@@ -83,3 +83,23 @@ def test_limited_devices_cannot_reach_provider_sign_in():
     for path, method in (("/harness-providers", "GET"), ("/harness-providers/login", "POST"),
                          ("/harness-providers/logout", "POST")):
         assert handler._device_forbidden(limited, path, method) is True
+
+
+def test_backend_auth_lists_every_harness_only_when_asked(running_server, monkeypatch):
+    from lib import backend_auth
+    asked = []
+
+    def fake_status(*, validate=True, every_harness=False, only=None):
+        asked.append(every_harness)
+        rows = [{"id": "claude"}, {"id": "codex"}]
+        return rows + ([{"id": "grok"}, {"id": "opencode"}] if every_harness else [])
+
+    monkeypatch.setattr(backend_auth, "status", fake_status)
+    base = running_server[0]
+    plain = json.loads(_get(base + "/backend-auth")[1])
+    every = json.loads(_get(base + "/backend-auth?harnesses=all")[1])
+    assert asked == [False, True]
+    assert [row["id"] for row in plain["backends"]] == ["claude", "codex"]
+    assert set(plain["tasks"]) == {"claude", "codex"}
+    assert [row["id"] for row in every["backends"]] == ["claude", "codex", "grok", "opencode"]
+    assert set(every["tasks"]) == {"claude", "codex", "grok"}

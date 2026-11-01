@@ -320,9 +320,9 @@ def test_login_refuses_backends_without_a_sign_in(monkeypatch):
     import pytest
     monkeypatch.setattr(backend_auth.shutil, "which", lambda name: f"/bin/{name}")
     with pytest.raises(ValueError):
-        backend_auth.start_login("grok")
+        backend_auth.start_login("opencode")
     with pytest.raises(ValueError):
-        backend_auth.logout("opencode")
+        backend_auth.logout("deepseek")
     with pytest.raises(ValueError):
         backend_auth.submit_login_code("agy", "ABCD-12345")
 
@@ -337,7 +337,88 @@ def test_login_accepts_registry_aliases(monkeypatch):
 
     monkeypatch.setattr(backend_auth, "_run", fake_run)
     monkeypatch.setattr(backend_auth, "status",
-                        lambda validate=True: [{"id": "claude"}, {"id": "codex"}])
+                        lambda validate=True, **_kw: [{"id": "claude"}, {"id": "codex"}])
     row = backend_auth.logout("codex")
     assert row["id"] == "codex"
     assert calls[-1] == ["/bin/codex", "logout"]
+
+
+def _every_harness_env(monkeypatch, tmp_path, *, missing=(), grok_out="Default model: grok-4.6\n",
+                       agy_rc=0):
+    from lib import harness_providers
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    monkeypatch.setenv("HOME", str(tmp_path))
+    (tmp_path / "cache" / "opencode").mkdir(parents=True)
+    (tmp_path / "cache" / "opencode" / "models.json").write_text(json.dumps({
+        "deepseek": {"name": "DeepSeek", "env": ["DEEPSEEK_API_KEY"],
+                     "models": {"deepseek-v4-pro": {}}},
+        "groq": {"name": "Groq", "env": ["GROQ_API_KEY"], "models": {"llama": {}}}}))
+    (tmp_path / "data" / "opencode").mkdir(parents=True)
+    (tmp_path / "data" / "opencode" / "auth.json").write_text(json.dumps({
+        "groq": {"type": "api", "key": "sk-fake-backend-auth-row"}}))
+    (tmp_path / ".gemini").mkdir()
+    (tmp_path / ".gemini" / "google_accounts.json").write_text(
+        json.dumps({"active": "person@example.com", "old": []}))
+    for var in ("DEEPSEEK_API_KEY", "GROQ_API_KEY"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setattr(harness_providers, "refresh_methods_in_background",
+                        lambda **_kw: (_ for _ in ()).throw(AssertionError("no probe")))
+    monkeypatch.setattr(backend_auth.shutil, "which",
+                        lambda name: None if name in missing else f"/bin/{name}")
+    monkeypatch.setattr(backend_auth, "_credential_metadata", lambda _backend: (False, 0))
+    monkeypatch.setattr(backend_auth, "_validation", lambda _backend, force=False: ("valid", ""))
+
+    def fake_run(argv, timeout=8):
+        name = argv[0].rsplit("/", 1)[-1]
+        if name == "grok":
+            return SimpleNamespace(returncode=0, stdout=grok_out, stderr="")
+        if name == "agy":
+            return SimpleNamespace(returncode=agy_rc, stdout="Fetching available models...\n"
+                                   + ("gemini-4\tGemini 4\n" if agy_rc == 0 else ""), stderr="")
+        return SimpleNamespace(returncode=1, stdout="", stderr="Not logged in")
+
+    monkeypatch.setattr(backend_auth, "_run", fake_run)
+
+
+def test_plain_backend_auth_keeps_its_rows(monkeypatch, tmp_path):
+    _every_harness_env(monkeypatch, tmp_path)
+    assert [row["id"] for row in backend_auth.status()] == ["claude", "codex"]
+
+
+def test_every_harness_lists_each_with_what_clarp_can_say(monkeypatch, tmp_path):
+    _every_harness_env(monkeypatch, tmp_path, missing=("muse",))
+
+    rows = {row["id"]: row for row in backend_auth.status(every_harness=True)}
+
+    assert list(rows) == ["claude", "codex", "agy", "grok", "opencode", "deepseek", "muse"]
+    assert rows["grok"]["state"] == "valid" and rows["grok"]["can_login"] is True
+    assert rows["grok"]["can_logout"] is True
+    assert rows["agy"]["state"] == "valid" and rows["agy"]["can_login"] is False
+    assert rows["agy"]["account"] == "person@example.com"
+    assert rows["opencode"]["model_providers"] is True
+    assert rows["opencode"]["state"] == "valid" and rows["opencode"]["account"] == "Groq"
+    assert rows["opencode"]["model_providers_signed_in"] == [
+        {"id": "groq", "name": "Groq", "credential": "api"}]
+    assert rows["deepseek"]["state"] == "signed_out"   # Groq hosts no DeepSeek model
+    assert rows["muse"]["installed"] is False
+    assert "sk-fake-backend-auth-row" not in json.dumps(rows)
+
+
+def test_signed_out_grok_and_agy_read_as_signed_out(monkeypatch, tmp_path):
+    _every_harness_env(monkeypatch, tmp_path, grok_out="You are not authenticated.\n", agy_rc=1)
+    rows = {row["id"]: row for row in backend_auth.status(every_harness=True)}
+    assert rows["grok"]["state"] == "signed_out" and rows["grok"]["can_logout"] is False
+    assert rows["agy"]["state"] == "signed_out" and rows["agy"]["account"] == ""
+
+
+def test_grok_signs_in_with_a_device_code_and_out_with_its_cli(monkeypatch, tmp_path):
+    _every_harness_env(monkeypatch, tmp_path)
+    driver = backend_auth._driver("grok")
+    assert driver.login_argv == ("login", "--device-auth")
+    calls = []
+    monkeypatch.setattr(backend_auth, "_run", lambda argv, timeout=8: calls.append(argv) or
+                        SimpleNamespace(returncode=0, stdout="You are not authenticated.\n", stderr=""))
+    row = backend_auth.logout("grok")
+    assert calls[0] == ["/bin/grok", "logout"]
+    assert row["id"] == "grok" and row["state"] == "signed_out"

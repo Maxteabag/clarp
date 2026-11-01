@@ -172,6 +172,11 @@ def routing_adapters() -> tuple["Backend", ...]:
     return tuple(b for b in _all() if b.supports_routing)
 
 
+def all_adapters() -> tuple["Backend", ...]:
+    """Every registered backend, in registry order."""
+    return tuple(_all())
+
+
 def auth_adapters() -> tuple["Backend", ...]:
     """Backends whose CLI has a sign-in the Host can drive."""
     return tuple(b for b in _all() if b.supports_auth)

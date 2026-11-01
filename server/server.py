@@ -2403,8 +2403,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def _handle_backend_auth(self):
         from lib.backend_auth import status, task
-        body = {"backends": status(), "tasks": {
-            adapter.id: task(adapter.id) for adapter in backends.auth_adapters()}}
+        every = (self._query().get("harnesses") or [""])[0] == "all"
+        rows = status(every_harness=every)
+        listed = {row["id"] for row in rows}
+        body = {"backends": rows, "tasks": {
+            adapter.id: task(adapter.id) for adapter in backends.auth_adapters()
+            if adapter.id in listed}}
         self._json_ok(body)
 
     def _handle_backend_auth_login(self):
