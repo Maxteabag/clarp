@@ -352,7 +352,10 @@ export component Sidebar inherits Rectangle {
                 return;
             }
             let index = root.row-index(root.cursor, root.shown-kind);
-            if (index < 0 || root.reveal-ticks > 30) {
+            // As long as the transcript's seek (120 frames): on slow frames
+            // 30 gave up before the list had made the row, and the cursor
+            // stayed out of view for good.
+            if (index < 0 || root.reveal-ticks > 120) {
                 root.cursor-drawn = root.cursor;
                 return;
             }
