@@ -52,14 +52,27 @@ pub fn a2a_check(out: String) {
     let anchor: Rc<RefCell<Option<(String, f32)>>> = Rc::default();
     let (anchor1, anchor2, anchor3) = (anchor.clone(), anchor.clone(), anchor.clone());
     let (out1, out2, out3, out4) = (out.clone(), out.clone(), out.clone(), out);
+    let mut opened = false;
     let stages: Vec<Stage> = vec![
-        ("live", Box::new(|app, _, _| {
+        ("live", Box::new(move |app, _, _| {
             if app.engine.borrow().connection_state() != "live" {
                 return false;
             }
-            app.engine.borrow_mut().set_reading_theme("paper");
+            if !opened {
+                app.engine.borrow_mut().set_reading_theme("paper");
+                app.engine.borrow_mut().select("rachel");
+                crate::pump();
+                opened = true;
+            }
+            // The Host's own chat (r1, r2) is held, and no load is still
+            // running, before it is replaced: a tail that lands after the
+            // replacement reorders r1 and r2 below the new rows by their time,
+            // not above them as the rest of this check expects.
+            let held = app.engine.borrow().conversation("rachel").is_some_and(|c| c.latest_revision() >= 2 && !c.loading());
+            if !held || row("r1").is_none() || row("r2").is_none() {
+                return false;
+            }
             check(control("/__control/turns", &turns()).is_ok(), "the Host takes a chat with two agents' prompts");
-            app.engine.borrow_mut().select("rachel");
             crate::pump();
             true
         })),
