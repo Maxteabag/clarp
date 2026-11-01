@@ -134,6 +134,8 @@ class GrokBackend(StreamJsonBackend):
     config_model_field = 'grok_model'
     config_effort_field = 'grok_effort'
     model_family = 'grok'
+    # ``grok login --device-auth`` / ``grok logout`` (backend_auth).
+    login_kind = 'device_code'
     fallback_models = (
         ('grok-4.6', 'Grok 4.6'),
         ('grok-4.5', 'Grok 4.5'),

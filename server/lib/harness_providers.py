@@ -271,12 +271,13 @@ def _row(provider_id: str, entry: dict[str, Any], types: dict[str, str],
     }
 
 
-def providers(harness: str | None = None) -> dict[str, Any]:
+def providers(harness: str | None = None, *, refresh_methods: bool = True) -> dict[str, Any]:
     harness = harness_id(harness)
     catalogue = read_catalogue()
     types = credential_types()
     methods, _, _ = _remembered_methods()
-    refresh_methods_in_background()
+    if refresh_methods:
+        refresh_methods_in_background()
     rows = [_row(pid, entry, types, methods) for pid, entry in catalogue.items()]
     # A credential for a provider the catalogue does not list (a custom
     # provider from opencode.json) is still shown so it can be signed out.
@@ -300,6 +301,11 @@ def providers(harness: str | None = None) -> dict[str, Any]:
         "providers": rows,
         "tasks": tasks,
     }
+
+
+def hosts_family(provider: str, family: str) -> bool:
+    """Whether the catalogue lists a model of ``family`` for ``provider``."""
+    return _hosts_family(read_catalogue().get(provider) or {}, family)
 
 
 def _hosts_family(entry: dict[str, Any], family: str) -> bool:
