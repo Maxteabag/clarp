@@ -276,10 +276,25 @@ export component ConnectionPage inherits Modal {
 export component SelectTextPage inherits Modal {
     in property <string> title;
     in property <string> body;
+    // What starts selected, its start in view.
+    in property <int> from;
+    in property <int> to;
     callback copy-all();
     callback close();
     public function open() {
         view.focus();
+        root.placing = true;
+    }
+    // Once the page is laid out (it has just become visible): the anchor at
+    // the end, so the caret, which the view keeps in sight, is the start.
+    property <bool> placing;
+    Timer {
+        interval: 16ms;
+        running: root.placing;
+        triggered => {
+            root.placing = false;
+            view.set-selection-offsets(root.to, root.from);
+        }
     }
     card-width: 860px;
     card-height: 2000px;
