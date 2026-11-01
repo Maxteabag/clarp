@@ -920,7 +920,14 @@ def _migrate_to_v121(con: sqlite3.Connection) -> None:
     such row now rather than a few per visit. Data only: older code reads the
     rows as ordinary terminal provider tasks, so a rollback needs nothing."""
     from .provider_background_jobs import expire_lost_evidence
-    expire_lost_evidence(con, limit=None)
+    # The projection reads rows by name; the upgrade may run on a plain
+    # connection (a fresh hook process, or the state-upgrade rehearsal).
+    factory = con.row_factory
+    con.row_factory = sqlite3.Row
+    try:
+        expire_lost_evidence(con, limit=None)
+    finally:
+        con.row_factory = factory
 
 
 def _migrate_to_v119(con: sqlite3.Connection) -> None:
