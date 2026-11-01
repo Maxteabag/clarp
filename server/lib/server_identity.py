@@ -41,7 +41,7 @@ CAPABILITIES_VERSION = 1
 # adds a row to docs/compatibility.md; tests/unit/test_client_contract.py
 # fails when the table and these constants disagree. Clients identify
 # themselves with the X-Clarp-Client header ("ios/2620 contract=1").
-HOST_CONTRACT = 75  # PROVISIONAL (harness model providers over listen-first 74): booked at the ready landing, else the next free
+HOST_CONTRACT = 76  # PROVISIONAL (agent_call_live over harness_model_providers 75): Sandra Agent Live landed after harness took 75 on main; booked at the ready landing, else the next free
 MIN_IOS_CONTRACT = 1
 # F4 delivery state (joint packet 9a96df74): implemented, NOT advertised. Its
 # introduction number is booked by Nadia at the ready landing; until then the
@@ -51,6 +51,7 @@ SEND_DELIVERY_STATE = "send_delivery_state"
 CLIENT_HEADER = "X-Clarp-Client"
 FEATURES: tuple[str, ...] = (
     "harness_model_providers",
+    "agent_call_live",
     "artifact_summary_v1",
     "agent_ring_device_optout",
     "agent_ring_live",
@@ -391,3 +392,4 @@ FEATURE_CONTRACTS["harness_model_providers"] = 75  # PROVISIONAL: booked at the 
 def feature_advertised(name: str) -> bool:
     """Whether this Host advertises ``name`` (clients gate on the same list)."""
     return name in FEATURES and name in FEATURE_CONTRACTS
+FEATURE_CONTRACTS["agent_call_live"] = 76  # PROVISIONAL: was 75 on the Sandra line; 75 is harness_model_providers on main

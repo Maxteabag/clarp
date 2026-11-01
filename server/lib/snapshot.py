@@ -132,6 +132,11 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
     janitor_templates = {row["agent_id"]: row["template_id"] for row in
                          db.conn().execute("SELECT agent_id,template_id FROM janitor_configs")}
     exhausted = _exhausted_backends()
+    from . import agent_ring_live
+    try:
+        call_profiles = agent_ring_live.user_call_profiles(strict=False)
+    except agent_ring_live.CallError:
+        call_profiles = None  # uncertainty must refuse explicitly, never silently start Normal
     agent_rows = agents_db.list_agents()
     tree = helper_tree(agent_rows, states, visible_labels)
     child_count = tree.child_count
@@ -218,6 +223,8 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
                 root=model_avatar_root,
                 default_model=default_models[resolved_backend])
         rows.append({
+            "call_mode": ("unavailable" if call_profiles is None else
+                          "agent_live_v1" if a.get("session") in call_profiles else "classic"),
             "agent_id":       agent_id,
             "persona":        a["persona"],
             "voice_id":       a["voice_id"],
@@ -321,17 +328,19 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
         if key and key not in roster_keys:
             roster.append(name.strip())
             roster_keys.add(key)
+    from . import settings_store
+    projected_settings = settings_store.get_many([avatar_settings.KEY, *tool_explanation_settings.KEYS])
     return {
         "agents": rows,
         "focus": focus,
         "roster": roster,
         "personas": [persona_store.public(row) for row in persona_rows],
         # Whether clients should prefer the model portrait where one exists.
-        "model_avatars": avatar_settings.get()["model_avatars"],
+        "model_avatars": avatar_settings.get(stored=projected_settings)["model_avatars"],
         # The menu of MCP servers an agent can be granted (from ~/.claude.json).
         "available_mcp_servers": sorted(config.read_global_mcp_servers().keys()),
         # Whether tool rows carry plain-language explanations (Host setting).
-        "tool_explanations": tool_explanation_settings.get(),
+        "tool_explanations": tool_explanation_settings.get(stored=projected_settings),
     }
 
 
