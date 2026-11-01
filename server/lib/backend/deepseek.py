@@ -26,6 +26,7 @@ class DeepSeekBackend(OpenCodeBackend):
     config_model_field = 'deepseek_model'
     config_effort_field = 'deepseek_effort'
     model_family = 'deepseek'
+    model_id_filter = 'deepseek'
     fallback_models = (
         ('fireworks-ai/accounts/fireworks/routers/deepseek-flash-latest', 'DeepSeek Flash (latest, Fireworks)'),
         ('fireworks-ai/accounts/fireworks/models/deepseek-v4p1-flash', 'DeepSeek V4.1 Flash (Fireworks)'),

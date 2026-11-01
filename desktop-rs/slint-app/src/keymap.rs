@@ -271,7 +271,7 @@ fn state(name: &str) -> Vec<Binding> {
         "launch" => vec![
             b("switcher", &["Ctrl+K"], "Commands", true, Always, false),
             // The hub's own keys (it handles them; listed here for the bar).
-            b("launch-provider", &["Ctrl+Left"], "Provider", true, Always, true),
+            b("launch-provider", &["Ctrl+Left"], "Harness", true, Always, true),
             b("launch-model", &["Ctrl+M"], "Model", true, Always, true),
             b("launch-effort", &["Ctrl+E"], "Effort", true, Always, true),
             b("launch-directory", &["Ctrl+D"], "Directory", true, Always, true),

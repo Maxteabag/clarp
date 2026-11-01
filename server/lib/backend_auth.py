@@ -139,6 +139,11 @@ class _AuthDriver:
     read_status: Callable[[subprocess.CompletedProcess[str]], _StatusReading]
     credential_metadata: Callable[[], tuple[bool, int]]
     validate: Callable[[], None]
+    # Listed by a plain ``GET /backend-auth``. Rows added with
+    # ``harness_model_providers`` appear only when the client asks for every
+    # harness (``?harnesses=all``), so an older app never sees a row it was
+    # not built for.
+    listed_by_default: bool = True
 
 
 def _claude_status(result: subprocess.CompletedProcess[str]) -> _StatusReading:
@@ -190,6 +195,27 @@ def _codex_validate() -> None:
     backend_usage.fetch_codex_usage(timeout=6)
 
 
+def _grok_status(result: subprocess.CompletedProcess[str]) -> _StatusReading:
+    # ``grok models`` has no status command beside it; signed out, it prints
+    # "You are not authenticated." and still exits 0.
+    output = (result.stdout + result.stderr).strip()
+    signed_out = "not authenticated" in output.lower()
+    return _StatusReading(
+        logged_in=result.returncode == 0 and not signed_out,
+        error="" if result.returncode == 0 else _failure_summary(output),
+    )
+
+
+def _no_credential_file() -> tuple[bool, int]:
+    # The CLI keeps its credential where Clarp cannot read it; the status
+    # command is the evidence.
+    return False, 0
+
+
+def _status_is_validation() -> None:
+    return None
+
+
 _DRIVERS: dict[str, _AuthDriver] = {
     backends.CLAUDE: _AuthDriver(
         status_argv=("auth", "status", "--json"),
@@ -206,6 +232,15 @@ _DRIVERS: dict[str, _AuthDriver] = {
         read_status=_codex_status,
         credential_metadata=_codex_credentials,
         validate=_codex_validate,
+    ),
+    backends.GROK: _AuthDriver(
+        status_argv=("models",),
+        login_argv=("login", "--device-auth"),
+        logout_argv=("logout",),
+        read_status=_grok_status,
+        credential_metadata=_no_credential_file,
+        validate=_status_is_validation,
+        listed_by_default=False,
     ),
 }
 
@@ -261,15 +296,28 @@ def _validation(backend: str, *, force: bool = False) -> tuple[str, str]:
     return state, error
 
 
-def status(*, validate: bool = True) -> list[dict[str, Any]]:
-    """One row per registry adapter that has a sign-in, in registry order."""
+def status(*, validate: bool = True, every_harness: bool = False,
+           only: str | None = None) -> list[dict[str, Any]]:
+    """One row per registry adapter that has a sign-in, in registry order.
+
+    ``every_harness`` adds a row for every other harness the Host runs: its
+    installed state, what Clarp can tell about its sign-in, and whether the
+    app can start one (``can_login``). Without it the response is what it was
+    before ``harness_model_providers``.
+    """
     rows: list[dict[str, Any]] = []
-    for adapter in backends.auth_adapters():
-        driver = _DRIVERS.get(adapter.id)
-        if driver is None:
+    for adapter in backends.all_adapters() if every_harness else backends.auth_adapters():
+        if only is not None and adapter.id != only:
+            continue
+        driver = _DRIVERS.get(adapter.id) if adapter.supports_auth else None
+        if driver is None or (not every_harness and not driver.listed_by_default):
+            if every_harness and not adapter.hidden:
+                rows.append(_harness_row(adapter))
             continue
         base = {"id": adapter.id, "name": adapter.label,
                 "login_kind": adapter.login_kind}
+        if every_harness:
+            base.update(can_login=True, model_providers=False, note="")
         executable = _executable(adapter.id)
         if executable is None:
             rows.append({**base, "installed": False, "logged_in": False})
@@ -278,6 +326,7 @@ def status(*, validate: bool = True) -> list[dict[str, Any]]:
             result = _run([executable, *driver.status_argv])
             reading = driver.read_status(result)
             present, expires_at = _credential_metadata(adapter.id)
+            present = present or reading.logged_in
             state, validation_error = "signed_out", ""
             if reading.logged_in:
                 if expires_at and expires_at <= _now_ms():
@@ -302,6 +351,81 @@ def status(*, validate: bool = True) -> list[dict[str, Any]]:
             rows.append({**base, "installed": True, "logged_in": False,
                          "error": str(exc)})
     return rows
+
+
+def _agy_account() -> str:
+    try:
+        payload = json.loads((pathlib.Path.home() / ".gemini/google_accounts.json").read_text())
+    except (OSError, ValueError):
+        return ""
+    return str(payload.get("active") or "") if isinstance(payload, dict) else ""
+
+
+def _agy_signed_in(executable: str) -> tuple[bool, str]:
+    """``agy`` has no status command; listing its account-scoped models is the
+    evidence. Signing in is the CLI's own interactive flow on the Host."""
+    try:
+        result = _run([executable, "models"], timeout=8)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return False, _failure_summary(str(exc))
+    lines = [line for line in result.stdout.splitlines()
+             if line.strip() and not line.lower().startswith("fetching")]
+    if result.returncode == 0 and lines:
+        return True, ""
+    return False, "" if result.returncode == 0 else _failure_summary(result.stdout + result.stderr)
+
+
+# Harnesses whose sign-in Clarp can read but not drive: (state reader, note).
+_STATUS_ONLY: dict[str, tuple[Callable[[str], tuple[bool, str]], Callable[[], str], str]] = {
+    backends.AGY: (_agy_signed_in, _agy_account,
+                   "Sign in by running agy on the Host."),
+}
+
+
+def _harness_row(adapter: Any) -> dict[str, Any]:
+    """A harness without a sign-in Clarp drives: what can be said about it."""
+    executable = _executable(adapter.id)
+    row: dict[str, Any] = {
+        "id": adapter.id, "name": adapter.label, "login_kind": adapter.login_kind,
+        "installed": executable is not None, "logged_in": False,
+        "account": "", "method": "", "state": "signed_out",
+        "credential_present": False, "can_logout": False, "expires_at": 0,
+        "validation_error": "", "error": "",
+        "can_login": False, "model_providers": bool(adapter.model_providers), "note": "",
+    }
+    if executable is None:
+        return row
+    if adapter.model_providers:
+        from . import harness_providers
+        listing = harness_providers.providers(adapter.id, refresh_methods=False)
+        family = adapter.model_id_filter
+        # A one-family card (DeepSeek) is usable only through a provider
+        # that serves that family.
+        signed = [p for p in listing["providers"] if p["signed_in"] and (
+            not family or harness_providers.hosts_family(p["id"], family))]
+        row.update(
+            logged_in=bool(signed), state="valid" if signed else "signed_out",
+            credential_present=bool(signed),
+            account=", ".join(p["name"] for p in signed[:3]) + (
+                f" and {len(signed) - 3} more" if len(signed) > 3 else ""),
+            model_providers_signed_in=[{"id": p["id"], "name": p["name"],
+                                        "credential": p["credential"]} for p in signed],
+            note=("Sign in to a model provider to use it."
+                  if not signed else f"{len(signed)} model provider"
+                  + ("s" if len(signed) != 1 else "") + " signed in."),
+        )
+        return row
+    reader = _STATUS_ONLY.get(adapter.id)
+    if reader is None:
+        row.update(state="host_managed",
+                   note=f"Sign in to {adapter.label} on the Host.")
+        return row
+    read_state, read_account, note = reader
+    signed_in, error = read_state(executable)
+    row.update(logged_in=signed_in, state="valid" if signed_in else "signed_out",
+               credential_present=signed_in, error=error, note=note,
+               account=read_account() if signed_in else "")
+    return row
 
 
 def task(backend: str) -> dict[str, Any]:
@@ -440,4 +564,5 @@ def logout(backend: str) -> dict[str, Any]:
         _code_submitted.pop(backend, None)
         _validation_cache.pop(backend, None)
     backends.by_id(backend).on_credential_change()
-    return next(row for row in status(validate=False) if row["id"] == backend)
+    return next(row for row in status(validate=False, every_harness=True, only=backend)
+                if row["id"] == backend)

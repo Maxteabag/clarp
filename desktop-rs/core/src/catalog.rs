@@ -46,7 +46,7 @@ pub fn backend_options(catalog: &Object) -> Vec<Value> {
 }
 
 pub fn models_for_backend(catalog: &Object, backend: &str) -> Vec<Value> {
-    let mut result = vec![option("", "Provider default")];
+    let mut result = vec![option("", "Harness default")];
     for model in models(catalog, backend) {
         let id = json::string(&model, "id");
         if !id.is_empty() {
@@ -78,7 +78,7 @@ pub fn efforts_for_model(catalog: &Object, backend: &str, model_id: &str) -> Vec
     if ids.is_empty() {
         ids = strings(json::array(&provider(catalog, backend), "supported_efforts"));
     }
-    let mut efforts = vec![option("", "Provider default")];
+    let mut efforts = vec![option("", "Harness default")];
     for id in ids {
         let mut label = id.clone();
         if let Some(first) = label.get(..1) {

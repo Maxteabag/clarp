@@ -51,6 +51,9 @@ ALLOWED: dict[tuple[str, str], str] = {
     ("lib/backend_auth.py", "_processes"): JOBS,
     ("lib/backend_auth.py", "_tasks"): JOBS,
     ("lib/backend_auth.py", "_validation_cache"): CACHE,
+    ("lib/harness_providers.py", "_methods_refresh"): JOBS,
+    ("lib/harness_providers.py", "_sessions"): JOBS,
+    ("lib/harness_providers.py", "_tasks"): JOBS,
     ("lib/backends.py", "_RUNTIME_CLIENT"): CLIENT,
     # Stop's in-process epoch backs up a durable fence write that failed; the
     # durable fence stays the authority, so losing it on restart is intended.
