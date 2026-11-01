@@ -307,6 +307,10 @@ thread_local! {
     static ROWS_INSIDE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static ROWS_EVENTS: std::cell::RefCell<Vec<(u64, String, i32, String, f32, bool, bool)>> = const { std::cell::RefCell::new(Vec::new()) };
     static ROWS_EVENTS_DROPPED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    /// Sequences the book took (accepted), and each (pane, row)'s batch at its last taken report.
+    static ROWS_TAKEN: std::cell::RefCell<Vec<u64>> = const { std::cell::RefCell::new(Vec::new()) };
+    static ROWS_ROW_BATCH: std::cell::RefCell<Vec<(String, String, i32)>> = const { std::cell::RefCell::new(Vec::new()) };
+    static ROWS_STAGE: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
 }
 
 pub fn rows_on() -> bool {
@@ -315,9 +319,10 @@ pub fn rows_on() -> bool {
 
 /// Called for every measurer report (scratch proof only; a no-op unless CLARP_ROWS_MEASURE=1).
 /// `app_dropped`: the app could not borrow its panes, so it dropped this report.
-pub fn rows_measured(pane: &str, batch: i32, id: &str, height: f32, app_dropped: bool) {
+/// Returns the report's sequence number (0 when recording is off).
+pub fn rows_measured(pane: &str, batch: i32, id: &str, height: f32, app_dropped: bool) -> u64 {
     if !rows_on() {
-        return;
+        return 0;
     }
     let seq = ROWS_SEQ.with(|s| { s.set(s.get() + 1); s.get() });
     let inside = ROWS_INSIDE.with(std::cell::Cell::get);
@@ -329,6 +334,40 @@ pub fn rows_measured(pane: &str, batch: i32, id: &str, height: f32, app_dropped:
             ROWS_EVENTS_DROPPED.with(|d| d.set(d.get() + 1));
         }
     });
+    seq
+}
+
+/// The book took (or ignored) report `seq`; a taken one sets the row's book batch.
+pub fn rows_taken(seq: u64, pane: &str, id: &str, batch: i32, taken: bool) {
+    if !rows_on() || !taken {
+        return;
+    }
+    ROWS_TAKEN.with(|t| t.borrow_mut().push(seq));
+    ROWS_ROW_BATCH.with(|b| {
+        let mut b = b.borrow_mut();
+        b.retain(|(p, r, _)| !(p == pane && r == id));
+        b.push((pane.to_owned(), id.to_owned(), batch));
+    });
+}
+
+/// The batch of the book's last taken report for (pane, row): a pure read.
+pub fn rows_row_batch(pane: &str, id: &str) -> Option<i32> {
+    ROWS_ROW_BATCH.with(|b| b.borrow().iter().find(|(p, r, _)| p == pane && r == id).map(|(_, _, batch)| *batch))
+}
+
+pub fn rows_take_taken() -> Vec<u64> {
+    ROWS_TAKEN.with(|t| std::mem::take(&mut *t.borrow_mut()))
+}
+
+/// The stage the check is in (set by run_stages).
+pub fn rows_set_stage(name: &str) {
+    if rows_on() {
+        ROWS_STAGE.with(|s| if *s.borrow() != name { *s.borrow_mut() = name.to_owned(); });
+    }
+}
+
+pub fn rows_stage() -> String {
+    ROWS_STAGE.with(|s| s.borrow().clone())
 }
 
 /// Events not kept because the buffer was full (never silent: the oracle fails on any).

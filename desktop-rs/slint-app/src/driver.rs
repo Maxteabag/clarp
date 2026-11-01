@@ -356,6 +356,7 @@ fn run_stages(mut stages: Vec<Stage>) {
             finish();
             return;
         };
+        crate::headless::rows_set_stage(name); // ROWS scratch proof only
         let elapsed = since.get().elapsed();
         if elapsed > Duration::from_secs(15) {
             check(false, &format!("timed out: {name} (active pane {:?}, report {:?}, panes {:?})", app.active_id(), app.active_report(), app.pane_drafts()));
