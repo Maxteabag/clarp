@@ -63,6 +63,8 @@ thread_local! {
     static ROWS_HANDLE: RefCell<Option<(String, i_slint_backend_testing::ElementHandle)>> = const { RefCell::new(None) };
     static ROWS_SAMPLES: Cell<usize> = const { Cell::new(0) };
     static ROWS_SEND: Cell<usize> = const { Cell::new(0) };
+    /// Sample records, buffered (printed only at stop_sampling, never between reads).
+    static ROWS_LINES: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
     static LANDING: RefCell<Option<(Rect, f32, Option<Rect>)>> = const { RefCell::new(None) };
     static DROPPED: Cell<i32> = const { Cell::new(0) };
     static REVEAL: RefCell<Option<RevealWatch>> = const { RefCell::new(None) };
@@ -155,17 +157,25 @@ fn rows_composer_sample(id: &str, sent: Instant) -> f32 {
     let (height, before, after) = rows_composer();
     let index = ROWS_SAMPLES.with(|n| { n.set(n.get() + 1); n.get() });
     if headless::rows_on() && index == 3001 {
-        println!("perf ROWS-CAP {}", json!({"samples_over": 3000}));   // never silent: the oracle fails on it
+        rows_line(format!("perf ROWS-CAP {}", json!({"samples_over": 3000})));   // never silent: the oracle fails on it
     }
     if headless::rows_on() && index <= 3000 {
-        let row = if id.is_empty() { None } else { app_now().measured_height(id).0 };
-        println!("perf ROWS-SAMPLE {}", json!({
+        let (row, pending) = if id.is_empty() { (None, (0, 0)) } else { app_now().measured_height(id) };
+        let (phase, reduced) = crate::window().map_or((String::new(), false), |w| {
+            (w.global::<crate::SendFlight>().get_phase().to_string(), w.global::<crate::ChatLook>().get_reduced_motion())
+        });
+        rows_line(format!("perf ROWS-SAMPLE {}", json!({
             "index": index, "at_ms": sent.elapsed().as_secs_f64() * 1000.0, "pane": app_now().active_id(), "row_id": id,
-            "batch": app_now().rows_batch(), "send": ROWS_SEND.with(Cell::get), "row": row, "composer": height,
-            "seq_before": before, "seq_after": after, "mode": rows_mode(),
-        }));
+            "batch": app_now().rows_batch(), "pending": [pending.0, pending.1], "send": ROWS_SEND.with(Cell::get), "row": row,
+            "status": if id.is_empty() { String::new() } else { status_of(id) }, "phase": phase, "reduced": reduced,
+            "composer": height, "seq_before": before, "seq_after": after, "mode": rows_mode(),
+        })));
     }
     height
+}
+
+fn rows_line(line: String) {
+    ROWS_LINES.with(|l| l.borrow_mut().push(line));
 }
 
 /// CLARP_ROWS_SAMPLER picks the arm: walk (the PR #231 form, the default),
@@ -246,6 +256,9 @@ fn send_and_sample(queue: bool, shots: &[(u64, &str)], known: Option<String>) {
     let sent = Instant::now();
     SENT_AT.with(|s| s.set(Some(sent)));
     ROWS_SEND.with(|n| n.set(n.get() + 1));
+    if headless::rows_on() {
+        rows_line(format!("perf ROWS-STAGE {}", json!({"send": ROWS_SEND.with(Cell::get), "queue": queue, "known": before})));
+    }
     if let Some(window) = crate::window() {
         window.global::<crate::SendFlight>().set_rows_force_tall(std::env::var("CLARP_ROWS_FORCE_TALL").is_ok_and(|v| v == "1"));
     }
@@ -365,6 +378,9 @@ fn contrast(name: &str, rect: Rect) -> Option<f32> {
 
 fn stop_sampling() -> Vec<Sample> {
     SAMPLER.with(|s| s.borrow_mut().take());
+    for line in ROWS_LINES.with(|l| std::mem::take(&mut *l.borrow_mut())) {
+        println!("{line}");
+    }
     for (seq, pane, batch, id, height, inside, app_dropped) in headless::rows_take_events() {
         println!("perf ROWS-MEASURE {}", json!({"seq": seq, "pane": pane, "batch": batch, "row_id": id, "height": height, "inside": inside, "app_dropped": app_dropped}));
     }

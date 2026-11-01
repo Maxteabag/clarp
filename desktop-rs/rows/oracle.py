@@ -86,8 +86,15 @@ def provisional(r):
         last = upto[-1]
         later = [e for e in rel if e["seq"] > s["seq_after"] and e["batch"] == last["batch"]]
         if abs(last["height"] - s["row"]) < 0.5 and any(abs(e["height"] - s["row"]) >= 0.5 for e in later):
+            final = later[-1]["height"]
+            # No input change: the same send later reads the final height for this row with the same status.
+            settled = [t for t in r["samples"] if t["index"] > s["index"] and t["row_id"] == s["row_id"] and t["send"] == s["send"]
+                       and t["row"] is not None and abs(t["row"] - final) < 0.5]
+            if not settled or settled[0]["status"] != s["status"]:
+                continue
             same = [e for e in rel if e["batch"] == last["batch"]]
-            out.append({"index": s["index"], "send": s["send"], "at_ms": round(s["at_ms"], 1), "pane": s["pane"], "row_id": s["row_id"],
+            out.append({"index": s["index"], "send": s["send"], "status": s["status"], "pending": s["pending"],
+                        "at_ms": round(s["at_ms"], 1), "pane": s["pane"], "row_id": s["row_id"],
                         "batch": last["batch"], "sample_batch": s["batch"], "row": s["row"], "final": later[-1]["height"],
                         "before": sum(e["seq"] <= s["seq_before"] for e in same),
                         "inside": sum(s["seq_before"] < e["seq"] <= s["seq_after"] for e in same),
@@ -112,7 +119,7 @@ def classify(r):
             cand = [p for p in prov if p["send"] == 1 and abs(p["row"] - low) < 0.5 and abs(p["final"] - high) < 0.5]
         else:
             cand = [p for p in prov if p["send"] == 2]
-        status = "UNMATCHED" if not cand else ("INSIDE" if any(p["inside"] > 0 for p in cand) else "GAP")
+        status = "UNMATCHED" if not cand else ("INSIDE" if any(p["inside"] > 0 for p in cand) else "GAP")  # correlation only
         per_fail.append({"fail": f, "status": status, "matched": cand[:5]})
     only_rows = r["fails"] and all(f.startswith(ROW_FAILS) for f in r["fails"])
     if not row_fails:
@@ -122,9 +129,9 @@ def classify(r):
     elif any(p["status"] == "UNMATCHED" for p in per_fail):
         cls = "NOT-REPRODUCED-UNCORRELATED"
     elif all(p["status"] == "INSIDE" for p in per_fail):
-        cls = "REPRODUCED"                # each row FAIL matched by its own send's provisional read with a relevant report inside the composer read
+        cls = "CORRELATED-INSIDE"         # CORRELATION ONLY: each row FAIL matched by its own send's provisional read with a relevant report during the composer read
     else:
-        cls = "SYMPTOM-GAP-CAUSE-UNKNOWN"  # matched provisional reads, but no relevant report during the read
+        cls = "CORRELATED-GAP"            # symptom reproduced, matched provisional reads, no relevant report during the read: cause UNKNOWN
     return dict(cls=cls, rc=r["rc"], e2e=r["e2e"], fails=r["fails"], per_fail=per_fail, samples=len(r["samples"]),
                 events=len(r["events"]), inside_any=sum(e["inside"] for e in r["events"]),
                 app_dropped=sum(e.get("app_dropped", False) for e in r["events"]), provisional=prov[:20],
@@ -160,9 +167,16 @@ def neg():
         r = load(k)
         comp = [f for f in r["fails"] if f.startswith(COMPOSER_FAIL)]
         first = float(comp[0].split("[", 1)[1].split(",")[0].rstrip("]")) if comp else None
-        ok = (r["rc"] != 0 and r["e2e"] == ["E2E_FAIL"] and len(r["fails"]) == 1 and len(comp) == 1
-              and first is not None and first > r["empty"] + 1.0 and abs(first - 66.0) < 1.0)
-        runs[k] = dict(rc=r["rc"], fails=r["fails"], first_reported=first, empty=r["empty"], ok=ok)
+        # Bound to the stage: the Reduce-Motion fade send's FIRST handle sample.
+        fade = [s for s in r["samples"] if s["mode"] == "handle" and s["reduced"] and s["phase"] == "fade"]
+        stage = min((s["send"] for s in fade), default=None)
+        first_sample = min((s for s in fade if s["send"] == stage), key=lambda s: s["index"], default=None)
+        bound = (first_sample is not None and first_sample["composer"] is not None and first is not None
+                 and abs(first_sample["composer"] - first) < 0.01)
+        ok = (r["rc"] != 0 and r["e2e"] == ["E2E_FAIL"] and len(r["fails"]) == 1 and len(comp) == 1 and first is not None
+              and first > r["empty"] + 1.0 and abs(first - 66.0) < 1.0 and bound)
+        runs[k] = dict(rc=r["rc"], fails=r["fails"], first_reported=first, empty=r["empty"], stage_send=stage,
+                       stage_first_sample=first_sample, bound_to_stage=bound, ok=ok)
         if not ok:
             bad.append(k)
     finish(0 if not bad else 5, verdict="NEG-FAILS-AS-REQUIRED" if not bad else "NEG-INCONCLUSIVE", runs=runs)
@@ -177,8 +191,8 @@ def summary():
         finish(2, problem="an arm verdict is missing or not exit 0", arms={a: (x and x["exit"]) for a, x in v.items()})
     cls = {a: [v[a]["runs"][k]["cls"] for k in ("1", "2")] for a in ("walk", "bridge", "fade")}
     finish(0, walk=cls["walk"], bridge=cls["bridge"], fade=cls["fade"],
-           mechanism=("INSIDE (a relevant measurer report during the walk read) in " + str(cls["walk"].count("REPRODUCED")) + "/2 walk runs")
-           if "REPRODUCED" in cls["walk"] else "NOT REPRODUCED as inside: cause UNKNOWN (see SYMPTOM-GAP / UNCORRELATED / OTHER-FAILS)",
+           correlation=("CORRELATED-INSIDE in " + str(cls["walk"].count("CORRELATED-INSIDE")) + "/2 walk runs (correlation only, not causation)")
+           if "CORRELATED-INSIDE" in cls["walk"] else "no CORRELATED-INSIDE walk run: cause UNKNOWN (see CORRELATED-GAP / UNCORRELATED / OTHER-FAILS)",
            c1="GREEN in both runs with 0 relevant inside reports; NEG fails as required in both")
 
 
