@@ -6860,6 +6860,7 @@ def _server_workers(ctx: ServerContext, srv: "ContextHTTPServer", cfg,
         """What watches the live events in this process: the tool explainer
         and the Live Activity pusher (docs/live-items.md §6, §8)."""
         from lib import apns, live_activity
+        from lib.agents import list_agents as agents_db_list
         from lib.live_explain import LiveExplainer
         explainer = LiveExplainer(lambda: ctx.tool_explanations, patch)
         from concurrent.futures import ThreadPoolExecutor
@@ -6871,7 +6872,7 @@ def _server_workers(ctx: ServerContext, srv: "ContextHTTPServer", cfg,
 
         pusher = live_activity.LiveActivityPusher(
             lambda payload, priority: sender.submit(apns.send_live_activity, payload, priority),
-            attention=live_activity.badge_attention, background=in_background)
+            attention=live_activity.badge_attention, roster=agents_db_list, background=in_background)
         srv.live_activity_pusher = pusher
 
         class _Observers:
