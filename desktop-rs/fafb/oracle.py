@@ -48,32 +48,110 @@ def rc(name):
     return int(m.group(1))
 
 
+TEST_HEADER = re.compile(r"^test (\S+)( - should panic)? \.\.\. ?(.*)$")
+PANIC_AT = re.compile(r"^thread '([^']+)' \(\d+\) panicked at engine/tests/host_flow\.rs:(\d+):(\d+):$")
+
+
+def fa_blocks(log):
+    """libtest's output as test blocks. With --nocapture a test's own output
+    sits between its 'test NAME ... ' header and its status, which is the
+    block's last non-empty line ('ok' alone, or after '... ' when the test
+    printed nothing). A block ends at the next header or at the blank line
+    before 'test result:'. Returns (blocks, lines outside any block)."""
+    lines = log.splitlines()
+    try:
+        start = lines.index("running 4 tests")
+    except ValueError:
+        return None, ["no 'running 4 tests' line"]
+    end = next((n for n in range(start, len(lines)) if lines[n].startswith("test result: ")), None)
+    if end is None:
+        return None, ["no 'test result:' line"]
+    blocks, stray = [], []
+    for line in lines[start + 1:end]:
+        m = TEST_HEADER.match(line)
+        if m:
+            blocks.append({"name": m.group(1), "should_panic": bool(m.group(2)), "body": [m.group(3)] if m.group(3) else []})
+        elif blocks:
+            blocks[-1]["body"].append(line)
+        elif line.strip():
+            stray.append(line)
+    for b in blocks:
+        body = [l for l in b["body"] if l.strip()]
+        b["status"] = body[-1].strip() if body else ""
+        b["output"] = body[:-1]
+    return blocks, stray
+
+
 def fa():
     log, code = read("fa.log"), rc("fa")
     if "error[" in log or "could not compile" in log:
         finish(2, problem="compile error")
-    red_line = next((n for n, l in enumerate(HOST_FLOW.read_text().splitlines(), 1) if "// FAFB-RED-UNWRAP" in l), None)
+    source = HOST_FLOW.read_text().splitlines()
+    red_line = next((n for n, l in enumerate(source, 1) if "// FAFB-RED-UNWRAP" in l), None)
+    until_line = next((n for n, l in enumerate(source, 1) if 'assert!(Instant::now() < deadline, "timed out waiting for: {what}' in l), None)
     problems = []
     if code != 0:
         problems.append(f"cargo test rc {code}")
-    if not re.search(r"^test result: ok\. 4 passed; 0 failed; 0 ignored; 0 measured; 10 filtered out", log, re.M):
-        problems.append("not exactly 4 passed / 0 failed / 10 filtered out")
-    for name, panics in FA_TESTS.items():
-        want = rf"^test {name}( - should panic)? \.\.\. ok$"
-        line = re.search(want, log, re.M)
-        if not line or bool(line.group(1)) != panics:
-            problems.append(f"{name}: not '{'should panic ... ok' if panics else 'ok'}'")
-    if red_line is None or not re.search(rf"panicked at engine/tests/host_flow\.rs:{red_line}:\d+:\ncalled `Option::unwrap\(\)` on a `None` value", log):
-        problems.append(f"RED did not panic at the copied l.102 read (host_flow.rs:{red_line})")
-    for marker in ("FAFB-RED-ORDER log_served=1 select_held=1 select_records=0", "FAFB-GREEN-ORDER log_served=1 select_held=1 select_records=0"):
-        if log.count(marker) != 1:
-            problems.append(f"ordering marker {marker.split()[0]} seen {log.count(marker)} times (want 1)")
-    neg = log.count("timed out waiting for: the Host was told rachel is selected")
-    if neg != 2:
-        problems.append(f"negative-control panic seen {neg} times (want 2)")
+    if red_line is None or until_line is None:
+        finish(2, problem="the RED read or Driver::until's assert is not in host_flow.rs")
+    summaries = re.findall(r"^test result: .*$", log, re.M)
+    if not summaries:
+        finish(2, problem="no 'test result:' line")
+    if len(summaries) != 1 or not summaries[0].startswith("test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 10 filtered out;"):
+        problems.append(f"summary lines {summaries}")
+    if log.count("panicked at") != 3:
+        problems.append(f"{log.count('panicked at')} panics in the whole log (want exactly 3: RED + 2 negatives)")
+    blocks, stray = fa_blocks(log)
+    if blocks is None:
+        finish(2, problem=stray[0])
+    if stray:
+        problems.append(f"output before the first test: {stray[:3]}")
+    names = [b["name"] for b in blocks]
+    if sorted(names) != sorted(FA_TESTS) or len(set(names)) != len(names):
+        problems.append(f"tests {names} (want each of {sorted(FA_TESTS)} exactly once)")
+    want = {
+        "fafb_red_the_current_read_comes_before_the_select_record":
+            ("FAFB-RED-ORDER log_served=1 select_held=1 select_records=0", red_line, "called `Option::unwrap()` on a `None` value"),
+        "fafb_green_the_fixed_test_waits_for_the_select_record":
+            ("FAFB-GREEN-ORDER log_served=1 select_held=1 select_records=0", None, None),
+        "fafb_neg_a_select_never_recorded_fails_the_fixed_test":
+            (None, until_line, "timed out waiting for: the Host was told rachel is selected (error: "),
+        "fafb_neg_another_session_selected_fails_the_fixed_test":
+            (None, until_line, "timed out waiting for: the Host was told rachel is selected (error: "),
+    }
+    for b in blocks:
+        name = b["name"]
+        if name not in want:
+            continue
+        marker, line, message = want[name]
+        if b["should_panic"] != FA_TESTS[name]:
+            problems.append(f"{name}: should-panic flag {b['should_panic']} (want {FA_TESTS[name]})")
+        if b["status"] != "ok":
+            problems.append(f"{name}: status {b['status']!r} (want 'ok')")
+        out = b["output"]
+        markers = [l for l in out if l.startswith("FAFB-")]
+        if markers != ([marker] if marker else []):
+            problems.append(f"{name}: markers {markers} (want {[marker] if marker else []})")
+        panics = [(n, PANIC_AT.match(l)) for n, l in enumerate(out) if "panicked at" in l]
+        if line is None:
+            if panics:
+                problems.append(f"{name}: unexpected panic {out[panics[0][0]]!r}")
+            continue
+        if len(panics) != 1 or not panics[0][1]:
+            problems.append(f"{name}: {len(panics)} panics (want exactly 1 in host_flow.rs)")
+            continue
+        n, m = panics[0]
+        if m.group(1) != name or int(m.group(2)) != line:
+            problems.append(f"{name}: panicked in {m.group(1)} at l.{m.group(2)} (want {name} at l.{line})")
+        if n + 1 >= len(out) or not out[n + 1].startswith(message):
+            problems.append(f"{name}: panic message {out[n + 1] if n + 1 < len(out) else None!r} (want {message!r}...)")
+        others = [l for l in out[n + 2:] if not l.startswith("note: run with `RUST_BACKTRACE=1`")]
+        if others:
+            problems.append(f"{name}: unexpected output after the panic {others[:2]}")
     if problems:
         finish(5, problems=problems)
-    finish(0, red_line=red_line, result="RED reproduced causally; GREEN waits for the record; both negatives fail")
+    finish(0, red_line=red_line, until_line=until_line, tests=names,
+           result="RED reproduced causally; GREEN waits for the record; both negatives fail")
 
 
 def check_step(name):
