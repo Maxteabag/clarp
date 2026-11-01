@@ -64,11 +64,15 @@ pub fn a2a_check(out: String) {
                 crate::pump();
                 opened = true;
             }
-            // The Host's own chat (r1, r2) is held, and no load is still
-            // running, before it is replaced: a tail that lands after the
+            // The Host's own chat (r1, r2) is held, and no log request for it
+            // is in flight or queued, before it is replaced: this orders the
+            // fixture after the default load. A tail that lands after the
             // replacement reorders r1 and r2 below the new rows by their time,
             // not above them as the rest of this check expects.
-            let held = app.engine.borrow().conversation("rachel").is_some_and(|c| c.latest_revision() >= 2 && !c.loading());
+            let held = {
+                let engine = app.engine.borrow();
+                !engine.log_pending("rachel") && engine.conversation("rachel").is_some_and(|c| c.latest_revision() >= 2 && !c.loading())
+            };
             if !held || row("r1").is_none() || row("r2").is_none() {
                 return false;
             }
