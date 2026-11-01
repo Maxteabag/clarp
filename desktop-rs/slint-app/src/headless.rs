@@ -305,7 +305,8 @@ thread_local! {
     static ROWS_ON: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
     static ROWS_SEQ: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static ROWS_INSIDE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-    static ROWS_EVENTS: std::cell::RefCell<Vec<(u64, String, i32, String, f32, bool)>> = const { std::cell::RefCell::new(Vec::new()) };
+    static ROWS_EVENTS: std::cell::RefCell<Vec<(u64, String, i32, String, f32, bool, bool)>> = const { std::cell::RefCell::new(Vec::new()) };
+    static ROWS_EVENTS_DROPPED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
 pub fn rows_on() -> bool {
@@ -313,7 +314,8 @@ pub fn rows_on() -> bool {
 }
 
 /// Called for every measurer report (scratch proof only; a no-op unless CLARP_ROWS_MEASURE=1).
-pub fn rows_measured(pane: &str, batch: i32, id: &str, height: f32) {
+/// `app_dropped`: the app could not borrow its panes, so it dropped this report.
+pub fn rows_measured(pane: &str, batch: i32, id: &str, height: f32, app_dropped: bool) {
     if !rows_on() {
         return;
     }
@@ -322,9 +324,16 @@ pub fn rows_measured(pane: &str, batch: i32, id: &str, height: f32) {
     ROWS_EVENTS.with(|e| {
         let mut e = e.borrow_mut();
         if e.len() < 5000 {
-            e.push((seq, pane.to_owned(), batch, id.to_owned(), height, inside));
+            e.push((seq, pane.to_owned(), batch, id.to_owned(), height, inside, app_dropped));
+        } else {
+            ROWS_EVENTS_DROPPED.with(|d| d.set(d.get() + 1));
         }
     });
+}
+
+/// Events not kept because the buffer was full (never silent: the oracle fails on any).
+pub fn rows_events_dropped() -> u64 {
+    ROWS_EVENTS_DROPPED.with(std::cell::Cell::get)
 }
 
 pub fn rows_seq() -> u64 {
@@ -335,7 +344,7 @@ pub fn rows_set_inside(inside: bool) {
     ROWS_INSIDE.with(|i| i.set(inside));
 }
 
-pub fn rows_take_events() -> Vec<(u64, String, i32, String, f32, bool)> {
+pub fn rows_take_events() -> Vec<(u64, String, i32, String, f32, bool, bool)> {
     ROWS_EVENTS.with(|e| std::mem::take(&mut *e.borrow_mut()))
 }
 

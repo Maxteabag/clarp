@@ -1,0 +1,71 @@
+# ROWS scratch proof only: the send check's ok-line labels (text before ':' , numbers as #),
+# taken from the retained PASSING send run FAFB b-green (run 41343016157, raw b-green.log). r-handle GREEN needs every one.
+the Host takes a long chat
+the empty composer is drawn
+the Host takes # s to confirm a send
+the new row was sampled while it was sent and after
+confirmed in 0.8 s, under the grace period
+the row's height never changed from unsent to sent
+captured send#-confirmed
+captured send#-reveal-early
+captured send#-sending
+captured send#-reveal-late
+unsent past the grace period (# s), it says Sending… from Some(#s)
+the late line grows the row once (and confirmed, it is gone)
+Sending… fades in
+and its fade takes # s
+the next send fails
+a failed send says Not delivered at once
+fading in over # s
+captured send#-failed
+two lines make the composer taller
+captured send#-flight-early
+captured send#-flight-mid
+captured send#-flight-late
+the text flew, sampled over # frames
+landed, the copy fades over the bubble
+sprung forward only
+it starts from the composer's text
+it ends on the bubble's final place
+where the bubble stays
+mid-flight the text is drawn between the composer and the bubble
+the composer shrinks smoothly (1 frames between its heights)
+and ends at its empty height 50
+the copy waits on the composer until the bubble is laid out (# ms)
+it lands 320 ms after the bubble is laid out
+the copy fades and is removed by +200 ms after landing
+the copy is gone
+the chat stays at its end before, during and after (# frames away)
+and the scroll journal saw no jump (#)
+the flight was drawn frame by frame
+a flight frame costs about an ordinary one
+captured send#-landed
+Ctrl+Enter's send flies too
+and was queued
+the reader is still scrolled up
+scrolled up, a send does not fly
+and the latest comes into view as before
+captured send#-waiting
+the copy waited on the composer and never flew
+with no bubble to go to, the copy is dropped at 600 ms
+and is gone
+the bubble shows
+captured send#-no-text-fade
+the attachment was sent
+with no text there is no copy
+over 0.2 s
+a draft longer than the composer shows fades in, no copy
+captured send#-fade
+with Reduce Motion the bubble fades in, nothing flies
+a 0.2 s fade
+and the composer is empty at once
+Settings show Send animation off
+off, a send neither flies nor fades
+a turn waits in rachel's queue
+the queued-turn labels (composer, explorer) stay hidden under 1.75 s
+and show after it
+the queued-turn labels fade in over # s
+captured send#-queued-label
+the queue empties
+an emptied queue's labels go at once
+the rows tiled at every moment watched
