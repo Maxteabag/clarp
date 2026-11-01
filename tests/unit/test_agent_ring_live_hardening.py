@@ -18,6 +18,7 @@ from lib import group_calls
 from tests.unit.test_agent_ring_live import PHONE, sander  # noqa: F401 - sander is a fixture
 from tests.unit.test_agent_ring_live_socket import (AUDIO, Handler, _admitted, _join, _masked, _ready, _ring_of,
                                                      _serve, _types, _wait, call)  # noqa: F401 - call is a fixture
+from tests.unit.test_agent_ring_live_socket import _live_lifecycle  # noqa: F401 - autouse: no session outlives its test
 from tests.unit.test_agent_rings import env  # noqa: F401 - env is a fixture
 
 DELTA = {"type": "session.output_audio.delta", "delta": AUDIO}
