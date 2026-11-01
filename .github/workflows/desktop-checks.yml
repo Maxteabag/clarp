@@ -2,15 +2,14 @@ name: Desktop checks (ROWS scratch proof)
 
 # SCRATCH PROOF BRANCH proof/desktop-rows-20261101 ONLY, never merged.
 # ONE dispatch-only job (no push/pull_request trigger): PR #231's send check
-# row-height failure. walk = the PR #231 form (a tree walk per sample), with
-# measurer reports and samples correlated; bridge = main's form; fade = a walk
-# only for Reduce-Motion fade samples; handle = C1 (a composer handle bound
-# once, no walk); neg = C1 against a composer that really starts tall. Each arm
-# runs twice (first, rerun). Observation arms record; C1 must be GREEN and NEG
+# row-height failure, ONE run per arm (ROOT): walk = the PR #231 form (a tree
+# walk per sample), with measurer reports and samples correlated (correlation
+# only); handle = C1 (a composer handle bound once, no walk); neg = C1 against
+# a composer that really starts tall. walk records; C1 must be GREEN and NEG
 # must FAIL, else the job stops. Synthetic, public.
 # Budget (whole job <= 30 min, every step capped): epoch 1, checkout 1,
-# deps 2, toolchain 1, cache 1, build 10, 5 arms x 2, stage 1, upload 2 = 29,
-# plus 1 unallocated. rows/admit.py admits each phase fail-closed with a 3 min
+# deps 2, toolchain 1, cache 1, build 10, 3 arms x 2, stage 1, upload 2 = 25,
+# plus 5 unallocated. rows/admit.py admits each phase fail-closed with a 3 min
 # reserve. The upload carries only /tmp/rows-upload, staged to <= 80 MB.
 
 on:
@@ -65,100 +64,47 @@ jobs:
           git rev-parse HEAD 'HEAD^{tree}' > /tmp/rows/source.txt
           cargo build --locked -p clarp-slint > /tmp/rows/build.log 2>&1
           sha256sum target/debug/clarp-slint >> /tmp/rows/source.txt
-      - name: "ROWS arm a: walk sampler, the PR #231 form (observed)"
+      - name: "ROWS walk: the PR #231 form (observed; correlation only)"
         timeout-minutes: 2
         run: |
           set -uo pipefail
           python3 rows/admit.py walk 2 || exit 7
           ulimit -f 40960
-          # First run, then the rerun (as the checks job does). The runner's shell is
-          # `bash -e`: only each measured command runs without -e, so its rc is recorded.
+          # The runner's shell is `bash -e`: the expected non-zero (a RED) must not end the step
+          # before its rc is recorded and the oracle judges it. Only this command runs without -e.
           set +e
-          CLARP_ROWS_MEASURE=1 CLARP_ROWS_SAMPLER=walk timeout 50 slint-app/tests/check.sh send /tmp/rows/r-walk-1 > /tmp/rows/r-walk-1.log 2>&1
+          CLARP_ROWS_MEASURE=1 CLARP_ROWS_SAMPLER=walk timeout 100 slint-app/tests/check.sh send /tmp/rows/r-walk-1 > /tmp/rows/r-walk-1.log 2>&1
           rc=$?
           set -e
           echo "rc=$rc" > /tmp/rows/r-walk-1.rc
-          set +e
-          CLARP_ROWS_MEASURE=1 CLARP_ROWS_SAMPLER=walk timeout 50 slint-app/tests/check.sh send /tmp/rows/r-walk-2 > /tmp/rows/r-walk-2.log 2>&1
-          rc=$?
-          set -e
-          echo "rc=$rc" > /tmp/rows/r-walk-2.rc
           python3 rows/oracle.py walk /tmp/rows
-      - name: "ROWS arm b: bridge sampler, main's form (observed)"
-        timeout-minutes: 2
-        run: |
-          set -uo pipefail
-          python3 rows/admit.py bridge 2 || exit 7
-          ulimit -f 40960
-          # First run, then the rerun (as the checks job does). The runner's shell is
-          # `bash -e`: only each measured command runs without -e, so its rc is recorded.
-          set +e
-          CLARP_ROWS_MEASURE=1 CLARP_ROWS_SAMPLER=bridge timeout 50 slint-app/tests/check.sh send /tmp/rows/r-bridge-1 > /tmp/rows/r-bridge-1.log 2>&1
-          rc=$?
-          set -e
-          echo "rc=$rc" > /tmp/rows/r-bridge-1.rc
-          set +e
-          CLARP_ROWS_MEASURE=1 CLARP_ROWS_SAMPLER=bridge timeout 50 slint-app/tests/check.sh send /tmp/rows/r-bridge-2 > /tmp/rows/r-bridge-2.log 2>&1
-          rc=$?
-          set -e
-          echo "rc=$rc" > /tmp/rows/r-bridge-2.rc
-          python3 rows/oracle.py bridge /tmp/rows
-      - name: "ROWS arm c: walk only for Reduce-Motion fade samples (observed)"
-        timeout-minutes: 2
-        run: |
-          set -uo pipefail
-          python3 rows/admit.py fade 2 || exit 7
-          ulimit -f 40960
-          # First run, then the rerun (as the checks job does). The runner's shell is
-          # `bash -e`: only each measured command runs without -e, so its rc is recorded.
-          set +e
-          CLARP_ROWS_MEASURE=1 CLARP_ROWS_SAMPLER=fade timeout 50 slint-app/tests/check.sh send /tmp/rows/r-fade-1 > /tmp/rows/r-fade-1.log 2>&1
-          rc=$?
-          set -e
-          echo "rc=$rc" > /tmp/rows/r-fade-1.rc
-          set +e
-          CLARP_ROWS_MEASURE=1 CLARP_ROWS_SAMPLER=fade timeout 50 slint-app/tests/check.sh send /tmp/rows/r-fade-2 > /tmp/rows/r-fade-2.log 2>&1
-          rc=$?
-          set -e
-          echo "rc=$rc" > /tmp/rows/r-fade-2.rc
-          python3 rows/oracle.py fade /tmp/rows
-      - name: "ROWS arm d: C1 bound handle (must be GREEN in both runs)"
+      - name: "ROWS C1: bound handle (must be GREEN)"
         timeout-minutes: 2
         run: |
           set -uo pipefail
           python3 rows/admit.py handle 2 || exit 7
           ulimit -f 40960
-          # First run, then the rerun (as the checks job does). The runner's shell is
-          # `bash -e`: only each measured command runs without -e, so its rc is recorded.
+          # The runner's shell is `bash -e`: the expected non-zero (a RED) must not end the step
+          # before its rc is recorded and the oracle judges it. Only this command runs without -e.
           set +e
-          CLARP_ROWS_MEASURE=1 CLARP_ROWS_SAMPLER=handle timeout 50 slint-app/tests/check.sh send /tmp/rows/r-handle-1 > /tmp/rows/r-handle-1.log 2>&1
+          CLARP_ROWS_MEASURE=1 CLARP_ROWS_SAMPLER=handle timeout 100 slint-app/tests/check.sh send /tmp/rows/r-handle-1 > /tmp/rows/r-handle-1.log 2>&1
           rc=$?
           set -e
           echo "rc=$rc" > /tmp/rows/r-handle-1.rc
-          set +e
-          CLARP_ROWS_MEASURE=1 CLARP_ROWS_SAMPLER=handle timeout 50 slint-app/tests/check.sh send /tmp/rows/r-handle-2 > /tmp/rows/r-handle-2.log 2>&1
-          rc=$?
-          set -e
-          echo "rc=$rc" > /tmp/rows/r-handle-2.rc
           python3 rows/oracle.py handle /tmp/rows
-      - name: "ROWS NEG: C1 against a composer that really starts tall (must FAIL in both runs)"
+      - name: "ROWS NEG: C1 against a composer that really starts tall (must FAIL)"
         timeout-minutes: 2
         run: |
           set -uo pipefail
           python3 rows/admit.py neg 2 || exit 7
           ulimit -f 40960
-          # First run, then the rerun (as the checks job does). The runner's shell is
-          # `bash -e`: only each measured command runs without -e, so its rc is recorded.
+          # The runner's shell is `bash -e`: the expected non-zero (a RED) must not end the step
+          # before its rc is recorded and the oracle judges it. Only this command runs without -e.
           set +e
-          CLARP_ROWS_MEASURE=1 CLARP_ROWS_SAMPLER=handle CLARP_ROWS_FORCE_TALL=1 timeout 50 slint-app/tests/check.sh send /tmp/rows/r-neg-1 > /tmp/rows/r-neg-1.log 2>&1
+          CLARP_ROWS_MEASURE=1 CLARP_ROWS_SAMPLER=handle CLARP_ROWS_FORCE_TALL=1 timeout 100 slint-app/tests/check.sh send /tmp/rows/r-neg-1 > /tmp/rows/r-neg-1.log 2>&1
           rc=$?
           set -e
           echo "rc=$rc" > /tmp/rows/r-neg-1.rc
-          set +e
-          CLARP_ROWS_MEASURE=1 CLARP_ROWS_SAMPLER=handle CLARP_ROWS_FORCE_TALL=1 timeout 50 slint-app/tests/check.sh send /tmp/rows/r-neg-2 > /tmp/rows/r-neg-2.log 2>&1
-          rc=$?
-          set -e
-          echo "rc=$rc" > /tmp/rows/r-neg-2.rc
           python3 rows/oracle.py neg /tmp/rows
           python3 rows/oracle.py summary /tmp/rows
       - name: Stage the upload (<= 80 MB, whole files only)

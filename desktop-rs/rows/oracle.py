@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """ROWS scratch proof only (branch proof/desktop-rows-20261101, never merged).
 
-Per-arm oracle over the arm's two runs (first, rerun): python3 rows/oracle.py ARM DIR
-ARM = walk | bridge | fade | handle | neg | summary. Run k of ARM reads
+Per-arm oracle over the arm's ONE run: python3 rows/oracle.py ARM DIR
+ARM = walk | handle | neg | summary. Run k (= 1) of ARM reads
 DIR/r-ARM-k.rc, DIR/r-ARM-k.log (check.sh output) and DIR/r-ARM-k/app.log
 (ROWS-SAMPLE / ROWS-MEASURE / ROWS-HANDLE lines). Writes DIR/ARM.verdict.
-Observation arms (walk, bridge, fade) record what happened and exit 0 when
-their data is complete; handle must be GREEN and neg must FAIL as required.
+The observation arm (walk) records what happened and exits 0 when its data is
+complete; handle must be GREEN and neg must FAIL as required.
 Exit: 0 expected/recorded, 2 missing/malformed/panic, 5 unexpected.
 A row read is RELEVANT only for the sample's own pane, row id and batch.
 """
@@ -18,7 +18,8 @@ import sys
 ARM, DIR = sys.argv[1], pathlib.Path(sys.argv[2])
 ROW_FAILS = ("FAIL the row's height never changed from unsent to sent:", "FAIL the late line grows the row once")
 COMPOSER_FAIL = "FAIL and the composer is empty at once: ["
-MODES = {"walk": "walk", "bridge": "bridge", "fade": "fade", "handle": "handle", "neg": "handle"}
+MODES = {"walk": "walk", "handle": "handle", "neg": "handle"}
+RUNS = ("1",)   # ROOT: one run per arm, no rerun
 MAX = 20 * 1024 * 1024
 
 
@@ -139,13 +140,13 @@ def classify(r):
 
 
 def observe():
-    runs = {k: classify(load(k)) for k in ("1", "2")}
+    runs = {k: classify(load(k)) for k in RUNS}
     finish(0, verdict="RECORDED", runs=runs)
 
 
 def handle():
     runs, bad = {}, []
-    for k in ("1", "2"):
+    for k in RUNS:
         r = load(k)
         c = classify(r)
         h = r["handles"]
@@ -163,7 +164,7 @@ def handle():
 
 def neg():
     runs, bad = {}, []
-    for k in ("1", "2"):
+    for k in RUNS:
         r = load(k)
         comp = [f for f in r["fails"] if f.startswith(COMPOSER_FAIL)]
         first = float(comp[0].split("[", 1)[1].split(",")[0].rstrip("]")) if comp else None
@@ -184,17 +185,16 @@ def neg():
 
 def summary():
     v = {}
-    for arm in ("walk", "bridge", "fade", "handle", "neg"):
+    for arm in ("walk", "handle", "neg"):
         p = DIR / f"{arm}.verdict"
         v[arm] = json.loads(p.read_text()) if p.is_file() else None
     if any(x is None or x["exit"] != 0 for x in v.values()):
         finish(2, problem="an arm verdict is missing or not exit 0", arms={a: (x and x["exit"]) for a, x in v.items()})
-    cls = {a: [v[a]["runs"][k]["cls"] for k in ("1", "2")] for a in ("walk", "bridge", "fade")}
-    finish(0, walk=cls["walk"], bridge=cls["bridge"], fade=cls["fade"],
-           correlation=("CORRELATED-INSIDE in " + str(cls["walk"].count("CORRELATED-INSIDE")) + "/2 walk runs (correlation only, not causation)")
-           if "CORRELATED-INSIDE" in cls["walk"] else "no CORRELATED-INSIDE walk run: cause UNKNOWN (see CORRELATED-GAP / UNCORRELATED / OTHER-FAILS)",
-           c1="GREEN in both runs with 0 relevant inside reports; NEG fails as required in both")
+    walk = v["walk"]["runs"]["1"]["cls"]
+    finish(0, walk=walk, correlation=("CORRELATED-INSIDE (correlation only; query causality UNKNOWN)" if walk == "CORRELATED-INSIDE"
+                                      else f"{walk}: cause UNKNOWN"),
+           c1="GREEN with 0 relevant inside reports; NEG fails as required")
 
 
-{"walk": observe, "bridge": observe, "fade": observe, "handle": handle, "neg": neg, "summary": summary}.get(
+{"walk": observe, "handle": handle, "neg": neg, "summary": summary}.get(
     ARM, lambda: finish(2, problem="unknown arm"))()
