@@ -78,6 +78,14 @@
   let modelEntries = $derived(
     (Array.isArray(provider.models) ? provider.models : []).filter(m => m && m.id));
   let models = $derived(modelEntries.map(m => m.id));
+  // A harness that serves models from many providers (OpenCode) names each
+  // model's provider; picking one narrows the model list. "" shows them all.
+  let modelProvider = $state('');
+  let modelProviders = $derived(
+    Array.isArray(provider.model_providers) ? provider.model_providers : []);
+  let visibleModels = $derived(modelProvider
+    ? modelEntries.filter(m => m.model_provider === modelProvider || m.id === modelPreset)
+    : modelEntries);
   // Efforts are provider-wide (agy) or per model; offer the selected model's
   // list, or everything any model supports when no preset is chosen.
   let efforts = $derived.by(() => {
@@ -126,6 +134,8 @@
     modelPreset = models.includes(existingModel) ? existingModel : '';
     modelCustom = existingModel && !models.includes(existingModel) ? existingModel : '';
     effort = efforts.includes(existingEffort) ? existingEffort : '';
+    const prefix = existingModel.includes('/') ? existingModel.split('/')[0] : '';
+    modelProvider = modelProviders.some(p => p.id === prefix) ? prefix : '';
   });
 
   // Fork is Claude-only; drop back to fresh rather than leaving it selected
@@ -297,7 +307,7 @@
         </ul>
       {/if}
 
-      <div class="start-backends">
+      <div class="start-backends" role="radiogroup" aria-label="Harness">
         {#each backendIds as b (b)}
           {@const isLocked = !!lockedBackend && lockedBackend !== b}
           <label class:disabled={isLocked} title={isLocked ? `${name} is locked to ${backendLabel(lockedBackend, catalogue)}` : ''}>
@@ -312,11 +322,23 @@
         {/each}
       </div>
 
+      {#if modelProviders.length}
+        <label class="start-field">
+          <span>Model provider</span>
+          <select bind:value={modelProvider}>
+            <option value="">All providers</option>
+            {#each modelProviders as p (p.id)}
+              <option value={p.id}>{p.name || p.id}{p.signed_in ? '' : ' (not signed in)'}</option>
+            {/each}
+          </select>
+        </label>
+      {/if}
+
       <label class="start-field">
         <span>Model</span>
         <select bind:value={modelPreset}>
           <option value="">Default</option>
-          {#each modelEntries as m (m.id)}<option value={m.id}>{m.label || m.id}</option>{/each}
+          {#each visibleModels as m (m.id)}<option value={m.id}>{m.label || m.id}</option>{/each}
         </select>
       </label>
 

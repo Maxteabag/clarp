@@ -27,8 +27,8 @@ fn backends_sort_by_index_and_skip_hidden_or_missing() {
 fn models_and_efforts_come_from_the_catalog() {
     let c = catalog();
     let models = models_for_backend(&c, "codex");
-    assert_eq!(models.len(), 3, "provider default + two models with ids");
-    assert_eq!(models[0], json!({"id": "", "label": "Provider default"}));
+    assert_eq!(models.len(), 3, "harness default + two models with ids");
+    assert_eq!(models[0], json!({"id": "", "label": "Harness default"}));
     assert_eq!(models[2]["label"], "mini");
     assert_eq!(default_effort_for_model(&c, "codex", "gpt-5.5"), "high");
     assert_eq!(default_effort_for_model(&c, "codex", "mini"), "");
