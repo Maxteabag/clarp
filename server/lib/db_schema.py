@@ -15,7 +15,7 @@ from __future__ import annotations
 
 # Versions 81 and 82 also exist on installed Hosts with additive indexing
 # migrations. History must run when upgrading those Hosts, not only main's v80.
-_SCHEMA_VERSION = 119  # PROVISIONAL (listen-first index over main 118): Nadia's ledger order fixes it at the landing
+_SCHEMA_VERSION = 121  # PROVISIONAL (stale provider tasks over main 119; 120 is feat/agent-ring-device-optout's): renumber at the landing if taken
 
 
 # The schema below is the complete current shape. It is applied in one step to
