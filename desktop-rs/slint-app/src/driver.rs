@@ -2213,7 +2213,10 @@ fn select_text_check(out: String) {
             if window.get_overlay() != "select-text" || elapsed < Duration::from_millis(200) {
                 return false;
             }
-            check(window.get_select_body() == "Step one, then step two.", &format!("a message's select icon shows its text: {:?}", window.get_select_body()));
+            let body = window.get_select_body().to_string();
+            check(body.contains("Show me the plan") && body.contains("Step one, then step two."), &format!("a message's select icon opens the whole chat, so a selection can reach the others: {body:?}"));
+            let (from, to) = (window.get_select_from() as usize, window.get_select_to() as usize);
+            check(body.get(from..to) == Some("Step one, then step two."), &format!("with that message selected: {:?}", body.get(from..to)));
             check(window.get_select_title().starts_with("Select text"), "under a Select text title");
             shot(&out, "select-text-01");
             headless::press(slint::platform::Key::Escape);
@@ -2233,6 +2236,7 @@ fn select_text_check(out: String) {
             }
             let body = window.get_select_body().to_string();
             check(body.contains("You:\nShow me the plan") && body.contains("Step one, then step two."), &format!("the whole chat, each message under who wrote it: {body:?}"));
+            check(window.get_select_from() as usize == body.len() && window.get_select_to() as usize == body.len(), "the caret at the latest, nothing selected");
             window.invoke_select_copy_all();
             let copied = std::env::var_os("CLARP_TEST_CLIPBOARD").and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
             check(copied == body, &format!("Copy all copies all of it: {copied:?}"));

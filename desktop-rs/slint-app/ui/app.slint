@@ -241,6 +241,9 @@ export component AppWindow inherits Window {
     // What the select-text page shows, and its buttons.
     in property <string> select-title;
     in property <string> select-body;
+    // What starts selected on it (UTF-8 offsets; equal: only the caret).
+    in property <int> select-from;
+    in property <int> select-to;
     callback select-copy-all();
     public function open-select-text() { select-text-page.open(); }
     callback silence();
@@ -668,6 +671,8 @@ export component AppWindow inherits Window {
             height: parent.height;
             title: root.select-title;
             body: root.select-body;
+            from: root.select-from;
+            to: root.select-to;
             copy-all => { root.select-copy-all(); }
             close => { root.overlay-closed(); }
         }
