@@ -59,6 +59,9 @@ thread_local! {
     static MID_WANTED: Cell<bool> = const { Cell::new(false) };
     static MID: RefCell<Option<(Rect, Rect)>> = const { RefCell::new(None) };
     static COMPOSER_MISSING: Cell<bool> = const { Cell::new(false) };
+    /// The composer box's element, found once where EMPTY is read, with the
+    /// id it was found by: sampling reads it without walking the tree.
+    static COMPOSER: RefCell<Option<(String, i_slint_backend_testing::ElementHandle)>> = const { RefCell::new(None) };
     static LANDING: RefCell<Option<(Rect, f32, Option<Rect>)>> = const { RefCell::new(None) };
     static DROPPED: Cell<i32> = const { Cell::new(0) };
     static REVEAL: RefCell<Option<RevealWatch>> = const { RefCell::new(None) };
@@ -105,6 +108,16 @@ fn composer_box() -> Option<Rect> {
     element(&format!("composer-box:{}", app_now().active_id()))
 }
 
+/// Finds the active pane's composer box once, for `composer_drawn`.
+fn bind_composer() {
+    use i_slint_backend_testing::ElementQuery;
+    let Some(window) = crate::window() else { return };
+    let want = format!("composer-box:{}", app_now().active_id());
+    let id = want.clone();
+    let found = ElementQuery::from_root(&window).match_predicate(move |e| e.accessible_id().is_some_and(|a| a == id.as_str())).find_first();
+    COMPOSER.with(|c| *c.borrow_mut() = found.map(|e| (want, e)));
+}
+
 /// The newest message of one's own in rachel's chat: id, unsent, failed.
 fn last_own() -> Option<(String, bool, bool)> {
     let app = app_now();
@@ -129,18 +142,23 @@ fn unexplained() -> usize {
 
 /// The composer's height as drawn, the source EMPTY is read from: the
 /// SendFlight bridge's copy is written only on the flight's ticks, so a send's
-/// first sample could read the last send's height. A missing box fails the
-/// check (once); its NaN fails every comparison after it.
+/// first sample could read the last send's height. It reads the element bound
+/// at "empty composer" rather than searching the window on every frame. A box
+/// that is missing, no longer valid, or not the active pane's fails the check
+/// (once); its NaN fails every comparison after it.
 fn composer_drawn() -> f32 {
-    composer_box().map_or_else(
-        || {
-            if !COMPOSER_MISSING.with(|m| m.replace(true)) {
-                check(false, "the composer box is drawn while a send is sampled");
-            }
-            f32::NAN
-        },
-        |r| r.3,
-    )
+    let want = format!("composer-box:{}", app_now().active_id());
+    let height = COMPOSER.with(|c| {
+        let c = c.borrow();
+        let (bound, e) = c.as_ref()?;
+        (*bound == want && e.is_valid() && e.accessible_id().is_some_and(|a| a == want.as_str())).then(|| e.size().height)
+    });
+    height.unwrap_or_else(|| {
+        if !COMPOSER_MISSING.with(|m| m.replace(true)) {
+            check(false, "the composer box is drawn while a send is sampled");
+        }
+        f32::NAN
+    })
 }
 
 /// Sends what the composer holds (Ctrl+Enter when `queue`) and samples
@@ -351,6 +369,7 @@ pub fn send_check(out: String) {
             }
             let Some(empty) = composer_box() else { return false };
             EMPTY.with(|e| e.set(empty.3));
+            bind_composer();
             check(empty.3 > 20.0, &format!("the empty composer is drawn: {empty:?}"));
             set_delay(0.8);
             type_draft("Benefit of the doubt");
