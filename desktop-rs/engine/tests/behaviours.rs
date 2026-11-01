@@ -187,6 +187,7 @@ fn a_chat_cached_over_a_page_behind_opens_at_its_latest_page() {
     };
     let backlog: Vec<_> = (0..250).map(|i| json!({"id": format!("n{i:03}"), "role": if i % 2 == 0 { "user" } else { "assistant" }, "text": format!("turn {i}")})).collect();
     host.control("/__control/turns", json!({"session": "rachel", "turns": backlog}));
+    host.control("/__control/page-deltas", json!({"on": true}));
     let before = rachel_logs(&host).len();
     let mut d = Driver::with_transcript_cache(&host.base, &cache);
     d.engine.start();
