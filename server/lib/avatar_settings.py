@@ -4,8 +4,10 @@ from . import settings_store
 KEY = "avatars.model_variants"
 
 
-def get() -> dict[str, bool]:
-    return {"model_avatars": settings_store.get_bool(KEY, default=False)}
+def get(*, stored: dict[str, str] | None = None) -> dict[str, bool]:
+    if stored is None:
+        return {"model_avatars": settings_store.get_bool(KEY, default=False)}
+    return {"model_avatars": stored.get(KEY, "false").strip().lower() in {"1", "true", "yes", "on"}}
 
 
 def update(value: bool) -> dict[str, bool]:
