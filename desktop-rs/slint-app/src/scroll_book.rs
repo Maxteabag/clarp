@@ -117,6 +117,11 @@ impl HeightBook {
         self.measure.set_vec(Vec::new());
     }
 
+    /// ROWS scratch proof only: the batch being measured now (read-only).
+    pub fn rows_batch(&self) -> i32 {
+        self.batch
+    }
+
     /// A row measured off screen. A row reports as it is created, before
     /// the blocks inside it are, and again once they are laid out, all
     /// before the window draws: the last report of the batch's frame is

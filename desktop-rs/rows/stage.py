@@ -18,8 +18,7 @@ import sys
 CAP = 80 * 1024 * 1024
 STAGE_MAX = 4096       # STAGE.json is a few fixed fields
 # Priority order: verdicts and small logs first, frames last.
-ALLOW = ["source.txt", "*.admission", "*.rc", "*.verdict", "r-walk.log", "r-handle.log", "r-neg.log",
-         "r-walk/app.log", "r-handle/app.log", "r-neg/app.log", "build.log", "r-*/*.png"]
+ALLOW = ["source.txt", "*.admission", "*.rc", "*.verdict", "r-*.log", "r-*/app.log", "build.log", "r-*/*.png"]
 
 raw, up = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
 up.mkdir(parents=True, exist_ok=True)
