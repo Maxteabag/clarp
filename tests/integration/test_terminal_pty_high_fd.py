@@ -71,7 +71,7 @@ def _read_session(cli: socket.socket, deadline: float) -> tuple[bytes, list[tupl
     return head, frames
 
 
-@pytest.mark.parametrize("high", [False, True], ids=["master-below-1024", "master-above-1024"])
+@pytest.mark.parametrize("high", [False, True], ids=["master-as-found", "master-above-1024"])
 def test_terminal_delivers_pty_output_whatever_the_master_fd_number(tmp_path, monkeypatch, high):
     soft, _hard = resource.getrlimit(resource.RLIMIT_NOFILE)
     assert soft >= 1100, f"RLIMIT_NOFILE soft limit {soft} cannot place fds above 1024"
@@ -109,7 +109,8 @@ def test_terminal_delivers_pty_output_whatever_the_master_fd_number(tmp_path, mo
 
     assert len(forks) == 1
     pid, master = forks[0]
-    assert (master >= 1024) is high
+    if high:     # LOW only checks delivery: a busy worker may already be above 1024
+        assert master >= 1024
     assert head.startswith(b"HTTP/1.1 101")
     output = b"".join(p for op, p in frames if op == ws.OP_BINARY)
     assert _MARK in output
