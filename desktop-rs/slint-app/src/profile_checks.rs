@@ -93,7 +93,7 @@ pub(super) fn profile_check(out: String) {
             check(info.plan_title == "Ship it" && bridge.get_plan().row_count() == 1, "and the current plan");
             check(bridge.get_prompts().row_count() == 20 && info.prompts_more, "the first 20 prompts, with more to load");
             let models: Vec<String> = bridge.get_models().iter().map(|m| m.to_string()).collect();
-            check(models == ["Provider default", "Opus", "Sonnet"] && info.model_index == 1, &format!("the catalog's models, Opus current: {models:?} {}", info.model_index));
+            check(models == ["Harness default", "Opus", "Sonnet"] && info.model_index == 1, &format!("the catalog's models, Opus current: {models:?} {}", info.model_index));
             let efforts: Vec<String> = bridge.get_efforts().iter().map(|m| m.to_string()).collect();
             check(efforts.len() == 3 && info.effort_index == 2, &format!("Opus's efforts, High current: {efforts:?} {}", info.effort_index));
             check(bridge.get_schedules().row_data(0).is_some_and(|s| s.name == "Nightly tidy" && s.on), "its scheduled task");
