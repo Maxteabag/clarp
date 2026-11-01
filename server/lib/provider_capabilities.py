@@ -559,7 +559,8 @@ def _with_model_providers(provider_id: str, row: dict[str, Any]) -> dict[str, An
             model["model_provider"] = prefix
             if prefix not in seen:
                 seen.append(prefix)
-    if provider_id == "opencode":
+    adapter = _adapter(provider_id)
+    if adapter is not None and adapter.model_providers and not adapter.model_id_filter:
         # Signed in but not yet in the remembered listing.
         seen += [prefix for prefix in types if prefix not in seen and "/" not in prefix
                  and ":" not in prefix]
@@ -853,7 +854,7 @@ def _discover_provider(
         "models": models,
         "source": catalog_source,
     }
-    if provider_id in ("opencode", "deepseek"):
+    if adapter is not None and adapter.model_providers:
         row = _with_model_providers(provider_id, row)
     return row
 

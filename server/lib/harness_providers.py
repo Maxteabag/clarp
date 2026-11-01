@@ -34,7 +34,6 @@ from . import backends, settings_store
 from .clock import now_ms as _now_ms
 from .log import log, log_exception
 
-HARNESSES = (backends.OPENCODE, backends.DEEPSEEK)
 STORE_HARNESS = backends.OPENCODE
 LOGIN_TIMEOUT_SECONDS = 600
 METHODS_TTL_SECONDS = 24 * 3600
@@ -89,7 +88,7 @@ def _executable() -> str | None:
 def harness_id(harness: str | None) -> str:
     """The harness whose store a request means; the DeepSeek card is OpenCode."""
     value = (harness or STORE_HARNESS).strip().lower()
-    if not backends.is_valid(value) or backends.normalize(value) not in HARNESSES:
+    if not backends.is_valid(value) or not backends.by_id(value).model_providers:
         raise ProviderError(f"{harness or value} has no model providers")
     return backends.normalize(value)
 
@@ -284,8 +283,9 @@ def providers(harness: str | None = None) -> dict[str, Any]:
     for pid in types:
         if pid not in catalogue and _PROVIDER_ID.fullmatch(pid):
             rows.append(_row(pid, {"name": pid}, types, methods))
-    if harness == backends.DEEPSEEK:
-        rows = [row for row in rows if _hosts_deepseek(catalogue.get(row["id"]) or {})
+    family = backends.by_id(harness).model_id_filter
+    if family:
+        rows = [row for row in rows if _hosts_family(catalogue.get(row["id"]) or {}, family)
                 or row["signed_in"]]
     popular_rank = {pid: i for i, pid in enumerate(POPULAR)}
     rows.sort(key=lambda row: (not row["signed_in"], not row["popular"],
@@ -302,9 +302,9 @@ def providers(harness: str | None = None) -> dict[str, Any]:
     }
 
 
-def _hosts_deepseek(entry: dict[str, Any]) -> bool:
+def _hosts_family(entry: dict[str, Any], family: str) -> bool:
     models = entry.get("models") if isinstance(entry.get("models"), dict) else {}
-    return any("deepseek" in str(mid).lower() for mid in models)
+    return any(family in str(mid).lower() for mid in models)
 
 
 def provider_row(provider: str) -> dict[str, Any]:
@@ -327,10 +327,11 @@ def models(harness: str | None, provider: str) -> dict[str, Any]:
     entry = read_catalogue().get(provider)
     if entry is None:
         raise ProviderError(f"unknown provider {provider}")
-    efforts = list(backends.by_id(harness).efforts)
+    adapter = backends.by_id(harness)
+    efforts = list(adapter.efforts)
     rows = []
     for model_id, detail in (entry.get("models") or {}).items():
-        if harness == backends.DEEPSEEK and "deepseek" not in str(model_id).lower():
+        if adapter.model_id_filter and adapter.model_id_filter not in str(model_id).lower():
             continue
         detail = detail if isinstance(detail, dict) else {}
         variants = detail.get("variants")
