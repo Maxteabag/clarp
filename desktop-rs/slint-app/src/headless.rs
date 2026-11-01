@@ -296,6 +296,49 @@ pub fn type_text(text: &str) {
 
 const MARGIN: usize = 8;
 
+// ---- ROWS scratch proof only (branch proof/desktop-rows-20261101, never merged) ----
+// Each off-screen measurer report (ScrollBook.measured -> App::row_measured):
+// a sequence number, and whether it arrived while a send check was reading
+// the composer. Ids and heights only; recording is a push, no tree walk.
+
+thread_local! {
+    static ROWS_ON: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
+    static ROWS_SEQ: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    static ROWS_INSIDE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static ROWS_EVENTS: std::cell::RefCell<Vec<(u64, String, i32, String, f32, bool)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+pub fn rows_on() -> bool {
+    ROWS_ON.with(|o| *o.get().get_or_insert_with(|| std::env::var("CLARP_ROWS_MEASURE").is_ok_and(|v| v == "1")))
+}
+
+/// Called for every measurer report (scratch proof only; a no-op unless CLARP_ROWS_MEASURE=1).
+pub fn rows_measured(pane: &str, batch: i32, id: &str, height: f32) {
+    if !rows_on() {
+        return;
+    }
+    let seq = ROWS_SEQ.with(|s| { s.set(s.get() + 1); s.get() });
+    let inside = ROWS_INSIDE.with(std::cell::Cell::get);
+    ROWS_EVENTS.with(|e| {
+        let mut e = e.borrow_mut();
+        if e.len() < 5000 {
+            e.push((seq, pane.to_owned(), batch, id.to_owned(), height, inside));
+        }
+    });
+}
+
+pub fn rows_seq() -> u64 {
+    ROWS_SEQ.with(std::cell::Cell::get)
+}
+
+pub fn rows_set_inside(inside: bool) {
+    ROWS_INSIDE.with(|i| i.set(inside));
+}
+
+pub fn rows_take_events() -> Vec<(u64, String, i32, String, f32, bool)> {
+    ROWS_EVENTS.with(|e| std::mem::take(&mut *e.borrow_mut()))
+}
+
 /// How many frames have been drawn so far.
 pub fn frames_drawn() -> u64 {
     FRAME.with(|frame| frame.borrow().3)

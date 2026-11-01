@@ -1,413 +1,125 @@
-name: Desktop checks
+name: Desktop checks (ROWS scratch proof)
 
-# The Rust desktop's gate for work branches, so nothing compiles on the
-# owner's machines: unit tests, the headless behaviour checks against the fake
-# Host, and a release binary to run locally, all as artifacts; on macOS the
-# unit tests, the --pair check and a zipped Clarp.app. Push a branch
-# (not main) that touches desktop-rs, or run it by hand with a branch and a
-# list of checks.
+# SCRATCH PROOF BRANCH proof/desktop-rows-20261101 ONLY, never merged.
+# ONE dispatch-only job (no push/pull_request trigger): PR #231's send check
+# row-height failure. r-walk = the PR #231 form (a tree walk per sample), with
+# measurer reports and samples correlated; r-handle = C1 (a composer handle
+# bound once, no walk); r-neg = C1 against a composer that really starts tall.
+# Each arm's oracle stops the job on anything unexpected. Synthetic, public.
+# Budget (whole job <= 30 min, every step capped): epoch 1, checkout 1,
+# deps 2, toolchain 1, cache 1, build 10, 3 arms x 2, stage 1, upload 2 = 25,
+# plus 5 unallocated. rows/admit.py admits each phase fail-closed with a 3 min
+# reserve. The upload carries only /tmp/rows-upload, staged to <= 80 MB.
 
 on:
-  push:
-    branches-ignore: [main]
-    paths:
-      - "desktop-rs/**"
-      - "static/icon.png"
-      - "src-tauri/icons/icon.icns"
-      - ".github/workflows/desktop-checks.yml"
   workflow_dispatch:
-    inputs:
-      checks:
-        description: "Space-separated check names (empty = the default set)"
-        required: false
-        default: ""
-      profile:
-        description: "Also profile the frame-budget check with perf (the budget artifact)"
-        type: boolean
-        required: false
-        default: false
-      compare_ref:
-        description: "Also measure this ref's release build on the same runner (frame budget, 60 and 120 Hz)"
-        required: false
-        default: ""
 
 permissions:
   contents: read
 
 concurrency:
-  group: desktop-checks-${{ github.ref }}
-  cancel-in-progress: true
-
-env:
-  DEFAULT_CHECKS: >-
-    scrollbar transcript scroll scroll-jump row-overlap composer live a2a receipts
-    artifacts artifact-open artifact-summary form-events artifact-keys link-hints keymap switcher panes sidebar banner
-    layout-warning updates settings themes fonts startup refocus avatars message-search select-text mention customize chat-zoom
-    send desktop vim processes roster-stale stop-receipt pair narrow explorer
+  group: desktop-rows-proof
+  cancel-in-progress: false
 
 jobs:
-  test:
+  rows:
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: desktop-rs
     steps:
+      - name: Start epoch (the budget's zero)
+        timeout-minutes: 1
+        working-directory: /
+        run: |
+          mkdir -p /tmp/rows
+          date +%s > /tmp/rows-epoch
+          cp /tmp/rows-epoch /tmp/rows/epoch.txt
       - uses: actions/checkout@v4
-      - name: Build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends pkg-config libasound2-dev \
-            libfontconfig1-dev libfreetype-dev libxkbcommon-dev libwayland-dev libx11-dev libudev-dev
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+        timeout-minutes: 1
         with:
-          workspaces: desktop-rs
-          shared-key: desktop-debug
-      - name: Retained reply ordering negative control
-        working-directory: desktop-rs
-        run: |
-          set -euo pipefail
-          # This contains the disappearance fix, before its ordering correction.
-          baseline=6a80900dd7c44972a393d285a47c4dbfb6ba7ad3
-          git fetch --no-tags --depth=1 origin "$baseline"
-          file=core/src/history_fold.rs
-          cp "$file" /tmp/history-fold-candidate.rs
-          trap 'cp /tmp/history-fold-candidate.rs "$file"' EXIT
-          git show "$baseline:desktop-rs/$file" > "$file"
-          set +e
-          cargo test --locked -p clarp-core --test history_fold retained_final_stays_between_prompts_sent_during_and_after_its_reply -- --exact > /tmp/reply-order-baseline.log 2>&1
-          rc=$?
-          set -e
-          cat /tmp/reply-order-baseline.log
-          test "$rc" -eq 101
-          grep -F 'the final must not move above the prompt sent during work' /tmp/reply-order-baseline.log
-          grep -F '0 passed; 1 failed;' /tmp/reply-order-baseline.log
-          cp /tmp/history-fold-candidate.rs "$file"
-          trap - EXIT
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: reply-order-negative-control
-          path: /tmp/reply-order-baseline.log
-      - name: Wheel settling counter negative control
-        working-directory: desktop-rs
-        run: |
-          set -euo pipefail
-          file=slint-app/src/scrollbar_checks.rs
-          cp "$file" /tmp/scrollbar-candidate.rs
-          trap 'cp /tmp/scrollbar-candidate.rs "$file"' EXIT
-          python3 - <<'PYCTRL'
-          from pathlib import Path
-          path = Path('slint-app/src/scrollbar_checks.rs')
-          source = path.read_text()
-          before = 'self.action_offset = Some(offset);\n        self.still = 0;'
-          assert source.count(before) == 1
-          path.write_text(source.replace(before, 'self.action_offset = Some(offset);'))
-          PYCTRL
-          set +e
-          cargo test --locked -p clarp-slint --bin clarp-slint driver::scrollbar_checks::settling_tests::delayed_wheel_gets_fresh_settling_and_only_the_real_endpoint_finishes -- --exact > /tmp/wheel-counter-baseline.log 2>&1
-          rc=$?
-          set -e
-          cat /tmp/wheel-counter-baseline.log
-          test "$rc" -eq 101
-          grep -F 'fresh wheel must receive its own settling polls' /tmp/wheel-counter-baseline.log
-          grep -F '0 passed; 1 failed;' /tmp/wheel-counter-baseline.log
-          cp /tmp/scrollbar-candidate.rs "$file"
-          trap - EXIT
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: wheel-counter-negative-control
-          path: /tmp/wheel-counter-baseline.log
-      - name: Exhausted pass state negative control
-        working-directory: desktop-rs
-        run: |
-          set -euo pipefail
-          file=slint-app/src/scrollbar_checks.rs
-          cp "$file" /tmp/budget-pass-candidate.rs
-          trap 'cp /tmp/budget-pass-candidate.rs "$file"' EXIT
-          python3 - <<'PYCTRL'
-          from pathlib import Path
-          path = Path('slint-app/src/scrollbar_checks.rs')
-          source = path.read_text()
-          before = 'if last { Some(std::mem::take(self)) } else { None }'
-          assert source.count(before) == 1
-          path.write_text(source.replace(before, 'let _ = last; None'))
-          PYCTRL
-          set +e
-          cargo test --locked -p clarp-slint --bin clarp-slint driver::scrollbar_checks::settling_tests::exhausted_pass_fails_and_cannot_leak_into_the_next_direction -- --exact > /tmp/pass-budget-baseline.log 2>&1
-          rc=$?
-          set -e
-          cat /tmp/pass-budget-baseline.log
-          test "$rc" -eq 101
-          grep -F 'budget expiry must isolate the next direction' /tmp/pass-budget-baseline.log
-          grep -F '0 passed; 1 failed;' /tmp/pass-budget-baseline.log
-          cp /tmp/budget-pass-candidate.rs "$file"
-          trap - EXIT
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: pass-budget-negative-control
-          path: /tmp/pass-budget-baseline.log
-      - name: Unit and contract tests
-        working-directory: desktop-rs
-        # pipefail: without it the job takes tee's exit code and a failing
-        # test passes.
-        run: |
-          set -o pipefail
-          cargo test --locked -p clarp-core -p clarp-engine -p clarp-net -p clarp-slint 2>&1 | tee /tmp/cargo-test.log
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: cargo-test-log
-          path: /tmp/cargo-test.log
-
-  checks:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 90
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build and check dependencies
+          persist-credentials: false
+      - name: Dependencies
+        timeout-minutes: 2
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends pkg-config libasound2-dev \
             libfontconfig1-dev libfreetype-dev libxkbcommon-dev libwayland-dev libx11-dev libudev-dev \
             dbus gnome-keyring python3 fonts-jetbrains-mono fonts-noto-core fonts-dejavu-core fonts-liberation2
       - uses: dtolnay/rust-toolchain@stable
+        timeout-minutes: 1
       - uses: Swatinem/rust-cache@v2
+        timeout-minutes: 1
         with:
           workspaces: desktop-rs
           shared-key: desktop-debug
-      - name: Build the app
-        working-directory: desktop-rs
+          save-if: false
+      - name: Build once (the app)
+        timeout-minutes: 10
         run: |
           set -euo pipefail
-          mkdir -p /tmp/checks
-          git rev-parse HEAD 'HEAD^{tree}' > /tmp/checks/clean-source.txt
-          git diff --exit-code -- .
-          cargo build --locked -p clarp-slint
-          git diff --exit-code -- .
-          sha256sum target/debug/clarp-slint | tee /tmp/checks/clean-checks-binary.sha256
-      - name: Headless checks
-        working-directory: desktop-rs
-        env:
-          CHECKS: ${{ github.event.inputs.checks }}
+          python3 rows/admit.py build 10
+          git rev-parse HEAD 'HEAD^{tree}' > /tmp/rows/source.txt
+          cargo build --locked -p clarp-slint > /tmp/rows/build.log 2>&1
+          sha256sum target/debug/clarp-slint >> /tmp/rows/source.txt
+      - name: ROWS walk sampler, the PR #231 form (expect the row FAIL, correlated)
+        timeout-minutes: 2
         run: |
-          set -u
-          list="${CHECKS:-$DEFAULT_CHECKS}"
-          mkdir -p /tmp/checks
-          failed=""
-          for c in $list; do
-            echo "::group::check $c"
-            if slint-app/tests/check.sh "$c" "/tmp/checks/$c" > "/tmp/checks/$c.log" 2>&1; then
-              echo "$c: E2E_PASS"
-            else
-              # One rerun: some checks are load-sensitive; a second failure counts.
-              if slint-app/tests/check.sh "$c" "/tmp/checks/$c-rerun" > "/tmp/checks/$c-rerun.log" 2>&1; then
-                echo "$c: passed on rerun"
-              else
-                echo "$c: FAILED"; failed="$failed $c"
-              fi
-            fi
-            grep -E "^FAIL" "/tmp/checks/$c.log" | head -20 || true
-            echo "::endgroup::"
-          done
-          echo "failed:${failed:- none}" | tee /tmp/checks/summary.txt
-          [ -z "$failed" ]
+          set -uo pipefail
+          python3 rows/admit.py r-walk 2 || exit 7
+          ulimit -f 40960
+          # The runner's shell is `bash -e`: the expected non-zero (a RED) must not end the step
+          # before its rc is recorded and the oracle judges it. Only this command runs without -e.
+          set +e
+          CLARP_ROWS_MEASURE=1 timeout 100 slint-app/tests/check.sh send /tmp/rows/r-walk > /tmp/rows/r-walk.log 2>&1
+          rc=$?
+          set -e
+          echo "rc=$rc" > /tmp/rows/r-walk.rc
+          python3 rows/oracle.py r-walk /tmp/rows
+      - name: ROWS C1 handle sampler (GREEN: every row, composer and timing check)
+        timeout-minutes: 2
+        run: |
+          set -uo pipefail
+          python3 rows/admit.py r-handle 2 || exit 7
+          ulimit -f 40960
+          # The runner's shell is `bash -e`: the expected non-zero (a RED) must not end the step
+          # before its rc is recorded and the oracle judges it. Only this command runs without -e.
+          set +e
+          CLARP_ROWS_MEASURE=1 CLARP_ROWS_SAMPLER=handle timeout 100 slint-app/tests/check.sh send /tmp/rows/r-handle > /tmp/rows/r-handle.log 2>&1
+          rc=$?
+          set -e
+          echo "rc=$rc" > /tmp/rows/r-handle.rc
+          python3 rows/oracle.py r-handle /tmp/rows
+      - name: ROWS C1 against a composer that really starts tall (must FAIL)
+        timeout-minutes: 2
+        run: |
+          set -uo pipefail
+          python3 rows/admit.py r-neg 2 || exit 7
+          ulimit -f 40960
+          # The runner's shell is `bash -e`: the expected non-zero (a RED) must not end the step
+          # before its rc is recorded and the oracle judges it. Only this command runs without -e.
+          set +e
+          CLARP_ROWS_MEASURE=1 CLARP_ROWS_SAMPLER=handle CLARP_ROWS_FORCE_TALL=1 timeout 100 slint-app/tests/check.sh send /tmp/rows/r-neg > /tmp/rows/r-neg.log 2>&1
+          rc=$?
+          set -e
+          echo "rc=$rc" > /tmp/rows/r-neg.rc
+          python3 rows/oracle.py r-neg /tmp/rows
+      - name: Stage the upload (<= 80 MB, whole files only)
+        if: always()
+        timeout-minutes: 1
+        run: |
+          set -uo pipefail
+          # Every raw file is hashed; allowlisted ones are copied whole while
+          # they fit; anything left out is listed (size, sha256) in
+          # OVERFLOW.json, stays on the runner, and makes the proof INCOMPLETE
+          # (this step and the job fail). Nothing is ever cut.
+          python3 rows/stage.py /tmp/rows /tmp/rows-upload
       - uses: actions/upload-artifact@v4
         if: always()
+        timeout-minutes: 2
         with:
-          name: checks
-          path: /tmp/checks
-
-  binary:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends pkg-config libasound2-dev \
-            libfontconfig1-dev libfreetype-dev libxkbcommon-dev libwayland-dev libx11-dev libudev-dev
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: desktop-rs
-      - name: Release build
-        working-directory: desktop-rs
-        # As desktop.yml publishes it: symbols kept for the stall log.
-        run: cargo build --release --locked -p clarp-slint && strip --strip-debug -o /tmp/clarp-slint target/release/clarp-slint && ls -l /tmp/clarp-slint
-      - uses: actions/upload-artifact@v4
-        with:
-          name: clarp-slint-x86_64-linux
-          path: /tmp/clarp-slint
-      # What animating costs the UI thread, on the release build a person
-      # runs (budget_checks.rs): the table lands in the run's summary.
-      - name: Frame budget dependencies
-        run: |
-          sudo apt-get install -y --no-install-recommends dbus gnome-keyring python3 \
-            fonts-jetbrains-mono fonts-noto-core fonts-dejavu-core fonts-liberation2
-      - name: Frame budget
-        working-directory: desktop-rs
-        env:
-          CLARP_CHECK_PROFILE: release
-          CLARP_BUDGET_RECTS: "1"
-        run: |
-          set -o pipefail
-          status=0
-          slint-app/tests/check.sh frame-budget /tmp/budget 2>&1 | tee /tmp/budget.log || status=$?
-          if [ -f /tmp/budget/budget.md ]; then cat /tmp/budget/budget.md >> "$GITHUB_STEP_SUMMARY"; else echo "no budget.md: the check stopped early"; fi
-          exit $status
-      - name: Frame budget at 120 Hz
-        if: success() || failure()
-        working-directory: desktop-rs
-        env:
-          CLARP_CHECK_PROFILE: release
-          CLARP_BUDGET_HZ: "120"
-        run: |
-          set -o pipefail
-          status=0
-          slint-app/tests/check.sh frame-budget /tmp/budget/hz120 2>&1 | tee /tmp/budget-120.log || status=$?
-          if [ -f /tmp/budget/hz120/budget.md ]; then { echo; cat /tmp/budget/hz120/budget.md; } >> "$GITHUB_STEP_SUMMARY"; else echo "no budget.md: the check stopped early"; fi
-          exit $status
-      - name: Profile the frame budget
-        if: (success() || failure()) && github.event.inputs.profile == 'true'
-        continue-on-error: true
-        working-directory: desktop-rs
-        run: |
-          sudo apt-get install -y --no-install-recommends linux-tools-common "linux-tools-$(uname -r)" || sudo apt-get install -y --no-install-recommends linux-tools-azure
-          sudo sysctl -w kernel.perf_event_paranoid=-1 kernel.kptr_restrict=0
-          slint-app/tests/budget-profile.sh /tmp/budget/profile
-      - name: Frame budget of the compared ref, same runner
-        if: (success() || failure()) && github.event.inputs.compare_ref != ''
-        env:
-          COMPARE_REF: ${{ github.event.inputs.compare_ref }}
-        run: |
-          set -o pipefail
-          git fetch --no-tags origin "$COMPARE_REF"
-          git worktree add /tmp/compare FETCH_HEAD
-          cd /tmp/compare/desktop-rs
-          cargo build --release --locked -p clarp-slint
-          { echo; echo "### Compared: $COMPARE_REF ($(git rev-parse --short HEAD)), same runner"; } >> "$GITHUB_STEP_SUMMARY"
-          status=0
-          for hz in 60 120; do
-            CLARP_CHECK_PROFILE=release CLARP_BUDGET_HZ=$hz slint-app/tests/check.sh frame-budget /tmp/budget/compare-$hz 2>&1 | tee /tmp/budget/compare-$hz.log || status=$?
-            if [ -f /tmp/budget/compare-$hz/budget.md ]; then { echo; cat /tmp/budget/compare-$hz/budget.md; } >> "$GITHUB_STEP_SUMMARY"; fi
-          done
-          echo "compared ref's own budget verdict: $status (informational)"
-      - name: The stripped release names a stall's frames
-        if: success() || failure()
-        working-directory: desktop-rs
-        env:
-          CLARP_CHECK_PROFILE: stripped
-          CLARP_STALL_THRESHOLD_MS: "150"
-          CLARP_STALL_LOG: /tmp/budget/stall-stripped.log
-        run: |
-          mkdir -p target/stripped && cp /tmp/clarp-slint target/stripped/clarp-slint
-          status=0
-          slint-app/tests/check.sh diagnostics /tmp/budget/diagnostics || status=$?
-          if [ -f /tmp/budget/stall-stripped.log ]; then cat /tmp/budget/stall-stripped.log; else echo "no stall log written"; fi
-          exit $status
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: budget
-          path: |
-            /tmp/budget
-            /tmp/budget.log
-            /tmp/budget-120.log
-
-  macos:
-    runs-on: macos-15
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: desktop-rs
-          shared-key: desktop-macos-debug
-      - name: A throwaway default keychain
-        # The Keychain round trip and the pair check write here, not the
-        # runner's login keychain.
-        run: |
-          security create-keychain -p probe clarp-test.keychain
-          security list-keychains -d user -s clarp-test.keychain $(security list-keychains -d user | tr -d '"')
-          security default-keychain -d user -s clarp-test.keychain
-          security unlock-keychain -p probe clarp-test.keychain
-          security set-keychain-settings clarp-test.keychain
-      - name: Unit and contract tests
-        working-directory: desktop-rs
-        env:
-          CLARP_TEST_KEYCHAIN: "1"
-        run: |
-          set -o pipefail
-          cargo test --locked --no-fail-fast -p clarp-core -p clarp-engine -p clarp-net -p clarp-slint 2>&1 | tee /tmp/cargo-test-macos.log
-      - name: Pair against the fake Host
-        working-directory: desktop-rs
-        env:
-          CLARP_TEST_KEYCHAIN: "1"
-        run: |
-          cargo build --locked -p clarp-slint
-          slint-app/tests/check.sh pair /tmp/checks-macos/pair
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: macos-test-logs
-          path: |
-            /tmp/cargo-test-macos.log
-            /tmp/checks-macos
-
-  macos-app:
-    runs-on: macos-15
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-apple-darwin
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: desktop-rs
-          shared-key: desktop-macos-release
-      - name: Release build
-        working-directory: desktop-rs
-        run: cargo build --release --locked --target aarch64-apple-darwin -p clarp-slint
-      - name: Clarp.app
-        run: |
-          desktop-rs/tools/macos-bundle.sh desktop-rs/target/aarch64-apple-darwin/release/clarp-slint \
-            "${GITHUB_SHA::12}" "/tmp/clarp-slint-${GITHUB_SHA}-aarch64-macos.zip"
-          # What Jasper installs: it unzips to a launchable app.
-          mkdir /tmp/unzipped && ditto -x -k "/tmp/clarp-slint-${GITHUB_SHA}-aarch64-macos.zip" /tmp/unzipped
-          codesign --verify --strict /tmp/unzipped/Clarp.app
-          /tmp/unzipped/Clarp.app/Contents/MacOS/clarp-slint --version
-          /tmp/unzipped/Clarp.app/Contents/MacOS/clarp-slint --help | grep -- --pair
-      - name: What macOS sees of the window
-        # Diagnostic: Clarp.app launched by LaunchServices against the fake
-        # Host, then the window list and the Accessibility API's view of it.
-        continue-on-error: true
-        run: |
-          scratch=$(mktemp -d)
-          python3 desktop-rs/tests/fake_host.py --port-file "$scratch/port" --log "$scratch/host.log" &
-          for _ in $(seq 300); do [ -s "$scratch/port" ] && break; sleep 0.1; done
-          open -n /tmp/unzipped/Clarp.app --stdout "$scratch/app.log" --stderr "$scratch/app.log" \
-            --env CLARP_BASE_URL="http://127.0.0.1:$(cat "$scratch/port")" --env CLARP_TOKEN=probe-token \
-            --env CLARP_KEYRING=off --env CLARP_SETTINGS=off --env XDG_CONFIG_HOME="$scratch/c" \
-            --env XDG_CACHE_HOME="$scratch/k" --env XDG_DATA_HOME="$scratch/d" --env XDG_STATE_HOME="$scratch/s"
-          sleep 15
-          pid=$(pgrep -x clarp-slint | head -1)
-          echo "pid: $pid"
-          swift desktop-rs/tools/macos-window-probe.swift "$pid"
-          osascript -e 'tell application "System Events" to get {name, count of windows} of (first process whose unix id is '"$pid"')' || true
-          screencapture -x /tmp/macos-window.png || true
-          kill "$pid"
-          tail -40 "$scratch/app.log"
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: macos-window
-          path: /tmp/macos-window.png
-          if-no-files-found: ignore
-      - uses: actions/upload-artifact@v4
-        with:
-          name: clarp-slint-aarch64-macos
-          path: /tmp/clarp-slint-${{ github.sha }}-aarch64-macos.zip
+          name: rows
+          path: /tmp/rows-upload
+          retention-days: 7
+          if-no-files-found: error

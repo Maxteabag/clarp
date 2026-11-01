@@ -59,6 +59,9 @@ thread_local! {
     static MID_WANTED: Cell<bool> = const { Cell::new(false) };
     static MID: RefCell<Option<(Rect, Rect)>> = const { RefCell::new(None) };
     static COMPOSER_MISSING: Cell<bool> = const { Cell::new(false) };
+    /// ROWS scratch proof only: C1's composer handle, bound once to its id.
+    static ROWS_HANDLE: RefCell<Option<(String, i_slint_backend_testing::ElementHandle)>> = const { RefCell::new(None) };
+    static ROWS_SAMPLES: Cell<usize> = const { Cell::new(0) };
     static LANDING: RefCell<Option<(Rect, f32, Option<Rect>)>> = const { RefCell::new(None) };
     static DROPPED: Cell<i32> = const { Cell::new(0) };
     static REVEAL: RefCell<Option<RevealWatch>> = const { RefCell::new(None) };
@@ -143,6 +146,65 @@ fn composer_drawn() -> f32 {
     )
 }
 
+// ---- ROWS scratch proof only (branch proof/desktop-rows-20261101, never merged) ----
+
+/// CLARP_ROWS_SAMPLER=handle selects C1; anything else is the PR #231 form (a tree walk per sample).
+/// One sample's composer read, logged with the row this sample will read
+/// (its id and current book height, read AFTER the composer as the sampler does).
+fn rows_composer_sample(id: &str, sent: Instant) -> f32 {
+    let (height, before, after) = rows_composer();
+    if headless::rows_on() && ROWS_SAMPLES.with(|n| { n.set(n.get() + 1); n.get() }) <= 3000 {
+        let row = if id.is_empty() { None } else { app_now().measured_height(id).0 };
+        println!("perf ROWS-SAMPLE {}", json!({
+            "at_ms": sent.elapsed().as_secs_f64() * 1000.0, "pane": app_now().active_id(), "row_id": id, "row": row,
+            "composer": height, "seq_before": before, "seq_after": after, "mode": if rows_handle_mode() { "handle" } else { "walk" },
+        }));
+    }
+    height
+}
+
+fn rows_handle_mode() -> bool {
+    std::env::var("CLARP_ROWS_SAMPLER").is_ok_and(|v| v == "handle")
+}
+
+/// C1: resolve the composer box's element once, where the check already looks it up.
+fn rows_resolve_handle() {
+    use i_slint_backend_testing::ElementQuery;
+    let Some(window) = crate::window() else { return };
+    let want = format!("composer-box:{}", app_now().active_id());
+    let id = want.clone();
+    let found = ElementQuery::from_root(&window).match_predicate(move |e| e.accessible_id().is_some_and(|a| a == id.as_str())).find_first();
+    ROWS_HANDLE.with(|h| *h.borrow_mut() = found.map(|e| (want, e)));
+}
+
+/// C1: the drawn height through the cached handle, with no tree walk. It
+/// fails closed when the handle is missing, no longer valid, no longer that
+/// element, or not the active pane's composer (never a stale or default size).
+fn rows_handle_height() -> f32 {
+    let want = format!("composer-box:{}", app_now().active_id());
+    let height = ROWS_HANDLE.with(|h| {
+        let h = h.borrow();
+        let (bound, e) = h.as_ref()?;
+        (*bound == want && e.is_valid() && e.accessible_id().is_some_and(|a| a == want.as_str())).then(|| e.size().height)
+    });
+    height.unwrap_or_else(|| {
+        if !COMPOSER_MISSING.with(|m| m.replace(true)) {
+            check(false, "the composer box is drawn while a send is sampled (bound handle)");
+        }
+        f32::NAN
+    })
+}
+
+/// The composer read the sampler uses, bracketed by the measurer report
+/// sequence: reports that arrive between before and after came during the read.
+fn rows_composer() -> (f32, u64, u64) {
+    let before = headless::rows_seq();
+    headless::rows_set_inside(true);
+    let height = if rows_handle_mode() { rows_handle_height() } else { composer_drawn() };
+    headless::rows_set_inside(false);
+    (height, before, headless::rows_seq())
+}
+
 /// Sends what the composer holds (Ctrl+Enter when `queue`) and samples
 /// every frame until `stop_sampling`, saving `shots` on the way.
 fn send_and_sample(queue: bool, shots: &[(u64, &str)], known: Option<String>) {
@@ -153,6 +215,9 @@ fn send_and_sample(queue: bool, shots: &[(u64, &str)], known: Option<String>) {
     let before = known;
     let sent = Instant::now();
     SENT_AT.with(|s| s.set(Some(sent)));
+    if let Some(window) = crate::window() {
+        window.global::<crate::SendFlight>().set_rows_force_tall(std::env::var("CLARP_ROWS_FORCE_TALL").is_ok_and(|v| v == "1"));
+    }
     if queue {
         headless::press_with(&[Key::Control], Key::Return);
     } else {
@@ -168,7 +233,7 @@ fn send_and_sample(queue: bool, shots: &[(u64, &str)], known: Option<String>) {
             at: sent.elapsed(),
             progress: flight.get_progress(),
             flight: matches!(phase.as_str(), "wait" | "flight" | "settle").then(|| (flight.get_x(), flight.get_y(), flight.get_width(), flight.get_height())),
-            composer: composer_drawn(),
+            composer: rows_composer_sample(&id, sent),
             row: if id.is_empty() { None } else { app_now().measured_height(&id).0 },
             status: if id.is_empty() { String::new() } else { status_of(&id) },
             at_end: report().at_end,
@@ -269,6 +334,9 @@ fn contrast(name: &str, rect: Rect) -> Option<f32> {
 
 fn stop_sampling() -> Vec<Sample> {
     SAMPLER.with(|s| s.borrow_mut().take());
+    for (seq, pane, batch, id, height, inside) in headless::rows_take_events() {
+        println!("perf ROWS-MEASURE {}", json!({"seq": seq, "pane": pane, "batch": batch, "row_id": id, "height": height, "inside": inside}));
+    }
     SAMPLES.with(|s| s.borrow().clone())
 }
 
@@ -351,6 +419,9 @@ pub fn send_check(out: String) {
             }
             let Some(empty) = composer_box() else { return false };
             EMPTY.with(|e| e.set(empty.3));
+            if rows_handle_mode() {
+                rows_resolve_handle();
+            }
             check(empty.3 > 20.0, &format!("the empty composer is drawn: {empty:?}"));
             set_delay(0.8);
             type_draft("Benefit of the doubt");

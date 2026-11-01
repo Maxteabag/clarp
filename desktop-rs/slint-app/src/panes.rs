@@ -163,6 +163,7 @@ impl App {
     /// A row the transcript measured off screen.
     pub fn row_measured(&self, pane: &str, batch: i32, id: &str, height: f32, width: f32) {
         let Ok(mut panes) = self.pane_state.try_borrow_mut() else { return };
+        crate::headless::rows_measured(pane, batch, id, height); // ROWS scratch proof only
         if let Some(pane) = panes.iter_mut().find(|p| p.id == pane) {
             pane.book.measured(batch, id, height, width);
             crate::scroll_book::measure_soon();

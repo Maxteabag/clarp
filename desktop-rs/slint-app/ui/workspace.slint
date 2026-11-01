@@ -296,6 +296,11 @@ export component Pane inherits Rectangle {
             return;
         }
         root.boxing = !ChatLook.reduced-motion;
+        // ROWS negative control only: the drawn box really starts tall.
+        if (SendFlight.rows-force-tall && ChatLook.reduced-motion) {
+            root.box-from = 66px;
+            root.boxing = true;
+        }
         root.armed = false;
         if (!at-end) {
             return;

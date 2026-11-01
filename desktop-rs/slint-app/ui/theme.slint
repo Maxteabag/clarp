@@ -138,6 +138,9 @@ export global SendFlight {
     in-out property <length> width;
     in-out property <length> height;
     in-out property <length> composer-height;
+    // ROWS scratch proof only (never merged): a forced tall composer start
+    // under Reduce Motion (the negative control).
+    in-out property <bool> rows-force-tall;
 }
 
 // A status line that appears (an unsent or failed message's, a queued
