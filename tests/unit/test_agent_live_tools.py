@@ -1750,3 +1750,24 @@ def test_the_call_stops_its_work_even_if_the_transcript_cannot_finish(make, monk
     with pytest.raises(RuntimeError):
         call.close()
     assert call.closed and stopped == [{"wait": False, "cancel_futures": True}]
+
+
+def test_a_lone_surrogate_and_a_non_json_receipt_still_reach_the_voice_and_the_close(make, ledger, monkeypatch):
+    monkeypatch.setattr(tools, "host_note", REAL_HOST_NOTE)                  # the real note, not the JSON test view
+    effects = FakeEffects([BOARD_Q])
+    call, said, clock = make(effects, save_transcript=True)
+    real = call.execute
+    monkeypatch.setattr(call, "execute", lambda name, arguments: {**real(name, arguments), "raw": object()})
+    stopped = []
+    real_shutdown = call.pool.shutdown
+    monkeypatch.setattr(call.pool, "shutdown", lambda **kw: stopped.append(kw) or real_shutdown(**kw))
+    _user_says(call, clock, "Hva er klart \ud800 ")
+    call.observe({"type": "session.input_transcript.delta", "delta": "på boardet?"})
+    assert effects.asks and "jeg sjekker" in said[-1][1]                         # the receipt note was spoken
+    folder = ledger.path.parent / "transcripts"
+    kinds = [json.loads(x)["kind"] for x in (folder / "call-1.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert "receipt" in kinds and "text" in kinds
+    call.close()
+    assert stopped == [{"wait": False, "cancel_futures": True}]
+    doc = json.loads((folder / "call-1.json").read_text(encoding="utf-8"))
+    assert doc["receipts"][0]["tool"] == "ask_my_agent" and doc["receipts"][0]["status"] == "asked"
