@@ -1288,7 +1288,7 @@ impl Engine {
     fn apply_log(&mut self, session: &str, object: &Object, kind: LoadKind) {
         self.log_in_flight.remove(session);
         self.ensure_conversation(session);
-        if self.catching_up.remove(session) && kind == LoadKind::Delta && json::boolean(object, "has_more") {
+        if kind == LoadKind::Delta && json::boolean(object, "has_more") && self.catching_up.remove(session) {
             // A chat opened from a copy over a page behind: its latest page
             // replaces it, so it opens at the end. Walking the backlog forward
             // a page at a time showed the chat far in the past while it
@@ -1309,6 +1309,9 @@ impl Engine {
             self.request_tail(session, false);
         } else if kind != LoadKind::Delta {
             self.order_check.remove(session);
+        }
+        if kind != LoadKind::Older {
+            self.catching_up.remove(session);
         }
         self.continue_pending_log_request(session);
     }
