@@ -178,11 +178,9 @@ fn rows_line(line: String) {
     ROWS_LINES.with(|l| l.borrow_mut().push(line));
 }
 
-/// CLARP_ROWS_SAMPLER picks the arm: walk (the PR #231 form, the default),
-/// bridge (main's form), fade (a walk only for Reduce-Motion fade samples),
-/// handle (C1).
+/// CLARP_ROWS_SAMPLER picks the arm: walk (the PR #231 form, the default) or handle (C1).
 fn rows_mode() -> String {
-    std::env::var("CLARP_ROWS_SAMPLER").ok().filter(|v| ["walk", "bridge", "fade", "handle"].contains(&v.as_str())).unwrap_or_else(|| "walk".into())
+    std::env::var("CLARP_ROWS_SAMPLER").ok().filter(|v| v == "handle").unwrap_or_else(|| "walk".into())
 }
 
 fn rows_handle_mode() -> bool {
@@ -219,28 +217,12 @@ fn rows_handle_height() -> f32 {
     })
 }
 
-/// main's form: the SendFlight bridge copy (written on the flight's ticks).
-fn rows_bridge_height() -> f32 {
-    crate::window().map_or(f32::NAN, |w| w.global::<crate::SendFlight>().get_composer_height())
-}
-
-/// Arm c: a Reduce-Motion send in its fade.
-fn rows_fade_now() -> bool {
-    crate::window().is_some_and(|w| w.global::<crate::ChatLook>().get_reduced_motion() && w.global::<crate::SendFlight>().get_phase() == "fade")
-}
-
 /// The composer read the sampler uses, bracketed by the measurer report
 /// sequence: reports that arrive between before and after came during the read.
 fn rows_composer() -> (f32, u64, u64) {
     let before = headless::rows_seq();
     headless::rows_set_inside(true);
-    let height = match rows_mode().as_str() {
-        "handle" => rows_handle_height(),
-        "bridge" => rows_bridge_height(),
-        "fade" if rows_fade_now() => composer_drawn(),
-        "fade" => rows_bridge_height(),
-        _ => composer_drawn(),
-    };
+    let height = if rows_handle_mode() { rows_handle_height() } else { composer_drawn() };
     headless::rows_set_inside(false);
     (height, before, headless::rows_seq())
 }
