@@ -1531,6 +1531,46 @@ def test_an_answer_interrupted_mid_relay_is_held_so_the_next_answer_in_the_call_
     assert relay.held is True and relay.next == 1
     assert any("Ja, fra tavla." in t for _k, t in said) and effects.acked == [first, second]
 
+def _interrupted_relay_call(make, **cfg):
+    effects = FakeEffects([BOARD_Q])
+    call, said, clock = make(effects, **cfg)
+    _user_says(call, clock, "Hva er klart?")
+    first = effects.asks[0][0]
+    effects.rows[first] = {"delegation_id": first, "status": "completed", "result_text": LONG_ANSWER, "session": "x"}
+    call.poll_answers()
+    _quiet(call, clock)
+    relay = call.active_relay
+    effects.calls = [("ask_my_agent", {"question": "Kommer de fra GitHub?"})]
+    clock.now += 1.0
+    _user_says(call, clock, "Kommer de fra GitHub?")                  # interrupts after part 1
+    second = effects.asks[1][0]
+    effects.rows[second] = {"delegation_id": second, "status": "completed", "result_text": "Ja, fra tavla.",
+                            "session": "x"}
+    call.poll_answers()
+    for _ in range(10):
+        _quiet(call, clock, 2.0)
+    return call, said, effects, relay, (first, second)
+
+
+def test_saving_the_transcript_never_changes_how_an_interrupted_answer_is_held_and_relayed(make, ledger):
+    """The transcript delta (4fa9f9a8) over the interrupted-relay fix (beb2ebb6): with save_transcript on, the
+    interrupted answer is still held, the next answer is still read, the same parts are spoken and the same rows
+    acknowledged as with it off; the file records both asks, both answers and the relay decisions."""
+    plain = _interrupted_relay_call(make)
+    saved = _interrupted_relay_call(make, save_transcript=True)
+    for call, said, effects, relay, asks in (plain, saved):
+        assert relay.held is True and relay.next == 1
+        assert effects.acked == list(asks) and any("Ja, fra tavla." in t for _k, t in said)
+    assert [t for _k, t in plain[1]] == [t for _k, t in saved[1]]
+    assert plain[0].transcript is None
+    folder = ledger.path.parent / "transcripts"
+    saved[0].close()
+    doc = json.loads((folder / "call-1.json").read_text())
+    assert [r["status"] for r in doc["receipts"] if r["tool"] == "ask_my_agent"] == ["asked", "asked"]
+    assert [p["event"] for p in doc["pacing"]].count("agentLiveAskAnswered") == 2
+    assert not (folder / "call-1.jsonl").exists()
+
+
 # ---- save_transcript ---------------------------------------------------------------------------
 
 def test_save_transcript_is_on_only_when_the_profile_says_true():
