@@ -1,0 +1,48 @@
+# Throwaway DIAGNOSTIC workflow (base-repair, ROOT-gated). Lives only on branch diag/basefix-s3 (base 752e39ea);
+# never merged. Runs ONLY the named failing node ids + controls and a metadata-only probe, inside the existing
+# scripts/ci_contained.sh (no network, no credentials, no privilege, 20 GiB /var/tmp guard). No full suite.
+name: Basefix diagnostic
+on:
+  push:
+    branches: [diag/basefix-s3]
+permissions:
+  contents: read
+concurrency:
+  group: basefix-diag
+  cancel-in-progress: false
+jobs:
+  diag:
+    runs-on: ubuntu-latest            # the failing CI's runner; the first step fails closed unless it is 26.04 + CPython 3.14.4
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - name: Bind the environment (fail closed)
+        run: |
+          set -eu
+          test "$(git rev-parse HEAD^)" = 752e39ea362a2065709a59efbce94e6c4b9dd0c9
+          . /etc/os-release; echo "os=$ID $VERSION_ID kernel=$(uname -r)"; test "$VERSION_ID" = 26.04
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Same setup as tests.yml (network allowed here only)
+        timeout-minutes: 10
+        run: |
+          set -eu
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+          uv sync --frozen --group dev
+          test "$(.venv/bin/python -c 'import sys;print(sys.version.split()[0])')" = 3.14.4
+          npm ci --ignore-scripts --no-audit --no-fund && npm run build
+          test -f static/app/bundle.js
+      - name: S0 probe + S1 node ids (contained, no network; max 3 rounds; first unexpected STOP)
+        timeout-minutes: 10
+        run: bash .github/basefix-diag/run.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: basefix-diag
+          path: diag-results/
+          retention-days: 7
