@@ -1048,6 +1048,7 @@ def test_the_real_post_is_loopback_only_never_proxied_or_redirected_and_reads_th
 # ---- inside a real Agent Live socket ---------------------------------------------------
 
 from tests.unit.test_agent_ring_live_socket import _admitted, _wait, call  # noqa: F401 - call is a fixture
+from tests.unit.test_agent_ring_live_socket import _live_lifecycle  # noqa: F401 - autouse: no session outlives its test
 
 
 @pytest.fixture
