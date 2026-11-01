@@ -57,6 +57,14 @@ pub fn a2a_check(out: String) {
             if app.engine.borrow().connection_state() != "live" {
                 return false;
             }
+            // The Host's own chat (r1, r2) first: replacing it while its first
+            // load is still in flight can leave r1 and r2 below the new rows
+            // (a tail reorders rows it no longer has by their time), not
+            // above them as the rest of this check expects.
+            let held = app.engine.borrow().conversation("rachel").is_some_and(|c| c.latest_revision() >= 2 && !c.loading());
+            if !held || row("r1").is_none() || row("r2").is_none() {
+                return false;
+            }
             app.engine.borrow_mut().set_reading_theme("paper");
             check(control("/__control/turns", &turns()).is_ok(), "the Host takes a chat with two agents' prompts");
             app.engine.borrow_mut().select("rachel");
