@@ -117,6 +117,10 @@ form_event_lost_receipts = 0
 snapshot_delay = [0.0, 0]
 # Seconds an older page (/log?before=) takes; /__control/older-delay sets it.
 older_delay = 0.0
+# Whether a delta pages its backlog by `limit` as the Host does (oldest
+# first, has_more); /__control/page-deltas turns it on. Off, a delta is one
+# page, which the checks that fill a chat at once rely on.
+page_deltas = False
 # Seconds a /send takes to be filed and answered (a slow Host's ack);
 # /__control/send-delay sets it.
 send_delay = 0.0
@@ -1159,7 +1163,7 @@ class Handler(BaseHTTPRequestHandler):
                     limit = int(query.get("limit", "0") or 0)
                     if limit and len(chosen) > limit:
                         chosen, more = chosen[-limit:], True
-                else:
+                elif page_deltas:
                     # A backlog of newer rows beyond the limit: the oldest
                     # first, and more (as the Host pages a delta).
                     limit = int(query.get("limit", "0") or 0)
@@ -1360,6 +1364,11 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/__control/snapshot-delay":
             # Test control: the next `count` snapshots answer after `seconds`.
             snapshot_delay[:] = [float(body.get("seconds", 0)), int(body.get("count", 1))]
+            return self.reply(200, {"ok": True})
+        if url.path == "/__control/page-deltas":
+            # Test control: deltas page their backlog by `limit`.
+            global page_deltas
+            page_deltas = bool(body.get("on", True))
             return self.reply(200, {"ok": True})
         if url.path == "/__control/older-delay":
             # Test control: older pages arrive after `seconds`.
