@@ -632,7 +632,8 @@ any subset. Payload shapes are documented in the handler docstrings in
 |---|---|---|
 | Device pairing | `POST /pairing/exchange`, `GET /paired-devices`, `POST /paired-devices/revoke`, `GET /devices`, `GET /server-info` | `device_pairing.py`, `server_identity.py` |
 | Push notifications | `POST /devices` (APNs token), `GET /notification-avatars/…`, `/attention` | `apns.py`, `user_notifications.py` |
-| Provider sign-in and usage | `/backend-auth`, `/backend-auth/login`, `/backend-auth/login-code`, `/backend-auth/logout`, `/backend-usage` | `backend_auth.py`, `backend_usage.py` |
+| Harness sign-in and usage | `/backend-auth` (`?harnesses=all` lists every harness), `/backend-auth/login`, `/backend-auth/login-code`, `/backend-auth/logout`, `/backend-usage` | `backend_auth.py`, `backend_usage.py` |
+| Model providers inside a harness (OpenCode, DeepSeek card) | `GET /harness-providers?harness=`, `GET /harness-providers/models?harness=&provider=`, `POST /harness-providers/login` (`key`, or `method` for OpenCode's own device/OAuth flow), `/harness-providers/login-code`, `/harness-providers/logout`; full-device scope; keys go to OpenCode's own `auth.json` and are never returned (see `docs/compatibility.md` row 75) | `harness_providers.py` |
 | Files and media | `POST /upload` (headers `X-Session`, `X-File-Name`, `X-Upload-ID`), `/media`, `/agent-files`, `/agent-file` | `upload_results.py`, `media_store.py`, `agent_files.py` |
 | Artifacts and decisions | `/artifacts`, `/artifacts/<id>`, `/decisions`, `/decisions/<id>/resolve`, `/task-plan` | `artifacts.py`, `task_plans.py` |
 | Portraits and personas | `/agent-portraits`, `/agent-portrait-generation`, `/personas`, `/personas/update`, `/personalities/settings`, `/avatar-settings` | `agent_portraits.py`, `portrait_generation.py`, `personas.py`, `model_avatars.py` |

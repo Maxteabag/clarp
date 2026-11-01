@@ -195,7 +195,7 @@ def test_catalogue_fields_carry_presentation_and_capability_flags():
 
 def test_routing_and_auth_adapters_are_derived_from_the_registry():
     assert [a.id for a in backends.routing_adapters()] == list(backends.ids())
-    assert [a.id for a in backends.auth_adapters()] == ["claude", "codex"]
+    assert [a.id for a in backends.auth_adapters()] == ["claude", "codex", "grok"]
 
 
 def test_adapter_rejects_unknown_enumerations():

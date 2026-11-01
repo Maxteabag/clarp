@@ -535,6 +535,46 @@ def _refresh_opencode_models_in_background(executable: str) -> None:
         _opencode_refresh_thread.start()
 
 
+def forget_opencode_models() -> None:
+    """A model provider was signed in or out: ``opencode models`` now lists a
+    different set. Refresh the remembered listing and let the next catalogue
+    call rebuild, instead of serving the old set for up to five minutes."""
+    _expire_cache()
+    executable = _resolve_executable("opencode")
+    if executable:
+        _refresh_opencode_models_in_background(executable)
+
+
+def _with_model_providers(provider_id: str, row: dict[str, Any]) -> dict[str, Any]:
+    """OpenCode model ids read ``provider/model``: name each model's provider
+    and list the providers, with their sign-in state, so a client can offer
+    OpenCode -> provider -> model."""
+    from . import harness_providers
+    catalogue = harness_providers.read_catalogue()
+    types = harness_providers.credential_types()
+    seen: list[str] = []
+    for model in row.get("models") or []:
+        prefix = str(model.get("id") or "").partition("/")[0]
+        if "/" in str(model.get("id") or "") and prefix:
+            model["model_provider"] = prefix
+            if prefix not in seen:
+                seen.append(prefix)
+    adapter = _adapter(provider_id)
+    if adapter is not None and adapter.model_providers and not adapter.model_id_filter:
+        # Signed in but not yet in the remembered listing.
+        seen += [prefix for prefix in types if prefix not in seen and "/" not in prefix
+                 and ":" not in prefix]
+    row["harness_providers"] = True
+    row["model_providers"] = [{
+        "id": prefix,
+        "name": harness_providers.provider_name(prefix, catalogue),
+        "signed_in": prefix in types or prefix == "opencode" or any(
+            os.environ.get(str(var))
+            for var in (catalogue.get(prefix) or {}).get("env") or ()),
+    } for prefix in seen]
+    return row
+
+
 def _opencode_models_listing(
     executable: str, observed_at: str, *, run: Callable[..., Any],
 ) -> tuple[str, dict[str, Any] | None]:
@@ -786,7 +826,7 @@ def _discover_provider(
     effort_scope = adapter.effort_scope if adapter else "provider"
     efforts = list(adapter.efforts) if adapter and adapter.efforts else []
     from . import backends
-    return {
+    row = {
         "id": provider_id,
         # Presentation and supports_* flags: the client renders these, so a
         # new adapter looks intentional without an app release.
@@ -814,6 +854,9 @@ def _discover_provider(
         "models": models,
         "source": catalog_source,
     }
+    if adapter is not None and adapter.model_providers:
+        row = _with_model_providers(provider_id, row)
+    return row
 
 
 def _build_catalog(

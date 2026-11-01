@@ -1035,7 +1035,7 @@ mod tests {
 
     #[test]
     fn catalog_choices_leave_out_the_default_row() {
-        let values = vec![serde_json::json!({"id": "", "label": "Provider default"}), serde_json::json!({"id": "opus", "label": ""})];
+        let values = vec![serde_json::json!({"id": "", "label": "Harness default"}), serde_json::json!({"id": "opus", "label": ""})];
         assert_eq!(choices(&values), vec![("opus".to_owned(), "opus".to_owned())]);
     }
 }

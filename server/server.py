@@ -466,6 +466,8 @@ class Handler(BaseHTTPRequestHandler):
         "/diagnostics/health": "_handle_diagnostics_health",
         "/backend-usage": "_handle_backend_usage",
         "/backend-auth": "_handle_backend_auth",
+        "/harness-providers": "_handle_harness_providers",
+        "/harness-providers/models": "_handle_harness_provider_models",
         "/managed-skills": "_handle_managed_skills",
         "/transcription-capabilities": "_handle_transcription_capabilities",
         "/transcription-guidance": "_handle_transcription_guidance_get",
@@ -590,6 +592,9 @@ class Handler(BaseHTTPRequestHandler):
         "/backend-auth/login": "_handle_backend_auth_login",
         "/backend-auth/login-code": "_handle_backend_auth_login_code",
         "/backend-auth/logout": "_handle_backend_auth_logout",
+        "/harness-providers/login": "_handle_harness_provider_login",
+        "/harness-providers/login-code": "_handle_harness_provider_login_code",
+        "/harness-providers/logout": "_handle_harness_provider_logout",
         "/server-update": "_handle_server_update",
         "/managed-skills": "_handle_managed_skills_update",
         "/upload": "_handle_upload",
@@ -1120,7 +1125,7 @@ class Handler(BaseHTTPRequestHandler):
         return True
 
     _DEVICE_FULL_ONLY_PREFIXES = (
-        "/backend-auth", "/server-update", "/managed-skills",
+        "/backend-auth", "/harness-providers", "/server-update", "/managed-skills",
         "/orchestrator/", "/herald/", "/personalities/",
         "/automation-settings", "/avatar-settings", "/paired-devices",
         "/tts/providers", "/network/", "/server-terminal",
@@ -2398,8 +2403,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def _handle_backend_auth(self):
         from lib.backend_auth import status, task
-        body = {"backends": status(), "tasks": {
-            adapter.id: task(adapter.id) for adapter in backends.auth_adapters()}}
+        every = (self._query().get("harnesses") or [""])[0] == "all"
+        rows = status(every_harness=every)
+        listed = {row["id"] for row in rows}
+        body = {"backends": rows, "tasks": {
+            adapter.id: task(adapter.id) for adapter in backends.auth_adapters()
+            if adapter.id in listed}}
         self._json_ok(body)
 
     def _handle_backend_auth_login(self):
@@ -2441,6 +2450,71 @@ class Handler(BaseHTTPRequestHandler):
         except RuntimeError as exc:
             return self._json_error(409, str(exc))
         self._json_ok(result)
+
+    # Model providers inside a harness (OpenCode). Keys travel only in POST
+    # bodies, are written to OpenCode's own store and are never returned.
+    def _harness_provider_call(self, action):
+        from lib import harness_providers
+        try:
+            return action(harness_providers)
+        except harness_providers.ProviderError as exc:
+            self._json_error(400, str(exc))
+        except harness_providers.ProviderConflict as exc:
+            self._json_error(409, str(exc))
+        except OSError as exc:
+            log_exception("harnessProviderStoreFail", exc)
+            self._json_error(500, "OpenCode's credential store could not be written")
+        return None
+
+    def _handle_harness_providers(self):
+        harness = (self._query().get("harness") or [""])[0]
+        result = self._harness_provider_call(lambda hp: hp.providers(harness))
+        if result is not None:
+            self._json_ok(result)
+
+    def _handle_harness_provider_models(self):
+        qs = self._query()
+        harness = (qs.get("harness") or [""])[0]
+        provider = (qs.get("provider") or [""])[0]
+        result = self._harness_provider_call(lambda hp: hp.models(harness, provider))
+        if result is not None:
+            self._json_ok(result)
+
+    def _handle_harness_provider_login(self):
+        data = self._read_json()
+        if data is None:
+            return self._json_error(400, "bad json")
+        harness, provider = data.get("harness"), data.get("provider")
+        if "key" in data:
+            result = self._harness_provider_call(
+                lambda hp: hp.save_api_key(harness, provider, data.get("key")))
+            if result is not None:
+                self._json_ok({"ok": True, "provider": result})
+            return
+        result = self._harness_provider_call(
+            lambda hp: hp.start_oauth(harness, provider, data.get("method"),
+                                      data.get("inputs")))
+        if result is not None:
+            self._json(202, result)
+
+    def _handle_harness_provider_login_code(self):
+        data = self._read_json()
+        if data is None:
+            return self._json_error(400, "bad json")
+        result = self._harness_provider_call(
+            lambda hp: hp.submit_code(data.get("harness"), data.get("provider"),
+                                      data.get("code")))
+        if result is not None:
+            self._json_ok(result)
+
+    def _handle_harness_provider_logout(self):
+        data = self._read_json()
+        if data is None:
+            return self._json_error(400, "bad json")
+        result = self._harness_provider_call(
+            lambda hp: hp.logout(data.get("harness"), data.get("provider")))
+        if result is not None:
+            self._json_ok({"ok": True, "provider": result})
 
     def _handle_managed_skills(self):
         from lib.managed_skills import status
