@@ -387,9 +387,9 @@ FEATURE_CONTRACTS["agent_ring_device_optout"] = 72  # PROVISIONAL: booked at the
 FEATURE_CONTRACTS["agent_ring_listen_first"] = 74
 FEATURE_CONTRACTS["call_transcription_policy"] = 74
 FEATURE_CONTRACTS["harness_model_providers"] = 75  # PROVISIONAL: booked at the ready landing, else the next free number
+FEATURE_CONTRACTS["agent_call_live"] = 76  # PROVISIONAL: was 75 on the Sandra line; 75 is harness_model_providers on main
 
 
 def feature_advertised(name: str) -> bool:
     """Whether this Host advertises ``name`` (clients gate on the same list)."""
     return name in FEATURES and name in FEATURE_CONTRACTS
-FEATURE_CONTRACTS["agent_call_live"] = 76  # PROVISIONAL: was 75 on the Sandra line; 75 is harness_model_providers on main

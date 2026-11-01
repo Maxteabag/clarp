@@ -1717,3 +1717,36 @@ def test_a_crash_before_finish_leaves_a_complete_journal_and_no_final(tmp_path):
     lines = [json.loads(line) for line in t.partial.read_text().splitlines()]
     assert [line["kind"] for line in lines] == ["text", "receipt"]
     assert not t.final.exists() and not t.final.with_name(t.final.name + ".tmp").exists()
+
+
+def test_a_lone_surrogate_or_a_non_json_receipt_never_breaks_the_transcript(tmp_path):
+    t = tools.Transcript(tmp_path, "alv_s", {"call_id": "alv_s"})
+    t.add("text", role="user", text="hei \ud800 der")
+    t.add("receipt", receipt={"tool": "ask", "odd": object()})
+    t.add("text", role="assistant", text="etterpå")
+    lines = [json.loads(line) for line in t.partial.read_text(encoding="utf-8").splitlines()]
+    assert [line["kind"] for line in lines] == ["text", "receipt", "text"]
+    t.finish()
+    doc = json.loads(t.final.read_text(encoding="utf-8"))
+    assert doc["call_id"] == "alv_s" and not t.partial.exists()
+    assert not t.final.with_name(t.final.name + ".tmp").exists()
+
+
+def test_a_failing_final_write_keeps_the_journal_and_leaves_no_tmp(tmp_path, monkeypatch):
+    t = tools.Transcript(tmp_path, "alv_f", {})
+    t.add("text", role="user", text="hei")
+    monkeypatch.setattr(t, "document", lambda: (_ for _ in ()).throw(ValueError("boom")))
+    t.finish()
+    assert t.partial.exists() and not t.final.exists()
+    assert not t.final.with_name(t.final.name + ".tmp").exists()
+
+
+def test_the_call_stops_its_work_even_if_the_transcript_cannot_finish(make, monkeypatch):
+    call, said, clock = make(FakeEffects(), save_transcript=True)
+    call.observe({"type": "session.input_transcript.delta", "delta": "Hei"})
+    stopped = []
+    monkeypatch.setattr(call.pool, "shutdown", lambda **kw: stopped.append(kw), raising=False)
+    monkeypatch.setattr(call.transcript, "finish", lambda: (_ for _ in ()).throw(RuntimeError("disk")))
+    with pytest.raises(RuntimeError):
+        call.close()
+    assert call.closed and stopped == [{"wait": False, "cancel_futures": True}]
