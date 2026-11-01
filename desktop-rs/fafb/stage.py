@@ -16,7 +16,7 @@ import shutil
 import sys
 
 CAP = 80 * 1024 * 1024
-META = 1024 * 1024    # kept free for RAW-SHA256SUMS' neighbours: OVERFLOW.json and STAGE.json
+STAGE_MAX = 4096       # STAGE.json is a few fixed fields
 # Priority order: verdicts and small logs first, frames last.
 ALLOW = ["source.txt", "*.admission", "*.rc", "*.verdict", "fa.log", "b-obs.log", "b-green.log", "b-neg.log",
          "b-obs/app.log", "b-green/app.log", "b-neg/app.log", "build.log", "b-*/*.png"]
@@ -41,6 +41,10 @@ listing = [(p.relative_to(raw).as_posix(), p.stat().st_size, sha(p)) for p in fi
 manifest = "".join(f"{digest}  {size}  {rel}\n" for rel, size, digest in listing)
 (up / "RAW-SHA256SUMS").write_text(manifest)
 staged = len(manifest.encode())
+# The metadata reserve is an upper bound from the full listing: OVERFLOW.json
+# as if every raw file were listed in it with the longer reason, plus STAGE.json.
+worst = [{"path": rel, "bytes": size, "sha256": digest, "reason": "over the 80 MB upload cap"} for rel, size, digest in listing]
+META = len(json.dumps({"omitted": worst, "not_allowlisted": []}, indent=1).encode()) + 1 + STAGE_MAX
 chosen, omitted, seen = [], [], set()
 for pattern in ALLOW:
     for rel, size, digest in [x for x in listing if pathlib.PurePosixPath(x[0]).match(pattern) and x[0] not in seen]:
@@ -56,9 +60,34 @@ for pattern in ALLOW:
 others = [{"path": rel, "bytes": size, "sha256": digest, "reason": "not allowlisted"} for rel, size, digest in listing if rel not in seen]
 complete = not omitted
 (up / "OVERFLOW.json").write_text(json.dumps({"omitted": omitted, "not_allowlisted": others}, indent=1) + "\n")
-stage = {"complete": complete, "cap_bytes": CAP, "staged_bytes": staged, "staged_files": len(chosen),
-         "raw_files": len(listing), "raw_bytes": sum(s for _, s, _ in listing), "omitted": len(omitted),
-         "not_allowlisted": len(others), "note": "" if complete else "INCOMPLETE: the proof is STOP; see OVERFLOW.json"}
+
+
+def total():
+    return sum(p.stat().st_size for p in up.rglob("*") if p.is_file())
+
+
+stage = {"complete": complete, "cap_bytes": CAP, "meta_reserve_bytes": META, "staged_bytes": staged,
+         "staged_files": len(chosen), "raw_files": len(listing), "raw_bytes": sum(s for _, s, _ in listing),
+         "omitted": len(omitted), "not_allowlisted": len(others),
+         "note": "" if complete else "INCOMPLETE: the proof is STOP; see OVERFLOW.json"}
+# Enforced, not assumed: the whole upload dir with STAGE.json must fit the cap.
+# If it does not, the staged copies are removed whole (the hash listing and
+# OVERFLOW.json stay), and the proof is INCOMPLETE.
+if total() + STAGE_MAX > CAP:
+    shutil.rmtree(up / "raw", ignore_errors=True)
+    complete = False
+    stage.update(complete=False, staged_files=0, note="INCOMPLETE: over the 80 MB cap with metadata; staged copies removed, hashes kept")
 (up / "STAGE.json").write_text(json.dumps(stage) + "\n")
+stage["upload_bytes"] = total()
+(up / "STAGE.json").write_text(json.dumps(stage) + "\n")
+if stage["upload_bytes"] > CAP:
+    # Even the listings do not fit: upload only STAGE.json (the raws stay on
+    # the runner, unhashed in the artifact). Never more than the cap.
+    for p in list(up.iterdir()):
+        if p.name != "STAGE.json":
+            shutil.rmtree(p) if p.is_dir() else p.unlink()
+    complete = False
+    stage.update(complete=False, staged_files=0, note="INCOMPLETE: even the hash listings exceed the cap; only STAGE.json uploaded")
+    (up / "STAGE.json").write_text(json.dumps(stage) + "\n")
 print(f"FAFB-STAGE {json.dumps(stage)}")
 sys.exit(0 if complete else 6)
