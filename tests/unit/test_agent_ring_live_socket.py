@@ -13,9 +13,11 @@ from __future__ import annotations
 import base64
 import json
 import queue
+import socket
 import struct
 import threading
 import time
+import weakref
 
 import pytest
 import websocket
@@ -175,8 +177,50 @@ def _wait(cond, timeout=15.0):
     raise AssertionError("condition not met")
 
 
+_SERVED: list = []      # (thread, handler) of every serve a test starts through _serve
+
+
+@pytest.fixture(autouse=True)
+def _live_lifecycle(monkeypatch):
+    """No live session or agent-live thread outlives its test. Every LiveSocket the test creates is retired, a serve
+    still waiting for frames gets EOF, and every serve and agent-live-* thread started during the test is joined.
+    The yielded callable does that cleanup (the `call` fixture runs it before its reset); this teardown runs it
+    again and fails the test if any such thread survives."""
+    before = set(threading.enumerate())
+    made, served = weakref.WeakSet(), []    # every LiveSocket created in this test (a live one is held by its threads)
+    real_init = sock.LiveSocket.__init__
+
+    def tracked_init(self, *args, **kwargs):
+        real_init(self, *args, **kwargs)
+        made.add(self)
+    monkeypatch.setattr(sock.LiveSocket, "__init__", tracked_init)
+
+    def ours():
+        return [t for t in threading.enumerate() if t not in before and t.is_alive()
+                and (t.name.startswith("agent-live-") or any(t is s for s, _h in served))]
+
+    def end():
+        served.extend(_SERVED)
+        _SERVED.clear()
+        for session in list(made):
+            if not session.closed.is_set():
+                session.retire("test_teardown")
+        for thread, handler in served:
+            if thread.is_alive():
+                handler.connection.shutdown(socket.SHUT_RDWR)   # EOF for a serve still waiting on frames
+        deadline = time.monotonic() + 15.0
+        while ours() and time.monotonic() < deadline:          # a retire can start close/goodbye threads
+            for thread in ours():
+                thread.join(max(0.0, deadline - time.monotonic()))
+        return [t.name for t in ours()]
+
+    yield end
+    survivors = end()
+    assert not survivors, f"live session threads outlived the test: {survivors}"
+
+
 @pytest.fixture
-def call(sander, monkeypatch):
+def call(sander, monkeypatch, _live_lifecycle):
     """A Live-answered ring, a fake upstream and clean voice-ownership claims."""
     def reset():
         with oracle_realtime._ACTIVE_LOCK:
@@ -200,6 +244,8 @@ def call(sander, monkeypatch):
     monkeypatch.setattr(config, "load", lambda: Cfg())
     state = type("Call", (), {"grant": grant, "up": up, "connects": connects, "env": sander})()
     yield state
+    survivors = _live_lifecycle()
+    assert not survivors, f"live session threads outlived the test: {survivors}"   # before the registry reset
     reset()
 
 
@@ -212,6 +258,7 @@ def _join(grant, **change):
 def _serve(handler):
     thread = threading.Thread(target=sock.serve, args=(handler,), daemon=True)
     thread.start()
+    _SERVED.append((thread, handler))
     return thread
 
 
