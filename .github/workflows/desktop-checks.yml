@@ -74,8 +74,13 @@ jobs:
           set -uo pipefail
           python3 fafb/admit.py fa 2 || exit 7
           ulimit -f 20480
+          # The runner's shell is `bash -e`: the expected non-zero (a RED) must not end the step
+          # before its rc is recorded and the oracle judges it. Only this command runs without -e.
+          set +e
           timeout 100 cargo test --locked -p clarp-engine --test host_flow fafb_ -- --test-threads=1 --nocapture > /tmp/fafb/fa.log 2>&1
-          echo "rc=$?" > /tmp/fafb/fa.rc
+          rc=$?
+          set -e
+          echo "rc=$rc" > /tmp/fafb/fa.rc
           python3 fafb/oracle.py fa /tmp/fafb
       - name: F-B observe the first drawn fade frame (current measurement, RED)
         timeout-minutes: 2
@@ -83,8 +88,13 @@ jobs:
           set -uo pipefail
           python3 fafb/admit.py b-obs 2 || exit 7
           ulimit -f 40960
+          # The runner's shell is `bash -e`: the expected non-zero (a RED) must not end the step
+          # before its rc is recorded and the oracle judges it. Only this command runs without -e.
+          set +e
           CLARP_FAFB_FRAME=1 timeout 100 slint-app/tests/check.sh send /tmp/fafb/b-obs > /tmp/fafb/b-obs.log 2>&1
-          echo "rc=$?" > /tmp/fafb/b-obs.rc
+          rc=$?
+          set -e
+          echo "rc=$rc" > /tmp/fafb/b-obs.rc
           python3 fafb/oracle.py b-obs /tmp/fafb
       - name: F-B with B2 (GREEN only if M)
         timeout-minutes: 2
@@ -92,8 +102,13 @@ jobs:
           set -uo pipefail
           python3 fafb/admit.py b-green 2 || exit 7
           ulimit -f 40960
+          # The runner's shell is `bash -e`: the expected non-zero (a RED) must not end the step
+          # before its rc is recorded and the oracle judges it. Only this command runs without -e.
+          set +e
           CLARP_FAFB_FRAME=1 CLARP_FAFB_DRAWN=1 timeout 100 slint-app/tests/check.sh send /tmp/fafb/b-green > /tmp/fafb/b-green.log 2>&1
-          echo "rc=$?" > /tmp/fafb/b-green.rc
+          rc=$?
+          set -e
+          echo "rc=$rc" > /tmp/fafb/b-green.rc
           python3 fafb/oracle.py b-green /tmp/fafb
       - name: F-B with B2 against a box that really starts tall (must FAIL)
         timeout-minutes: 2
@@ -101,8 +116,13 @@ jobs:
           set -uo pipefail
           python3 fafb/admit.py b-neg 2 || exit 7
           ulimit -f 40960
+          # The runner's shell is `bash -e`: the expected non-zero (a RED) must not end the step
+          # before its rc is recorded and the oracle judges it. Only this command runs without -e.
+          set +e
           CLARP_FAFB_FRAME=1 CLARP_FAFB_DRAWN=1 CLARP_FAFB_FORCE_TALL=1 timeout 100 slint-app/tests/check.sh send /tmp/fafb/b-neg > /tmp/fafb/b-neg.log 2>&1
-          echo "rc=$?" > /tmp/fafb/b-neg.rc
+          rc=$?
+          set -e
+          echo "rc=$rc" > /tmp/fafb/b-neg.rc
           python3 fafb/oracle.py b-neg /tmp/fafb
       - name: Stage the upload (<= 80 MB, whole files only)
         if: always()
