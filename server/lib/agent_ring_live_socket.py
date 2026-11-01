@@ -16,7 +16,8 @@ the phone holds what it captured (at most 3 s) and sends it after the ACK.
 
 This reuses only the Oracle-v2 socket helpers, the shared voice-ownership claim
 (never superseding another session) and the upstream connector; no Oracle
-prompt, tools, router, memory, contact selection or voice-provider choice.
+prompt, tools, router, memory, contact selection or voice-provider choice. A profile that opts in with
+``live_tools`` gets its own Host-run tools (agent_live_tools); every other call is unchanged.
 """
 from __future__ import annotations
 
@@ -80,24 +81,59 @@ def _quiet_note(name: str, detail: str) -> None:
         pass
 
 
+def _audible(delta) -> bool:
+    """Oracle's test for speech (oracle_live_stable.audible) on one base64 output chunk; silence is not speech."""
+    from .oracle_live_stable import audible
+    try:
+        return audible(base64.b64decode(delta or ""))
+    except (binascii.Error, ValueError, TypeError):
+        return False
+
+
 class Refused(Exception):
     def __init__(self, code: str, message: str = ""):
         super().__init__(code)
         self.code, self.message = code, message or code
 
 
+USER_CALL_OVERLAY = """
+This is a live phone call with the user, spoken in real time, in Norwegian bokmål.
+- The user called you from the Clarp app. There is no event, camera observation or event log in this call.
+- Speak plainly: no <speak> tags or SSML, no markup, no stage directions.
+- Nothing has been played to the user yet. You begin the call with the opening line you are given, once.
+- You have no tools in this call: never say that you logged, filed, dispatched or saved anything.
+- There is no shell, no agent roster and no delegation; you cannot reach other agents from here.
+- Where a procedure revision is marked withdrawn, never follow it; follow the current revision.
+"""
+
+
 def instructions(snapshot: dict) -> str:
     """The Live model's instructions, from the frozen snapshot only."""
-    context, event = snapshot["event_context"], snapshot["event_context"]["event"]
+    context = snapshot["event_context"]
     parts = [f"You are {snapshot['profile']['display_name']}."]
     parts += [f"[{key}]\n{text}" for key, text in snapshot["texts"].items()]
+    tools = snapshot.get("live_tools")
+    if context.get("kind") == "user_call":      # issue #216: the user called; there is no event to describe
+        if tools:                               # the profile opted in: the Host acts for this agent in the call
+            from .agent_live_tools import overlay
+            parts.append(overlay(snapshot))
+        else:
+            parts.append(USER_CALL_OVERLAY.strip())
+        return "\n\n".join(parts)
+    event = context["event"]
     meta = event.get("meta") or {}
     observation = {"event_id": event["id"], "time": event["time"], "camera": event["camera_label"] or event["camera_id"],
                    "when": event["when_text"], "what": event["what_text"], "log": event["log"],
                    **{key: value for key, value in meta.items() if value}}
     parts.append(f"The {context['story']} event you are calling about (data from {context['source']}):\n"
                  + json.dumps(observation, ensure_ascii=False, indent=1))
-    parts.append(OVERLAY.strip())
+    if tools:
+        from .agent_live_tools import overlay
+        lines = [line for line in OVERLAY.strip().splitlines()
+                 if "no tools" not in line and "no delegation" not in line]
+        parts.append("\n".join(lines) + "\n" + "\n".join(overlay(snapshot).splitlines()[4:]))
+    else:
+        parts.append(OVERLAY.strip())
     return "\n\n".join(parts)
 
 
@@ -167,6 +203,39 @@ class LiveSocket:
         self._order: list[str] = []             # metadata-only upstream event order (type@ms[:cid])
         self.joined_at = time.monotonic()       # absolute: no frame or ping moves it
         self.reason = ""
+        self.tools = None                       # agent_live_tools.CallTools when the profile opted in
+
+    # -- opt-in tools (agent_live_tools) ------------------------------------------------
+    def attach_tools(self, api_key: str) -> None:
+        if not self.snapshot.get("live_tools"):
+            return
+        from .agent_live_tools import CallTools, Effects
+        self.tools = CallTools(self.snapshot, self.call_id, self.tool_context,
+                               effects=Effects(api_key, ctx=getattr(self.handler, "ctx", None)),
+                               principal=self.principal, current=self.tools_current)
+
+    def tools_current(self) -> bool:
+        """The tools' lifecycle fence: this socket still owns a live, unretired call."""
+        return not (self.closed.is_set() or self.stop.is_set() or self.ending.is_set() or live.retired(self.call_id))
+
+    def tool_context(self, kind: str, text: str) -> bool:
+        """A Host note to the voice model, only once the opening was admitted and drained. True only when it was
+        handed to the provider transport; False when dropped (not drained, closed, no upstream, retired)."""
+        if not self.drained or self.closed.is_set():
+            _quiet_note("agentLiveToolNoteDropped", f"call={self.call_id} kind={kind} drained={self.drained}")
+            return False
+        from .oracle_live_wire import LiveWire
+        return self.upstream_send(LiveWire("api").context(kind, text))
+
+    def _tools_observe(self, event: dict) -> None:
+        tools = self.tools
+        if tools is None or event.get("type") not in (
+                "session.input_transcript.delta", "session.output_transcript.delta", "session.delegation.created"):
+            return
+        try:
+            tools.observe(event)
+        except Exception as exc:  # noqa: BLE001 - tools never affect the call itself
+            _quiet_log("agentLiveToolsObserve", exc, self.call_id)
 
     # -- identity -------------------------------------------------------------------
     def ids(self) -> dict:
@@ -229,12 +298,13 @@ class LiveSocket:
         """The stop is clean: the provider session actually closed and no effect is still in flight."""
         return self.upstream_closed.is_set() and not self.fence_stuck.is_set()
 
-    def upstream_send(self, event: dict) -> None:
+    def upstream_send(self, event: dict) -> bool:
         # Revocation stops every paid effect at once: no silence, no user audio, no append after a close or
         # fallback retired the call (marked under the ring lock before its save and its stop).
+        # True only when the frame was written to the provider transport.
         upstream = self.upstream
         if upstream is None:
-            return
+            return False
 
         def send():
             with self._send_lock:
@@ -242,7 +312,7 @@ class LiveSocket:
                 if event.get("type") == "session.instructions.append":
                     with self._state:
                         self.instructions_appends_issued += 1
-        self.effect(send)
+        return self.effect(send)
 
     # -- authority on the ring record ---------------------------------------------------
     def _record(self, change) -> bool:
@@ -292,6 +362,11 @@ class LiveSocket:
             self.reason = reason
             self._held, self._held_bytes = [], 0          # held audio is never forwarded after a retirement
         self.stop.set()
+        if self.tools is not None:
+            try:
+                self.tools.close()
+            except Exception as exc:  # noqa: BLE001
+                _quiet_log("agentLiveToolsClose", exc, self.call_id)
         try:
             _quiet_note("agentLiveUpstreamOrder", f"call={self.call_id} reason={reason} admitted={self.admitted} "
                         f"ack={self._ack_kind or 'none'} held_peak_bytes={self._held_peak} "
@@ -506,6 +581,7 @@ class LiveSocket:
     def receive(self, event: dict) -> None:
         kind = event.get("type")
         self._note_order(kind, event)
+        self._tools_observe(event)
         if kind == "session.started":
             with self._state:
                 self.provider_ready = True
@@ -514,6 +590,8 @@ class LiveSocket:
         elif kind == "session.instructions.appended":
             self._admit(event)
         elif kind == "session.output_audio.delta":
+            if self.tools is not None and _audible(event.get("delta")):
+                self.tools.note_output()        # only real speech: the provider also streams silent frames
             self._output(event.get("delta"))
         elif kind == "session.output_audio.interrupted":
             if self.drained and not self.closed.is_set():
@@ -524,6 +602,11 @@ class LiveSocket:
             self._end_locally("provider_closed")
         elif kind == "error":
             log("agentLiveUpstreamError", f"call={self.call_id} error={json.dumps(event.get('error'))[:300]}")
+            if self.tools is not None and "context append" in json.dumps(event.get("error")).lower():
+                try:
+                    self.tools.append_rejected()
+                except Exception as exc:  # noqa: BLE001 - tools never affect the call
+                    _quiet_log("agentLiveToolsAppendRejected", exc, self.call_id)
             if not self.admitted:
                 self.fail("live_unavailable", "provider_error")
 
@@ -670,6 +753,11 @@ class LiveSocket:
                         time.monotonic() - self.joined_at > READY_S:
                     self.fail("live_unavailable", "not_ready")
                     return
+                if self.tools is not None and self.drained:
+                    try:
+                        self.tools.tick()
+                    except Exception as exc:  # noqa: BLE001 - tools never end the call
+                        _quiet_log("agentLiveToolsTick", exc, self.call_id)
                 if self.client_ready and self.provider_ready and not self.forwarding and not self.closed.is_set():
                     self.upstream_send({"type": "session.input_audio.append", "audio": SILENCE})
                 if self.opening_sent and not self.admitted and \
@@ -753,6 +841,8 @@ def _join(principal: str, event: Any) -> dict:
             raise Refused("live_owner_conflict")
         if ring.get("_live_join_consumed"):
             raise Refused("live_join_consumed")
+        if ring.get("_live_retired_reason") == "live_join_expired":
+            raise Refused("live_join_expired")
         if ring.get("_live_phase") != "answered_waiting_join":
             raise Refused("live_call_stale")
         if agent_rings.now_ms() >= ring["_live_join_expires_at"]:
@@ -839,6 +929,10 @@ def serve(handler) -> None:
             return session.fail("live_unavailable", "provider_connect_failed")
         if not session.attach_upstream(upstream):   # the call ended while it connected: closed, never used
             return
+        try:
+            session.attach_tools(key)
+        except Exception as exc:  # noqa: BLE001 - a call without its tools still goes ahead
+            _quiet_log("agentLiveToolsAttach", exc, session.call_id)
         from .oracle_live_wire import LiveWire
         wire = LiveWire("api")
         session.downstream({"type": "agent_live.session", "protocol": live.PROTOCOL, "host_id": _host_id(),
