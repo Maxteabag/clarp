@@ -167,7 +167,7 @@ fn rows_composer_sample(id: &str, sent: Instant) -> f32 {
             (w.global::<crate::SendFlight>().get_phase().to_string(), w.global::<crate::ChatLook>().get_reduced_motion())
         });
         rows_line(format!("perf ROWS-SAMPLE {}", json!({
-            "index": index, "at_ms": sent.elapsed().as_secs_f64() * 1000.0, "pane": pane, "row_id": id,
+            "index": index, "at_ms": sent.elapsed().as_secs_f64() * 1000.0, "pane": pane.as_str(), "row_id": id,
             "row_batch": headless::rows_row_batch(&pane, id), "measuring_batch": app_now().rows_batch(),
             "book_progress": [progress.0, progress.1], "pending": own.as_ref().map(|o| o.1), "failed": own.as_ref().map(|o| o.2),
             "stage": headless::rows_stage(), "send": ROWS_SEND.with(Cell::get), "row": row,
