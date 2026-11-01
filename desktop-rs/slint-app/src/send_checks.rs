@@ -58,6 +58,7 @@ thread_local! {
     static BASELINE: RefCell<Vec<f64>> = const { RefCell::new(Vec::new()) };
     static MID_WANTED: Cell<bool> = const { Cell::new(false) };
     static MID: RefCell<Option<(Rect, Rect)>> = const { RefCell::new(None) };
+    static COMPOSER_MISSING: Cell<bool> = const { Cell::new(false) };
     static LANDING: RefCell<Option<(Rect, f32, Option<Rect>)>> = const { RefCell::new(None) };
     static DROPPED: Cell<i32> = const { Cell::new(0) };
     static REVEAL: RefCell<Option<RevealWatch>> = const { RefCell::new(None) };
@@ -126,6 +127,22 @@ fn unexplained() -> usize {
     crate::scroll_journal::logged().iter().filter(|c| *c == "unexplained").count()
 }
 
+/// The composer's height as drawn, the source EMPTY is read from: the
+/// SendFlight bridge's copy is written only on the flight's ticks, so a send's
+/// first sample could read the last send's height. A missing box fails the
+/// check (once); its NaN fails every comparison after it.
+fn composer_drawn() -> f32 {
+    composer_box().map_or_else(
+        || {
+            if !COMPOSER_MISSING.with(|m| m.replace(true)) {
+                check(false, "the composer box is drawn while a send is sampled");
+            }
+            f32::NAN
+        },
+        |r| r.3,
+    )
+}
+
 /// Sends what the composer holds (Ctrl+Enter when `queue`) and samples
 /// every frame until `stop_sampling`, saving `shots` on the way.
 fn send_and_sample(queue: bool, shots: &[(u64, &str)], known: Option<String>) {
@@ -151,7 +168,7 @@ fn send_and_sample(queue: bool, shots: &[(u64, &str)], known: Option<String>) {
             at: sent.elapsed(),
             progress: flight.get_progress(),
             flight: matches!(phase.as_str(), "wait" | "flight" | "settle").then(|| (flight.get_x(), flight.get_y(), flight.get_width(), flight.get_height())),
-            composer: flight.get_composer_height(),
+            composer: composer_drawn(),
             row: if id.is_empty() { None } else { app_now().measured_height(&id).0 },
             status: if id.is_empty() { String::new() } else { status_of(&id) },
             at_end: report().at_end,
