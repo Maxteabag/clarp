@@ -1355,14 +1355,15 @@ def observe_native_task(c, owner: dict, ident: str, *, native: str, tool: str,
     row = c.execute('SELECT * FROM background_jobs WHERE job_id=?', (ident,)).fetchone()
     if row:
         meta = json.loads(row['metadata_json'])
-        # A turn-exit stop is inferred, not reported: the provider's own
-        # completion record for the task, imported later, still decides.
+        # A turn-exit or lost-evidence stop is inferred, not reported: the
+        # provider's own completion record for the task, imported later, still
+        # decides.
+        inferred_stop = (row['terminal_at'] is not None
+                         and meta.get('stop_basis') in INFERRED_STOP_BASES)
         receipt_after_turn_exit = (
-            row['terminal_at'] is not None and meta.get('stop_basis') == 'turn_exit'
-            and state in {'completed', 'failed'}
+            inferred_stop and state in {'completed', 'failed'}
             and (not task or meta.get('provider_task_id') in ('', task)))
-        if (row['terminal_at'] is not None and meta.get('stop_basis') == 'turn_exit'
-                and state == 'running' and task and not meta.get('provider_task_id')):
+        if inferred_stop and state == 'running' and task and not meta.get('provider_task_id'):
             # The receipt names the task its completion record will cite; keep
             # the stop, but let that record be matched when it is imported.
             meta['provider_task_id'] = task
@@ -1373,7 +1374,7 @@ def observe_native_task(c, owner: dict, ident: str, *, native: str, tool: str,
                 or at < meta['provider_observed_at']):
             return
         if receipt_after_turn_exit:
-            for key in ('stop_basis', 'stop_turn', 'turn_exited_at'):
+            for key in ('stop_basis', 'stop_turn', 'turn_exited_at', 'evidence_lost_at'):
                 meta.pop(key, None)
         if task and meta.get('provider_task_id') not in ('', task):
             return
@@ -1418,6 +1419,35 @@ def observe_native_task(c, owner: dict, ident: str, *, native: str, tool: str,
         progress_text=?,progress_at=?,terminal_at=?,terminal_reason=? WHERE job_id=?''',
         (status, observed, json.dumps(meta), progress, observed, at if terminal else None, reason, ident))
     _record_event(c, ident, observed, note=progress)
+
+
+# Stops Clarp inferred rather than read from the provider; a completion record
+# imported later replaces them.
+INFERRED_STOP_BASES = frozenset({'turn_exit', 'evidence_lost'})
+
+
+def project_native_task_evidence_lost(c, ident: str, *, at: int) -> bool:
+    """No provider evidence for this task in a long time: count it as over.
+
+    Claude ends a background Bash task with the process that launched it, and
+    that process is long gone or was never Clarp's to watch (a task launched
+    before the turn fence existed, from an interactive session, or whose link
+    expired). The outcome stays unknown. Provisional like a turn-exit stop: a
+    completion record imported later supersedes it, and an existing terminal
+    record is never overwritten.
+    """
+    row = c.execute('SELECT * FROM background_jobs WHERE job_id=?', (ident,)).fetchone()
+    if row is None or row['terminal_at'] is not None or row['heartbeat_source'] != 'provider_event':
+        return False
+    meta = json.loads(row['metadata_json'])
+    meta.update(provider_state='stopped', stop_basis='evidence_lost', evidence_lost_at=at)
+    progress = ('No word from Claude about this task for a long time; '
+                'it is treated as ended. Outcome unknown')
+    c.execute('''UPDATE background_jobs SET status='failed',updated_at=?,metadata_json=?,
+        progress_text=?,progress_at=?,terminal_at=?,terminal_reason=? WHERE job_id=?''',
+        (at, json.dumps(meta), progress, at, at, 'provider_task_evidence_lost', ident))
+    _record_event(c, ident, at, note=progress)
+    return True
 
 
 def project_native_task_turn_exit(c, ident: str, *, turn: str, exited_at: int) -> bool:
