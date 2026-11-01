@@ -195,6 +195,12 @@ impl App {
         panes.iter().find(|p| p.id == pane).map_or(0, |p| p.book.row_at(y) as i32)
     }
 
+    /// ROWS scratch proof only: the active chat's current measuring batch.
+    pub fn rows_batch(&self) -> i32 {
+        let Some(index) = self.active_index() else { return -1 };
+        self.pane_state.borrow()[index].book.rows_batch()
+    }
+
     /// The active chat's measured height of row `id`, and its rows measured
     /// and waiting (for the checks).
     pub fn measured_height(&self, id: &str) -> (Option<f32>, (usize, usize)) {

@@ -148,23 +148,30 @@ fn composer_drawn() -> f32 {
 
 // ---- ROWS scratch proof only (branch proof/desktop-rows-20261101, never merged) ----
 
-/// CLARP_ROWS_SAMPLER=handle selects C1; anything else is the PR #231 form (a tree walk per sample).
 /// One sample's composer read, logged with the row this sample will read
-/// (its id and current book height, read AFTER the composer as the sampler does).
+/// (its id, the book's batch and its height, read AFTER the composer as the sampler does).
 fn rows_composer_sample(id: &str, sent: Instant) -> f32 {
     let (height, before, after) = rows_composer();
-    if headless::rows_on() && ROWS_SAMPLES.with(|n| { n.set(n.get() + 1); n.get() }) <= 3000 {
+    let index = ROWS_SAMPLES.with(|n| { n.set(n.get() + 1); n.get() });
+    if headless::rows_on() && index <= 3000 {
         let row = if id.is_empty() { None } else { app_now().measured_height(id).0 };
         println!("perf ROWS-SAMPLE {}", json!({
-            "at_ms": sent.elapsed().as_secs_f64() * 1000.0, "pane": app_now().active_id(), "row_id": id, "row": row,
-            "composer": height, "seq_before": before, "seq_after": after, "mode": if rows_handle_mode() { "handle" } else { "walk" },
+            "index": index, "at_ms": sent.elapsed().as_secs_f64() * 1000.0, "pane": app_now().active_id(), "row_id": id,
+            "batch": app_now().rows_batch(), "row": row, "composer": height, "seq_before": before, "seq_after": after, "mode": rows_mode(),
         }));
     }
     height
 }
 
+/// CLARP_ROWS_SAMPLER picks the arm: walk (the PR #231 form, the default),
+/// bridge (main's form), fade (a walk only for Reduce-Motion fade samples),
+/// handle (C1).
+fn rows_mode() -> String {
+    std::env::var("CLARP_ROWS_SAMPLER").ok().filter(|v| ["walk", "bridge", "fade", "handle"].contains(&v.as_str())).unwrap_or_else(|| "walk".into())
+}
+
 fn rows_handle_mode() -> bool {
-    std::env::var("CLARP_ROWS_SAMPLER").is_ok_and(|v| v == "handle")
+    rows_mode() == "handle"
 }
 
 /// C1: resolve the composer box's element once, where the check already looks it up.
@@ -174,6 +181,8 @@ fn rows_resolve_handle() {
     let want = format!("composer-box:{}", app_now().active_id());
     let id = want.clone();
     let found = ElementQuery::from_root(&window).match_predicate(move |e| e.accessible_id().is_some_and(|a| a == id.as_str())).find_first();
+    let height = found.as_ref().map(|e| e.size().height);
+    println!("perf ROWS-HANDLE {}", json!({"bound_id": want, "found": found.is_some(), "handle_height": height, "empty": EMPTY.with(Cell::get)}));
     ROWS_HANDLE.with(|h| *h.borrow_mut() = found.map(|e| (want, e)));
 }
 
@@ -195,12 +204,28 @@ fn rows_handle_height() -> f32 {
     })
 }
 
+/// main's form: the SendFlight bridge copy (written on the flight's ticks).
+fn rows_bridge_height() -> f32 {
+    crate::window().map_or(f32::NAN, |w| w.global::<crate::SendFlight>().get_composer_height())
+}
+
+/// Arm c: a Reduce-Motion send in its fade.
+fn rows_fade_now() -> bool {
+    crate::window().is_some_and(|w| w.global::<crate::ChatLook>().get_reduced_motion() && w.global::<crate::SendFlight>().get_phase() == "fade")
+}
+
 /// The composer read the sampler uses, bracketed by the measurer report
 /// sequence: reports that arrive between before and after came during the read.
 fn rows_composer() -> (f32, u64, u64) {
     let before = headless::rows_seq();
     headless::rows_set_inside(true);
-    let height = if rows_handle_mode() { rows_handle_height() } else { composer_drawn() };
+    let height = match rows_mode().as_str() {
+        "handle" => rows_handle_height(),
+        "bridge" => rows_bridge_height(),
+        "fade" if rows_fade_now() => composer_drawn(),
+        "fade" => rows_bridge_height(),
+        _ => composer_drawn(),
+    };
     headless::rows_set_inside(false);
     (height, before, headless::rows_seq())
 }
