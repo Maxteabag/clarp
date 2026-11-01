@@ -51,9 +51,9 @@ def read(name, required=True):
 
 
 def label(text):
-    """An ok line's label: the text before ':', else the text with numbers as '#'
-    (the same transform that froze rows/required_ok.txt)."""
-    return (text.split(":")[0] if ":" in text else re.sub(r"[-+]?\d+(\.\d+)?", "#", text)).strip()
+    """An ok line's label: the text before ':' (or all of it), with every number as '#'
+    (the same transform that froze rows/required_ok.txt; run-to-run counts never matter)."""
+    return re.sub(r"[-+]?\d+(\.\d+)?", "#", text.split(":")[0] if ":" in text else text).strip()
 
 
 REQUIRED = [l.strip() for l in (pathlib.Path(__file__).resolve().parent / "required_ok.txt").read_text().splitlines()
@@ -214,7 +214,8 @@ def neg():
     comp = [f for f in r["fails"] if f.startswith(COMPOSER_FAIL)]
     first = float(comp[0].split("[", 1)[1].split(",")[0].rstrip("]")) if comp else None
     # Bound to the stage: the Reduce-Motion fade send's samples, the FIRST one's composer == the FAIL's first value.
-    fade = [s for s in r["samples"] if s["mode"] == "handle" and s["reduced"] and s["phase"] == "fade"]
+    # ... flushed by the 'faded' stage, which judges 'and the composer is empty at once' (send_checks l.691 at 53fd).
+    fade = [s for s in r["samples"] if s["mode"] == "handle" and s["reduced"] and s["phase"] == "fade" and s["flush"] == "faded"]
     send = min((s["send"] for s in fade), default=None)
     stage = sorted((s for s in r["samples"] if s["send"] == send), key=lambda s: s["index"])
     first_fade = next((s for s in stage if s["phase"] == "fade"), None)
