@@ -8,6 +8,10 @@ name: Desktop checks (FAFB scratch proof)
 # drawn box (observe + RED), then B2 (GREEN only if M) and B2 against a box
 # that really starts tall (must FAIL). Each step's oracle stops the job on
 # anything unexpected. Artifacts are synthetic (the fake Host) and public.
+# Budget (whole job <= 30 min, every step capped): checkout 1, deps 2,
+# toolchain 1, cache 1, build 12, F-A 2, F-B 3 x 2, stage 1, upload 2 = 28,
+# plus 2 unallocated for the runner's own set-up and post steps. The upload
+# carries only /tmp/fafb-upload, staged to <= 80 MB before it runs.
 
 on:
   workflow_dispatch:
@@ -28,23 +32,26 @@ jobs:
         working-directory: desktop-rs
     steps:
       - uses: actions/checkout@v4
+        timeout-minutes: 1
         with:
           persist-credentials: false
       - name: Dependencies
-        timeout-minutes: 3
+        timeout-minutes: 2
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends pkg-config libasound2-dev \
             libfontconfig1-dev libfreetype-dev libxkbcommon-dev libwayland-dev libx11-dev libudev-dev \
             dbus gnome-keyring python3 fonts-jetbrains-mono fonts-noto-core fonts-dejavu-core fonts-liberation2
       - uses: dtolnay/rust-toolchain@stable
+        timeout-minutes: 1
       - uses: Swatinem/rust-cache@v2
+        timeout-minutes: 1
         with:
           workspaces: desktop-rs
           shared-key: desktop-debug
           save-if: false
       - name: Build once (the app and the host_flow test binary)
-        timeout-minutes: 16
+        timeout-minutes: 12
         run: |
           set -euo pipefail
           mkdir -p /tmp/fafb
@@ -53,52 +60,52 @@ jobs:
           cargo test --locked -p clarp-engine --test host_flow --no-run >> /tmp/fafb/build.log 2>&1
           sha256sum target/debug/clarp-slint >> /tmp/fafb/source.txt
       - name: F-A /select record ordering (RED, GREEN, 2 negatives)
-        timeout-minutes: 3
+        timeout-minutes: 2
         run: |
           set -uo pipefail
           ulimit -f 20480
-          cargo test --locked -p clarp-engine --test host_flow fafb_ -- --test-threads=1 --nocapture > /tmp/fafb/fa.log 2>&1
+          timeout 100 cargo test --locked -p clarp-engine --test host_flow fafb_ -- --test-threads=1 --nocapture > /tmp/fafb/fa.log 2>&1
           echo "rc=$?" > /tmp/fafb/fa.rc
           python3 fafb/oracle.py fa /tmp/fafb
       - name: F-B observe the first drawn fade frame (current measurement, RED)
-        timeout-minutes: 3
+        timeout-minutes: 2
         run: |
           set -uo pipefail
           ulimit -f 40960
-          CLARP_FAFB_FRAME=1 slint-app/tests/check.sh send /tmp/fafb/b-obs > /tmp/fafb/b-obs.log 2>&1
+          CLARP_FAFB_FRAME=1 timeout 100 slint-app/tests/check.sh send /tmp/fafb/b-obs > /tmp/fafb/b-obs.log 2>&1
           echo "rc=$?" > /tmp/fafb/b-obs.rc
           python3 fafb/oracle.py b-obs /tmp/fafb
       - name: F-B with B2 (GREEN only if M)
-        timeout-minutes: 3
+        timeout-minutes: 2
         run: |
           set -uo pipefail
           ulimit -f 40960
-          CLARP_FAFB_FRAME=1 CLARP_FAFB_DRAWN=1 slint-app/tests/check.sh send /tmp/fafb/b-green > /tmp/fafb/b-green.log 2>&1
+          CLARP_FAFB_FRAME=1 CLARP_FAFB_DRAWN=1 timeout 100 slint-app/tests/check.sh send /tmp/fafb/b-green > /tmp/fafb/b-green.log 2>&1
           echo "rc=$?" > /tmp/fafb/b-green.rc
           python3 fafb/oracle.py b-green /tmp/fafb
       - name: F-B with B2 against a box that really starts tall (must FAIL)
-        timeout-minutes: 3
+        timeout-minutes: 2
         run: |
           set -uo pipefail
           ulimit -f 40960
-          CLARP_FAFB_FRAME=1 CLARP_FAFB_DRAWN=1 CLARP_FAFB_FORCE_TALL=1 slint-app/tests/check.sh send /tmp/fafb/b-neg > /tmp/fafb/b-neg.log 2>&1
+          CLARP_FAFB_FRAME=1 CLARP_FAFB_DRAWN=1 CLARP_FAFB_FORCE_TALL=1 timeout 100 slint-app/tests/check.sh send /tmp/fafb/b-neg > /tmp/fafb/b-neg.log 2>&1
           echo "rc=$?" > /tmp/fafb/b-neg.rc
           python3 fafb/oracle.py b-neg /tmp/fafb
-      - name: Sizes and hashes
+      - name: Stage the upload (<= 80 MB, whole files only)
         if: always()
         timeout-minutes: 1
         run: |
           set -uo pipefail
-          mkdir -p /tmp/fafb
-          python3 fafb/oracle.py size /tmp/fafb
-          size=$?
-          (cd /tmp/fafb && find . -type f ! -name SHA256SUMS | sort | xargs -r sha256sum > SHA256SUMS)
-          # Over the 80 MB cap the job fails (the upload still runs: if: always()).
-          exit $size
+          # Every raw file is hashed; allowlisted ones are copied whole while
+          # they fit; anything left out is listed (size, sha256) in
+          # OVERFLOW.json, stays on the runner, and makes the proof INCOMPLETE
+          # (this step and the job fail). Nothing is ever cut.
+          python3 fafb/stage.py /tmp/fafb /tmp/fafb-upload
       - uses: actions/upload-artifact@v4
         if: always()
+        timeout-minutes: 2
         with:
           name: fafb
-          path: /tmp/fafb
+          path: /tmp/fafb-upload
           retention-days: 7
           if-no-files-found: error
