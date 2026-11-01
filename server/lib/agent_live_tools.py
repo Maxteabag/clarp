@@ -54,6 +54,7 @@ from __future__ import annotations
 import concurrent.futures
 import json
 import os
+import stat
 import pathlib
 import re
 import shutil
@@ -508,7 +509,7 @@ MAX_DELEGATIONS_PER_CALL = 12
 CLAIMED, DONE, NOT_DONE, UNCONFIRMED, CANCELLED = "claimed", "done", "not_done", "unconfirmed", "cancelled"
 
 
-_CALL_ID = re.compile(r"[A-Za-z0-9_.-]{1,120}")
+_CALL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,119}")  # no leading dot: ".", ".." and hidden names get a digest
 
 
 class Transcript:
@@ -527,9 +528,13 @@ class Transcript:
         self.started = _iso()
         try:
             self.directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+            if self.directory.is_symlink() or not self.directory.is_dir():
+                raise OSError(f"transcript directory is not a real directory: {self.directory}")
+            # A pre-existing directory keeps its own permissions; files are always 600.
             if keep_days:
                 prune_transcripts(self.directory, keep_days * 24 * 3600)
         except OSError as exc:
+            self.done = True                    # no safe directory: write nothing for this call
             log_exception("agentLiveTranscriptDir", exc, str(self.directory))
 
     def add(self, kind: str, **fields) -> None:
@@ -539,7 +544,7 @@ class Transcript:
                 return
             self.entries.append(entry)
             try:
-                fd = os.open(self.partial, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+                fd = os.open(self.partial, os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW, 0o600)
                 with os.fdopen(fd, "a", encoding="utf-8") as handle:
                     handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
             except OSError as exc:
@@ -568,9 +573,11 @@ class Transcript:
             self.done = True
             try:
                 tmp = self.final.with_name(self.final.name + ".tmp")
-                fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+                fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
                 with os.fdopen(fd, "w", encoding="utf-8") as handle:
                     json.dump(self.document(), handle, ensure_ascii=False, indent=1)
+                    handle.flush()
+                    os.fsync(handle.fileno())        # the rename below is atomic only for durable contents
                 os.replace(tmp, self.final)
                 self.partial.unlink(missing_ok=True)
             except OSError as exc:              # the .jsonl stays: nothing is lost
@@ -585,9 +592,13 @@ def _iso() -> str:
 def prune_transcripts(directory: pathlib.Path, keep_s: float) -> int:
     """Delete saved transcripts (and leftover partials) older than ``keep_s`` (only with transcript_keep_days)."""
     removed, cutoff = 0, time.time() - keep_s
-    for path in pathlib.Path(directory).glob("*.json*"):
+    root = pathlib.Path(directory)
+    if root.is_symlink() or not root.is_dir():
+        return 0
+    for path in root.glob("*.json*"):
         try:
-            if path.is_file() and path.stat().st_mtime < cutoff:
+            info = path.lstat()                     # a symlink is never followed, its target never deleted
+            if stat.S_ISREG(info.st_mode) and info.st_mtime < cutoff:
                 path.unlink()
                 removed += 1
         except OSError:

@@ -1609,3 +1609,111 @@ def test_with_transcript_keep_days_older_files_are_deleted_when_a_call_starts(ma
     make(FakeEffects(), save_transcript=True, transcript_keep_days=14)
     assert new.exists() and not old.exists() and not partial.exists()
     assert "transcript_keep_days" not in _config(save_transcript=True, transcript_keep_days=0)
+
+
+# --- transcript file safety (coordinator review requirements) -----------------
+
+def test_transcript_keep_days_must_be_a_real_int_from_1_to_365():
+    for bad in (True, False, 0, 366, -1, 14.0, "14", None):
+        assert "transcript_keep_days" not in _config(save_transcript=True, transcript_keep_days=bad), bad
+    for good in (1, 14, 365):
+        assert _config(save_transcript=True, transcript_keep_days=good)["transcript_keep_days"] == good
+
+
+def test_save_transcript_must_be_exactly_true():
+    for bad in (1, "true", "True", [True], {"on": True}):
+        assert "save_transcript" not in _config(save_transcript=bad), bad
+
+
+def test_dot_and_unsafe_call_ids_never_name_a_file_outside_or_hidden(tmp_path):
+    for call_id in (".", "..", ".hidden", "../escape", "a/b", "", "x" * 300):
+        t = tools.Transcript(tmp_path, call_id, {"call_id": call_id})
+        assert t.partial.parent == tmp_path and t.final.parent == tmp_path
+        assert not t.partial.name.startswith(".") and "/" not in t.partial.name
+        assert t.partial.name.startswith("call-"), call_id
+    assert tools.Transcript(tmp_path, "alv_ok-1.2", {}).partial.name == "alv_ok-1.2.jsonl"
+
+
+def test_a_symlinked_partial_is_not_followed(tmp_path):
+    outside = tmp_path / "outside.txt"
+    outside.write_text("keep")
+    folder = tmp_path / "transcripts"
+    folder.mkdir()
+    (folder / "alv_x.jsonl").symlink_to(outside)
+    t = tools.Transcript(folder, "alv_x", {})
+    t.add("text", role="user", text="hei")
+    t.finish()
+    assert outside.read_text() == "keep"
+
+
+def test_a_symlinked_final_tmp_is_not_followed_and_the_partial_survives(tmp_path):
+    outside = tmp_path / "outside.txt"
+    outside.write_text("keep")
+    folder = tmp_path / "transcripts"
+    folder.mkdir()
+    t = tools.Transcript(folder, "alv_y", {})
+    t.add("text", role="user", text="hei")
+    (folder / "alv_y.json.tmp").symlink_to(outside)
+    t.finish()
+    assert outside.read_text() == "keep"
+    assert (folder / "alv_y.jsonl").exists() and not (folder / "alv_y.json").exists()
+
+
+def test_a_symlinked_transcript_directory_is_refused(tmp_path):
+    real = tmp_path / "elsewhere"
+    real.mkdir()
+    link = tmp_path / "transcripts"
+    link.symlink_to(real, target_is_directory=True)
+    t = tools.Transcript(link, "alv_z", {})
+    t.add("text", role="user", text="hei")
+    t.finish()
+    assert list(real.iterdir()) == []
+
+
+def test_retention_never_deletes_through_a_symlink_or_outside_its_folder(tmp_path):
+    import os as _os
+    folder = tmp_path / "transcripts"
+    folder.mkdir()
+    outside = tmp_path / "precious.json"
+    outside.write_text("{}")
+    (folder / "link.json").symlink_to(outside)
+    sub = folder / "nested"
+    sub.mkdir()
+    (sub / "deep.json").write_text("{}")
+    other = folder / "notes.txt"
+    other.write_text("x")
+    past = time.time() - 30 * 24 * 3600
+    for path in (outside, sub / "deep.json", other):
+        _os.utime(path, (past, past))
+    _os.utime(folder / "link.json", (past, past), follow_symlinks=False)
+    tools.prune_transcripts(folder, 14 * 24 * 3600)
+    assert outside.exists() and (sub / "deep.json").exists() and other.exists()
+    assert (folder / "link.json").is_symlink()
+    real = tmp_path / "real"
+    real.mkdir()
+    (real / "old.json").write_text("{}")
+    _os.utime(real / "old.json", (past, past))
+    (tmp_path / "linkdir").symlink_to(real, target_is_directory=True)
+    assert tools.prune_transcripts(tmp_path / "linkdir", 14 * 24 * 3600) == 0
+    assert (real / "old.json").exists()
+
+
+def test_a_pre_existing_directory_keeps_its_permissions_and_files_are_600(tmp_path):
+    folder = tmp_path / "transcripts"
+    folder.mkdir(mode=0o750)
+    folder.chmod(0o750)
+    t = tools.Transcript(folder, "alv_p", {})
+    t.add("text", role="user", text="hei")
+    assert oct(t.partial.stat().st_mode & 0o777) == "0o600"
+    t.finish()
+    assert oct(t.final.stat().st_mode & 0o777) == "0o600"
+    assert oct(folder.stat().st_mode & 0o777) == "0o750"
+
+
+def test_a_crash_before_finish_leaves_a_complete_journal_and_no_final(tmp_path):
+    t = tools.Transcript(tmp_path, "alv_c", {"call_id": "alv_c"})
+    t.add("text", role="user", text="første")
+    t.add("receipt", receipt={"tool": "ask", "sent": True})
+    lines = [json.loads(line) for line in t.partial.read_text().splitlines()]
+    assert [line["kind"] for line in lines] == ["text", "receipt"]
+    assert not t.final.exists() and not t.final.with_name(t.final.name + ".tmp").exists()
