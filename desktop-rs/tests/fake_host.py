@@ -16,6 +16,7 @@ import argparse
 import copy
 import hashlib
 import json
+import os
 import pathlib
 import queue
 import random
@@ -27,6 +28,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
 
 TOKEN = "probe-token"
+
+# FAFB scratch proof only (branch proof/desktop-fafb-20261101, never merged):
+# controls for the order of POST /select against GET /log. Inert unless set.
+FAFB_GATE = os.environ.get("FAFB_SELECT_GATE") == "1"
+FAFB_DROP = os.environ.get("FAFB_SELECT_DROP") == "1"
+FAFB_AS = os.environ.get("FAFB_SELECT_AS", "")
+FAFB_RELEASE = os.environ.get("FAFB_SELECT_RELEASE", "")
+fafb_log_served = threading.Event()
 
 
 def solid_png(width, height, rgba):
@@ -903,6 +912,11 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
+        # FAFB: rachel's /log has been answered (written to the socket).
+        if (FAFB_GATE and self.command == "GET" and path == "/log" and not fafb_log_served.is_set()
+                and parse_qs(urlparse(self.path).query).get("session", [""])[0] == "rachel"):
+            record({"method": "FAFB", "path": "log_served"})
+            fafb_log_served.set()
 
     def in_outage(self):
         # An outage looks like a dead Host: the connection closes unanswered.
@@ -1729,6 +1743,21 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, {"ok": True})
         if self.in_outage():
             return
+        if url.path == "/select" and (FAFB_GATE or FAFB_DROP or FAFB_AS):
+            # FAFB: never record it, record another session, or hold its
+            # record until rachel's /log was answered and the test releases it.
+            if FAFB_DROP:
+                return self.reply(200, {"ok": True})
+            if FAFB_AS:
+                body = dict(body, session=FAFB_AS)
+            if FAFB_GATE:
+                served = fafb_log_served.wait(10)
+                record({"method": "FAFB", "path": "select_held", "log_served": served})
+                deadline = time.time() + 15
+                while FAFB_RELEASE and not os.path.exists(FAFB_RELEASE) and time.time() < deadline:
+                    time.sleep(0.02)
+                record({"method": "FAFB", "path": "select_released",
+                        "released": bool(FAFB_RELEASE) and os.path.exists(FAFB_RELEASE)})
         record({"method": "POST", "path": url.path, "body": body,
                 "authorization": self.headers.get("Authorization", "")})
         if url.path == "/pairing/exchange":
