@@ -139,17 +139,22 @@ def test_needs_you_matches_the_updates_badge(monkeypatch):
     attention = live_activity.badge_attention()
     assert attention["count"] == 3
     assert attention["agent_ids"] == {mike, rachel, "janitor-1"}
+    assert sorted(attention["items"]) == sorted([mike, rachel, "janitor-1"])
 
     clock, sent = FakeClock(), []
     pusher = live_activity.LiveActivityPusher(
         lambda payload, priority: sent.append((payload, priority)),
-        clock=clock, schedule=clock.schedule, attention=live_activity.badge_attention)
+        clock=clock, schedule=clock.schedule, attention=live_activity.badge_attention,
+        roster=agents_db.list_agents)
     pusher.observe(_status(mike, "mike", "waiting"))      # already counted by its decision
     pusher.observe(_status(nina, "nina", "waiting"))      # waiting with nothing filed: counts
     clock.advance(20)
     state = sent[-1][0]["aps"]["content-state"]
+    # Mike, Rachel (idle, her failure filed) and Nina once each, plus the
+    # Janitor item, which names no agent on the chip.
     assert state["needs_you"] == 4
     assert state["decisions"] == 3
+    assert {row["persona"] for row in state["agents"]} == {"Mike", "Rachel", "Nina"}
 
 
 def test_attention_changes_push_and_raise_priority():
@@ -215,3 +220,124 @@ def test_rows_carry_the_agents_display_name():
     names = [row["persona"] for row in sent[-1]["aps"]["content-state"]["agents"]]
     assert names == ["Clarp Memory Expert", "ECIT Rachel"]
     assert live_activity.display_name("clarp-memory-expert") == "Clarp Memory Expert"
+
+
+# --- helpers roll up into their top-level agent (the app's chip rule) ------------
+
+def _helper(persona, parent, session=None):
+    agent_id = agents_db.create_agent(persona=persona, voice_id="v", cwd="/tmp",
+                                      session=session or persona.lower())
+    agents_db.set_lineage(agent_id, parent_agent_id=parent, role="helper")
+    return agent_id
+
+
+def _pusher(attention=None, roster=agents_db.list_agents):
+    clock, sent = FakeClock(), []
+    pusher = live_activity.LiveActivityPusher(
+        lambda payload, priority: sent.append(payload), clock=clock, schedule=clock.schedule,
+        attention=attention or (lambda: {"count": 0, "agent_ids": set(), "items": []}),
+        roster=roster)
+    return pusher, clock, sent
+
+
+def _faces(state):
+    return [row["persona"] for row in state["agents"]]
+
+
+def test_helpers_never_count_or_show_on_their_own():
+    """The lock screen read "7 working" for one agent and its helpers."""
+    arnold = agents_db.create_agent(persona="Arnold", voice_id="v", cwd="/tmp", session="arnold")
+    mike = agents_db.create_agent(persona="Mike", voice_id="v", cwd="/tmp", session="mike")
+    fixer, tester = _helper("Fixer", arnold), _helper("Tester", arnold)
+    scout = _helper("Scout", mike)
+    pusher, clock, sent = _pusher()
+    pusher.observe(_status(arnold, "arnold", "thinking", turn_started=100))
+    pusher.observe(_status(fixer, "fixer", "tool", tool="Bash", started=300, turn_started=290))
+    pusher.observe(_status(tester, "tester", "thinking", turn_started=280))
+    pusher.observe(_status(scout, "scout", "thinking", turn_started=200))   # Mike himself is idle
+    clock.advance(20)
+    state = sent[-1]["aps"]["content-state"]
+    assert (state["working"], state["needs_you"]) == (2, 0)
+    assert _faces(state) == ["Mike", "Arnold"]
+    assert state["lead"]["persona"] == "Mike"
+    assert state["lead"]["headline"] == "1 sub-agent working"
+    assert state["lead"]["turn_started_ms"] == 200 and state["lead"]["tool"] is None
+    assert state["agents"][1]["headline"] == "Thinking", "a working parent keeps its own line"
+
+
+def test_nested_helpers_reach_the_top_and_a_wait_counts_once_per_agent():
+    arnold = agents_db.create_agent(persona="Arnold", voice_id="v", cwd="/tmp", session="arnold")
+    lead = _helper("Lead", arnold)
+    deep = _helper("Deep", lead)
+    other = _helper("Other", arnold)
+    pusher, clock, sent = _pusher(attention=lambda: {
+        "count": 2, "agent_ids": {deep}, "items": [deep, deep]})
+    pusher.observe(_status(other, "other", "waiting"))
+    clock.advance(20)
+    state = sent[-1]["aps"]["content-state"]
+    assert (state["working"], state["needs_you"]) == (0, 1)
+    assert state["decisions"] == 2
+    assert _faces(state) == ["Arnold"]
+    assert state["agents"][0]["state"] == "waiting"
+    assert state["agents"][0]["headline"] == "Waiting for you"
+
+
+def test_a_busy_parent_with_a_waiting_helper_works_and_needs_you():
+    arnold = agents_db.create_agent(persona="Arnold", voice_id="v", cwd="/tmp", session="arnold")
+    asker = _helper("Asker", arnold)
+    pusher, clock, sent = _pusher()
+    pusher.observe(_status(arnold, "arnold", "thinking", turn_started=1))
+    pusher.observe(_status(asker, "asker", "waiting"))
+    clock.advance(20)
+    state = sent[-1]["aps"]["content-state"]
+    assert (state["working"], state["needs_you"]) == (1, 1)
+    assert _faces(state) == ["Arnold"]
+
+
+def test_a_helper_whose_parent_is_archived_shows_as_its_own_agent():
+    """Its work is never hidden; the app's chip does the same."""
+    gone = agents_db.create_agent(persona="Gone", voice_id="v", cwd="/tmp", session="gone")
+    orphan = _helper("Orphan", gone)
+    agents_db.set_archived(gone, True)
+    pusher, clock, sent = _pusher()
+    pusher.observe(_status(orphan, "orphan", "thinking", turn_started=1))
+    clock.advance(20)
+    state = sent[-1]["aps"]["content-state"]
+    assert state["working"] == 1 and state["lead"]["persona"] == "Orphan"
+
+
+def test_a_parent_cycle_keeps_everyone_in_it_top_level():
+    roster = {"a": {"session": "a", "persona": "A", "role": "helper", "parent_agent_id": "b"},
+              "b": {"session": "b", "persona": "B", "role": "helper", "parent_agent_id": "a"},
+              "c": {"session": "c", "persona": "C", "role": "helper", "parent_agent_id": "unknown"},
+              "d": {"session": "d", "persona": "D", "role": "agent", "parent_agent_id": "a"}}
+    assert live_activity.top_level_owners(roster) == {"a": "a", "b": "b", "c": "c", "d": "d"}
+    roster["b"]["parent_agent_id"] = "d"
+    roster["c"]["parent_agent_id"] = "a"
+    assert live_activity.top_level_owners(roster) == {"a": "d", "b": "d", "c": "d", "d": "d"}, \
+        "once the cycle is broken, the chain reaches the agent that is not a helper"
+
+
+def test_a_parent_named_by_session_and_a_helper_first_seen_live_roll_up_without_a_roster():
+    """A helper spawned after the last roster refresh rolls up at once: the
+    pusher fetches its parent chain the first time it sees the helper."""
+    arnold = agents_db.create_agent(persona="Arnold", voice_id="v", cwd="/tmp", session="arnold")
+    lead = _helper("Lead", "arnold")         # parent named by session
+    deep = _helper("Deep", lead)
+    pusher, clock, sent = _pusher(roster=None)
+    pusher.observe(_status(deep, "deep", "thinking", turn_started=5))
+    clock.advance(20)
+    state = sent[-1]["aps"]["content-state"]
+    assert state["working"] == 1 and _faces(state) == ["Arnold"]
+    assert state["lead"]["agent_id"] == arnold
+
+
+def test_badge_items_that_name_no_listed_agent_still_count_each():
+    rachel, _mike = _agents()
+    state = live_activity.content_state({}, 1, {"count": 3, "items": [rachel, rachel, ""]},
+                                        {rachel: agents_db.get_by_agent_id(rachel)})
+    assert state["needs_you"] == 2, "Rachel once, the unnamed item once"
+    assert _faces(state) == ["Rachel"]
+    old_shape = live_activity.content_state({}, 1, {"count": 3, "agent_ids": {rachel}},
+                                            {rachel: agents_db.get_by_agent_id(rachel)})
+    assert old_shape["needs_you"] == 3
