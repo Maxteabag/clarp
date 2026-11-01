@@ -155,6 +155,12 @@ class Backend:
     janitor_default_model: str = ""
     # Model family the CLI stands for when the Agent pins no model (avatars).
     model_family: str = ""
+    # The CLI serves models from many providers, each with its own sign-in
+    # (``harness_providers``), and names them ``provider/model``.
+    model_providers: bool = False
+    # Text a model id must contain to be offered on this card; "" keeps all.
+    # A card that is one model family on a many-provider CLI (DeepSeek).
+    model_id_filter: str = ""
 
     def __init__(self) -> None:
         if self.login_kind not in LOGIN_KINDS:

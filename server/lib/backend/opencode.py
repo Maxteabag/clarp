@@ -218,6 +218,7 @@ class OpenCodeBackend(StreamJsonBackend):
     runner = 'opencode'
     config_model_field = 'opencode_model'
     config_effort_field = 'opencode_effort'
+    model_providers = True
     # Shown only when ``opencode models`` cannot be read. OpenCode Zen's own
     # model first (no provider key needed), then models the common providers
     # listed on 2026-09-28.
