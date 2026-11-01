@@ -135,7 +135,8 @@ def _row(agent_id: str, info: dict[str, Any]) -> dict[str, Any]:
 def badge_attention() -> dict[str, Any]:
     """What the apps' Updates badge counts, unarchived: pending decisions and
     questions, artifacts waiting on the owner (attention bucket `blocking`),
-    and Janitor failures. With the agents they belong to."""
+    and Janitor failures. With the agents they belong to: ``items`` holds one
+    agent id per badge item (empty when it names none)."""
     from . import artifacts, attention_index, janitor_attention
     items: list[str] = []
     for decision in artifacts.attention(include_questions=True):
@@ -155,24 +156,136 @@ def badge_attention() -> dict[str, Any]:
         cursor = page.get("next_cursor") or ""
         if not cursor:
             break
-    return {"count": len(items), "agent_ids": {agent for agent in items if agent}}
+    return {"count": len(items), "agent_ids": {agent for agent in items if agent}, "items": items}
+
+
+def _attention_items(attention: dict[str, Any]) -> list[str]:
+    """One agent id per badge item. An older caller without ``items`` gives
+    each named agent one item and the rest of ``count`` none."""
+    if attention.get("items") is not None:
+        return [str(agent or "") for agent in attention["items"]]
+    named = sorted(str(agent) for agent in attention.get("agent_ids") or () if agent)
+    return named + [""] * max(0, int(attention.get("count") or 0) - len(named))
+
+
+def _clean_attention(attention: dict[str, Any]) -> dict[str, Any]:
+    clean = {"count": max(0, int(attention.get("count") or 0)),
+             "agent_ids": set(attention.get("agent_ids") or ())}
+    if attention.get("items") is not None:
+        clean["items"] = [str(agent or "") for agent in attention["items"]]
+    return clean
+
+
+# --- helpers roll up into their top-level agent ----------------------------------
+#
+# The same rule as the app's chip (clarp-ios AgentWorkActivityPolicy) and its
+# chat list nesting: a helper is ``role == "helper"`` with a
+# ``parent_agent_id``, which names its parent by agent id (else session). A
+# helper never counts or shows on its own; its work and its wait belong to its
+# top-level agent. A helper whose parent is not listed (archived, deleted, a
+# Janitor) is its own top level, and so is everyone in a parent cycle.
+
+def _is_helper(row: dict[str, Any]) -> bool:
+    return str(row.get("role") or "") == "helper" and bool(row.get("parent_agent_id"))
+
+
+def _listed(row: dict[str, Any]) -> bool:
+    """On the chip at all: not archived and not a quiet agent (Janitor)."""
+    return not row.get("archived_at") and not row.get("is_janitor")
+
+
+def top_level_owners(roster: dict[str, dict[str, Any]]) -> dict[str, str]:
+    """Each listed agent's top-level agent id. ``roster`` maps agent id to its
+    ``agents`` row (``session``, ``role``, ``parent_agent_id``)."""
+    alias: dict[str, str] = {}
+    for agent_id in roster:
+        alias.setdefault(agent_id, agent_id)
+    for agent_id, row in roster.items():
+        if row.get("session"):
+            alias.setdefault(str(row["session"]), agent_id)
+
+    def parent(agent_id: str) -> str | None:
+        row = roster[agent_id]
+        if not _is_helper(row):
+            return None
+        found = alias.get(str(row["parent_agent_id"]))
+        return found if found and found != agent_id else None
+
+    owners: dict[str, str] = {}
+    for agent_id in roster:
+        seen, top = {agent_id}, agent_id
+        while (up := parent(top)) is not None:
+            if up in seen:
+                top = agent_id
+                break
+            seen.add(up)
+            top = up
+        owners[agent_id] = top
+    return owners
+
+
+def _newest_first(row: dict[str, Any]) -> tuple:
+    return (-(row["turn_started_ms"] or row["started_at_ms"] or 0), row["persona"])
+
+
+def _waiting(row: dict[str, Any]) -> dict[str, Any]:
+    return {**row, "state": "waiting", "headline": "Waiting for you", "tool": None,
+            "started_at_ms": None, "turn_started_ms": None}
 
 
 def content_state(agents: dict[str, dict[str, Any]], now_ms: int,
-                  attention: dict[str, Any] | None = None) -> dict[str, Any]:
-    attention = attention or {"count": 0, "agent_ids": set()}
-    decisions = int(attention.get("count") or 0)
-    counted = set(attention.get("agent_ids") or ())
-    rows = [_row(agent_id, info) for agent_id, info in agents.items()]
-    working = [r for r in rows if r["state"] in WORKING]
-    needing = [r for r in rows if r["state"] in NEEDS_YOU]
-    # A waiting agent that already filed something is counted once.
-    waiting_unfiled = [r for r in needing if r["agent_id"] not in counted]
-    working.sort(key=lambda r: r["turn_started_ms"] or r["started_at_ms"] or 0, reverse=True)
-    return {"working": len(working), "needs_you": len(waiting_unfiled) + decisions,
-            "decisions": decisions,
+                  attention: dict[str, Any] | None = None,
+                  roster: dict[str, dict[str, Any]] | None = None) -> dict[str, Any]:
+    """The chip's content: top-level agents only. ``agents`` are the agents
+    seen on the live stream; ``roster`` the ``agents`` rows by id (an agent
+    seen live but not in it is listed by what ``agents`` knows of it).
+
+    ``needs_you`` counts each top-level agent with a badge item or a wait
+    (its own or a helper's) once, plus badge items that name no listed agent.
+    """
+    attention = attention or {}
+    rows_by_id = {agent_id: row for agent_id, row in (roster or {}).items()}
+    for agent_id, info in agents.items():
+        rows_by_id.setdefault(agent_id, info)
+    listed = {agent_id: row for agent_id, row in rows_by_id.items() if _listed(row)}
+    owners = top_level_owners(listed)
+    items = _attention_items(attention)
+    flagged = {agent for agent in items if agent in listed}
+    other = sum(1 for agent in items if agent not in listed)
+
+    def row_of(agent_id: str) -> dict[str, Any]:
+        info = agents.get(agent_id)
+        if info is None:
+            row = listed[agent_id]
+            info = {"session": row.get("session"), "persona": row.get("persona"), "activity": {}}
+        return _row(agent_id, info)
+
+    teams: dict[str, list[str]] = {}
+    for agent_id in listed:
+        if agent_id in agents or agent_id in flagged:
+            teams.setdefault(owners[agent_id], []).append(agent_id)
+    tops: list[tuple[dict[str, Any], bool]] = []
+    for owner, members in teams.items():
+        top = row_of(owner)
+        rows = [row_of(member) for member in members if member != owner]
+        needs = any(member in flagged for member in members) \
+            or any(row["state"] in NEEDS_YOU for row in rows + [top])
+        busy = sorted((row for row in rows if row["state"] in WORKING), key=_newest_first)
+        if top["state"] not in WORKING and busy:
+            newest = busy[0]
+            top = {**top, "state": newest["state"], "tool": None,
+                   "headline": "1 sub-agent working" if len(busy) == 1
+                   else f"{len(busy)} sub-agents working",
+                   "started_at_ms": newest["started_at_ms"],
+                   "turn_started_ms": newest["turn_started_ms"]}
+        tops.append((top, needs))
+    working = sorted((top for top, _ in tops if top["state"] in WORKING), key=_newest_first)
+    waiting = [_waiting(top) for top in sorted(
+        (top for top, needs in tops if needs and top["state"] not in WORKING), key=_newest_first)]
+    return {"working": len(working), "needs_you": other + sum(1 for _, needs in tops if needs),
+            "decisions": len(items),
             "lead": working[0] if working else None,
-            "agents": (needing + working)[:MAX_ROWS], "updated_at_ms": now_ms}
+            "agents": (waiting + working)[:MAX_ROWS], "updated_at_ms": now_ms}
 
 
 def payload(state: dict[str, Any], now: float) -> dict[str, Any]:
@@ -190,6 +303,7 @@ class LiveActivityPusher:
                  min_interval: float = 15.0,
                  attention: Callable[[], dict[str, Any]] | None = None,
                  attention_refresh_sec: float = 30.0,
+                 roster: Callable[[], list[dict[str, Any]]] | None = None,
                  background: Callable[[Callable[[], None]], Any] | None = None):
         from .live_pacing import _thread_timer
         self._send = send
@@ -207,6 +321,11 @@ class LiveActivityPusher:
         self._attention: dict[str, Any] | None = None
         self._attention_at = 0.0
         self._attention_refresh = attention_refresh_sec
+        # The agents rows (lineage, archived) the roll-up reads, by agent id:
+        # refreshed with the badge, and learned at once for an agent first
+        # seen live together with its parent chain.
+        self._roster_source = roster
+        self._roster: dict[str, dict[str, Any]] = {}
         # Where the badge query runs: in production a thread, so the hub's
         # lock never waits on the database; inline when not given.
         self._background = background
@@ -215,8 +334,7 @@ class LiveActivityPusher:
     def set_attention(self, attention: dict[str, Any]) -> None:
         """The Updates badge changed (decisions, blocking artifacts, Janitor)."""
         with self._lock:
-            self._attention = {"count": max(0, int(attention.get("count") or 0)),
-                               "agent_ids": set(attention.get("agent_ids") or ())}
+            self._attention = _clean_attention(attention)
             self._attention_at = self._clock()
             if self._agents or self._sent_key is not None:
                 self._consider()
@@ -228,6 +346,7 @@ class LiveActivityPusher:
             self._attention_at = self._clock()
             if self._background is None:
                 self._attention = self._read_attention()
+                self._roster = self._read_roster()
             else:
                 self._refreshing = True
                 self._background(self._refresh_attention)
@@ -235,16 +354,25 @@ class LiveActivityPusher:
 
     def _read_attention(self) -> dict[str, Any]:
         try:
-            fresh = self._attention_source() or {}
-            return {"count": int(fresh.get("count") or 0),
-                    "agent_ids": set(fresh.get("agent_ids") or ())}
+            return _clean_attention(self._attention_source() or {})
         except Exception:  # noqa: BLE001 - a count, never a failure
             return self._attention or {"count": 0, "agent_ids": set()}
 
+    def _read_roster(self) -> dict[str, dict[str, Any]]:
+        if self._roster_source is None:
+            return self._roster
+        try:
+            return {str(row["agent_id"]): row for row in self._roster_source() or ()
+                    if row.get("agent_id")}
+        except Exception:  # noqa: BLE001 - the last roster, never a failure
+            return self._roster
+
     def _refresh_attention(self) -> None:
         fresh = self._read_attention()
+        roster = self._read_roster()
         with self._lock:
             self._refreshing = False
+            self._roster = roster
         self.set_attention(fresh)
 
     def observe(self, event: dict[str, Any]) -> None:
@@ -264,6 +392,7 @@ class LiveActivityPusher:
                     # A Janitor's work is not "agents working" (quiet_agents).
                     self._quiet.add(agent_id)
                     return
+                self._learn_lineage(agent_id, info)
                 self._agents[agent_id] = info
             info["activity"] = statuses[-1].get("activity") or {}
             self._consider()
@@ -279,10 +408,37 @@ class LiveActivityPusher:
             agent = {}
         return {"session": event.get("session") or "",
                 "persona": str(agent.get("persona") or ""),
+                "role": agent.get("role"), "parent_agent_id": agent.get("parent_agent_id"),
+                "archived_at": agent.get("archived_at"),
                 "quiet": quiet_agents.is_quiet(agent)}
 
+    def _learn_lineage(self, agent_id: str, info: dict[str, Any]) -> None:
+        """A helper first seen live rolls up at once: fetch the ancestors the
+        roster does not hold yet (bounded; a cycle or a gap stops it)."""
+        if agent_id not in self._roster:
+            self._roster[agent_id] = {"agent_id": agent_id, **info}
+        row = self._roster[agent_id]
+        known = {r.get("session"): r for r in self._roster.values() if r.get("session")}
+        for _step in range(16):
+            if not _is_helper(row):
+                return
+            parent = str(row["parent_agent_id"])
+            if parent in self._roster or parent in known:
+                row = self._roster.get(parent) or known[parent]
+                continue
+            from . import identity
+            try:
+                found = identity.lookup(parent)
+            except Exception:  # noqa: BLE001 - an orphan then, never the stream
+                return
+            if not found:
+                return
+            self._roster[str(found["agent_id"])] = found
+            row = found
+
     def _consider(self) -> None:
-        state = content_state(self._agents, int(self._clock() * 1000), self._current_attention())
+        state = content_state(self._agents, int(self._clock() * 1000), self._current_attention(),
+                              self._roster)
         lead = state["lead"] or {}
         shape = (state["working"], state["needs_you"], lead.get("agent_id"))
         detail = shape + (lead.get("headline"), lead.get("tool"),
