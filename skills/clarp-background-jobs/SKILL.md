@@ -170,8 +170,11 @@ reported a task ID, and unknown means evidence is missing or stale. A stopped
 session without a completion record has unknown outcome. When the Claude turn that
 launched a task exits, the task is shown stopped right away
 (`provider_turn_exited_without_result`), fenced to that exact process: a
-later turn on the same conversation is not affected. That stop is provisional;
-the provider's own completion record, if it arrives later, replaces it. These jobs do not claim
+later turn on the same conversation is not affected. A task with no provider
+evidence for a day and no live launching turn (launched before the fence, or by
+a CLI session Clarp did not start) is shown stopped too
+(`provider_task_evidence_lost`), outcome unknown. Both stops are provisional;
+the provider's own completion record, if it arrives later, replaces them. These jobs do not claim
 PID ownership or heartbeats. A successful watcher task does not establish that a
 remote deployment succeeded; inspect the actual deployment result.
 
