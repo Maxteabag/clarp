@@ -90,8 +90,11 @@ jobs:
         run: |
           set -uo pipefail
           mkdir -p /tmp/fafb
-          python3 fafb/oracle.py size /tmp/fafb || echo "size cap exceeded" >> /tmp/fafb/size-problem.txt
+          python3 fafb/oracle.py size /tmp/fafb
+          size=$?
           (cd /tmp/fafb && find . -type f ! -name SHA256SUMS | sort | xargs -r sha256sum > SHA256SUMS)
+          # Over the 80 MB cap the job fails (the upload still runs: if: always()).
+          exit $size
       - uses: actions/upload-artifact@v4
         if: always()
         with:
