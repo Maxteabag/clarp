@@ -68,10 +68,11 @@ def load():
     rc = int(m.group(1))
     out = read(f"{stem}.log")
     e2e = [l.strip() for l in out.splitlines() if l.startswith("E2E_")]
-    if rc in TIMEOUT_RCS or not e2e:
+    # Exactly one E2E_PASS or E2E_FAIL, and no timeout/kill rc, or the run is INCOMPLETE (coord O1b).
+    if rc in TIMEOUT_RCS or len(e2e) != 1 or e2e[0] not in ("E2E_PASS", "E2E_FAIL"):
         partial = read(f"{stem}/app.partial.log", required=False)
-        finish(2, problem=f"INCOMPLETE: {stem} timed out or was killed (rc {rc}, E2E lines {e2e}); not proof",
-               partial_log_bytes=None if partial is None else len(partial))
+        finish(2, verdict="INCOMPLETE-TIMEOUT", problem=f"INCOMPLETE: {stem} timed out, was killed or did not finish "
+               f"(rc {rc}, E2E lines {e2e}); not proof", partial_log_bytes=None if partial is None else len(partial))
     app = read(f"{stem}/app.log")
     if "panicked" in out or "panicked" in app:
         finish(2, problem=f"INCOMPLETE: {stem}: the app panicked")
