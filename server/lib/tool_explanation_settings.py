@@ -15,10 +15,12 @@ from . import settings_store
 _ENABLED = "tool_explanations.enabled"
 _LEVEL = "tool_explanations.detail_level"
 DEFAULT_LEVEL = 2
+KEYS = (_ENABLED, _LEVEL)
 
 
-def get() -> dict[str, Any]:
-    stored = settings_store.get_many([_ENABLED, _LEVEL])
+def get(*, stored: dict[str, str] | None = None) -> dict[str, Any]:
+    if stored is None:
+        stored = settings_store.get_many(list(KEYS))
     enabled = stored.get(_ENABLED, "true").strip().lower() in {"1", "true", "yes", "on"}
     try:
         level = min(4, max(0, int(stored.get(_LEVEL, DEFAULT_LEVEL))))

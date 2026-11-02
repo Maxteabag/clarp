@@ -130,6 +130,8 @@ def update_settings(data: dict) -> dict:
 
 def public(ring: dict) -> dict:
     out = {k: v for k, v in ring.items() if not k.startswith("_")}
+    if ring.get("_user_call"):
+        out["origin"] = "user_call"
     if ring.get("opening_mode") == LISTEN_FIRST:
         opening = opening_state(ring["ring_id"])
         if opening is not None:
@@ -152,7 +154,15 @@ def _expire(records: list[dict]) -> list[dict]:
 
 
 def _settle(records: list[dict]) -> list[dict]:
+    expired = False
+    for ring in records:
+        if (ring.get("_user_call") and ring.get("_live_phase") == "answered_waiting_join"
+                and now_ms() >= ring.get("_live_join_expires_at", 0)):
+            ring.update(_live_phase="retired", _live_retired_reason="live_join_expired")
+            expired = True
     missed = _expire(records)
+    if expired:
+        _save(records)
     if missed:
         _save(records)
         for ring in missed:
@@ -184,7 +194,8 @@ def current(principal: str | None = None) -> dict | None:
     with _lock:
         records = _load()
         _settle(records)
-        ring = next((r for r in reversed(records) if r["state"] == "ringing" and _visible(r, capable)), None)
+        ring = next((r for r in reversed(records) if r["state"] == "ringing" and not r.get("_user_call")
+                     and _visible(r, capable)), None)
         return public(ring) if ring else None
 
 
@@ -220,6 +231,8 @@ def event_visible(event: dict, principal: str | None) -> bool:
     from .protocol import SSEType
     if event.get("type", SSEType.AGENT_RING) != SSEType.AGENT_RING:
         return True
+    if event.get("origin") == "user_call":
+        return bool(principal) and event.get("answered_by") == principal
     if principal and event.get("answered_by") == principal:
         return True                     # the ring this phone answered stays its own: rings off or capability dropped
     if principal is not None and not receives_rings(principal):
@@ -262,11 +275,11 @@ def _admit(agent: dict, records: list[dict]) -> None:
     if any(r["state"] == "ringing" for r in records):
         raise CallError(409, "the user is already being called")
     now = now_ms()
-    mine = [r for r in records if r["agent_id"] == agent["agent_id"]]
+    mine = [r for r in records if r["agent_id"] == agent["agent_id"] and not r.get("_user_call")]
     if mine and now - mine[-1]["created_at"] < AGENT_INTERVAL_MS:
         wait = (AGENT_INTERVAL_MS - (now - mine[-1]["created_at"]) + 999) // 1000
         raise CallError(429, "wait before calling again", retry_after_s=int(wait))
-    if sum(1 for r in records if now - r["created_at"] < HOUR_MS) >= HOURLY_LIMIT:
+    if sum(1 for r in records if not r.get("_user_call") and now - r["created_at"] < HOUR_MS) >= HOURLY_LIMIT:
         raise CallError(429, "too many calls this hour")
 
 
@@ -371,6 +384,8 @@ def _end(ring_id: str, state: str, *, by: str, allowed=None) -> dict:
         records = _load()
         _settle(records)
         ring = _find(records, ring_id)
+        if ring.get("_user_call") and ring["_user_call"] != by:
+            raise CallError(404, "unknown call")
         if allowed is not None:
             allowed(ring)
         if ring["state"] == state:
@@ -395,6 +410,8 @@ def cancel(caller_agent_id: str, ring_id: str) -> dict:
             raise CallError(403, "an agent can only cancel its own call")
     with _lock:
         ring = _find(_load(), ring_id)
+        if ring.get("_user_call"):
+            raise CallError(404, "unknown call")
         if ring["state"] in FINAL:
             return {"ok": True, "ring": public(ring), "changed": False}
     return _end(ring_id, "cancelled", by=caller_agent_id or "owner", allowed=own)
@@ -488,6 +505,69 @@ def _ring_live(*, caller_agent_id: str = "", agent: str = "", reason: str = "", 
     _schedule_expiry(record)
     return {"ok": True, "ring": public(record), "delivery": delivery,
             "summary": f"Calling the user. The call rings for {RING_TIMEOUT_MS // 1000} seconds."}
+
+
+def _admit_user_call(agent: dict, records: list[dict]) -> None:
+    """The admission of a USER-started call: the agent must be usable by voice and no ring may be ringing.
+
+    Not the agent-ring rules: the rings switch, mute and the per-agent ring interval govern an agent ringing
+    the user, not the user calling an agent (a Normal POST /calls ignores them as well)."""
+    from . import agents as agents_db
+    if (agent.get("archived_at") or agent.get("deleted_at")
+            or not agents_db.interaction_capabilities(agent)["can_voice_target"]):
+        raise CallError(403, "this agent cannot be called")
+    if any(r["state"] == "ringing" for r in records):
+        raise CallError(409, "the user is already being called")
+
+
+def user_call_live(principal: str, agent: Any, request_id: Any, client_nonce: Any) -> dict:
+    """Originate one private, already-answered call, atomically bound to the phone's intent."""
+    from . import agent_ring_live as live, agents as agents_db
+    live.require_device(principal)
+    _live_intent(request_id, client_nonce)  # validate everything before persisting a ring
+    if not live._request_id_ok(agent):
+        raise CallError(400, live.REQUEST_INVALID)
+    caller = agents_db.get_by_agent_id(agent)  # exact snapshot raw id; no persona/session resolution
+    if caller is None:
+        raise CallError(404, "unknown agent")
+    with _lock:
+        records = _load()
+        _settle(records)
+        replay = next((r for r in reversed(records) if r.get("_user_call") == principal
+                       and r.get("_live_request_id") == request_id), None)
+        if replay is not None:
+            if replay["agent_id"] != agent or replay.get("_live_client_nonce") != client_nonce:
+                raise CallError(400, live.REQUEST_INVALID)
+            if replay.get("_live_retired_reason") == "live_join_expired":
+                raise CallError(409, "live_join_expired")
+            if replay.get("_live_phase") not in live.LIVE_PHASES:
+                raise CallError(409, live.CALL_STALE)
+            return _answered_live(replay, changed=False)
+        profile_id = live.user_call_profile_id(caller)
+        if profile_id is None:
+            raise CallError(409, live.CONTEXT_UNAVAILABLE)
+        context = live.user_call_context(profile_id, caller, request_id)
+        if any(r.get("answered_by") == principal and r.get("_live_phase") in live.LIVE_PHASES
+               for r in records):
+            raise CallError(409, live.CALL_ACTIVE)
+        _admit_user_call(caller, records)
+        if not live_capable(principal):
+            raise CallError(409, live.CLIENT_REQUIRED)
+        snapshot = live.build_snapshot(caller, context)
+        who = {key: str(caller[key]) for key in ("session", "persona", "agent_id")}
+        now = now_ms()
+        record = {
+            "ring_id": "rng_" + uuid.uuid4().hex, **who, "reason": "User-initiated call",
+            "opening_line": context["opening_text"], "opening_audio_url": "", "state": "ringing",
+            "created_at": now, "expires_at": now + RING_TIMEOUT_MS, "ended_at": None,
+            "answered_by": "", "call_id": "", "conversation_mode": live.MODE_LIVE,
+            "_live_snapshot": snapshot, "_live_context_digest": live.digest(snapshot),
+            "_user_call": principal,
+        }
+        records.append(record)
+        # This internal answer runs under the same lock and persists only the answered record.
+        _answer_live(records, record, principal, live.MODE_LIVE, request_id, client_nonce)
+        return _answered_live(record, changed=True)
 
 
 def answer(principal: str, ring_id: str, conversation_mode: Any = None, *,
@@ -676,6 +756,8 @@ def _answer_live(records: list[dict], ring: dict, principal: str, mode: str | No
     """The Live branch of answer (under _lock): one grant per ring, first owner
     wins. True when this request answered it, False for the owner's repeat."""
     from . import agent_ring_live as live
+    if ring.get("_user_call") and ring["_user_call"] != principal:
+        raise CallError(403, live.AUTH)
     if mode != live.MODE_LIVE:
         raise CallError(409, live.CLIENT_REQUIRED)
     # The grant binds a paired, full-scope device: its principal is the device identity.
@@ -762,6 +844,8 @@ _NOTICES = {
 def _announce(ring: dict, kind: str, *, notice: bool = True) -> dict:
     """Event, push and the agent's chat notice for one ring change. Never raises.
     ``notice=False`` skips the chat notice when its wording would be untrue."""
+    if ring.get("_user_call"):
+        return {}                       # issue #216: a user-started Live call is this phone's own; nothing to announce
     stream = _context["stream"]
     if stream is not None:
         try:
