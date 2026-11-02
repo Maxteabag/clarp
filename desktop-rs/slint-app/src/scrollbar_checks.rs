@@ -27,16 +27,20 @@ const TURNS: usize = 240;
 const SHORT: &str = "steady-short";
 const SHORT_ROWS: usize = 99;
 /// A pass is bounded by what it does, not by how fast the host is. Each
-/// pass names `green`, the inputs (wheel notches or key presses) it took in
-/// the green runs; the runner twice as slow took the same. Its samples are
-/// one per settled input plus the endpoint's, so inputs + 1, and its polls
-/// (one per 100 ms tick) are wall time, bounded by the cap below. A pass
-/// gets twice its green inputs; past them it has not reached its endpoint,
-/// and fails as a wrong pass.
-/// A separate wall-time cap on a pass, a resource limit well above twice
-/// the slow runner's need (its long first pass up ran out at 120 s): 25
-/// stages of 12 s, each inside the stage runner's 15 s. Running out of it
-/// is still a failure, labelled RESOURCE rather than a wrong pass.
+/// pass names `green`, the inputs (wheel notches or key presses) measured
+/// in the green runs. On a slower runner every pass that ended took the
+/// same; its long first pass up ran out at 74 inputs without reaching its
+/// endpoint, so what a slow run needs to finish is not measured. A pass's
+/// samples are one per settled input plus the endpoint's: inputs + 1. Its
+/// polls come on the stage runner's ticks and have no bound of their own;
+/// only the allowance below limits them. A pass gets twice its green
+/// inputs; past them it has not reached its endpoint, and fails as a wrong
+/// pass.
+/// A separate per-pass resource allowance of wall time: 25 stages of 12 s,
+/// each inside the stage runner's 15 s, about 2.5 times the 120 s at which
+/// the slow runner's long first pass up ran out. It is not shown to exceed
+/// twice what a slow run needs. Running out of it is still a failure,
+/// labelled RESOURCE rather than a wrong pass.
 const SEGMENTS: usize = 25;
 const SEGMENT: Duration = Duration::from_secs(12);
 
