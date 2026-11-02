@@ -26,6 +26,18 @@ const TURNS: usize = 240;
 /// chat it is at its smallest.
 const SHORT: &str = "steady-short";
 const SHORT_ROWS: usize = 99;
+/// A pass is bounded by what it does, not by how fast the host is: the
+/// green runs and a runner twice as slow took the same steps, at most 75
+/// by wheel and 126 by Page keys. A pass gets twice that many inputs; past
+/// them it has not reached its endpoint, and fails as a wrong pass.
+const WHEEL_INPUTS: usize = 150;
+const KEY_INPUTS: usize = 252;
+/// A separate wall-time cap on a pass, a resource limit well above twice
+/// the slow runner's need (its long first pass up ran out at 120 s): 25
+/// stages of 12 s, each inside the stage runner's 15 s. Running out of it
+/// is still a failure, labelled RESOURCE rather than a wrong pass.
+const SEGMENTS: usize = 25;
+const SEGMENT: Duration = Duration::from_secs(12);
 
 /// The thumb and the track it travels (window coordinates).
 #[derive(Debug, Clone, Copy, Default)]
@@ -288,21 +300,23 @@ impl Pass {
 /// the thumb, and again, until the offset no longer moves. `down`: the direction the reader goes.
 fn pass(state: Rc<RefCell<Pass>>, label: &'static str, down: bool, by_key: bool, first: bool) -> Vec<Stage> {
     let mut stages: Vec<Stage> = Vec::new();
+    let most = if by_key { KEY_INPUTS } else { WHEEL_INPUTS };
     // A stage times out after 15 s: the pass spans several.
-    for part in 0..10 {
+    for part in 0..SEGMENTS {
         let state = state.clone();
         stages.push((label, Box::new(move |app, window, elapsed| {
             let mut st = state.borrow_mut();
             if st.done {
-                if part == 9 {
+                if part == SEGMENTS - 1 {
                     verdict(label, &st.samples, down, first);
                     *st = Pass::default();
                 }
                 return true;
             }
-            if elapsed > Duration::from_secs(12) {
-                if let Some(expired) = st.expire_segment(part == 9) {
-                    check(false, &format!("{label}: pass exhausted its ten 12-second segments ({} inputs, {} samples); state cleared before the next direction", expired.acts, expired.samples.len()));
+            if elapsed > SEGMENT {
+                if let Some(expired) = st.expire_segment(part == SEGMENTS - 1) {
+                    check(false, &format!("RESOURCE, not a wrong pass: {label}: pass ran past its {} s wall cap ({} inputs, {} samples); state cleared before the next direction",
+                        SEGMENTS as u64 * SEGMENT.as_secs(), expired.acts, expired.samples.len()));
                     verdict(label, &expired.samples, down, first);
                 }
                 return true;
@@ -328,7 +342,7 @@ fn pass(state: Rc<RefCell<Pass>>, label: &'static str, down: bool, by_key: bool,
                 let viewport_height = viewport().map_or(-1.0, |(_, _, _, height)| height);
                 st.samples.push(Sample { thumb, offset, rows: count, truth: truth(window), book_total, viewport_height, measured });
             }
-            if step == Step::End || step == Step::Stalled || st.acts > 400 {
+            if step == Step::End || step == Step::Stalled || st.acts >= most {
                 // Optional CI-only accessibility probe, read after deciding
                 // whether this input ended or stalled (never drives scrolling).
                 use i_slint_backend_testing::ElementQuery;
