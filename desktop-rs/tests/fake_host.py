@@ -1180,17 +1180,20 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/tool-explanations/settings":
             return self.reply(200, tool_explanation_settings)
         if url.path == "/events":
-            self.send_response(200)
-            self.send_header("Content-Type", "text/event-stream")
-            self.send_header("Cache-Control", "no-cache")
-            self.end_headers()
             inbox = queue.Queue()
             # `live=` (blank) asks for status ops only; no parameter, none.
             live = parse_qs(url.query, keep_blank_values=True).get("live", [None])[0]
+            # Subscribed before the 200 goes out: a client counts itself
+            # connected once it has the headers, and an event broadcast then
+            # must already reach this inbox (it is not kept for later).
             with state_lock:
                 subscribers.append(inbox)
                 live_filters[id(inbox)] = None if live is None else {n for n in live.split(",") if n}
             try:
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Cache-Control", "no-cache")
+                self.end_headers()
                 self.wfile.write(b": connected\n\n")
                 self.wfile.flush()
                 while True:
