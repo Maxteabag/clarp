@@ -7,6 +7,8 @@ no Whisper model — just the handler logic exercised end-to-end.
 
 This is the payoff for the AddScoped-style DI refactor.
 """
+import contextlib
+import faulthandler
 import json
 import os
 import pathlib
@@ -132,6 +134,26 @@ def _get(url, **kw):
     req = urllib.request.Request(url, **kw)
     with urllib.request.urlopen(req, timeout=2) as r:
         return r.status, r.read()
+
+
+FRAMES_MARKER = "CLARP-DIAG client timeout: every thread's frames follow"
+
+
+@contextlib.contextmanager
+def _frames_on_client_timeout():
+    """On a client TimeoutError, print one fixed marker and every thread's
+    frames of this process (file, line, function; no values) to stderr, then
+    re-raise the same exception. The dump can never replace it: any error
+    while dumping is dropped."""
+    try:
+        yield
+    except TimeoutError:
+        try:
+            print(FRAMES_MARKER, file=sys.stderr, flush=True)
+            faulthandler.dump_traceback(file=sys.stderr, all_threads=True)
+        except Exception:  # noqa: BLE001 - the timeout is the failure, not the dump
+            pass
+        raise
 
 
 def _post(url, body: dict):
@@ -4965,6 +4987,12 @@ def test_more_than_ten_bootstrap_pages_under_gate_exhaustion_stay_incomplete_and
     from lib import agents as agents_db, launch_receipts, runtime_attestation, settings_store, turn_queue
     base, ctx, _srv = running_server
     manager = _advertise_delivery(monkeypatch)
+
+    def log(query):
+        # This test timed out waiting for a /log response twice in CI; a
+        # recurrence names the frame each thread is in.
+        with _frames_on_client_timeout():
+            return _log(base, query)
     agent = agents_db.get_by_session("rachel")["agent_id"]
     total = 11 * launch_receipts.PAGE_CAP
     with settings_store.transaction():
@@ -4974,7 +5002,7 @@ def test_more_than_ten_bootstrap_pages_under_gate_exhaustion_stay_incomplete_and
                                            user_stop_generation=turn_queue.user_stop_generation(agent))
     ctx.replace_service("runtime_client", _FakeRuntime(_runtime_status()))
     manager.frozen = True                                # no refill: the burst of 2, then exhaustion
-    first = _log(base, "delivery_since=0")
+    first = log("delivery_since=0")
     until, g = first["delivery_until"], first["delivery_stop_generation"]
 
     def carry(cursor):
@@ -4982,7 +5010,7 @@ def test_more_than_ten_bootstrap_pages_under_gate_exhaustion_stay_incomplete_and
                 f"&delivery_stop_generation={g}&delivery_runtime_release=r-A&delivery_runtime_instance=i1")
     served, cursor, omitted = [first], first["delivery_cursor"], 0
     for _ in range(12):
-        body = _log(base, carry(cursor))
+        body = log(carry(cursor))
         if _no_delivery(body):                           # no cursor, no partial page: keep the last one
             omitted += 1
             continue
@@ -4995,7 +5023,7 @@ def test_more_than_ten_bootstrap_pages_under_gate_exhaustion_stay_incomplete_and
     manager.frozen = False
     manager.t += 1.0                                     # one second later: the gate has refilled
     for _ in range(20):                                  # bounded: the pass must finish well within this
-        body = _log(base, carry(cursor))
+        body = log(carry(cursor))
         assert not _no_delivery(body) and not body["delivery_cursor_expired"]
         assert body["delivery_cursor"] >= cursor
         served.append(body)
