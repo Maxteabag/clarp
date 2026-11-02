@@ -26,12 +26,13 @@ const TURNS: usize = 240;
 /// chat it is at its smallest.
 const SHORT: &str = "steady-short";
 const SHORT_ROWS: usize = 99;
-/// A pass is bounded by what it does, not by how fast the host is: the
-/// green runs and a runner twice as slow took the same steps, at most 75
-/// by wheel and 126 by Page keys. A pass gets twice that many inputs; past
-/// them it has not reached its endpoint, and fails as a wrong pass.
-const WHEEL_INPUTS: usize = 150;
-const KEY_INPUTS: usize = 252;
+/// A pass is bounded by what it does, not by how fast the host is. Each
+/// pass names `green`, the inputs (wheel notches or key presses) it took in
+/// the green runs; the runner twice as slow took the same. Its samples are
+/// one per settled input plus the endpoint's, so inputs + 1, and its polls
+/// (one per 100 ms tick) are wall time, bounded by the cap below. A pass
+/// gets twice its green inputs; past them it has not reached its endpoint,
+/// and fails as a wrong pass.
 /// A separate wall-time cap on a pass, a resource limit well above twice
 /// the slow runner's need (its long first pass up ran out at 120 s): 25
 /// stages of 12 s, each inside the stage runner's 15 s. Running out of it
@@ -298,9 +299,9 @@ impl Pass {
 /// A pass through the chat: act (a wheel notch, a key), wait until the
 /// offset holds for two polls with no row waiting to be measured, sample
 /// the thumb, and again, until the offset no longer moves. `down`: the direction the reader goes.
-fn pass(state: Rc<RefCell<Pass>>, label: &'static str, down: bool, by_key: bool, first: bool) -> Vec<Stage> {
+fn pass(state: Rc<RefCell<Pass>>, label: &'static str, down: bool, by_key: bool, first: bool, green: usize) -> Vec<Stage> {
     let mut stages: Vec<Stage> = Vec::new();
-    let most = if by_key { KEY_INPUTS } else { WHEEL_INPUTS };
+    let most = 2 * green;
     // A stage times out after 15 s: the pass spans several.
     for part in 0..SEGMENTS {
         let state = state.clone();
@@ -350,7 +351,7 @@ fn pass(state: Rc<RefCell<Pass>>, label: &'static str, down: bool, by_key: bool,
                 eprintln!("SCROLL_STOP label={label} step={step:?} acts={} still={} report={:?} measuring={measuring} probe={probe:?}", st.acts, st.gate.still, report());
                 check(step == Step::End, &format!("{label}: the input reaches its actual endpoint (report {:?}, measuring {measuring}, thumb {drawn_thumb:?})", report()));
                 if step != Step::End && st.acts >= most {
-                    check(false, &format!("{label}: the pass did not reach its endpoint within its input budget ({} of {most} inputs, twice the green need)", st.acts));
+                    check(false, &format!("{label}: the pass did not reach its endpoint within its input budget ({} of {most} inputs, twice the {green} of the green runs)", st.acts));
                 }
                 st.done = true;
                 return false;
@@ -499,14 +500,14 @@ pub(super) fn scrollbar_check(out: String) {
             true
         })),
     ];
-    stages.extend(pass(state.clone(), "short chat: first pass up by wheel", false, false, true));
-    stages.extend(pass(state.clone(), "short chat: down by wheel", true, false, false));
+    stages.extend(pass(state.clone(), "short chat: first pass up by wheel", false, false, true, 12));
+    stages.extend(pass(state.clone(), "short chat: down by wheel", true, false, false, 13));
     stages.push(("short chat: focus", Box::new(|app, _, _| {
         app.focus_transcript();
         true
     })));
-    stages.extend(pass(state.clone(), "short chat: up by Page Up", false, true, false));
-    stages.extend(pass(state.clone(), "short chat: down by Page Down", true, true, false));
+    stages.extend(pass(state.clone(), "short chat: up by Page Up", false, true, false, 22));
+    stages.extend(pass(state.clone(), "short chat: down by Page Down", true, true, false, 21));
     let long: Vec<Stage> = vec![
         ("fill", Box::new({
             let count = count.clone();
@@ -551,7 +552,7 @@ pub(super) fn scrollbar_check(out: String) {
         })),
     ];
     stages.extend(long);
-    stages.extend(pass(state.clone(), "first pass up by wheel", false, false, true));
+    stages.extend(pass(state.clone(), "first pass up by wheel", false, false, true, 74));
     stages.push(("all pages", Box::new(|app, window, elapsed| {
         let (_, (measured, waiting)) = app.measured_height("");
         if waiting > 0 && elapsed < Duration::from_secs(10) {
@@ -562,13 +563,13 @@ pub(super) fn scrollbar_check(out: String) {
         check(waiting == 0 && measured == shown, &format!("and every row of it is measured ({measured} measured, {waiting} waiting)"));
         true
     })));
-    stages.extend(pass(state.clone(), "down by wheel", true, false, false));
+    stages.extend(pass(state.clone(), "down by wheel", true, false, false, 65));
     stages.push(("focus", Box::new(|app, _, _| {
         app.focus_transcript();
         true
     })));
-    stages.extend(pass(state.clone(), "up by Page Up", false, true, false));
-    stages.extend(pass(state.clone(), "down by Page Down", true, true, false));
+    stages.extend(pass(state.clone(), "up by Page Up", false, true, false, 125));
+    stages.extend(pass(state.clone(), "down by Page Down", true, true, false, 125));
     stages.push(("end", Box::new(move |_, _, elapsed| {
         if elapsed < Duration::from_millis(500) {
             return false;
