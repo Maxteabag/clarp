@@ -349,6 +349,9 @@ fn pass(state: Rc<RefCell<Pass>>, label: &'static str, down: bool, by_key: bool,
                 let probe = ElementQuery::from_root(window).match_type_name("Transcript").find_first().and_then(|e| e.accessible_value());
                 eprintln!("SCROLL_STOP label={label} step={step:?} acts={} still={} report={:?} measuring={measuring} probe={probe:?}", st.acts, st.gate.still, report());
                 check(step == Step::End, &format!("{label}: the input reaches its actual endpoint (report {:?}, measuring {measuring}, thumb {drawn_thumb:?})", report()));
+                if step != Step::End && st.acts >= most {
+                    check(false, &format!("{label}: the pass did not reach its endpoint within its input budget ({} of {most} inputs, twice the green need)", st.acts));
+                }
                 st.done = true;
                 return false;
             }
