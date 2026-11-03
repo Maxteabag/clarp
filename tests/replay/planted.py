@@ -1,13 +1,18 @@
 """Planted changes: deliberate behaviour changes the harness must catch.
 
-Each change is an exact text replacement (or a swap of two adjacent blocks) in a copy of a build's server tree
-(never in a checkout). ``find`` must occur exactly ``count`` times, so a
-change that no longer applies after code moves fails loudly instead of
-silently planting nothing; update its anchor then.
+Each change is an exact text replacement (or a swap of two adjacent blocks)
+in a copy of a build's server tree, never in a checkout. ``find`` must occur
+exactly ``count`` times, so a change that no longer applies after code moves
+fails loudly instead of silently planting nothing; update its anchor then.
+
+``expect`` names the specific observable the change must produce: a channel,
+a locator pattern and the difference kinds that count (review finding 8). A
+difference elsewhere does not count as catching it.
 """
 from __future__ import annotations
 
 from pathlib import Path
+import re
 
 CHANGES = [
     {
@@ -16,7 +21,7 @@ CHANGES = [
         'file': 'server/server.py',
         'find': '                "queue_depth": result.queue_depth,\n',
         'replace': '',
-        'expect_channels': {'http'},
+        'expect': {'channel': 'http', 'locator': r'\.body\.queue_depth$', 'kinds': {'field-removed'}},
     },
     {
         'id': 'db-write',
@@ -24,7 +29,7 @@ CHANGES = [
         'file': 'server/lib/turn_usage.py',
         'find': '    if tokens_in is None and tokens_out is None and cost is None:\n        return\n',
         'replace': '    if True:\n        return\n',
-        'expect_channels': {'table'},
+        'expect': {'channel': 'table', 'locator': r'^turn_usage', 'kinds': {'row-removed', 'changed'}},
     },
     {
         'id': 'status-transition',
@@ -32,7 +37,7 @@ CHANGES = [
         'file': 'server/lib/message_turns.py',
         'find': '"stop_requested": "interrupted"',
         'replace': '"stop_requested": "failed"',
-        'expect_channels': {'table', 'http', 'sse'},
+        'expect': {'channel': 'table', 'locator': r'^turns\[.*\.outcome$', 'kinds': {'changed'}},
     },
     {
         'id': 'sse-order',
@@ -57,9 +62,29 @@ CHANGES = [
             '                detail=detail,\n'
             '            )))\n',
         ),
-        'expect_channels': {'sse'},
+        'expect': {'channel': 'sse', 'locator': r'->', 'kinds': {'sequence-replace', 'sequence-insert',
+                                                                  'sequence-delete'}},
+    },
+    {
+        'id': 'header-only',
+        'what': 'responses say Cache-Control no-cache instead of no-store (body unchanged)',
+        'file': 'server/server.py',
+        'find': '        if "Cache-Control" not in headers:\n            self.send_header("Cache-Control", "no-store")\n',
+        'replace': '        if "Cache-Control" not in headers:\n            self.send_header("Cache-Control", "no-cache")\n',
+        'expect': {'channel': 'http', 'locator': r'\.headers\.cache-control$', 'kinds': {'changed'}},
+    },
+    {
+        'id': 'sse-envelope',
+        'what': 'SSE frames lose their id: line (data unchanged)',
+        'file': 'server/server.py',
+        'find': '                        self.wfile.write(f"id: {event_id}\\n".encode())\n',
+        'count': 2,
+        'replace': '',
+        'expect': {'channel': 'sse', 'locator': r'\.has_id$', 'kinds': {'changed'}},
     },
 ]
+
+BY_ID = {c['id']: c for c in CHANGES}
 
 
 def apply(change: dict, root: Path) -> None:
@@ -74,3 +99,11 @@ def apply(change: dict, root: Path) -> None:
         raise RuntimeError(f"planted change {change['id']}: anchor found {found} times in "
                            f"{change['file']}, expected {expected}; update the anchor")
     path.write_text(text.replace(change['find'], change['replace']))
+
+
+def caught(change: dict, differences: list[dict]) -> list[dict]:
+    """The differences that show this specific planted change."""
+    want = change['expect']
+    pattern = re.compile(want['locator'])
+    return [d for d in differences if d['channel'] == want['channel'] and d['kind'] in want['kinds']
+            and pattern.search(d['locator'])]

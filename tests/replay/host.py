@@ -6,6 +6,10 @@ the checkout whose ``server/`` and ``static/`` are under test. Base and head
 therefore run the same launcher, fakes and corpus, and only the server code
 differs. Everything the Host writes stays under ``--state-dir``.
 
+capture.py starts this with a minimal environment (no inherited provider homes,
+sockets or proxies); ``isolate`` then points every home, data, config, temp and
+provider directory into the state dir.
+
 Adapted from tests/qa/host.py (the deterministic turn lane), without its route
 allow-list: the replay corpus is meant to reach every route it names.
 """
@@ -33,12 +37,14 @@ def isolate(root: Path) -> None:
         'CLARP_TELEMETRY_DB': 'telemetry.sqlite',
         'XDG_CONFIG_HOME': 'xdg-config', 'XDG_DATA_HOME': 'xdg-data',
         'XDG_CACHE_HOME': 'xdg-cache', 'XDG_STATE_HOME': 'xdg-state',
-        'CLARP_QA_PROVIDER_ROOT': 'provider',
+        'CLARP_QA_PROVIDER_ROOT': 'provider', 'CODEX_HOME': 'provider',
+        'CLAUDE_CONFIG_DIR': 'home/.claude', 'TMPDIR': 'tmp',
         'CLARP_MEDIA_DIR': 'media', 'CLARP_UPLOADS_DIR': 'uploads',
         'CLARP_WORKSPACE_ROOT': 'workspace',
     }.items():
         os.environ[key] = str(root / suffix)
-    (root / 'home').mkdir(exist_ok=True)
+    for sub in ('home', 'tmp'):
+        (root / sub).mkdir(exist_ok=True)
     (root / 'provider').mkdir(exist_ok=True)
     (root / 'config.toml').write_text('[tts]\nprovider = "none"\n[network]\nadvertise_lan = false\n')
     for key in tuple(os.environ):
@@ -57,10 +63,8 @@ def main():
     args = parser.parse_args()
     build, root = args.build.resolve(), args.state_dir.resolve()
     marker = root / '.clarp-replay-owned'
-    if root.exists() and any(root.iterdir()) and not marker.is_file():
-        parser.error('state directory is nonempty and does not belong to the replay harness')
-    root.mkdir(parents=True, exist_ok=True)
-    marker.touch()
+    if root.is_symlink() or not marker.is_file():
+        parser.error('state directory was not prepared by the replay harness')
     isolate(root)
     sys.path.insert(0, str(build / 'server'))
 

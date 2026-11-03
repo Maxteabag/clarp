@@ -1,34 +1,74 @@
 """Compare two normalized captures and report the differences safely.
 
 A difference names its scenario, channel (http, sse, schema, table, files,
-cli), a locator and a kind. The report never prints message text: a value is
-shown only when its key is a code key (type, kind, status, ...) and it looks
-like a code; anything else is shown as its type, length and a short hash.
-Every difference gets a stable id so an intended difference can be
-registered once and matched on later runs.
+cli, run), a locator and a kind. The report never prints message text
+(review s0-harness-7daeae37 finding 2):
+
+- A value prints only if it is a number, boolean, null, a surrogate the
+  normalizer made (``<id:3>``, ``<time>``), or a code: a string under a code
+  key (``CODE_KEYS``) that is also a string literal in the server source the
+  harness ships with (the codebook). Text a user or agent wrote is not in the
+  source, so it prints as ``str[len]#hash8``.
+- A key in a locator prints only if it is in the codebook (field names are
+  code literals); any other key, such as a map keyed by user text, prints as
+  ``k#hash8``. Event types in sequence signatures follow the value rule.
+- Run errors print as the step index and op only.
+
+A difference's id hashes its scenario, channel, locator, kind and the hashes
+of both values (finding 5), so a registered intended difference matches only
+that exact change; another change at the same place gets a new id.
 """
 from __future__ import annotations
 
+from collections import Counter
 import difflib
+import functools
 import hashlib
 import json
+from pathlib import Path
 import re
 
-CODE_KEYS = {'type', 'kind', 'status', 'op', 'outcome', 'state', 'method', 'path', 'phase', 'reason',
-             'code', 'role', 'source', 'origin', 'action', 'event', 'field', 'name', 'backend',
-             'step', 'queued', 'busy', 'error_code', 'mode', 'tbl_name', 'session'}
-CODE_VALUE = re.compile(r'^[\w./:<>?=&-]{1,48}$')
+HARNESS = Path(__file__).resolve().parents[2]
+CODE_KEYS = frozenset({'type', 'kind', 'status', 'op', 'outcome', 'state', 'method', 'phase', 'role',
+                       'action', 'mode', 'event', 'field', 'backend', 'error_code', 'code', 'tbl_name'})
+CODE_SHAPE = re.compile(r'^[a-z][a-z0-9_./:-]{0,47}$')
+SURROGATE = re.compile(r'^(<(id|eid):\d+>|<(time|duration|pid|port|json|bytes|sha256)>|<(ROOT|BUILD|HARNESS)>)$')
+# Keys the capture itself creates (envelopes, contract header names).
+HARNESS_KEYS = frozenset({'step', 'method', 'path', 'status', 'headers', 'body', 'event', 'has_id', 'data',
+                          'bytes', 'digest', 'json', 'kind', 'pk', 'rows', '<json>', '<bytes>', '<sha256>',
+                          'content-type', 'location', 'content-range', 'accept-ranges', 'content-encoding',
+                          'cache-control', 'content-disposition', 'etag', 'www-authenticate', 'retry-after',
+                          'type', 'name', 'tbl_name', 'sql'})
+LITERAL = re.compile(r'''["']([A-Za-z_][\w./:-]{0,47})["']''')
+
+
+@functools.lru_cache(maxsize=1)
+def codebook() -> frozenset[str]:
+    """Every identifier-shaped string literal in the harness tree's server code."""
+    words: set[str] = set()
+    for path in (HARNESS / 'server').rglob('*.py'):
+        words.update(LITERAL.findall(path.read_text(errors='replace')))
+    return frozenset(words)
+
+
+def _hash(value) -> str:
+    return hashlib.sha1(json.dumps(value, sort_keys=True, default=str).encode()).hexdigest()[:8]
 
 
 def safe(value, key: str = '') -> str:
-    if value is None or isinstance(value, bool) or isinstance(value, (int, float)):
+    if value is None or isinstance(value, (bool, int, float)):
         return json.dumps(value)
-    if isinstance(value, str) and (key in CODE_KEYS or value.startswith('<')) and CODE_VALUE.match(value):
-        return value
-    blob = json.dumps(value, sort_keys=True)
-    kind = type(value).__name__
-    size = len(value) if isinstance(value, (str, list, dict)) else len(blob)
-    return f'{kind}[{size}]#{hashlib.sha1(blob.encode()).hexdigest()[:8]}'
+    if isinstance(value, str):
+        if SURROGATE.match(value):
+            return value
+        if key in CODE_KEYS and CODE_SHAPE.match(value) and value in codebook():
+            return value
+    size = len(value) if isinstance(value, (str, list, dict)) else 0
+    return f'{type(value).__name__}[{size}]#{_hash(value)}'
+
+
+def safe_key(key: str) -> str:
+    return key if key in HARNESS_KEYS or key in codebook() or SURROGATE.match(key) else f'k#{_hash(key)}'
 
 
 class Report:
@@ -36,10 +76,9 @@ class Report:
         self.items: list[dict] = []
 
     def add(self, scenario, channel, locator, kind, a=None, b=None, key=''):
-        ident = hashlib.sha1(f'{scenario}|{channel}|{locator}|{kind}'.encode()).hexdigest()[:10]
+        ident = hashlib.sha1(f'{scenario}|{channel}|{locator}|{kind}|{_hash(a)}|{_hash(b)}'.encode()).hexdigest()[:12]
         self.items.append({'id': ident, 'scenario': scenario, 'channel': channel, 'locator': locator,
-                           'kind': kind, 'base': safe(a, key) if a is not None or kind == 'changed' else None,
-                           'head': safe(b, key) if b is not None or kind == 'changed' else None})
+                           'kind': kind, 'base': safe(a, key), 'head': safe(b, key)})
 
 
 def _deep(report, scenario, channel, locator, a, b, key=''):
@@ -47,7 +86,7 @@ def _deep(report, scenario, channel, locator, a, b, key=''):
         report.add(scenario, channel, locator, 'changed', a, b, key)
     elif isinstance(a, dict):
         for k in sorted(set(a) | set(b)):
-            loc = f'{locator}.{k}'
+            loc = f'{locator}.{safe_key(k)}'
             if k not in b:
                 report.add(scenario, channel, loc, 'field-removed', a[k], None, k)
             elif k not in a:
@@ -63,79 +102,115 @@ def _deep(report, scenario, channel, locator, a, b, key=''):
         report.add(scenario, channel, locator, 'changed', a, b, key)
 
 
-def _signature(event) -> str:
-    if not isinstance(event, dict):
-        return safe(event)
-    parts = [str(event.get('type', '?'))]
+def _signature(item) -> str:
+    """A safe, comparable summary of an HTTP exchange or SSE frame."""
+    if not isinstance(item, dict):
+        return safe(item)
+    if 'method' in item:
+        return f"{item['method']} {_path_code(item['path'])} {item['status']}"
+    data = item.get('data') if isinstance(item.get('data'), dict) else {}
+    parts = [safe(item.get('event'), 'event') if item.get('event') else 'message', safe(data.get('type'), 'type')]
     for k in ('kind', 'status', 'state', 'phase', 'action'):
-        if isinstance(event.get(k), str):
-            parts.append(f'{k}={event[k]}')
-    if isinstance(event.get('ops'), list):
-        parts.append('ops=' + ','.join(str(o.get('op')) for o in event['ops'] if isinstance(o, dict)))
+        if isinstance(data.get(k), str):
+            parts.append(f'{k}={safe(data[k], k)}')
+    if isinstance(data.get('ops'), list):
+        parts.append('ops=' + ','.join(safe(o.get('op'), 'op') for o in data['ops'] if isinstance(o, dict)))
     return ' '.join(parts)
 
 
+def _path_code(path: str) -> str:
+    """Request paths are the harness's own scenario text; print the route shape."""
+    return '/'.join(p if p in codebook() or not p else f'k#{_hash(p)}' for p in path.split('/'))
+
+
 def _sequence(report, scenario, channel, a, b):
-    """Align two event sequences by signature; an insertion, removal or reorder
-    shows as a sequence difference, a matched pair is compared field by field."""
+    """Align two sequences by signature; an insertion, removal or reorder shows
+    as a sequence difference, a matched pair is compared field by field."""
     sa, sb = [_signature(e) for e in a], [_signature(e) for e in b]
     matcher = difflib.SequenceMatcher(a=sa, b=sb, autojunk=False)
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
         if tag == 'equal':
             for i, j in zip(range(i1, i2), range(j1, j2)):
-                _deep(report, scenario, channel, f'[{i}:{sa[i].split()[0]}]', a[i], b[j])
+                _deep(report, scenario, channel, f'[{i}]', a[i], b[j])
         else:
             report.add(scenario, channel, f'[{i1}:{i2}]->[{j1}:{j2}]', f'sequence-{tag}',
-                       ' | '.join(sa[i1:i2]) or None, ' | '.join(sb[j1:j2]) or None, 'type')
+                       {'<signatures>': sa[i1:i2]}, {'<signatures>': sb[j1:j2]})
+            # The signatures are already safe; show them so a reorder is readable.
+            report.items[-1]['base'] = ' | '.join(sa[i1:i2]) or '-'
+            report.items[-1]['head'] = ' | '.join(sb[j1:j2]) or '-'
 
 
 def _rows(report, scenario, table, a, b):
-    ka = [json.dumps(r, sort_keys=True) for r in a]
-    kb = [json.dumps(r, sort_keys=True) for r in b]
-    only_a = [r for r, k in zip(a, ka) if k not in kb or ka.count(k) > kb.count(k)]
-    only_b = [r for r, k in zip(b, kb) if k not in ka or kb.count(k) > ka.count(k)]
-    if len(a) != len(b):
-        report.add(scenario, 'table', f'{table}#rows', 'changed', len(a), len(b))
-    # Pair leftover rows by their first column (usually the primary key).
-    def first(r):
-        return json.dumps(next(iter(r.values()), None)) if r else ''
-    by_key = {first(r): r for r in only_b}
-    for r in only_a:
-        other = by_key.pop(first(r), None)
-        if other is None:
-            report.add(scenario, 'table', f'{table}[{safe(first(r))}]', 'row-removed', r, None)
+    """Rows as a multiset (SELECT order is not a contract); leftovers paired by primary key."""
+    pk = a.get('pk') or b.get('pk') or []
+    ra, rb = a.get('rows', []), b.get('rows', [])
+    ca = Counter(json.dumps(r, sort_keys=True) for r in ra)
+    cb = Counter(json.dumps(r, sort_keys=True) for r in rb)
+    if len(ra) != len(rb):
+        report.add(scenario, 'table', f'{table}#rows', 'changed', len(ra), len(rb))
+    only_a = [json.loads(k) for k in (ca - cb).elements()]
+    only_b = [json.loads(k) for k in (cb - ca).elements()]
+
+    def key(row):
+        return json.dumps([row.get(c) for c in pk]) if pk else None
+    pending: dict[str, list] = {}
+    for row in only_b:
+        if key(row) is not None:
+            pending.setdefault(key(row), []).append(row)
+    for row in only_a:
+        match = pending.get(key(row)) if key(row) is not None else None
+        if match:
+            _deep(report, scenario, 'table', f"{table}[pk={','.join(safe(row.get(c)) for c in pk)}]", row, match.pop(0))
         else:
-            _deep(report, scenario, 'table', f'{table}[{safe(first(r))}]', r, other)
-    for k, r in by_key.items():
-        report.add(scenario, 'table', f'{table}[{safe(k)}]', 'row-added', None, r)
+            report.add(scenario, 'table', f'{table}[row]', 'row-removed', row, None)
+    for rows in pending.values():
+        for row in rows:
+            report.add(scenario, 'table', f'{table}[row]', 'row-added', None, row)
+    for row in only_b:
+        if key(row) is None:
+            report.add(scenario, 'table', f'{table}[row]', 'row-added', None, row)
 
 
 def compare(a: dict, b: dict, report: Report):
     s = a['scenario']
     if a['error'] or b['error']:
-        if bool(a['error']) != bool(b['error']) or a['error'] != b['error']:
-            report.add(s, 'run', 'error', 'changed', a['error'] and 'failed', b['error'] and 'failed')
+        report.add(s, 'run', 'error', 'run-failed', 'failed' if a['error'] else 'ok',
+                   'failed' if b['error'] else 'ok')
+        return
     _sequence(report, s, 'http', a['http'], b['http'])
     _sequence(report, s, 'sse', a['sse'], b['sse'])
     _deep(report, s, 'schema', 'sqlite_master', a['schema'], b['schema'])
     for table in sorted(set(a['tables']) | set(b['tables'])):
-        _rows(report, s, table, a['tables'].get(table, []), b['tables'].get(table, []))
-    _deep(report, s, 'files', 'files', a['files'], b['files'])
+        _rows(report, s, table, a['tables'].get(table, {}), b['tables'].get(table, {}))
+    _files(report, s, a['files'], b['files'])
     _deep(report, s, 'cli', 'cli', a['cli'], b['cli'])
 
 
-def render(report: Report, intended: set[str], title: str) -> str:
+def _files(report, scenario, a, b):
+    fa = {f['path']: f for f in a}
+    fb = {f['path']: f for f in b}
+    for path in sorted(set(fa) | set(fb)):
+        loc = f'files[{_hash(path)}]'
+        if path not in fb:  # paths are scratch-relative and may carry scenario text: hashed
+            report.add(scenario, 'files', loc, 'file-removed', fa[path]['bytes'], None)
+        elif path not in fa:
+            report.add(scenario, 'files', loc, 'file-added', None, fb[path]['bytes'])
+        else:
+            _deep(report, scenario, 'files', loc, fa[path], fb[path])
+
+
+def render(report: Report, intended: set[str], title: str, errors=()) -> str:
     lines = [f'# Replay difference report: {title}', '']
     unexplained = [d for d in report.items if d['id'] not in intended]
-    by_scenario: dict[str, int] = {}
-    for d in report.items:
-        by_scenario[d['scenario']] = by_scenario.get(d['scenario'], 0) + 1
+    by_scenario = Counter(d['scenario'] for d in report.items)
     lines.append(f'differences: {len(report.items)}  registered intended: '
                  f'{len(report.items) - len(unexplained)}  unexplained: {len(unexplained)}')
     for scen, count in sorted(by_scenario.items()):
         lines.append(f'  {scen}: {count}')
+    for line in errors:
+        lines.append(f'RUN ERROR {line}')
     if report.items:
-        lines += ['', 'id          class        scenario / channel / locator / kind: base -> head']
+        lines += ['', 'id            class        scenario / channel / locator / kind: base -> head']
     for d in report.items:
         cls = 'intended' if d['id'] in intended else 'UNEXPLAINED'
         lines.append(f"{d['id']}  {cls:<11}  {d['scenario']} / {d['channel']} / {d['locator']} / "

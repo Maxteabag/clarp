@@ -12,12 +12,12 @@ import diff  # noqa: E402
 import normalize  # noqa: E402
 import planted  # noqa: E402
 
-SECRET = 'synthetic secret sentence that must never be printed'
+SECRETS = ('synthetic secret sentence that must never be printed', 'zebrafish', '<private-message>')
 
 
 def _capture(**over):
     base = {'scenario': 's', 'error': None, 'root': '/scratch/s', 'build': '/b',
-            'http': [], 'sse': [], 'db': {'schema': [], 'tables': {}}, 'files': []}
+            'http': [], 'sse': [], 'db': {'schema': [], 'pk': {}, 'tables': {}}, 'files': []}
     return {**base, **over}
 
 
@@ -27,41 +27,91 @@ def _report(a, b):
     return report
 
 
+def _frame(data, event=None, has_id=True):
+    return {'event': event, 'has_id': has_id, 'data': data}
+
+
+def _http(body, status=200, headers=None):
+    return {'step': 'send', 'method': 'POST', 'path': '/send', 'status': status,
+            'headers': headers or {}, 'body': body}
+
+
 def test_generated_ids_and_clocks_normalize_away_but_keep_identity():
     n = normalize.Normalizer({'<ROOT>': '/scratch/s'})
-    a = n.value({'agent_id': 'a1b2c3d4e5f60718', 'ts': 1793692941182, 'again': 'a1b2c3d4e5f60718',
-                 'cwd': '/scratch/s/workspace', 'pid': 4242})
-    assert a == {'agent_id': '<id:1>', 'ts': '<time>', 'again': '<id:1>',
-                 'cwd': '<ROOT>/workspace', 'pid': '<pid>'}
+    out = n.value({'agent_id': 'a1b2c3d4e5f60718', 'ts': 1793692941182, 'again_id': 'a1b2c3d4e5f60718',
+                   'cwd': '/scratch/s/workspace', 'pid': 4242, 'event_id': 17, 'next': {'event_id': 17}})
+    assert out == {'agent_id': '<id:1>', 'ts': '<time>', 'again_id': '<id:1>', 'cwd': '<ROOT>/workspace',
+                   'pid': '<pid>', 'event_id': '<eid:1>', 'next': {'event_id': '<eid:1>'}}
 
 
-def test_report_never_prints_message_text():
-    a = _capture(sse=[{'type': 'transcript', 'text': SECRET}],
-                 db={'schema': [], 'tables': {'messages': [{'message_id': 'u-1', 'text': SECRET}]}})
-    b = _capture(sse=[{'type': 'transcript', 'text': SECRET + ' changed'}],
-                 db={'schema': [], 'tables': {'messages': [{'message_id': 'u-1', 'text': 'other'}]}})
+def test_settings_checksums_and_free_text_hex_stay_comparable():
+    n = normalize.Normalizer({})
+    assert n.value({'timeout_ms': 30000, 'heartbeat_interval_sec': 60}) == {
+        'timeout_ms': 30000, 'heartbeat_interval_sec': 60}
+    # Hex outside an id field is content, not a generated id.
+    assert n.value({'checksum': 'deadbeefcafe0123'}) == {'checksum': 'deadbeefcafe0123'}
+    a = _capture(http=[_http({'checksum': 'deadbeefcafe0123'})])
+    b = _capture(http=[_http({'checksum': 'deadbeefcafe9999'})])
+    assert [d['kind'] for d in _report(a, b).items] == ['changed']
+
+
+@pytest.mark.parametrize('secret', SECRETS)
+def test_report_never_prints_message_text_values_or_keys(secret):
+    a = _capture(sse=[_frame({'type': 'transcript', 'text': secret, 'reason': secret, 'by': {secret: 1}})],
+                 db={'schema': [], 'pk': {'messages': ['message_id']},
+                     'tables': {'messages': [{'message_id': 'u-1', 'text': secret}]}})
+    b = _capture(sse=[_frame({'type': 'transcript', 'text': secret + 'x', 'reason': 'other',
+                              'by': {secret + 'x': 1}})],
+                 db={'schema': [], 'pk': {'messages': ['message_id']},
+                     'tables': {'messages': [{'message_id': 'u-1', 'text': 'other'}]}})
     report = _report(a, b)
     rendered = diff.render(report, set(), 'test')
     assert report.items
-    assert 'synthetic' not in rendered and 'other' not in rendered
+    assert secret not in rendered and 'other' not in rendered
 
 
-def test_order_swap_and_removed_field_are_differences():
-    events = [{'type': 'agent-state', 'kind': 'done'}, {'type': 'agent-activity', 'state': 'idle'}]
-    swapped = _report(_capture(sse=events), _capture(sse=events[::-1]))
-    assert any(d['kind'].startswith('sequence-') for d in swapped.items)
-    http = [{'step': 'send', 'method': 'POST', 'path': '/send', 'status': 200,
-             'body': {'ok': True, 'queue_depth': 0}}]
-    dropped = [{**http[0], 'body': {'ok': True}}]
-    removed = _report(_capture(http=http), _capture(http=dropped))
-    assert [d['kind'] for d in removed.items] == ['field-removed']
+def test_codes_from_the_server_source_do_print():
+    a = _capture(sse=[_frame({'type': 'agent-state', 'kind': 'done'})])
+    b = _capture(sse=[_frame({'type': 'agent-state', 'kind': 'thinking'})])
+    rendered = diff.render(_report(a, b), set(), 'test')
+    assert 'kind=done -> message agent-state kind=thinking' in rendered
 
 
-def test_identical_captures_have_no_difference_and_stable_ids():
-    a = _capture(http=[{'step': 'x', 'method': 'GET', 'path': '/status', 'status': 200, 'body': {'busy': False}}])
-    b = _capture(http=[{**a['http'][0], 'status': 500}])
-    assert not _report(a, a).items
-    assert [d['id'] for d in _report(a, b).items] == [d['id'] for d in _report(a, b).items]
+def test_order_swap_removed_field_header_and_envelope_are_differences():
+    events = [_frame({'type': 'agent-state', 'kind': 'done'}), _frame({'type': 'agent-activity', 'state': 'idle'})]
+    assert any(d['kind'].startswith('sequence-') for d in _report(_capture(sse=events),
+                                                                   _capture(sse=events[::-1])).items)
+    removed = _report(_capture(http=[_http({'ok': True, 'queue_depth': 0})]),
+                      _capture(http=[_http({'ok': True})]))
+    assert [(d['kind'], d['locator']) for d in removed.items] == [('field-removed', '[0].body.queue_depth')]
+    header = _report(_capture(http=[_http({}, headers={'cache-control': 'no-store'})]),
+                     _capture(http=[_http({}, headers={'cache-control': 'no-cache'})]))
+    assert [d['locator'] for d in header.items] == ['[0].headers.cache-control']
+    envelope = _report(_capture(sse=[_frame({'type': 'x'})]), _capture(sse=[_frame({'type': 'x'}, has_id=False)]))
+    assert [d['locator'] for d in envelope.items] == ['[0].has_id']
+
+
+def test_same_size_file_change_is_a_difference():
+    f = {'path': 'audio/a.mp3', 'bytes': 4, 'kind': 'bytes', 'digest': 'aa'}
+    assert _report(_capture(files=[f]), _capture(files=[{**f, 'digest': 'bb'}])).items
+
+
+def test_rows_pair_by_primary_key_and_count_duplicates():
+    rows = [{'turn_id': 1, 'outcome': 'interrupted'}, {'turn_id': 2, 'outcome': 'completed'}]
+    a = _capture(db={'schema': [], 'pk': {'turns': ['turn_id']}, 'tables': {'turns': rows}})
+    b = _capture(db={'schema': [], 'pk': {'turns': ['turn_id']},
+                     'tables': {'turns': [rows[1], {**rows[0], 'outcome': 'failed'}]}})
+    assert [(d['locator'], d['kind']) for d in _report(a, b).items] == [('turns[pk=1].outcome', 'changed')]
+    dup = _capture(db={'schema': [], 'pk': {'t': []}, 'tables': {'t': [{'v': 1}, {'v': 1}]}})
+    one = _capture(db={'schema': [], 'pk': {'t': []}, 'tables': {'t': [{'v': 1}]}})
+    assert {d['kind'] for d in _report(dup, one).items} == {'changed', 'row-removed'}
+
+
+def test_intended_id_binds_the_values_not_just_the_place():
+    a = _capture(http=[_http({}, status=200)])
+    first = _report(a, _capture(http=[_http({}, status=403)])).items
+    other = _report(a, _capture(http=[_http({}, status=500)])).items
+    assert first[0]['locator'] == other[0]['locator'] and first[0]['id'] != other[0]['id']
 
 
 def test_planted_change_refuses_a_stale_anchor(tmp_path):
@@ -69,6 +119,14 @@ def test_planted_change_refuses_a_stale_anchor(tmp_path):
     (tmp_path / 'server/x.py').write_text('a = 1\n')
     with pytest.raises(RuntimeError, match='anchor found 0 times'):
         planted.apply({'id': 't', 'file': 'server/x.py', 'find': 'b = 2', 'replace': ''}, tmp_path)
+
+
+def test_a_planted_change_counts_only_its_own_observable():
+    change = planted.BY_ID['response-field']
+    unrelated = [{'channel': 'http', 'kind': 'changed', 'locator': '[0].status'}]
+    assert not planted.caught(change, unrelated)
+    assert planted.caught(change, [{'channel': 'http', 'kind': 'field-removed',
+                                    'locator': '[2].body.queue_depth'}])
 
 
 @pytest.mark.parametrize('change', planted.CHANGES, ids=lambda c: c['id'])
