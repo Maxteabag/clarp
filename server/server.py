@@ -5341,9 +5341,9 @@ class Handler(BaseHTTPRequestHandler):
                             agent_id, stop_snapshot, cancelled_trace_ids)
                         turn_dispatch.finish_stop(
                             self.ctx, agent_id, backend_registry=backends)
-                if stop_unrecorded is not None:
-                    release(set())
-                    raise StopNotRecorded(agent_id) from stop_unrecorded
+                # A deferred Stop (Oracle cancellation) completes even when its
+                # row could not be written: its caller releases the barrier
+                # through ``release``; the failure is logged (turnStopRecordFail).
                 log("turnStop", f"session={session} terminated={n} barrier=held")
                 return n, release
             elif runtime_client is not None:
