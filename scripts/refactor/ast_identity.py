@@ -33,6 +33,30 @@ Imports, the only thing allowed to differ, are checked one occurrence at a time:
   definition must equal the old file's: they change how an unchanged
   definition executes (annotations, for example).
 
+Method mode (S3 mixin moves). A MOVE of the form
+`server.py::Handler=lib/routes/vocab.py::VocabRoutes[,lib/routes/x.py::XRoutes]`
+moves members (methods and class-level assignments) out of a class into mixin
+classes:
+
+- every member of each listed mixin at HEAD comes from the class at BASE, by
+  name, is AST-equal with imports blanked, has the same per-import accounting
+  as above (shared helper `pair_imports`), and lives in exactly one listed
+  mixin; a member defined twice in a class fails;
+- the class at HEAD equals the class at BASE minus exactly those members, in
+  order; its decorators and keywords are unchanged; its bases are the listed
+  mixins first, in the listed order, then the BASE bases; and at HEAD every
+  moved name resolves on the class to the mixin's object (no shadowing);
+- the old file is unchanged outside the class (module-level statements);
+- per destination (each mixin file and the retained old file): every name the
+  old file imported that the destination uses is still imported there to the
+  same object; a new import fails unless it brings a listed mixin into the
+  old file from its home; compiler directives equal the old file's;
+- a module-level name a moved member reads that the old file defined (not
+  imported) must be bound in the mixin module to the same object (so a
+  look-alike fails); an unbound name fails; a builtin may not be rebound;
+- a moved member may not use zero-argument `super()` or a private `__name`
+  (both change meaning when the defining class changes).
+
 Identity is checked by importing both sides in one interpreter, in a sandboxed
 copy of HEAD (HOME, XDG and CLAUDE_PWA_DB point into a temp directory).
 
@@ -151,6 +175,27 @@ def used_names(tree: ast.AST) -> set[str]:
     return {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
 
 
+def pair_imports(old: str, name: str, before: ast.AST, after: ast.AST, old_package: str,
+                 path: str) -> tuple[list[str], list[tuple]]:
+    """The k-th import of a definition before the move pairs with its k-th import
+    after: counts must match, each pair must bind the same names, and every
+    changed absolute target becomes an identity pair checked at HEAD."""
+    old_imps, new_imps = imports_in(before), imports_in(after)
+    if len(old_imps) != len(new_imps):
+        return [f"{old}: {name} has {len(old_imps)} imports, {len(new_imps)} in {path}"], []
+    problems: list[str] = []
+    pairs: list[tuple] = []
+    for k, (b1, b2) in enumerate(zip(old_imps, new_imps)):
+        b_old, b_new = bindings(b1, old_package), bindings(b2, _package(path))
+        if [b[0] for b in b_old] != [b[0] for b in b_new]:
+            problems.append(f"{old}: {name} import #{k + 1} binds other names in {path}")
+            continue
+        for (bound, m1, a1), (_, m2, a2) in zip(b_old, b_new):
+            if (m1, a1) != (m2, a2):
+                pairs.append((f"{name}: {bound}", (m1, a1), (m2, a2)))
+    return problems, pairs
+
+
 def compare(base: str, head: str, old: str, new: list[str]) -> tuple[list[str], list[tuple]]:
     """Problems found, and (label, before, after) target pairs to check for identity at HEAD."""
     old_tree = ast.parse(_source(base, old))
@@ -174,18 +219,9 @@ def compare(base: str, head: str, old: str, new: list[str]) -> tuple[list[str], 
         if blanked(stmt) != blanked(moved):
             problems.append(f"{old}: {name} differs in {path}")
             continue
-        old_imps, new_imps = imports_in(stmt), imports_in(moved)
-        if len(old_imps) != len(new_imps):
-            problems.append(f"{old}: {name} has {len(old_imps)} imports, {len(new_imps)} in {path}")
-            continue
-        for k, (before, after) in enumerate(zip(old_imps, new_imps)):
-            b_old, b_new = bindings(before, old_package), bindings(after, _package(path))
-            if [b[0] for b in b_old] != [b[0] for b in b_new]:
-                problems.append(f"{old}: {name} import #{k + 1} binds other names in {path}")
-                continue
-            for (bound, m1, a1), (_, m2, a2) in zip(b_old, b_new):
-                if (m1, a1) != (m2, a2):
-                    pairs.append((f"{name}: {bound}", (m1, a1), (m2, a2)))
+        found, more = pair_imports(old, name, stmt, moved, old_package, path)
+        problems += found
+        pairs += more
 
     if len(new_trees) == 1:
         (path, tree), = new_trees.items()
@@ -222,6 +258,216 @@ def compare(base: str, head: str, old: str, new: list[str]) -> tuple[list[str], 
     return problems, pairs
 
 
+def _class(tree: ast.Module, name: str) -> ast.ClassDef | None:
+    return next((s for s in tree.body if isinstance(s, ast.ClassDef) and s.name == name), None)
+
+
+def members(cls: ast.ClassDef) -> dict[str, ast.stmt]:
+    """A class body's definitions by name (methods, nested classes, assignments)."""
+    found: dict[str, ast.stmt] = {}
+    for stmt in cls.body:
+        if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            found[stmt.name] = stmt
+        elif isinstance(stmt, (ast.Assign, ast.AnnAssign)):
+            targets = stmt.targets if isinstance(stmt, ast.Assign) else [stmt.target]
+            found[",".join(n.id for t in targets for n in ast.walk(t)
+                           if isinstance(n, ast.Name))] = stmt
+    return found
+
+
+def global_reads(member: ast.stmt) -> set[str]:
+    """Names a member reads from module scope: those evaluated when it is defined
+    (decorators, defaults, annotations, assigned values) and symtable's implicit
+    globals in every scope nested in it; imports inside the member are local."""
+    import symtable
+    import textwrap
+    source = textwrap.dedent(ast.unparse(member))
+    table = symtable.symtable(source, "<member>", "exec")
+    found: set[str] = set()
+
+    def visit(t):
+        for sym in t.get_symbols():
+            if sym.is_global() and sym.is_referenced() and not sym.is_imported():
+                found.add(sym.get_name())
+        for child in t.get_children():
+            visit(child)
+    # Names read when the member is defined (decorators, default values,
+    # annotations, a class-level assignment's value) live in the root table.
+    # A name the member also binds still counts when it is read: in a class
+    # body `VALUE = VALUE` reads the module's VALUE before binding its own.
+    for sym in table.get_symbols():
+        if sym.is_referenced() and not sym.is_imported():
+            found.add(sym.get_name())
+    for child in table.get_children():
+        visit(child)
+    return found
+
+
+def module_binding(tree: ast.Module, path: str, name: str) -> tuple[str, str | None] | None:
+    """Where a module binds `name`: an import target, or (module, name) for a
+    module-level definition; None when the module does not bind it."""
+    imported = top_imports(tree, _package(path))
+    if name in imported:
+        return imported[name]
+    for stmt in tree.body:
+        if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and stmt.name == name:
+            return (_module(path), name)
+        if isinstance(stmt, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+            targets = stmt.targets if isinstance(stmt, ast.Assign) else [stmt.target]
+            if any(isinstance(n, ast.Name) and n.id == name for t in targets for n in ast.walk(t)):
+                return (_module(path), name)
+    return None
+
+
+def _base_label(node: ast.expr) -> str:
+    return ast.unparse(node)
+
+
+def _duplicates(cls: ast.ClassDef) -> list[str]:
+    names = collections.Counter()
+    for stmt in cls.body:
+        names.update(_one(stmt).keys())
+    return sorted(n for n, count in names.items() if count > 1)
+
+
+def _spec(text: str) -> tuple[str, str]:
+    path, sep, name = text.partition("::")
+    if not sep or not name:
+        raise ValueError(f"method mode needs path.py::Class, got {text!r}")
+    return path, name
+
+
+def compare_methods(base: str, head: str, old: str, new: list[str]) -> tuple[list[str], list[tuple]]:
+    """Method mode (`old.py::Class=new.py::Mixin[,...]`): members moved out of a
+    class into mixin classes. The old file stays; everything in it outside the
+    moved members must be unchanged."""
+    import builtins
+    old_path, old_name = _spec(old)
+    old_package = _package(old_path)
+    base_tree = ast.parse(_source(base, old_path))
+    head_tree = ast.parse(_source(head, old_path))
+    problems: list[str] = []
+    pairs: list[tuple] = []
+    cls_base, cls_head = _class(base_tree, old_name), _class(head_tree, old_name)
+    if cls_base is None or cls_head is None:
+        return [f"{old}: class {old_name} not found at {'BASE' if cls_base is None else 'HEAD'}"], []
+    base_members = members(cls_base)
+    old_top = top_imports(base_tree, old_package)
+
+    mixins: list[tuple[str, str, ast.Module, ast.ClassDef]] = []
+    for text in new:
+        path, mixin_name = _spec(text)
+        tree = ast.parse(_source(head, path))
+        cls = _class(tree, mixin_name)
+        if cls is None:
+            problems.append(f"{old}: mixin {mixin_name} not found in {path}")
+            continue
+        mixins.append((path, mixin_name, tree, cls))
+    mixin_names = [m[1] for m in mixins]
+
+    # Members: each moved one verbatim, from the class at BASE, in one mixin.
+    moved: dict[str, tuple[str, str]] = {}
+    for path, mixin_name, tree, cls in mixins:
+        for name in _duplicates(cls):
+            problems.append(f"{old}: {name} is defined twice in {path}::{mixin_name}")
+        for name, stmt in members(cls).items():
+            if name in moved:
+                problems.append(f"{old}: {name} is in both {moved[name][0]} and {path}")
+                continue
+            moved[name] = (path, mixin_name)
+            if name not in base_members:
+                problems.append(f"{old}: {path}::{mixin_name}.{name} did not exist in {old_name} at BASE")
+                continue
+            before = base_members[name]
+            if blanked(before) != blanked(stmt):
+                problems.append(f"{old}: {old_name}.{name} differs in {path}::{mixin_name}")
+                continue
+            for node in ast.walk(stmt):
+                if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                        and node.func.id == "super" and not node.args):
+                    problems.append(f"{old}: {name} uses zero-argument super(), which changes meaning in a mixin")
+                ident = (node.attr if isinstance(node, ast.Attribute)
+                         else node.id if isinstance(node, ast.Name) else "")
+                if ident.startswith("__") and not ident.endswith("__"):
+                    problems.append(f"{old}: {name} uses private name {ident}, mangled differently in a mixin")
+            found, more = pair_imports(old, name, before, stmt, old_package, path)
+            problems += found
+            pairs += more
+            # Module-level names it reads that the old module defined (not
+            # imported: the import rule below covers those) or builtins.
+            for read in sorted(global_reads(stmt)):
+                if read in old_top:
+                    continue
+                was = module_binding(base_tree, old_path, read)
+                now = module_binding(tree, path, read)
+                if was is None and hasattr(builtins, read):
+                    if now is not None:
+                        problems.append(f"{old}: {path} binds builtin {read} that {name} reads")
+                elif now is None:
+                    problems.append(f"{old}: {name} reads {read}, which {path} does not bind")
+                elif was is None:
+                    problems.append(f"{old}: {name} reads {read}, which {old_path} did not bind at BASE")
+                elif was != now:
+                    pairs.append((f"{path}: {read} (read by {name})", was, now))
+            # Resolution at HEAD: the class attribute must be the moved member.
+            pairs.append((f"{old_name}.{name} resolves to {mixin_name}.{name}",
+                          (_module(path), f"{mixin_name}.{name}"), (_module(old_path), f"{old_name}.{name}")))
+
+    # The class at HEAD: BASE minus exactly the moved members, mixins first.
+    for name in _duplicates(cls_head):
+        problems.append(f"{old}: {name} is defined twice in {old_path}::{old_name}")
+    remaining = [blanked(s) for s in cls_base.body if not (_one(s).keys() & moved.keys())]
+    if remaining != [blanked(s) for s in cls_head.body]:
+        problems.append(f"{old}: {old_name} at HEAD differs from {old_name} at BASE beyond the moved members")
+    if ([blanked(d) for d in cls_base.decorator_list] != [blanked(d) for d in cls_head.decorator_list]
+            or [blanked(k) for k in cls_base.keywords] != [blanked(k) for k in cls_head.keywords]):
+        problems.append(f"{old}: {old_name} decorators or keywords changed")
+    expected_bases = mixin_names + [ast.unparse(b) for b in cls_base.bases]
+    head_bases = [ast.unparse(b) for b in cls_head.bases]
+    if head_bases != expected_bases:
+        problems.append(f"{old}: {old_name} bases {head_bases}; expected the listed mixins first, "
+                        f"in order, then the BASE bases: {expected_bases}")
+
+    # The rest of the old file: module-level statements unchanged.
+    def outside(tree):
+        return [("<class>" if isinstance(s, ast.ClassDef) and s.name == old_name else blanked(s))
+                for s in tree.body if not isinstance(s, _IMPORTS)]
+    if outside(base_tree) != outside(head_tree):
+        problems.append(f"{old}: {old_path} differs outside {old_name} (module-level statements)")
+
+    # Imports and compiler directives, per destination (mixin files and the
+    # retained old file): a name the old file imported that a destination uses
+    # must still be bound there to the same object; a new import fails unless
+    # it brings a listed mixin into the old file from its home.
+    homes = {mixin_name: path for path, mixin_name, _, _ in mixins}
+    for path, tree in [(old_path, head_tree)] + [(m[0], m[2]) for m in mixins]:
+        if futures(tree) != futures(base_tree):
+            problems.append(f"{old}: compiler directives differ in {path}: "
+                            f"{sorted(futures(base_tree))} -> {sorted(futures(tree))}")
+        new_top = top_imports(tree, _package(path))
+        used = used_names(tree)
+        for bound, target in old_top.items():
+            if bound not in used:
+                continue
+            if bound not in new_top:
+                problems.append(f"{old}: {path} uses {bound} but no longer imports it")
+            elif new_top[bound] != target:
+                pairs.append((f"{path}: {bound}", target, new_top[bound]))
+        for bound, target in new_top.items():
+            if bound in old_top:
+                continue
+            if path == old_path and bound in homes:
+                pairs.append((f"{path}: {bound}", (_module(homes[bound]), bound), target))
+            else:
+                problems.append(f"{old}: {path} adds an import of {bound} that {old_path} did not have")
+    return problems, pairs
+
+
+def _one(stmt: ast.stmt) -> dict[str, ast.stmt]:
+    holder = ast.ClassDef(name="_", bases=[], keywords=[], body=[stmt], decorator_list=[])
+    return members(holder)
+
+
 _IDENTITY = """
 import importlib, json, sys
 sys.path.insert(0, sys.argv[1])
@@ -229,7 +475,9 @@ def get(spec):
     module, attr = spec
     try:
         obj = importlib.import_module(module)
-        return getattr(obj, attr) if attr else obj
+        for part in (attr.split(".") if attr else []):
+            obj = getattr(obj, part)
+        return obj
     except Exception as exc:
         return exc
 bad = []
@@ -270,7 +518,8 @@ def main(argv: list[str]) -> int:
     problems, pairs = [], []
     for move in moves:
         old, _, new = move.partition("=")
-        found, imports = compare(base, head, old, new.split(","))
+        check = compare_methods if "::" in old else compare
+        found, imports = check(base, head, old, new.split(","))
         problems += found
         pairs += imports
     problems += identical_objects(head, pairs)
