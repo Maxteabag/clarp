@@ -286,9 +286,15 @@ PLACEHOLDER = re.compile(r'\{(\w+)\}')
 
 
 def fill(value, variables: dict):
-    """Replace {name} with a run variable (port, root, or one a step saved)."""
+    """Replace {name} with a run variable (port, root, or one a step saved). A
+    placeholder with nothing saved under its name means an earlier step did not
+    produce it: the scenario fails here, with that reason."""
     if isinstance(value, str):
-        return PLACEHOLDER.sub(lambda m: str(variables[m.group(1)]) if m.group(1) in variables else m.group(0), value)
+        def one(m):
+            if m.group(1) not in variables:
+                raise StepFailed(f'nothing saved as {m.group(1)} (an earlier step did not produce it)')
+            return str(variables[m.group(1)])
+        return PLACEHOLDER.sub(one, value)
     if isinstance(value, list):
         return [fill(v, variables) for v in value]
     if isinstance(value, dict):
@@ -331,6 +337,8 @@ def run_step(host: Host, sse, step: dict, http: list, cli: list, variables: dict
             # Carry fields from the previous response, e.g. /transcribe's trace_id into /send.
             last = http[-1]['body'] if http and isinstance(http[-1]['body'], dict) else {}
             body = {**(body or {}), **{k: last.get(src) for k, src in step['body_from_last'].items()}}
+        if step.get('auth') and step['auth'] not in variables:
+            raise StepFailed(f"nothing saved as {step['auth']} (an earlier step did not produce it)")
         token = variables[step['auth']] if step.get('auth') else None
         status, headers, payload = host.request(op.upper(), path, body, step.get('raw'),
                                                 step.get('headers'), token=token)
@@ -544,6 +552,9 @@ def capture(build: Path, scenario: dict, root: Path, python: str = sys.executabl
     sessions = scenario.get('sessions', ('rachel',))
     db, files = {'schema': [], 'pk': {}, 'tables': {}}, []
     try:
+        if any(step['op'] == 'cli' for step in scenario['steps']) \
+                and not (build / 'bin' / 'clarp-admin.py').is_file():
+            raise StepFailed('the build has no bin/clarp-admin.py (prepared by an older harness?)')
         host.start(scenario.get('config'))
         timings['start'] = round(time.monotonic() - started, 2)
         variables = {'port': host.url.rsplit(':', 1)[1], 'root': str(root)}
