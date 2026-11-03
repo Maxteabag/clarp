@@ -19,6 +19,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import signal
 import sqlite3
@@ -110,8 +111,9 @@ class Host:
             self.log.close()
             self.log = None
 
-    def request(self, method: str, path: str, body=None, raw: dict | None = None, headers: dict | None = None):
-        sent = {'Authorization': f'Bearer {TOKEN}', 'Content-Type': 'application/json', **(headers or {})}
+    def request(self, method: str, path: str, body=None, raw: dict | None = None, headers: dict | None = None,
+                token: str | None = None):
+        sent = {'Authorization': f'Bearer {token or TOKEN}', 'Content-Type': 'application/json', **(headers or {})}
         if raw is not None:
             data = raw['bytes'].encode()
             sent['Content-Type'] = raw['content_type']
@@ -239,11 +241,39 @@ def _provider_started(root: Path, marker: str):
     return False
 
 
-def run_step(host: Host, sse, step: dict, http: list, cli: list):
+PLACEHOLDER = re.compile(r'\{(\w+)\}')
+
+
+def fill(value, variables: dict):
+    """Replace {name} with a run variable (port, root, or one a step saved)."""
+    if isinstance(value, str):
+        return PLACEHOLDER.sub(lambda m: str(variables[m.group(1)]) if m.group(1) in variables else m.group(0), value)
+    if isinstance(value, list):
+        return [fill(v, variables) for v in value]
+    if isinstance(value, dict):
+        return {k: fill(v, variables) for k, v in value.items()}
+    return value
+
+
+def dig(value, dotted: str):
+    for part in dotted.split('.'):
+        value = value[int(part)] if isinstance(value, list) else (value or {}).get(part)
+    return value
+
+
+def save(step: dict, source, variables: dict) -> None:
+    for name, dotted in (step.get('save') or {}).items():
+        value = dig(source, dotted)
+        if value is None:
+            raise StepFailed(f'nothing to save as {name}')
+        variables[name] = value
+
+
+def run_step(host: Host, sse, step: dict, http: list, cli: list, variables: dict):
     op = step['op']
-    if op in ('get', 'post', 'put', 'delete'):
-        body = step.get('body')
-        path = step['path']
+    if op in ('get', 'post', 'put', 'delete', 'patch'):
+        body = fill(step.get('body'), variables)
+        path = fill(step['path'], variables)
         if step.get('from_last'):
             # Fill {name} in the path from the previous response, e.g. a queue item id.
             last = http[-1]['body'] if http else None
@@ -260,11 +290,14 @@ def run_step(host: Host, sse, step: dict, http: list, cli: list):
             # Carry fields from the previous response, e.g. /transcribe's trace_id into /send.
             last = http[-1]['body'] if http and isinstance(http[-1]['body'], dict) else {}
             body = {**(body or {}), **{k: last.get(src) for k, src in step['body_from_last'].items()}}
+        token = variables[step['auth']] if step.get('auth') else None
         status, headers, payload = host.request(op.upper(), path, body, step.get('raw'),
-                                                step.get('headers'))
+                                                step.get('headers'), token=token)
         http.append({'step': step.get('name') or f"{op} {step['path']}", 'method': op.upper(),
                      'path': step['path'].split('?')[0], 'status': status, 'headers': headers,
                      'body': payload})
+        if status < 400:
+            save(step, payload, variables)
         expect = step.get('expect_status')
         if expect is not None and status != expect:
             raise StepFailed(f'unexpected status {status}')
@@ -313,7 +346,17 @@ def run_step(host: Host, sse, step: dict, http: list, cli: list):
             return bool(row) and (row[0] or 0) >= step.get('min', 1)
         _poll('database state', counted)
     elif op == 'cli':
-        cli.append(run_cli(host, step))
+        result = run_cli(host, {**step, 'args': fill(step['args'], variables)})
+        cli.append(result)
+        if result['exit'] == 0 and isinstance(result['stdout'], dict):
+            save(step, result['stdout'].get('<json>'), variables)
+    elif op == 'save_sql':
+        # Setup from the database (a harness-authored read-only query), e.g. a janitor's session.
+        with _ro(host.root) as db:
+            row = db.execute(step['sql']).fetchone()
+        if not row:
+            raise StepFailed(f"nothing to save as {step['var']}")
+        variables[step['var']] = row[0]
     elif op == 'wait_busy':
         def busy():
             status = host.request('GET', f"/status?session={step['session']}")[2]
@@ -452,11 +495,12 @@ def capture(build: Path, scenario: dict, root: Path, python: str = sys.executabl
     try:
         host.start()
         timings['start'] = round(time.monotonic() - started, 2)
+        variables = {'port': host.url.rsplit(':', 1)[1], 'root': str(root)}
         sse = SSE(host, sessions)
         _poll('SSE connected', lambda: sse.frames)
         for index, step in enumerate(scenario['steps']):
             try:
-                run_step(host, sse, step, http, cli)
+                run_step(host, sse, step, http, cli, variables)
             except StepFailed as exc:
                 raise StepFailed(f'step {index} ({step["op"]}): {exc}') from exc
         timings['steps'] = round(time.monotonic() - started, 2)

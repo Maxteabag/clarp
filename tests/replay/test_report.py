@@ -370,3 +370,17 @@ def test_the_provider_proxy_injects_tool_items_after_turn_start(tmp_path):
         ('item/started', 'reasoning'), ('item/completed', 'reasoning'),
         ('item/started', 'commandExecution'), ('item/commandExecution/outputDelta', None),
         ('item/completed', 'commandExecution')]
+
+
+def test_pairing_secrets_become_surrogates_and_keep_identity():
+    code = 'clp_' + 'A' * 43
+    token = 'cld_' + 'b-' * 24
+    out = normalize.Normalizer({}).value({'code': code, 'uri': f'clarp://pair?code={code}', 'token': token})
+    assert out == {'code': '<secret:1>', 'uri': 'clarp://pair?code=<secret:1>', 'token': '<secret:2>'}
+
+
+def test_step_placeholders_fill_from_run_variables():
+    import capture
+    filled = capture.fill({'path': '/schedules/{schedule}', 'args': ['--url', 'http://127.0.0.1:{port}'],
+                           'keep': '{unknown}'}, {'schedule': 'sched_1', 'port': 4242})
+    assert filled == {'path': '/schedules/sched_1', 'args': ['--url', 'http://127.0.0.1:4242'], 'keep': '{unknown}'}

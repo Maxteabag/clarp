@@ -38,6 +38,8 @@ import re
 UUID = re.compile(r'[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}')
 HEX = re.compile(r'(?<![0-9A-Za-z])[0-9a-f]{12,64}(?![0-9A-Za-z])')
 ISO = re.compile(r'^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?$')
+# Pairing codes and device tokens (device_pairing): random secrets in a fixed format.
+SECRET = re.compile(r'(?<![0-9A-Za-z])(clp|cld)_[A-Za-z0-9_-]{30,}')
 LOOPBACK = re.compile(r'127\.0\.0\.1:\d+')
 # A short generated tail after a word prefix, e.g. the goal turn's trace id 'goal-1c4f4f95';
 # applied only where ids are expected (id keys, paths, ID_COLUMNS), never to free text.
@@ -170,6 +172,7 @@ class Normalizer:
         self.ids: dict[str, str] = {}
         self.eids: dict[str, str] = {}
         self.eid_names: dict[str, str] = {}
+        self.secrets: dict[str, str] = {}
         self.in_stream = False  # event ids are SSE ids only inside the SSE channels
         self.json_here = False  # JSON_HTTP_KEYS are parsed only in HTTP bodies
 
@@ -196,7 +199,13 @@ class Normalizer:
         value = HEX.sub(lambda m: self._id(m.group(0)), value)
         return SHORT_PREFIXED.sub(lambda m: m.group(1) + self._id(m.group(2)), value)
 
+    def _secret(self, token: str) -> str:
+        if token not in self.secrets:
+            self.secrets[token] = f'<secret:{len(self.secrets) + 1}>'
+        return self.secrets[token]
+
     def string(self, value: str, key: str) -> str:
+        value = SECRET.sub(lambda m: self._secret(m.group(0)), value)
         if key in CLOCK_KEYS and ISO.match(value.strip()):
             return '<time>'
         replaced = self.paths_in(value)

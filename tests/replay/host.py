@@ -122,6 +122,13 @@ def main():
     spec = importlib.util.spec_from_file_location('replay_server', build / 'server/server.py')
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    # Never a real interactive CLI: a scenario only sends plain GETs to /terminal/
+    # (answered before any spawn), and this makes an accidental upgrade fail loudly.
+    from lib import terminal_ws
+
+    def no_pty(*_args, **_kwargs):
+        raise RuntimeError('the replay host never spawns a terminal')
+    terminal_ws._serve_pty = no_pty
     server = module.build_server(ctx, 0, bind_addr='127.0.0.1')
     metadata = {'url': f'http://127.0.0.1:{server.server_address[1]}', 'pid': os.getpid()}
     pending = root / f'.host.json.{os.getpid()}.tmp'

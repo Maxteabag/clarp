@@ -34,7 +34,7 @@ HARNESS = Path(__file__).resolve().parents[2]
 CODE_KEYS = frozenset({'type', 'kind', 'status', 'op', 'outcome', 'state', 'method', 'phase', 'role',
                        'action', 'mode', 'event', 'field', 'backend', 'error_code', 'code', 'tbl_name'})
 CODE_SHAPE = re.compile(r'^[a-z][a-z0-9_./:-]{0,47}$')
-SURROGATE = re.compile(r'^(<id:\d+>|<eid:(\?\d+|(log:)?[a-z][a-z0-9_-]{0,40}#\d+@[0-9a-f]{6})>|<(time|duration|pid|port|json|bytes|sha256)>|<(ROOT|BUILD|HARNESS)>)$')
+SURROGATE = re.compile(r'^(<id:\d+>|<secret:\d+>|<eid:(\?\d+|(log:)?[a-z][a-z0-9_-]{0,40}#\d+@[0-9a-f]{6})>|<(time|duration|pid|port|json|bytes|sha256)>|<(ROOT|BUILD|HARNESS)>)$')
 # Keys the capture itself creates (envelopes, contract header names).
 HARNESS_KEYS = frozenset({'step', 'method', 'path', 'status', 'headers', 'body', 'event', 'id', 'data', '<form>', '<keys>',
                           'bytes', 'digest', 'json', 'kind', 'pk', 'rows', '<json>', '<bytes>', '<sha256>',
