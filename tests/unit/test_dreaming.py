@@ -1372,3 +1372,40 @@ def test_abandoning_does_not_overwrite_a_completion_that_won(tmp_path, monkeypat
     dreaming.abandon_run(run["run_id"], harvest=False)
 
     assert raced and real_get(run["run_id"])["status"] == "completed"
+
+
+def test_a_live_worker_whose_start_was_unreadable_is_not_taken_for_gone(monkeypatch):
+    """AUT-06 review 4 (B's control): an unknown recorded start time is no
+    proof that a live pid was reused; only a known, different start is."""
+    import os
+    real_start = dreaming._process_start
+    claim = dreaming._claim_worker("synthetic-unknown-start")
+    monkeypatch.setattr(dreaming, "_process_start", lambda _pid: None)
+    dreaming._fill_worker(claim, os.getpid())
+    monkeypatch.setattr(dreaming, "_process_start", real_start)
+    assert not dreaming._workers_gone("synthetic-unknown-start")
+
+
+def test_overlapping_dream_spawns_keep_their_own_claims():
+    """AUT-06 review 4 (B's control): two spawns of one run each hold their
+    own claim; the first one finishing does not clear the second's."""
+    import subprocess
+    first = dreaming._claim_worker("synthetic-overlap")
+    dreaming._claim_worker("synthetic-overlap")            # the second spawn, still under way
+    finished = subprocess.Popen(["true"])
+    finished.wait()
+    dreaming._fill_worker(first, finished.pid)
+    assert not dreaming._workers_gone("synthetic-overlap")
+
+
+def test_a_run_whose_workers_all_exited_is_gone():
+    import os
+    import subprocess
+    claim = dreaming._claim_worker("synthetic-all-exited")
+    finished = subprocess.Popen(["true"])
+    finished.wait()
+    dreaming._fill_worker(claim, finished.pid)
+    assert dreaming._workers_gone("synthetic-all-exited")
+    live = dreaming._claim_worker("synthetic-live")
+    dreaming._fill_worker(live, os.getpid())
+    assert not dreaming._workers_gone("synthetic-live")
