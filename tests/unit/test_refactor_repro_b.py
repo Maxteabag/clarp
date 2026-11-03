@@ -8,6 +8,10 @@ changes. Each assertion expresses the user-visible invariant, not source shape.
 from __future__ import annotations
 
 import os
+import io
+import json
+import pathlib
+import threading
 from types import SimpleNamespace
 
 import pytest
@@ -185,3 +189,192 @@ def test_aut01_stop_pauses_goal_despite_concurrent_checkpoint(tmp_path, monkeypa
             error = exc
     current = task_plans.get(plan["plan_id"])
     assert error is None and current["status"] == "paused", "concurrent revision defeats Stop goal pause"
+
+
+def test_http01_limited_device_cannot_reach_interactive_terminal(tmp_path, monkeypatch):
+    import server as host
+    from lib import terminal_ws
+    _agent(tmp_path)
+    handler = host.Handler.__new__(host.Handler)
+    handler.path = "/terminal/repro"
+    handler._request_device_scope = "limited"
+    handler._request_auth_validated = True
+    handler._request_principal = "synthetic-device"
+    handler._authorized = lambda: True
+    denied, reached = [], []
+    handler._json_error = lambda status, _message: denied.append(status)
+    monkeypatch.setattr(terminal_ws, "serve_terminal", lambda *_: reached.append(True))
+    handler.do_GET()
+    assert denied == [403] and not reached, "limited device reached the interactive terminal"
+
+
+def test_rm01_appending_one_record_does_not_rescan_unchanged_prefix(tmp_path, monkeypatch):
+    from lib import transcript_incremental as importer
+    aid = _agent(tmp_path)
+    path = tmp_path / "synthetic.jsonl"
+    def record(i):
+        return json.dumps({"type": "user", "uuid": f"synthetic-{i}",
+            "timestamp": f"2026-01-01T00:00:{i % 60:02d}Z",
+            "message": {"role": "user", "content": f"synthetic-{i}"}}) + "\n"
+    path.write_text("".join(record(i) for i in range(256)))
+    monkeypatch.setenv("CLARP_TRANSCRIPT_SHADOW", "0")
+    open_path = pathlib.Path.open
+    scanned = []
+
+    class CountingReader:
+        def __init__(self, stream):
+            self.stream = stream
+        def __enter__(self):
+            self.stream.__enter__()
+            return self
+        def __exit__(self, *args):
+            return self.stream.__exit__(*args)
+        def __iter__(self):
+            for line in self.stream:
+                scanned.append(len(line.encode() if isinstance(line, str) else line))
+                yield line
+        def __getattr__(self, name):
+            return getattr(self.stream, name)
+
+    def counted_open(self, *args, **kwargs):
+        stream = open_path(self, *args, **kwargs)
+        if self == path and (not args or "r" in str(args[0])):
+            return CountingReader(stream)
+        return stream
+
+    monkeypatch.setattr(pathlib.Path, "open", counted_open)
+    importer.import_transcript(backend="claude", path=path, agent_id=aid,
+                               backend_session_id="synthetic-native")
+    scanned.clear()
+    tail = record(256)
+    with open_path(path, "a") as stream:
+        stream.write(tail)
+    importer.import_transcript(backend="claude", path=path, agent_id=aid,
+                               backend_session_id="synthetic-native")
+    assert sum(scanned) <= len(tail.encode()) + 4096, "append rescanned the unchanged transcript prefix"
+
+
+def test_rto01_early_stable_oracle_failure_releases_device_claim(tmp_path, monkeypatch):
+    from lib import oracle_live_stable as stable, oracle_realtime
+    principal = "synthetic-rto01-device"
+    monkeypatch.setattr(stable.config, "load", lambda: config.Config(openai_api_key="synthetic"))
+    monkeypatch.setattr(stable.oracle_strategy, "contact", lambda *_a, **_k: "")
+    monkeypatch.setattr(stable.oracle_voice_context, "load", lambda *_: None)
+    monkeypatch.setattr(stable.oracle_memory, "open_thread", lambda *_a, **_k: None)
+    upstream = SimpleNamespace(close=lambda: None, send=lambda *_: None)
+    monkeypatch.setattr(stable, "_connect_voice", lambda *_a: (upstream, "openai"))
+    tools = SimpleNamespace(lock=threading.Lock(), delegations=set())
+    monkeypatch.setattr(stable, "AgentTools", lambda *_a: tools)
+
+    reached = []
+    def fail_register(_conversation):
+        reached.append(True)
+        raise OSError("synthetic identity write failure")
+
+    monkeypatch.setattr(stable.oracle_handoffs, "bind", lambda *_: None)
+    monkeypatch.setattr(stable.oracle_handoffs, "register", fail_register)
+    monkeypatch.setattr(stable.oracle_handoffs, "unregister", lambda *_: None)
+    handler = SimpleNamespace(headers={"Upgrade": "websocket", "Connection": "Upgrade",
+        "Sec-WebSocket-Key": "dGhlIHNhbXBsZSBub25jZQ=="}, path="/oracle/v2?handoff=hands_free",
+        ctx=SimpleNamespace(), wfile=io.BytesIO(), connection=SimpleNamespace(settimeout=lambda *_: None),
+        _request_auth_validated=True, _request_device_scope="full", _request_principal=principal,
+        _stop_agent_session=lambda *_a, **_k: (0, lambda *_: None))
+    error = None
+    try:
+        try:
+            stable.serve(handler)
+        except Exception as exc:
+            error = exc
+        assert reached, "probe did not reach the handoff registration failure"
+        assert principal not in oracle_realtime._ACTIVE_PRINCIPALS, (
+            f"early Oracle failure leaked voice claim; cleanup error={type(error).__name__}")
+    finally:
+        token = oracle_realtime._ACTIVE_PRINCIPALS.get(principal)
+        if token:
+            stable.release_connection(principal, token)
+
+
+def test_rto02_herald_grant_preserves_following_user_instruction(tmp_path, monkeypatch):
+    from lib import transcription_pipeline as pipeline, stt_providers
+    from lib.herald import HeraldManager
+    from test_transcription_pipeline import StubSTT, Recorder, _ctx, _run
+    monkeypatch.setattr(stt_providers, "selected_engine", lambda: "server-default")
+    monkeypatch.setattr(stt_providers, "is_cloud_model", lambda _engine: False)
+    monkeypatch.setattr(stt_providers, "long_form_model_for", lambda _seconds: "")
+    monkeypatch.setattr(pipeline, "_cache_dir", lambda: tmp_path / "cache")
+    herald = HeraldManager(stream=SimpleNamespace(broadcast=lambda *_: None),
+        tts=SimpleNamespace(), agents=lambda: {"rachel": {"name": "Rachel"}})
+    herald._pending.add("rachel")
+    out = _run(_ctx(StubSTT(text="OK Rachel, rerun the failing tests"), herald=herald), Recorder())
+    assert out.status == 200
+    assert "rerun the failing tests" in out.payload["text"], "herald grant swallowed the following instruction"
+
+
+def test_rto03_low_confidence_router_cannot_stop_agent(tmp_path, monkeypatch):
+    from lib import backends
+    from lib.orchestrator import OrchestratorService
+    from test_orchestrator import _ctx
+    aid = _agent(tmp_path, "mike")
+    interrupted = []
+    monkeypatch.setattr(backends, "interrupt_any", lambda target: interrupted.append(target))
+    service = OrchestratorService(_ctx(tmp_path), model_call=lambda *_: {
+        "kind": "agent_control", "control_action": "stop", "target_session": "mike",
+        "confidence": 0.3, "addressing": False, "reason": "Synthetic ambiguous input"})
+    outcome = service.handle_send(text="synthetic ambiguous request", requested_session="mike",
+        trace_id="repro-rto03", hands_free=True, synthesize_audio=False,
+        dispatch=lambda **_: pytest.fail("ambiguous control must not dispatch work"))
+    assert outcome is not None
+    assert not interrupted, f"low confidence router stopped agent {aid}"
+
+
+def test_aut04_computer_job_cancel_does_not_dispatch_to_default_agent(tmp_path, monkeypatch):
+    import server as host
+    from lib import background_jobs, turn_dispatch as td
+    from test_drain_pause_parity import World
+    monkeypatch.setattr(td, "_RUNTIME_CLIENT", None)
+    td.reset_for_tests()
+    try:
+        world = World(tmp_path)
+        job = background_jobs.upsert_computer(computer_id="synthetic-computer", job_id="synthetic-install",
+                                              title="Synthetic model install")
+        handler = host.Handler.__new__(host.Handler)
+        handler.server = SimpleNamespace(ctx=world.service.ctx)
+        handler._expected_generation = lambda: (True, job["generation"])
+        handler._json_ok = lambda payload: payload
+        monkeypatch.setattr(host, "TurnDispatchService", lambda _ctx: world.service)
+        receipt = handler._handle_background_job_cancel(job["job_id"])
+        assert receipt["job"]["status"] == "cancelled"
+        world._collect()
+        assert world.started == [], "computer-owned cancellation was dispatched to the default agent"
+    finally:
+        td.reset_for_tests()
+
+
+def test_aut06_repeated_backend_failure_does_not_retry_dream_forever(tmp_path, monkeypatch):
+    from lib import dreaming
+    aid = _agent(tmp_path)
+    agents.update_agent(aid, dreaming_enabled=True)
+    agent = agents.get_by_agent_id(aid)
+    run = dreaming.create_dream_run(agent, local_date="2026-01-01", timezone_name="UTC",
+                                    timezone_source="synthetic")
+    first = dreaming.list_dream_runs(session="repro")[0]["rounds"][0]
+    callbacks = {}
+    monkeypatch.setattr(dreaming, "_dream_scratch_cwd", lambda *_: tmp_path)
+    monkeypatch.setattr(dreaming.backends, "spawn_turn", lambda _backend, **kw: callbacks.update(kw))
+    monkeypatch.setattr(dreaming.backends, "active_handles", lambda *_: [])
+    clock = [db.now_ms()]
+    monkeypatch.setattr(dreaming.db, "now_ms", lambda: clock[0])
+    scheduler = dreaming.DreamingScheduler(send_dream=lambda _session, prompt:
+        dreaming.dispatch_isolated_dream(agent, prompt), now=lambda: clock[0] / 1000)
+    attempts = 0
+    # More than a month of daily identical failures must not reserve a run
+    # forever. No real wait, provider, or worker is involved.
+    for _ in range(32):
+        current = dreaming.active_run_for_agent(aid)
+        if current is None:
+            break
+        attempts += scheduler._advance_run(current)
+        callbacks["on_error"]("synthetic permanent backend rejection")
+        clock[0] += 86_400_000
+    assert dreaming.active_run_for_agent(aid) is None, (
+        f"failed dream {run['run_id']} remains active after {attempts} failed daily attempts")
