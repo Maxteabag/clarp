@@ -300,3 +300,42 @@ def test_a_class_attribute_that_reads_its_own_name_from_the_module_is_checked(
     assert tool.main(["--root", str(tmp_path), base, head,
                       "server.py::Handler=lib/routes/feat.py::FeatRoutes"]) == 1
     assert expected in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("rebinding, reason", [
+    ("json = {'kind': 'server-local'}\n", "also bound at module level"),
+    ("from lib.helper import VALUE as json\n", "imported from 2 different places"),
+    ("try:\n    import json\nexcept ImportError:\n    pass\n", "imported again inside a block"),
+    ("def reset():\n    global json\n    json = None\n", "written through `global` in reset"),
+    ("for json in []:\n    pass\n", "also bound at module level"),
+    ("del json\nimport json\n", "also bound at module level"),
+])
+def test_a_moved_reader_of_a_rebound_import_fails(repo, capsys, rebinding, reason):
+    """Review B (s3-tools 7f2bb6be, F4a): server.py imports json and also
+    rebinds it, so the moved reader sees the module in the mixin but another
+    object in server.py; top_imports alone reported 0 problems."""
+    path, _ = repo
+    rebound = SERVER.replace('_CFG = {"delivery": "hls"}\n', '_CFG = {"delivery": "hls"}\n' + rebinding)
+    base = _commit(path, {"server.py": rebound})
+    server = SERVER_MOVED.replace('_CFG = {"delivery": "hls"}\n', '_CFG = {"delivery": "hls"}\n' + rebinding)
+    assert _run(path, base, server=server) == 1
+    out = capsys.readouterr().out
+    assert "a reads json, which server.py imports and rebinds" in out and reason in out, out
+
+
+def test_a_rebinding_in_the_mixin_fails_too(repo, capsys):
+    path, base = repo
+    assert _run(path, base, feat=FEAT.replace("from lib import helper\n",
+                                              "from lib import helper\njson = None\n")) == 1
+    assert "a reads json, which lib/routes/feat.py imports and rebinds" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("harmless", [
+    "import os\nimport os.path\n",                       # one target, bound twice
+    "def reader():\n    global json\n    return json\n",  # global read, no write
+])
+def test_harmless_double_bindings_are_not_rebinding(repo, capsys, harmless):
+    path, _ = repo
+    base = _commit(path, {"server.py": SERVER.replace("from lib import helper\n", "from lib import helper\n" + harmless)})
+    server = SERVER_MOVED.replace("from lib import helper\n", "from lib import helper\n" + harmless)
+    assert _run(path, base, server=server) == 0, capsys.readouterr().out
