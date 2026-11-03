@@ -105,3 +105,32 @@ def test_a_goal_the_writer_stored_with_references_reads_back_identical(tmp_path,
     plan_id = _replanned_goal(tmp_path, monkeypatch)
     assert _store_as_the_writer_would(plan_id) == 4     # 2 retired + 2 proposed step lists
     assert_golden(golden_payload(plan_id))
+
+
+def test_expanded_history_keeps_the_artifact_summary_encoding_bound(tmp_path, monkeypatch):
+    """Reviewer B: the artifact summary bounds the history it serializes by
+    the stored goal text. A document with references is small while its
+    history is not; the bound must cover what get() expands, so a summary
+    with too little budget leaves the digest pending without encoding it."""
+    from lib import artifacts
+    plan_id = _replanned_goal(tmp_path, monkeypatch)
+    inline, inline_text, inline_bound = task_plans.get_with_goal_text_and_bound(plan_id)
+    inline_digest = artifacts._history_marker(
+        artifacts._PlanWithGoalText(inline, inline_text, inline_bound), inline["goal"]["history"],
+        inline_text, artifacts.summary_budget(max_bytes=10_000_000))["digest"]
+    assert inline_digest
+    _store_as_the_writer_would(plan_id)
+    artifacts._HISTORY_DIGEST.pop(plan_id)     # a cold cache: the bound decides
+    plan, text, bound = task_plans.get_with_goal_text_and_bound(plan_id)
+    assert len(text.encode()) < 4096 and bound > 500_000
+    wrapped = artifacts._PlanWithGoalText(plan, text, bound)
+    history = plan["goal"]["history"]
+    encoded = []
+    real_dumps = artifacts.json.dumps
+    monkeypatch.setattr(artifacts.json, "dumps", lambda value, *a, **k: (
+        encoded.append(1) if value is history else None, real_dumps(value, *a, **k))[1])
+    small = artifacts._history_marker(wrapped, history, text, artifacts.summary_budget(max_bytes=4096))
+    assert small["digest_pending"] is True and encoded == []
+    monkeypatch.setattr(artifacts.json, "dumps", real_dumps)
+    large = artifacts._history_marker(wrapped, history, text, artifacts.summary_budget(max_bytes=10_000_000))
+    assert large["digest"] == inline_digest
