@@ -139,15 +139,15 @@ the hot spots; every high finding fixed or explicitly accepted.
 | Role | Session | Model | Owns |
 |---|---|---|---|
 | Lead | `hobbles-18b0` | Claude | this brief, scope, decisions, registers, sign-offs |
-| Merge captain | see table update | Claude | landing on main, the gate script, the flake quarantine list, the parked-branch manifest |
-| Release owner | see table update | Claude | windows, tags, backup, deploy, health check, rollback, break-glass, the canary node |
-| Harness owner | see table update | Claude | `tests/replay/` (new), the corpus tools, planted changes, diff report |
-| Contract owner | see table update | Claude | `server/lib/db_schema.py`, `server/lib/db_migrations.py`, `contract/`, `server/lib/server_identity.py` contract constants, the lifecycle kit (`server/lib/lifecycle.py`, `docs/architecture/lifecycles.md`), schema goldens |
-| Fix-lane owner | see table update | Claude | one fix per commit, in the files the lead names per fix |
-| Slice owner S3 | see table update | Claude | route goldens now; the route seam and route modules after go/no-go 1 |
-| Slice owner S5 | see table update | Claude | read-model goldens now; the read model after go/no-go 1 |
-| Reviewer A (core) | see table update | Codex | verdicts only |
-| Reviewer B (rest) | see table update | Codex | verdicts only |
+| Merge captain | `rf-merge-f870` | Claude | landing on main, the gate script, the flake quarantine list, the parked-branch manifest |
+| Release owner | `rf-release-d188` | Claude | windows, tags, backup, deploy, health check, rollback, break-glass, the canary node |
+| Harness owner | `rf-harness-eeb2` | Claude | `tests/replay/` (new), the corpus tools, planted changes, diff report |
+| Contract owner | `rf-contract-80af` | Claude | `server/lib/db_schema.py`, `server/lib/db_migrations.py`, `contract/`, `server/lib/server_identity.py` contract constants, the lifecycle kit (`server/lib/lifecycle.py`, `docs/architecture/lifecycles.md`), schema goldens |
+| Fix-lane owner | `rf-fix-c4ab` | Claude | one fix per commit, in the files the lead names per fix |
+| Slice owner S3 | `rf-routes-0f54` | Claude | route goldens now; the route seam and route modules after go/no-go 1 |
+| Slice owner S5 | `rf-readmodel-12f8` | Claude | read-model goldens now; the read model after go/no-go 1 |
+| Reviewer A (core) | `rf-review-core-bbc1` | Codex | verdicts only |
+| Reviewer B (rest) | `rf-review-rest-a79f` | Codex | verdicts only |
 
 Reviewers never edit sources, never run jobs against the live Host and never
 grant more than the exact commit they reviewed.
