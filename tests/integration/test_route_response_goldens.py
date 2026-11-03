@@ -63,10 +63,36 @@ def _host_requirements(body):
     return body
 
 
-# Fields whose content depends on the machine running the test; each value is
+_HEALTH_FIELDS = {"last_success_at": (int, float), "last_error_at": (int, float),
+                  "last_error": (str,)}
+
+
+def _process_health(body):
+    """lib.health is a process-wide registry: which subsystems appear, and
+    whether each last succeeded or failed, depends on what earlier tests in
+    the same worker and the server's background workers did. Only a map whose
+    every entry has exactly the registry's fields with their types (or null)
+    is canonicalized, to one marker entry; anything else keeps its own shape."""
+    subsystems = body.get("subsystems")
+    if not isinstance(subsystems, dict):
+        return body
+
+    def well_formed(entry):
+        return (isinstance(entry, dict) and set(entry) == set(_HEALTH_FIELDS)
+                and all(entry[key] is None or (isinstance(entry[key], kinds)
+                                               and not isinstance(entry[key], bool))
+                        for key, kinds in _HEALTH_FIELDS.items()))
+    if all(well_formed(entry) for entry in subsystems.values()):
+        body["subsystems"] = {"<process-dependent>": {
+            "last_success_at": 0, "last_error_at": 0, "last_error": ""}}
+    return body
+
+
+# Fields whose content depends on the machine or process running the test; each value is
 # replaced by a marker before its shape is taken, the rest stays pinned.
 HOST_DEPENDENT = {
     "GET /managed-skills": _host_requirements,
+    "GET /diagnostics/health": _process_health,
 }
 
 
@@ -198,8 +224,10 @@ def _dump(golden: dict) -> str:
 
 
 def test_response_golden(fake_ctx, backend_cli_guard):
-    from lib import device_pairing
+    from lib import device_pairing, health
 
+    # Earlier tests in this worker leave entries in the process-wide registry.
+    health.reset_for_tests()
     ctx = fake_ctx.with_(auth_token=route_probe.ADMIN_TOKEN)
     issued = device_pairing.issue(device_name="route golden limited", scope="limited")
     limited_token = device_pairing.exchange(issued["code"])["token"]
@@ -292,3 +320,22 @@ def test_host_dependent_requirements_keep_their_type():
         assert normalized(corrupted) != canonical, corrupted
     without_field = shape(_host_requirements({"skills": [{"id": "s"}]}))
     assert without_field == {"skills": [{"id": "str"}]}
+
+
+def test_process_health_keeps_its_type():
+    def normalized(subsystems):
+        return shape(_process_health({"ready": True, "subsystems": subsystems}))
+    canonical = normalized({})
+    assert canonical == normalized({"sse": {"last_success_at": 1.5, "last_error_at": None,
+                                            "last_error": None},
+                                    "stt": {"last_success_at": None, "last_error_at": 2,
+                                            "last_error": "boom"}})
+    for corrupted in (
+            None, [], "sse",
+            {"sse": None},
+            {"sse": {"last_success_at": 1, "last_error_at": None}},
+            {"sse": {"last_success_at": "1", "last_error_at": None, "last_error": None}},
+            {"sse": {"last_success_at": True, "last_error_at": None, "last_error": None}},
+            {"sse": {"last_success_at": 1, "last_error_at": None, "last_error": 3}},
+            {"sse": {"last_success_at": 1, "last_error_at": None, "last_error": None, "x": 1}}):
+        assert normalized(corrupted) != canonical, corrupted
