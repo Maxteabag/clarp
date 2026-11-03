@@ -365,20 +365,21 @@ class TurnStateMachine:
             if target in TERMINAL and not conn().in_transaction:
                 # Atomic, so a lock error leaves nothing behind: retry the whole
                 # write (bounded, db.retry_locked) rather than strand the agent busy.
-                fence: list[int] = []
+                # The agent's newest state row before the first attempt (one index
+                # seek): a retry writes only if every row since is this turn's own,
+                # so a Stop or successor that commits while an attempt waits, fails
+                # or rolls back wins. Not state_generation(): that marks the
+                # call-open path, which ordinary turns never take.
+                fence = int(conn().execute(
+                    "SELECT COALESCE(MAX(state_id), 0) FROM state_log WHERE agent_id = ?",
+                    (agent_id,)).fetchone()[0])
+                attempts: list[int] = []
 
                 def write():
-                    try:
-                        return self._write_terminal(
-                            agent_id, event, target, detail, runtime_id, stamp,
-                            recheck=fence[0] if fence else None, force=force)
-                    except sqlite3.OperationalError:
-                        if not fence:
-                            # The state generation when the first attempt failed:
-                            # a retry writes only if every row since is this
-                            # turn's own. Read only on this failure path.
-                            fence.append(int(state_generation(agent_id) or 0))
-                        raise
+                    attempts.append(1)
+                    return self._write_terminal(
+                        agent_id, event, target, detail, runtime_id, stamp,
+                        recheck=fence if len(attempts) > 1 else None, force=force)
                 cursor, trace = db.retry_locked(write)
                 _after_settle(agent_id, event, target, trace)
             else:
