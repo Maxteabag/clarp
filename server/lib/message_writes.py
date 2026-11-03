@@ -983,6 +983,56 @@ def _delete_slot(database, agent_id: str, backend_session_id: str,
         (agent_id, backend_session_id, source_file, seq)).rowcount
 
 
+class _ClientProvenance:
+    """User turns the client already recorded durably (keyed by client_msg_id).
+
+    Claude's transcript carries its own copy of each; the import links those
+    back to the client rows by text in send order rather than inserting a
+    duplicate. ``consumed`` lists the client rows this import linked to
+    transcript turns, in match order (the incremental import carries it)."""
+
+    def __init__(self, database, agent_id: str, backend_session_id: str):
+        self._by_text: dict[str, list[tuple[str, str, str, str]]] = {}
+        for r in database.execute(
+            """SELECT message_id, text, origin, sender_agent_id, timestamp FROM messages
+                WHERE agent_id = ? AND backend_session_id = ?
+                  AND source_file LIKE 'client:%'
+                ORDER BY updated_at ASC, seq ASC""",
+            (agent_id, backend_session_id),
+        ).fetchall():
+            key = _norm_text(r["text"])
+            self._by_text.setdefault(key, []).append((
+                r["message_id"],
+                r["origin"] or "user",
+                r["sender_agent_id"] or "",
+                r["timestamp"],
+            ))
+        self.consumed: list[str] = []
+
+    def resume(self, consumed_client_ids) -> None:
+        """Continue after the rows an earlier import already linked."""
+        self.consumed = list(consumed_client_ids)
+        consumed = set(self.consumed)
+        for key in list(self._by_text):
+            remaining = [r for r in self._by_text[key] if r[0] not in consumed]
+            if remaining:
+                self._by_text[key] = remaining
+            else:
+                del self._by_text[key]
+
+    def candidates(self, key: str) -> list[tuple[str, str, str, str]]:
+        """The unlinked client rows with this text, oldest first."""
+        return self._by_text.get(key) or []
+
+    def take(self, key: str, rows: list) -> tuple[str, str, str, str]:
+        """Link the oldest of ``rows`` (from ``candidates(key)``)."""
+        row = rows.pop(0)
+        self.consumed.append(row[0])
+        if not rows:
+            self._by_text.pop(key, None)
+        return row
+
+
 def _store_transcript_turns_txn(database, *, agent_id: str,
                                 backend_session_id: str, source_file: str,
                                 turns: list[dict[str, Any]],
@@ -1012,26 +1062,7 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
     phases = _row_phases(turns)
     touched_traces: set[str] = set()
     newest_trace = ""
-    # User turns the client already recorded durably (keyed by client_msg_id).
-    # Claude's transcript carries its own copy of each; we link those back to
-    # the client rows by text in send order rather than inserting a duplicate.
-    client_user_provenance: dict[str, list[tuple[str, str, str, str]]] = {}
-    for r in database.execute(
-        """SELECT message_id, text, origin, sender_agent_id, timestamp FROM messages
-            WHERE agent_id = ? AND backend_session_id = ?
-              AND source_file LIKE 'client:%'
-            ORDER BY updated_at ASC, seq ASC""",
-        (agent_id, backend_session_id),
-    ).fetchall():
-        key = _norm_text(r["text"])
-        client_user_provenance.setdefault(key, []).append((
-            r["message_id"],
-            r["origin"] or "user",
-            r["sender_agent_id"] or "",
-            r["timestamp"],
-        ))
-    # Client rows this import linked to transcript turns, in match order.
-    consumed_client_ids: list[str] = []
+    provenance = _ClientProvenance(database, agent_id, backend_session_id)
     if carry is None:
         latest_user_key, current_origin, current_sender_agent_id = _latest_user_provenance(
             database, agent_id, backend_session_id)
@@ -1042,14 +1073,7 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
             latest_user_key if current_origin == "heartbeat" else ""
         )
     else:
-        consumed_client_ids = list(carry["consumed_client_ids"])
-        consumed = set(consumed_client_ids)
-        for key in list(client_user_provenance):
-            remaining = [r for r in client_user_provenance[key] if r[0] not in consumed]
-            if remaining:
-                client_user_provenance[key] = remaining
-            else:
-                del client_user_provenance[key]
+        provenance.resume(carry["consumed_client_ids"])
         current_origin = carry["current_origin"]
         current_sender_agent_id = carry["current_sender_agent_id"]
         current_heartbeat_key = carry["current_heartbeat_key"]
@@ -1082,7 +1106,7 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
         """The carried state as the loop stands now (lib.transcript_incremental)."""
         captured.clear()
         captured.update(json.loads(json.dumps({
-            "consumed_client_ids": consumed_client_ids,
+            "consumed_client_ids": provenance.consumed,
             "current_origin": current_origin,
             "current_sender_agent_id": current_sender_agent_id,
             "current_heartbeat_key": current_heartbeat_key,
@@ -1222,7 +1246,7 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
         # second copy; the client row stands in for it (matched by send order).
         if role == "user" and turn.get("id") is None:
             key = _norm_text(text)
-            rows = client_user_provenance.get(key) or []
+            rows = provenance.candidates(key)
             if key and key == unanswered_key and _is_retry_echo(
                     turn.get("timestamp"), rows[0][3] if rows else None):
                 # A retry's copy: the matched client row already stands for
@@ -1233,16 +1257,14 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
                 skipped_slot_removed = skipped_slot_removed or removed > 0
                 continue
             if rows:
-                client_msg_id, current_origin, current_sender_agent_id, _ = rows.pop(0)
-                consumed_client_ids.append(client_msg_id)
+                client_msg_id, current_origin, current_sender_agent_id, _ = \
+                    provenance.take(key, rows)
                 unanswered_key = key
                 authored = database.execute("SELECT trace_id FROM messages WHERE message_id=?", (client_msg_id,)).fetchone()
                 current_request_trace = (authored["trace_id"] or "") if authored else ""
                 current_heartbeat_key = (
                     client_msg_id if current_origin == "heartbeat" else ""
                 )
-                if not rows:
-                    client_user_provenance.pop(key, None)
                 # Nothing is written at this position, so whatever an earlier
                 # import left here would outlive it. When the parser starts
                 # hiding a message every later turn shifts down, and the old
