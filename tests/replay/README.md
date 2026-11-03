@@ -50,9 +50,12 @@ Host state dirs (`<label-index>/s<scenario-index>`, mapped in `labels.json`),
 planted copies and raw captures live there, and a scenario root that already
 exists is refused, never deleted. Concurrent runs therefore never share or
 remove each other's state. Only the SHA build cache `<scratch>/builds` is
-shared (created under a lock). A clean run removes its directory; a failed
-run, or one with `--keep`, keeps it and prints its path. `clean` removes run
-directories no job holds and refuses anything it did not make. Nothing is
+shared: builds are created under a lock, and every run holds a shared lease
+on the cache for its whole life. A clean run removes its directory; a failed
+run, or one with `--keep`, keeps it and prints its path. `clean` removes cached
+builds only while holding that lease exclusively (so never while any run is
+live) and the creation lock, removes run directories no job holds, and
+refuses anything it did not make. Nothing is
 written to `~/.local/share/clarp` or `~/.config/clarp`.
 
 ## What runs
