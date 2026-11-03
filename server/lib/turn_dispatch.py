@@ -2108,9 +2108,15 @@ class TurnDispatchService:
             # durably like a send behind a preempted process (TP-01b).
             parked = False
             if not spec.queue_id and not spec.park_id:
-                waiting_park = _park(spec, prefix="preempt-park")
+                # A Stop that finished after this send parked behind its
+                # barrier left that row: it stays the send's one durable row.
+                waiting_park = park_id or _park(spec, prefix="preempt-park")
                 if not waiting_park:
                     raise DispatchError(503, "could not durably queue message")
+                if park_id and spec.bypass_pause:
+                    # As a preempt-park row would: the send's right to run
+                    # past a pause survives a restart.
+                    turn_queue.allow_paused_for(park_id)
                 spec = replace(spec, park_id=waiting_park)
                 parked = True
             owner = f"{_PROCESS_OWNER_PREFIX}{spec.trace_id}"
