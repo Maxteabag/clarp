@@ -195,3 +195,50 @@ def test_log_delivery_state_failure(running_server, monkeypatch):
     monkeypatch.setattr(server_module.Handler, "_add_delivery_state", broken)
     assert _call(base, "GET", "/log?session=claude") == (
         500, {"error": "delivery state unavailable"})
+
+
+# ---- /send listen-first call opening, /compact, /orchestrator/settings ------
+
+def test_send_call_opening_refusals(running_server, monkeypatch):
+    from lib import agent_rings, group_calls
+    base, _ctx, _srv = running_server
+    send = lambda extra: _call(base, "POST", "/send", {  # noqa: E731
+        "text": "hello", "session": "claude", "hands_free": True, **extra})
+    assert send({"call_opening": {"token": "t"}}) == (400, {"error": "bad call_opening"})
+    assert send({"call_id": "c1", "call_opening": "t"}) == (400, {"error": "bad call_opening"})
+    assert send({"call_id": "c1", "call_opening": {"token": 5}}) == (
+        400, {"error": "bad call_opening"})
+    seen = []
+
+    def greeting_routed(principal, **kwargs):
+        seen.append(kwargs)
+        raise group_calls.CallError(409, "ring expired", epoch=3)
+    monkeypatch.setattr(agent_rings, "greeting_routed", greeting_routed)
+    assert send({"call_id": "c1", "trace_id": "t-9",
+                 "call_opening": {"token": "tok", "epoch": 2}}) == (
+        409, {"ok": False, "error": "ring expired", "epoch": 3})
+    assert seen == [{"token": "tok", "epoch": 2, "client_msg_id": "t-9", "trace_id": "t-9",
+                     "session": "claude", "call_id": "c1"}]
+
+
+@pytest.mark.parametrize("ok, expected_status", [(True, 200), (False, 409)])
+def test_compact(running_server, monkeypatch, ok, expected_status):
+    from lib import compaction
+    base, _ctx, _srv = running_server
+    monkeypatch.setattr(compaction, "compact_session",
+                        lambda session: {"ok": ok, "session": session})
+    assert _call(base, "POST", "/compact", raw=b"{") == (400, {"error": "bad json"})
+    assert _call(base, "POST", "/compact", {}) == (400, {"error": "session required"})
+    assert _call(base, "POST", "/compact", {"session": " claude "}) == (
+        expected_status, {"ok": ok, "session": "claude"})
+
+
+def test_orchestrator_settings_post_errors(running_server, monkeypatch):
+    base, _ctx, _srv = running_server
+    assert _call(base, "POST", "/orchestrator/settings", raw=b"{") == (400, {"error": "bad json"})
+
+    def refuse(data):
+        raise ValueError("confidence_threshold must be between 0 and 1")
+    monkeypatch.setattr(server_module, "update_orchestrator_settings", refuse)
+    assert _call(base, "POST", "/orchestrator/settings", {"confidence_threshold": 7}) == (
+        400, {"error": "confidence_threshold must be between 0 and 1"})
