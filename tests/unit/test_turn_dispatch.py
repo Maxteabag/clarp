@@ -573,7 +573,6 @@ def test_preemption_does_not_spawn_until_the_old_process_exits(tmp_path, monkeyp
     """TP-01: two CLIs on one native session interleave and corrupt it."""
     import time
     monkeypatch.setattr(_td, "_PROCESS_EXIT_POLL_S", 0.01)
-    monkeypatch.setattr(_td, "_PREEMPT_EXIT_WAIT_S", 0.05, raising=False)
     service, backends, agent_id = _make_service(tmp_path)
     slow = _SlowExitBackends()
     service.backends = slow
@@ -591,6 +590,56 @@ def test_preemption_does_not_spawn_until_the_old_process_exits(tmp_path, monkeyp
     while len(slow.spawned) < 2 and time.monotonic() < deadline:
         time.sleep(0.01)
     assert [call["trace_id"] for _b, call in slow.spawned] == ["tA", "tB"]
+
+
+def _open_rows(agent_id):
+    return [(row["trace_id"], row["status"]) for row in agents_db.conn().execute(
+        "SELECT trace_id, status FROM queued_turns WHERE agent_id = ?", (agent_id,))]
+
+
+def test_a_send_waiting_for_a_preempted_process_survives_a_restart(tmp_path, monkeypatch):
+    """TP-01 review: a preempting send that waits for the old process is
+    acknowledged as queued, so it must not live only in memory."""
+    import time
+    monkeypatch.setattr(_td, "_PROCESS_EXIT_POLL_S", 0.01)
+    service, _backends, agent_id = _make_service(tmp_path)
+    slow = _SlowExitBackends()
+    service.backends = slow
+    service.dispatch(text="first", requested_session="mike", trace_id="tA",
+                     client_msg_id="m-first", synthesize_audio=False)
+    result = service.dispatch(text="second", requested_session="mike", trace_id="tB",
+                              client_msg_id="m-second", synthesize_audio=False)
+
+    assert result.queued is True
+    assert len(slow.spawned) == 1
+    assert ("tB", "parked") in _open_rows(agent_id), "only memory holds the queued send"
+
+    slow.process.alive = False
+    deadline = time.monotonic() + 3
+    while len(slow.spawned) < 2 and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert [call["trace_id"] for _b, call in slow.spawned] == ["tA", "tB"]
+    assert ("tB", "parked") not in _open_rows(agent_id), "a launched send keeps no park row"
+
+
+def test_a_send_that_cannot_wait_durably_is_refused(tmp_path, monkeypatch):
+    service, _backends, agent_id = _make_service(tmp_path)
+    slow = _SlowExitBackends()
+    service.backends = slow
+    service.dispatch(text="first", requested_session="mike", trace_id="tA",
+                     synthesize_audio=False)
+
+    def locked(**_kwargs):
+        raise RuntimeError("database is locked")
+
+    monkeypatch.setattr(_td.turn_queue, "park", locked)
+    with pytest.raises(_td.DispatchError) as refused:
+        service.dispatch(text="second", requested_session="mike", trace_id="tB",
+                         synthesize_audio=False)
+    assert refused.value.status == 503
+    assert len(slow.spawned) == 1
+    assert _td._SLOTS.queue_depth(agent_id) == 0
+    slow.process.alive = False
 
 
 def test_explicit_queue_waits_for_current_turn_without_interrupting(tmp_path):
