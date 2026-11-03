@@ -231,6 +231,17 @@ the next starts.
 | 5 | `db_migrations.py` moves to `persistence/migrate.py` and each `_migrate_to_vNNN` to `migrations/vNNN.py`, names and control flow unchanged; SCHEMA imports retargeted to `persistence.schema_parts`; alias | move |
 | 6 | persistence made strict in the layer test: zero upward edges besides the four named exceptions (section 2) | test only |
 
+**Inverted alias until the end (lead, 3 Nov).** A main edit to a file that
+an alias replaced conflicts on every merge into refactor/integration (git
+cannot follow a rename when the old path still exists). So commit 2 keeps the
+code in `lib/db_schema.py` and makes `lib/persistence/schema.py` the alias
+of it; commits 3 and 6 follow on that layout. The physical move of
+`db_schema.py` (flipping the alias) and commit 5 are made last, against the
+final main, in one claim window with full gates. Until then every merge of
+main into integration runs the schema golden and the migration matrix, and a
+conflict in `db_schema.py`, a feature's SCHEMA string or `db_migrations.py`
+is resolved by the contract owner as a commit reviewed by reviewer A.
+
 Commit 2 is a pure rename plus the alias. Commit 5 is the largest, but every
 definition in it is moved verbatim, so the AST identity gate covers all of it.
 
