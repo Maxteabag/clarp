@@ -549,6 +549,22 @@ def test_muted_agent_suppresses_push_but_keeps_badge_unread(monkeypatch):
     assert payload["muted"] is True
 
 
+def test_a_helper_reply_never_pushes_but_keeps_badge_unread(monkeypatch):
+    monkeypatch.setattr(user_notifications, "SETTLE_TIMEOUT_S", 0)
+    parent = _agent()
+    aid = _agent(persona="Stream A", session="stream-a")
+    agents_db.set_lineage(aid, parent_agent_id=parent, role="helper")
+    done_ts = _turn(aid, origin="user", assistant="Helper done.")
+
+    notification = _classify(aid, done_ts)
+
+    assert notification["notify"] is True
+    assert notification["push"] is False
+    assert notification["badge"] is True
+    assert notification["unread"] is True
+    assert notification["muted"] is True
+
+
 def test_unmute_restores_push(monkeypatch):
     monkeypatch.setattr(user_notifications, "SETTLE_TIMEOUT_S", 0)
     aid = _agent()
