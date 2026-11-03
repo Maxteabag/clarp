@@ -285,10 +285,39 @@ isolation stays. The dream owner becomes its own durable receiver:
   `attempt_id = <round id>:<attempts>`, and stores that attempt's
   `trace_id` and `backend_session_id`. A new attempt always gets a new id. A
   redelivery of the same attempt always reuses the stored one.
-- **The launch fence.** Before calling `spawn_turn`, the dispatch effect runs
-  a short compare-and-set: stamp `launched_at` where the round is sent, has
-  this `attempt_id`, and `launched_at IS NULL`. Only the winner spawns. That
-  makes **each attempt run at most once**: the stamp commits before the spawn.
+- **The launch fence and its owner.** The dispatch effect claims the launch
+  by compare-and-set: it stamps `launched_at` and `launch_owner` where the
+  round is sent, has this `attempt_id`, and `launched_at IS NULL`. The owner
+  is the dispatching server process: its boot id and pid. Dreams are
+  dispatched only from the server (the scheduler's `run_once` and the
+  `request_advance` threads). The winner also registers the attempt in the
+  owner's in-memory in-flight set, and keeps it registered until the
+  attempt's execution identity is recorded or the spawn has failed.
+  Recovery never replaces an attempt while that registration exists. So a
+  winner paused between the stamp and `spawn_turn` cannot launch after a
+  replacement: the replacement waits for the registration to end. Each
+  attempt therefore runs **at most once**. The output fence below is a
+  second line of defence, not the guard against overlap.
+- **Execution evidence per attempt.** Right after `spawn_turn` returns, the
+  owner records the attempt's execution identity on the attempt row. What
+  the identity is depends on the backend, as for `EXECUTION` in section 4:
+  - **Exec backends:** PID and start token. This includes Codex with
+    `isolated=True`, which runs `codex exec` (`codex_app_server.py:816-824`).
+    Its handles live in `active_exec_handles` (`backend/codex.py:220`), not in
+    `active_handles` (:196), which only sees the shared
+    app-server.
+  - **Shared app-server turns:** the thread and turn ids.
+
+  The attempt's end evidence is one of:
+  - its own `on_result` or `on_error`, durably recorded as `ended_at`;
+  - for an exec identity, a check of that PID and start token showing the
+    process is gone or has been replaced.
+
+  The generic `backends.active_handles` is never used as evidence for an
+  isolated attempt. A registry with no entry is not proof of an end: the
+  registry can be lost, for example after a runtime restart, while the
+  process lives on. This is `EXECUTION`'s fail-closed rule, and it applies
+  to dreams from conversion 2 on, not only to turns after S4.
 - **Output fence.** `on_result` carries its `attempt_id`, and the output is
   recorded only while the round is still sent with that same `attempt_id`.
   Output from an earlier attempt gets a `Conflict` and is logged.
@@ -300,18 +329,28 @@ What this guarantees: **one winner per claim**, **at most one execution per
 attempt**, and a distinct identity for every new attempt. It does not
 guarantee that a round runs exactly once. The cases:
 - **Crash after the claim, before `launched_at`:** nothing ran. The owner's
-  recovery re-runs the dispatch for a sent round with no `launched_at` past a
-  short grace, with the same `attempt_id`. The fence makes that redelivery
-  safe.
-- **Crash, or an unclear result, after `launched_at`:** the attempt may be
-  running. It is never redelivered.
-  - The sent deadline's eligibility hook needs a liveness result for that
-    attempt's own execution: its trace in `backends.active_handles`, computed
-    outside the lock, with an inspection error counted as live.
-  - While the attempt is live, or its liveness is unknown, the round stays
-    sent.
-  - Only a confirmed end, or no handle past the deadline, re-queues it. The
-    next claim then allocates a new `attempt_id`.
+  recovery re-runs the dispatch, with the same `attempt_id`, for a sent round
+  that has no `launched_at` past a short grace. The fence makes that
+  redelivery safe.
+- **`launched_at` set, no execution identity recorded yet:**
+  - If the launch owner is this server instance and the attempt is in its
+    in-flight set, the attempt is still launching. Recovery waits.
+  - If the owner is this instance and the attempt is not in flight, the
+    spawn ended without an identity, so `spawn_turn` failed. That is
+    recorded as the attempt's end, and the round is re-queued.
+  - If the owner is another boot, the outcome is **unknown**: the process
+    may have started and outlived its parent. The round stays sent and
+    surfaces `attention` after its deadline. It is never replaced
+    automatically.
+- **An execution identity is recorded:** the attempt may be running. It is
+  never redelivered. The eligibility hook for the sent deadline needs that
+  attempt's own end evidence, computed outside the lock and revalidated
+  inside:
+  - Confirmed end: the round is re-queued, and the next claim allocates a
+    new `attempt_id`.
+  - Still alive: the round stays sent.
+  - Unknown (the check fails, or the identity cannot be checked): the round
+    stays sent and surfaces `attention`. It is never replaced.
 - **A failed attempt followed by a new one:** attempt 1's error ends it.
   The round is re-queued, and attempt 2 runs under its own id. Nothing of
   attempt 1 deduplicates it away.
@@ -319,7 +358,7 @@ guarantee that a round runs exactly once. The cases:
   not idle). The claim is reverted sent→queued with event `refused`, without
   counting an attempt.
 - **`EffectsFailed`** before the fence is the first case above. After the
-  fence it is the second.
+  fence it is one of the later cases.
 
 **G0 must prove the actual receiving boundary on the isolated path.** The
 `retry-same-client-id` evidence from the ordinary send path does not count
@@ -333,8 +372,10 @@ retries undelivered completed runs.
 **Commits:**
 1. Activate the declarations, with `UNCONVERTED` and `STATUS_WRITERS` removed
    together.
-2. Attempt identity, the launch fence and the output fence. This needs a
-   migration: `attempt_id`, `launched_at` and per-attempt evidence.
+2. Attempt identity, the launch fence with its owner and in-flight set, the
+   execution evidence and the output fence. This needs a migration:
+   `attempt_id`, `launched_at`, `launch_owner`, the execution identity and
+   per-attempt evidence.
 3. Route the remaining writers through the kit.
 4. Delivery with `delivered_at`.
 5. The bounded reaper with the attempt cap and the run deadline.
@@ -346,6 +387,15 @@ retries undelivered completed runs.
   confirmed end;
 - a failed attempt followed by a new attempt that really runs;
 - late output from a superseded attempt is rejected;
+- an isolated Codex exec attempt that is alive, visible in
+  `active_exec_handles` but not in `active_handles`: the round is held;
+- a lost registry with the process alive: the round is held, and the missing
+  entry is not counted as an end;
+- a paused launch winner: the winner stamps `launched_at` and pauses before
+  `spawn_turn`, recovery runs, then the winner resumes. There is no
+  replacement, and exactly one execution;
+- a launch owner from another boot with no identity: the round surfaces
+  `attention` and is not replaced;
 - a busy refusal;
 - a delivery failure.
 
