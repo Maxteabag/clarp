@@ -1162,3 +1162,38 @@ def test_google_timezone_is_cached_per_location_and_a_failure_retries_later(monk
     fail[0] = False
     assert dreaming._google_timezone(other, t + 600).name == "Europe/Oslo"
     assert len(calls) == 4
+
+
+def test_a_dream_that_keeps_failing_ends_and_frees_the_next_night(tmp_path, monkeypatch):
+    """AUT-06: a failed isolated round was re-sent every 90 minutes for ever,
+    and the active run kept the agent from ever dreaming again."""
+    from lib import db
+    aid = agents_db.create_agent(persona="Dreamer", voice_id="v", cwd=str(tmp_path),
+                                 session="dreamer")
+    agents_db.start_runtime(aid, "dreamer")
+    agents_db.update_agent(aid, dreaming_enabled=True)
+    agent = agents_db.get_by_agent_id(aid)
+    run = dreaming.create_dream_run(agent, local_date="2026-01-01", timezone_name="UTC",
+                                    timezone_source="synthetic")
+    callbacks = {}
+    monkeypatch.setattr(dreaming, "_dream_scratch_cwd", lambda *_: tmp_path)
+    monkeypatch.setattr(dreaming.backends, "spawn_turn",
+                        lambda _backend, **kw: callbacks.update(kw))
+    monkeypatch.setattr(dreaming.backends, "active_handles", lambda *_: [])
+    clock = [db.now_ms()]
+    monkeypatch.setattr(dreaming.db, "now_ms", lambda: clock[0])
+    scheduler = dreaming.DreamingScheduler(
+        send_dream=lambda _session, prompt: dreaming.dispatch_isolated_dream(agent, prompt),
+        now=lambda: clock[0] / 1000)
+
+    for _ in range(3):
+        current = dreaming.active_run_for_agent(aid)
+        if current is None:
+            break
+        scheduler._advance_run(current)
+        callbacks["on_error"]("synthetic permanent backend rejection")
+        clock[0] += 86_400_000
+
+    assert dreaming.active_run_for_agent(aid) is None
+    ended = dreaming.get_run(run["run_id"])
+    assert ended["status"] != "active" and ended["last_error"]
