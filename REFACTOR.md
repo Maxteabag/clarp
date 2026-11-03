@@ -64,11 +64,10 @@ the hot spots; every high finding fixed or explicitly accepted.
    standing order of 2026-10-12; this machine runs his live Host). Locally, run at
    most one test file or node id with `-n 0` through
    `/var/tmp/clarp-refactor-program/bin/heavy` (it refuses everything else).
-   Full suites run on the buildbox through
-   `/var/tmp/clarp-refactor-program/bin/heavy-remote` once the lead announces it;
-   until then through GitHub Actions (`gh workflow run tests.yml -R
-   Maxteabag/clarp --ref <branch>`), which the merge captain drives. Never run
-   `cargo` (repo rule).
+   Full suites, coverage and replay runs go to the buildbox through
+   `/var/tmp/clarp-refactor-program/bin/heavy-remote` (announced 3 Nov; default
+   `-n 10`; `--status`, `--forget`). The landing gate is the merge captain's
+   GitHub Actions run on the exact commit. Never run `cargo` (repo rule).
 6. **Data.** The replay corpus is scrubbed with stable surrogates and read only
    through the harness. Tools print structure, counts and codes, never message
    text. Never paste conversation content into messages, commits or reports. Read
@@ -120,7 +119,7 @@ the hot spots; every high finding fixed or explicitly accepted.
 - **G0 entry (per slice):** characterization tests for the code the slice will
   move, written against the old code and committed first; line coverage of that
   code at least 85%, or a lead-signed exception.
-- **G1 author:** the full suite (`heavy-remote uv run --frozen --group dev python -m pytest`, or GitHub Actions until heavy-remote exists) is green
+- **G1 author:** the full suite (`heavy-remote uv run --frozen --group dev python -m pytest`) is green
   except the quarantined tests (read the result, not a wrapper's exit code);
   move-only commits pass the AST-identity check once it exists; the layer test
   once it exists.
