@@ -61,7 +61,8 @@ Reads, in both modes: every module-level name a moved definition or member
 reads resolves in its new home. A name the old file or the destination binds
 by import and also rebinds (imported from two places, imported again inside a
 try/if/with/for block, assigned, defined, a loop/with/except/walrus target or
-deleted at module level, or written through `global` in a function) fails,
+deleted at module level, or written through `global` in a function, by assignment or by an import)
+fails,
 because `top_imports` sees only the import and the moved reader may see
 another object. In top-level mode a read of a moved definition must be that
 definition in its new home (imported from it, or defined in the same file);
@@ -313,7 +314,11 @@ def _comprehension_locals(member: ast.stmt) -> set[str]:
             for gen in node.generators:
                 # The first iterable is evaluated outside the comprehension.
                 visit(gen.iter, bound if gen is node.generators[0] else frozenset(inner))
-                inner |= {n.id for n in ast.walk(gen.target) if isinstance(n, ast.Name)}
+                # Only plain names stored by the target are bound; a target
+                # like `holder.value` or `rows[i]` loads holder and rows.
+                inner |= {n.id for n in ast.walk(gen.target)
+                          if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store)}
+                visit(gen.target, frozenset(inner))
                 for cond in gen.ifs:
                     visit(cond, frozenset(inner))
             for part in ([node.key, node.value] if isinstance(node, ast.DictComp) else [node.elt]):
@@ -426,7 +431,8 @@ def rebound_imports(tree: ast.Module, path: str) -> dict[str, str]:
 
     def visit(t):
         for sym in t.get_symbols():
-            if sym.get_name() in imports and sym.is_declared_global() and sym.is_assigned():
+            # A `global` name rebound by assignment or by `import ... as name`.
+            if sym.get_name() in imports and sym.is_declared_global() and (sym.is_assigned() or sym.is_imported()):
                 found.setdefault(sym.get_name(), f"written through `global` in {t.get_name()}")
         for child in t.get_children():
             visit(child)
