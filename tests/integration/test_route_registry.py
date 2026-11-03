@@ -17,21 +17,59 @@ from tests.integration.test_server_di import (  # noqa: F401 - fixtures
     _model_catalog_never_probes_installed_clis, fake_ctx)
 
 
-def test_every_route_is_the_first_match_for_some_golden_key():
+def _selected_routes(server_module, monkeypatch, tmp_path, routes):
+    """Which (method, route name) actually served a golden key: dispatch runs
+    for real (as the local administrator, through the probe that stubs every
+    handler) with each adapter wrapped to record when it answered, that is
+    returned anything but NOT_HANDLED or reached a handler."""
     from lib.routes import registry
-    golden = json.loads(DISPATCH_GOLDEN.read_text())["routes"]
-    used = set()
-    for key in golden:
+    selected = set()
+
+    def witness(route):
+        def adapter(handler, path):
+            try:
+                result = route.adapter(handler, path)
+            except route_probe.Resolved:
+                selected.add((route.method, route.name))
+                raise
+            if result is not registry.NOT_HANDLED:
+                selected.add((route.method, route.name))
+            return result
+        return registry.Route(route.method, route.name, route.match, adapter)
+
+    monkeypatch.setattr(registry, "ROUTES", {
+        method: tuple(witness(route) for route in table) for method, table in routes.items()})
+    (tmp_path / "static").mkdir(exist_ok=True)
+    (tmp_path / "audio").mkdir(exist_ok=True)
+    route_probe.patch_lib_targets(monkeypatch)
+    probe = route_probe.make_probe_class(server_module.Handler)
+    admin = route_probe.principals("unused", "unused")["admin"]
+    for key in json.loads(DISPATCH_GOLDEN.read_text())["routes"]:
         method, path = key.split(" ", 1)
-        bare = path.split("?", 1)[0]
-        for route in registry.ROUTES[method]:
-            if route.match(bare):
-                used.add((method, route.name))
-                if route.name not in ("exact", "root-static", "decision", "clip-hls"):
-                    break
-    declared = {(method, route.name) for method, routes in registry.ROUTES.items()
-                for route in routes}
-    assert declared - used == set()
+        route_probe.resolve(probe, tmp_path, method, path, *admin)
+    return selected
+
+
+def _declared(routes):
+    return {(method, route.name) for method, table in routes.items() for route in table}
+
+
+def test_every_route_serves_some_golden_key(server_module, monkeypatch, tmp_path):
+    from lib.routes import registry
+    routes = dict(registry.ROUTES)
+    assert _declared(routes) - _selected_routes(server_module, monkeypatch, tmp_path, routes) == set()
+
+
+def test_dead_route_check_catches_a_route_shadowed_by_the_exact_table(
+        server_module, monkeypatch, tmp_path):
+    """Negative control (review B): a route appended after the exact table for a
+    path the table already serves is never selected and must be reported."""
+    from lib.routes import registry
+    shadowed = registry.Route("GET", "shadowed-status", lambda path: path == "/status",
+                              lambda handler, path: handler._handle_status())
+    routes = {**registry.ROUTES, "GET": registry.ROUTES["GET"] + (shadowed,)}
+    unused = _declared(routes) - _selected_routes(server_module, monkeypatch, tmp_path, routes)
+    assert unused == {("GET", "shadowed-status")}
 
 
 @pytest.mark.parametrize("method", route_probe.METHODS)
