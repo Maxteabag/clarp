@@ -99,6 +99,9 @@ _STOPPING_SENTINEL = turn_slots.STOPPING_SENTINEL
 # sends wait behind it (see _claim_or_queue).
 _PROCESS_OWNER_PREFIX = "process:"
 _PROCESS_EXIT_POLL_S = 0.25
+# How long a preempting send waits for the SIGTERMed process to exit before
+# it waits behind that process instead (TP-01).
+_PREEMPT_EXIT_WAIT_S = 3.0
 # A settled turn whose slot is still held this long after it settled leaked
 # (see TurnDispatchService.release_leaked_slots).
 LEAKED_SLOT_GRACE_MS = 60_000
@@ -1970,20 +1973,24 @@ class TurnDispatchService:
         if not spec.queue_id and _SLOTS.get(spec.agent_id) == _STOPPING_SENTINEL:
             park_id = _park(spec)
         parked = False
+        preempt: list = []
         try:
             with _TURN_LOCK:
                 parked, decision = self._claim_or_queue(
-                    spec, queue_if_busy=queue_if_busy, park_id=park_id)
+                    spec, queue_if_busy=queue_if_busy, park_id=park_id,
+                    preempt=preempt)
         finally:
             if park_id and not parked:
                 turn_queue.unpark(park_id)
+        if preempt and self._preempt_for(spec, preempt[0]):
+            decision = True     # it waits for the old process to exit
         if decision and _SLOTS.fenced:
             # Held behind the release drain: durable before anything else.
             self.persist_held(spec.agent_id)
         return decision
 
     def _claim_or_queue(self, spec: _TurnSpec, *, queue_if_busy: bool,
-                        park_id: str) -> tuple[bool, bool]:
+                        park_id: str, preempt: list | None = None) -> tuple[bool, bool]:
         """The decision half of _enqueue_if_busy; the caller holds _TURN_LOCK.
         Returns (parked behind Stop, send waits)."""
         agent_id = spec.agent_id
@@ -2049,9 +2056,13 @@ class TurnDispatchService:
                 # The release drain waits for this turn; never preempt it.
                 return self._hold_for_drain(spec, "behind a live turn")
             # Take the slot first so the preempted turn's dying callback is
-            # already superseded, then interrupt once the lock is released.
+            # already superseded, then interrupt once the lock is released
+            # (the caller does, see ``preempt``).
             _SLOTS.claim(agent_id, spec.trace_id)
-            defer_on(_TURN_LOCK, lambda: self._preempt_for(spec, current))
+            if preempt is not None:
+                preempt.append(current)
+            else:
+                defer_on(_TURN_LOCK, lambda: self._preempt_for(spec, current))
             return False, False
         if self._running_processes(spec):
             # The slot is free but a turn process of this agent still runs
@@ -2125,7 +2136,11 @@ class TurnDispatchService:
         threading.Thread(target=wait, daemon=True,
                          name=f"turn-wait-{spec.agent_id}").start()
 
-    def _preempt_for(self, spec: _TurnSpec, killed: str) -> None:
+    def _preempt_for(self, spec: _TurnSpec, killed: str) -> bool:
+        """Interrupt the running turn for ``spec``. Two processes on one native
+        session interleave and corrupt it, so ``spec`` starts only once the
+        old process has exited; one that outlives ``_PREEMPT_EXIT_WAIT_S``
+        keeps the slot and ``spec`` waits behind it. Returns whether it waits."""
         try:
             self.backends.interrupt(spec.backend, spec.agent_id)
         except Exception as e:  # noqa: BLE001
@@ -2135,6 +2150,22 @@ class TurnDispatchService:
         log("turnPreempted",
             f"agent={spec.agent_id} killed={killed or '∅'} "
             f"new={spec.trace_id or '∅'} — busy, preempting and resuming")
+        deadline = time.monotonic() + _PREEMPT_EXIT_WAIT_S
+        while self._running_processes(spec):
+            if time.monotonic() < deadline:
+                time.sleep(_PROCESS_EXIT_POLL_S)
+                continue
+            owner = f"{_PROCESS_OWNER_PREFIX}{spec.trace_id}"
+            with _TURN_LOCK:
+                if _SLOTS.get(spec.agent_id) != spec.trace_id:
+                    return False    # a Stop or another send took the slot
+                _SLOTS.claim(spec.agent_id, owner)
+                _SLOTS.mark_spawned(spec.agent_id, owner)
+                _SLOTS.requeue_front(spec.agent_id, spec)
+                depth = _SLOTS.queue_depth(spec.agent_id)
+            self._wait_for_process_exit(spec, owner, depth)
+            return True
+        return False
 
     def _call_opening_claimed(self, spec: _TurnSpec) -> bool:
         """The dispatcher's claim of a listen-first initiative before it runs
