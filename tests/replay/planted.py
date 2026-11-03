@@ -79,7 +79,7 @@ CHANGES = [
         'file': 'server/server.py',
         'find': '                        self.wfile.write(f"id: {event_id}\\n".encode())\n',
         'count': 2,
-        'replace': '',
+        'replace': '                        pass\n',
         'expect': {'channel': 'sse', 'locator': r'\.has_id$', 'kinds': {'changed'}},
     },
 ]
