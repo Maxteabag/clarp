@@ -56,6 +56,9 @@ DREAM_PLANNED_ROUNDS = (
 DREAM_TARGET_TOKEN_BUDGET = 70_000
 DREAM_TARGET_MINUTES = 120
 DREAM_SENT_RECOVERY_SEC = 90 * 60
+# A run still active this long after it started is ended, so a round that
+# keeps failing cannot hold the agent's nightly dream for ever (AUT-06).
+DREAM_RUN_DEADLINE_SEC = 12 * 60 * 60
 DREAM_PRIOR_CONTEXT_MAX_CHARS = 7_000
 DREAM_PRIOR_ROUND_EXCERPT_CHARS = 1_000
 
@@ -906,7 +909,7 @@ def _deliver_digest(*, run_id: str, agent_id: str, digest: str) -> None:
         log_exception("dreamingDigestMessageFail", e, detail=run_id)
 
 
-def abandon_run(run_id: str) -> None:
+def abandon_run(run_id: str, reason: str = "dreaming disabled while in flight") -> None:
     """End a run whose agent is no longer opted in, keeping what it built.
 
     Called when dreaming is switched off while a run is in flight. The run is
@@ -922,10 +925,9 @@ def abandon_run(run_id: str) -> None:
         """UPDATE dream_runs
               SET status = 'abandoned', stage = 'abandoned',
                   finished_at = ?, updated_at = ?,
-                  last_error = COALESCE(NULLIF(last_error, ''),
-                                        'dreaming disabled while in flight')
+                  last_error = COALESCE(NULLIF(last_error, ''), ?)
             WHERE run_id = ?""",
-        (now, now, run_id),
+        (now, now, reason, run_id),
     )
     db.conn().execute(
         """UPDATE dream_rounds SET status = 'abandoned', updated_at = ?
@@ -1258,6 +1260,13 @@ def dispatch_isolated_dream(agent: dict, prompt: str) -> bool:
         log("dreamingIsolatedError",
             f"agent={agent_id} session={session} trace={trace_id} "
             f"error={str(message or '')[:300]}")
+        if run_id:
+            # Visible on the run, which its deadline later ends (AUT-06).
+            db.conn().execute(
+                "UPDATE dream_runs SET last_error = ?, updated_at = ? "
+                "WHERE run_id = ? AND status = 'active'",
+                (f"isolated round failed: {str(message or '')[:400]}",
+                 db.now_ms(), run_id))
 
     backends.spawn_turn(
         backend,
@@ -2280,6 +2289,10 @@ class DreamingScheduler:
             # forever holding an untracked worktree. Opting out ends the run
             # instead of abandoning it.
             abandon_run(run["run_id"])
+            return 0
+        if db.now_ms() - int(run.get("started_at") or 0) > DREAM_RUN_DEADLINE_SEC * 1000:
+            abandon_run(run["run_id"],
+                        reason=f"dream run passed its {DREAM_RUN_DEADLINE_SEC // 3600} h deadline")
             return 0
         _recover_stale_sent_round(run["run_id"])
         reason = _skip_busy_reason(agent)
