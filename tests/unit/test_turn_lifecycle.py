@@ -504,3 +504,35 @@ def test_a_stop_after_a_turn_opened_in_the_same_millisecond_fences_it(tmp_path, 
 
     assert started is None
     assert turn_lifecycle.current_kind(agent_id) == AgentState.INTERRUPTED
+
+
+def test_a_stop_is_written_together_with_its_settlement_or_not_at_all(tmp_path, monkeypatch):
+    """TP-N1b: the settlement that attributes a Stop to its turn was a
+    best-effort write after the Stop row; when it failed, a Stop in a tied
+    millisecond looked foreign and a stopped turn's late start was admitted.
+    The terminal row and its settlement now commit together; a failure
+    rolls both back and is raised, not swallowed."""
+    import sqlite3
+    agent_id = _agent(tmp_path)
+    _one_millisecond(monkeypatch)
+    _first_turn(agent_id)
+    turn_lifecycle.transition(agent_id, TurnEvent.STOP_REQUESTED, {"source": "user_stop"})
+    second = turn_lifecycle.open_turn(agent_id=agent_id, source="pwa", trace_id="t-2")
+    assert turn_lifecycle.try_transition(agent_id, TurnEvent.SPAWN_STARTED,
+                                         {"source": "pwa", "dispatch": "codex", "trace_id": "t-2"})
+
+    def settlement_fails(*_args, **_kwargs):
+        raise sqlite3.OperationalError("database is locked")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(turn_lifecycle, "_record_outcome", settlement_fails)
+        with pytest.raises(sqlite3.OperationalError):
+            turn_lifecycle.transition(agent_id, TurnEvent.STOP_REQUESTED, {"source": "user_stop"})
+
+    assert turn_lifecycle.current_kind(agent_id) == AgentState.THINKING, "a Stop row without its settlement"
+    turn_lifecycle.transition(agent_id, TurnEvent.STOP_REQUESTED, {"source": "user_stop"})
+    settled = db.conn().execute("SELECT settled_at FROM turns WHERE turn_id = ?", (second,)).fetchone()
+    assert settled["settled_at"] is not None
+    late = turn_lifecycle.try_transition(agent_id, TurnEvent.SPAWN_STARTED,
+                                         {"dispatch": "codex", "trace_id": "t-2"})
+    assert late is None and turn_lifecycle.current_kind(agent_id) == AgentState.INTERRUPTED
