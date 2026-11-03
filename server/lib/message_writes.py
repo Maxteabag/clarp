@@ -906,6 +906,26 @@ def _is_retry_echo(native_timestamp: Any, next_client_timestamp: Any) -> bool:
             and (next_at - native_at).total_seconds() > _RETRY_ECHO_SLACK_S)
 
 
+def _shifted_twin(database, agent_id: str, backend_session_id: str,
+                  source_file: str, request_trace: str, visible: str, seq: int,
+                  *, exclude: set[str]):
+    """(message_id, seq) of the one reply to ``request_trace`` that an earlier
+    import adopted (its id is not its slot's hash) and that sits at a later
+    slot of this transcript, with this visible text; else None. A shift moves
+    turns down, so only a later slot means this reply moved (RM-N1)."""
+    found = [
+        (row["message_id"], int(row["seq"])) for row in database.execute(
+            """SELECT message_id, seq, text FROM messages
+                WHERE trace_id = ? AND agent_id = ? AND backend_session_id = ?
+                  AND source_file = ? AND role = 'assistant' AND seq > ?""",
+            (request_trace, agent_id, backend_session_id, source_file, seq))
+        if row["message_id"] not in exclude
+        and row["message_id"] != _message_id(agent_id, backend_session_id,
+                                             source_file, row["seq"])
+        and _strip_voice_markup(row["text"]) == visible]
+    return found[0] if len(found) == 1 else None
+
+
 class _FinalRows:
     """Finalized live rows of one conversation, read once per write batch.
 
@@ -1116,6 +1136,8 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
     adopted_final_ids: set[str] = set()
     skipped_slot_removed = False
     final_rows = _FinalRows(database, agent_id, backend_session_id)
+    # Rows this import already wrote: never moved again (RM-N1).
+    placed_ids: set[str] = set()
     if carry is not None:
         assistant_ordinal = int(carry["assistant_ordinal"])
         authority_tools = {trace: (entry[0], list(entry[1]), list(entry[2]))
@@ -1212,6 +1234,11 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
                         authority["trace_id"], (authority["authoritative_message_id"], [], []))
                     tools.extend(turn.get("tools") or [])
                     cells.extend(turn.get("display_cells") or [])
+                # Nothing is written at this position: whatever an earlier
+                # import left here would outlive a shift (RM-N1).
+                removed = _delete_slot(database, agent_id, backend_session_id,
+                                       source_file, seq)
+                skipped_slot_removed = skipped_slot_removed or removed > 0
                 continue
         text = str(turn.get("text") or "")
         origin = "user"
@@ -1314,7 +1341,25 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
             # Never deduplicate equal replies belonging to different requests.
             slot = database.execute("SELECT message_id FROM messages WHERE agent_id=? AND backend_session_id=? AND source_file=? AND seq=? AND role='assistant'",
                 (agent_id, backend_session_id, source_file, seq)).fetchone()
-            if slot:
+            moved = None
+            if current_request_trace and not (
+                    slot and slot["message_id"] != _message_id(
+                        agent_id, backend_session_id, source_file, seq)):
+                # An earlier import adopted this reply's final row (its
+                # source_file is this transcript's now) and the turns have
+                # shifted since: it moves with its turn, where a fresh import
+                # would place it, and the slot's old occupant goes (RM-N1).
+                moved = _shifted_twin(database, agent_id, backend_session_id,
+                                      source_file, current_request_trace,
+                                      _strip_voice_markup(text), seq,
+                                      exclude=adopted_final_ids | placed_ids)
+            if moved is not None:
+                msg_id = moved[0]
+                adopted_final_ids.add(msg_id)
+                _delete_slot(database, agent_id, backend_session_id, source_file, seq)
+                skipped_slot_removed = True
+                slot = None
+            elif slot:
                 msg_id = slot["message_id"]
             elif current_request_trace:
                 request_source = "final:" + current_request_trace
@@ -1445,6 +1490,7 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
             from . import oracle_delegations
             oracle_delegations.complete_for_trace(
                 trace_id=trace_id, message_id=msg_id, text=text)
+        placed_ids.add(msg_id)
         out.append({
             **turn,
             "id": msg_id,
