@@ -374,3 +374,29 @@ def test_the_generation_read_seeks_the_per_agent_index(tmp_path):
     plan = " ".join(r[3] for r in db.conn().execute(
         "EXPLAIN QUERY PLAN SELECT MAX(state_id) FROM state_log WHERE agent_id = ?", ("a",)))
     assert "idx_state_log_agent_state" in plan, plan
+
+
+def test_a_late_provider_start_does_not_reopen_a_stopped_turn(tmp_path):
+    """TP-N1: the dispatcher writes a turn's 'thinking', a Stop writes
+    'interrupted', then the provider's own turn-start 'thinking' for the same
+    trace arrives. It must not make the agent busy again for good."""
+    agent_id = _agent(tmp_path)
+    turn_lifecycle.transition(agent_id, TurnEvent.SPAWN_STARTED,
+                              {"source": "pwa", "dispatch": "codex", "trace_id": "t-1"})
+    turn_lifecycle.transition(agent_id, TurnEvent.STOP_REQUESTED, {"source": "user_stop"})
+
+    late = turn_lifecycle.try_transition(agent_id, TurnEvent.SPAWN_STARTED,
+                                         {"dispatch": "codex", "trace_id": "t-1"})
+
+    assert late is None
+    assert turn_lifecycle.current_kind(agent_id) == AgentState.INTERRUPTED
+
+
+def test_the_next_turn_still_starts_after_a_stop(tmp_path):
+    agent_id = _agent(tmp_path)
+    turn_lifecycle.transition(agent_id, TurnEvent.SPAWN_STARTED,
+                              {"source": "pwa", "dispatch": "codex", "trace_id": "t-1"})
+    turn_lifecycle.transition(agent_id, TurnEvent.STOP_REQUESTED, {"source": "user_stop"})
+    turn_lifecycle.transition(agent_id, TurnEvent.SPAWN_STARTED,
+                              {"source": "pwa", "dispatch": "codex", "trace_id": "t-2"})
+    assert turn_lifecycle.current_kind(agent_id) == AgentState.THINKING
