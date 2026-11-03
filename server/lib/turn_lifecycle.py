@@ -179,7 +179,7 @@ def _record_outcome(agent_id: str, event: str, kind: str, detail: dict[str, Any]
     if row is None:
         row = database.execute(
             """SELECT turn_id, trace_id FROM turns WHERE agent_id = ? AND started_at <= ?
-                ORDER BY started_at DESC LIMIT 1""", (agent_id, ts)).fetchone()
+                ORDER BY started_at DESC, turn_id DESC LIMIT 1""", (agent_id, ts)).fetchone()
         if row is None or database.execute(
                 "SELECT settled_at FROM turns WHERE turn_id = ?",
                 (row["turn_id"],)).fetchone()["settled_at"] is not None:
@@ -465,10 +465,26 @@ class TurnStateMachine:
                               AND json_extract(detail, '$.trace_id') = ?""",
                         (agent_id, trace)).fetchone()
                     since = first["ts"] if first is not None else None
+                # A clock tie is no order. A Stop belongs to the trace it names, else
+                # to the turn it settled; one that settled another turn (and not this
+                # one) came before this turn and does not fence it. A Stop that
+                # settled nothing still fences.
                 stopped = since is not None and database.execute(
-                    """SELECT 1 FROM state_log WHERE agent_id = ? AND ts >= ?
-                          AND kind IN ('interrupted', 'stopped') LIMIT 1""",
-                    (agent_id, since)).fetchone() is not None
+                    """SELECT 1 FROM state_log s WHERE s.agent_id = ? AND s.ts >= ?
+                          AND s.kind IN ('interrupted', 'stopped')
+                          AND (COALESCE(json_extract(s.detail, '$.trace_id'), '') = ?
+                               OR (COALESCE(json_extract(s.detail, '$.trace_id'), '') = ''
+                                   AND (EXISTS (SELECT 1 FROM turns u
+                                                 WHERE u.agent_id = s.agent_id AND u.trace_id = ?
+                                                   AND u.settled_at = s.ts
+                                                   AND u.outcome = 'interrupted')
+                                        OR NOT EXISTS (SELECT 1 FROM turns u
+                                                 WHERE u.agent_id = s.agent_id
+                                                   AND u.trace_id IS NOT ?
+                                                   AND u.settled_at = s.ts
+                                                   AND u.outcome = 'interrupted'))))
+                        LIMIT 1""",
+                    (agent_id, since, trace, trace, trace)).fetchone() is not None
                 if stopped:
                     # Nothing of ours was written; a Stop that landed meanwhile stays.
                     database.execute("COMMIT")
