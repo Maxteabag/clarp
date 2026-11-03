@@ -175,8 +175,15 @@ def other_enabled_configs(agent_id: str, c=None) -> list:
     return list(_c(c).execute("SELECT j.* FROM janitor_configs j JOIN agents a ON a.agent_id=j.agent_id WHERE j.enabled=1 AND j.agent_id!=? AND a.deleted_at IS NULL AND a.archived_at IS NULL", (agent_id,)))
 
 
-def janitor_agent_ids(c=None) -> list[str]:
-    return [r[0] for r in _c(c).execute("SELECT a.agent_id FROM agents a JOIN janitor_configs j ON j.agent_id=a.agent_id WHERE a.is_janitor=1 AND a.deleted_at IS NULL AND a.archived_at IS NULL ORDER BY a.persona")]
+def janitor_agent_ids(c=None, *, template_id: str | None = None, enabled_only: bool = False) -> list[str]:
+    where = ""
+    params: list = []
+    if template_id is not None:
+        where += " AND j.template_id=?"
+        params.append(template_id)
+    if enabled_only:
+        where += " AND j.enabled=1"
+    return [r[0] for r in _c(c).execute("SELECT a.agent_id FROM agents a JOIN janitor_configs j ON j.agent_id=a.agent_id WHERE a.is_janitor=1 AND a.deleted_at IS NULL AND a.archived_at IS NULL" + where + " ORDER BY a.persona", params)]
 
 
 def admission_fingerprint(agent_id: str, c=None):
