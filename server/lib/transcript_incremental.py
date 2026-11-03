@@ -723,6 +723,22 @@ def _summary_moved_off(changed: set[str], planned: set[str],
     return explained
 
 
+def _summary_consistent(database, agent_id: str, trace_id: str) -> bool:
+    """Whether a turn's rows hold the summary stamp_turn decides for it: on a
+    settled turn exactly one row, its last, with that summary; on an
+    unsettled or unknown turn none. Rows are read across backend sessions."""
+    from . import message_writes
+    stamped = message_writes.turn_stamp(database, agent_id, trace_id)
+    if stamped is None:
+        return True
+    _, rows, summary = stamped
+    holders = [row for row in rows if row["turn_json"] is not None]
+    if summary is None:
+        return not holders
+    return [row["message_id"] for row in holders] == [rows[-1]["message_id"]] \
+        and holders[0]["turn_json"] == summary
+
+
 class _Shadow:
     """One shadow run beside a full import. Its own failures are logged and
     end the run; they never reach the authoritative import."""
@@ -884,6 +900,19 @@ class _Shadow:
             {row["message_id"]: _restamp_view(row) for row in rows})
         if unexplained:
             mismatches.append("changed_rows")
+        # The plan cannot predict turn summaries, so check them directly: every
+        # turn this import changed carries what stamp_turn gives it now.
+        # stamp_turn writes a turn's rows in every backend session, so the
+        # turns to check come from the agent's rows, not just this
+        # conversation's. The floor is a global clock value: any row of the
+        # agent above it changed since the plan's snapshot.
+        changed_traces = {row["trace_id"] for row in database.execute(
+            """SELECT DISTINCT trace_id FROM messages
+                WHERE agent_id = ? AND revision > ? AND trace_id IS NOT NULL""",
+            (self.agent_id, floor)).fetchall()}
+        if any(not _summary_consistent(database, self.agent_id, trace)
+               for trace in sorted(changed_traces)):
+            mismatches.append("summary")
         # A row the plan adopts (a streamed twin) keeps its id; the plan, which
         # never applies its writes, still sees it as live and deletes it.
         planned_deleted = (plan["deleted"] & self.ids_before) - {r["id"] for r in planned}

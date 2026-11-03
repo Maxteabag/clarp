@@ -234,3 +234,137 @@ def test_the_comparator_flags_an_unpredicted_write_to_a_row_of_a_planned_turn(tm
     shadow.mismatches, shadow.out_seqs, shadow.detail = [], [0, 1], {}
     shadow._compare([{**prefix, "revision": floor}, {**tail, "revision": floor + 2}])
     assert shadow.verdict == "diverge:changed_rows", shadow.verdict
+
+
+# ---- RM-N3 residual R1: the shadow checks turn summaries ---------------------
+
+def _summary_world(tmp_path, *, settled: bool | None):
+    """Three transcript rows of trace tr-s, stamped as stamp_turn would.
+    ``settled`` None: no turns row at all."""
+    world.prepare(tmp_path / "state.sqlite", "claude")
+    c = db.conn()
+    if settled is not None:
+        start = int(corpus.epoch(0, 0) * 1000)
+        c.execute("""INSERT INTO turns(agent_id, source, trace_id, started_at, ended_at,
+                     settled_at, outcome) VALUES (?, 'pwa', 'tr-s', ?, ?, ?, ?)""",
+                  (corpus.AGENT, start, start + 6000, start + 6000 if settled else None,
+                   "completed" if settled else None))
+    for seq in range(3):
+        c.execute("""INSERT INTO messages(message_id, agent_id, backend_session_id, source_file,
+                     seq, role, timestamp, text, updated_at, revision, trace_id)
+                     VALUES (?, ?, ?, '/t', ?, 'assistant', ?, ?, 1, 1, 'tr-s')""",
+                  (f"m{seq}", corpus.AGENT, corpus.SESSION, seq, corpus.iso(0, seq + 1), f"r{seq}"))
+    message_writes.stamp_turn(c, corpus.AGENT, "tr-s", message_writes._next_revision)
+    c.commit()
+    return c
+
+
+def _set_summary(c, message_id, value):
+    c.execute("UPDATE messages SET turn_json=? WHERE message_id=?", (value, message_id))
+    c.commit()
+
+
+@pytest.mark.parametrize("settled", [True, False, None])
+def test_a_stamped_turn_is_consistent(tmp_path, settled):
+    c = _summary_world(tmp_path, settled=settled)
+    assert inc._summary_consistent(c, corpus.AGENT, "tr-s")
+    holders = [r[0] for r in c.execute(
+        "SELECT message_id FROM messages WHERE turn_json IS NOT NULL ORDER BY seq")]
+    assert holders == (["m2"] if settled else [])
+
+
+@pytest.mark.parametrize("control", ["corrupted_holder", "second_holder", "holder_on_wrong_row",
+                                     "summary_on_an_active_turn", "summary_without_a_turns_row"])
+def test_each_summary_inconsistency_is_caught(tmp_path, control):
+    settled = {"summary_on_an_active_turn": False, "summary_without_a_turns_row": None}.get(control, True)
+    c = _summary_world(tmp_path, settled=settled)
+    stored = c.execute("SELECT turn_json FROM messages WHERE message_id='m2'").fetchone()[0]
+    if control == "corrupted_holder":
+        _set_summary(c, "m2", stored.replace('"tool_count":0', '"tool_count":7'))
+    elif control == "second_holder":
+        _set_summary(c, "m0", stored)
+    elif control == "holder_on_wrong_row":
+        _set_summary(c, "m1", stored)
+        _set_summary(c, "m2", None)
+    else:
+        _set_summary(c, "m1", '{"turn_id":"tr-s","status":"completed"}')
+    assert not inc._summary_consistent(c, corpus.AGENT, "tr-s")
+
+
+def test_the_shadow_reports_a_corrupted_summary(tmp_path, importer, monkeypatch):
+    """End to end: the authoritative import stores a wrong summary for a turn
+    it stamped; the shadow's verdict names it."""
+    real = message_writes.stamp_turn
+
+    def stamp_turn(database, agent_id, trace_id, next_revision):
+        out = real(database, agent_id, trace_id, next_revision)
+        if trace_id == "tr-1" and isinstance(database, message_writes._ImportWriter) \
+                and database.locked:
+            database.execute("UPDATE messages SET turn_json='{\"corrupt\":1}', revision=? "
+                             "WHERE agent_id=? AND trace_id=? AND turn_json IS NOT NULL",
+                             (next_revision(database), agent_id, trace_id))
+        return out
+    world.prepare(tmp_path / "state.sqlite", "claude")
+    world.seed("claude", importer)
+    transcript = corpus.transcript_path(tmp_path, "claude")
+    for step in ("grow", "partial"):
+        corpus.apply(transcript, "claude", step)
+        importer.ms += 1000
+        inc.import_transcript(backend="claude", path=transcript, agent_id=corpus.AGENT,
+                              backend_session_id=corpus.SESSION)
+    monkeypatch.setattr(message_writes, "stamp_turn", stamp_turn)
+    corpus.apply(transcript, "claude", "complete")
+    importer.ms += 1000
+    inc.import_transcript(backend="claude", path=transcript, agent_id=corpus.AGENT,
+                          backend_session_id=corpus.SESSION)
+    assert "summary" in importer.verdicts[-1], importer.verdicts
+
+
+def test_the_shadow_checks_a_turn_whose_summary_holder_is_in_another_session(
+        tmp_path, importer, monkeypatch):
+    """Reviewer C's control (R1): the turn's summary sits on a later row of
+    the same agent in another backend session; the import's stamp rewrites
+    only that row. The shadow must still check the turn."""
+    world.prepare(tmp_path / "state.sqlite", "claude")
+    world.seed("claude", importer)
+    path = corpus.transcript_path(tmp_path, "claude")
+    corpus.apply(path, "claude", "grow")
+    inc.import_transcript(backend="claude", path=path, agent_id=corpus.AGENT,
+                          backend_session_id=corpus.SESSION)
+    c = db.conn()
+    c.execute("""INSERT INTO messages(message_id, agent_id, backend_session_id, source_file,
+                 seq, role, timestamp, text, updated_at, revision, trace_id)
+                 VALUES ('foreign', ?, 'other-session', '/foreign', 100, 'assistant', ?,
+                         'synthetic foreign reply', 1, ?, 'tr-1')""",
+              (corpus.AGENT, corpus.iso(1, 6), message_writes._next_revision(c)))
+    message_writes.stamp_turn(c, corpus.AGENT, "tr-1", message_writes._next_revision)
+    c.commit()
+    with path.open("ab") as f:          # a fresh checkpoint after the foreign holder
+        f.write(b"\n")
+    importer.ms += 1000
+    inc.import_transcript(backend="claude", path=path, agent_id=corpus.AGENT,
+                          backend_session_id=corpus.SESSION)
+    c.execute("UPDATE turns SET outcome='interrupted' WHERE trace_id='tr-1'")
+    c.commit()
+    real = message_writes.stamp_turn
+    corrupted = []
+
+    def stamp(database, agent_id, trace_id, next_revision):
+        result = real(database, agent_id, trace_id, next_revision)
+        if trace_id == "tr-1" and isinstance(database, message_writes._ImportWriter) \
+                and database.locked:
+            assert database.execute("SELECT turn_json FROM messages WHERE message_id='foreign'"
+                                    ).fetchone()["turn_json"] is not None
+            database.execute("UPDATE messages SET turn_json='{}', revision=? "
+                             "WHERE message_id='foreign'", (next_revision(database),))
+            corrupted.append(True)
+        return result
+    monkeypatch.setattr(message_writes, "stamp_turn", stamp)
+    with path.open("ab") as f:
+        f.write(b"\n")
+    importer.ms += 1000
+    inc.import_transcript(backend="claude", path=path, agent_id=corpus.AGENT,
+                          backend_session_id=corpus.SESSION)
+    assert corrupted, "the control did not reach the locked foreign summary stamp"
+    assert not inc._summary_consistent(c, corpus.AGENT, "tr-1")
+    assert "summary" in importer.verdicts[-1], importer.verdicts
