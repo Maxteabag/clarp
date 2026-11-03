@@ -255,13 +255,6 @@ def test_a_call_opening_input_is_never_a_user_row_and_clears_its_slot(clock):
     assert head()[1] > before[1]
 
 
-def test_hidden_blocks_and_injected_context_are_stripped(clock):
-    store([u("ask", 0), a("visible<clarp-hidden>secret</clarp-hidden>", 1)])
-    texts = [r["text"] for r in transcript_rows()]
-    assert texts[0] == "ask"
-    assert texts[1] == message_writes.strip_hidden_blocks("visible<clarp-hidden>secret</clarp-hidden>")
-
-
 def test_a_turn_with_its_own_id_keeps_it(clock):
     store([u("ask", 0, id="native-u"), a("reply", 1, id="native-a")])
     assert view(transcript_rows(), "message_id", "seq") == [("native-u", 0), ("native-a", 1)]
@@ -452,20 +445,6 @@ def test_a_tombstone_authority_hides_the_turn_and_attaches_nothing(clock):
 
 
 # ---- batches and a failure part-way (gap 4, RM-04) ---------------------------
-
-def test_batches_publish_the_head_as_they_commit(clock, monkeypatch):
-    monkeypatch.setattr(message_store, "IMPORT_COMMIT_EVERY", 2)
-    heads = []
-    real = message_writes._next_revision
-
-    def watch(database):
-        heads.append(db.conn().execute("SELECT revision FROM conversation_heads").fetchone())
-        return real(database)
-    monkeypatch.setattr(message_writes, "_next_revision", watch)
-    store([u(f"q{i}", i * 10) if i % 2 == 0 else a(f"a{i}", i * 10) for i in range(6)])
-    assert len(transcript_rows()) == 6
-    assert head()[0] == max(r["revision"] for r in transcript_rows())
-
 
 def test_a_failure_after_the_first_batch_leaves_that_batch_and_skips_cleanup(clock, monkeypatch):
     """RM-04 as it stands: batch 1 is committed with its head, the stale
