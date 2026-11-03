@@ -123,6 +123,7 @@ class _Client:
         # idle agent do not resume the same thread again.
         self._loaded_threads: set[str] = set()
         self.stream = stream
+        self.reader_dead = False
         self.reader = threading.Thread(target=self._read, daemon=True)
         self.reader.start()
         self.stderr_reader = threading.Thread(target=self._drain_stderr,
@@ -172,27 +173,39 @@ class _Client:
                     message = json.loads(line)
                 except (json.JSONDecodeError, TypeError):
                     continue
-                if "id" in message and ("result" in message or "error" in message):
-                    with self._lock:
-                        pending = self._pending.pop(message["id"], None)
-                    if pending:
-                        done, box = pending
-                        box.update(message)
-                        done.set()
-                    continue
-                method = str(message.get("method") or "")
-                params = message.get("params") or {}
-                if "id" in message:  # unexpected server request: reject safely
-                    self._send({"id": message["id"], "error": {
-                        "code": -32601, "message": "unsupported by headless Clarp"
-                    }})
-                    continue
-                self._notification(method, params)
+                # One bad message must not end the reader every agent shares.
+                try:
+                    self._handle_message(message)
+                except Exception as exc:  # noqa: BLE001
+                    log_exception("codexAppServerMessageFail", exc,
+                                  detail=self.agent_id)
         except Exception as exc:  # noqa: BLE001
             failure = str(exc) or failure
             log_exception("codexAppServerReadFail", exc, detail=self.agent_id)
         finally:
-            self._fail_all(failure)
+            try:
+                self._fail_all(failure)
+            finally:
+                # Nothing reads this process any more: _client() replaces it.
+                self.reader_dead = True
+
+    def _handle_message(self, message) -> None:
+        if "id" in message and ("result" in message or "error" in message):
+            with self._lock:
+                pending = self._pending.pop(message["id"], None)
+            if pending:
+                done, box = pending
+                box.update(message)
+                done.set()
+            return
+        method = str(message.get("method") or "")
+        params = message.get("params") or {}
+        if "id" in message:  # unexpected server request: reject safely
+            self._send({"id": message["id"], "error": {
+                "code": -32601, "message": "unsupported by headless Clarp"
+            }})
+            return
+        self._notification(method, params)
 
     def _drain_stderr(self) -> None:
         if self.proc.stderr is None:
@@ -342,10 +355,14 @@ class _Client:
             turn = params.get("turn") or {}
             status = str(turn.get("status") or "completed")
             error = turn.get("error") or {}
-            _backend().update_live_text(
-                active.state, agent_id=active.agent_id,
-                session=active.session, trace_id=active.trace_id,
-                stream=active.stream, force=True)
+            try:
+                _backend().update_live_text(
+                    active.state, agent_id=active.agent_id,
+                    session=active.session, trace_id=active.trace_id,
+                    stream=active.stream, force=True)
+            except Exception as exc:  # noqa: BLE001 - the turn must still end
+                log_exception("codexAppServerFlushFail", exc,
+                              detail=active.agent_id)
             if hasattr(self, "_actives"):
                 self._actives.pop(active.agent_id, None)
             if self.active is active:
@@ -629,6 +646,15 @@ class _Client:
                 self.interrupt_active()
         except Exception:
             pass
+        self._stop_process()
+
+    def retire(self) -> None:
+        """Stop a client whose reader ended, without any protocol request:
+        nothing would read the reply, so a request would wait out its timeout."""
+        self._fail_all("codex app-server reader ended")
+        self._stop_process()
+
+    def _stop_process(self) -> None:
         try:
             if self.proc.stdin is not None:
                 self.proc.stdin.close()
@@ -764,6 +790,11 @@ def _client(agent_id: str, session: str, stream=None) -> _Client:
                     client.shutdown()
                     _CLIENTS.clear()
                     client = None
+        if client is not None and getattr(client, "reader_dead", False):
+            # Stop the unread process so it releases the thread writer lock
+            # before a new one starts.
+            client.retire()
+            client = None
         if client is None or client.proc.poll() is not None:
             client = _Client(agent_id, session, stream=stream)
             _CLIENTS[_SHARED_KEY] = client
