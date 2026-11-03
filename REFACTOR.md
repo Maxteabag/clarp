@@ -50,8 +50,8 @@ the hot spots; every high finding fixed or explicitly accepted.
    18:00, at most one a day. Longest downtime 5 minutes. A failed health check
    rolls back automatically. Never run `make deploy`, `install.sh`,
    `make deploy-static`, `clarp-admin update` or `systemctl ... clarp*` yourself.
-2. **Main moves through the merge captain** for program work. You commit on your
-   own branch and never push.
+2. **Main and `refactor/integration` move through the merge captain** for
+   program work. You commit on your own branch and never push.
 3. **Refactor slices change no behaviour.** Fixes go through the fix lane, one
    commit and one test each. A move-only commit contains nothing but moves.
 4. **Frozen surfaces** (changing one needs Peter's decision through the lead): the
@@ -87,8 +87,14 @@ the hot spots; every high finding fixed or explicitly accepted.
 ## 3. Decisions already made (do not reopen)
 
 - Keep the stdlib HTTP server; no ASGI move.
-- Trunk: small reviewed merges, released by tag in windows. No long-lived
-  refactor branch.
+- **Two tracks (Peter, 3 Nov evening; replaces "no long-lived refactor
+  branch").** Bug fixes (the fix lane) and other agents' work land on main and
+  go live as we go, in the 18:00 window, only when the release interrupts no
+  running agent turn and can be rolled back. The restructuring (slices S1-S6,
+  and anything else that is not a bug fix) lands on `refactor/integration`,
+  which takes in main after every main landing. It goes live as **one big
+  release** when everything is done and good. Tests-only, tools, harness and
+  docs changes land on main.
 - Claude authors (the fix lane included); Codex reviewers, a different model
   family.
 - Seams before moves: new code goes into new files (a route registry, a
@@ -110,9 +116,9 @@ the hot spots; every high finding fixed or explicitly accepted.
 |---|---|---|
 | F0 (today) | AUT-01 (Stop pauses goals and always records the stop), RTO-01 (voice claim released on early Oracle failure), BACKENDS-02 (one bad Codex message no longer kills the shared reader) | released in windows |
 | 1 (days 1–3) | this brief; flakes quarantined; parked-branch manifest; route goldens; schema golden; migration rehearsal; lifecycle kit contract; harness S0; each slice's characterization tests | **Go/no-go 1** (lead, on the harness proof) |
-| 2 | S3 route seam then moves; S5 read model; S1 layering (move-only); S2 guards; F1 fixes with replay evidence; then S4 turn engine and S6 backends after canary ×3 | **Go/no-go 2** (lead, on the Phase 2 evidence) |
+| 2 | S3 route seam then moves; S5 read model; S1 layering (move-only); S2 guards (all on `refactor/integration`); F1 fixes with replay evidence (on main, released as we go); then S4 turn engine and S6 backends after canary ×3 | **Go/no-go 2** (lead, on the Phase 2 evidence) |
 | 3 | deep work: lifecycle conversions, incremental transcript import, locks out of I/O, database behaviour (P) | lead's done check |
-| 4 | close-out: archive agents, remove worktrees, update ARCHITECTURE.md, delete this file | — |
+| 4 | the one big release: `refactor/integration` into main after a full replay against main, CI, and a canary soak on the buildbox, then a window with rollback ready; close-out: archive agents, remove worktrees, update ARCHITECTURE.md, delete this file | lead's release GO |
 
 **Checkpoints (Peter, 3 Nov 11:3x):** "I dont want to approve for next stages. I just want a finshed refactored server". Both go/no-go checkpoints are the lead's decisions on the same evidence; no agent waits for Peter. Every gate in section 5 still applies.
 
@@ -144,7 +150,8 @@ continue as before.
   3 Nov 13:05): read model and transcripts (S5, RM-*), voice (VP-*). Reviewer
   B: everything else (HTTP layer, live calls and Oracle, autonomy and goals,
   harness and test infrastructure, release tooling).
-- **G4 merge captain:** rebase onto current `origin/main`; the rebased diff's
+- **G4 merge captain:** rebase onto the current target (`origin/main` for
+  fixes, tests and tools; `refactor/integration` for slices); the rebased diff's
   `git patch-id --stable` equals the reviewed diff's, otherwise back to review;
   rerun G1 (and G2) on the rebased commit; fast-forward push.
 - **G5 release owner:** tag `refactor-<yyyymmdd>-<n>` on main inside a window;
