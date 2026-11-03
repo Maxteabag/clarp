@@ -209,9 +209,24 @@ def test_a_split_resolves_each_moved_read_in_its_new_home(tmp_path, capsys, b_te
     ("X = X", ["X"]),
     ("def f(count):\n    ranked = sorted(G)\n    return ', '.join(str(k) for k in ranked[:count])", ["G", "sorted", "str"]),
     ("def f():\n    global Y\n    Y = 1\n    return Y", ["Y"]),
+    ("X = [holder.value for holder.value in VALUES]", ["VALUES", "holder"]),  # review A ee5897e1 F2
+    ("X = [r for rows[0] in A for r in rows]", ["A", "rows"]),
 ])
 def test_global_reads_are_module_reads_only(source, reads):
     """Python 3.12's symtable lists inlined comprehension variables in the
     enclosing scope and can mark a function's own parameters global; neither
     is a module read (S1 commit 3's feature modules hit both)."""
     assert sorted(tool.global_reads(tool.ast.parse(source).body[0])) == reads
+
+
+def test_a_global_import_in_a_function_is_a_rebinding(tmp_path, capsys):
+    """Review A (ee5897e1, F1): `global dep; import cmath as dep` rebinds dep
+    without an assignment; a moved reader of dep must fail."""
+    imports, writer = "import math as dep\n", "def rebind():\n    global dep\n    import cmath as dep\n"
+    reader = "def read():\n    return dep.__name__\n"
+    base = _scoped_repo(tmp_path, imports + writer + reader, {})
+    head = _commit(tmp_path, {"lib/old.py": imports + writer + "from .moved import read\n",
+                              "lib/moved.py": imports + reader})
+    assert tool.main(["--root", str(tmp_path), base, head, "lib/old.py=lib/old.py,lib/moved.py"]) == 1
+    assert "read reads dep, which lib/old.py imports and rebinds (written through `global` in rebind)" \
+        in capsys.readouterr().out
