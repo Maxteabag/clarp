@@ -405,3 +405,105 @@ def test_a_wildcard_import_in_server_py_is_refused_for_groups_and_helpers(tmp_pa
                     recipe=HELPER_RECIPE)
     assert _run(helpers, "--helpers") == 2
     assert "wildcard import from math" in capsys.readouterr().out
+
+
+# ---- found by the first real application (dispatch helpers patched in tests) ----
+
+@pytest.mark.parametrize("text", [
+    "def t(monkeypatch, server_module):\n    monkeypatch.setattr(server_module, 'json', None)\n",
+    "import server\nserver.json = None\n",
+    "import importlib.util as u\nspec = u.spec_from_file_location('x', 'server/server.py')\n"
+    "mod = u.module_from_spec(spec)\nmod.json = None\n",
+    "from unittest import mock\nmock.patch('server.json')\n",
+])
+def test_a_group_member_whose_imported_read_is_patched_through_the_server_module_is_refused(
+        tmp_path, capsys, text):
+    """A test patching server.<imported name> stops reaching a member once it
+    reads that name in its mixin module; refuse until the patch is retargeted."""
+    root = _tree(tmp_path)
+    (root / "tests").mkdir()
+    (root / "tests" / "test_x.py").write_text(text)
+    assert _run(root, "--all") == 2
+    out = capsys.readouterr().out
+    assert "patched through the server module" in out and "tests/test_x.py" in out
+
+
+def test_a_patch_of_the_same_name_on_another_module_is_not_a_server_patch(tmp_path):
+    root = _tree(tmp_path)
+    (root / "tests").mkdir()
+    (root / "tests" / "test_x.py").write_text(
+        "from lib import helper\ndef t(monkeypatch):\n    monkeypatch.setattr(helper, 'json', None)\n")
+    assert _run(root, "--all") == 0
+
+
+def test_a_helper_whose_imported_read_is_patched_through_the_server_module_is_refused(tmp_path, capsys):
+    root = _tree(tmp_path, server=HELPER_SERVER, recipe=HELPER_RECIPE)
+    (root / "tests").mkdir()
+    (root / "tests" / "test_x.py").write_text("import server\nserver.json = None\n")
+    assert _run(root, "--helpers") == 2
+    assert "moved helpers read are patched through the server module" in capsys.readouterr().out
+
+
+def test_the_patch_scan_covers_the_repository_when_helpers_and_groups_apply_together(tmp_path, capsys):
+    recipe = HELPER_RECIPE + ('\n[[group]]\nname = "feat"\nmodule = "lib/routes/feat.py"\n'
+                              'class = "FeatRoutes"\nmembers = ["a"]\n')
+    server = HELPER_SERVER.replace('return _note("x") + str(_plain())',
+                                   'return _note("x") + str(_plain()) + json.dumps(1)')
+    root = _tree(tmp_path, server=server, recipe=recipe)
+    (root / "tests").mkdir()
+    (root / "tests" / "test_x.py").write_text("import server\nserver.json = None\n")
+    assert _run(root, "--all") == 2
+    assert "patched through the server module" in capsys.readouterr().out
+
+
+def test_an_acknowledged_patch_site_with_a_reason_is_allowed(tmp_path, capsys):
+    ack = ('acknowledged_patches = [{path = "tests/test_x.py", name = "json", '
+           'reason = "patches the server for a function that stays there", '
+           'evidence = "trace: no frame of lib/routes/feat.py ran in that test"}]\n')
+    root = _tree(tmp_path, recipe=RECIPE + ack)
+    (root / "tests").mkdir()
+    (root / "tests" / "test_x.py").write_text("import server\nserver.json = None\n")
+    assert _run(root, "--all") == 0
+
+
+@pytest.mark.parametrize("ack", [
+    'acknowledged_patches = [{path = "tests/test_x.py", name = "json", evidence = "e"}]\n',
+    'acknowledged_patches = [{path = "tests/test_x.py", name = "json", reason = " ", evidence = "e"}]\n',
+    'acknowledged_patches = [{path = "tests/test_x.py", name = "json", reason = "r"}]\n',
+    'acknowledged_patches = [{path = "tests/test_x.py", name = "json", reason = "r", evidence = " "}]\n',
+    'acknowledged_patches = [{path = "tests/other.py", name = "json", reason = "wrong file", evidence = "e"}]\n',
+    'acknowledged_patches = [{path = "tests/test_x.py", name = "os", reason = "wrong name", evidence = "e"}]\n',
+])
+def test_an_acknowledgement_needs_reason_and_evidence_and_must_match_path_and_name(tmp_path, capsys, ack):
+    root = _tree(tmp_path, recipe=RECIPE + ack)
+    (root / "tests").mkdir()
+    (root / "tests" / "test_x.py").write_text("import server\nserver.json = None\n")
+    assert _run(root, "--all") == 2
+
+
+# ---- review B, 858211b3 ------------------------------------------------------
+
+@pytest.mark.parametrize("text", [
+    "from unittest import mock\nmock.patch.multiple('server', json=None)\n",
+    "from unittest import mock\nmock.patch.multiple(target='server', json=None)\n",
+    "def t(monkeypatch):\n    monkeypatch.setattr('server.json', 'a string value')\n",
+])
+def test_string_server_targets_are_judged_by_their_string(tmp_path, capsys, text):
+    root = _tree(tmp_path)
+    (root / "tests").mkdir()
+    (root / "tests" / "test_x.py").write_text(text)
+    assert _run(root, "--all") == 2
+    assert "patched through the server module" in capsys.readouterr().out
+
+
+def test_an_acknowledgement_matches_the_patched_name_not_the_file_name(tmp_path, capsys):
+    """An acknowledgement for json in tests/json.py must not waive a patch of
+    another name in that file."""
+    ack = ('acknowledged_patches = [{path = "tests/json.py", name = "json", reason = "r", '
+           'evidence = "e"}]\n')
+    server = SERVER.replace("return json.dumps(VALUE)", "return json.dumps(VALUE) + str(OTHER)")
+    root = _tree(tmp_path, server=server, recipe=RECIPE + ack)
+    (root / "tests").mkdir()
+    (root / "tests" / "json.py").write_text("import server\nserver.OTHER = None\n")
+    assert _run(root, "--all") == 2
+    assert "tests/json.py:2: assigns or deletes .OTHER" in capsys.readouterr().out
