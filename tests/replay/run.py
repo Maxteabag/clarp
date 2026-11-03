@@ -198,6 +198,9 @@ def _build_for(ref: str, scratch: Path, allow_path: bool) -> tuple[Path, str]:
     return target, sha
 
 
+LEASE = '.lease'
+
+
 class RunRoot:
     """This run's own directory under ``<scratch>/r/``: made with an exclusive mkdir
     and held under an exclusive flock until the run ends, so no other job can
@@ -219,6 +222,11 @@ class RunRoot:
         else:
             raise BuildError('could not claim a run directory')
         self.path = path
+        # A shared lease on the build cache for the whole run: clean takes it
+        # exclusively, so it never removes a build while any run may be using one.
+        (scratch / 'builds').mkdir(parents=True, exist_ok=True)
+        self._lease = open(scratch / 'builds' / LEASE, 'w')
+        fcntl.flock(self._lease, fcntl.LOCK_SH)
         self._lock = open(path / '.claim', 'w')
         fcntl.flock(self._lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         self._lock.write(f'{os.getpid()}\n')
@@ -238,6 +246,7 @@ class RunRoot:
             _set_writable(self.path, True)
             shutil.rmtree(self.path, ignore_errors=True)
         self._lock.close()
+        self._lease.close()
 
 
 def live(run_dir: Path) -> bool:
@@ -345,10 +354,10 @@ def cmd_compare(args) -> int:
     scratch = Path(args.scratch)
     started = time.monotonic()
     chosen = select(args.scenarios, scenarios.BY_ID, 'scenario')
-    base, base_sha = build_for(args.base, scratch, args.allow_path)
-    head, head_sha = build_for(args.head, scratch, args.allow_path)
-    run = RunRoot(scratch)
+    run = RunRoot(scratch)  # takes the build lease before any build is made or used
     try:
+        base, base_sha = build_for(args.base, scratch, args.allow_path)
+        head, head_sha = build_for(args.head, scratch, args.allow_path)
         status = _compare(args, run, chosen, base, base_sha, head, head_sha, started)
     except BaseException:
         run.release(keep=True)
@@ -385,9 +394,9 @@ def cmd_self_check(args) -> int:
     chosen = select(args.scenarios, scenarios.BY_ID, 'scenario')
     changes = [] if args.no_planted else select(args.planted, planted.BY_ID, 'planted change')
     diagnostic = diagnostic or args.no_planted
-    build, sha = build_for(args.ref, scratch, args.allow_path)
-    run = RunRoot(scratch)
+    run = RunRoot(scratch)  # takes the build lease before any build is made or used
     try:
+        build, sha = build_for(args.ref, scratch, args.allow_path)
         status = _self_check(args, run, chosen, changes, build, sha, diagnostic, started)
     except BaseException:
         run.release(keep=True)
@@ -445,13 +454,32 @@ def _self_check(args, run, chosen, changes, build, sha, diagnostic, started) -> 
 
 
 def cmd_clean(args) -> int:
-    """Remove cached builds this harness made: registered worktrees under
-    scratch/builds that are clean. Anything else is refused and reported."""
+    """Remove cached builds this harness made (registered, clean worktrees under
+    scratch/builds) and finished run directories. Builds are removed only while
+    holding the build lease exclusively, which no live run allows, and the
+    creation lock; run directories only when no job holds their claim."""
     scratch = Path(args.scratch)
+    (scratch / 'builds').mkdir(parents=True, exist_ok=True)
+    with open(scratch / 'builds' / LEASE, 'w') as lease, open(scratch / 'builds' / '.lock', 'w') as lock:
+        try:
+            fcntl.flock(lease, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            print('refused to remove builds: a replay run holds the build lease')
+            status = 1
+        else:
+            fcntl.flock(lock, fcntl.LOCK_EX)  # and no build is being created
+            status = _clean_builds(scratch)
+    return _clean_runs(scratch, status)
+
+
+def _clean_builds(scratch: Path) -> int:
+    """Called with the build lease and the creation lock held exclusively."""
+    if not has_git():
+        return 0
     registered = {line[len('worktree '):] for line in git('worktree', 'list', '--porcelain').splitlines()
-                  if line.startswith('worktree ')} if has_git() else set()
+                  if line.startswith('worktree ')}
     status = 0
-    for path in sorted((scratch / 'builds').glob('*')) if has_git() else ():
+    for path in sorted(p for p in (scratch / 'builds').glob('*') if not p.name.startswith('.')):
         if str(path) not in registered or path.is_symlink():
             print('refused (not a worktree this harness made):', path.name)
             status = 1
@@ -466,8 +494,11 @@ def cmd_clean(args) -> int:
             continue
         git('worktree', 'remove', str(path))
         print('removed', path)
-    if has_git():
-        git('worktree', 'prune')
+    git('worktree', 'prune')
+    return status
+
+
+def _clean_runs(scratch: Path, status: int) -> int:
     for path in sorted((scratch / 'r').glob('*')):
         if path.is_symlink() or not (path / '.claim').is_file():
             print('refused (not a run directory):', path.name)

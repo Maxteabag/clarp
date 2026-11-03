@@ -190,7 +190,8 @@ def test_run_roots_are_exclusive_and_clean_spares_a_live_one(tmp_path):
     first.dir_for('run1'), first.dir_for('run1')
     second.release(keep=True)
     assert not run.live(second.path)
-    assert run.cmd_clean(type('A', (), {'scratch': str(tmp_path)})()) == 0
+    # Builds are refused while any run is live (1); the finished run is removed, the live one kept.
+    assert run.cmd_clean(type('A', (), {'scratch': str(tmp_path)})()) == 1
     assert first.path.exists() and not second.path.exists()
     first.release(keep=False)
     assert not first.path.exists()
@@ -282,3 +283,52 @@ def test_two_thinking_rows_that_are_not_the_spawn_start_pair_keep_their_order():
             {'state_id': i + 1, 'agent_id': 'a', 'kind': 'thinking', 'detail': json.dumps(d)}
             for i, d in enumerate(details)]}})
     assert _report(rows([a, b]), rows([b, a])).items
+
+
+def _disposable_build(tmp_path, monkeypatch):
+    """A real registered clean Git worktree under scratch/builds/<sha> of a throwaway repo."""
+    import subprocess
+    import run
+    repo = tmp_path / 'repo'
+    repo.mkdir()
+
+    def git(*args):
+        return subprocess.run(['git', '-C', str(repo), *args], check=True, capture_output=True,
+                              text=True).stdout.strip()
+    git('init', '-q')
+    (repo / 'synthetic.txt').write_text('synthetic fixture\n')
+    git('add', 'synthetic.txt')
+    git('-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-qm', 'fixture')
+    sha = git('rev-parse', 'HEAD')
+    scratch = tmp_path / 'scratch'
+    build = scratch / 'builds' / sha
+    build.parent.mkdir(parents=True)
+    git('worktree', 'add', '-q', '--detach', str(build), sha)
+    real_git = run.git
+    monkeypatch.setattr(run, 'HARNESS', repo)
+    monkeypatch.setattr(run, 'git', lambda *args, **kwargs: real_git(*args, cwd=kwargs.get('cwd', repo)))
+    return run, scratch, build
+
+
+def test_clean_does_not_remove_a_build_an_active_replay_uses(tmp_path, monkeypatch):
+    # Reviewer B's control (review s0-harness-c06cb4992293): a live run's cached build survives clean.
+    import subprocess
+    from types import SimpleNamespace
+    run, scratch, build = _disposable_build(tmp_path, monkeypatch)
+    active = run.RunRoot(scratch)
+    process = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'], cwd=build)
+    try:
+        assert run.cmd_clean(SimpleNamespace(scratch=str(scratch))) == 1
+        assert process.poll() is None and build.exists()
+    finally:
+        process.terminate()
+        process.wait(timeout=5)
+        active.release(keep=False)
+
+
+def test_clean_removes_a_build_once_no_run_holds_the_lease(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    run, scratch, build = _disposable_build(tmp_path, monkeypatch)
+    run.RunRoot(scratch).release(keep=False)
+    assert run.cmd_clean(SimpleNamespace(scratch=str(scratch))) == 0
+    assert not build.exists()
