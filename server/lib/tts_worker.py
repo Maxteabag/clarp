@@ -111,9 +111,11 @@ def synth_one(*,
                 active_delivery = delivery or ChunkedFileDelivery(broker=broker)
                 clip_route = tts_mode.route(voice_config, agent)
                 # Raw PCM is Cartesia's live stream; any other provider's
-                # clip is an MP3 that every client plays from its URL.
-                if (clip_route.provider != CARTESIA
-                        and getattr(active_delivery, "name", "") == "raw-pcm"):
+                # clip, or a Cartesia one with no key or voice, is an MP3
+                # that every client plays from its URL and that can fall
+                # back to the configured provider (VP-02).
+                if (getattr(active_delivery, "name", "") == "raw-pcm"
+                        and not _cartesia_can_stream(voice_config, row, agent, clip_route)):
                     active_delivery = ChunkedFileDelivery(broker=broker)
                 refusal = _google_collision_refusal(voice_config, clip_route)
                 if refusal:
@@ -244,6 +246,15 @@ def _google_collision_refusal(cfg, clip_route) -> str | None:
         return None
     from . import google_tts
     return google_tts.collision_code(cfg)
+
+
+def _cartesia_can_stream(cfg, row: dict, agent: dict | None, clip_route) -> bool:
+    """Whether raw-pcm can stream this clip: Cartesia is the routed provider
+    and has a key and a voice for it (as ``_synthesize`` resolves them)."""
+    if clip_route.provider != CARTESIA or not cfg.cartesia_key():
+        return False
+    voice = clip_route.voice or resolve_voice(row["voice_id"], CARTESIA)
+    return bool(voice or cfg.cartesia_voice_for((agent or {}).get("persona", "")))
 
 
 def _route_has_voice(cfg, row: dict, agent: dict | None, clip_route) -> bool:
