@@ -1791,12 +1791,13 @@ def _attach_authority_tools(database, agent_id: str,
     return latest
 
 
-def stamp_turn(database, agent_id: str, trace_id: str, next_revision) -> int:
+def turn_stamp(database, agent_id: str, trace_id: str):
+    """What ``stamp_turn`` reads and decides for one turn, without writing:
+    ``(turn, rows, summary)``. ``turn`` is its ``turns`` row or None, ``rows``
+    its message rows across backend sessions in display order, ``summary`` the
+    JSON its last row carries (None while the turn is unsettled or unknown).
+    None when the turn has no rows."""
     from . import message_turns
-    """Re-stamp one turn's rows (inside the caller's write transaction).
-    Returns the highest revision written, 0 when nothing changed."""
-    if not trace_id:
-        return 0
     turn = database.execute(
         """SELECT started_at, settled_at, outcome FROM turns WHERE agent_id = ? AND trace_id = ?
             ORDER BY started_at DESC LIMIT 1""", (agent_id, trace_id)).fetchone()
@@ -1805,7 +1806,7 @@ def stamp_turn(database, agent_id: str, trace_id: str, next_revision) -> int:
              FROM messages WHERE agent_id = ? AND trace_id = ?
             ORDER BY COALESCE(timestamp, ''), seq""", (agent_id, trace_id)).fetchall()
     if not rows:
-        return 0
+        return None
     summary = None
     if turn is not None and turn["settled_at"] is not None:
         started = int(turn["started_at"])
@@ -1814,6 +1815,19 @@ def stamp_turn(database, agent_id: str, trace_id: str, next_revision) -> int:
                               "started_at_ms": started, "ended_at_ms": ended,
                               "worked_ms": ended - started, "tool_count": message_turns.tool_count(rows)},
                              separators=(",", ":"))
+    return turn, rows, summary
+
+
+def stamp_turn(database, agent_id: str, trace_id: str, next_revision) -> int:
+    from . import message_turns
+    """Re-stamp one turn's rows (inside the caller's write transaction).
+    Returns the highest revision written, 0 when nothing changed."""
+    if not trace_id:
+        return 0
+    stamped = turn_stamp(database, agent_id, trace_id)
+    if stamped is None:
+        return 0
+    turn, rows, summary = stamped
     outcome = turn["outcome"] if turn is not None else None
     highest = 0
     last = rows[-1]["message_id"]
