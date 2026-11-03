@@ -19,15 +19,7 @@ import os
 import re
 from contextlib import contextmanager
 
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS model_fallback_attempts (
- agent_id TEXT NOT NULL REFERENCES agents(agent_id), request_id TEXT NOT NULL,
- attempt INTEGER NOT NULL, backend TEXT NOT NULL, model TEXT NOT NULL, effort TEXT NOT NULL,
- status TEXT NOT NULL, reason TEXT NOT NULL, result_json TEXT,
- started_at INTEGER NOT NULL, finished_at INTEGER, runtime_id INTEGER,
- PRIMARY KEY(agent_id,request_id,attempt)
-);
-"""
+from .persistence.schema_parts.model_fallbacks import SCHEMA
 
 
 class Cancelled(RuntimeError):

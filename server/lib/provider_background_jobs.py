@@ -21,34 +21,14 @@ from . import background_jobs as jobs, db
 from .janitor_context import redact
 from .log import log_exception
 
-SCHEMA = """CREATE TABLE IF NOT EXISTS provider_job_cursors (
- agent_id TEXT NOT NULL, native_id TEXT NOT NULL, path TEXT NOT NULL,
- file_identity TEXT NOT NULL, position INTEGER NOT NULL,
- discarding INTEGER NOT NULL DEFAULT 0,
- action_offset INTEGER NOT NULL DEFAULT 0,
- PRIMARY KEY(agent_id,native_id))"""
+from .persistence.schema_parts.provider_background_jobs import SCHEMA
 # A Clarp turn is one provider process. Claude ends its background Bash tasks
 # with that process, so a task is fenced to the exact process that launched it:
 # the runner records each spawn under a fresh token with the process identity,
 # and the PreToolUse hook (running inside that process) records which token
 # launched each background tool call. Native session ids span resumed turns
 # and are not enough on their own.
-TURN_SCHEMA = (
-    """CREATE TABLE IF NOT EXISTS provider_turns (
- turn_token TEXT PRIMARY KEY, agent_id TEXT NOT NULL, provider TEXT NOT NULL,
- pid INTEGER, start_token TEXT NOT NULL DEFAULT '',
- started_at INTEGER NOT NULL, exited_at INTEGER)""",
-    """CREATE INDEX IF NOT EXISTS idx_provider_turns_open
- ON provider_turns(started_at) WHERE exited_at IS NULL""",
-    """CREATE TABLE IF NOT EXISTS provider_task_turns (
- agent_id TEXT NOT NULL, native_id TEXT NOT NULL, tool_use_id TEXT NOT NULL,
- turn_token TEXT NOT NULL, recorded_at INTEGER NOT NULL,
- PRIMARY KEY(agent_id,native_id,tool_use_id))""",
-    """CREATE INDEX IF NOT EXISTS idx_provider_task_turns_token
- ON provider_task_turns(turn_token)""",
-    """CREATE INDEX IF NOT EXISTS idx_background_jobs_agent_active
- ON background_jobs(agent_id) WHERE terminal_at IS NULL""",
-)
+from .persistence.schema_parts.provider_background_jobs import TURN_SCHEMA
 TURN_ENV = "CLARP_PROVIDER_TURN"
 _TOKEN = re.compile(r"[0-9a-f]{24}\Z")
 # Open turns whose process is gone are closed by the observer (runtime restart
