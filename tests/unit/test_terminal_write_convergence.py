@@ -270,3 +270,19 @@ def test_a_first_terminal_write_is_not_promoted_past_a_successor_by_its_own_late
         assert lifecycle.current_kind(world.agent) != AgentState.DONE
     finally:
         dispatch.reset_for_tests()
+
+
+def test_the_terminal_rows_own_turn_lookup_seeks_only_rows_after_the_fence(tmp_path, monkeypatch):
+    """The lookup under the writer lock reads the rows after the fence through
+    the (agent_id, state_id) index, however long the agent's history is."""
+    world, _call = _world(tmp_path, monkeypatch, "first")
+    seen = []
+    db.conn().set_trace_callback(lambda sql: seen.append(sql) if "foreign_row" in sql else None)
+    try:
+        lifecycle.transition(world.agent, TurnEvent.PROCESS_EXITED_OK, {"trace_id": "t-first"})
+    finally:
+        db.conn().set_trace_callback(None)
+        dispatch.reset_for_tests()
+    assert len(seen) == 1
+    plan = " ".join(row[3] for row in db.conn().execute("EXPLAIN QUERY PLAN " + seen[0]))
+    assert "idx_state_log_agent_state (agent_id=? AND state_id>?)" in plan, plan
