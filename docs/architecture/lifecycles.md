@@ -118,7 +118,9 @@ so tests can find every declaration by scanning `server/` without a registry.
 
 ## Lifecycles to convert (Phase 3)
 
-The order follows severity. Each conversion is its own slice: declare the
+The table follows severity; the order of the first conversions and what each
+changes is in [lifecycle-conversion-plan.md](lifecycle-conversion-plan.md).
+Each conversion is its own slice: declare the
 lifecycle, route every writer through the owner, add the reaper, and move the
 effects into the outbox. Behaviour changes that the conversion implies (a
 deadline that did not exist before) are registered intended differences.
