@@ -63,10 +63,34 @@ def popen_turn(cmd: list[str], *, cwd: Any, session: str,
         stdin=stdin,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        text=True,
+        # A CLI may write bytes that are not UTF-8 (a tool's binary output);
+        # strict decoding would stop the reader mid-turn (BACKENDS-03).
+        text=True, errors="replace",
         bufsize=1, start_new_session=(os.name == "posix"),
         env=env,
     )
+
+
+def stop_after_drain_failure(proc: subprocess.Popen,
+                             handle: Optional[TurnHandle]) -> None:
+    """A drain that failed reading leaves no one to read the CLI: stop it, so
+    it cannot keep writing the session nobody follows (BACKENDS-04)."""
+    if proc.poll() is not None:
+        return
+    try:
+        if handle is not None:
+            handle.terminate()
+        else:
+            proc.terminate()
+        proc.wait(timeout=2)
+    except Exception:  # noqa: BLE001
+        try:
+            if handle is not None:
+                handle.kill()
+            else:
+                proc.kill()
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def make_handle(proc: subprocess.Popen) -> TurnHandle:
