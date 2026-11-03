@@ -929,13 +929,19 @@ def _park_adopted_occupant(database, agent_id: str, backend_session_id: str,
     return True
 
 
+def _seq_taken(database, agent_id: str, backend_session_id: str, seq: int) -> bool:
+    return database.execute(
+        "SELECT 1 FROM messages WHERE agent_id = ? AND backend_session_id = ? AND seq = ?",
+        (agent_id, backend_session_id, seq)).fetchone() is not None
+
+
 def _restore_unadopted_parked(database, agent_id: str, backend_session_id: str,
                               source_file: str) -> int:
     """A parked reply no turn re-adopted belongs to a request that left the
     transcript: it goes back to its final:<trace> row, as a fresh import would
     leave it, instead of the stale cleanup deleting a reply the user saw
     (RM-N1c). Its seq is the one a live final row takes (-800000 + the turn's
-    id), or one only it can hold. Without a trace it cannot be named, and the
+    id), or the next free one below everything the conversation holds. Without a trace it cannot be named, and the
     stale cleanup takes it as before."""
     restored = 0
     for row in database.execute(
@@ -950,10 +956,13 @@ def _restore_unadopted_parked(database, agent_id: str, backend_session_id: str,
             """SELECT turn_id FROM turns WHERE agent_id = ? AND trace_id = ?
                 ORDER BY turn_id DESC LIMIT 1""", (agent_id, trace)).fetchone()
         seq = -800000 + int(turn["turn_id"]) if turn is not None else None
-        if seq is None or database.execute(
-                "SELECT 1 FROM messages WHERE agent_id = ? AND backend_session_id = ? AND seq = ?",
-                (agent_id, backend_session_id, seq)).fetchone() is not None:
-            seq = -_PARKED_SEQ_BASE - (int(row["seq"]) - _PARKED_SEQ_BASE)
+        if seq is None or _seq_taken(database, agent_id, backend_session_id, seq):
+            # Below everything the conversation holds: free by construction,
+            # also for a reply an earlier import restored the same way.
+            lowest = database.execute(
+                "SELECT MIN(seq) FROM messages WHERE agent_id = ? AND backend_session_id = ?",
+                (agent_id, backend_session_id)).fetchone()[0]
+            seq = min(-_PARKED_SEQ_BASE, int(lowest if lowest is not None else 0)) - 1
         database.execute(
             # As a final row is written: no transcript phase, no empty sender.
             "UPDATE messages SET source_file = ?, seq = ?, revision = ?, phase = NULL,"
