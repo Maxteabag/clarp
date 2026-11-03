@@ -140,9 +140,10 @@ continue as before.
   exit 0 passes. Register intended differences with the lead before the run.
 - **G3 reviewer:** the area reviewer's first line `SOURCE YES <full sha>` on the
   exact commit. Reviewer A: turn engine, runtime boundary, agents and identity,
-  policies, backends and accounts, database and maintenance. Reviewer B:
-  everything else (HTTP layer, read model, voice, live calls and Oracle,
-  autonomy and goals, harness and test infrastructure).
+  policies, backends and accounts, database and maintenance. Reviewer C (from
+  3 Nov 13:05): read model and transcripts (S5, RM-*), voice (VP-*). Reviewer
+  B: everything else (HTTP layer, live calls and Oracle, autonomy and goals,
+  harness and test infrastructure, release tooling).
 - **G4 merge captain:** rebase onto current `origin/main`; the rebased diff's
   `git patch-id --stable` equals the reviewed diff's, otherwise back to review;
   rerun G1 (and G2) on the rebased commit; fast-forward push.
@@ -165,6 +166,7 @@ continue as before.
 | Compute owner | `rf-compute-aa87` | Claude | `/var/tmp/clarp-refactor-program/bin/heavy-remote`, the buildbox ledger |
 | Reviewer A (core) | `rf-review-core-bbc1` | Codex | verdicts only |
 | Reviewer B (rest) | `rf-review-rest-a79f` | Codex | verdicts only |
+| Reviewer C (read model, voice) | `rf-review-readmodel-300e` | Codex | verdicts only |
 
 Reviewers never edit sources, never run jobs against the live Host and never
 grant more than the exact commit they reviewed.
@@ -208,8 +210,9 @@ commits land.
   long turn the rest wait, sometimes for hours. Run
   `/var/tmp/clarp-refactor-program/bin/inbox <your session>` at the start of
   every turn and before any decision, landing or ship. It prints every waiting
-  message, keeps a copy in `messages/inbox-<session>.md` and takes them out of
-  your queue.
+  message and is read-only: the messages still arrive later as turns, so note
+  "handled via inbox" on one you already handled. Never delete queue rows: each
+  delete scans the whole messages table under the writer lock (QUEUE-N2).
 - **Messages.** One message per decision. Check whether your question was
   already answered before you send it. Never reverse an in-flight decision
   unless asked. No acknowledgements. Address agents by session slug.
