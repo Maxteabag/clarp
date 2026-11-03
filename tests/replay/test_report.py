@@ -39,6 +39,7 @@ def _http(body, status=200, headers=None):
 
 def test_generated_ids_and_clocks_normalize_away_but_keep_identity():
     n = normalize.Normalizer({'<ROOT>': '/scratch/s'})
+    n.in_stream = True
     out = n.value({'agent_id': 'a1b2c3d4e5f60718', 'ts': 1793692941182, 'again_id': 'a1b2c3d4e5f60718',
                    'cwd': '/scratch/s/workspace', 'pid': 4242, 'event_id': 17, 'next': {'event_id': 17}})
     assert out == {'agent_id': '<id:1>', 'ts': '<time>', 'again_id': '<id:1>', 'cwd': '<ROOT>/workspace',
