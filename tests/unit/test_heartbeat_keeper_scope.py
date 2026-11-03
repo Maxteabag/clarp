@@ -116,3 +116,27 @@ def test_the_first_record_keeps_a_legacy_adoption_after_its_keeper_is_deleted(sc
 
     assert heartbeat.keeper_owns_heartbeat(agents.get_by_agent_id(ids["outside"]))
     assert _fixed_heartbeats() == []
+
+
+def test_a_heartbeat_pass_reads_the_keepers_once_however_many_agents(scoped_keeper, tmp_path, monkeypatch):
+    """AUT-02s bench (lead): the pass resolved the keepers again for every due
+    agent, re-reading every Janitor config each time. It reads them once, and
+    an agent a keeper serves is dropped before its state is read."""
+    ids, _cfg = scoped_keeper
+    for n in range(12):
+        agent_id = agents.create_agent(persona=f"extra{n}", voice_id="synthetic",
+                                       cwd=str(tmp_path), session=f"extra{n}", backend="codex")
+        agents.record_state(agent_id, "done", {"source": "user"})
+        agents.update_agent(agent_id, heartbeat_enabled=True)
+    listed = []
+    real = janitors.list_janitors
+    monkeypatch.setattr(janitors, "list_janitors", lambda **kw: listed.append(1) or real(**kw))
+    snapshots = []
+    real_snapshot = heartbeat._gather_snapshot
+    monkeypatch.setattr(heartbeat, "_gather_snapshot",
+                        lambda agent, now: snapshots.append(agent["agent_id"]) or real_snapshot(agent, now))
+
+    _fixed_heartbeats()
+
+    assert len(listed) == 1
+    assert ids["included"] not in snapshots
