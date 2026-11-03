@@ -266,7 +266,8 @@ def run_step(host: Host, sse, step: dict, http: list):
         # Control files the fake provider reads (tests/qa/fake_codex.py), e.g. quota-mode.
         (host.root / 'provider' / step['name']).write_text(step['text'])
     elif op == 'wait_state':
-        # The agent's state_log has rows of this kind carrying each named detail key.
+        # The agent's state_log has at least `count` rows of this kind, together
+        # carrying each named detail key.
         def rows():
             try:
                 with _ro(host.root) as db:
@@ -275,7 +276,8 @@ def run_step(host: Host, sse, step: dict, http: list):
                         'WHERE a.session = ? AND s.kind = ?', (step['session'], step['kind']))]
             except (sqlite3.Error, ValueError):
                 return False
-            return all(any(key in d for d in found) for key in step['detail_keys'])
+            return (len(found) >= step.get('count', 1)
+                    and all(any(key in d for d in found) for key in step.get('detail_keys', ())))
         _poll('state rows', rows)
     elif op == 'quiesce':
         _quiesce(host, sse, step.get('sessions', ('rachel',)))

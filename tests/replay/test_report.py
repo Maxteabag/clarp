@@ -1,6 +1,7 @@
 """The replay report's own guarantees, without running a Host."""
 from __future__ import annotations
 
+import json
 import pathlib
 import sys
 
@@ -166,3 +167,14 @@ def test_event_ids_are_named_by_lane_position_and_keep_aliases():
     out = normalize.normalize(_capture(sse=frames), '/h')['sse']
     assert out[0]['data']['event_id'] == out[1]['data']['ref_event_id']
     assert out[0]['data']['event_id'].startswith('<eid:agent-state#1@')
+
+
+def test_racing_writers_of_one_transition_compare_equal_but_a_changed_detail_does_not():
+    def rows(first, second):
+        return {'schema': [], 'pk': {'state_log': ['state_id']}, 'tables': {'state_log': [
+            {'state_id': 1, 'agent_id': 'a', 'kind': 'thinking', 'detail': json.dumps(first)},
+            {'state_id': 2, 'agent_id': 'a', 'kind': 'thinking', 'detail': json.dumps(second)}]}}
+    spawn = {'trace_id': 't1', 'dispatch': 'codex', 'source': 'pwa'}
+    start = {'trace_id': 't1', 'dispatch': 'codex'}
+    assert not _report(_capture(db=rows(spawn, start)), _capture(db=rows(start, spawn))).items
+    assert _report(_capture(db=rows(spawn, start)), _capture(db=rows(start, {**spawn, 'source': 'x'}))).items

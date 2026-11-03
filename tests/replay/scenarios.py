@@ -50,10 +50,10 @@ SCENARIOS = [
             _send('rachel', '[qa-slow] synthetic task to stop', 'tostop'),
             {'op': 'wait_provider_started', 'marker': '[qa-slow] synthetic task to stop'},
             {'op': 'wait_open', 'message_id': 'u-tostop'},
-            # Stop only once both the dispatcher's and the runner's thinking rows exist:
-            # a Stop before the dispatcher's row leaves the agent busy (registered race).
-            {'op': 'wait_state', 'session': 'rachel', 'kind': 'thinking',
-             'detail_keys': ['dispatch', 'backend_session_id']},
+            # Stop only once both thinking rows of the turn exist (spawn, then provider
+            # turn start): a Stop between them is overwritten by the late row and the
+            # agent stays busy (pre-existing race, reported to the lead).
+            {'op': 'wait_state', 'session': 'rachel', 'kind': 'thinking', 'count': 2},
             {'op': 'post', 'path': '/stop', 'body': {'session': 'rachel'}},
             {'op': 'wait_settled', 'message_id': 'u-tostop'},
             {'op': 'quiesce'},

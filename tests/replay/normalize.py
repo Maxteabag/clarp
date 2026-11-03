@@ -49,6 +49,11 @@ ID_KEYS = frozenset({'focus', 'dedupe_key', 'id', 'conv', 'epoch', 'cause', 'sou
 COALESCED_TYPES = frozenset({'transcript-updated'})
 # Table columns that hold generated ids outside an id-named column.
 ID_COLUMNS = frozenset({('settings', 'key'), ('settings', 'value')})
+# Two writers record the same transition for one turn (the dispatcher's spawn row
+# and the runner's provider turn-start row, both 'thinking'); their order races.
+# Consecutive state rows of one agent with the same kind and trace are compared
+# with their details sorted (pre-existing nondeterminism, reported to the lead).
+STATE_TABLE, STATE_TYPE = 'state_log', 'agent-state'
 SORTED_LISTS = frozenset({'personas', 'roster'})
 PID_KEYS = frozenset({'pid', 'pgid', 'ppid', 'port'})
 PATH_KEYS = frozenset({'file', 'cwd', 'path', 'file_path', 'transcript_path', 'root', 'audio_path'})
@@ -169,9 +174,16 @@ class Normalizer:
 def normalize(capture: dict, harness_root: str) -> dict:
     n = Normalizer({'<ROOT>': capture['root'], '<BUILD>': capture['build'], '<HARNESS>': harness_root})
     db = capture['db']
-    frames, frame_alias = coalesce(capture['sse'])
+    db = {**db, 'tables': dict(db['tables'])}
+    if STATE_TABLE in db['tables']:
+        rows = [dict(r) for r in sorted(db['tables'][STATE_TABLE], key=lambda r: r.get('state_id') or 0)]
+        canonical_state_runs(rows, lambda r: r.get('detail'), lambda r, d: r.__setitem__('detail', d),
+                             lambda r: _state_key(r.get('agent_id'), r.get('kind'), r.get('detail')))
+        db['tables'][STATE_TABLE] = rows
+    frames, frame_alias = coalesce(_canonical_frames(capture['sse']))
     log_rows = sorted(db['tables'].get('sse_events', []), key=lambda r: r.get('event_id') or 0)
-    log_frames, log_alias = coalesce([{'event': None, 'data': _payload(r), 'row': r} for r in log_rows])
+    log_frames, log_alias = coalesce(_canonical_frames(
+        [{'event': None, 'data': _payload(r), 'row': r} for r in log_rows]))
     log_rows = [f['row'] for f in log_frames]
     # Event ids are named by lane position, from the stream first, then the stored log.
     for frame, name in zip(frames, lane_names(frames)):
@@ -214,6 +226,40 @@ def normalize(capture: dict, harness_root: str) -> dict:
     return out
 
 
+def _detail(value):
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except ValueError:
+            return value
+    return value
+
+
+def canonical_state_runs(items: list[dict], get, put, key) -> None:
+    """Within runs of items sharing ``key(item)``, reassign details in sorted order."""
+    run: list[dict] = []
+
+    def flush():
+        if len(run) > 1:
+            details = sorted((get(i) for i in run), key=lambda d: json.dumps(_detail(d), sort_keys=True))
+            for item, detail in zip(run, details):
+                put(item, detail)
+        run.clear()
+    for item in items:
+        k = key(item)
+        if run and (k is None or k != key(run[-1])):
+            flush()
+        if k is not None:
+            run.append(item)
+    flush()
+
+
+def _state_key(agent, kind, detail):
+    detail = _detail(detail)
+    trace = detail.get('trace_id') if isinstance(detail, dict) else None
+    return (agent, kind, trace) if trace else None
+
+
 def coalesce(frames: list[dict]) -> tuple[list[dict], dict[str, str]]:
     """Drop a COALESCED_TYPES frame equal (but for its event id) to an earlier
     one in its lane; returns the kept frames and {dropped event id: kept event id}."""
@@ -230,6 +276,19 @@ def coalesce(frames: list[dict]) -> tuple[list[dict], dict[str, str]]:
             seen[key] = data.get('event_id')
         kept.append(frame)
     return kept, alias
+
+
+def _canonical_frames(frames: list[dict]) -> list[dict]:
+    """The watcher's agent-state frames, canonicalized like state_log rows
+    (only agent-state frames take part; others in between do not break a run)."""
+    frames = [{**f, 'data': dict(f['data'])} if isinstance(f.get('data'), dict) else f for f in frames]
+    states = [f for f in frames if isinstance(f.get('data'), dict) and f['data'].get('type') == STATE_TYPE
+              and 'client_msg_id' not in f['data']]
+    canonical_state_runs(states, lambda f: f['data'].get('detail'),
+                         lambda f, d: f['data'].__setitem__('detail', d),
+                         lambda f: _state_key(f['data'].get('session'), f['data'].get('kind'),
+                                              f['data'].get('detail')))
+    return frames
 
 
 def _payload(row: dict):
