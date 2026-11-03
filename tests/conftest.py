@@ -36,6 +36,22 @@ if _TEMP_ROOT:
     os.environ["PYTEST_DEBUG_TEMPROOT"] = _TEMP_ROOT
 
 
+def _load_no_servers_guard():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "_clarp_no_servers_guard", pathlib.Path(__file__).with_name("no_servers_guard.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+# Under bin/heavy on laptopstudio (CLARP_TEST_NO_SERVERS=1) a test that starts a
+# server or a Host fails fast instead of serving (tests/no_servers_guard.py).
+_no_servers_guard = _load_no_servers_guard()
+if _no_servers_guard.enabled():
+    _no_servers_guard.install()
+
+
 # Match the installed layout: server/lib is imported as the top-level `lib`
 # package. Centralizing this keeps test collection independent of file order.
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "server"))

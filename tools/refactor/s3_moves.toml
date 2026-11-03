@@ -1,0 +1,11 @@
+# S3 group moves (docs/architecture/route-registry.md, section 11).
+# Each [[group]] moves the listed Handler members out of server/server.py into
+# server/<module> as class <class>, applied by tools/refactor/s3_apply.py in this
+# order. A new or changed entry needs reviewer G3; re-applications need only the
+# automated gates. No group is approved yet.
+#
+# [[group]]
+# name = "vocab"
+# module = "lib/routes/vocab.py"
+# class = "VocabRoutes"
+# members = ["_handle_vocab_packs_get", "..."]

@@ -381,9 +381,12 @@ def test_pairing_secrets_become_surrogates_and_keep_identity():
 
 def test_step_placeholders_fill_from_run_variables():
     import capture
-    filled = capture.fill({'path': '/schedules/{schedule}', 'args': ['--url', 'http://127.0.0.1:{port}'],
-                           'keep': '{unknown}'}, {'schedule': 'sched_1', 'port': 4242})
-    assert filled == {'path': '/schedules/sched_1', 'args': ['--url', 'http://127.0.0.1:4242'], 'keep': '{unknown}'}
+    filled = capture.fill({'path': '/schedules/{schedule}', 'args': ['--url', 'http://127.0.0.1:{port}']},
+                          {'schedule': 'sched_1', 'port': 4242})
+    assert filled == {'path': '/schedules/sched_1', 'args': ['--url', 'http://127.0.0.1:4242']}
+    # rf-readmodel RM-N3: a value an earlier step failed to save is a scenario failure with a reason.
+    with pytest.raises(capture.StepFailed, match='nothing saved as limited_code'):
+        capture.fill({'code': '{limited_code}'}, {'port': 4242})
 
 
 def test_the_replay_host_refuses_network_but_not_loopback():
@@ -535,3 +538,36 @@ def test_clock_schema_on_a_dropped_frame_remains_observable():
 
 def test_valid_wire_id_presence_on_a_dropped_frame_remains_observable():
     assert _report(_capture(sse=frames()), _capture(sse=frames(wire="12"))).items
+
+
+def test_a_hex_id_that_reads_as_a_json_number_is_still_an_id():
+    # rf-merge g2i-s3: a launch receipt's trace id '5533263533985e85' parsed as 5.5e+97.
+    def settings(trace):
+        return _capture(db={'schema': [], 'pk': {'settings': ['key']}, 'tables': {'settings': [
+            {'key': 'launch-receipt-seq:agent0000000a:00000000000000000002', 'value': trace}]}})
+    assert not _report(settings('5533263533985e85'), settings('51d510e6cbd138ab')).items
+    assert _report(settings('5533263533985e85'), settings('{"state": "attempted"}')).items
+
+
+def test_a_prepared_build_from_an_older_harness_is_refused(tmp_path, monkeypatch):
+    # rf-readmodel RM-N3: builds prepared before bin/ was shipped were reused silently.
+    import run
+    monkeypatch.setattr(run, 'PREPARED', tmp_path)
+    build = tmp_path / ('a' * 40)
+    (build / 'server').mkdir(parents=True)
+    (build / 'server' / 'x.py').write_text('x = 1\n')
+    (build / run.STAMP).write_text(json.dumps({'sha': 'a' * 40, 'digest': run.tree_digest(build)}))
+    with pytest.raises(run.BuildError, match='older harness'):
+        run.prepared_build('a' * 12)
+
+
+def test_a_path_field_from_the_previous_response_fills_its_placeholder():
+    # queue-cancel: DELETE /turn-queue/{queue_id} with the id from the GET before it.
+    import capture
+    from types import SimpleNamespace
+    sent = []
+    host = SimpleNamespace(request=lambda method, path, *a, **kw: (sent.append(path), (200, {}, {}))[1])
+    http = [{'body': {'items': [{'id': 'q 1'}]}}]
+    capture.run_step(host, None, {'op': 'delete', 'path': '/turn-queue/{queue_id}',
+                                  'from_last': {'queue_id': 'items.0.id'}}, http, [], {'port': 1})
+    assert sent == ['/turn-queue/q%201']

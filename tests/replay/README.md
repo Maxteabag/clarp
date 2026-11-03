@@ -36,7 +36,9 @@ heavy-remote copies the worktree without `.git`, so builds come from
 `.replay-builds/<sha>/`, which `prepare` makes with `git archive` (server/
 and static/, files read-only, a stamp with a SHA-256 over every file).
 `.replay-builds/` is untracked on purpose so heavy-remote ships it; never
-commit it. In CI, where `.git` exists, builds are `git worktree add --detach`
+commit it. The stamp also records which directories the build holds
+(`server`, `static`, `bin`); a prepared build made by an older harness with
+fewer is refused with a message, and `prepare` makes it again. In CI, where `.git` exists, builds are `git worktree add --detach`
 checkouts as below.
 
 `compare` exits 0 with no unexplained difference, 1 with differences, 2 when a

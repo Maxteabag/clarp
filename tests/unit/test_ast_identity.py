@@ -170,3 +170,63 @@ def test_compiler_directives_must_follow_the_definitions(tmp_path, capsys):
     head = _scoped_head(tmp_path, "def read(value: NotDefined):\n    return value\n")
     assert tool.main(["--root", str(tmp_path), base, head, "lib/old.py=lib/pkg/new.py"]) == 1
     assert "compiler directives differ" in capsys.readouterr().out
+
+
+def test_a_moved_reader_of_a_rebound_import_fails_in_top_level_mode(tmp_path, capsys):
+    """Review B (s3-tools 7f2bb6be, F4a), helpers step: the old file imports
+    json and rebinds it; the moved helper would read the module, not the dict."""
+    old = "import json\njson = {'kind': 'local'}\n\ndef helper():\n    return json\n"
+    base = _scoped_repo(tmp_path, old, {})
+    head = _commit(tmp_path, {"lib/routes/__init__.py": "",
+                              "lib/routes/helpers.py": "import json\n\ndef helper():\n    return json\n",
+                              "lib/old.py": "import json\njson = {'kind': 'local'}\n"
+                                            "from .routes.helpers import helper\n"})
+    assert tool.main(["--root", str(tmp_path), base, head,
+                      "lib/old.py=lib/old.py,lib/routes/helpers.py"]) == 1
+    assert "helper reads json, which lib/old.py imports and rebinds" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("b_text, code, expected", [
+    ("def f():\n    return X\n", 1, "f reads X, which lib/b.py does not bind"),
+    ("X = 2\n\ndef f():\n    return X\n", 1, "X is defined in both"),
+    ("from .a import X\n\ndef f():\n    return X\n", 0, "0 problems"),
+])
+def test_a_split_resolves_each_moved_read_in_its_new_home(tmp_path, capsys, b_text, code, expected):
+    """A one-to-many split where a moved function reads a definition moved to
+    another file: it must import it from there (before, the gate passed a b.py
+    that read X without binding it)."""
+    base = _scoped_repo(tmp_path, "X = 1\n\ndef f():\n    return X\n", {})
+    head = _commit(tmp_path, {"lib/a.py": "X = 1\n", "lib/b.py": b_text, "lib/old.py": None})
+    assert tool.main(["--root", str(tmp_path), base, head, "lib/old.py=lib/a.py,lib/b.py"]) == code
+    assert expected in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("source, reads", [
+    ("X = {v: k for k, v in F.items()}", ["F"]),            # PEP 709 inlined variables are not reads
+    ("X = [k for k in A] + [k]", ["A", "k"]),               # k outside the comprehension is
+    ("X = [k for k in k]", ["k"]),                          # the first iterable is evaluated outside
+    ("X = [[a for a in b] for b in C]", ["C"]),
+    ("X = X", ["X"]),
+    ("def f(count):\n    ranked = sorted(G)\n    return ', '.join(str(k) for k in ranked[:count])", ["G", "sorted", "str"]),
+    ("def f():\n    global Y\n    Y = 1\n    return Y", ["Y"]),
+    ("X = [holder.value for holder.value in VALUES]", ["VALUES", "holder"]),  # review A ee5897e1 F2
+    ("X = [r for rows[0] in A for r in rows]", ["A", "rows"]),
+])
+def test_global_reads_are_module_reads_only(source, reads):
+    """Python 3.12's symtable lists inlined comprehension variables in the
+    enclosing scope and can mark a function's own parameters global; neither
+    is a module read (S1 commit 3's feature modules hit both)."""
+    assert sorted(tool.global_reads(tool.ast.parse(source).body[0])) == reads
+
+
+def test_a_global_import_in_a_function_is_a_rebinding(tmp_path, capsys):
+    """Review A (ee5897e1, F1): `global dep; import cmath as dep` rebinds dep
+    without an assignment; a moved reader of dep must fail."""
+    imports, writer = "import math as dep\n", "def rebind():\n    global dep\n    import cmath as dep\n"
+    reader = "def read():\n    return dep.__name__\n"
+    base = _scoped_repo(tmp_path, imports + writer + reader, {})
+    head = _commit(tmp_path, {"lib/old.py": imports + writer + "from .moved import read\n",
+                              "lib/moved.py": imports + reader})
+    assert tool.main(["--root", str(tmp_path), base, head, "lib/old.py=lib/old.py,lib/moved.py"]) == 1
+    assert "read reads dep, which lib/old.py imports and rebinds (written through `global` in rebind)" \
+        in capsys.readouterr().out

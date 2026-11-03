@@ -298,7 +298,10 @@ def normalize(capture: dict, harness_root: str) -> dict:
     def row(table, r):
         out = {}
         for k, v in r.items():
-            if (table, k) in JSON_COLUMNS and parse_json(v) is not None:
+            # Only an object or array is stored JSON: a scalar stays text, so a hex id
+            # that happens to read as a number ('5533263533985e85') is still an id.
+            if (table, k) in JSON_COLUMNS and isinstance(v, str) and v.lstrip()[:1] in '{[' \
+                    and parse_json(v) is not None:
                 v = parse_json(v)
             elif (table, k) in ID_COLUMNS and isinstance(v, str):
                 v = n.ids_in(v)
