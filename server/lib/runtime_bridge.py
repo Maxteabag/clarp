@@ -781,16 +781,11 @@ class RuntimeRPCServer(socketserver.ThreadingMixIn,
             with self._stop_lease_lock:
                 if self._stop_leases:
                     return False
-            # A slot whose turn settled without releasing it would hold the
-            # handoff off forever; give those back before judging idleness.
-            release_leaked = getattr(
-                self.dispatch_service, "release_leaked_slots", None)
-            if release_leaked is not None:
-                release_leaked()
-            status = dict(self.status_provider())
-            if (status.get("active") or status.get("spawning")
-                    or status.get("terminals") or status.get("queued")
-                    or status.get("compactions")):
+            # One idleness rule with handover_blockers (TP-04): a provider
+            # turn, unpersisted held work or an account recovery would be cut
+            # short too. Queued work also keeps the fast path off.
+            blockers, status = self._blockers_and_status()
+            if blockers or status.get("queued"):
                 return False
             self._draining = True
             return True
@@ -826,6 +821,9 @@ class RuntimeRPCServer(socketserver.ThreadingMixIn,
         Held queued work is not a blocker once it is durable: the next
         runtime recovers it. A slot whose turn settled without releasing it is
         given back first (it would otherwise block for ever)."""
+        return self._blockers_and_status()[0]
+
+    def _blockers_and_status(self) -> tuple[dict[str, list[str]], dict]:
         with self._stop_lease_lock:
             leases = sorted(agent for agent, _ in self._stop_leases.values())
         release_leaked = getattr(
@@ -854,7 +852,7 @@ class RuntimeRPCServer(socketserver.ThreadingMixIn,
                     # otherwise carries over (resume_account_recovery).
                     waiting = waiting or ["<checking>"]
                 blockers[key] = waiting
-        return {key: value for key, value in blockers.items() if value}
+        return {key: value for key, value in blockers.items() if value}, status
 
     def only_account_recovery(self, blockers: dict[str, list[str]]) -> bool:
         return self._only_account_recovery(blockers)
