@@ -61,10 +61,34 @@ def client_message_trace(client_msg_id: str) -> str:
 
 
 def relink_client_message(client_msg_id: str, *, trace_id: str) -> None:
-    """Hand an admitted-but-never-launched user row to a new attempt."""
-    conn().execute(
-        "UPDATE messages SET trace_id = ? WHERE message_id = ? AND role = 'user'",
-        ((trace_id or "").strip() or None, _client_message_id(client_msg_id)),
+    """Hand an admitted-but-never-launched user row to a new attempt.
+
+    The row gets a new revision and its conversation head moves with it, in
+    the caller's transaction, so delta clients see the new trace (RM-N5)."""
+    database = conn()
+    new_trace = (trace_id or "").strip() or None
+    row = database.execute(
+        "SELECT agent_id, backend_session_id, trace_id FROM messages"
+        " WHERE message_id = ? AND role = 'user'",
+        (_client_message_id(client_msg_id),),
+    ).fetchone()
+    if row is None or row["trace_id"] == new_trace:
+        return
+    revision = _next_revision(database)
+    # updated_at stays: it is the row's send order, by which the import links
+    # transcript copies to client rows.
+    database.execute(
+        "UPDATE messages SET trace_id = ?, revision = ?"
+        " WHERE message_id = ? AND role = 'user'",
+        (new_trace, revision, _client_message_id(client_msg_id)),
+    )
+    database.execute(
+        """INSERT INTO conversation_heads (
+               agent_id, backend_session_id, revision, replace_revision
+           ) VALUES (?, ?, ?, 0)
+           ON CONFLICT(agent_id, backend_session_id) DO UPDATE SET
+               revision = MAX(conversation_heads.revision, excluded.revision)""",
+        (row["agent_id"], row["backend_session_id"], revision),
     )
 
 
