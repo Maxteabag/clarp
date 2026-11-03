@@ -240,7 +240,7 @@ def _provider_started(root: Path, marker: str):
     return False
 
 
-def run_step(host: Host, step: dict, http: list):
+def run_step(host: Host, sse, step: dict, http: list):
     op = step['op']
     if op in ('get', 'post', 'put', 'delete'):
         body = step.get('body')
@@ -265,6 +265,20 @@ def run_step(host: Host, step: dict, http: list):
     elif op == 'provider_file':
         # Control files the fake provider reads (tests/qa/fake_codex.py), e.g. quota-mode.
         (host.root / 'provider' / step['name']).write_text(step['text'])
+    elif op == 'wait_state':
+        # The agent's state_log has rows of this kind carrying each named detail key.
+        def rows():
+            try:
+                with _ro(host.root) as db:
+                    found = [json.loads(r[0] or '{}') for r in db.execute(
+                        'SELECT s.detail FROM state_log s JOIN agents a ON a.agent_id = s.agent_id '
+                        'WHERE a.session = ? AND s.kind = ?', (step['session'], step['kind']))]
+            except (sqlite3.Error, ValueError):
+                return False
+            return all(any(key in d for d in found) for key in step['detail_keys'])
+        _poll('state rows', rows)
+    elif op == 'quiesce':
+        _quiesce(host, sse, step.get('sessions', ('rachel',)))
     elif op == 'wait_busy':
         def busy():
             status = host.request('GET', f"/status?session={step['session']}")[2]
@@ -330,6 +344,11 @@ def list_files(root: Path) -> list[dict]:
             continue
         raw = path.read_bytes()
         entry = {'path': rel, 'bytes': len(raw), 'kind': 'bytes', 'digest': hashlib.sha256(raw).hexdigest()}
+        if path.suffix not in ('.json', '.jsonl') and len(raw) <= 65536:
+            try:
+                entry.update(kind='text', text=raw.decode('utf-8'), digest=None)
+            except UnicodeDecodeError:
+                pass
         if path.suffix in ('.json', '.jsonl'):
             try:
                 text = raw.decode()
@@ -361,7 +380,7 @@ def capture(build: Path, scenario: dict, scratch: Path, python: str = sys.execut
         _poll('SSE connected', lambda: sse.frames)
         for index, step in enumerate(scenario['steps']):
             try:
-                run_step(host, step, http)
+                run_step(host, sse, step, http)
             except StepFailed as exc:
                 raise StepFailed(f'step {index} ({step["op"]}): {exc}') from exc
         timings['steps'] = round(time.monotonic() - started, 2)

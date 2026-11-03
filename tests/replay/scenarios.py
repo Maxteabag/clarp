@@ -2,7 +2,9 @@
 
 Every text here is synthetic. A scenario is a list of steps the capture
 runner executes in order (see capture.run_step); waits poll observable state
-(database, provider request log, /status), never the clock.
+(database, provider request log, /status), never the clock. ``quiesce`` (every
+listed session idle and the SSE stream quiet) comes before the final reads, so
+they never race the Host's background import.
 """
 from __future__ import annotations
 
@@ -20,7 +22,7 @@ SCENARIOS = [
         'steps': [
             _send('rachel', 'synthetic greeting alpha', 'alpha'),
             {'op': 'wait_settled', 'message_id': 'u-alpha'},
-            {'op': 'wait_busy', 'session': 'rachel', 'busy': False},
+            {'op': 'quiesce'},
             {'op': 'get', 'path': '/log?session=rachel'},
             {'op': 'get', 'path': '/status?session=rachel'},
         ],
@@ -37,7 +39,7 @@ SCENARIOS = [
             {'op': 'get', 'path': '/turn-queue?session=rachel'},
             {'op': 'wait_settled', 'message_id': 'u-slow'},
             {'op': 'wait_settled', 'message_id': 'u-bravo'},
-            {'op': 'wait_busy', 'session': 'rachel', 'busy': False},
+            {'op': 'quiesce'},
             {'op': 'get', 'path': '/log?session=rachel'},
         ],
     },
@@ -48,9 +50,13 @@ SCENARIOS = [
             _send('rachel', '[qa-slow] synthetic task to stop', 'tostop'),
             {'op': 'wait_provider_started', 'marker': '[qa-slow] synthetic task to stop'},
             {'op': 'wait_open', 'message_id': 'u-tostop'},
+            # Stop only once both the dispatcher's and the runner's thinking rows exist:
+            # a Stop before the dispatcher's row leaves the agent busy (registered race).
+            {'op': 'wait_state', 'session': 'rachel', 'kind': 'thinking',
+             'detail_keys': ['dispatch', 'backend_session_id']},
             {'op': 'post', 'path': '/stop', 'body': {'session': 'rachel'}},
             {'op': 'wait_settled', 'message_id': 'u-tostop'},
-            {'op': 'wait_busy', 'session': 'rachel', 'busy': False},
+            {'op': 'quiesce'},
             {'op': 'get', 'path': '/log?session=rachel'},
             {'op': 'get', 'path': '/status?session=rachel'},
         ],
@@ -62,7 +68,7 @@ SCENARIOS = [
             _send('rachel', 'synthetic durable charlie', 'charlie'),
             _send('rachel', 'synthetic durable charlie', 'charlie'),
             {'op': 'wait_settled', 'message_id': 'u-charlie'},
-            {'op': 'wait_busy', 'session': 'rachel', 'busy': False},
+            {'op': 'quiesce'},
             {'op': 'get', 'path': '/log?session=rachel'},
         ],
     },
@@ -75,8 +81,7 @@ SCENARIOS = [
             {'op': 'wait_settled', 'message_id': 'u-delta'},
             _send('mike', 'synthetic question for mike', 'echo'),
             {'op': 'wait_settled', 'message_id': 'u-echo'},
-            {'op': 'wait_busy', 'session': 'rachel', 'busy': False},
-            {'op': 'wait_busy', 'session': 'mike', 'busy': False},
+            {'op': 'quiesce', 'sessions': ('rachel', 'mike')},
             {'op': 'get', 'path': '/log?session=rachel'},
             {'op': 'get', 'path': '/log?session=mike'},
             {'op': 'get', 'path': '/agents/snapshot'},
@@ -89,7 +94,7 @@ SCENARIOS = [
             {'op': 'provider_file', 'name': 'quota-mode', 'text': 'blocked'},
             _send('rachel', 'synthetic task over quota', 'foxtrot'),
             {'op': 'wait_settled', 'message_id': 'u-foxtrot'},
-            {'op': 'wait_busy', 'session': 'rachel', 'busy': False},
+            {'op': 'quiesce'},
             {'op': 'get', 'path': '/log?session=rachel'},
             {'op': 'get', 'path': '/status?session=rachel'},
         ],
@@ -103,7 +108,7 @@ SCENARIOS = [
             {'op': 'wait_open', 'message_id': 'u-golf'},
             _send('rachel', 'synthetic steering hotel', 'hotel'),
             {'op': 'wait_settled', 'message_id': 'u-golf'},
-            {'op': 'wait_busy', 'session': 'rachel', 'busy': False},
+            {'op': 'quiesce'},
             {'op': 'get', 'path': '/log?session=rachel'},
         ],
     },
@@ -133,7 +138,7 @@ SCENARIOS = [
                       'synthesize_audio': False, 'utterance_id': 'utt-india'},
              'body_from_last': {'trace_id': 'trace_id', 'transcription_id': 'transcription_id'}},
             {'op': 'wait_settled', 'message_id': 'u-india'},
-            {'op': 'wait_busy', 'session': 'rachel', 'busy': False},
+            {'op': 'quiesce'},
             {'op': 'get', 'path': '/log?session=rachel'},
             {'op': 'get', 'path': '/voice-events?session=rachel'},
         ],
