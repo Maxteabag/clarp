@@ -179,6 +179,10 @@ class ContextHTTPServer(ThreadingHTTPServer):
 
     def __init__(self, addr, handler_cls, ctx: ServerContext):
         self.ctx = ctx
+        # The import-time config snapshot (_CFG), the same object, for handler
+        # code that must not import this module. Set here, not in build_server,
+        # so the LAN listener (a subclass) and directly built servers carry it.
+        self.boot_config = _CFG
         self._close_callbacks = []
         self.local_tls = False
         self.local_transport = None
@@ -1781,7 +1785,7 @@ class Handler(BaseHTTPRequestHandler):
     def _handle_diagnostics_health(self):
         from lib import tts_queue
         stt_ready = bool(self.ctx.stt.ready.is_set())
-        ffmpeg_ready = _CFG.delivery != "hls" or shutil.which("ffmpeg") is not None
+        ffmpeg_ready = self.server.boot_config.delivery != "hls" or shutil.which("ffmpeg") is not None
         body = json.dumps({
             "ready": stt_ready and ffmpeg_ready,
             "checks": {
