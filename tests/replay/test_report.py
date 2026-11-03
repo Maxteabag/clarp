@@ -415,3 +415,24 @@ def test_cli_json_output_form_remains_observable(tmp_path, monkeypatch):
     first, second, third, fourth = (capture.run_cli(host, {'args': ['sessions']}) for _ in range(4))
     assert first != second and second == third and third != fourth
     assert second['stdout']['<form>'] == 'default-indent2'
+
+
+def _live(lseq, *ops):
+    return _frame({'type': 'live', 'session': 's', 'lseq': lseq, 'ops': list(ops)})
+
+
+def test_live_appends_split_by_timing_compare_equal_but_text_and_lseq_gaps_do_not():
+    up = {'op': 'upsert', 'id': 'i1', 'rev': 1}
+    whole = [_live(1, up), _live(2, {'op': 'append', 'id': 'i1', 'field': 'text', 'rev': 2, 'chunk': 'abcdef'}),
+             _live(3, {'op': 'done', 'id': 'i1', 'rev': 3})]
+    split = [_live(1, up), _live(2, {'op': 'append', 'id': 'i1', 'field': 'text', 'rev': 2, 'chunk': 'ab'}),
+             _live(3, {'op': 'append', 'id': 'i1', 'field': 'text', 'rev': 3, 'chunk': 'cdef'}),
+             _live(4, {'op': 'done', 'id': 'i1', 'rev': 4})]
+    assert not _report(_capture(sse=whole), _capture(sse=split)).items
+    changed = [*split[:2], _live(3, {'op': 'append', 'id': 'i1', 'field': 'text', 'rev': 3, 'chunk': 'cdeX'}), split[3]]
+    assert _report(_capture(sse=whole), _capture(sse=changed)).items
+    other_item = [*split[:2], _live(3, {'op': 'append', 'id': 'i2', 'field': 'text', 'rev': 1, 'chunk': 'cdef'}),
+                  split[3]]
+    assert _report(_capture(sse=whole), _capture(sse=other_item)).items
+    gap = [whole[0], whole[1], _live(5, {'op': 'done', 'id': 'i1', 'rev': 3})]
+    assert any('live-contract' in d['locator'] for d in _report(_capture(sse=whole), _capture(sse=gap)).items)
