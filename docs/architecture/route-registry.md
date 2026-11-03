@@ -215,14 +215,15 @@ resolve to the same objects. Each move therefore needs:
 2. **Preparatory commit, separate from the move** (lead decisions, 3 Nov; composition-root state now goes on the server object, see section 10:
    S3 owns composition-root state that moved handlers read).
    - **Composition-root state** (`_CFG`, `PORT`, `BIND_ADDR`,
-     `_runtime_paths`) is exposed through `ServerContext` as a read-only
-     accessor that returns the very object server.py holds, never a fresh
-     `config.load()` (that would turn the boot snapshot into live config and
-     change behaviour, see HTTP-12). Example: `_handle_diagnostics_health`
-     reads `_CFG.delivery`; the preparatory commit adds the accessor, edits the
-     handler **in server.py** to read it from `self.ctx`, and adds a test that
-     the accessor `is` server.py's `_CFG` under each load alias. The later move
-     of that handler is then byte-identical.
+     `_runtime_paths`) is exposed on the server object: `ContextHTTPServer`
+     carries the very object server.py holds (`self.boot_config = _CFG`),
+     never a fresh `config.load()` (that would turn the boot snapshot into live
+     config, see HTTP-12). The handler is edited **in server.py** to read it
+     from `self.server`, and a test asserts identity under each load alias, so
+     the later move is byte-identical. New composition-root state goes into
+     `ServerContext` unless the same constraint applies; no further server
+     attributes without the lead (decision A, 3 Nov, replacing the earlier
+     ServerContext accessor).
    - **Mutable module state** only moving code uses (`_OUTDATED_CLIENTS_NOTED`,
      `_CARTESIA_PREVIEW_LOCKS`) moves to a leaf owner module under
      `lib.routes`, and server.py binds the same object from it.
@@ -288,9 +289,9 @@ is `server/lib/routes`, exempt from rule 8 by name, imported by nothing else
 in `server/lib`.
 
 Decided by the lead on 3 Nov: S3 owns composition-root state that moved
-handlers read; it reaches them through an identity-tested read-only
-`ServerContext` accessor set up in a preparatory commit, never through
-`config.load()` and never by importing server.py (section 6, step 2).
+handlers read; it reaches them through the server object (`srv.boot_config`,
+identity-tested), never through `config.load()` and never by importing
+server.py (section 6, step 2; section 10).
 
 Open: none.
 
