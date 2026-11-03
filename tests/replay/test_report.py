@@ -341,3 +341,32 @@ def test_scenarios_have_unique_ids_and_known_bugs_name_a_register_id():
     assert len(ids) == len(set(ids))
     assert all(re.fullmatch(r'[A-Z]+-N?\d+', s['known_bug']) for s in scenarios.KNOWN_BUGS)
     assert scenarios.GATING and not any(s.get('known_bug') for s in scenarios.GATING)
+
+
+def test_the_provider_proxy_injects_tool_items_after_turn_start(tmp_path):
+    import subprocess
+    proxy = pathlib.Path(__file__).resolve().parent / 'fake_provider.py'
+    requests = [
+        {'id': 1, 'method': 'initialize', 'params': {}},
+        {'id': 2, 'method': 'thread/start', 'params': {}},
+        {'id': 3, 'method': 'turn/start', 'params': {'input': [{'type': 'text', 'text': '[replay-tool] x'}]}},
+    ]
+    env = {'PATH': '/usr/bin:/bin', 'CLARP_QA_PROVIDER_ROOT': str(tmp_path), 'CLARP_QA_STREAM_DELAY': '0'}
+    proc = subprocess.Popen([sys.executable, str(proxy), 'app-server'], stdin=subprocess.PIPE,
+                            stdout=subprocess.PIPE, text=True, env=env)
+    for request in requests:
+        proc.stdin.write(json.dumps(request) + '\n')
+    proc.stdin.flush()
+    methods = []
+    for line in proc.stdout:
+        event = json.loads(line)
+        methods.append((event.get('method'), (event.get('params') or {}).get('item', {}).get('type')))
+        if event.get('method') == 'turn/completed':
+            break
+    proc.stdin.close()
+    proc.wait(timeout=10)
+    started = methods.index(('turn/started', None))
+    assert methods[started + 1:started + 6] == [
+        ('item/started', 'reasoning'), ('item/completed', 'reasoning'),
+        ('item/started', 'commandExecution'), ('item/commandExecution/outputDelta', None),
+        ('item/completed', 'commandExecution')]
