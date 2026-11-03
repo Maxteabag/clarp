@@ -28,11 +28,13 @@ import json
 from pathlib import Path
 import re
 
+import normalize
+
 HARNESS = Path(__file__).resolve().parents[2]
 CODE_KEYS = frozenset({'type', 'kind', 'status', 'op', 'outcome', 'state', 'method', 'phase', 'role',
                        'action', 'mode', 'event', 'field', 'backend', 'error_code', 'code', 'tbl_name'})
 CODE_SHAPE = re.compile(r'^[a-z][a-z0-9_./:-]{0,47}$')
-SURROGATE = re.compile(r'^(<(id|eid):\d+>|<(time|duration|pid|port|json|bytes|sha256)>|<(ROOT|BUILD|HARNESS)>)$')
+SURROGATE = re.compile(r'^(<id:\d+>|<eid:(\?\d+|(log:)?[a-z][a-z0-9_-]{0,40}#\d+@[0-9a-f]{6})>|<(time|duration|pid|port|json|bytes|sha256)>|<(ROOT|BUILD|HARNESS)>)$')
 # Keys the capture itself creates (envelopes, contract header names).
 HARNESS_KEYS = frozenset({'step', 'method', 'path', 'status', 'headers', 'body', 'event', 'has_id', 'data',
                           'bytes', 'digest', 'json', 'kind', 'pk', 'rows', '<json>', '<bytes>', '<sha256>',
@@ -123,7 +125,7 @@ def _path_code(path: str) -> str:
     return '/'.join(p if p in codebook() or not p else f'k#{_hash(p)}' for p in path.split('/'))
 
 
-def _sequence(report, scenario, channel, a, b):
+def _sequence(report, scenario, channel, a, b, prefix=''):
     """Align two sequences by signature; an insertion, removal or reorder shows
     as a sequence difference, a matched pair is compared field by field."""
     sa, sb = [_signature(e) for e in a], [_signature(e) for e in b]
@@ -131,13 +133,53 @@ def _sequence(report, scenario, channel, a, b):
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
         if tag == 'equal':
             for i, j in zip(range(i1, i2), range(j1, j2)):
-                _deep(report, scenario, channel, f'[{i}]', a[i], b[j])
+                _deep(report, scenario, channel, f'{prefix}[{i}]', a[i], b[j])
         else:
-            report.add(scenario, channel, f'[{i1}:{i2}]->[{j1}:{j2}]', f'sequence-{tag}',
+            report.add(scenario, channel, f'{prefix}[{i1}:{i2}]->[{j1}:{j2}]', f'sequence-{tag}',
                        {'<signatures>': sa[i1:i2]}, {'<signatures>': sb[j1:j2]})
             # The signatures are already safe; show them so a reorder is readable.
             report.items[-1]['base'] = ' | '.join(sa[i1:i2]) or '-'
             report.items[-1]['head'] = ' | '.join(sb[j1:j2]) or '-'
+
+
+def _lane_label(name: str) -> str:
+    kind, _, rest = name.partition('#')
+    return f"{safe(kind, 'type')}@{rest.split('@')[1]}"
+
+
+def stable_order(runs: list[list[dict]]) -> set[tuple[str, str]]:
+    """Pairs (x, y) of lane positions where x came before y in every run."""
+    pairs = None
+    for frames in runs:
+        names = normalize.lane_names(frames)
+        here = {(x, y) for i, x in enumerate(names) for y in names[i + 1:]}
+        pairs = here if pairs is None else pairs & here
+    return pairs or set()
+
+
+def _stream(report, scenario, channel, a, b, calibration):
+    """An interleaved event stream: each producer lane is compared as an exact
+    sequence; across lanes, only orders every calibration run agreed on count."""
+    names_a, names_b = normalize.lane_names(a), normalize.lane_names(b)
+    lanes: dict[str, tuple[list, list]] = {}
+    for name, frame in zip(names_a, a):
+        lanes.setdefault(name.split('@')[1], ([], []))[0].append((name, frame))
+    for name, frame in zip(names_b, b):
+        lanes.setdefault(name.split('@')[1], ([], []))[1].append((name, frame))
+    for lane, (la, lb) in sorted(lanes.items()):
+        label = _lane_label((la or lb)[0][0])
+        _sequence(report, scenario, channel, [f for _, f in la], [f for _, f in lb], prefix=f'lane[{label}]')
+    position = {name: i for i, name in enumerate(names_b)}
+    moved: dict[str, list[str]] = {}
+    for x, y in stable_order(calibration):
+        if x in position and y in position and position[y] < position[x]:
+            moved.setdefault(x, []).append(y)
+    for x, partners in sorted(moved.items()):
+        report.add(scenario, channel, f'order[{_lane_label(x)}#{x.split("#")[1].split("@")[0]}]', 'order-changed',
+                   None, sorted(partners))
+        report.items[-1]['base'] = 'before'
+        report.items[-1]['head'] = f'after {len(partners)}: ' + ', '.join(
+            f'{_lane_label(p)}#{p.split("#")[1].split("@")[0]}' for p in sorted(partners)[:6])
 
 
 def _rows(report, scenario, table, a, b):
@@ -171,14 +213,19 @@ def _rows(report, scenario, table, a, b):
             report.add(scenario, 'table', f'{table}[row]', 'row-added', None, row)
 
 
-def compare(a: dict, b: dict, report: Report):
+def compare(a: dict, b: dict, report: Report, calibration: list[dict] | None = None):
+    """``calibration``: normalized captures of the base (default ``[a]``) whose
+    common cross-lane orders a stream must keep."""
     s = a['scenario']
+    calibration = calibration or [a]
     if a['error'] or b['error']:
         report.add(s, 'run', 'error', 'run-failed', 'failed' if a['error'] else 'ok',
                    'failed' if b['error'] else 'ok')
         return
     _sequence(report, s, 'http', a['http'], b['http'])
-    _sequence(report, s, 'sse', a['sse'], b['sse'])
+    _stream(report, s, 'sse', a['sse'], b['sse'], [c['sse'] for c in calibration])
+    _stream(report, s, 'sse_log', a.get('sse_log', []), b.get('sse_log', []),
+            [c.get('sse_log', []) for c in calibration])
     _deep(report, s, 'schema', 'sqlite_master', a['schema'], b['schema'])
     for table in sorted(set(a['tables']) | set(b['tables'])):
         _rows(report, s, table, a['tables'].get(table, {}), b['tables'].get(table, {}))

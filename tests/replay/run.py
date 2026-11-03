@@ -219,10 +219,11 @@ def verify_unchanged(builds) -> list[str]:
     return broken
 
 
-def diff_builds(results, a: str, b: str, chosen) -> diff.Report:
+def diff_builds(results, a: str, b: str, chosen, calibration=()) -> diff.Report:
     report = diff.Report()
     for s in chosen:
-        diff.compare(results[a][s['id']], results[b][s['id']], report)
+        diff.compare(results[a][s['id']], results[b][s['id']], report,
+                     [results[c][s['id']] for c in calibration] or None)
     return report
 
 
@@ -270,11 +271,17 @@ def cmd_compare(args) -> int:
     chosen = select(args.scenarios, scenarios.BY_ID, 'scenario')
     base, base_sha = build_for(args.base, scratch, args.allow_path)
     head, head_sha = build_for(args.head, scratch, args.allow_path)
-    results = run_corpus({'base': base, 'head': head}, chosen, scratch, args.jobs)
-    report = diff_builds(results, 'base', 'head', chosen)
+    results = run_corpus({'base': base, 'base2': base, 'head': head}, chosen, scratch, args.jobs)
+    # The base runs twice: cross-lane SSE orders count only where both base runs agree.
+    calibration = ('base', 'base2')
+    noise = diff_builds(results, 'base', 'base2', chosen, calibration)
+    report = diff_builds(results, 'base', 'head', chosen, calibration)
     intended = load_intended(args.intended)
     print('\n'.join(manifest(f'{base_sha} -> {head_sha}', chosen, [])))
     broken = errors(results) + verify_unchanged({'base': base, 'head': head})
+    if noise.items:
+        broken.append(f'base is not reproducible: {len(noise.items)} differences between its two runs')
+        print('\n'.join(diff.shapes(noise)))
     print(diff.render(report, intended, f'{base_sha[:12]} -> {head_sha[:12]}', broken), end='')
     print(f'seconds: {time.monotonic() - started:.1f}')
     if broken:
@@ -290,20 +297,23 @@ def cmd_self_check(args) -> int:
     changes = [] if args.no_planted else select(args.planted, planted.BY_ID, 'planted change')
     diagnostic = diagnostic or args.no_planted
     build, sha = build_for(args.ref, scratch, args.allow_path)
-    builds = {'run1': build, 'run2': build, 'run3': build}
+    builds = {'run1': build, 'run2': build, 'run3': build, 'run4': build}
     for change in changes:
         builds[f"planted-{change['id']}"] = planted_copy(build, change, scratch)
     results = run_corpus(builds, chosen, scratch, args.jobs)
     if args.show_sse:
-        for label in ('run1', 'run2', 'run3'):
+        for label in ('run1', 'run2', 'run3', 'run4'):
             for s in chosen:
                 sigs = [diff._signature(f) for f in results[label][s['id']]['sse']]
                 print(f"SSE {label} {s['id']}: " + ' || '.join(sigs))
     print(f"# Replay harness self-check{' (DIAGNOSTIC: subset or path build, not a proof)' if diagnostic else ''}")
     print('\n'.join(manifest(sha, chosen, changes)))
     ok = True
-    for a, b in (('run1', 'run2'), ('run1', 'run3')):
-        report = diff_builds(results, a, b, chosen)
+    # run1 and run2 calibrate the cross-lane SSE orders (as the base does in compare);
+    # run3 and run4 are the two independent unchanged replays that must show nothing.
+    calibration = ('run1', 'run2')
+    for a, b in (('run1', 'run2'), ('run1', 'run3'), ('run1', 'run4')):
+        report = diff_builds(results, a, b, chosen, calibration)
         ok &= not report.items
         print(f"unchanged {a} vs {b}: {len(report.items)} differences  {'PASS' if not report.items else 'FAIL'}")
         if report.items:
@@ -312,7 +322,7 @@ def cmd_self_check(args) -> int:
                 print(diff.render(report, set(), f'{a} vs {b}'), end='')
     for change in changes:
         label = f"planted-{change['id']}"
-        report = diff_builds(results, 'run1', label, chosen)
+        report = diff_builds(results, 'run1', label, chosen, calibration)
         hits = planted.caught(change, report.items)
         ok &= bool(hits)
         print(f"planted {change['id']}: {len(report.items)} differences, {len(hits)} specific  "

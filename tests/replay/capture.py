@@ -274,10 +274,25 @@ def run_step(host: Host, step: dict, http: list):
         raise StepFailed(f'unknown step op {op!r}')
 
 
+def _state_tail(root: Path, session: str) -> str:
+    """The agent's last state_log kinds (codes), for a failed wait."""
+    try:
+        with _ro(root) as db:
+            kinds = [r[0] for r in db.execute(
+                'SELECT s.kind FROM state_log s JOIN agents a ON a.agent_id = s.agent_id '
+                'WHERE a.session = ? ORDER BY s.state_id DESC LIMIT 6', (session,))]
+    except sqlite3.Error as exc:
+        return f'state unreadable ({type(exc).__name__})'
+    return 'last states ' + ','.join(reversed(kinds))
+
+
 def _quiesce(host: Host, sse: SSE, sessions):
     for session in sessions:
-        _poll('sessions idle',
-              lambda s=session: (host.request('GET', f'/status?session={s}')[2] or {}).get('busy') is False)
+        try:
+            _poll('sessions idle',
+                  lambda s=session: (host.request('GET', f'/status?session={s}')[2] or {}).get('busy') is False)
+        except StepFailed as exc:
+            raise StepFailed(f'{exc}; {_state_tail(host.root, session)}') from exc
     _poll('SSE quiet', lambda: time.monotonic() - sse.last_at >= QUIET_S)
 
 

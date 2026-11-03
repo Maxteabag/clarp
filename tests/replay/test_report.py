@@ -41,7 +41,7 @@ def test_generated_ids_and_clocks_normalize_away_but_keep_identity():
     out = n.value({'agent_id': 'a1b2c3d4e5f60718', 'ts': 1793692941182, 'again_id': 'a1b2c3d4e5f60718',
                    'cwd': '/scratch/s/workspace', 'pid': 4242, 'event_id': 17, 'next': {'event_id': 17}})
     assert out == {'agent_id': '<id:1>', 'ts': '<time>', 'again_id': '<id:1>', 'cwd': '<ROOT>/workspace',
-                   'pid': '<pid>', 'event_id': '<eid:1>', 'next': {'event_id': '<eid:1>'}}
+                   'pid': '<pid>', 'event_id': '<eid:?1>', 'next': {'event_id': '<eid:?1>'}}
 
 
 def test_settings_checksums_and_free_text_hex_stay_comparable():
@@ -79,8 +79,8 @@ def test_codes_from_the_server_source_do_print():
 
 def test_order_swap_removed_field_header_and_envelope_are_differences():
     events = [_frame({'type': 'agent-state', 'kind': 'done'}), _frame({'type': 'agent-activity', 'state': 'idle'})]
-    assert any(d['kind'].startswith('sequence-') for d in _report(_capture(sse=events),
-                                                                   _capture(sse=events[::-1])).items)
+    assert [d['kind'] for d in _report(_capture(sse=events), _capture(sse=events[::-1])).items] == [
+        'order-changed']
     removed = _report(_capture(http=[_http({'ok': True, 'queue_depth': 0})]),
                       _capture(http=[_http({'ok': True})]))
     assert [(d['kind'], d['locator']) for d in removed.items] == [('field-removed', '[0].body.queue_depth')]
@@ -88,7 +88,7 @@ def test_order_swap_removed_field_header_and_envelope_are_differences():
                      _capture(http=[_http({}, headers={'cache-control': 'no-cache'})]))
     assert [d['locator'] for d in header.items] == ['[0].headers.cache-control']
     envelope = _report(_capture(sse=[_frame({'type': 'x'})]), _capture(sse=[_frame({'type': 'x'}, has_id=False)]))
-    assert [d['locator'] for d in envelope.items] == ['[0].has_id']
+    assert [d['locator'].split(']', 1)[1] for d in envelope.items] == ['[0].has_id']
 
 
 def test_same_size_file_change_is_a_difference():
@@ -137,3 +137,28 @@ def test_every_planted_anchor_matches_this_tree(change, tmp_path):
     target.write_text((repo / change['file']).read_text())
     planted.apply(change, tmp_path)
     assert target.read_text() != (repo / change['file']).read_text()
+
+
+def test_cross_lane_order_counts_only_where_calibration_agrees():
+    state = _frame({'type': 'agent-state', 'kind': 'done'})
+    live = _frame({'type': 'live', 'ops': []})
+    note = _frame({'type': 'user-notification', 'push': True})
+    norm = lambda frames: normalize.normalize(_capture(sse=frames), '/h')
+    run1, run2 = norm([state, live, note]), norm([live, state, note])
+    head = norm([note, live, state])
+    report = diff.Report()
+    diff.compare(run1, head, report, [run1, run2])
+    # state/live disagreed in calibration; both moving behind the notification did not.
+    assert [(d['kind'], d['head'].split(':')[0]) for d in report.items] == [
+        ('order-changed', 'after 1'), ('order-changed', 'after 1')]
+    quiet = diff.Report()
+    diff.compare(run1, run2, quiet, [run1, run2])
+    assert not quiet.items
+
+
+def test_event_ids_are_named_by_lane_position_and_keep_aliases():
+    frames = [_frame({'type': 'agent-state', 'event_id': 41}), _frame({'type': 'live', 'event_id': 40,
+                                                                       'ref_event_id': 41})]
+    out = normalize.normalize(_capture(sse=frames), '/h')['sse']
+    assert out[0]['data']['event_id'] == out[1]['data']['ref_event_id']
+    assert out[0]['data']['event_id'].startswith('<eid:agent-state#1@')
