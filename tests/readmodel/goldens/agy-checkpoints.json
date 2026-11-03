@@ -112,19 +112,19 @@
   {
    "checkpoint": {
     "backend": "agy",
-    "boundary_offset": 3263,
-    "boundary_seq": 12,
-    "complete_size": 3937,
+    "boundary_offset": 3022,
+    "boundary_seq": 11,
+    "complete_size": 3696,
     "imports_since_audit": 0,
     "parser_carry_json": "{\"boundary_step\":16,\"running_tools\":0}",
-    "prefix_hash": "022dfd80eed5a985c5d3c19aa6ac4290",
-    "prefix_turns_hash": "6215ad9b1ac274fb2a8e45edf14ead73",
-    "size": 3937,
-    "store_carry_json": "{\"consumed_client_ids\":[\"u-c0\",\"u-c1\",\"u-c3\"],\"current_origin\":\"agent\",\"current_sender_agent_id\":\"agent-sender\",\"current_heartbeat_key\":\"\",\"assistant_ordinal\":8,\"authority_tools\":{\"tr-1\":[\"final-1\",[{\"name\":\"Bash\",\"summary\":\"list files\",\"action\":\"running command\",\"file_path\":\"\",\"status\":\"ok\",\"id\":\"step-6\",\"command\":\"ls /redacted/1\",\"description\":\"\",\"input\":{\"command\":\"ls /redacted/1\",\"description\":\"\"},\"exit_code\":null,\"result\":\"a\\nb\"}],[{\"id\":\"agy-think-5\",\"kind\":\"reasoning\",\"title\":\"Reasoned\",\"summary\":\"\",\"status\":\"ok\",\"lines\":[{\"label\":\"\",\"text\":\"Plan the listing.\",\"kind\":\"status\"}]},{\"id\":\"step-6\",\"kind\":\"exploration\",\"title\":\"Explored\",\"summary\":\"\",\"status\":\"ok\",\"lines\":[{\"label\":\"List\",\"text\":\"/redacted/1\",\"kind\":\"detail\"}]}]]},\"closed_authority\":[\"tr-1\"],\"unanswered_key\":\"\",\"current_request_trace\":\"tr-3\",\"adopted_final_ids\":[],\"newest_trace\":\"tr-3\"}",
+    "prefix_hash": "adc30a591fc38e9a2032614e59a9eb24",
+    "prefix_turns_hash": "5da56feedb53461a85fe589f9cca5097",
+    "size": 3696,
+    "store_carry_json": "{\"consumed_client_ids\":[\"u-c0\",\"u-c1\",\"u-c3\"],\"current_origin\":\"agent\",\"current_sender_agent_id\":\"agent-sender\",\"current_heartbeat_key\":\"\",\"assistant_ordinal\":7,\"authority_tools\":{\"tr-1\":[\"final-1\",[],[]]},\"closed_authority\":[\"tr-1\"],\"unanswered_key\":\"\",\"current_request_trace\":\"tr-3\",\"adopted_final_ids\":[\"live-3\"],\"newest_trace\":\"tr-3\"}",
     "tail_hash": "b83b02c3bb83d060b14f6aeeeb4a3b70",
-    "turn_count": 15
+    "turn_count": 14
    },
-   "import": "IntegrityError: UNIQUE constraint failed: messages.agent_id, messages.backend_session_id, messages.seq",
+   "import": "ok",
    "step": "rotate"
   }
  ]
