@@ -146,6 +146,61 @@ SCENARIOS = [
             {'op': 'get', 'path': '/voice-events?session=rachel'},
         ],
     },
+    {
+        'id': 'stop-with-queue',
+        'what': 'a Stop while a message waits: the turn is interrupted, the queue pauses, resume runs it',
+        'steps': [
+            _send('rachel', '[qa-slow] synthetic task before a queue', 'juliet'),
+            {'op': 'wait_provider_started', 'marker': '[qa-slow] synthetic task before a queue'},
+            {'op': 'wait_open', 'message_id': 'u-juliet'},
+            {'op': 'wait_state', 'session': 'rachel', 'kind': 'thinking', 'count': 2},
+            _send('rachel', 'synthetic waiting kilo', 'kilo', queue_if_busy=True),
+            {'op': 'post', 'path': '/stop', 'body': {'session': 'rachel'}},
+            {'op': 'wait_settled', 'message_id': 'u-juliet'},
+            {'op': 'quiesce'},
+            {'op': 'get', 'path': '/turn-queue?session=rachel'},
+            {'op': 'post', 'path': '/turn-queue/resume', 'body': {'session': 'rachel'}},
+            {'op': 'wait_settled', 'message_id': 'u-kilo'},
+            {'op': 'quiesce'},
+            {'op': 'get', 'path': '/turn-queue?session=rachel'},
+            {'op': 'get', 'path': '/log?session=rachel'},
+        ],
+    },
+    {
+        'id': 'queue-cancel',
+        'what': 'a queued message is deleted before it runs',
+        'steps': [
+            _send('rachel', '[qa-slow] synthetic task before a cancel', 'lima'),
+            {'op': 'wait_provider_started', 'marker': '[qa-slow] synthetic task before a cancel'},
+            {'op': 'wait_open', 'message_id': 'u-lima'},
+            _send('rachel', 'synthetic message to cancel', 'mike', queue_if_busy=True),
+            {'op': 'get', 'path': '/turn-queue?session=rachel'},
+            {'op': 'delete', 'path': '/turn-queue/{queue_id}', 'from_last': {'queue_id': 'items.0.id'}},
+            {'op': 'wait_settled', 'message_id': 'u-lima'},
+            {'op': 'quiesce'},
+            {'op': 'get', 'path': '/turn-queue?session=rachel'},
+            {'op': 'get', 'path': '/log?session=rachel'},
+        ],
+    },
+    {
+        'id': 'stop-at-admission',
+        'what': 'a Stop between the two thinking rows of a turn start (pins TP-N1)',
+        # Known bug: the late thinking row overwrites the stop and the agent stays busy,
+        # so this scenario fails (in most runs) until the fix lands. It runs and is
+        # reported, but never counts in the zero or the exit code.
+        'known_bug': 'TP-N1',
+        'steps': [
+            _send('rachel', '[qa-slow] synthetic task stopped at once', 'november'),
+            {'op': 'wait_open', 'message_id': 'u-november'},
+            {'op': 'post', 'path': '/stop', 'body': {'session': 'rachel'}},
+            {'op': 'wait_settled', 'message_id': 'u-november'},
+            {'op': 'quiesce'},
+            {'op': 'get', 'path': '/status?session=rachel'},
+        ],
+    },
 ]
+
+GATING = [s for s in SCENARIOS if not s.get('known_bug')]
+KNOWN_BUGS = [s for s in SCENARIOS if s.get('known_bug')]
 
 BY_ID = {s['id']: s for s in SCENARIOS}
