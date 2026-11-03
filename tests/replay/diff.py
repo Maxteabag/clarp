@@ -199,6 +199,14 @@ def _files(report, scenario, a, b):
             _deep(report, scenario, 'files', loc, fa[path], fb[path])
 
 
+def shapes(report: Report, top: int = 40) -> list[str]:
+    """Differences grouped by shape (indices and hashes folded), most frequent first."""
+    fold = re.compile(r'\[\d+(:\d+)?\]|\[\d+:\d+\]->\[\d+:\d+\]|#[0-9a-f]{8}|pk=[^\]]*')
+    counts = Counter(('*', d['channel'], fold.sub('[*]', d['locator']), d['kind'])
+                     for d in report.items)
+    return [f'{n:6d}  {ch} / {loc} / {kind}' for (_, ch, loc, kind), n in counts.most_common(top)]
+
+
 def render(report: Report, intended: set[str], title: str, errors=()) -> str:
     lines = [f'# Replay difference report: {title}', '']
     unexplained = [d for d in report.items if d['id'] not in intended]

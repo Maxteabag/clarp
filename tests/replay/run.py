@@ -301,7 +301,9 @@ def cmd_self_check(args) -> int:
         ok &= not report.items
         print(f"unchanged {a} vs {b}: {len(report.items)} differences  {'PASS' if not report.items else 'FAIL'}")
         if report.items:
-            print(diff.render(report, set(), f'{a} vs {b}'), end='')
+            print('\n'.join(diff.shapes(report)))
+            if args.verbose:
+                print(diff.render(report, set(), f'{a} vs {b}'), end='')
     for change in changes:
         label = f"planted-{change['id']}"
         report = diff_builds(results, 'run1', label, chosen)
