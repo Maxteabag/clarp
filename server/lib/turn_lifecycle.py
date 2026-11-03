@@ -377,16 +377,11 @@ class TurnStateMachine:
 
                 def write():
                     attempts.append(1)
-                    nonlocal stamp
-                    if len(attempts) > 1 and ts is None:
-                        # A retry is a new write: it takes a fresh stamp (never an
-                        # earlier one), so it sorts after any row of its own turn
-                        # written during the backoff. A historical ts is kept.
-                        stamp = max(stamp, now_ms())
                     return self._write_terminal(
                         agent_id, event, target, detail, runtime_id, stamp,
-                        recheck=fence if len(attempts) > 1 else None, force=force)
-                cursor, trace = db.retry_locked(write)
+                        recheck=fence if len(attempts) > 1 else None, force=force,
+                        ordinary=ts is None)
+                cursor, trace, stamp = db.retry_locked(write)
                 _after_settle(agent_id, event, target, trace)
             else:
                 cursor = conn().execute(
@@ -405,7 +400,8 @@ class TurnStateMachine:
 
     def _write_terminal(self, agent_id: str, event: str, target: str,
                         detail: dict[str, Any] | None, runtime_id, stamp: int, *,
-                        recheck: int | None = None, force: bool = False):
+                        recheck: int | None = None, force: bool = False,
+                        ordinary: bool = False):
         """A terminal row and its turn's settlement in one write transaction:
         the settlement attributes a Stop to its turn (the start guard reads it),
         so a row without it would be a Stop of unknown turn (TP-N1b). A failure
@@ -418,6 +414,14 @@ class TurnStateMachine:
         try:
             if recheck is not None:
                 self._recheck_terminal(agent_id, event, detail, since=recheck, force=force)
+            if ordinary:
+                # Under the writer lock: the row sorts after every row already
+                # written for the agent (its own turn's activity that committed
+                # while this write waited), and a retry is stamped when it lands.
+                # A historical ts (not ordinary) is kept as given.
+                newest = database.execute(
+                    "SELECT MAX(ts) FROM state_log WHERE agent_id = ?", (agent_id,)).fetchone()[0]
+                stamp = max(stamp, int(newest or 0), now_ms() if recheck is not None else 0)
             cursor = database.execute(
                 """INSERT INTO state_log (agent_id, runtime_id, ts, kind, detail)
                    VALUES (?, ?, ?, ?, ?)""",
@@ -429,7 +433,7 @@ class TurnStateMachine:
             if database.in_transaction:
                 database.execute("ROLLBACK")
             raise
-        return cursor, trace
+        return cursor, trace, stamp
 
     def _recheck_terminal(self, agent_id: str, event: str, detail: dict[str, Any] | None,
                           *, since: int, force: bool) -> None:
