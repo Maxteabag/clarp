@@ -1033,6 +1033,56 @@ class _ClientProvenance:
         return row
 
 
+class _AgyAuthority:
+    """agy turns whose text the stream owns (``agy_turn_authority``).
+
+    Each assistant turn of the transcript has an ordinal; a turn inside an
+    authority row's range is not imported as a row of its own, and its tool
+    calls are collected for the authoritative row (_attach_authority_tools)."""
+
+    def __init__(self):
+        self.ordinal = 0
+        # Tools of agy turns whose final row the stream owns: trace -> (row, tools, cells).
+        self.tools: dict[str, tuple[str, list, list]] = {}
+        # A dispatched turn's range stays open until the next Clarp turn binds, so
+        # once a later user message appears its tools are complete: assistant turns
+        # after that (agy run from a terminal, say) are not its own.
+        self.closed: set[str] = set()
+
+    def resume(self, carry: dict[str, Any]) -> None:
+        self.ordinal = int(carry["assistant_ordinal"])
+        self.tools = {trace: (entry[0], list(entry[1]), list(entry[2]))
+                      for trace, entry in carry["authority_tools"].items()}
+        self.closed = set(carry["closed_authority"])
+
+    def close_open(self) -> None:
+        """A user turn: every range collected so far is complete."""
+        self.closed.update(self.tools)
+
+    def lookup(self, database, agent_id: str, backend_session_id: str):
+        """The authority row owning the next assistant turn, or None."""
+        authority = database.execute(
+            """SELECT trace_id, authoritative_message_id FROM agy_turn_authority
+                 WHERE agent_id=? AND backend_session_id=?
+                   AND assistant_start_ordinal<=?
+                   AND (assistant_end_ordinal IS NULL
+                        OR ?<assistant_end_ordinal)
+                 ORDER BY updated_at DESC LIMIT 1""",
+            (agent_id, backend_session_id, self.ordinal,
+             self.ordinal),).fetchone()
+        self.ordinal += 1
+        return authority
+
+    def collect(self, authority, turn: dict[str, Any]) -> None:
+        """Carry the turn's tool calls onto its authoritative row."""
+        if authority["authoritative_message_id"] and \
+                authority["trace_id"] not in self.closed:
+            _, tools, cells = self.tools.setdefault(
+                authority["trace_id"], (authority["authoritative_message_id"], [], []))
+            tools.extend(turn.get("tools") or [])
+            cells.extend(turn.get("display_cells") or [])
+
+
 def _store_transcript_turns_txn(database, *, agent_id: str,
                                 backend_session_id: str, source_file: str,
                                 turns: list[dict[str, Any]],
@@ -1077,13 +1127,7 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
         current_origin = carry["current_origin"]
         current_sender_agent_id = carry["current_sender_agent_id"]
         current_heartbeat_key = carry["current_heartbeat_key"]
-    assistant_ordinal = 0
-    # Tools of agy turns whose final row the stream owns: trace -> (row, tools, cells).
-    authority_tools: dict[str, tuple[str, list, list]] = {}
-    # A dispatched turn's range stays open until the next Clarp turn binds, so
-    # once a later user message appears its tools are complete: assistant turns
-    # after that (agy run from a terminal, say) are not its own.
-    closed_authority: set[str] = set()
+    agy = _AgyAuthority()
     # The request whose client row was matched last and has had no answer yet.
     # When an attempt fails, the dispatcher sends the same prompt again and
     # the backend records one more copy of it per retry.
@@ -1093,10 +1137,7 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
     skipped_slot_removed = False
     final_rows = _FinalRows(database, agent_id, backend_session_id)
     if carry is not None:
-        assistant_ordinal = int(carry["assistant_ordinal"])
-        authority_tools = {trace: (entry[0], list(entry[1]), list(entry[2]))
-                           for trace, entry in carry["authority_tools"].items()}
-        closed_authority = set(carry["closed_authority"])
+        agy.resume(carry)
         unanswered_key = carry["unanswered_key"]
         current_request_trace = carry["current_request_trace"]
         adopted_final_ids = set(carry["adopted_final_ids"])
@@ -1110,9 +1151,9 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
             "current_origin": current_origin,
             "current_sender_agent_id": current_sender_agent_id,
             "current_heartbeat_key": current_heartbeat_key,
-            "assistant_ordinal": assistant_ordinal,
-            "authority_tools": authority_tools,
-            "closed_authority": sorted(closed_authority),
+            "assistant_ordinal": agy.ordinal,
+            "authority_tools": agy.tools,
+            "closed_authority": sorted(agy.closed),
             "unanswered_key": unanswered_key,
             "current_request_trace": current_request_trace,
             "adopted_final_ids": sorted(adopted_final_ids),
@@ -1156,20 +1197,11 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
         if role == "assistant":
             reply_trace = current_request_trace or turn_index.trace_at(turn.get("timestamp"))
         if role == "user":
-            closed_authority.update(authority_tools)
+            agy.close_open()
         if role == "assistant" and not turn.get("failed"):
             unanswered_key = ""
         if role == "assistant":
-            authority = database.execute(
-                """SELECT trace_id, authoritative_message_id FROM agy_turn_authority
-                     WHERE agent_id=? AND backend_session_id=?
-                       AND assistant_start_ordinal<=?
-                       AND (assistant_end_ordinal IS NULL
-                            OR ?<assistant_end_ordinal)
-                     ORDER BY updated_at DESC LIMIT 1""",
-                (agent_id, backend_session_id, assistant_ordinal,
-                 assistant_ordinal),).fetchone()
-            assistant_ordinal += 1
+            authority = agy.lookup(database, agent_id, backend_session_id)
             visible_reply = visible_replies[index] if visible_replies is not None \
                 else _strip_voice_markup(turn.get("text"))
             if visible_reply:
@@ -1182,12 +1214,7 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
                 # authoritative across every later /log or watcher import.
                 # Its text, that is: the tool calls the transcript records for
                 # the turn are carried onto that row below.
-                if authority["authoritative_message_id"] and \
-                        authority["trace_id"] not in closed_authority:
-                    _, tools, cells = authority_tools.setdefault(
-                        authority["trace_id"], (authority["authoritative_message_id"], [], []))
-                    tools.extend(turn.get("tools") or [])
-                    cells.extend(turn.get("display_cells") or [])
+                agy.collect(authority, turn)
                 continue
         text = str(turn.get("text") or "")
         origin = "user"
@@ -1491,7 +1518,7 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
     replace_revision = max(stale_replace_revision, live_replace_revision)
     latest_revision = max(latest_revision, replace_revision)
     latest_revision = max(latest_revision,
-                          _attach_authority_tools(database, agent_id, authority_tools))
+                          _attach_authority_tools(database, agent_id, agy.tools))
     head = database.execute(
         """SELECT revision, replace_revision FROM conversation_heads
             WHERE agent_id = ? AND backend_session_id = ?""",
