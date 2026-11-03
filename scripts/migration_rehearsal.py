@@ -291,7 +291,10 @@ def check_destination(path: pathlib.Path, source: pathlib.Path | None = None) ->
     path = path.expanduser()
     if source is not None:
         source = source.expanduser()
-        companions = [source] + [source.with_name(source.name + s) for s in ("-wal", "-shm", "-journal")]
+        # SQLite names the companions after the path it opens, which may be an
+        # alias, and after the file it resolves to: protect both families.
+        bases = {source, pathlib.Path(os.path.realpath(source))}
+        companions = [b.with_name(b.name + s) for b in bases for s in ("", "-wal", "-shm", "-journal")]
         if any(os.path.realpath(path) == os.path.realpath(c) for c in companions) or (
                 path.exists() and source.exists() and os.path.samefile(path, source)):
             raise SystemExit(f"refusing to overwrite {path}: it is the source database")

@@ -162,6 +162,22 @@ def test_the_source_and_its_companions_are_refused_before_any_read(tmp_path, suf
     assert source.read_bytes() == before
 
 
+@pytest.mark.parametrize("suffix", ["", "-wal", "-shm", "-journal"])
+@pytest.mark.parametrize("family", ["alias", "real"])
+def test_companions_of_a_symlinked_source_are_refused(tmp_path, suffix, family, monkeypatch):
+    real = tmp_path / "data" / "real.sqlite"
+    real.parent.mkdir()
+    before = _tiny_db(real)
+    alias = tmp_path / "alias.sqlite"
+    alias.symlink_to(real)
+    target = (alias if family == "alias" else real).with_name((alias if family == "alias" else real).name + suffix)
+    monkeypatch.setattr(rehearsal, "write_profile", lambda *a, **k: pytest.fail("profiled before refusing"))
+    with pytest.raises(SystemExit, match="refusing to overwrite"):
+        rehearsal.main(["--write-profile", str(target), "--from-db", str(alias)])
+    assert real.read_bytes() == before
+    assert sorted(p.name for p in real.parent.iterdir()) == ["real.sqlite"]
+
+
 def test_a_hard_link_to_the_source_is_refused(tmp_path):
     source = tmp_path / "state.sqlite"
     before = _tiny_db(source)
