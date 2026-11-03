@@ -2,8 +2,10 @@
 
 Status: design for review (reviewer A), approval by the lead before any move.
 Owner: contract owner (rf-contract). Findings: PT-04, PT-05, PT-14. Guards it
-builds on: `tests/unit/test_import_layers.py`, `test_lazy_imports_resolve.py`,
-`test_schema_golden.py` (all S2 or Phase 1, ratchet mode).
+builds on: `tests/unit/test_import_layers.py`, `test_lazy_imports_resolve.py`
+(S2, reviewed at 9bb0ba68, not yet on main) and `test_schema_golden.py` (on
+main). Every count below was measured on main 658d18ed with the S2 layer
+guard at 9bb0ba68; reviewer A reproduced them.
 
 ## 1. What S1 does and does not do
 
@@ -17,9 +19,11 @@ In scope:
 1. The layer map: four refinements in the S2 layer test (section 2).
 2. One complete schema module, `lib/persistence/schema.py`, with no feature
    imports (PT-05): the feature `SCHEMA` constants move into it.
-3. One file per migration, `lib/persistence/migrations/vNNN.py`, with frozen
-   SQL, and one runner, `lib/persistence/migrate.py` (PT-04).
-4. The persistence layer made strict in the layer test.
+3. One file per migration step function, `lib/persistence/migrations/vNNN.py`,
+   with the runner `_migrate` moved unchanged to `lib/persistence/migrate.py`
+   (PT-04).
+4. The persistence layer made strict in the layer test, with an exact list of
+   named exceptions.
 
 Not in scope, with the owner:
 
@@ -37,6 +41,11 @@ Not in scope, with the owner:
   cascade if one process never registers it. That is a behaviour risk, not a
   move, so it goes to the fix lane or S4 with its own test and G2 (section 7,
   question 3).
+- Freezing migration SQL as literal copies, a step registry replacing the
+  `_migrate` if-chain, and extracting the inline steps into their own
+  functions. None of them is a move: renames and rewritten control flow fail
+  the AST identity gate. They belong to a later behaviour slice with its own
+  proof (section 7, question 5).
 - Splitting `db.py` (568 lines, under the 1,500-line limit). Tests patch its
   globals (`db.now_ms` 33 times, `db.conn`, `db.DB_PATH`,
   `db._open_connection`, the lock and retry constants). Moving code out of the
@@ -57,13 +66,27 @@ actually does:
 | `ws` | http | core | WebSocket framing used by feature streams; 5 feature edges |
 | `bonjour` | features | http | LAN service advertisement for the local transport |
 
-`log` stays core. Two persistence edges remain as named exceptions with
-their reasons, checked exactly rather than ratcheted: `db → log` ("logging is
-cross-cutting") and v121's call into `provider_background_jobs` (3.2).
+`log` stays core. Four persistence edges remain as named exceptions, each with
+its reason, checked exactly rather than ratcheted (a new edge fails, a gone
+one must be removed from the list):
 
-Upward edges: 149 today, 131 after the map change, 115 after S1. Persistence
-goes from 22 to the two named exceptions. The remaining 113 are owned as
-listed in section 1 (core → features 111, features → http 1, core → http 1).
+| Edge | Reason |
+|---|---|
+| `db → log` | logging is cross-cutting |
+| v99 `→ tool_explanation_learning` | the step calls `backfill_programs(con)`, live feature logic |
+| v112 `→ goal_ledger` | the step calls `goal_ledger.backfill(con)` (and its ledger helpers) |
+| v121 `→ provider_background_jobs` | the step calls `expire_lost_evidence` |
+
+The three backfills run feature code inside a migration. Freezing or
+relocating them is behaviour work, not a move, so S1 keeps them as they are.
+
+Upward edges: 149 today; 131 after the map change (persistence 18); 117
+after S1. Persistence goes from 22 to the four named exceptions: commit 3
+removes the 11 `db_schema` edges, and the import rewrites in commit 5 remove
+three of the six `db_migrations` edges (audio_bookkeeper, janitor_autonomy and
+judgments, which the migrations import only for their SCHEMA strings). The
+remaining 113 are owned as listed in section 1 (core → features 111,
+features → http 1, core → http 1).
 
 ## 3. Package layout and the move map
 
@@ -106,35 +129,49 @@ so every existing import keeps working:
 
 `_SCHEMA_SQL` is assembled in the same order from the same strings, so
 `sqlite_master` of a fresh database is unchanged: the schema golden must pass
-byte-identical. The three tables that only the v84+ steps create on a fresh
-database (janitor_autonomy, judgments, provider_background_jobs; see 3.2)
-stay created there. Folding them into `_SCHEMA_SQL` would change what
-`_create_schema` runs, so that is not a move.
+byte-identical. Six tables from three schema modules are created on a fresh
+database only by the steps after `_create_schema` (see 3.2):
+janitor_continuity and janitor_quota_receipts (janitor_autonomy),
+judgment_decisions (judgments), and provider_job_cursors, provider_turns and
+provider_task_turns (provider_background_jobs). They stay created there.
+Folding them into `_SCHEMA_SQL` would change what `_create_schema` runs, so
+that is not a move.
 
 ### 3.2 Migrations (PT-04)
 
-Today `_migrate` is one function with 40 `_migrate_to_vN` helpers and about
-20 inline steps. The steps from v84 on sit outside the `else`, so they run
-on fresh databases too; that is how janitor_autonomy, judgments and the
-provider job tables get created. The move keeps that control flow
-exactly:
+Today `_migrate` is one function. It calls 40 `_migrate_to_vN` helpers and
+holds about 20 inline steps. The steps from v84 on sit outside the `else`, so
+they also run on a fresh database (that is how the six tables in 3.1 get
+created). There are exceptions inside that region: v121 runs only for
+`0 < version < 121`, so a fresh database skips it.
 
-- Each version becomes `migrations/vNNN.py` with one function, `apply(con)`.
-  It holds what the step runs today: the moved `_migrate_to_vNNN` body, or
-  the inline block.
-- `migrations/__init__.py` holds two ordered tables: `UPGRADE_ONLY`
-  (62–83, run only in the `else`) and `ALWAYS` (84+, run for fresh and old
-  databases alike), mirroring today's structure.
-- `migrate._migrate` iterates them with the same version tests, the same
-  transaction and the same final `PRAGMA user_version`.
-- **Frozen SQL:** a step that reads a live constant today
-  (`db_schema._HTML_FORMS_SCHEMA`, `judgments.SCHEMA`, ...) gets a literal copy
-  of that string as it is at the move commit. The copy is byte-identical
-  today, so behaviour is unchanged. A later edit to a feature's schema then
-  no longer rewrites a past migration.
-- **v121** calls `provider_background_jobs.expire_lost_evidence` (feature
-  logic in a migration). I propose keeping that one call as a lazy import
-  with a named exception for now (section 7, question 2).
+S1 moves code without changing any control flow:
+
+- Each `_migrate_to_vNNN` moves verbatim, with the same name, to
+  `migrations/vNNN.py`.
+- `_migrate`, `_create_schema` and `_user_version` move verbatim to
+  `persistence/migrate.py`. The if-chain stays exactly as it is, including
+  the `else` boundary, the v84+ region, the `0 < version < 121` predicate, the
+  transaction and the final `PRAGMA user_version`. The inline steps stay
+  inline.
+- The only edits are import lines. `migrate.py` imports each step function
+  by its unchanged name, so the call sites are byte-identical. A lazy
+  `from .judgments import SCHEMA as judgments_schema` (likewise
+  janitor_autonomy, audio_bookkeeper, provider_background_jobs `SCHEMA` and
+  `TURN_SCHEMA`) becomes an import of the same object from
+  `persistence.schema` (3.1). The binding name and the call-time lookup stay
+  the same, and so does the value.
+- The v99, v112 and v121 steps keep their lazy feature imports and calls (the
+  named exceptions in section 2).
+- `db.__getattr__` keeps forwarding through the `db_migrations` alias:
+  `_migrate`, `_create_schema` and every `_migrate_to_vN` stay attributes of
+  `persistence.migrate` (imported names). `db.py` itself is not edited.
+- Behaviour is pinned beyond the schema golden. A start-version matrix test
+  runs, for every start version from 61 to the head and for a fresh database,
+  which steps execute (recorded through the moved functions) and the final
+  stamp. It runs on the old layout before commit 5 and must be identical
+  after it. It proves, for example, that a fresh database skips v121 and an
+  upgrade from 119 runs it.
 
 ### 3.3 Old import paths keep working: alias, not facade
 
@@ -169,62 +206,82 @@ the next starts.
 | 1 | layer map refinement (section 2) and the named-exception mechanism | test only |
 | 2 | `lib/persistence/` package; `db_schema.py` moves to `persistence/schema.py`; alias | move |
 | 3 | the feature SCHEMA constants move into `persistence/schema.py` (3.1) | move |
-| 4 | `db_migrations.py` moves to `persistence/migrate.py`; alias | move |
-| 5 | split `_migrate` into `migrations/vNNN.py` with frozen SQL (3.2) | move + freeze |
-| 6 | persistence made strict in the layer test (zero upward edges besides the two named exceptions) | test only |
+| 4 | the start-version matrix test (3.2), on the old layout | test only |
+| 5 | `db_migrations.py` moves to `persistence/migrate.py` and each `_migrate_to_vNNN` to `migrations/vNNN.py`, names and control flow unchanged; SCHEMA imports retargeted to `persistence.schema`; alias | move |
+| 6 | persistence made strict in the layer test: zero upward edges besides the four named exceptions (section 2) | test only |
 
-Commits 2 and 4 are pure renames plus the alias, so their diffs are small and
-easy to replay on parked branches. Commit 5 is the only large one.
+Commit 2 is a pure rename plus the alias. Commit 5 is the largest, but every
+definition in it is moved verbatim, so the AST identity gate covers all of it.
 
 ## 5. Gates for every move commit
 
 - **AST identity** (new tool, `scripts/refactor/ast_identity.py`): for every
   top-level function, class and constant that moved, `ast.dump` of the old
-  and new definition is equal. The only allowed differences are import lines
-  and the frozen copies in commit 5, which are checked against the original
-  constant's value.
+  and new definition is equal, under its unchanged name. The only allowed
+  differences are import statements. A changed import must bind the same name
+  to the same object: the tool resolves both and compares identity. Nothing
+  else is normalized: no renames, no control-flow changes.
 - `test_schema_golden.py` byte-identical (fresh and v61-upgraded databases),
   `test_db_migrations.py`, `test_import_layers.py`,
   `test_lazy_imports_resolve.py`, `test_table_writers.py`, the alias test.
 - The migration rehearsal (synthetic, production-shaped, v61 → head) on
   heavy-remote: same row counts and state_log digest as before the move,
   migration time within ±20% of the baseline run.
-- Full suite on heavy-remote (G1), and G2: a replay compare of head against
-  its base with zero differences. Moves carry no intended differences.
+- Full suite on heavy-remote (G1), and G2. G2 is a replay compare of head
+  against its own base, using the harness version that has reviewer B's
+  SOURCE YES, with zero differences. Moves register no intended differences.
+  Replay jobs run one at a time on the VM under heavy-remote's replay lock.
 - Reviewer A's SOURCE YES on the exact commit, and the merge captain.
 
 ## 6. Rebase helper and move map for other branches
 
 Every commit ships a machine-readable move map,
 `docs/architecture/s1-moves.json`: per commit, `{old_module, new_module,
-symbols: {old_name: new_name}}`. The helper, `scripts/refactor/s1_rebase.py
-<branch> [--apply]`, uses it in three ways:
+symbols: {old_name: new_name}}` (in S1 every new name equals the old one).
+The helper, `scripts/refactor/s1_rebase.py <branch> [--apply]`, does three
+things:
 
 1. **Report:** lists the branch's commits that touch a moved file, and which
    symbols they change. It reads the parked-branch manifest.
-2. **Transplant:** for an edit to a moved symbol, it takes the branch's
-   version of that symbol (located by AST in the old file) and replaces the
-   symbol's span in the new file, then commits. Edits outside moved symbols
-   are applied as ordinary patches. Anything it cannot place is reported,
-   never guessed.
+2. **Transplant, by three-way merge.** For each moved symbol the branch
+   changed, it takes three versions: base (the symbol in the old file at the
+   branch's merge-base with main), ours (the symbol at its mapped destination
+   on current main) and theirs (the symbol in the old file on the branch).
+   - If ours equals base (main has not touched the symbol since), it replaces
+     the destination span with theirs.
+   - Otherwise it runs `git merge-file` on the three texts. A clean merge is
+     applied. A conflict is reported and the symbol is left untouched; it
+     never takes either side wholesale.
+   - Edits outside moved symbols are applied as ordinary patches.
+   - Anything it cannot locate is reported, never guessed.
 3. **Imports:** optional, because the aliases keep old imports working. It
    rewrites `from .db_schema import X` style imports to the new module.
 
-It never pushes and works on a new branch `<branch>-s1`. It is tested on
-synthetic branches: an edit to a moved migration, to a moved schema constant,
-and an unplaceable conflict.
+It never pushes and works on a new branch `<branch>-s1`. Its tests use
+synthetic branches:
+- a branch edit to a moved migration step while main is unchanged (replace);
+- a branch edit and a separate main edit to different lines of the same moved
+  function (three-way merge keeps both);
+- overlapping edits (conflict reported, destination unchanged);
+- an edit to a moved schema constant;
+- a symbol the helper cannot locate.
 
 ## 7. Questions for the reviewer and the lead
 
 1. Keep `db.py` whole, as recommended because of the monkeypatch evidence?
    Or split it, with `lib.db` aliased to `persistence.connection` (the whole
    module, so patches still work)?
-2. v121's call into `provider_background_jobs.expire_lost_evidence`: keep the
-   lazy import as a named exception (recommended), or freeze a copy of the
-   function into `v121.py` (a duplicate that can drift)?
+2. The v99, v112 and v121 backfill calls into feature code: keep them as named
+   exceptions (recommended; reviewer A agrees), or freeze copies of the
+   functions into the migration files (duplicates of live logic that can
+   drift, and behaviour work)?
 3. The `agents.soft_delete` cascade: confirm it leaves S1 for the fix lane or
    S4, as a registration seam with a test that every composition root
    (server, runtime) registers the cascades before any delete can run.
-4. The named-exception mechanism (`db → log`, v121 → provider_background_jobs):
-   agree that exact, reasoned exceptions are acceptable in a strict layer,
-   instead of a ratchet?
+4. The named-exception mechanism (the four edges in section 2): agree that
+   exact, reasoned exceptions are acceptable in a strict layer, instead of a
+   ratchet?
+5. The migration step registry, the extraction of inline steps and frozen
+   literal SQL: confirm they leave S1. If wanted later, they are a behaviour
+   slice proven by the start-version matrix test, the schema goldens and the
+   rehearsal, with the lead's explicit classification.
