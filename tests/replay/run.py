@@ -5,7 +5,15 @@
   run.py self-check [--ref REF]          the harness proof: REF against itself twice
                                          gives zero differences, and every planted
                                          change shows its specific difference
+  run.py prepare REF...                  (laptop, git only) extract builds into
+                                         .replay-builds/ for a runner without git
   run.py clean                           remove the cached build worktrees (clean ones only)
+
+On the buildbox (heavy-remote copies the worktree without .git), builds come
+from ``.replay-builds/<sha>/``, made beforehand by ``prepare``: ``git archive``
+of server/ and static/, files read-only, and a stamp with a SHA-256 over every
+file. A prepared build is used only if its digest still matches, checked
+before and after the replay.
 
 REF is a commit-ish, checked out with ``git worktree add --detach`` into the
 scratch directory, made read-only and cached by SHA; a cached build is reused
@@ -73,8 +81,87 @@ def _clean_at(path: Path, sha: str | None) -> str:
     return head
 
 
+PREPARED = HARNESS / '.replay-builds'
+STAMP = '.replay-build.json'
+
+
+def tree_digest(build: Path) -> str:
+    digest = hashlib.sha256()
+    for top in ('server', 'static'):
+        for path in sorted((build / top).rglob('*')):
+            if '__pycache__' in path.parts or path.is_dir():
+                continue
+            digest.update(path.relative_to(build).as_posix().encode() + b'\0')
+            digest.update(os.readlink(path).encode() if path.is_symlink() else path.read_bytes())
+            digest.update(b'\0')
+    return digest.hexdigest()
+
+
+def has_git() -> bool:
+    return (HARNESS / '.git').exists()
+
+
+def prepared_build(ref: str) -> tuple[Path, str] | None:
+    if not PREPARED.is_dir():
+        return None
+    if ref == 'HEAD':
+        meta = PREPARED / 'harness.json'
+        ref = json.loads(meta.read_text())['head'] if meta.is_file() else ref
+    matches = [p for p in PREPARED.iterdir() if p.is_dir() and len(ref) >= 7 and p.name.startswith(ref)]
+    if len(matches) != 1:
+        return None
+    stamp = json.loads((matches[0] / STAMP).read_text())
+    if tree_digest(matches[0]) != stamp['digest']:
+        raise BuildError(f"prepared build {stamp['sha'][:12]} does not match its stamp")
+    return matches[0], stamp['sha']
+
+
+def cmd_prepare(args) -> int:
+    PREPARED.mkdir(exist_ok=True)
+    head = git('rev-parse', 'HEAD')
+    dirty = bool(git('status', '--porcelain', '--', 'tests/replay'))
+    (PREPARED / 'harness.json').write_text(json.dumps({'head': head, 'dirty': dirty}) + '\n')
+    wanted = set()
+    for ref in args.refs:
+        sha = git('rev-parse', '--verify', f'{ref}^{{commit}}')
+        wanted.add(sha)
+        target = PREPARED / sha
+        if not target.exists():
+            tmp = PREPARED / f'.{sha}.partial'
+            if tmp.exists():
+                _set_writable(tmp, True)
+                shutil.rmtree(tmp)
+            tmp.mkdir()
+            archive = subprocess.run(['git', 'archive', sha, 'server', 'static'], cwd=HARNESS,
+                                     check=True, capture_output=True).stdout
+            subprocess.run(['tar', '-x', '-C', str(tmp)], input=archive, check=True)
+            (tmp / STAMP).write_text(json.dumps({'sha': sha, 'digest': tree_digest(tmp)}) + '\n')
+            _set_files_readonly(tmp)
+            tmp.rename(target)
+        print(f'prepared {ref} {sha}')
+    if args.prune:
+        for path in PREPARED.iterdir():
+            if path.is_dir() and path.name not in wanted and (path / STAMP).is_file():
+                _set_writable(path, True)
+                shutil.rmtree(path)
+                print('pruned', path.name)
+    return 0
+
+
+def _set_files_readonly(root: Path) -> None:
+    """Files read-only, directories writable (so a sync can still delete them)."""
+    for path in root.rglob('*'):
+        if path.is_file() and not path.is_symlink():
+            path.chmod(path.stat().st_mode & ~(stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH))
+
+
 def build_for(ref: str, scratch: Path, allow_path: bool) -> tuple[Path, str]:
     """A pinned, clean, read-only build for ``ref``; returns (path, sha)."""
+    prepared = prepared_build(ref)
+    if prepared is not None:
+        return prepared
+    if not has_git():
+        raise BuildError('no git here and no prepared build for this ref (run `run.py prepare` on the laptop)')
     path = Path(ref)
     if allow_path and path.is_dir() and (path / 'server/server.py').is_file():
         return path.resolve(), _clean_at(path.resolve(), None)
@@ -122,6 +209,16 @@ def run_corpus(builds: dict[str, Path], chosen, scratch: Path, jobs: int) -> dic
     return out
 
 
+def verify_unchanged(builds) -> list[str]:
+    """A prepared build must still match its stamp after the replay ran its code."""
+    broken = []
+    for label, build in builds.items():
+        stamp = build / STAMP
+        if stamp.is_file() and tree_digest(build) != json.loads(stamp.read_text())['digest']:
+            broken.append(f'{label}: build changed during the replay')
+    return broken
+
+
 def diff_builds(results, a: str, b: str, chosen) -> diff.Report:
     report = diff.Report()
     for s in chosen:
@@ -139,9 +236,14 @@ def manifest(target: str, chosen, changes) -> list[str]:
     digest = hashlib.sha256()
     for name in HARNESS_FILES:
         digest.update((HERE / name).read_bytes())
-    dirty = bool(git('status', '--porcelain', '--', 'tests/replay'))
+    if has_git():
+        head, dirty = git('rev-parse', 'HEAD'), bool(git('status', '--porcelain', '--', 'tests/replay'))
+    else:
+        meta = PREPARED / 'harness.json'
+        info = json.loads(meta.read_text()) if meta.is_file() else {'head': 'unknown', 'dirty': True}
+        head, dirty = f"{info['head']} (as prepared)", info['dirty']
     return [f'target: {target}',
-            f"harness: {git('rev-parse', 'HEAD')}{' DIRTY' if dirty else ''} files-sha256 {digest.hexdigest()[:16]}",
+            f"harness: {head}{' DIRTY' if dirty else ''} files-sha256 {digest.hexdigest()[:16]}",
             f"scenarios ({len(chosen)}): {','.join(s['id'] for s in chosen)}",
             f"planted ({len(changes)}): {','.join(c['id'] for c in changes)}"]
 
@@ -172,7 +274,7 @@ def cmd_compare(args) -> int:
     report = diff_builds(results, 'base', 'head', chosen)
     intended = load_intended(args.intended)
     print('\n'.join(manifest(f'{base_sha} -> {head_sha}', chosen, [])))
-    broken = errors(results)
+    broken = errors(results) + verify_unchanged({'base': base, 'head': head})
     print(diff.render(report, intended, f'{base_sha[:12]} -> {head_sha[:12]}', broken), end='')
     print(f'seconds: {time.monotonic() - started:.1f}')
     if broken:
@@ -209,7 +311,7 @@ def cmd_self_check(args) -> int:
               f"{'CAUGHT' if hits else 'MISSED'}")
         if args.verbose:
             print(diff.render(report, set(), label), end='')
-    broken = errors(results)
+    broken = errors(results) + verify_unchanged({'run1': build})
     for line in broken:
         print('RUN ERROR', line)
     print(f'seconds: {time.monotonic() - started:.1f}')
@@ -269,10 +371,14 @@ def main(argv=None) -> int:
     p.add_argument('--ref', default='HEAD')
     p.add_argument('--planted', help='comma-separated planted change ids (default: all; a subset is diagnostic)')
     p.add_argument('--verbose', action='store_true')
+    p = sub.add_parser('prepare')
+    p.add_argument('refs', nargs='+')
+    p.add_argument('--prune', action='store_true', help='remove prepared builds not named here')
     sub.add_parser('clean')
     args = parser.parse_args(argv)
     try:
-        return {'compare': cmd_compare, 'self-check': cmd_self_check, 'clean': cmd_clean}[args.cmd](args)
+        return {'compare': cmd_compare, 'self-check': cmd_self_check, 'prepare': cmd_prepare,
+                'clean': cmd_clean}[args.cmd](args)
     except BuildError as exc:
         print('BUILD ERROR', exc)
         return 2
