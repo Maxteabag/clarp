@@ -55,6 +55,45 @@ SCENARIOS = [
             {'op': 'get', 'path': '/status?session=rachel'},
         ],
     },
+    {
+        'id': 'retry-same-client-id',
+        'what': 'a client resends after a lost acknowledgement; one message, one turn',
+        'steps': [
+            _send('rachel', 'synthetic durable charlie', 'charlie'),
+            _send('rachel', 'synthetic durable charlie', 'charlie'),
+            {'op': 'wait_settled', 'message_id': 'u-charlie'},
+            {'op': 'wait_busy', 'session': 'rachel', 'busy': False},
+            {'op': 'get', 'path': '/log?session=rachel'},
+        ],
+    },
+    {
+        'id': 'two-agents',
+        'what': 'two agents take a turn each; nothing crosses between them',
+        'sessions': ('rachel', 'mike'),
+        'steps': [
+            _send('rachel', 'synthetic question for rachel', 'delta'),
+            {'op': 'wait_settled', 'message_id': 'u-delta'},
+            _send('mike', 'synthetic question for mike', 'echo'),
+            {'op': 'wait_settled', 'message_id': 'u-echo'},
+            {'op': 'wait_busy', 'session': 'rachel', 'busy': False},
+            {'op': 'wait_busy', 'session': 'mike', 'busy': False},
+            {'op': 'get', 'path': '/log?session=rachel'},
+            {'op': 'get', 'path': '/log?session=mike'},
+            {'op': 'get', 'path': '/agents/snapshot'},
+        ],
+    },
+    {
+        'id': 'usage-limit',
+        'what': 'the provider reports a usage limit and fails the turn',
+        'steps': [
+            {'op': 'provider_file', 'name': 'quota-mode', 'text': 'blocked'},
+            _send('rachel', 'synthetic task over quota', 'foxtrot'),
+            {'op': 'wait_settled', 'message_id': 'u-foxtrot'},
+            {'op': 'wait_busy', 'session': 'rachel', 'busy': False},
+            {'op': 'get', 'path': '/log?session=rachel'},
+            {'op': 'get', 'path': '/status?session=rachel'},
+        ],
+    },
 ]
 
 BY_ID = {s['id']: s for s in SCENARIOS}
