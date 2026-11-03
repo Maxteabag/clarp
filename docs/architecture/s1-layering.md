@@ -16,9 +16,11 @@ compare prove it.
 
 In scope:
 
-1. The layer map: four refinements in the S2 layer test (section 2).
+1. The layer map: four refinements and the `lib.persistence` namespace rule in
+   the S2 layer test (section 2).
 2. One complete schema module, `lib/persistence/schema.py`, with no feature
-   imports (PT-05): the feature `SCHEMA` constants move into it.
+   imports (PT-05): the feature `SCHEMA` constants move, under their unchanged
+   names, into fragment modules under `lib/persistence/schema_parts/` (3.1).
 3. One file per migration step function, `lib/persistence/migrations/vNNN.py`,
    with the runner `_migrate` moved unchanged to `lib/persistence/migrate.py`
    (PT-04).
@@ -94,7 +96,7 @@ features → http 1, core → http 1).
 ```
 server/lib/persistence/
     __init__.py           (empty)
-    schema.py             was db_schema.py, unchanged except its 14 fragment imports
+    schema.py             was db_schema.py, unchanged except its 11 feature imports, which now point at fragments
     schema_parts/         one module per feature schema constant (3.1)
         __init__.py       (empty)
         html_forms.py ... provider_background_jobs.py
@@ -120,8 +122,8 @@ fragment module `persistence/schema_parts/<feature>.py`. Nothing is renamed:
   `from .schema_parts.html_forms import SCHEMA as _HTML_FORMS_SCHEMA`, binding
   the same local name to the same object.
 - `schema.py` stays the one entry point that assembles `_SCHEMA_SQL`, and its
-  size does not change (1,398 lines today; the fragments add about 360 lines
-  in 15 small files instead of growing it past the 1,500-line target).
+  size does not change (1,398 lines today; the 15 constants live in 14 small
+  fragment modules, about 360 lines, instead of growing it past the 1,500-line target).
 
 | Old (feature module, name unchanged) | New home |
 |---|---|
