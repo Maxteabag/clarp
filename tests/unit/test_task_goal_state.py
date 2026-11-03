@@ -804,3 +804,29 @@ def test_stop_still_pauses_other_goals_when_one_pause_fails(tmp_path, monkeypatc
     assert task_plans.pause_recovery_for_agent(first["agent_id"], "User stopped") == 1
     assert task_plans.get(first["plan_id"])["status"] == "active"
     assert task_plans.get(second["plan_id"])["status"] == "paused"
+
+
+def test_idle_ticks_before_the_due_time_do_not_rewrite_the_goal(tmp_path, monkeypatch):
+    # The scheduler ticks every 15 s. A goal that is not due yet and has not
+    # changed must not be rewritten each tick: goal_json can be megabytes.
+    p = make_goal(tmp_path)
+    due = task_plans.get(p["plan_id"])["goal"]["continuation"]["due_at"]
+    assert due > db.now_ms() + 2000
+    saves = []
+    real = goals._save
+    monkeypatch.setattr(goals, "_save", lambda con, plan_id, goal: (
+        saves.append(plan_id), real(con, plan_id, goal)))
+
+    def events():
+        return db.conn().execute(
+            "SELECT COUNT(*) FROM goal_events WHERE plan_id=?", (p["plan_id"],)
+        ).fetchone()[0]
+
+    no_dispatch = lambda *args: pytest.fail("a goal that is not due must not dispatch")
+    recovery.tick(no_dispatch, now=due - 2000)
+    after_first, saves_first = events(), len(saves)
+    recovery.tick(no_dispatch, now=due - 1000)
+
+    assert saves_first <= 1
+    assert len(saves) == saves_first, "an unchanged goal was rewritten"
+    assert events() == after_first
