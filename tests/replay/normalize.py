@@ -8,7 +8,7 @@ they are known to occur.
   ISO timestamp string becomes ``<time>``. A setting such as ``timeout_ms:
   30000`` is not in that range and stays as is.
 - Durations the Host measures: only the keys in ``DURATION_KEYS``.
-- Generated ids: a UUID, or a hex token of 12-64 characters, under an id key
+- Generated ids: a string that is exactly a UUID, anywhere; a UUID, or a hex token of 12-64 characters, under an id key
   (``id``, ``*_id``, ``*_ids``, ``ID_KEYS``), in a path, or as the random tail
   of a prefixed id under an id key. Each becomes an ordinal surrogate by first
   appearance (``<id:3>``), so the same id keeps the same surrogate within a run
@@ -42,11 +42,16 @@ LOOPBACK = re.compile(r'127\.0\.0\.1:\d+')
 PREFIXED = re.compile(r'^([a-z][a-z0-9]{0,15}[-_])([0-9a-f]{12,64}|[0-9A-Za-z]{20,})$')
 DURATION_KEYS = frozenset({'duration_ms', 'worked_ms', 'elapsed_ms', 'source_delta_ms', 'latency_ms',
                            'time_used_seconds', 'timeUsedSeconds', 'age_ms', 'age_sec'})
-ID_KEYS = frozenset({'id', 'conv', 'epoch', 'cause', 'source', 'thread', 'threadId', 'turnId',
+ID_KEYS = frozenset({'focus', 'dedupe_key', 'id', 'conv', 'epoch', 'cause', 'source', 'thread', 'threadId', 'turnId',
                      'native_session_id', 'backend_session_id', 'cause_message_id', 'client_msg_id'})
+# Lanes whose frames are pure invalidation signals ("refetch now"); how many the
+# Host coalesces depends on timing, so only distinct frames are compared.
+COALESCED_TYPES = frozenset({'transcript-updated'})
+# Table columns that hold generated ids outside an id-named column.
+ID_COLUMNS = frozenset({('settings', 'key'), ('settings', 'value')})
 SORTED_LISTS = frozenset({'personas', 'roster'})
 PID_KEYS = frozenset({'pid', 'pgid', 'ppid', 'port'})
-PATH_KEYS = frozenset({'cwd', 'path', 'file_path', 'transcript_path', 'root', 'audio_path'})
+PATH_KEYS = frozenset({'file', 'cwd', 'path', 'file_path', 'transcript_path', 'root', 'audio_path'})
 
 
 def lane_key(frame: dict) -> str:
@@ -111,6 +116,8 @@ class Normalizer:
     def string(self, value: str, key: str) -> str:
         if ISO.match(value.strip()):
             return '<time>'
+        if UUID.fullmatch(value.strip()):
+            return self._id(value.strip().lower())
         replaced = self.paths_in(value)
         if is_id_key(key):
             prefixed = PREFIXED.match(replaced)
@@ -154,9 +161,10 @@ class Normalizer:
 def normalize(capture: dict, harness_root: str) -> dict:
     n = Normalizer({'<ROOT>': capture['root'], '<BUILD>': capture['build'], '<HARNESS>': harness_root})
     db = capture['db']
-    frames = capture['sse']
+    frames, frame_alias = coalesce(capture['sse'])
     log_rows = sorted(db['tables'].get('sse_events', []), key=lambda r: r.get('event_id') or 0)
-    log_frames = [{'event': None, 'data': _payload(r)} for r in log_rows]
+    log_frames, log_alias = coalesce([{'event': None, 'data': _payload(r), 'row': r} for r in log_rows])
+    log_rows = [f['row'] for f in log_frames]
     # Event ids are named by lane position, from the stream first, then the stored log.
     for frame, name in zip(frames, lane_names(frames)):
         data = frame.get('data') if isinstance(frame.get('data'), dict) else {}
@@ -165,6 +173,9 @@ def normalize(capture: dict, harness_root: str) -> dict:
     for row, name in zip(log_rows, lane_names(log_frames)):
         if row.get('event_id') is not None:
             n.eid_names.setdefault(str(row['event_id']), 'log:' + name)
+    for dropped, kept in [*frame_alias.items(), *log_alias.items()]:
+        if kept in n.eid_names:
+            n.eid_names.setdefault(dropped, n.eid_names[kept])
     out = {'scenario': capture['scenario'], 'error': capture['error']}
     # Id surrogates by first appearance, deterministic channels first: the
     # harness-driven HTTP sequence, then tables by name, then files; the
@@ -173,11 +184,18 @@ def normalize(capture: dict, harness_root: str) -> dict:
                     'headers': n.value(h.get('headers', {})), 'body': n.value(h['body'])}
                    for h in capture['http']]
     out['schema'] = db['schema']
-    out['tables'] = {name: {'pk': db.get('pk', {}).get(name, []), 'rows': [n.value(r) for r in rows]}
+    def row(table, r):
+        r = {k: (n.ids_in(v) if (table, k) in ID_COLUMNS and isinstance(v, str) and v[:1] not in '{[' else v)
+             for k, v in r.items()}
+        return n.value(r)
+    out['tables'] = {name: {'pk': db.get('pk', {}).get(name, []), 'rows': [row(name, r) for r in rows]}
                      for name, rows in sorted(db['tables'].items()) if name != 'sse_events'}
     out['files'] = [{'path': n.string(f['path'], 'path'), 'bytes': f['bytes'],
-                     'digest': f['digest'] if f.get('kind') != 'json' else None,
-                     'json': n.value(f['json']) if f.get('kind') == 'json' else None}
+                     'digest': f['digest'] if f.get('kind') == 'bytes' else None,
+                     'json': n.value(f['json']) if f.get('kind') == 'json' else None,
+                     # Small text files: compared as text with UUIDs (generated tokens) as surrogates.
+                     'text': UUID.sub(lambda m: n._id(m.group(0).lower()), n.paths_in(f['text']))
+                     if f.get('kind') == 'text' else None}
                     for f in capture['files']]
     out['sse'] = [{'event': f.get('event'), 'has_id': f.get('has_id'), 'data': n.value(f.get('data'))}
                   for f in frames]
@@ -186,6 +204,24 @@ def normalize(capture: dict, harness_root: str) -> dict:
     out['sse_health'] = capture.get('sse_health')
     out['cli'] = [n.value(c) for c in capture.get('cli', [])]
     return out
+
+
+def coalesce(frames: list[dict]) -> tuple[list[dict], dict[str, str]]:
+    """Drop a COALESCED_TYPES frame equal (but for its event id) to an earlier
+    one in its lane; returns the kept frames and {dropped event id: kept event id}."""
+    kept, alias, seen = [], {}, {}
+    for frame in frames:
+        data = frame.get('data') if isinstance(frame.get('data'), dict) else {}
+        if data.get('type') in COALESCED_TYPES:
+            body = json.dumps({k: v for k, v in data.items() if k != 'event_id'}, sort_keys=True)
+            key = (lane_key(frame), body)
+            if key in seen:
+                if data.get('event_id') is not None and seen[key] is not None:
+                    alias[str(data['event_id'])] = str(seen[key])
+                continue
+            seen[key] = data.get('event_id')
+        kept.append(frame)
+    return kept, alias
 
 
 def _payload(row: dict):
