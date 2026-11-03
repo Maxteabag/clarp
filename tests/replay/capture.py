@@ -392,9 +392,9 @@ def capture(build: Path, scenario: dict, scratch: Path, python: str = sys.execut
         if sse is not None:
             frames = sse.close()
         host.stop()
-    if error is None:
-        db = dump_db(root / 'state.sqlite')
-        files = list_files(root)
+    # Dumped on a failed run too: the frozen state is the diagnostic (structure only in reports).
+    db = dump_db(root / 'state.sqlite')
+    files = list_files(root)
     health = {'errors': sse.errors if sse else ['not connected'], 'ended_early': bool(sse and sse.ended)}
     if error is None and (health['errors'] or health['ended_early']):
         error = 'SSE stream unhealthy: ' + ', '.join(health['errors'] + (['ended early'] if health['ended_early'] else []))

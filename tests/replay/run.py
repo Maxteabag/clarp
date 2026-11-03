@@ -223,7 +223,7 @@ def diff_builds(results, a: str, b: str, chosen, calibration=()) -> diff.Report:
     report = diff.Report()
     for s in chosen:
         diff.compare(results[a][s['id']], results[b][s['id']], report,
-                     [results[c][s['id']] for c in calibration] or None)
+                     [results[c][s['id']] for c in calibration] if calibration else None)
     return report
 
 
@@ -272,8 +272,9 @@ def cmd_compare(args) -> int:
     base, base_sha = build_for(args.base, scratch, args.allow_path)
     head, head_sha = build_for(args.head, scratch, args.allow_path)
     results = run_corpus({'base': base, 'base2': base, 'head': head}, chosen, scratch, args.jobs)
-    # The base runs twice: cross-lane SSE orders count only where both base runs agree.
-    calibration = ('base', 'base2')
+    # The base runs twice: a difference between its own runs means the scenario is not
+    # reproducible, and its comparison with head proves nothing.
+    calibration = ('base', 'base2') if args.cross_lane_order else ()
     noise = diff_builds(results, 'base', 'base2', chosen, calibration)
     report = diff_builds(results, 'base', 'head', chosen, calibration)
     intended = load_intended(args.intended)
@@ -309,9 +310,9 @@ def cmd_self_check(args) -> int:
     print(f"# Replay harness self-check{' (DIAGNOSTIC: subset or path build, not a proof)' if diagnostic else ''}")
     print('\n'.join(manifest(sha, chosen, changes)))
     ok = True
-    # run1 and run2 calibrate the cross-lane SSE orders (as the base does in compare);
-    # run3 and run4 are the two independent unchanged replays that must show nothing.
-    calibration = ('run1', 'run2')
+    # run1 is the reference; run2, run3 and run4 are independent unchanged replays that
+    # must show nothing (with --cross-lane-order, run1+run2 calibrate the diagnostic).
+    calibration = ('run1', 'run2') if args.cross_lane_order else ()
     for a, b in (('run1', 'run2'), ('run1', 'run3'), ('run1', 'run4')):
         report = diff_builds(results, a, b, chosen, calibration)
         ok &= not report.items
@@ -379,6 +380,8 @@ def main(argv=None) -> int:
     parser.add_argument('--scratch', default=str(DEFAULT_SCRATCH))
     parser.add_argument('--jobs', type=int, default=4)
     parser.add_argument('--scenarios', help='comma-separated scenario ids (default: all; a subset is diagnostic)')
+    parser.add_argument('--cross-lane-order', action='store_true',
+                        help='also report cross-producer SSE order changes (diagnostic; not a contract)')
     parser.add_argument('--allow-path', action='store_true', help='accept a clean checkout path as REF (diagnostic)')
     sub = parser.add_subparsers(dest='cmd', required=True)
     p = sub.add_parser('compare')

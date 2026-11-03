@@ -8,7 +8,7 @@ they are known to occur.
   ISO timestamp string becomes ``<time>``. A setting such as ``timeout_ms:
   30000`` is not in that range and stays as is.
 - Durations the Host measures: only the keys in ``DURATION_KEYS``.
-- Generated ids: a string that is exactly a UUID, anywhere; a UUID, or a hex token of 12-64 characters, under an id key
+- Generated ids: a UUID, or a hex token of 12-64 characters, under an id key
   (``id``, ``*_id``, ``*_ids``, ``ID_KEYS``), in a path, or as the random tail
   of a prefixed id under an id key. Each becomes an ordinal surrogate by first
   appearance (``<id:3>``), so the same id keeps the same surrogate within a run
@@ -54,9 +54,19 @@ PID_KEYS = frozenset({'pid', 'pgid', 'ppid', 'port'})
 PATH_KEYS = frozenset({'file', 'cwd', 'path', 'file_path', 'transcript_path', 'root', 'audio_path'})
 
 
+# Event types one producer emits in sequence from one thread share a lane, so
+# their relative order is compared: state_watcher._poll_once broadcasts each
+# state_log row as agent-state then agent-activity (the dispatcher's own
+# agent-state carries client_msg_id and is a different producer).
+PRODUCERS = {'agent-state': 'state-watcher', 'agent-activity': 'state-watcher'}
+
+
 def lane_key(frame: dict) -> str:
     """The producer lane of an SSE frame (or an sse_events row's payload)."""
     data = frame.get('data') if isinstance(frame.get('data'), dict) else {}
+    producer = PRODUCERS.get(str(data.get('type')))
+    if producer and 'client_msg_id' not in data:
+        return f"{producer}|{data.get('session') or ''}"
     return '|'.join([str(frame.get('event') or ''), str(data.get('type') or ''),
                      ','.join(sorted(data)), str(data.get('session') or '')])
 
@@ -116,8 +126,6 @@ class Normalizer:
     def string(self, value: str, key: str) -> str:
         if ISO.match(value.strip()):
             return '<time>'
-        if UUID.fullmatch(value.strip()):
-            return self._id(value.strip().lower())
         replaced = self.paths_in(value)
         if is_id_key(key):
             prefixed = PREFIXED.match(replaced)
