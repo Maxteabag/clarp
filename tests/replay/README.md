@@ -11,8 +11,12 @@ this directory.
 Replay starts real test Hosts, so it **never runs on laptopstudio** (Peter's
 standing order of 2026-10-12: no test suites or test servers on the machine that
 runs his live Host). It runs on the buildbox through
-`/var/tmp/clarp-refactor-program/bin/heavy-remote` once that exists, or in
-GitHub Actions. Locally only `tests/replay/test_report.py` may run (one file,
+`/var/tmp/clarp-refactor-program/bin/heavy-remote` (development and the
+go/no-go proof runs) and in GitHub Actions as the permanent CI gate:
+`.github/workflows/replay.yml` (`workflow_dispatch` and `workflow_call`, inputs
+`mode` = `self-check`|`compare`, `ref`, `base`, `head`), contained like
+`tests.yml` through `scripts/ci_contained.sh`; it uploads the report as the
+`replay-report` artifact. Locally only `tests/replay/test_report.py` may run (one file,
 `-n 0`, through `heavy`); it starts no Host.
 
 ```bash
