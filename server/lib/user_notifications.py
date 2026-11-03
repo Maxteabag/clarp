@@ -384,7 +384,9 @@ def classify_completed_turn(*, agent_id: str, session: str, persona: str,
         AgentCapabilities(
             present=agent is not None,
             can_chat=agents_db.interaction_capabilities(agent)["can_chat"] if agent else True,
-            muted=bool(agent and agent.get("muted")),
+            # A helper reports to its parent agent, so its replies never
+            # interrupt the user: treated as muted (badge and unread stay).
+            muted=bool(agent and (agent.get("muted") or agent.get("role") == "helper")),
             is_team_leader=_is_team_leader(agent_id),
             quiet=quiet_agents.is_quiet(agent),
         ),
