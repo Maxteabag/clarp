@@ -21,7 +21,7 @@ from urllib.parse import parse_qs, urlparse
 from . import config, oracle_delegations, oracle_router, oracle_memory, oracle_work, ws
 from .http_utils import principal_of, require_full_scope
 from . import oracle_contact, oracle_strategy, oracle_voice_context
-from .log import log
+from .log import log, log_exception
 from .oracle_calls import AgentTools, session_config as realtime_config
 from .oracle_context import context_chunks, result_context
 from .oracle_live_usage import LiveUsage
@@ -865,6 +865,7 @@ def serve(handler):
     if token is None:
         return _send_http_error(handler, 409, "An Oracle session is already active")
     upstream = None
+    opened_at = time.monotonic()
     conversation = None
     memory = None
     write_lock = threading.Lock()
@@ -988,35 +989,41 @@ def serve(handler):
         if conversation is None:
             _send_http_error(handler, 502, "Oracle v2 upstream unavailable")
     finally:
-        mark_closing(principal)
-        if conversation:
-            if not conversation.taken_over.is_set():
+        # The device's claim must be released whatever cleanup above fails.
+        try:
+            mark_closing(principal)
+            if conversation:
+                if not conversation.taken_over.is_set():
+                    try:
+                        if not conversation.close_sent:
+                            conversation.input({"type": "session.close"})
+                        conversation.closed.wait(2)
+                    except Exception:
+                        pass
+                conversation.stop.set()
+                conversation.pool.shutdown(wait=False, cancel_futures=True)
+            if upstream:
                 try:
-                    if not conversation.close_sent:
-                        conversation.input({"type": "session.close"})
-                    conversation.closed.wait(2)
+                    upstream.close()
+                except Exception as exc:
+                    log_exception("oracleV2Close", exc, "closing the upstream")
+            if conversation:
+                summary = dict(conversation.counts)
+                summary["seconds"] = round(time.monotonic() - opened_at, 1)
+                summary["closed_by_upstream"] = conversation.closed.is_set()
+                summary["taken_over"] = conversation.taken_over.is_set()
+                summary["voice_usage"] = conversation.usage.snapshot()
+                log("oracleV2Close", " ".join(f"{k}={v}" for k, v in summary.items()))
+                if conversation.journal:
+                    conversation.journal.record("session.summary", summary)
+                    conversation.journal.close()
+            if history_id:
+                try:
+                    podcast_history.finish(history_id,
+                        "failed" if conversation is None else "closed" if conversation.closed.is_set() else "interrupted")
                 except Exception:
+                    # A failed terminal write leaves an unconfirmed/interrupted record;
+                    # existing transcript commits remain durable.
                     pass
-            conversation.stop.set()
-            conversation.pool.shutdown(wait=False, cancel_futures=True)
-        if upstream:
-            upstream.close()
-        if conversation:
-            summary = dict(conversation.counts)
-            summary["seconds"] = round(time.monotonic() - opened_at, 1)
-            summary["closed_by_upstream"] = conversation.closed.is_set()
-            summary["taken_over"] = conversation.taken_over.is_set()
-            summary["voice_usage"] = conversation.usage.snapshot()
-            log("oracleV2Close", " ".join(f"{k}={v}" for k, v in summary.items()))
-            if conversation.journal:
-                conversation.journal.record("session.summary", summary)
-                conversation.journal.close()
-        if history_id:
-            try:
-                podcast_history.finish(history_id,
-                    "failed" if conversation is None else "closed" if conversation.closed.is_set() else "interrupted")
-            except Exception:
-                # A failed terminal write leaves an unconfirmed/interrupted record;
-                # existing transcript commits remain durable.
-                pass
-        release_connection(principal, token)
+        finally:
+            release_connection(principal, token)
