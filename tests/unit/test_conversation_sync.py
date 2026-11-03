@@ -408,3 +408,21 @@ def test_claude_subagent_cell_reaches_the_log_intact(tmp_path):
     assert compact["display_cells"][0]["kind"] == "subagents"
     assert compact["display_cells"][0]["ephemeral"] is True
     assert compact["activity_count"] == 1
+
+
+def test_a_delta_after_a_relink_carries_the_new_trace(tmp_path):
+    """RM-N5: re-owning an admitted-but-never-launched user row under a new
+    attempt rewrote its trace with no revision, so delta clients kept the old
+    trace until a full reload."""
+    agent_id = _agent(tmp_path)
+    message_store.record_user_message(
+        agent_id=agent_id, backend_session_id="conversation-1", client_msg_id="c-1",
+        text="please do it", origin="user", sender_agent_id=None, trace_id="t-first")
+    before = _load("reliable")["latest_revision"]
+
+    message_store.relink_client_message("c-1", trace_id="t-second")
+
+    delta = _load("reliable", after_revision=before)
+    rows = [t for t in delta["turns"] if t.get("id") == "u-c-1"]
+    assert [t.get("trace_id") for t in rows] == ["t-second"]
+    assert delta["latest_revision"] > before
