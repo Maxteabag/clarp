@@ -27,6 +27,7 @@ import sys
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 HERE = Path(__file__).resolve().parent
@@ -241,11 +242,24 @@ def run_step(host: Host, sse, step: dict, http: list):
     op = step['op']
     if op in ('get', 'post', 'put', 'delete'):
         body = step.get('body')
+        path = step['path']
+        if step.get('from_last'):
+            # Fill {name} in the path from the previous response, e.g. a queue item id.
+            last = http[-1]['body'] if http else None
+            values = {}
+            for name, dotted in step['from_last'].items():
+                value = last
+                for part in dotted.split('.'):
+                    value = value[int(part)] if isinstance(value, list) else (value or {}).get(part)
+                if value is None:
+                    raise StepFailed(f'no {name} in the previous response')
+                values[name] = urllib.parse.quote(str(value), safe='')
+            path = path.format(**values)
         if step.get('body_from_last'):
             # Carry fields from the previous response, e.g. /transcribe's trace_id into /send.
             last = http[-1]['body'] if http and isinstance(http[-1]['body'], dict) else {}
             body = {**(body or {}), **{k: last.get(src) for k, src in step['body_from_last'].items()}}
-        status, headers, payload = host.request(op.upper(), step['path'], body, step.get('raw'),
+        status, headers, payload = host.request(op.upper(), path, body, step.get('raw'),
                                                 step.get('headers'))
         http.append({'step': step.get('name') or f"{op} {step['path']}", 'method': op.upper(),
                      'path': step['path'].split('?')[0], 'status': status, 'headers': headers,

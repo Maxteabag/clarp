@@ -312,10 +312,25 @@ def diff_builds(results, a: str, b: str, chosen, calibration=()) -> diff.Report:
     return report
 
 
-def errors(results) -> list[str]:
+def errors(results, gating) -> list[str]:
     # Errors are harness-made strings (step index, op, what it waited for), never Host content.
+    ids = {s['id'] for s in gating}
     return sorted(f"{label}/{sid}: {r['error']}" for label, runs in results.items()
-                  for sid, r in runs.items() if r['error'])
+                  for sid, r in runs.items() if r['error'] and sid in ids)
+
+
+def split(chosen):
+    """Gating scenarios count; known-bug scenarios (they pin a registered bug that
+    is not fixed yet) run and are reported, never in the zero or the exit code."""
+    return [s for s in chosen if not s.get('known_bug')], [s for s in chosen if s.get('known_bug')]
+
+
+def known_lines(results, known, labels) -> list[str]:
+    lines = []
+    for s in known:
+        states = ', '.join(f"{label} {'FAILED' if results[label][s['id']]['error'] else 'ok'}" for label in labels)
+        lines.append(f"KNOWN BUG {s['known_bug']} ({s['id']}, not counted): {states}")
+    return lines
 
 
 def manifest(target: str, chosen, changes) -> list[str]:
@@ -369,6 +384,7 @@ def cmd_compare(args) -> int:
 
 def _compare(args, run, chosen, base, base_sha, head, head_sha, started) -> int:
     results = run_corpus({'base': base, 'base2': base, 'head': head}, chosen, run, args.jobs)
+    chosen, known = split(chosen)
     # The base runs twice: a difference between its own runs means the scenario is not
     # reproducible, and its comparison with head proves nothing.
     calibration = ('base', 'base2') if args.cross_lane_order else ()
@@ -376,7 +392,8 @@ def _compare(args, run, chosen, base, base_sha, head, head_sha, started) -> int:
     report = diff_builds(results, 'base', 'head', chosen, calibration)
     intended = load_intended(args.intended)
     print('\n'.join(manifest(f'{base_sha} -> {head_sha}', chosen, [])))
-    broken = errors(results) + verify_unchanged({'base': base, 'head': head})
+    broken = errors(results, chosen) + verify_unchanged({'base': base, 'head': head})
+    print('\n'.join(known_lines(results, known, ('base', 'base2', 'head'))))
     if noise.items:
         broken.append(f'base is not reproducible: {len(noise.items)} differences between its two runs')
         print('\n'.join(diff.shapes(noise)))
@@ -411,6 +428,7 @@ def _self_check(args, run, chosen, changes, build, sha, diagnostic, started) -> 
     for change in changes:
         builds[f"planted-{change['id']}"] = planted_copy(build, change, run)
     results = run_corpus(builds, chosen, run, args.jobs)
+    chosen, known = split(chosen)
     if args.show_sse:
         for label in ('run1', 'run2', 'run3', 'run4'):
             for s in chosen:
@@ -439,7 +457,9 @@ def _self_check(args, run, chosen, changes, build, sha, diagnostic, started) -> 
               f"{'CAUGHT' if hits else 'MISSED'}")
         if args.verbose:
             print(diff.render(report, set(), label), end='')
-    broken = errors(results) + verify_unchanged({'run1': build})
+    broken = errors(results, chosen) + verify_unchanged({'run1': build})
+    for line in known_lines(results, known, ('run1', 'run2', 'run3', 'run4')):
+        print(line)
     for line in broken:
         print('RUN ERROR', line)
     print(f'seconds: {time.monotonic() - started:.1f}')

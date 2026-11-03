@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import pathlib
 import sys
 
@@ -332,3 +333,11 @@ def test_clean_removes_a_build_once_no_run_holds_the_lease(tmp_path, monkeypatch
     run.RunRoot(scratch).release(keep=False)
     assert run.cmd_clean(SimpleNamespace(scratch=str(scratch))) == 0
     assert not build.exists()
+
+
+def test_scenarios_have_unique_ids_and_known_bugs_name_a_register_id():
+    import scenarios
+    ids = [s['id'] for s in scenarios.SCENARIOS]
+    assert len(ids) == len(set(ids))
+    assert all(re.fullmatch(r'[A-Z]+-N?\d+', s['known_bug']) for s in scenarios.KNOWN_BUGS)
+    assert scenarios.GATING and not any(s.get('known_bug') for s in scenarios.GATING)
