@@ -363,8 +363,10 @@ class TurnStateMachine:
         with (contextlib.nullcontext() if event == TurnEvent.TEXT_STREAMED
               else _critical_write()):
             if target in TERMINAL and not conn().in_transaction:
-                cursor, trace = self._write_terminal(agent_id, event, target, detail,
-                                                     runtime_id, stamp)
+                # Atomic, so a lock error leaves nothing behind: retry the whole
+                # write (bounded, db.retry_locked) rather than strand the agent busy.
+                cursor, trace = db.retry_locked(lambda: self._write_terminal(
+                    agent_id, event, target, detail, runtime_id, stamp))
                 _after_settle(agent_id, event, target, trace)
             else:
                 cursor = conn().execute(
