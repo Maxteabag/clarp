@@ -147,8 +147,8 @@ def _set_clause(text: str, start: int) -> str:
         if quote:
             quote = "" if ch == quote else quote
             continue
-        if ch in "'\"`":
-            quote = ch
+        if ch in "'\"`[":
+            quote = "]" if ch == "[" else ch  # strings and quoted identifiers, e.g. [from]
             continue
         depth += ch == "("
         depth -= ch == ")"
@@ -260,6 +260,9 @@ def status_writers() -> dict[tuple[str, str], set[str]]:
     ("'UPDATE jobs SET old_status = ?, status_at = ? WHERE status = ?'", False),
     ("'UPDATE jobs SET n = (SELECT 1 FROM t WHERE x = 1), status = ? WHERE id = ?'", True),
     ("\"UPDATE jobs SET note = '(', status = ? WHERE id = ?\"", True),
+    ("'UPDATE jobs SET [from] = ?, status = ? WHERE id = ?'", True),
+    ("'UPDATE jobs SET \"where\" = ?, `returning` = ?, status = ? WHERE id = ?'", True),
+    ("\"UPDATE jobs SET note = 'it''s FROM', status = ? WHERE id = ?\"", True),
     ("f'INSERT INTO jobs ({cols}) VALUES ({marks})'", True),
     ("'INSERT INTO \"jobs\" (id, \"status\") VALUES (?, ?)'", True),
     ("'INSERT INTO jobs (id, note) VALUES (?, ?)'", False),
