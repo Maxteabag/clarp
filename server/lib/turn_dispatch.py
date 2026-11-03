@@ -2104,13 +2104,21 @@ class TurnDispatchService:
             # The slot is free but a turn process of this agent still runs
             # (the Host took its turn for finished too early). Two processes
             # on one native session interleave and corrupt it, so the slot
-            # goes to that process until it exits and this send waits.
+            # goes to that process until it exits and this send waits,
+            # durably like a send behind a preempted process (TP-01b).
+            parked = False
+            if not spec.queue_id and not spec.park_id:
+                waiting_park = _park(spec, prefix="preempt-park")
+                if not waiting_park:
+                    raise DispatchError(503, "could not durably queue message")
+                spec = replace(spec, park_id=waiting_park)
+                parked = True
             owner = f"{_PROCESS_OWNER_PREFIX}{spec.trace_id}"
             _SLOTS.claim(agent_id, owner)
             _SLOTS.mark_spawned(agent_id, owner)
             depth = _SLOTS.enqueue(agent_id, spec)
             defer_on(_TURN_LOCK, lambda: self._wait_for_process_exit(spec, owner, depth))
-            return False, True
+            return parked, True
         if _SLOTS.fenced:
             return self._hold_for_drain(spec, "free slot")
         if _SLOTS.queue_depth(agent_id):
