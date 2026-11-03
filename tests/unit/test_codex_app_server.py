@@ -642,3 +642,55 @@ def test_a_client_is_not_reused_while_its_reader_is_cleaning_up(monkeypatch):
         codex_app_server._CLIENTS.clear()
     assert not reader.is_alive()
     assert active.on_error.call_count == 1, "one terminal outcome per turn"
+
+
+def test_the_shared_app_server_speaks_for_no_agent(tmp_path, monkeypatch):
+    """BACKENDS-N1: one app-server process serves every Codex agent, so its
+    environment must not name the agent that happened to start it. Tools in
+    any Codex agent's shell that trust CLAUDE_PWA_SESSION would act as that
+    agent; without it they refuse instead."""
+    _install_fake_codex(tmp_path, monkeypatch)
+    monkeypatch.setenv("CLAUDE_PWA_SESSION", "the-host-itself")
+    seen = []
+    real_popen = codex_app_server.subprocess.Popen
+
+    def recording_popen(*args, **kwargs):
+        seen.append(dict(kwargs.get("env") or {}))
+        return real_popen(*args, **kwargs)
+
+    monkeypatch.setattr(codex_app_server.subprocess, "Popen", recording_popen)
+    try:
+        codex_app_server._client("agent-one", "first-agent")
+    finally:
+        codex_app_server.recycle_clients()
+    assert seen and all("CLAUDE_PWA_SESSION" not in env for env in seen)
+    assert all("CLARP_PROVIDER_TURN" not in env for env in seen)
+
+
+def test_each_codex_thread_carries_its_own_agent_session(tmp_path, monkeypatch):
+    """BACKENDS-N1: the shared app-server has no agent identity; each thread
+    gets its own agent's session for its shell through the thread's config
+    (shell_environment_policy.set), on start and on resume."""
+    _install_fake_codex(tmp_path, monkeypatch)
+    sent = []
+    real_request = codex_app_server._Client.request
+
+    def recording(self, method, params, timeout=30):
+        sent.append((method, dict(params)))
+        return real_request(self, method, params, timeout=timeout)
+
+    monkeypatch.setattr(codex_app_server._Client, "request", recording)
+    first = agents_db.create_agent(persona="One", voice_id="v", cwd=str(tmp_path),
+                                   session="one", backend="codex")
+    second = agents_db.create_agent(persona="Two", voice_id="v", cwd=str(tmp_path),
+                                    session="two", backend="codex")
+    try:
+        for agent_id, session in ((first, "one"), (second, "two")):
+            handle = _spawn_fake_turn(tmp_path, agent_id=agent_id, session=session, text=session)
+            assert handle.wait(timeout=8) == 0
+    finally:
+        codex_app_server.recycle_clients()
+    identities = [params.get("config", {}).get("shell_environment_policy", {})
+                  .get("set", {}).get("CLAUDE_PWA_SESSION")
+                  for method, params in sent if method in ("thread/start", "thread/resume")]
+    assert identities == ["one", "two"]
