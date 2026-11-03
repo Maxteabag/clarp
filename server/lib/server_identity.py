@@ -41,7 +41,7 @@ CAPABILITIES_VERSION = 1
 # adds a row to docs/compatibility.md; tests/unit/test_client_contract.py
 # fails when the table and these constants disagree. Clients identify
 # themselves with the X-Clarp-Client header ("ios/2620 contract=1").
-HOST_CONTRACT = 76  # PROVISIONAL (agent_call_live over harness_model_providers 75): Sandra Agent Live landed after harness took 75 on main; booked at the ready landing, else the next free
+HOST_CONTRACT = 77  # PROVISIONAL (limited-scope 403s, HTTP-01/02/03, over agent_call_live 76): booked at the ready landing, else the next free
 MIN_IOS_CONTRACT = 1
 # F4 delivery state (joint packet 9a96df74): implemented, NOT advertised. Its
 # introduction number is booked by Nadia at the ready landing; until then the
