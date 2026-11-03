@@ -438,3 +438,152 @@ def test_stale_explicit_turn_event_cannot_replace_current_turn_output():
     client._notification('turn/completed',{'threadId':'primary-thread','turn':{'id':'old-turn','status':'completed'}})
     assert client.active is active and not active.handle._done.is_set()
     assert active.state.last_agent_message==''
+
+
+class _LinesProc(_FakeProc):
+    """A live app-server whose stdout yields the given lines, then ends."""
+
+    def __init__(self, lines):
+        super().__init__()
+        self.stdout = iter(lines)
+        self.stdin = None
+
+
+def _reader_client(lines, agent_id="agent-reader"):
+    client = object.__new__(codex_app_server._Client)
+    client.agent_id = agent_id
+    client.active = None
+    client._actives = {}
+    client._lock = threading.Lock()
+    client._write_lock = threading.Lock()
+    client._pending = {}
+    client.proc = _LinesProc(lines)
+    return client
+
+
+def test_one_failing_notification_does_not_end_the_shared_reader(monkeypatch):
+    # A database-locked error while handling one notification, or a JSON line
+    # that is not an object, must not fail the other requests on the process.
+    done = threading.Event()
+    box = {}
+    client = _reader_client([
+        json.dumps({"method": "item/agentMessage/delta", "params": {"delta": "x"}}) + "\n",
+        "5\n",
+        json.dumps({"id": 7, "result": {"ok": True}}) + "\n",
+    ])
+    client._pending[7] = (done, box)
+
+    def locked(_method, _params):
+        raise RuntimeError("database is locked")
+
+    monkeypatch.setattr(client, "_notification", locked)
+    client._read()
+
+    assert done.is_set()
+    assert box.get("result") == {"ok": True}
+    assert "error" not in box
+
+
+def test_a_live_app_server_whose_reader_ended_is_replaced(monkeypatch):
+    def broken_stdout():
+        yield json.dumps({"method": "noop", "params": {}}) + "\n"
+        raise ValueError("stdout decode failed")
+
+    client = _reader_client([])
+    client.proc.stdout = broken_stdout()
+    client.auth_fingerprint = codex_app_server._auth_fingerprint()
+    client.refresh_requested = False
+    monkeypatch.setattr(client, "_notification", lambda *_a: None)
+    client._read()
+    assert client.proc.poll() is None, "the process itself is still running"
+
+    created = []
+
+    class FakeClient:
+        def __init__(self, agent_id, session, stream=None):
+            self.proc = _FakeProc()
+            created.append(self)
+
+    monkeypatch.setattr(codex_app_server, "_Client", FakeClient)
+    codex_app_server._CLIENTS.clear()
+    codex_app_server._CLIENTS[codex_app_server._SHARED_KEY] = client
+    try:
+        fresh = codex_app_server._client("agent-reader", "reader")
+        assert created == [fresh]
+        assert fresh is not client
+        assert client.proc.signals, "the orphaned process is stopped"
+    finally:
+        codex_app_server._CLIENTS.clear()
+
+
+def _client_with_turn(agent_id="agent-turn"):
+    from unittest.mock import Mock
+
+    client = _reader_client([], agent_id=agent_id)
+    handle = codex_app_server.AppTurnHandle(client, agent_id)
+    active = codex_app_server._ActiveTurn(
+        turn_id="turn-1", thread_id="thread-1", agent_id=agent_id,
+        session="turn", trace_id="trace-1",
+        state=_TurnState(live_backend_session_id="thread-1"), handle=handle,
+        on_result=Mock(), on_error=Mock(), stream=None,
+        enqueue=lambda **_kwargs: 0)
+    client.active = active
+    client._actives = {agent_id: active}
+    return client, active
+
+
+def test_a_failed_final_flush_still_settles_the_turn(monkeypatch):
+    # The final live-text flush hits a locked database: the turn must still
+    # end with its outcome while the shared reader keeps running.
+    from unittest.mock import Mock
+
+    client, active = _client_with_turn()
+    monkeypatch.setattr(client, "_callback", lambda callback, value: callback(value))
+    monkeypatch.setattr(by_id("codex"), "update_live_text",
+                        Mock(side_effect=RuntimeError("database is locked")))
+    seen = []
+
+    def lines():
+        yield json.dumps({"method": "turn/completed", "params": {
+            "threadId": "thread-1",
+            "turn": {"id": "turn-1", "status": "completed"}}}) + "\n"
+        # Checked before EOF, whose _fail_all would hide a stranded turn.
+        seen.append((active.handle.is_alive(), active.on_result.call_count))
+        yield ""
+
+    client.proc.stdout = lines()
+    client._read()
+
+    assert seen == [(False, 1)]
+    active.on_error.assert_not_called()
+
+
+def test_retiring_a_dead_reader_client_sends_no_request(monkeypatch):
+    # Nothing reads the old process, so any request would wait out its
+    # timeout while the pool lock is held.
+    client, active = _client_with_turn("agent-retire")
+    client.reader_dead = True
+    client.auth_fingerprint = codex_app_server._auth_fingerprint()
+    client.refresh_requested = False
+    client.proc.stdin = None
+    requests = []
+    monkeypatch.setattr(client, "request",
+                        lambda method, *_a, **_k: requests.append(method) or {})
+    monkeypatch.setattr(client, "_callback", lambda callback, value: callback(value))
+
+    class FakeClient:
+        def __init__(self, agent_id, session, stream=None):
+            self.proc = _FakeProc()
+
+    monkeypatch.setattr(codex_app_server, "_Client", FakeClient)
+    codex_app_server._CLIENTS.clear()
+    codex_app_server._CLIENTS[codex_app_server._SHARED_KEY] = client
+    try:
+        fresh = codex_app_server._client("agent-retire", "retire")
+        assert isinstance(fresh, FakeClient)
+        assert requests == []
+        assert client.proc.signals, "the old process is stopped"
+        assert not active.handle.is_alive()
+        active.on_error.assert_called_once()
+    finally:
+        codex_app_server._CLIENTS.clear()
