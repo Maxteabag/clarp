@@ -1,0 +1,31 @@
+# Tests skipped on local runs during the refactor program (REFACTOR.md, PT-09).
+# Only environmental or load-flaky tests belong here, never a real failure. Each
+# was confirmed by running it alone. CI (CI=true) still runs all of them, and
+# CLARP_RUN_QUARANTINED=1 runs them locally. The merge captain owns this list;
+# it only shrinks.
+#
+# <node id>  # env|load: why
+
+# env: the CLI guard blocks node on this host
+tests/contract/test_reference_client.py::test_reference_client_full_turn  # env: guard blocks node
+tests/unit/test_viz_world.py::test_source_modules_are_published_without_an_artistic_vocabulary  # env: guard blocks node
+tests/unit/test_viz_world.py::test_bad_source_and_escaping_paths_cannot_replace_a_program  # env: guard blocks node
+tests/unit/test_viz_world.py::test_evolution_extends_the_current_source_and_preserves_world_identity  # env: guard blocks node
+tests/unit/test_viz_world.py::test_author_view_switch_preserves_previous_visual_software  # env: guard blocks node
+tests/unit/test_viz_world.py::test_unrequested_redesign_cannot_change_the_live_library  # env: guard blocks node
+
+# env: a fresh worktree has no node_modules and the npm ci fallback is blocked
+tests/integration/test_versioned_installer.py::test_installer_leaves_pre_clarp_paths_untouched  # env: no node_modules, npm ci blocked
+tests/integration/test_versioned_installer.py::test_installer_creates_versioned_release_and_compatibility_links  # env: no node_modules, npm ci blocked
+tests/integration/test_versioned_installer.py::test_unit_execstart_points_at_the_installed_share_dir  # env: no node_modules, npm ci blocked
+tests/integration/test_versioned_installer.py::test_macos_installer_writes_and_bootstraps_launch_agent  # env: no node_modules, npm ci blocked
+
+# env: runs the user's real shell rc, which execs wezterm
+tests/integration/test_server_di.py::test_server_home_terminal_runs_shell_in_home_without_resuming_an_agent  # env: shell rc execs wezterm
+
+# load: timing-sensitive under xdist on a busy host; pass when run alone
+tests/integration/test_task_goal_recovery.py::test_detached_job_wakes_its_owner_through_every_failure[finishes]  # load
+tests/unit/test_runtime_bridge.py::test_runtime_client_waits_out_a_full_listener_backlog  # load
+tests/unit/test_turn_dispatch.py::test_queue_during_claim_to_spawn_window_stays_serial  # load
+tests/unit/test_turn_dispatch.py::test_idle_queue_request_retry_does_not_duplicate_started_turn  # load
+tests/unit/test_writer_lock_holds.py::test_slow_import_never_blocks_a_short_writer  # load
