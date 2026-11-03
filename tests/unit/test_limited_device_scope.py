@@ -70,3 +70,18 @@ def test_a_full_device_keeps_every_one_of_these(monkeypatch):
     patch._handle_schedule_patch = lambda *_a: patch.reached.append("patch")
     patch.do_PATCH()
     assert handler.reached == ["terminal"] and patch.reached == ["patch"]
+
+
+@pytest.mark.parametrize("method, path", [
+    ("GET", "/terminal"),        # no session: unmatched, stays 404
+    ("GET", "/dirsX"),           # not /dirs: unmatched, stays 404
+    ("PATCH", "/nothing-here"),  # unmatched PATCH stays 404
+])
+def test_unmatched_paths_answer_a_limited_device_as_before(method, path):
+    """The lead's rule for HTTP-01/02/03: only the finding's routes change;
+    an unmatched path keeps its 404 for a limited device."""
+    handler = _handler(path)
+    sent = []
+    handler._send = lambda status, *_a, **_k: sent.append(status)
+    getattr(handler, f"do_{method}")()
+    assert handler.denied == [] and sent == [404]
