@@ -109,10 +109,12 @@ the hot spots; every high finding fixed or explicitly accepted.
 | Phase | Content | Exit |
 |---|---|---|
 | F0 (today) | AUT-01 (Stop pauses goals and always records the stop), RTO-01 (voice claim released on early Oracle failure), BACKENDS-02 (one bad Codex message no longer kills the shared reader) | released in windows |
-| 1 (days 1–3) | this brief; flakes quarantined; parked-branch manifest; route goldens; schema golden; migration rehearsal; lifecycle kit contract; harness S0; each slice's characterization tests | **Go/no-go 1** (Peter) on the harness proof |
-| 2 | S3 route seam then moves; S5 read model; S1 layering (move-only); S2 guards; F1 fixes with replay evidence; then S4 turn engine and S6 backends after canary ×3 | **Go/no-go 2** (Peter) |
+| 1 (days 1–3) | this brief; flakes quarantined; parked-branch manifest; route goldens; schema golden; migration rehearsal; lifecycle kit contract; harness S0; each slice's characterization tests | **Go/no-go 1** (lead, on the harness proof) |
+| 2 | S3 route seam then moves; S5 read model; S1 layering (move-only); S2 guards; F1 fixes with replay evidence; then S4 turn engine and S6 backends after canary ×3 | **Go/no-go 2** (lead, on the Phase 2 evidence) |
 | 3 | deep work: lifecycle conversions, incremental transcript import, locks out of I/O, database behaviour (P) | lead's done check |
 | 4 | close-out: archive agents, remove worktrees, update ARCHITECTURE.md, delete this file | — |
+
+**Checkpoints (Peter, 3 Nov 11:3x):** "I dont want to approve for next stages. I just want a finshed refactored server". Both go/no-go checkpoints are the lead's decisions on the same evidence; no agent waits for Peter. Every gate in section 5 still applies.
 
 ## 5. Gates
 
@@ -123,7 +125,7 @@ the hot spots; every high finding fixed or explicitly accepted.
   except the quarantined tests (read the result, not a wrapper's exit code);
   move-only commits pass the AST-identity check once it exists; the layer test
   once it exists.
-- **G2 harness** (from go/no-go 1): replay of head against base: zero unexplained
+- **G2 harness** (from the lead's go/no-go 1): replay of head against base: zero unexplained
   differences.
 - **G3 reviewer:** the area reviewer's first line `SOURCE YES <full sha>` on the
   exact commit. Reviewer A: turn engine, runtime boundary, agents and identity,
