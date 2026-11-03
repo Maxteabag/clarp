@@ -79,7 +79,8 @@ def test_codes_from_the_server_source_do_print():
 
 
 def test_order_swap_removed_field_header_and_envelope_are_differences():
-    events = [_frame({'type': 'agent-state', 'kind': 'done'}), _frame({'type': 'agent-activity', 'state': 'idle'})]
+    events = [_frame({'type': 'agent-state', 'kind': 'done', 'status_text': ''}),
+              _frame({'type': 'agent-activity', 'state': 'idle'})]
     # One producer (the state watcher) emits both: one lane, so a swap is a sequence difference.
     assert {d['kind'] for d in _report(_capture(sse=events), _capture(sse=events[::-1])).items} == {
         'sequence-insert', 'sequence-delete'}
