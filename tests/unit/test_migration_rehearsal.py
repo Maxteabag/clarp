@@ -87,6 +87,51 @@ def test_profile_rows_come_from_the_rowid_span_without_counting(tmp_path, monkey
     # ids 11..100 span 90 rows; the newest five (96..100) average 2.2 + 2 bytes.
     assert data["tables"]["t"] == [90, 4]
     assert statements and not [s for s in statements if "count(" in s.lower()]
+    con = real_connect(source)
+    plans = [r[3] for sql in statements if sql.lstrip().upper().startswith("SELECT") and "LIMIT" not in sql.upper()
+             and '"t"' in sql for r in con.execute("EXPLAIN QUERY PLAN " + sql)]
+    con.close()
+    assert plans and not [p for p in plans if p.upper().startswith("SCAN")], plans
+
+
+def test_without_rowid_floor_is_fetched_not_counted(tmp_path, monkeypatch):
+    source = tmp_path / "source.sqlite"
+    con = sqlite3.connect(source)
+    con.executescript("CREATE TABLE keyed (k TEXT PRIMARY KEY, v TEXT) WITHOUT ROWID;"
+                      "INSERT INTO keyed VALUES ('a', 'xyz'), ('b', 'xyz'), ('c', 'xyz');")
+    con.close()
+    statements = []
+    real_connect = sqlite3.connect
+    monkeypatch.setattr(sqlite3, "connect", lambda *a, **k: _traced(real_connect(*a, **k), statements))
+
+    data = rehearsal.write_profile(source, sample=2)
+
+    assert data["tables"]["keyed"] == [2, 4]
+    assert not [s for s in statements if "count(" in s.lower()]
+
+
+def _traced(connection, statements):
+    connection.set_trace_callback(statements.append)
+    return connection
+
+
+def test_profile_output_never_replaces_a_database_or_other_file(tmp_path):
+    source = tmp_path / "source.sqlite"
+    con = sqlite3.connect(source)
+    con.executescript("CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT); INSERT INTO t VALUES (1, 'x');")
+    con.close()
+    before = source.read_bytes()
+    with pytest.raises(SystemExit, match="refusing to overwrite"):
+        rehearsal.main(["--write-profile", str(source), "--from-db", str(source)])
+    assert source.read_bytes() == before
+    other = tmp_path / "notes.json"
+    other.write_text('{"kind": "something-else"}')
+    with pytest.raises(SystemExit, match="refusing to overwrite"):
+        rehearsal.main(["--write-profile", str(other), "--from-db", str(source)])
+    profile = tmp_path / "profile.json"
+    assert rehearsal.main(["--write-profile", str(profile), "--from-db", str(source)]) == 0
+    assert rehearsal.main(["--write-profile", str(profile), "--from-db", str(source)]) == 0
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["notes.json", "profile.json", "source.sqlite"]
 
 
 def rehearsal_head_version() -> int:

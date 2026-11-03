@@ -245,11 +245,14 @@ def write_profile(source: pathlib.Path, sample: int = 2_000) -> dict:
             columns = [r[1] for r in con.execute(f'PRAGMA table_info("{table}")')]
             size = " + ".join(f'coalesce(length("{c}"), 0)' for c in columns) or "0"
             if re.search(r"WITHOUT\s+ROWID", sql, re.I):
-                rows, avg = con.execute(
-                    f'SELECT count(*), avg(s) FROM (SELECT {size} AS s FROM "{table}" LIMIT ?)', (sample,)).fetchone()
+                # Sizes are summed here, not counted in SQL: the floor is len() of a bounded fetch.
+                sizes = [r[0] for r in con.execute(f'SELECT {size} FROM "{table}" LIMIT ?', (sample,))]
+                rows, avg = len(sizes), (sum(sizes) / len(sizes) if sizes else 0)
                 methods[table] = "without_rowid_sample_floor"
             else:
-                low, high = con.execute(f'SELECT min(rowid), max(rowid) FROM "{table}"').fetchone()
+                # Two statements: SQLite seeks min() or max() alone, but scans for both together.
+                low = con.execute(f'SELECT min(rowid) FROM "{table}"').fetchone()[0]
+                high = con.execute(f'SELECT max(rowid) FROM "{table}"').fetchone()[0]
                 rows = 0 if high is None else high - low + 1
                 avg = con.execute(
                     f'SELECT avg(s) FROM (SELECT {size} AS s FROM "{table}" ORDER BY rowid DESC LIMIT ?)',
@@ -261,6 +264,22 @@ def write_profile(source: pathlib.Path, sample: int = 2_000) -> dict:
         con.close()
     return {"kind": "clarp-state-profile", "user_version": version, "sample_rows": sample,
             "taken_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "row_methods": methods, "tables": tables}
+
+
+def save_profile(path: pathlib.Path, profile: dict) -> None:
+    """Write a profile, never over a file that is not already a profile (a
+    database given by mistake, the source itself): write beside it, then rename."""
+    path = path.expanduser()
+    if path.exists():
+        try:
+            existing = json.loads(path.read_text())
+        except (UnicodeDecodeError, ValueError):
+            existing = None
+        if not isinstance(existing, dict) or existing.get("kind") != "clarp-state-profile":
+            raise SystemExit(f"refusing to overwrite {path}: it is not a clarp-state-profile")
+    partial = path.with_name(path.name + ".partial")
+    partial.write_text(json.dumps(profile, indent=1, sort_keys=True))
+    partial.replace(path)
 
 
 def load_profile(path: pathlib.Path) -> dict[str, tuple[int, int]]:
@@ -330,7 +349,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.write_profile:
         if not args.from_db:
             parser.error("--write-profile needs --from-db")
-        args.write_profile.write_text(json.dumps(write_profile(args.from_db.expanduser()), indent=1, sort_keys=True))
+        save_profile(args.write_profile, write_profile(args.from_db.expanduser()))
         return 0
     profile = load_profile(args.profile) if args.profile else PROFILE
     base = args.base or _git("merge-base", "HEAD", "origin/main")
