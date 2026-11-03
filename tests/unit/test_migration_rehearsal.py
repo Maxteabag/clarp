@@ -134,6 +134,73 @@ def test_profile_output_never_replaces_a_database_or_other_file(tmp_path):
     assert sorted(p.name for p in tmp_path.iterdir()) == ["notes.json", "profile.json", "source.sqlite"]
 
 
+def _tiny_db(path):
+    con = sqlite3.connect(path)
+    con.executescript("CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT); INSERT INTO t VALUES (1, 'x');")
+    con.close()
+    return path.read_bytes()
+
+
+@pytest.mark.parametrize("name", ["profile.json.partial", ".profile.json.partial"])
+def test_staging_never_collides_with_the_source(tmp_path, name):
+    source = tmp_path / name
+    before = _tiny_db(source)
+    target = tmp_path / "profile.json"
+    assert rehearsal.main(["--write-profile", str(target), "--from-db", str(source)]) == 0
+    assert source.read_bytes() == before
+    assert json.loads(target.read_text())["kind"] == "clarp-state-profile"
+    assert sorted(p.name for p in tmp_path.iterdir()) == sorted([name, "profile.json"])
+
+
+@pytest.mark.parametrize("suffix", ["", "-wal", "-shm", "-journal"])
+def test_the_source_and_its_companions_are_refused_before_any_read(tmp_path, suffix, monkeypatch):
+    source = tmp_path / "state.sqlite"
+    before = _tiny_db(source)
+    monkeypatch.setattr(rehearsal, "write_profile", lambda *a, **k: pytest.fail("profiled before refusing"))
+    with pytest.raises(SystemExit, match="it is the source database"):
+        rehearsal.main(["--write-profile", str(tmp_path / ("state.sqlite" + suffix)), "--from-db", str(source)])
+    assert source.read_bytes() == before
+
+
+def test_a_hard_link_to_the_source_is_refused(tmp_path):
+    source = tmp_path / "state.sqlite"
+    before = _tiny_db(source)
+    alias = tmp_path / "alias.json"
+    os.link(source, alias)
+    with pytest.raises(SystemExit, match="refusing to overwrite"):
+        rehearsal.main(["--write-profile", str(alias), "--from-db", str(source)])
+    assert source.read_bytes() == before
+
+
+def test_a_large_target_is_refused_from_its_size_without_reading_it(tmp_path, monkeypatch):
+    target = tmp_path / "big.json"
+    target.write_text('{"kind": "clarp-state-profile"}')
+    real_stat = pathlib.Path.stat
+
+    def large(path, *args, **kwargs):
+        result = real_stat(path, *args, **kwargs)
+        if path == target:
+            fields = list(result)
+            fields[6] = 4 * 1024**3
+            return os.stat_result(fields)
+        return result
+    monkeypatch.setattr(pathlib.Path, "stat", large)
+    monkeypatch.setattr(pathlib.Path, "open", lambda *a, **k: pytest.fail("read a large target"))
+    monkeypatch.setattr(pathlib.Path, "read_text", lambda *a, **k: pytest.fail("read a large target"))
+    with pytest.raises(SystemExit, match="not a clarp-state-profile"):
+        rehearsal.save_profile(target, {"kind": "clarp-state-profile", "tables": {}})
+
+
+def test_a_symlink_target_is_refused(tmp_path):
+    source = tmp_path / "state.sqlite"
+    before = _tiny_db(source)
+    link = tmp_path / "profile.json"
+    link.symlink_to(source)
+    with pytest.raises(SystemExit, match="refusing to overwrite"):
+        rehearsal.main(["--write-profile", str(link), "--from-db", str(tmp_path / "other.sqlite")])
+    assert source.read_bytes() == before
+
+
 def rehearsal_head_version() -> int:
     from lib import db
     return db._SCHEMA_VERSION
