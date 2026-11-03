@@ -247,3 +247,17 @@ def test_gemini_vertex_backend_posts_to_the_global_vertex_endpoint(monkeypatch, 
         "https://aiplatform.googleapis.com/v1/publishers/google/models/"
         "gemini-3.8-flash-tts:streamGenerateContent?alt=sse",
         "vk", {"voiceConfig": {"voice": "voice_abc-123"}})]
+
+
+def test_raw_pcm_without_a_usable_cartesia_falls_back_as_chunked_file(env, providers, monkeypatch):
+    """VP-02: raw-pcm is Cartesia's live stream. With Cartesia routed but no
+    key, the clip used to fail with no voice at all; it is now delivered as
+    chunked-file, which reaches the configured fallback."""
+    from lib import config
+    from lib.clip_delivery.raw_pcm import RawPcmDelivery
+    monkeypatch.setattr(config, "_CACHED", config.Config(
+        tts_provider="cartesia", tts_fallback="gemini", gemini_api_key="simulated",
+        gemini_voices={"Mike": "voice_mike"}))
+    row = _speak(env, "mike", "mike-1", delivery=RawPcmDelivery())
+    assert row["status"] == tts_queue.DONE
+    assert [c["provider"] for c in providers] == ["gemini"]
