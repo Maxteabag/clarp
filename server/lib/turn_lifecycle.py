@@ -329,13 +329,13 @@ class TurnStateMachine:
         if not force and not self.is_legal(from_state, event):
             self._refuse(agent_id, event, from_state, target)
             raise IllegalTransition(agent_id, event, from_state, target)
-        if (event == TurnEvent.SPAWN_STARTED and not force and from_state in TERMINAL
-                and self._turn_already_started(agent_id, (detail or {}).get("trace_id"))):
+        trace = str((detail or {}).get("trace_id") or "")
+        if (event == TurnEvent.SPAWN_STARTED and not force and ts is None and trace
+                and not conn().in_transaction):
             # A turn writes 'thinking' twice: the dispatcher's spawn and the
             # provider's own turn start. A Stop between them ended the turn;
-            # the late second write must not make the agent busy for good
-            # (TP-N1).
-            raise TransitionNotWritten(agent_id, event, "turn_already_ended")
+            # the late write must not make the agent busy for good (TP-N1).
+            return self._start_unless_stopped(agent_id, event, target, detail, trace)
         stamp = now_ms() if ts is None else int(ts)
         if event == TurnEvent.TEXT_STREAMED and self._same_phase(agent_id, target, detail):
             # A backend reports every delta; the state only changes when the
@@ -438,16 +438,61 @@ class TurnStateMachine:
             agent_id=agent_id, event=event, from_state=from_state, to_state=target,
             ts=stamp, detail=detail, state_id=int(cursor.lastrowid or 0))
 
-    @staticmethod
-    def _turn_already_started(agent_id: str, trace_id: Any) -> bool:
-        """Whether a recent 'thinking' row of this agent carries ``trace_id``."""
-        if not trace_id:
-            return False
-        return conn().execute(
-            """SELECT 1 FROM (SELECT kind, detail FROM state_log WHERE agent_id = ?
-                                ORDER BY state_id DESC LIMIT 50)
-                WHERE kind = 'thinking' AND json_extract(detail, '$.trace_id') = ?
-                LIMIT 1""", (agent_id, str(trace_id))).fetchone() is not None
+    def _start_unless_stopped(self, agent_id: str, event: str, target: str,
+                              detail: dict[str, Any] | None, trace: str) -> Transition:
+        """Write a turn's start unless that turn was stopped, in ONE write
+        transaction: a Stop cannot land between the check and the write.
+        Evidence is durable and per turn: an 'interrupted' or 'stopped' row
+        since the turn started (its turns row, else its first 'thinking' row).
+        A reconciler's 'idle' is an observation, not a Stop, so a running
+        turn's start still lands after one."""
+        database = conn()
+        with _critical_write():
+            database.execute("BEGIN IMMEDIATE")
+            try:
+                from_state = self.current_kind(agent_id)
+                if not self.is_legal(from_state, event):
+                    database.execute("COMMIT")
+                    self._refuse(agent_id, event, from_state, target)
+                    raise IllegalTransition(agent_id, event, from_state, target)
+                started = database.execute(
+                    """SELECT started_at FROM turns WHERE agent_id = ? AND trace_id = ?
+                        ORDER BY started_at DESC LIMIT 1""", (agent_id, trace)).fetchone()
+                since = started["started_at"] if started is not None else None
+                if since is None:
+                    first = database.execute(
+                        """SELECT MIN(ts) AS ts FROM state_log WHERE agent_id = ? AND kind = 'thinking'
+                              AND json_extract(detail, '$.trace_id') = ?""",
+                        (agent_id, trace)).fetchone()
+                    since = first["ts"] if first is not None else None
+                stopped = since is not None and database.execute(
+                    """SELECT 1 FROM state_log WHERE agent_id = ? AND ts >= ?
+                          AND kind IN ('interrupted', 'stopped') LIMIT 1""",
+                    (agent_id, since)).fetchone() is not None
+                if stopped:
+                    # Nothing of ours was written; a Stop that landed meanwhile stays.
+                    database.execute("COMMIT")
+                    raise TransitionNotWritten(agent_id, event, "turn_stopped")
+                stamp = now_ms()
+                detail = _detail_with_origin(agent_id, target, detail, stamp)
+                from . import agents as agents_db
+                cursor = database.execute(
+                    """INSERT INTO state_log (agent_id, runtime_id, ts, kind, detail)
+                       VALUES (?, ?, ?, ?, ?)""",
+                    (agent_id, agents_db.current_runtime_id(agent_id), stamp, target,
+                     json.dumps(detail) if detail else None))
+                _settle_turn(agent_id, event, target, detail, stamp)
+                database.execute("COMMIT")
+            except BaseException:
+                if database.in_transaction:
+                    database.execute("ROLLBACK")
+                raise
+        from . import live_hub
+        live_hub.observe_transition(agent_id, event, target,
+                                    {**(detail or {}), "_state_id": int(cursor.lastrowid or 0)})
+        return Transition(
+            agent_id=agent_id, event=event, from_state=from_state, to_state=target,
+            ts=stamp, detail=detail, state_id=int(cursor.lastrowid or 0))
 
     def record(self, agent_id: str, kind: str,
                detail: dict[str, Any] | None = None) -> Transition:
