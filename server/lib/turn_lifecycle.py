@@ -380,7 +380,7 @@ class TurnStateMachine:
                     return self._write_terminal(
                         agent_id, event, target, detail, runtime_id, stamp,
                         recheck=fence if len(attempts) > 1 else None, force=force,
-                        ordinary=ts is None)
+                        own_since=fence if ts is None else None)
                 cursor, trace, stamp = db.retry_locked(write)
                 _after_settle(agent_id, event, target, trace)
             else:
@@ -401,7 +401,7 @@ class TurnStateMachine:
     def _write_terminal(self, agent_id: str, event: str, target: str,
                         detail: dict[str, Any] | None, runtime_id, stamp: int, *,
                         recheck: int | None = None, force: bool = False,
-                        ordinary: bool = False):
+                        own_since: int | None = None):
         """A terminal row and its turn's settlement in one write transaction:
         the settlement attributes a Stop to its turn (the start guard reads it),
         so a row without it would be a Stop of unknown turn (TP-N1b). A failure
@@ -414,13 +414,18 @@ class TurnStateMachine:
         try:
             if recheck is not None:
                 self._recheck_terminal(agent_id, event, detail, since=recheck, force=force)
-            if ordinary:
-                # Under the writer lock: the row sorts after every row already
-                # written for the agent (its own turn's activity that committed
-                # while this write waited), and a retry is stamped when it lands.
-                # A historical ts (not ordinary) is kept as given.
+            if own_since is not None:
+                # Under the writer lock: the row sorts after its OWN turn's rows
+                # written since the write began (activity that committed while it
+                # waited), never over another's: a Stop or successor that commits
+                # first stays the newest row. A retry has passed the fence, so no
+                # foreign row exists since it and it is stamped when it lands. A
+                # historical ts (own_since None) is kept as given.
+                trace = str((detail or {}).get("trace_id") or "")
                 newest = database.execute(
-                    "SELECT MAX(ts) FROM state_log WHERE agent_id = ?", (agent_id,)).fetchone()[0]
+                    """SELECT MAX(ts) FROM state_log WHERE agent_id = ? AND state_id > ?
+                          AND ? <> '' AND COALESCE(json_extract(detail, '$.trace_id'), '') = ?""",
+                    (agent_id, own_since, trace, trace)).fetchone()[0]
                 stamp = max(stamp, int(newest or 0), now_ms() if recheck is not None else 0)
             cursor = database.execute(
                 """INSERT INTO state_log (agent_id, runtime_id, ts, kind, detail)
