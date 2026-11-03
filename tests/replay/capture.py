@@ -182,7 +182,8 @@ class SSE:
                         has_id = True
                     elif field == 'data':
                         data.append(value)
-            self.ended = True
+            if not self._stop.is_set():
+                self.ended = True
         except Exception as exc:  # noqa: BLE001 - recorded as a capture error unless we closed it
             if not self._stop.is_set():
                 self.errors.append(f'stream error {type(exc).__name__}')
@@ -362,7 +363,7 @@ def capture(build: Path, scenario: dict, scratch: Path, python: str = sys.execut
         files = list_files(root)
     health = {'errors': sse.errors if sse else ['not connected'], 'ended_early': bool(sse and sse.ended)}
     if error is None and (health['errors'] or health['ended_early']):
-        error = 'SSE stream unhealthy'
+        error = 'SSE stream unhealthy: ' + ', '.join(health['errors'] + (['ended early'] if health['ended_early'] else []))
     timings['done'] = round(time.monotonic() - started, 2)
     return {
         'timings': timings,
