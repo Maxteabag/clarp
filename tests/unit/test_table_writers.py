@@ -41,7 +41,10 @@ ALLOWED = {
     ("message_clock", "lib/db_migrations.py"): _MIGRATION,
     ("teams", "lib/db_migrations.py"): _MIGRATION,
     ("janitor_trigger_definitions", "lib/db_schema.py"): _MIGRATION,
-    ("janitor_trigger_definitions", "lib/audio_bookkeeper.py"): _MIGRATION + " (its SCHEMA seeds the audio trigger)",
+    ("janitor_trigger_definitions", "lib/persistence/schema_parts/audio_bookkeeper.py"):
+        _MIGRATION + " (the audio_bookkeeper schema seeds the audio trigger)",
+    ("audio_bookkeeping_events", "lib/persistence/schema_parts/audio_bookkeeper.py"):
+        _MIGRATION + " (the audio_bookkeeper schema's trigger; S1 moved it out of lib/audio_bookkeeper.py)",
     # Retention sweeps: maintenance.py deletes expired rows from many tables.
     ("background_job_events", "lib/maintenance.py"): "retention sweep",
     ("state_log", "lib/maintenance.py"): "retention sweep",
