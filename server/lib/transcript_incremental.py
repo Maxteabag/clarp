@@ -739,6 +739,88 @@ def _summary_consistent(database, agent_id: str, trace_id: str) -> bool:
         and holders[0]["turn_json"] == summary
 
 
+def _witness_state(database, agent_id: str, backend_session_id: str) -> dict[str, Any]:
+    """What other writers could change under an import: the heads of the
+    agent's other conversations and fingerprints of its turns and of this
+    conversation's agy authority rows."""
+    heads = database.execute(
+        """SELECT COALESCE(MAX(revision), 0), COALESCE(MAX(replace_revision), 0)
+             FROM conversation_heads WHERE agent_id = ? AND backend_session_id != ?""",
+        (agent_id, backend_session_id)).fetchone()
+    turns = hashlib.blake2b(digest_size=16)
+    for row in database.execute(
+            """SELECT turn_id, trace_id, started_at, settled_at, outcome FROM turns
+                WHERE agent_id = ? ORDER BY turn_id""", (agent_id,)):
+        turns.update(json.dumps(list(row), default=str).encode())
+    authority = hashlib.blake2b(digest_size=16)
+    for row in database.execute(
+            """SELECT trace_id, assistant_start_ordinal, assistant_end_ordinal,
+                      terminal_status, authoritative_message_id, updated_at
+                 FROM agy_turn_authority WHERE agent_id = ? AND backend_session_id = ?
+                ORDER BY trace_id""", (agent_id, backend_session_id)):
+        authority.update(json.dumps(list(row), default=str).encode())
+    return {"other_heads": [int(heads[0]), int(heads[1])],
+            "turns": turns.hexdigest(), "authority": authority.hexdigest()}
+
+
+def _witness(database, agent_id: str, backend_session_id: str, source_file: str,
+             floor: int, before: dict[str, Any] | None) -> dict[str, Any]:
+    """Whether anything besides this import wrote what it reads between the
+    plan's snapshot and the comparison. Diagnostic only: it never changes a
+    verdict; it lets a divergence be told from concurrency noise.
+
+    The import writes this conversation's transcript rows and, through
+    stamp_turn, every row (in any conversation) of the turns it may stamp: the
+    turns of the rows it changed and its newest turn, which it re-stamps on
+    every import. It also writes the tools of agy turns whose text the stream
+    owns onto their authoritative rows (_attach_authority_tools), so this
+    conversation's agy authority turns and rows count as its own too. Of the
+    agent's other rows changed since the floor (client,
+    live and final rows, and rows of other conversations), ``foreign_rows``
+    counts those outside those turns (another writer), ``ambiguous_rows``
+    those inside them (the stamp or another writer). Another conversation's
+    head moving counts only when rows the stamp may have written do not
+    account for it."""
+    after = _witness_state(database, agent_id, backend_session_id)
+    changed = database.execute(
+        """SELECT message_id, backend_session_id, source_file, trace_id FROM messages
+            WHERE agent_id = ? AND revision > ?""", (agent_id, floor)).fetchall()
+    own = [row for row in changed
+           if row["backend_session_id"] == backend_session_id
+           and row["source_file"] == source_file]
+    footprint = {row["trace_id"] for row in own if row["trace_id"]}
+    newest = database.execute(
+        """SELECT trace_id FROM messages
+            WHERE agent_id = ? AND backend_session_id = ? AND source_file = ?
+              AND trace_id IS NOT NULL ORDER BY seq DESC LIMIT 1""",
+        (agent_id, backend_session_id, source_file)).fetchone()
+    if newest is not None:
+        footprint.add(newest["trace_id"])
+    authority_ids: set[str] = set()
+    for row in database.execute(
+            """SELECT trace_id, authoritative_message_id FROM agy_turn_authority
+                WHERE agent_id = ? AND backend_session_id = ?""",
+            (agent_id, backend_session_id)):
+        footprint.add(row["trace_id"])
+        if row["authoritative_message_id"]:
+            authority_ids.add(row["authoritative_message_id"])
+    others = [row for row in changed if row not in own]
+    ambiguous = sum(1 for row in others
+                    if row["trace_id"] in footprint or row["message_id"] in authority_ids)
+    out = {"foreign_rows": len(others) - ambiguous, "ambiguous_rows": ambiguous}
+    if before is not None:
+        other_sessions = [row for row in others
+                          if row["backend_session_id"] != backend_session_id]
+        explained = bool(other_sessions) and all(
+            row["trace_id"] in footprint or row["message_id"] in authority_ids
+            for row in other_sessions)
+        out.update(other_heads_moved=after["other_heads"] != before["other_heads"]
+                   and not explained,
+                   turns_changed=after["turns"] != before["turns"],
+                   authority_changed=after["authority"] != before["authority"])
+    return out
+
+
 class _Shadow:
     """One shadow run beside a full import. Its own failures are logged and
     end the run; they never reach the authoritative import."""
@@ -826,6 +908,8 @@ class _Shadow:
                 f"SELECT {_RESTAMP_COLUMNS} FROM messages WHERE agent_id=? AND backend_session_id=?",
                 (self.agent_id, self.backend_session_id)).fetchall()}
             self.ids_before = set(self.rows_before)
+            self.witness_before = _witness_state(database, self.agent_id,
+                                                 self.backend_session_id)
             self.plan = message_writes.plan_transcript_tail(
                 agent_id=self.agent_id, backend_session_id=self.backend_session_id,
                 source_file=str(self.path), turns=tail, start_seq=old.boundary_seq,
@@ -919,6 +1003,9 @@ class _Shadow:
         if (self.ids_before - ids_after) != planned_deleted:
             mismatches.append("deleted_rows")
         self.detail["mismatches"] = mismatches
+        self.detail["witness"] = _witness(
+            database, self.agent_id, self.backend_session_id, str(self.path), floor,
+            getattr(self, "witness_before", None))
         if mismatches:
             self.detail["examples"] = sorted(unexplained)[:5]
         self.verdict = "diverge:" + ",".join(mismatches) if mismatches else "match"

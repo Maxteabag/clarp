@@ -368,3 +368,138 @@ def test_the_shadow_checks_a_turn_whose_summary_holder_is_in_another_session(
     assert corrupted, "the control did not reach the locked foreign summary stamp"
     assert not inc._summary_consistent(c, corpus.AGENT, "tr-1")
     assert "summary" in importer.verdicts[-1], importer.verdicts
+
+
+# ---- the concurrency witness (stage-1 prerequisite) --------------------------
+
+def _witness_run(tmp_path, importer, monkeypatch, *, plant: bool):
+    details = []
+    real_emit = eventlog.emit
+
+    def emit(source, event, **kw):
+        if event == "import_shadow":
+            details.append(kw["detail"])
+        return real_emit(source, event, **kw)
+    monkeypatch.setattr(eventlog, "emit", emit)
+    world.prepare(tmp_path / "state.sqlite", "claude")
+    world.seed("claude", importer)
+    transcript = corpus.transcript_path(tmp_path, "claude")
+    for step in ("grow", "partial"):
+        corpus.apply(transcript, "claude", step)
+        importer.ms += 1000
+        inc.import_transcript(backend="claude", path=transcript, agent_id=corpus.AGENT,
+                              backend_session_id=corpus.SESSION)
+    real = message_writes.stamp_turn
+    planted = []
+
+    def stamp_turn(database, agent_id, trace_id, next_revision):
+        out = real(database, agent_id, trace_id, next_revision)
+        if plant and not planted and isinstance(database, message_writes._ImportWriter) \
+                and database.locked:
+            # Another writer during the import: a client send, and a turn settling.
+            database.execute("""INSERT INTO messages(message_id, agent_id, backend_session_id,
+                                source_file, seq, role, timestamp, text, updated_at, revision)
+                                VALUES ('u-planted', ?, ?, 'client:planted', -50, 'user', ?,
+                                        'planted', 1, ?)""",
+                             (agent_id, corpus.SESSION, corpus.iso(9, 0), next_revision(database)))
+            database.execute("UPDATE turns SET outcome='failed' WHERE trace_id='tr-4'")
+            planted.append(True)
+        return out
+    monkeypatch.setattr(message_writes, "stamp_turn", stamp_turn)
+    corpus.apply(transcript, "claude", "complete")
+    importer.ms += 1000
+    inc.import_transcript(backend="claude", path=transcript, agent_id=corpus.AGENT,
+                          backend_session_id=corpus.SESSION)
+    assert planted == ([True] if plant else [])
+    return details[-1]
+
+
+def test_the_witness_shows_a_foreign_write_and_never_changes_the_verdict(
+        tmp_path, importer, monkeypatch):
+    quiet = _witness_run(tmp_path / "quiet", importer, monkeypatch, plant=False)
+    busy = _witness_run(tmp_path / "busy", importer, monkeypatch, plant=True)
+    assert busy["verdict"] == quiet["verdict"]
+    assert busy["mismatches"] == quiet["mismatches"]
+    assert quiet["witness"] == {"foreign_rows": 0, "ambiguous_rows": quiet["witness"]["ambiguous_rows"],
+                                "other_heads_moved": False, "turns_changed": False,
+                                "authority_changed": False}
+    assert busy["witness"]["foreign_rows"] == 1
+    assert busy["witness"]["turns_changed"] is True
+    assert busy["witness"]["other_heads_moved"] is False
+
+
+def test_the_import_restamping_a_holder_in_another_session_is_not_foreign(
+        tmp_path, importer, monkeypatch):
+    """Reviewer C's control: no other writer. A turn's outcome changes before
+    the run and its summary sits on a row of another session. The import
+    re-stamps it as its newest turn, which is its own write: ambiguous,
+    never foreign, and no foreign head movement."""
+    details = []
+    real_emit = eventlog.emit
+
+    def emit(source, event, **kw):
+        if event == "import_shadow":
+            details.append(kw["detail"])
+        return real_emit(source, event, **kw)
+    monkeypatch.setattr(eventlog, "emit", emit)
+    world.prepare(tmp_path / "state.sqlite", "claude")
+    world.seed("claude", importer)
+    path = corpus.transcript_path(tmp_path, "claude")
+    corpus.apply(path, "claude", "grow")
+    inc.import_transcript(backend="claude", path=path, agent_id=corpus.AGENT,
+                          backend_session_id=corpus.SESSION)
+    c = db.conn()
+    c.execute("""INSERT INTO messages(message_id, agent_id, backend_session_id, source_file,
+                 seq, role, timestamp, text, updated_at, revision, trace_id)
+                 VALUES ('foreign', ?, 'other-session', '/foreign', 100, 'assistant', ?,
+                         'synthetic foreign reply', 1, ?, 'tr-1')""",
+              (corpus.AGENT, corpus.iso(1, 6), message_writes._next_revision(c)))
+    message_writes.stamp_turn(c, corpus.AGENT, "tr-1", message_writes._next_revision)
+    c.commit()
+    for change in (None, "interrupted"):
+        if change:
+            c.execute("UPDATE turns SET outcome=? WHERE trace_id='tr-1'", (change,))
+            c.commit()           # every other change is done before the run
+        with path.open("ab") as f:
+            f.write(b"\n")
+        importer.ms += 1000
+        inc.import_transcript(backend="claude", path=path, agent_id=corpus.AGENT,
+                              backend_session_id=corpus.SESSION)
+    assert "interrupted" in c.execute(
+        "SELECT turn_json FROM messages WHERE message_id='foreign'").fetchone()[0]
+    witness = details[-1]["witness"]
+    assert details[-1]["verdict"] == "match"
+    assert (witness["foreign_rows"], witness["other_heads_moved"], witness["turns_changed"]) == \
+        (0, False, False), witness
+    assert witness["ambiguous_rows"] >= 1
+
+
+@pytest.mark.parametrize("backend", INCREMENTAL)
+def test_a_quiet_import_never_shows_a_foreign_writer(tmp_path, importer, monkeypatch, backend):
+    """No other writer: at every cut of the growing corpus the witness must
+    show nothing foreign. Reviewer C's agy control is the case that needs
+    the import's own agy authority tool writes counted as its own."""
+    details = []
+    real_emit = eventlog.emit
+
+    def emit(source, event, **kw):
+        if event == "import_shadow" and "witness" in kw["detail"]:
+            details.append(kw["detail"])
+        return real_emit(source, event, **kw)
+    monkeypatch.setattr(eventlog, "emit", emit)
+    world.prepare(tmp_path / "state.sqlite", backend)
+    world.seed(backend, importer)
+    path = corpus.transcript_path(tmp_path, backend)
+    data, cuts = corpus.jsonl_cuts(backend)
+    path.write_bytes(b"")
+    for cut in cuts:
+        with path.open("ab") as f:
+            f.write(data[f.tell():cut])
+        importer.ms += 1000
+        inc.import_transcript(backend=backend, path=path, agent_id=corpus.AGENT,
+                              backend_session_id=corpus.SESSION)
+    assert details, "no compared shadow run"
+    noisy = [(i, d["witness"]) for i, d in enumerate(details)
+             if d["witness"]["foreign_rows"] or d["witness"].get("other_heads_moved")
+             or d["witness"].get("turns_changed") or d["witness"].get("authority_changed")]
+    assert not noisy, noisy
