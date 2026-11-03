@@ -87,6 +87,10 @@ def serve_terminal(handler, session: str) -> None:
     agent = agents_db.get_by_session(session)
     if not agent:
         return _send_http_error(handler, 404, "no such agent")
+    if agent.get("is_janitor"):
+        # Inspection-only, as /send, /stop and /repair-slot treat it (HTTP-01b).
+        return _send_http_error(
+            handler, 403, "Janitors are inspection-only. Use their Pause or Configure controls.")
     backend = backends.by_id(agent.get("backend"))
     agent_id = agent["agent_id"]
     bsid = agents_db.live_backend_session(agent_id)
