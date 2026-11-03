@@ -81,6 +81,25 @@ DYNAMIC_SAMPLES = (
     "/past-sessions?scope=all", "/dirs?path=/",
     # fall-through
     "/unknown", "/devices/live-activity/x",
+    # Edge witnesses for the route-registry parity (review B, design finding 5):
+    # remainders with slashes, empty or doubled separators, encoded and double-
+    # encoded slashes, prefix boundaries, overlapping matchers, infix splits and
+    # a query that looks like a route.
+    "/terminal/a/b", "/terminal/", "/terminal//s1/", "/terminal/a%2Fb",
+    "/artifacts/a/b/html", "/artifacts//html", "/artifacts/a%2Fb/html",
+    "/artifacts/a%252Fb", "/artifacts/", "/artifacts/a1/events-config/events",
+    "/teams/t1/members/a1/b", "/teams//members/", "/teams/t1/members/",
+    "/agents/a%2F1", "/agents/a1/", "/agents//fork", "/agents/a1/fork/x",
+    "/decisions/d%2F1/resolve", "/decisions//dismiss",
+    "/turn-queue/resume/send", "/turn-queue//send", "/turn-queue/",
+    "/background-jobs/", "/background-jobs/a/b", "/schedules/", "/schedules/a/b",
+    "/stt/stream/x", "/static", "/static/", "/audio/", "/media/",
+    "/clips/1/a/b", "/clips//stream", "/clips/1/", "/clips/%31/stream",
+    "/janitorsx", "/janitors/", "/janitor-runs/", "/controller-actionsx",
+    "/controller-actions/", "/podcast-historyx", "/podcast-history/",
+    "/oracle-x", "/oracle/", "/server-terminal/", "/notification-avatars/",
+    "/persona-avatars/a/b", "/viz/owner-avatar/a%2Fb", "/media/m1/x",
+    "/send?path=/teams/t1/members", "//send", "/send/",
 )
 
 # Pre-existing bugs from the code review (http-shell.md at 09ee9279). The
