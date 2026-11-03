@@ -3265,6 +3265,36 @@ def test_stop_records_its_actor_and_reason_and_still_pauses(running_server):
     assert turn_queue.get("queue-held") is not None
 
 
+def test_a_stop_whose_record_cannot_be_written_fails_visibly_and_releases_its_barrier(
+        running_server, monkeypatch):
+    """TP-N1b review: a Stop whose terminal write still fails after its bounded
+    retries is not reported as done. The barrier is released all the same, and
+    the user's next Stop records it."""
+    import sqlite3
+    from lib import agents as agents_db, turn_dispatch, turn_lifecycle
+    from lib.turn_lifecycle import TurnEvent
+    base, _ctx, _srv = running_server
+    agent = agents_db.get_by_session("claude")
+    turn_lifecycle.open_turn(agent_id=agent["agent_id"], source="pwa", trace_id="t-stop-lock")
+    turn_lifecycle.transition(agent["agent_id"], TurnEvent.SPAWN_STARTED,
+                              {"source": "pwa", "dispatch": "claude", "trace_id": "t-stop-lock"})
+
+    def locked(*_args, **_kwargs):
+        raise sqlite3.OperationalError("database is locked")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(turn_lifecycle, "_record_outcome", locked)
+        status, body = _post_status(base + "/stop", {"session": "claude"})
+
+    assert status == 503, body
+    assert turn_dispatch._SLOTS.get(agent["agent_id"]) != turn_dispatch._STOPPING_SENTINEL, (
+        "the Stop barrier was left held")
+    assert agents_db.latest_state(agent["agent_id"])["kind"] == "thinking"
+    status, _body = _post(base + "/stop", {"session": "claude"})
+    assert status == 200
+    assert agents_db.latest_state(agent["agent_id"])["kind"] == "interrupted"
+
+
 def test_stop_actor_comes_from_the_turn_identity_not_the_claim(running_server):
     import os
     from lib import agents as agents_db, provider_background_jobs as turns
