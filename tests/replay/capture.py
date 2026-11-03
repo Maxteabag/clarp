@@ -341,13 +341,23 @@ def run_cli(host: Host, step: dict) -> dict:
     """The build's own clarp-admin against the replay Host: the same state dirs as the
     Host, and its own config naming the Host's loopback port and token."""
     from host import STATE_DIRS
-    port = host.url.rsplit(':', 1)[1]
-    config = host.root / 'cli-config.toml'
+    port = int(host.url.rsplit(':', 1)[1])
+    # clarp-admin reads $CLARP_CONFIG_DIR/config.toml for the Host's address and
+    # token (and falls back to the default port without it): give it its own dir.
+    config_dir = host.root / 'cli-config'
+    config_dir.mkdir(exist_ok=True)
+    config = config_dir / 'config.toml'
     config.write_text((host.root / 'config.toml').read_text()
                       + f'\n[server]\nbind_addr = "127.0.0.1"\nport = {port}\nauth_token = "{TOKEN}"\n')
     env = child_env()
     env.update({key: str(host.root / suffix) for key, suffix in STATE_DIRS.items()})
+    env['CLARP_CONFIG_DIR'] = str(config_dir)
     env['CLAUDE_PWA_CONFIG'] = str(config)
+    # Refuse unless the file the CLI will read names this replay Host and nothing else.
+    import tomllib
+    server = tomllib.loads(config.read_text()).get('server', {})
+    if server.get('port') != port or server.get('bind_addr') != '127.0.0.1':
+        raise StepFailed('cli config does not name the replay Host')
     env['CLARP_HEARTBEATS_DISABLED'] = '1'
     try:
         done = subprocess.run([host.python, str(host.build / 'bin' / 'clarp-admin.py'), *step['args']],
