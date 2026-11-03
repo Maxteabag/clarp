@@ -592,11 +592,14 @@ def _record_adopted_heartbeat_scope(scope: dict, *, legacy: list[dict]) -> None:
     first record starts from what was adopted before records existed
     (``legacy``: the latch's fallback scopes, empty on a fresh Host)."""
     from . import settings_store
-    scopes = _decode(settings_store.get_text(_ADOPTED_HEARTBEAT_SCOPES, default="[]"), [])
-    if not scopes:
-        scopes = list(legacy)
+    stored = _decode(settings_store.get_text(_ADOPTED_HEARTBEAT_SCOPES, default="[]"), [])
+    scopes = list(stored) or list(legacy)
     if scope not in scopes:
-        settings_store.set_text(_ADOPTED_HEARTBEAT_SCOPES, _json([*scopes, scope]))
+        scopes.append(scope)
+    if scopes != stored:
+        # The seeded legacy list is stored even when this scope is already in
+        # it: it is derived from keepers that may be deleted later.
+        settings_store.set_text(_ADOPTED_HEARTBEAT_SCOPES, _json(scopes))
 
 
 def adopted_heartbeat_scopes() -> list[dict]:
