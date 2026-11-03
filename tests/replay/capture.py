@@ -29,6 +29,8 @@ import threading
 import time
 import urllib.error
 import urllib.parse
+
+import normalize
 import urllib.request
 
 HERE = Path(__file__).resolve().parent
@@ -417,10 +419,16 @@ def run_cli(host: Host, step: dict) -> dict:
     except subprocess.TimeoutExpired as exc:
         raise StepFailed('cli timed out') from exc
     def parsed(text):
-        try:
-            return {'<json>': json.loads(text)} if text.strip() else ''
-        except ValueError:
+        # CLI output is a frozen surface: JSON output keeps its layout (indent,
+        # separators), key order and final newline next to the parsed value
+        # (review s0-corpus-aa744001); anything else stays text.
+        if not text.strip():
             return text
+        body = text[:-1] if text.endswith('\n') else text
+        form = normalize.parse_json(body)
+        if form is None:
+            return text
+        return {**form, '<newline>': text.endswith('\n')}
     return {'step': step.get('name') or ' '.join(step['args'][:1]), 'exit': done.returncode,
             'stdout': parsed(done.stdout), 'stderr': done.stderr}
 

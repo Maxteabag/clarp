@@ -399,3 +399,19 @@ def test_the_replay_host_refuses_network_but_not_loopback():
         "except socket.gaierror: print('no-dns')\n") % str(here)
     out = subprocess.run([sys.executable, '-c', probe], capture_output=True, text=True, timeout=20).stdout.split()
     assert out[0] == 'refused' and out[2] == 'no-dns'
+
+
+def test_cli_json_output_form_remains_observable(tmp_path, monkeypatch):
+    # Reviewer B's control (review s0-corpus-aa744001): CLI stdout layout and key order are frozen.
+    import capture
+    from types import SimpleNamespace
+    (tmp_path / 'config.toml').write_text('[tts]\nenabled = false\n')
+    host = SimpleNamespace(root=tmp_path, build=tmp_path / 'build', python=sys.executable,
+                           url='http://127.0.0.1:17991')
+    outputs = iter(['{"a":1,"b":2}\n', '{\n  "b": 2,\n  "a": 1\n}\n', '{\n  "b": 2,\n  "a": 1\n}\n',
+                    '{\n  "b": 2,\n  "a": 1\n}'])
+    monkeypatch.setattr(capture.subprocess, 'run', lambda *a, **kw:
+                        SimpleNamespace(returncode=0, stdout=next(outputs), stderr=''))
+    first, second, third, fourth = (capture.run_cli(host, {'args': ['sessions']}) for _ in range(4))
+    assert first != second and second == third and third != fourth
+    assert second['stdout']['<form>'] == 'default-indent2'
