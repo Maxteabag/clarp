@@ -1197,3 +1197,27 @@ def test_a_dream_that_keeps_failing_ends_and_frees_the_next_night(tmp_path, monk
     assert dreaming.active_run_for_agent(aid) is None
     ended = dreaming.get_run(run["run_id"])
     assert ended["status"] != "active" and ended["last_error"]
+
+
+def test_a_run_past_its_deadline_is_harvested_only_once_its_backend_stops(tmp_path, monkeypatch):
+    """AUT-06 review: the deadline ends the run at once, but its worktree is
+    committed and removed only when the dream's backend is no longer using it."""
+    agent_id = agents_db.create_agent(persona="Late", voice_id="v", cwd=str(tmp_path), session="late")
+    agents_db.update_agent(agent_id, dreaming_enabled=True)
+    run = dreaming.create_dream_run(agents_db.get_by_agent_id(agent_id), local_date="2026-01-01",
+                                    timezone_name="UTC", timezone_source="synthetic")
+    clock = int(run["started_at"]) + dreaming.DREAM_RUN_DEADLINE_SEC * 1000 + 1
+    monkeypatch.setattr(dreaming.db, "now_ms", lambda: clock)
+    monkeypatch.setattr(dreaming, "_dream_worktree_path", lambda run_id: tmp_path)
+    harvested, handles = [], [object()]
+    monkeypatch.setattr(dreaming, "harvest_worktree", harvested.append)
+    monkeypatch.setattr(dreaming.backends, "active_handles", lambda *_: list(handles))
+    scheduler = dreaming.DreamingScheduler(send_dream=lambda *_: False)
+
+    scheduler._advance_run(run)
+
+    assert dreaming.get_run(run["run_id"])["status"] == "abandoned"
+    assert harvested == []
+    handles.clear()
+    scheduler.run_once()
+    assert harvested == [run["run_id"]]
