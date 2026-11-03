@@ -128,9 +128,10 @@ def test_a_heartbeat_pass_reads_the_keepers_once_however_many_agents(scoped_keep
                                        cwd=str(tmp_path), session=f"extra{n}", backend="codex")
         agents.record_state(agent_id, "done", {"source": "user"})
         agents.update_agent(agent_id, heartbeat_enabled=True)
+    from lib import janitor_builtins as builtins_module
     listed = []
-    real = janitors.list_janitors
-    monkeypatch.setattr(janitors, "list_janitors", lambda **kw: listed.append(1) or real(**kw))
+    real = builtins_module.eligible
+    monkeypatch.setattr(builtins_module, "eligible", lambda role: listed.append(role) or real(role))
     snapshots = []
     real_snapshot = heartbeat._gather_snapshot
     monkeypatch.setattr(heartbeat, "_gather_snapshot",

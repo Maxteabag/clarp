@@ -261,7 +261,7 @@ def pending_heartbeat_agents(*, now: float | None = None,
         return []
     due: list[dict] = []
     for agent in agents_db.list_agents():
-        if not heartbeat_enabled(agent) or (skip is not None and skip(agent)):
+        if (skip is not None and skip(agent)) or not heartbeat_enabled(agent):
             continue
         agent_id = agent["agent_id"]
         session = (agent.get("session") or "").strip()

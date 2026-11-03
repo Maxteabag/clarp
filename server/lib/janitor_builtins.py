@@ -128,7 +128,8 @@ def eligible(role: str) -> list[dict]:
     once and pass to ``select`` to resolve many targets (heartbeat pass)."""
     _role(role)
     selected = []
-    for config in janitors.list_janitors(include_runtime=False):
+    for agent_id in store.janitor_agent_ids(template_id=role, enabled_only=True):
+        config = janitors.get(agent_id, include_runtime=False)
         if config["template_id"] != role or not config["enabled"]:
             continue
         matching = [v for v in config["attachments"] if v["enabled"] and v["trigger_version"] == 1
