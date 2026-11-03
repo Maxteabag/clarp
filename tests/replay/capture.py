@@ -310,6 +310,10 @@ def run_step(host: Host, sse, step: dict, http: list, cli: list, variables: dict
         _poll('turn open', lambda: _turns_settled(host.root, step['message_id'], False))
     elif op == 'wait_provider_started':
         _poll('provider turn start', lambda: _provider_started(host.root, step['marker']))
+    elif op == 'wait_file':
+        # A provider-root file (written by a fake) contains the given text.
+        path = host.root / 'provider' / step['name']
+        _poll('provider file', lambda: path.is_file() and step['contains'] in path.read_text())
     elif op == 'provider_file':
         # Control files the fake provider reads (tests/qa/fake_codex.py), e.g. quota-mode.
         (host.root / 'provider' / step['name']).write_text(step['text'])
