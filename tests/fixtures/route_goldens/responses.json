@@ -116,7 +116,7 @@
   "GET /controller-actions/mappings": {"admin": {"body": {"error": "str"}, "status": 404, "type": "application/json"}},
   "GET /controller-actions/update": {"admin": {"body": {"error": "str"}, "status": 404, "type": "application/json"}},
   "GET /controller-narration": {"admin": {"body": "bytes", "status": 400, "type": "text/plain"}},
-  "GET /diagnostics/health": {"admin": {"body": {"checks": {"ffmpeg_ready": "bool", "stt_ready": "bool"}, "deployed_version": "str", "ready": "bool", "subsystems": {"sse": {"last_error": "null", "last_error_at": "null", "last_success_at": "num"}, "transcript_streamer": {"last_error": "null", "last_error_at": "null", "last_success_at": "num"}, "tts_worker": {"last_error": "null", "last_error_at": "null", "last_success_at": "num"}}, "tts_queue": {"in_flight": "num", "pending": "num"}}, "status": 200, "type": "application/json"}},
+  "GET /diagnostics/health": {"admin": {"body": {"checks": {"ffmpeg_ready": "bool", "stt_ready": "bool"}, "deployed_version": "str", "ready": "bool", "subsystems": {"<map>": [{"last_error": "str", "last_error_at": "num", "last_success_at": "num"}]}, "tts_queue": {"in_flight": "num", "pending": "num"}}, "status": 200, "type": "application/json"}},
   "GET /diagnostics/settings": {"admin": {"body": {"ok": "bool", "settings": {"categories": [], "enabled": "bool", "retention_hours": "num", "rollup_retention_days": "num"}}, "status": 200, "type": "application/json"}},
   "GET /dirs": {"admin": {"body": {"base": "str", "matches": ["str"]}, "status": 200, "type": "application/json"}},
   "GET /dirs?path=/": {"admin": {"body": {"base": "str", "matches": ["str"]}, "status": 200, "type": "application/json"}},
