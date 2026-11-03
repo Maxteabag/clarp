@@ -94,7 +94,11 @@ class AppTurnHandle:
         return not self._done.is_set()
 
     def terminate(self) -> None:
-        self.client.interrupt_active(self.agent_id)
+        # Only this handle's own turn: a late terminate (a retry that lost its
+        # slot during the handoff) must not reach the agent's next turn (TP-N1).
+        if self._done.is_set():
+            return
+        self.client.interrupt_active(self.agent_id, handle=self)
 
 
 class _Client:
@@ -612,9 +616,11 @@ class _Client:
         self.request("turn/steer", params)
         return True
 
-    def interrupt_active(self, agent_id: str = "") -> None:
+    def interrupt_active(self, agent_id: str = "", *, handle: "AppTurnHandle | None" = None) -> None:
+        """Interrupt the agent's active turn; with ``handle``, only if that turn
+        is the one the handle was returned for."""
         active = self._actives.get(agent_id) if agent_id else self.active
-        if active:
+        if active and (handle is None or active.handle is handle):
             self._pause_goal_for_stop(active)
             if not active.turn_id:
                 if len(getattr(self, "_actives", {})) <= 1:
