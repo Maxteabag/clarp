@@ -592,8 +592,15 @@ def keeper_ownership() -> Callable[[dict], bool]:
     The keepers and adopted scopes are read once; the returned test reads
     nothing, so a pass costs one read however many agents it covers."""
     from . import janitor_builtins, janitors
-    keepers = janitor_builtins.eligible("heartbeat-decider")
-    adopted = janitors.adopted_heartbeat_scopes()
+
+    def indexed(scope: dict) -> dict:
+        # The same scope with its id lists as sets: a pass tests every agent
+        # against every scope, so membership must not scan a list.
+        return {**scope, **{key: frozenset(scope[key]) for key in ("agent_ids", "exclude_agent_ids")
+                            if scope.get(key)}}
+    keepers = [{**config, "scope": indexed(config["scope"])}
+               for config in janitor_builtins.eligible("heartbeat-decider")]
+    adopted = [indexed(scope) for scope in janitors.adopted_heartbeat_scopes()]
 
     def owns(agent: dict) -> bool:
         return (janitor_builtins.select(keepers, agent) is not None
