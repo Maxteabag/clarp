@@ -191,6 +191,11 @@ SCENARIOS = [
         'steps': [
             _send('rachel', '[replay-tool] synthetic look around oscar', 'oscar'),
             {'op': 'wait_settled', 'message_id': 'u-oscar'},
+            # The tool-explanation worker settles each explanation on its own schedule
+            # (queued/running -> failed here, no provider): wait for it before the final
+            # reads, or they race it (rf-routes, 3 Nov: pending vs failed, one live frame).
+            {'op': 'wait_sql', 'sql': "SELECT (SELECT count(*) FROM tool_explanation_jobs) > 0 AND "
+                                      "(SELECT count(*) FROM tool_explanation_jobs WHERE status IN ('queued', 'running')) = 0"},
             {'op': 'quiesce'},
             {'op': 'get', 'path': '/log?session=rachel'},
             {'op': 'get', 'path': '/live?session=rachel'},
@@ -202,6 +207,11 @@ SCENARIOS = [
         'steps': [
             _send('rachel', '[replay-tool-fail] synthetic look for papa', 'papa'),
             {'op': 'wait_settled', 'message_id': 'u-papa'},
+            # The tool-explanation worker settles each explanation on its own schedule
+            # (queued/running -> failed here, no provider): wait for it before the final
+            # reads, or they race it (rf-routes, 3 Nov: pending vs failed, one live frame).
+            {'op': 'wait_sql', 'sql': "SELECT (SELECT count(*) FROM tool_explanation_jobs) > 0 AND "
+                                      "(SELECT count(*) FROM tool_explanation_jobs WHERE status IN ('queued', 'running')) = 0"},
             {'op': 'quiesce'},
             {'op': 'get', 'path': '/log?session=rachel'},
             {'op': 'get', 'path': '/live?session=rachel'},
