@@ -626,6 +626,7 @@ class RuntimeRPCServer(socketserver.ThreadingMixIn,
                 # Its barrier is already rolled back (QUEUE-N1); the Stop fails.
                 from .log import log_exception
                 log_exception("runtimeStopBeginFail", exc, detail=agent_id)
+                self._handoff_after_failed_stop(agent_id)
                 return {"ok": False, "status": 503, "error": str(exc)}
             if user_stop:
                 try:
@@ -640,6 +641,7 @@ class RuntimeRPCServer(socketserver.ThreadingMixIn,
                         from .log import log_exception
                         log_exception("runtimeStopRollbackFail", restore_exc,
                                       detail=agent_id)
+                    self._handoff_after_failed_stop(agent_id)
                     return {"ok": False, "status": 503, "error": str(exc)}
             try:
                 terminated = int(backends.interrupt(backend, agent_id) or 0)
@@ -970,6 +972,19 @@ class RuntimeRPCServer(socketserver.ThreadingMixIn,
     def _drain_status(self) -> dict[str, Any]:
         monitor = self.release_monitor
         return monitor.status() if monitor is not None else {"phase": "idle"}
+
+    def _handoff_after_failed_stop(self, agent_id: str) -> None:
+        """Work admitted while a failed Stop held its barrier waits in memory
+        behind a slot nobody owns now: hand it on (QUEUE-N1). The handoff
+        keeps an owner's slot and the restored pause's rights."""
+        retry = getattr(self.dispatch_service, "_retry_handoff", None)
+        if retry is None:
+            return
+        try:
+            retry(agent_id)
+        except Exception as exc:  # noqa: BLE001 - the Stop already failed
+            from .log import log_exception
+            log_exception("runtimeStopHandoffFail", exc, detail=agent_id)
 
     def _expire_stop_lease(self, lease_id: str) -> None:
         with self._stop_lease_lock:
