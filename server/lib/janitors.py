@@ -573,8 +573,11 @@ def set_enabled(session: str, expected_revision: int, enabled: bool) -> dict:
         now = db.now_ms()
         if enabled and row["template_id"] == "heartbeat-decider":
             from . import settings_store
+            # Before the latch flips: an adoption made before scopes were
+            # recorded must survive this record (AUT-02s review).
+            legacy = adopted_heartbeat_scopes()
             settings_store.set_bool("heartbeat.janitor_adopted", True)
-            _record_adopted_heartbeat_scope(_decode(row["scope_json"], {}))
+            _record_adopted_heartbeat_scope(_decode(row["scope_json"], {}), legacy=legacy)
         _fence(c, a["agent_id"], now)
         store.set_config_enabled(c, a["agent_id"], enabled, now)
     return get(session)
@@ -583,11 +586,15 @@ def set_enabled(session: str, expected_revision: int, enabled: bool) -> dict:
 _ADOPTED_HEARTBEAT_SCOPES = "heartbeat.janitor_adopted_scopes"
 
 
-def _record_adopted_heartbeat_scope(scope: dict) -> None:
+def _record_adopted_heartbeat_scope(scope: dict, *, legacy: list[dict]) -> None:
     """Remember where a Heartbeat keeper took over from the fixed heartbeat:
-    pausing or deleting it keeps fixed heartbeats off there (AUT-02s)."""
+    pausing or deleting it keeps fixed heartbeats off there (AUT-02s). The
+    first record starts from what was adopted before records existed
+    (``legacy``: the latch's fallback scopes, empty on a fresh Host)."""
     from . import settings_store
     scopes = _decode(settings_store.get_text(_ADOPTED_HEARTBEAT_SCOPES, default="[]"), [])
+    if not scopes:
+        scopes = list(legacy)
     if scope not in scopes:
         settings_store.set_text(_ADOPTED_HEARTBEAT_SCOPES, _json([*scopes, scope]))
 
