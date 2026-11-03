@@ -182,6 +182,9 @@ def run_step(host: Host, sse: SSE, step: dict, http: list):
               lambda: _turns_settled(host.root, step['message_id'], False))
     elif op == 'wait_provider_started':
         _poll('provider turn start', lambda: _provider_started(host.root, step['marker']))
+    elif op == 'provider_file':
+        # Control files the fake provider reads (tests/qa/fake_codex.py), e.g. quota-mode.
+        (host.root / 'provider' / step['name']).write_text(step['text'])
     elif op == 'wait_busy':
         def busy():
             _, status = host.request('GET', f"/status?session={step['session']}")
