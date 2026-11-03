@@ -23,36 +23,7 @@
    "import": "ok",
    "messages": [
     {
-     "display_cells_json": [
-      {
-       "id": "agy-think-5",
-       "kind": "reasoning",
-       "lines": [
-        {
-         "kind": "status",
-         "label": "",
-         "text": "Plan the listing."
-        }
-       ],
-       "status": "ok",
-       "summary": "",
-       "title": "Reasoned"
-      },
-      {
-       "id": "step-6",
-       "kind": "exploration",
-       "lines": [
-        {
-         "kind": "detail",
-         "label": "List",
-         "text": "/redacted/1"
-        }
-       ],
-       "status": "ok",
-       "summary": "",
-       "title": "Explored"
-      }
-     ],
+     "display_cells_json": "[{\"id\":\"agy-think-5\",\"kind\":\"reasoning\",\"title\":\"Reasoned\",\"summary\":\"\",\"status\":\"ok\",\"lines\":[{\"label\":\"\",\"text\":\"Plan the listing.\",\"kind\":\"status\"}]},{\"id\":\"step-6\",\"kind\":\"exploration\",\"title\":\"Explored\",\"summary\":\"\",\"status\":\"ok\",\"lines\":[{\"label\":\"List\",\"text\":\"/redacted/1\",\"kind\":\"detail\"}]}]",
      "kind": null,
      "message_id": "final-1",
      "origin": "user",
@@ -66,29 +37,12 @@
      "text": "Done with 1. <speak>Done 1.</speak>",
      "timestamp": "2026-10-11T08:21:05.000Z",
      "tool_name": null,
-     "tools_json": [
-      {
-       "action": "running command",
-       "command": "ls /redacted/1",
-       "description": "",
-       "exit_code": null,
-       "file_path": "",
-       "id": "step-6",
-       "input": {
-        "command": "ls /redacted/1",
-        "description": ""
-       },
-       "name": "Bash",
-       "result": "a\nb",
-       "status": "ok",
-       "summary": "list files"
-      }
-     ],
+     "tools_json": "[{\"name\":\"Bash\",\"summary\":\"list files\",\"action\":\"running command\",\"file_path\":\"\",\"status\":\"ok\",\"id\":\"step-6\",\"command\":\"ls /redacted/1\",\"description\":\"\",\"input\":{\"command\":\"ls /redacted/1\",\"description\":\"\"},\"exit_code\":null,\"result\":\"a\\nb\"}]",
      "trace_id": "tr-1",
      "turn_json": null
     },
     {
-     "display_cells_json": [],
+     "display_cells_json": "[]",
      "kind": null,
      "message_id": "live-3",
      "origin": "user",
@@ -102,12 +56,12 @@
      "text": "Done with 3.",
      "timestamp": "2026-10-11T08:23:04.000Z",
      "tool_name": null,
-     "tools_json": [],
+     "tools_json": "[]",
      "trace_id": "tr-3",
      "turn_json": null
     },
     {
-     "display_cells_json": [],
+     "display_cells_json": "[]",
      "kind": null,
      "message_id": "u-c3",
      "origin": "agent",
@@ -121,12 +75,12 @@
      "text": "continue",
      "timestamp": "2026-10-11T08:22:59.500Z",
      "tool_name": null,
-     "tools_json": [],
+     "tools_json": "[]",
      "trace_id": "tr-3",
      "turn_json": null
     },
     {
-     "display_cells_json": [],
+     "display_cells_json": "[]",
      "kind": null,
      "message_id": "u-c1",
      "origin": "agent",
@@ -140,12 +94,12 @@
      "text": "request 1 about /redacted/1",
      "timestamp": "2026-10-11T08:20:59.500Z",
      "tool_name": null,
-     "tools_json": [],
+     "tools_json": "[]",
      "trace_id": "tr-1",
      "turn_json": null
     },
     {
-     "display_cells_json": [],
+     "display_cells_json": "[]",
      "kind": null,
      "message_id": "u-c0",
      "origin": "user",
@@ -159,41 +113,12 @@
      "text": "continue",
      "timestamp": "2026-10-11T08:19:59.500Z",
      "tool_name": null,
-     "tools_json": [],
+     "tools_json": "[]",
      "trace_id": null,
      "turn_json": null
     },
     {
-     "display_cells_json": [
-      {
-       "id": "agy-think-1",
-       "kind": "reasoning",
-       "lines": [
-        {
-         "kind": "status",
-         "label": "",
-         "text": "Plan the listing."
-        }
-       ],
-       "status": "ok",
-       "summary": "",
-       "title": "Reasoned"
-      },
-      {
-       "id": "step-2",
-       "kind": "exploration",
-       "lines": [
-        {
-         "kind": "detail",
-         "label": "List",
-         "text": "/redacted/0"
-        }
-       ],
-       "status": "ok",
-       "summary": "",
-       "title": "Explored"
-      }
-     ],
+     "display_cells_json": "[{\"id\":\"agy-think-1\",\"kind\":\"reasoning\",\"title\":\"Reasoned\",\"summary\":\"\",\"status\":\"ok\",\"lines\":[{\"label\":\"\",\"text\":\"Plan the listing.\",\"kind\":\"status\"}]},{\"id\":\"step-2\",\"kind\":\"exploration\",\"title\":\"Explored\",\"summary\":\"\",\"status\":\"ok\",\"lines\":[{\"label\":\"List\",\"text\":\"/redacted/0\",\"kind\":\"detail\"}]}]",
      "kind": null,
      "message_id": "msg-f573251188d63cabd329",
      "origin": "user",
@@ -207,29 +132,12 @@
      "text": "Looking at 0.",
      "timestamp": "2026-10-11T08:20:02.000Z",
      "tool_name": null,
-     "tools_json": [
-      {
-       "action": "running command",
-       "command": "ls /redacted/0",
-       "description": "",
-       "exit_code": null,
-       "file_path": "",
-       "id": "step-2",
-       "input": {
-        "command": "ls /redacted/0",
-        "description": ""
-       },
-       "name": "Bash",
-       "result": "a\nb",
-       "status": "ok",
-       "summary": "list files"
-      }
-     ],
+     "tools_json": "[{\"name\":\"Bash\",\"summary\":\"list files\",\"action\":\"running command\",\"file_path\":\"\",\"status\":\"ok\",\"id\":\"step-2\",\"command\":\"ls /redacted/0\",\"description\":\"\",\"input\":{\"command\":\"ls /redacted/0\",\"description\":\"\"},\"exit_code\":null,\"result\":\"a\\nb\"}]",
      "trace_id": null,
      "turn_json": null
     },
     {
-     "display_cells_json": [],
+     "display_cells_json": "[]",
      "kind": null,
      "message_id": "msg-0206b66d688ab53e9185",
      "origin": "user",
@@ -243,7 +151,7 @@
      "text": "Done with 0. <speak>Done 0.</speak>",
      "timestamp": "2026-10-11T08:20:05.000Z",
      "tool_name": null,
-     "tools_json": [],
+     "tools_json": "[]",
      "trace_id": null,
      "turn_json": null
     }
@@ -272,36 +180,7 @@
    "import": "ok",
    "messages": [
     {
-     "display_cells_json": [
-      {
-       "id": "agy-think-5",
-       "kind": "reasoning",
-       "lines": [
-        {
-         "kind": "status",
-         "label": "",
-         "text": "Plan the listing."
-        }
-       ],
-       "status": "ok",
-       "summary": "",
-       "title": "Reasoned"
-      },
-      {
-       "id": "step-6",
-       "kind": "exploration",
-       "lines": [
-        {
-         "kind": "detail",
-         "label": "List",
-         "text": "/redacted/1"
-        }
-       ],
-       "status": "ok",
-       "summary": "",
-       "title": "Explored"
-      }
-     ],
+     "display_cells_json": "[{\"id\":\"agy-think-5\",\"kind\":\"reasoning\",\"title\":\"Reasoned\",\"summary\":\"\",\"status\":\"ok\",\"lines\":[{\"label\":\"\",\"text\":\"Plan the listing.\",\"kind\":\"status\"}]},{\"id\":\"step-6\",\"kind\":\"exploration\",\"title\":\"Explored\",\"summary\":\"\",\"status\":\"ok\",\"lines\":[{\"label\":\"List\",\"text\":\"/redacted/1\",\"kind\":\"detail\"}]}]",
      "kind": null,
      "message_id": "final-1",
      "origin": "user",
@@ -315,29 +194,12 @@
      "text": "Done with 1. <speak>Done 1.</speak>",
      "timestamp": "2026-10-11T08:21:05.000Z",
      "tool_name": null,
-     "tools_json": [
-      {
-       "action": "running command",
-       "command": "ls /redacted/1",
-       "description": "",
-       "exit_code": null,
-       "file_path": "",
-       "id": "step-6",
-       "input": {
-        "command": "ls /redacted/1",
-        "description": ""
-       },
-       "name": "Bash",
-       "result": "a\nb",
-       "status": "ok",
-       "summary": "list files"
-      }
-     ],
+     "tools_json": "[{\"name\":\"Bash\",\"summary\":\"list files\",\"action\":\"running command\",\"file_path\":\"\",\"status\":\"ok\",\"id\":\"step-6\",\"command\":\"ls /redacted/1\",\"description\":\"\",\"input\":{\"command\":\"ls /redacted/1\",\"description\":\"\"},\"exit_code\":null,\"result\":\"a\\nb\"}]",
      "trace_id": "tr-1",
      "turn_json": null
     },
     {
-     "display_cells_json": [],
+     "display_cells_json": "[]",
      "kind": null,
      "message_id": "live-3",
      "origin": "user",
@@ -351,12 +213,12 @@
      "text": "Done with 3.",
      "timestamp": "2026-10-11T08:23:04.000Z",
      "tool_name": null,
-     "tools_json": [],
+     "tools_json": "[]",
      "trace_id": "tr-3",
      "turn_json": null
     },
     {
-     "display_cells_json": [],
+     "display_cells_json": "[]",
      "kind": null,
      "message_id": "u-c3",
      "origin": "agent",
@@ -370,12 +232,12 @@
      "text": "continue",
      "timestamp": "2026-10-11T08:22:59.500Z",
      "tool_name": null,
-     "tools_json": [],
+     "tools_json": "[]",
      "trace_id": "tr-3",
      "turn_json": null
     },
     {
-     "display_cells_json": [],
+     "display_cells_json": "[]",
      "kind": null,
      "message_id": "u-c1",
      "origin": "agent",
@@ -389,12 +251,12 @@
      "text": "request 1 about /redacted/1",
      "timestamp": "2026-10-11T08:20:59.500Z",
      "tool_name": null,
-     "tools_json": [],
+     "tools_json": "[]",
      "trace_id": "tr-1",
      "turn_json": null
     },
     {
-     "display_cells_json": [],
+     "display_cells_json": "[]",
      "kind": null,
      "message_id": "u-c0",
      "origin": "user",
@@ -408,41 +270,12 @@
      "text": "continue",
      "timestamp": "2026-10-11T08:19:59.500Z",
      "tool_name": null,
-     "tools_json": [],
+     "tools_json": "[]",
      "trace_id": null,
      "turn_json": null
     },
     {
-     "display_cells_json": [
-      {
-       "id": "agy-think-1",
-       "kind": "reasoning",
-       "lines": [
-        {
-         "kind": "status",
-         "label": "",
-         "text": "Plan the listing."
-        }
-       ],
-       "status": "ok",
-       "summary": "",
-       "title": "Reasoned"
-      },
-      {
-       "id": "step-2",
-       "kind": "exploration",
-       "lines": [
-        {
-         "kind": "detail",
-         "label": "List",
-         "text": "/redacted/0"
-        }
-       ],
-       "status": "ok",
-       "summary": "",
-       "title": "Explored"
-      }
-     ],
+     "display_cells_json": "[{\"id\":\"agy-think-1\",\"kind\":\"reasoning\",\"title\":\"Reasoned\",\"summary\":\"\",\"status\":\"ok\",\"lines\":[{\"label\":\"\",\"text\":\"Plan the listing.\",\"kind\":\"status\"}]},{\"id\":\"step-2\",\"kind\":\"exploration\",\"title\":\"Explored\",\"summary\":\"\",\"status\":\"ok\",\"lines\":[{\"label\":\"List\",\"text\":\"/redacted/0\",\"kind\":\"detail\"}]}]",
      "kind": null,
      "message_id": "msg-f573251188d63cabd329",
      "origin": "user",
@@ -456,29 +289,12 @@
      "text": "Looking at 0.",
      "timestamp": "2026-10-11T08:20:02.000Z",
      "tool_name": null,
-     "tools_json": [
-      {
-       "action": "running command",
-       "command": "ls /redacted/0",
-       "description": "",
-       "exit_code": null,
-       "file_path": "",
-       "id": "step-2",
-       "input": {
-        "command": "ls /redacted/0",
-        "description": ""
-       },
-       "name": "Bash",
-       "result": "a\nb",
-       "status": "ok",
-       "summary": "list files"
-      }
-     ],
+     "tools_json": "[{\"name\":\"Bash\",\"summary\":\"list files\",\"action\":\"running command\",\"file_path\":\"\",\"status\":\"ok\",\"id\":\"step-2\",\"command\":\"ls /redacted/0\",\"description\":\"\",\"input\":{\"command\":\"ls /redacted/0\",\"description\":\"\"},\"exit_code\":null,\"result\":\"a\\nb\"}]",
      "trace_id": null,
      "turn_json": null
     },
     {
-     "display_cells_json": [],
+     "display_cells_json": "[]",
      "kind": null,
      "message_id": "msg-0206b66d688ab53e9185",
      "origin": "user",
@@ -492,7 +308,7 @@
      "text": "Done with 0. <speak>Done 0.</speak>",
      "timestamp": "2026-10-11T08:20:05.000Z",
      "tool_name": null,
-     "tools_json": [],
+     "tools_json": "[]",
      "trace_id": null,
      "turn_json": null
     }
@@ -521,36 +337,7 @@
    "import": "ok",
    "messages": [
     {
-     "display_cells_json": [
-      {
-       "id": "agy-think-5",
-       "kind": "reasoning",
-       "lines": [
-        {
-         "kind": "status",
-         "label": "",
-         "text": "Plan the listing."
-        }
-       ],
-       "status": "ok",
-       "summary": "",
-       "title": "Reasoned"
-      },
-      {
-       "id": "step-6",
-       "kind": "exploration",
-       "lines": [
-        {
-         "kind": "detail",
-         "label": "List",
-         "text": "/redacted/1"
-        }
-       ],
-       "status": "ok",
-       "summary": "",
-       "title": "Explored"
-      }
-     ],
+     "display_cells_json": "[{\"id\":\"agy-think-5\",\"kind\":\"reasoning\",\"title\":\"Reasoned\",\"summary\":\"\",\"status\":\"ok\",\"lines\":[{\"label\":\"\",\"text\":\"Plan the listing.\",\"kind\":\"status\"}]},{\"id\":\"step-6\",\"kind\":\"exploration\",\"title\":\"Explored\",\"summary\":\"\",\"status\":\"ok\",\"lines\":[{\"label\":\"List\",\"text\":\"/redacted/1\",\"kind\":\"detail\"}]}]",
      "kind": null,
      "message_id": "final-1",
      "origin": "user",
@@ -564,29 +351,12 @@
      "text": "Done with 1. <speak>Done 1.</speak>",
      "timestamp": "2026-10-11T08:21:05.000Z",
      "tool_name": null,
-     "tools_json": [
-      {
-       "action": "running command",
-       "command": "ls /redacted/1",
-       "description": "",
-       "exit_code": null,
-       "file_path": "",
-       "id": "step-6",
-       "input": {
-        "command": "ls /redacted/1",
-        "description": ""
-       },
-       "name": "Bash",
-       "result": "a\nb",
-       "status": "ok",
-       "summary": "list files"
-      }
-     ],
+     "tools_json": "[{\"name\":\"Bash\",\"summary\":\"list files\",\"action\":\"running command\",\"file_path\":\"\",\"status\":\"ok\",\"id\":\"step-6\",\"command\":\"ls /redacted/1\",\"description\":\"\",\"input\":{\"command\":\"ls /redacted/1\",\"description\":\"\"},\"exit_code\":null,\"result\":\"a\\nb\"}]",
      "trace_id": "tr-1",
      "turn_json": null
     },
     {
-     "display_cells_json": [],
+     "display_cells_json": "[]",
      "kind": null,
      "message_id": "u-c3",
      "origin": "agent",
@@ -600,12 +370,12 @@
      "text": "continue",
      "timestamp": "2026-10-11T08:22:59.500Z",
      "tool_name": null,
-     "tools_json": [],
+     "tools_json": "[]",
      "trace_id": "tr-3",
      "turn_json": null
     },
     {
-     "display_cells_json": [],
+     "display_cells_json": "[]",
      "kind": null,
      "message_id": "u-c1",
      "origin": "agent",
@@ -619,12 +389,12 @@
      "text": "request 1 about /redacted/1",
      "timestamp": "2026-10-11T08:20:59.500Z",
      "tool_name": null,
-     "tools_json": [],
+     "tools_json": "[]",
      "trace_id": "tr-1",
      "turn_json": null
     },
     {
-     "display_cells_json": [],
+     "display_cells_json": "[]",
      "kind": null,
      "message_id": "u-c0",
      "origin": "user",
@@ -638,41 +408,12 @@
      "text": "continue",
      "timestamp": "2026-10-11T08:19:59.500Z",
      "tool_name": null,
-     "tools_json": [],
+     "tools_json": "[]",
      "trace_id": null,
      "turn_json": null
     },
     {
-     "display_cells_json": [
-      {
-       "id": "agy-think-1",
-       "kind": "reasoning",
-       "lines": [
-        {
-         "kind": "status",
-         "label": "",
-         "text": "Plan the listing."
-        }
-       ],
-       "status": "ok",
-       "summary": "",
-       "title": "Reasoned"
-      },
-      {
-       "id": "step-2",
-       "kind": "exploration",
-       "lines": [
-        {
-         "kind": "detail",
-         "label": "List",
-         "text": "/redacted/0"
-        }
-       ],
-       "status": "ok",
-       "summary": "",
-       "title": "Explored"
-      }
-     ],
+     "display_cells_json": "[{\"id\":\"agy-think-1\",\"kind\":\"reasoning\",\"title\":\"Reasoned\",\"summary\":\"\",\"status\":\"ok\",\"lines\":[{\"label\":\"\",\"text\":\"Plan the listing.\",\"kind\":\"status\"}]},{\"id\":\"step-2\",\"kind\":\"exploration\",\"title\":\"Explored\",\"summary\":\"\",\"status\":\"ok\",\"lines\":[{\"label\":\"List\",\"text\":\"/redacted/0\",\"kind\":\"detail\"}]}]",
      "kind": null,
      "message_id": "msg-f573251188d63cabd329",
      "origin": "user",
@@ -686,29 +427,12 @@
      "text": "Looking at 0.",
      "timestamp": "2026-10-11T08:20:02.000Z",
      "tool_name": null,
-     "tools_json": [
-      {
-       "action": "running command",
-       "command": "ls /redacted/0",
-       "description": "",
-       "exit_code": null,
-       "file_path": "",
-       "id": "step-2",
-       "input": {
-        "command": "ls /redacted/0",
-        "description": ""
-       },
-       "name": "Bash",
-       "result": "a\nb",
-       "status": "ok",
-       "summary": "list files"
-      }
-     ],
+     "tools_json": "[{\"name\":\"Bash\",\"summary\":\"list files\",\"action\":\"running command\",\"file_path\":\"\",\"status\":\"ok\",\"id\":\"step-2\",\"command\":\"ls /redacted/0\",\"description\":\"\",\"input\":{\"command\":\"ls /redacted/0\",\"description\":\"\"},\"exit_code\":null,\"result\":\"a\\nb\"}]",
      "trace_id": null,
      "turn_json": null
     },
     {
-     "display_cells_json": [],
+     "display_cells_json": "[]",
      "kind": null,
      "message_id": "msg-0206b66d688ab53e9185",
      "origin": "user",
@@ -722,12 +446,12 @@
      "text": "Done with 0. <speak>Done 0.</speak>",
      "timestamp": "2026-10-11T08:20:05.000Z",
      "tool_name": null,
-     "tools_json": [],
+     "tools_json": "[]",
      "trace_id": null,
      "turn_json": null
     },
     {
-     "display_cells_json": [],
+     "display_cells_json": "[]",
      "kind": null,
      "message_id": "msg-f44cac0ef7a7b0887e86",
      "origin": "heartbeat",
@@ -741,41 +465,12 @@
      "text": "This is a continuity check, not a new task. Read HEARTBEAT.md if it exists (workspace context). Follow it strictly. Review the durable goal/task plan included below, current commitments, and queued team updates. If a pending or in-progress plan item can be advanced safely, continue it now; do not reply HEARTBEAT_OK merely because no new chat message arrived. Do not infer or repeat old tasks from prior chats. Do not restart completed or stale work. Audit durable background jobs and update any job whose displayed state is stale. Preserve genuine active work. If no current work can be advanced and nothing needs attention, reply HEARTBEAT_OK and take no action.",
      "timestamp": "2026-10-11T08:22:00.000Z",
      "tool_name": null,
-     "tools_json": [],
+     "tools_json": "[]",
      "trace_id": "tr-1",
      "turn_json": null
     },
     {
-     "display_cells_json": [
-      {
-       "id": "agy-think-9",
-       "kind": "reasoning",
-       "lines": [
-        {
-         "kind": "status",
-         "label": "",
-         "text": "Plan the listing."
-        }
-       ],
-       "status": "ok",
-       "summary": "",
-       "title": "Reasoned"
-      },
-      {
-       "id": "step-10",
-       "kind": "exploration",
-       "lines": [
-        {
-         "kind": "detail",
-         "label": "List",
-         "text": "/redacted/2"
-        }
-       ],
-       "status": "ok",
-       "summary": "",
-       "title": "Explored"
-      }
-     ],
+     "display_cells_json": "[{\"id\":\"agy-think-9\",\"kind\":\"reasoning\",\"title\":\"Reasoned\",\"summary\":\"\",\"status\":\"ok\",\"lines\":[{\"label\":\"\",\"text\":\"Plan the listing.\",\"kind\":\"status\"}]},{\"id\":\"step-10\",\"kind\":\"exploration\",\"title\":\"Explored\",\"summary\":\"\",\"status\":\"ok\",\"lines\":[{\"label\":\"List\",\"text\":\"/redacted/2\",\"kind\":\"detail\"}]}]",
      "kind": null,
      "message_id": "msg-b14becec6db32850a57e",
      "origin": "heartbeat",
@@ -789,29 +484,12 @@
      "text": "Looking at 2.",
      "timestamp": "2026-10-11T08:22:02.000Z",
      "tool_name": null,
-     "tools_json": [
-      {
-       "action": "running command",
-       "command": "ls /redacted/2",
-       "description": "",
-       "exit_code": null,
-       "file_path": "",
-       "id": "step-10",
-       "input": {
-        "command": "ls /redacted/2",
-        "description": ""
-       },
-       "name": "Bash",
-       "result": "a\nb",
-       "status": "ok",
-       "summary": "list files"
-      }
-     ],
+     "tools_json": "[{\"name\":\"Bash\",\"summary\":\"list files\",\"action\":\"running command\",\"file_path\":\"\",\"status\":\"ok\",\"id\":\"step-10\",\"command\":\"ls /redacted/2\",\"description\":\"\",\"input\":{\"command\":\"ls /redacted/2\",\"description\":\"\"},\"exit_code\":null,\"result\":\"a\\nb\"}]",
      "trace_id": "tr-1",
      "turn_json": null
     },
     {
-     "display_cells_json": [],
+     "display_cells_json": "[]",
      "kind": null,
      "message_id": "msg-7906102a7ab7d7942a25",
      "origin": "heartbeat",
@@ -825,48 +503,12 @@
      "text": "Heartbeat check: no action needed.",
      "timestamp": "2026-10-11T08:22:05.000Z",
      "tool_name": null,
-     "tools_json": [],
+     "tools_json": "[]",
      "trace_id": "tr-1",
-     "turn_json": {
-      "ended_at_ms": 1791706866000,
-      "started_at_ms": 1791706860000,
-      "status": "completed",
-      "tool_count": 2,
-      "turn_id": "tr-1",
-      "worked_ms": 6000
-     }
+     "turn_json": "{\"turn_id\":\"tr-1\",\"status\":\"completed\",\"started_at_ms\":1791706860000,\"ended_at_ms\":1791706866000,\"worked_ms\":6000,\"tool_count\":2}"
     },
     {
-     "display_cells_json": [
-      {
-       "id": "agy-think-13",
-       "kind": "reasoning",
-       "lines": [
-        {
-         "kind": "status",
-         "label": "",
-         "text": "Plan the listing."
-        }
-       ],
-       "status": "ok",
-       "summary": "",
-       "title": "Reasoned"
-      },
-      {
-       "id": "step-14",
-       "kind": "exploration",
-       "lines": [
-        {
-         "kind": "detail",
-         "label": "List",
-         "text": "/redacted/3"
-        }
-       ],
-       "status": "ok",
-       "summary": "",
-       "title": "Explored"
-      }
-     ],
+     "display_cells_json": "[{\"id\":\"agy-think-13\",\"kind\":\"reasoning\",\"title\":\"Reasoned\",\"summary\":\"\",\"status\":\"ok\",\"lines\":[{\"label\":\"\",\"text\":\"Plan the listing.\",\"kind\":\"status\"}]},{\"id\":\"step-14\",\"kind\":\"exploration\",\"title\":\"Explored\",\"summary\":\"\",\"status\":\"ok\",\"lines\":[{\"label\":\"List\",\"text\":\"/redacted/3\",\"kind\":\"detail\"}]}]",
      "kind": null,
      "message_id": "msg-a7a7aa51eebb57a8f870",
      "origin": "agent",
@@ -880,29 +522,12 @@
      "text": "Looking at 3.",
      "timestamp": "2026-10-11T08:23:02.000Z",
      "tool_name": null,
-     "tools_json": [
-      {
-       "action": "running command",
-       "command": "ls /redacted/3",
-       "description": "",
-       "exit_code": null,
-       "file_path": "",
-       "id": "step-14",
-       "input": {
-        "command": "ls /redacted/3",
-        "description": ""
-       },
-       "name": "Bash",
-       "result": "a\nb",
-       "status": "ok",
-       "summary": "list files"
-      }
-     ],
+     "tools_json": "[{\"name\":\"Bash\",\"summary\":\"list files\",\"action\":\"running command\",\"file_path\":\"\",\"status\":\"ok\",\"id\":\"step-14\",\"command\":\"ls /redacted/3\",\"description\":\"\",\"input\":{\"command\":\"ls /redacted/3\",\"description\":\"\"},\"exit_code\":null,\"result\":\"a\\nb\"}]",
      "trace_id": "tr-3",
      "turn_json": null
     },
     {
-     "display_cells_json": [],
+     "display_cells_json": "[]",
      "kind": null,
      "message_id": "live-3",
      "origin": "agent",
@@ -916,16 +541,9 @@
      "text": "Done with 3. <speak>Done 3.</speak>",
      "timestamp": "2026-10-11T08:23:05.000Z",
      "tool_name": null,
-     "tools_json": [],
+     "tools_json": "[]",
      "trace_id": "tr-3",
-     "turn_json": {
-      "ended_at_ms": 1791706986000,
-      "started_at_ms": 1791706980000,
-      "status": "completed",
-      "tool_count": 1,
-      "turn_id": "tr-3",
-      "worked_ms": 6000
-     }
+     "turn_json": "{\"turn_id\":\"tr-3\",\"status\":\"completed\",\"started_at_ms\":1791706980000,\"ended_at_ms\":1791706986000,\"worked_ms\":6000,\"tool_count\":1}"
     }
    ],
    "step": "complete"
@@ -952,36 +570,7 @@
    "import": "ok",
    "messages": [
     {
-     "display_cells_json": [
-      {
-       "id": "agy-think-5",
-       "kind": "reasoning",
-       "lines": [
-        {
-         "kind": "status",
-         "label": "",
-         "text": "Plan the listing."
-        }
-       ],
-       "status": "ok",
-       "summary": "",
-       "title": "Reasoned"
-      },
-      {
-       "id": "step-6",
-       "kind": "exploration",
-       "lines": [
-        {
-         "kind": "detail",
-         "label": "List",
-         "text": "/redacted/1"
-        }
-       ],
-       "status": "ok",
-       "summary": "",
-       "title": "Explored"
-      }
-     ],
+     "display_cells_json": "[{\"id\":\"agy-think-5\",\"kind\":\"reasoning\",\"title\":\"Reasoned\",\"summary\":\"\",\"status\":\"ok\",\"lines\":[{\"label\":\"\",\"text\":\"Plan the listing.\",\"kind\":\"status\"}]},{\"id\":\"step-6\",\"kind\":\"exploration\",\"title\":\"Explored\",\"summary\":\"\",\"status\":\"ok\",\"lines\":[{\"label\":\"List\",\"text\":\"/redacted/1\",\"kind\":\"detail\"}]}]",
      "kind": null,
      "message_id": "final-1",
      "origin": "user",
@@ -995,29 +584,12 @@
      "text": "Done with 1. <speak>Done 1.</speak>",
      "timestamp": "2026-10-11T08:21:05.000Z",
      "tool_name": null,
-     "tools_json": [
-      {
-       "action": "running command",
-       "command": "ls /redacted/1",
-       "description": "",
-       "exit_code": null,
-       "file_path": "",
-       "id": "step-6",
-       "input": {
-        "command": "ls /redacted/1",
-        "description": ""
-       },
-       "name": "Bash",
-       "result": "a\nb",
-       "status": "ok",
-       "summary": "list files"
-      }
-     ],
+     "tools_json": "[{\"name\":\"Bash\",\"summary\":\"list files\",\"action\":\"running command\",\"file_path\":\"\",\"status\":\"ok\",\"id\":\"step-6\",\"command\":\"ls /redacted/1\",\"description\":\"\",\"input\":{\"command\":\"ls /redacted/1\",\"description\":\"\"},\"exit_code\":null,\"result\":\"a\\nb\"}]",
      "trace_id": "tr-1",
      "turn_json": null
     },
     {
-     "display_cells_json": [],
+     "display_cells_json": "[]",
      "kind": null,
      "message_id": "u-c3",
      "origin": "agent",
@@ -1031,12 +603,12 @@
      "text": "continue",
      "timestamp": "2026-10-11T08:22:59.500Z",
      "tool_name": null,
-     "tools_json": [],
+     "tools_json": "[]",
      "trace_id": "tr-3",
      "turn_json": null
     },
     {
-     "display_cells_json": [],
+     "display_cells_json": "[]",
      "kind": null,
      "message_id": "u-c1",
      "origin": "agent",
@@ -1050,12 +622,12 @@
      "text": "request 1 about /redacted/1",
      "timestamp": "2026-10-11T08:20:59.500Z",
      "tool_name": null,
-     "tools_json": [],
+     "tools_json": "[]",
      "trace_id": "tr-1",
      "turn_json": null
     },
     {
-     "display_cells_json": [],
+     "display_cells_json": "[]",
      "kind": null,
      "message_id": "u-c0",
      "origin": "user",
@@ -1069,41 +641,12 @@
      "text": "continue",
      "timestamp": "2026-10-11T08:19:59.500Z",
      "tool_name": null,
-     "tools_json": [],
+     "tools_json": "[]",
      "trace_id": null,
      "turn_json": null
     },
     {
-     "display_cells_json": [
-      {
-       "id": "agy-think-1",
-       "kind": "reasoning",
-       "lines": [
-        {
-         "kind": "status",
-         "label": "",
-         "text": "Plan the listing."
-        }
-       ],
-       "status": "ok",
-       "summary": "",
-       "title": "Reasoned"
-      },
-      {
-       "id": "step-2",
-       "kind": "exploration",
-       "lines": [
-        {
-         "kind": "detail",
-         "label": "List",
-         "text": "/redacted/0"
-        }
-       ],
-       "status": "ok",
-       "summary": "",
-       "title": "Explored"
-      }
-     ],
+     "display_cells_json": "[{\"id\":\"agy-think-1\",\"kind\":\"reasoning\",\"title\":\"Reasoned\",\"summary\":\"\",\"status\":\"ok\",\"lines\":[{\"label\":\"\",\"text\":\"Plan the listing.\",\"kind\":\"status\"}]},{\"id\":\"step-2\",\"kind\":\"exploration\",\"title\":\"Explored\",\"summary\":\"\",\"status\":\"ok\",\"lines\":[{\"label\":\"List\",\"text\":\"/redacted/0\",\"kind\":\"detail\"}]}]",
      "kind": null,
      "message_id": "msg-f573251188d63cabd329",
      "origin": "user",
@@ -1117,29 +660,12 @@
      "text": "Looking at 0.",
      "timestamp": "2026-10-11T08:20:02.000Z",
      "tool_name": null,
-     "tools_json": [
-      {
-       "action": "running command",
-       "command": "ls /redacted/0",
-       "description": "",
-       "exit_code": null,
-       "file_path": "",
-       "id": "step-2",
-       "input": {
-        "command": "ls /redacted/0",
-        "description": ""
-       },
-       "name": "Bash",
-       "result": "a\nb",
-       "status": "ok",
-       "summary": "list files"
-      }
-     ],
+     "tools_json": "[{\"name\":\"Bash\",\"summary\":\"list files\",\"action\":\"running command\",\"file_path\":\"\",\"status\":\"ok\",\"id\":\"step-2\",\"command\":\"ls /redacted/0\",\"description\":\"\",\"input\":{\"command\":\"ls /redacted/0\",\"description\":\"\"},\"exit_code\":null,\"result\":\"a\\nb\"}]",
      "trace_id": null,
      "turn_json": null
     },
     {
-     "display_cells_json": [],
+     "display_cells_json": "[]",
      "kind": null,
      "message_id": "msg-0206b66d688ab53e9185",
      "origin": "user",
@@ -1153,12 +679,12 @@
      "text": "Done with 0. <speak>Done 0.</speak>",
      "timestamp": "2026-10-11T08:20:05.000Z",
      "tool_name": null,
-     "tools_json": [],
+     "tools_json": "[]",
      "trace_id": null,
      "turn_json": null
     },
     {
-     "display_cells_json": [],
+     "display_cells_json": "[]",
      "kind": null,
      "message_id": "msg-f44cac0ef7a7b0887e86",
      "origin": "heartbeat",
@@ -1172,41 +698,12 @@
      "text": "This is a continuity check, not a new task. Read HEARTBEAT.md if it exists (workspace context). Follow it strictly. Review the durable goal/task plan included below, current commitments, and queued team updates. If a pending or in-progress plan item can be advanced safely, continue it now; do not reply HEARTBEAT_OK merely because no new chat message arrived. Do not infer or repeat old tasks from prior chats. Do not restart completed or stale work. Audit durable background jobs and update any job whose displayed state is stale. Preserve genuine active work. If no current work can be advanced and nothing needs attention, reply HEARTBEAT_OK and take no action.",
      "timestamp": "2026-10-11T08:22:00.000Z",
      "tool_name": null,
-     "tools_json": [],
+     "tools_json": "[]",
      "trace_id": "tr-1",
      "turn_json": null
     },
     {
-     "display_cells_json": [
-      {
-       "id": "agy-think-9",
-       "kind": "reasoning",
-       "lines": [
-        {
-         "kind": "status",
-         "label": "",
-         "text": "Plan the listing."
-        }
-       ],
-       "status": "ok",
-       "summary": "",
-       "title": "Reasoned"
-      },
-      {
-       "id": "step-10",
-       "kind": "exploration",
-       "lines": [
-        {
-         "kind": "detail",
-         "label": "List",
-         "text": "/redacted/2"
-        }
-       ],
-       "status": "ok",
-       "summary": "",
-       "title": "Explored"
-      }
-     ],
+     "display_cells_json": "[{\"id\":\"agy-think-9\",\"kind\":\"reasoning\",\"title\":\"Reasoned\",\"summary\":\"\",\"status\":\"ok\",\"lines\":[{\"label\":\"\",\"text\":\"Plan the listing.\",\"kind\":\"status\"}]},{\"id\":\"step-10\",\"kind\":\"exploration\",\"title\":\"Explored\",\"summary\":\"\",\"status\":\"ok\",\"lines\":[{\"label\":\"List\",\"text\":\"/redacted/2\",\"kind\":\"detail\"}]}]",
      "kind": null,
      "message_id": "msg-b14becec6db32850a57e",
      "origin": "heartbeat",
@@ -1220,29 +717,12 @@
      "text": "Looking at 2.",
      "timestamp": "2026-10-11T08:22:02.000Z",
      "tool_name": null,
-     "tools_json": [
-      {
-       "action": "running command",
-       "command": "ls /redacted/2",
-       "description": "",
-       "exit_code": null,
-       "file_path": "",
-       "id": "step-10",
-       "input": {
-        "command": "ls /redacted/2",
-        "description": ""
-       },
-       "name": "Bash",
-       "result": "a\nb",
-       "status": "ok",
-       "summary": "list files"
-      }
-     ],
+     "tools_json": "[{\"name\":\"Bash\",\"summary\":\"list files\",\"action\":\"running command\",\"file_path\":\"\",\"status\":\"ok\",\"id\":\"step-10\",\"command\":\"ls /redacted/2\",\"description\":\"\",\"input\":{\"command\":\"ls /redacted/2\",\"description\":\"\"},\"exit_code\":null,\"result\":\"a\\nb\"}]",
      "trace_id": "tr-1",
      "turn_json": null
     },
     {
-     "display_cells_json": [],
+     "display_cells_json": "[]",
      "kind": null,
      "message_id": "msg-7906102a7ab7d7942a25",
      "origin": "heartbeat",
@@ -1256,48 +736,12 @@
      "text": "Heartbeat check: no action needed.",
      "timestamp": "2026-10-11T08:22:05.000Z",
      "tool_name": null,
-     "tools_json": [],
+     "tools_json": "[]",
      "trace_id": "tr-1",
-     "turn_json": {
-      "ended_at_ms": 1791706866000,
-      "started_at_ms": 1791706860000,
-      "status": "completed",
-      "tool_count": 2,
-      "turn_id": "tr-1",
-      "worked_ms": 6000
-     }
+     "turn_json": "{\"turn_id\":\"tr-1\",\"status\":\"completed\",\"started_at_ms\":1791706860000,\"ended_at_ms\":1791706866000,\"worked_ms\":6000,\"tool_count\":2}"
     },
     {
-     "display_cells_json": [
-      {
-       "id": "agy-think-13",
-       "kind": "reasoning",
-       "lines": [
-        {
-         "kind": "status",
-         "label": "",
-         "text": "Plan the listing."
-        }
-       ],
-       "status": "ok",
-       "summary": "",
-       "title": "Reasoned"
-      },
-      {
-       "id": "step-14",
-       "kind": "exploration",
-       "lines": [
-        {
-         "kind": "detail",
-         "label": "List",
-         "text": "/redacted/3"
-        }
-       ],
-       "status": "ok",
-       "summary": "",
-       "title": "Explored"
-      }
-     ],
+     "display_cells_json": "[{\"id\":\"agy-think-13\",\"kind\":\"reasoning\",\"title\":\"Reasoned\",\"summary\":\"\",\"status\":\"ok\",\"lines\":[{\"label\":\"\",\"text\":\"Plan the listing.\",\"kind\":\"status\"}]},{\"id\":\"step-14\",\"kind\":\"exploration\",\"title\":\"Explored\",\"summary\":\"\",\"status\":\"ok\",\"lines\":[{\"label\":\"List\",\"text\":\"/redacted/3\",\"kind\":\"detail\"}]}]",
      "kind": null,
      "message_id": "msg-a7a7aa51eebb57a8f870",
      "origin": "agent",
@@ -1311,29 +755,12 @@
      "text": "Looking at 3.",
      "timestamp": "2026-10-11T08:23:02.000Z",
      "tool_name": null,
-     "tools_json": [
-      {
-       "action": "running command",
-       "command": "ls /redacted/3",
-       "description": "",
-       "exit_code": null,
-       "file_path": "",
-       "id": "step-14",
-       "input": {
-        "command": "ls /redacted/3",
-        "description": ""
-       },
-       "name": "Bash",
-       "result": "a\nb",
-       "status": "ok",
-       "summary": "list files"
-      }
-     ],
+     "tools_json": "[{\"name\":\"Bash\",\"summary\":\"list files\",\"action\":\"running command\",\"file_path\":\"\",\"status\":\"ok\",\"id\":\"step-14\",\"command\":\"ls /redacted/3\",\"description\":\"\",\"input\":{\"command\":\"ls /redacted/3\",\"description\":\"\"},\"exit_code\":null,\"result\":\"a\\nb\"}]",
      "trace_id": "tr-3",
      "turn_json": null
     },
     {
-     "display_cells_json": [],
+     "display_cells_json": "[]",
      "kind": null,
      "message_id": "live-3",
      "origin": "agent",
@@ -1347,19 +774,12 @@
      "text": "Done with 3. <speak>Done 3.</speak>",
      "timestamp": "2026-10-11T08:23:05.000Z",
      "tool_name": null,
-     "tools_json": [],
+     "tools_json": "[]",
      "trace_id": "tr-3",
-     "turn_json": {
-      "ended_at_ms": 1791706986000,
-      "started_at_ms": 1791706980000,
-      "status": "completed",
-      "tool_count": 1,
-      "turn_id": "tr-3",
-      "worked_ms": 6000
-     }
+     "turn_json": "{\"turn_id\":\"tr-3\",\"status\":\"completed\",\"started_at_ms\":1791706980000,\"ended_at_ms\":1791706986000,\"worked_ms\":6000,\"tool_count\":1}"
     },
     {
-     "display_cells_json": [],
+     "display_cells_json": "[]",
      "kind": null,
      "message_id": "msg-e14e86b68b08b28666d9",
      "origin": "user",
@@ -1373,41 +793,12 @@
      "text": "request 4 about /redacted/4",
      "timestamp": "2026-10-11T08:24:00.000Z",
      "tool_name": null,
-     "tools_json": [],
+     "tools_json": "[]",
      "trace_id": "tr-4",
      "turn_json": null
     },
     {
-     "display_cells_json": [
-      {
-       "id": "agy-think-17",
-       "kind": "reasoning",
-       "lines": [
-        {
-         "kind": "status",
-         "label": "",
-         "text": "Plan the listing."
-        }
-       ],
-       "status": "ok",
-       "summary": "",
-       "title": "Reasoned"
-      },
-      {
-       "id": "step-18",
-       "kind": "exploration",
-       "lines": [
-        {
-         "kind": "detail",
-         "label": "List",
-         "text": "/redacted/4"
-        }
-       ],
-       "status": "ok",
-       "summary": "",
-       "title": "Explored"
-      }
-     ],
+     "display_cells_json": "[{\"id\":\"agy-think-17\",\"kind\":\"reasoning\",\"title\":\"Reasoned\",\"summary\":\"\",\"status\":\"ok\",\"lines\":[{\"label\":\"\",\"text\":\"Plan the listing.\",\"kind\":\"status\"}]},{\"id\":\"step-18\",\"kind\":\"exploration\",\"title\":\"Explored\",\"summary\":\"\",\"status\":\"ok\",\"lines\":[{\"label\":\"List\",\"text\":\"/redacted/4\",\"kind\":\"detail\"}]}]",
      "kind": null,
      "message_id": "msg-a8e567f923212e99a714",
      "origin": "user",
@@ -1421,29 +812,12 @@
      "text": "Looking at 4.",
      "timestamp": "2026-10-11T08:24:02.000Z",
      "tool_name": null,
-     "tools_json": [
-      {
-       "action": "running command",
-       "command": "ls /redacted/4",
-       "description": "",
-       "exit_code": null,
-       "file_path": "",
-       "id": "step-18",
-       "input": {
-        "command": "ls /redacted/4",
-        "description": ""
-       },
-       "name": "Bash",
-       "result": "a\nb",
-       "status": "ok",
-       "summary": "list files"
-      }
-     ],
+     "tools_json": "[{\"name\":\"Bash\",\"summary\":\"list files\",\"action\":\"running command\",\"file_path\":\"\",\"status\":\"ok\",\"id\":\"step-18\",\"command\":\"ls /redacted/4\",\"description\":\"\",\"input\":{\"command\":\"ls /redacted/4\",\"description\":\"\"},\"exit_code\":null,\"result\":\"a\\nb\"}]",
      "trace_id": "tr-4",
      "turn_json": null
     },
     {
-     "display_cells_json": [],
+     "display_cells_json": "[]",
      "kind": null,
      "message_id": "msg-1caddcceac629bbc5fdf",
      "origin": "user",
@@ -1457,16 +831,9 @@
      "text": "Done with 4. <speak>Done 4.</speak>",
      "timestamp": "2026-10-11T08:24:05.000Z",
      "tool_name": null,
-     "tools_json": [],
+     "tools_json": "[]",
      "trace_id": "tr-4",
-     "turn_json": {
-      "ended_at_ms": 1791707046000,
-      "started_at_ms": 1791707040000,
-      "status": "interrupted",
-      "tool_count": 1,
-      "turn_id": "tr-4",
-      "worked_ms": 6000
-     }
+     "turn_json": "{\"turn_id\":\"tr-4\",\"status\":\"interrupted\",\"started_at_ms\":1791707040000,\"ended_at_ms\":1791707046000,\"worked_ms\":6000,\"tool_count\":1}"
     }
    ],
    "step": "append"
@@ -1493,36 +860,7 @@
    "import": "ok",
    "messages": [
     {
-     "display_cells_json": [
-      {
-       "id": "agy-think-5",
-       "kind": "reasoning",
-       "lines": [
-        {
-         "kind": "status",
-         "label": "",
-         "text": "Plan the listing."
-        }
-       ],
-       "status": "ok",
-       "summary": "",
-       "title": "Reasoned"
-      },
-      {
-       "id": "step-6",
-       "kind": "exploration",
-       "lines": [
-        {
-         "kind": "detail",
-         "label": "List",
-         "text": "/redacted/1"
-        }
-       ],
-       "status": "ok",
-       "summary": "",
-       "title": "Explored"
-      }
-     ],
+     "display_cells_json": "[{\"id\":\"agy-think-5\",\"kind\":\"reasoning\",\"title\":\"Reasoned\",\"summary\":\"\",\"status\":\"ok\",\"lines\":[{\"label\":\"\",\"text\":\"Plan the listing.\",\"kind\":\"status\"}]},{\"id\":\"step-6\",\"kind\":\"exploration\",\"title\":\"Explored\",\"summary\":\"\",\"status\":\"ok\",\"lines\":[{\"label\":\"List\",\"text\":\"/redacted/1\",\"kind\":\"detail\"}]}]",
      "kind": null,
      "message_id": "final-1",
      "origin": "user",
@@ -1536,29 +874,12 @@
      "text": "Done with 1. <speak>Done 1.</speak>",
      "timestamp": "2026-10-11T08:21:05.000Z",
      "tool_name": null,
-     "tools_json": [
-      {
-       "action": "running command",
-       "command": "ls /redacted/1",
-       "description": "",
-       "exit_code": null,
-       "file_path": "",
-       "id": "step-6",
-       "input": {
-        "command": "ls /redacted/1",
-        "description": ""
-       },
-       "name": "Bash",
-       "result": "a\nb",
-       "status": "ok",
-       "summary": "list files"
-      }
-     ],
+     "tools_json": "[{\"name\":\"Bash\",\"summary\":\"list files\",\"action\":\"running command\",\"file_path\":\"\",\"status\":\"ok\",\"id\":\"step-6\",\"command\":\"ls /redacted/1\",\"description\":\"\",\"input\":{\"command\":\"ls /redacted/1\",\"description\":\"\"},\"exit_code\":null,\"result\":\"a\\nb\"}]",
      "trace_id": "tr-1",
      "turn_json": null
     },
     {
-     "display_cells_json": [],
+     "display_cells_json": "[]",
      "kind": null,
      "message_id": "u-c3",
      "origin": "agent",
@@ -1572,12 +893,12 @@
      "text": "continue",
      "timestamp": "2026-10-11T08:22:59.500Z",
      "tool_name": null,
-     "tools_json": [],
+     "tools_json": "[]",
      "trace_id": "tr-3",
      "turn_json": null
     },
     {
-     "display_cells_json": [],
+     "display_cells_json": "[]",
      "kind": null,
      "message_id": "u-c1",
      "origin": "agent",
@@ -1591,12 +912,12 @@
      "text": "request 1 about /redacted/1",
      "timestamp": "2026-10-11T08:20:59.500Z",
      "tool_name": null,
-     "tools_json": [],
+     "tools_json": "[]",
      "trace_id": "tr-1",
      "turn_json": null
     },
     {
-     "display_cells_json": [],
+     "display_cells_json": "[]",
      "kind": null,
      "message_id": "u-c0",
      "origin": "user",
@@ -1610,41 +931,12 @@
      "text": "continue",
      "timestamp": "2026-10-11T08:19:59.500Z",
      "tool_name": null,
-     "tools_json": [],
+     "tools_json": "[]",
      "trace_id": null,
      "turn_json": null
     },
     {
-     "display_cells_json": [
-      {
-       "id": "agy-think-1",
-       "kind": "reasoning",
-       "lines": [
-        {
-         "kind": "status",
-         "label": "",
-         "text": "Plan the listing."
-        }
-       ],
-       "status": "ok",
-       "summary": "",
-       "title": "Reasoned"
-      },
-      {
-       "id": "step-2",
-       "kind": "exploration",
-       "lines": [
-        {
-         "kind": "detail",
-         "label": "List",
-         "text": "/redacted/0"
-        }
-       ],
-       "status": "ok",
-       "summary": "",
-       "title": "Explored"
-      }
-     ],
+     "display_cells_json": "[{\"id\":\"agy-think-1\",\"kind\":\"reasoning\",\"title\":\"Reasoned\",\"summary\":\"\",\"status\":\"ok\",\"lines\":[{\"label\":\"\",\"text\":\"Plan the listing.\",\"kind\":\"status\"}]},{\"id\":\"step-2\",\"kind\":\"exploration\",\"title\":\"Explored\",\"summary\":\"\",\"status\":\"ok\",\"lines\":[{\"label\":\"List\",\"text\":\"/redacted/0\",\"kind\":\"detail\"}]}]",
      "kind": null,
      "message_id": "msg-f573251188d63cabd329",
      "origin": "user",
@@ -1658,29 +950,12 @@
      "text": "Looking at 0.",
      "timestamp": "2026-10-11T08:20:02.000Z",
      "tool_name": null,
-     "tools_json": [
-      {
-       "action": "running command",
-       "command": "ls /redacted/0",
-       "description": "",
-       "exit_code": null,
-       "file_path": "",
-       "id": "step-2",
-       "input": {
-        "command": "ls /redacted/0",
-        "description": ""
-       },
-       "name": "Bash",
-       "result": "a\nb",
-       "status": "ok",
-       "summary": "list files"
-      }
-     ],
+     "tools_json": "[{\"name\":\"Bash\",\"summary\":\"list files\",\"action\":\"running command\",\"file_path\":\"\",\"status\":\"ok\",\"id\":\"step-2\",\"command\":\"ls /redacted/0\",\"description\":\"\",\"input\":{\"command\":\"ls /redacted/0\",\"description\":\"\"},\"exit_code\":null,\"result\":\"a\\nb\"}]",
      "trace_id": null,
      "turn_json": null
     },
     {
-     "display_cells_json": [],
+     "display_cells_json": "[]",
      "kind": null,
      "message_id": "msg-0206b66d688ab53e9185",
      "origin": "user",
@@ -1694,12 +969,12 @@
      "text": "Done with 0. <speak>Done 0.</speak>",
      "timestamp": "2026-10-11T08:20:05.000Z",
      "tool_name": null,
-     "tools_json": [],
+     "tools_json": "[]",
      "trace_id": null,
      "turn_json": null
     },
     {
-     "display_cells_json": [],
+     "display_cells_json": "[]",
      "kind": null,
      "message_id": "msg-f44cac0ef7a7b0887e86",
      "origin": "heartbeat",
@@ -1713,41 +988,12 @@
      "text": "This is a continuity check, not a new task. Read HEARTBEAT.md if it exists (workspace context). Follow it strictly. Review the durable goal/task plan included below, current commitments, and queued team updates. If a pending or in-progress plan item can be advanced safely, continue it now; do not reply HEARTBEAT_OK merely because no new chat message arrived. Do not infer or repeat old tasks from prior chats. Do not restart completed or stale work. Audit durable background jobs and update any job whose displayed state is stale. Preserve genuine active work. If no current work can be advanced and nothing needs attention, reply HEARTBEAT_OK and take no action.",
      "timestamp": "2026-10-11T08:22:00.000Z",
      "tool_name": null,
-     "tools_json": [],
+     "tools_json": "[]",
      "trace_id": "tr-1",
      "turn_json": null
     },
     {
-     "display_cells_json": [
-      {
-       "id": "agy-think-9",
-       "kind": "reasoning",
-       "lines": [
-        {
-         "kind": "status",
-         "label": "",
-         "text": "Plan the listing."
-        }
-       ],
-       "status": "ok",
-       "summary": "",
-       "title": "Reasoned"
-      },
-      {
-       "id": "step-10",
-       "kind": "exploration",
-       "lines": [
-        {
-         "kind": "detail",
-         "label": "List",
-         "text": "/redacted/2"
-        }
-       ],
-       "status": "ok",
-       "summary": "",
-       "title": "Explored"
-      }
-     ],
+     "display_cells_json": "[{\"id\":\"agy-think-9\",\"kind\":\"reasoning\",\"title\":\"Reasoned\",\"summary\":\"\",\"status\":\"ok\",\"lines\":[{\"label\":\"\",\"text\":\"Plan the listing.\",\"kind\":\"status\"}]},{\"id\":\"step-10\",\"kind\":\"exploration\",\"title\":\"Explored\",\"summary\":\"\",\"status\":\"ok\",\"lines\":[{\"label\":\"List\",\"text\":\"/redacted/2\",\"kind\":\"detail\"}]}]",
      "kind": null,
      "message_id": "msg-b14becec6db32850a57e",
      "origin": "heartbeat",
@@ -1761,29 +1007,12 @@
      "text": "Looking at 2.",
      "timestamp": "2026-10-11T08:22:02.000Z",
      "tool_name": null,
-     "tools_json": [
-      {
-       "action": "running command",
-       "command": "ls /redacted/2",
-       "description": "",
-       "exit_code": null,
-       "file_path": "",
-       "id": "step-10",
-       "input": {
-        "command": "ls /redacted/2",
-        "description": ""
-       },
-       "name": "Bash",
-       "result": "a\nb",
-       "status": "ok",
-       "summary": "list files"
-      }
-     ],
+     "tools_json": "[{\"name\":\"Bash\",\"summary\":\"list files\",\"action\":\"running command\",\"file_path\":\"\",\"status\":\"ok\",\"id\":\"step-10\",\"command\":\"ls /redacted/2\",\"description\":\"\",\"input\":{\"command\":\"ls /redacted/2\",\"description\":\"\"},\"exit_code\":null,\"result\":\"a\\nb\"}]",
      "trace_id": "tr-1",
      "turn_json": null
     },
     {
-     "display_cells_json": [],
+     "display_cells_json": "[]",
      "kind": null,
      "message_id": "msg-7906102a7ab7d7942a25",
      "origin": "heartbeat",
@@ -1797,48 +1026,12 @@
      "text": "Heartbeat check: no action needed.",
      "timestamp": "2026-10-11T08:22:05.000Z",
      "tool_name": null,
-     "tools_json": [],
+     "tools_json": "[]",
      "trace_id": "tr-1",
-     "turn_json": {
-      "ended_at_ms": 1791706866000,
-      "started_at_ms": 1791706860000,
-      "status": "completed",
-      "tool_count": 2,
-      "turn_id": "tr-1",
-      "worked_ms": 6000
-     }
+     "turn_json": "{\"turn_id\":\"tr-1\",\"status\":\"completed\",\"started_at_ms\":1791706860000,\"ended_at_ms\":1791706866000,\"worked_ms\":6000,\"tool_count\":2}"
     },
     {
-     "display_cells_json": [
-      {
-       "id": "agy-think-13",
-       "kind": "reasoning",
-       "lines": [
-        {
-         "kind": "status",
-         "label": "",
-         "text": "Plan the listing."
-        }
-       ],
-       "status": "ok",
-       "summary": "",
-       "title": "Reasoned"
-      },
-      {
-       "id": "step-14",
-       "kind": "exploration",
-       "lines": [
-        {
-         "kind": "detail",
-         "label": "List",
-         "text": "/redacted/3"
-        }
-       ],
-       "status": "ok",
-       "summary": "",
-       "title": "Explored"
-      }
-     ],
+     "display_cells_json": "[{\"id\":\"agy-think-13\",\"kind\":\"reasoning\",\"title\":\"Reasoned\",\"summary\":\"\",\"status\":\"ok\",\"lines\":[{\"label\":\"\",\"text\":\"Plan the listing.\",\"kind\":\"status\"}]},{\"id\":\"step-14\",\"kind\":\"exploration\",\"title\":\"Explored\",\"summary\":\"\",\"status\":\"ok\",\"lines\":[{\"label\":\"List\",\"text\":\"/redacted/3\",\"kind\":\"detail\"}]}]",
      "kind": null,
      "message_id": "msg-a7a7aa51eebb57a8f870",
      "origin": "agent",
@@ -1852,29 +1045,12 @@
      "text": "Looking at 3.",
      "timestamp": "2026-10-11T08:23:02.000Z",
      "tool_name": null,
-     "tools_json": [
-      {
-       "action": "running command",
-       "command": "ls /redacted/3",
-       "description": "",
-       "exit_code": null,
-       "file_path": "",
-       "id": "step-14",
-       "input": {
-        "command": "ls /redacted/3",
-        "description": ""
-       },
-       "name": "Bash",
-       "result": "a\nb",
-       "status": "ok",
-       "summary": "list files"
-      }
-     ],
+     "tools_json": "[{\"name\":\"Bash\",\"summary\":\"list files\",\"action\":\"running command\",\"file_path\":\"\",\"status\":\"ok\",\"id\":\"step-14\",\"command\":\"ls /redacted/3\",\"description\":\"\",\"input\":{\"command\":\"ls /redacted/3\",\"description\":\"\"},\"exit_code\":null,\"result\":\"a\\nb\"}]",
      "trace_id": "tr-3",
      "turn_json": null
     },
     {
-     "display_cells_json": [],
+     "display_cells_json": "[]",
      "kind": null,
      "message_id": "live-3",
      "origin": "agent",
@@ -1888,16 +1064,9 @@
      "text": "Done with 3. <speak>Done 3.</speak>",
      "timestamp": "2026-10-11T08:23:05.000Z",
      "tool_name": null,
-     "tools_json": [],
+     "tools_json": "[]",
      "trace_id": "tr-3",
-     "turn_json": {
-      "ended_at_ms": 1791706986000,
-      "started_at_ms": 1791706980000,
-      "status": "completed",
-      "tool_count": 1,
-      "turn_id": "tr-3",
-      "worked_ms": 6000
-     }
+     "turn_json": "{\"turn_id\":\"tr-3\",\"status\":\"completed\",\"started_at_ms\":1791706980000,\"ended_at_ms\":1791706986000,\"worked_ms\":6000,\"tool_count\":1}"
     }
    ],
    "step": "truncate"
@@ -1924,36 +1093,7 @@
    "import": "ok",
    "messages": [
     {
-     "display_cells_json": [
-      {
-       "id": "agy-think-5",
-       "kind": "reasoning",
-       "lines": [
-        {
-         "kind": "status",
-         "label": "",
-         "text": "Plan the listing."
-        }
-       ],
-       "status": "ok",
-       "summary": "",
-       "title": "Reasoned"
-      },
-      {
-       "id": "step-6",
-       "kind": "exploration",
-       "lines": [
-        {
-         "kind": "detail",
-         "label": "List",
-         "text": "/redacted/1"
-        }
-       ],
-       "status": "ok",
-       "summary": "",
-       "title": "Explored"
-      }
-     ],
+     "display_cells_json": "[{\"id\":\"agy-think-5\",\"kind\":\"reasoning\",\"title\":\"Reasoned\",\"summary\":\"\",\"status\":\"ok\",\"lines\":[{\"label\":\"\",\"text\":\"Plan the listing.\",\"kind\":\"status\"}]},{\"id\":\"step-6\",\"kind\":\"exploration\",\"title\":\"Explored\",\"summary\":\"\",\"status\":\"ok\",\"lines\":[{\"label\":\"List\",\"text\":\"/redacted/1\",\"kind\":\"detail\"}]}]",
      "kind": null,
      "message_id": "final-1",
      "origin": "user",
@@ -1967,29 +1107,12 @@
      "text": "Done with 1. <speak>Done 1.</speak>",
      "timestamp": "2026-10-11T08:21:05.000Z",
      "tool_name": null,
-     "tools_json": [
-      {
-       "action": "running command",
-       "command": "ls /redacted/1",
-       "description": "",
-       "exit_code": null,
-       "file_path": "",
-       "id": "step-6",
-       "input": {
-        "command": "ls /redacted/1",
-        "description": ""
-       },
-       "name": "Bash",
-       "result": "a\nb",
-       "status": "ok",
-       "summary": "list files"
-      }
-     ],
+     "tools_json": "[{\"name\":\"Bash\",\"summary\":\"list files\",\"action\":\"running command\",\"file_path\":\"\",\"status\":\"ok\",\"id\":\"step-6\",\"command\":\"ls /redacted/1\",\"description\":\"\",\"input\":{\"command\":\"ls /redacted/1\",\"description\":\"\"},\"exit_code\":null,\"result\":\"a\\nb\"}]",
      "trace_id": "tr-1",
      "turn_json": null
     },
     {
-     "display_cells_json": [],
+     "display_cells_json": "[]",
      "kind": null,
      "message_id": "u-c3",
      "origin": "agent",
@@ -2003,12 +1126,12 @@
      "text": "continue",
      "timestamp": "2026-10-11T08:22:59.500Z",
      "tool_name": null,
-     "tools_json": [],
+     "tools_json": "[]",
      "trace_id": "tr-3",
      "turn_json": null
     },
     {
-     "display_cells_json": [],
+     "display_cells_json": "[]",
      "kind": null,
      "message_id": "u-c1",
      "origin": "agent",
@@ -2022,12 +1145,12 @@
      "text": "request 1 about /redacted/1",
      "timestamp": "2026-10-11T08:20:59.500Z",
      "tool_name": null,
-     "tools_json": [],
+     "tools_json": "[]",
      "trace_id": "tr-1",
      "turn_json": null
     },
     {
-     "display_cells_json": [],
+     "display_cells_json": "[]",
      "kind": null,
      "message_id": "u-c0",
      "origin": "user",
@@ -2041,41 +1164,12 @@
      "text": "continue",
      "timestamp": "2026-10-11T08:19:59.500Z",
      "tool_name": null,
-     "tools_json": [],
+     "tools_json": "[]",
      "trace_id": null,
      "turn_json": null
     },
     {
-     "display_cells_json": [
-      {
-       "id": "agy-think-1",
-       "kind": "reasoning",
-       "lines": [
-        {
-         "kind": "status",
-         "label": "",
-         "text": "Plan the listing."
-        }
-       ],
-       "status": "ok",
-       "summary": "",
-       "title": "Reasoned"
-      },
-      {
-       "id": "step-2",
-       "kind": "exploration",
-       "lines": [
-        {
-         "kind": "detail",
-         "label": "List",
-         "text": "/redacted/0"
-        }
-       ],
-       "status": "ok",
-       "summary": "",
-       "title": "Explored"
-      }
-     ],
+     "display_cells_json": "[{\"id\":\"agy-think-1\",\"kind\":\"reasoning\",\"title\":\"Reasoned\",\"summary\":\"\",\"status\":\"ok\",\"lines\":[{\"label\":\"\",\"text\":\"Plan the listing.\",\"kind\":\"status\"}]},{\"id\":\"step-2\",\"kind\":\"exploration\",\"title\":\"Explored\",\"summary\":\"\",\"status\":\"ok\",\"lines\":[{\"label\":\"List\",\"text\":\"/redacted/0\",\"kind\":\"detail\"}]}]",
      "kind": null,
      "message_id": "msg-f573251188d63cabd329",
      "origin": "user",
@@ -2089,29 +1183,12 @@
      "text": "Looking at 0.",
      "timestamp": "2026-10-11T08:20:02.000Z",
      "tool_name": null,
-     "tools_json": [
-      {
-       "action": "running command",
-       "command": "ls /redacted/0",
-       "description": "",
-       "exit_code": null,
-       "file_path": "",
-       "id": "step-2",
-       "input": {
-        "command": "ls /redacted/0",
-        "description": ""
-       },
-       "name": "Bash",
-       "result": "a\nb",
-       "status": "ok",
-       "summary": "list files"
-      }
-     ],
+     "tools_json": "[{\"name\":\"Bash\",\"summary\":\"list files\",\"action\":\"running command\",\"file_path\":\"\",\"status\":\"ok\",\"id\":\"step-2\",\"command\":\"ls /redacted/0\",\"description\":\"\",\"input\":{\"command\":\"ls /redacted/0\",\"description\":\"\"},\"exit_code\":null,\"result\":\"a\\nb\"}]",
      "trace_id": null,
      "turn_json": null
     },
     {
-     "display_cells_json": [],
+     "display_cells_json": "[]",
      "kind": null,
      "message_id": "msg-0206b66d688ab53e9185",
      "origin": "user",
@@ -2125,12 +1202,12 @@
      "text": "Done with 0. <speak>Done 0.</speak>",
      "timestamp": "2026-10-11T08:20:05.000Z",
      "tool_name": null,
-     "tools_json": [],
+     "tools_json": "[]",
      "trace_id": null,
      "turn_json": null
     },
     {
-     "display_cells_json": [],
+     "display_cells_json": "[]",
      "kind": null,
      "message_id": "msg-f44cac0ef7a7b0887e86",
      "origin": "heartbeat",
@@ -2144,41 +1221,12 @@
      "text": "This is a continuity check, not a new task. Read HEARTBEAT.md if it exists (workspace context). Follow it strictly. Review the durable goal/task plan included below, current commitments, and queued team updates. If a pending or in-progress plan item can be advanced safely, continue it now; do not reply HEARTBEAT_OK merely because no new chat message arrived. Do not infer or repeat old tasks from prior chats. Do not restart completed or stale work. Audit durable background jobs and update any job whose displayed state is stale. Preserve genuine active work. If no current work can be advanced and nothing needs attention, reply HEARTBEAT_OK and take no action.",
      "timestamp": "2026-10-11T08:22:00.000Z",
      "tool_name": null,
-     "tools_json": [],
+     "tools_json": "[]",
      "trace_id": "tr-1",
      "turn_json": null
     },
     {
-     "display_cells_json": [
-      {
-       "id": "agy-think-9",
-       "kind": "reasoning",
-       "lines": [
-        {
-         "kind": "status",
-         "label": "",
-         "text": "Plan the listing."
-        }
-       ],
-       "status": "ok",
-       "summary": "",
-       "title": "Reasoned"
-      },
-      {
-       "id": "step-10",
-       "kind": "exploration",
-       "lines": [
-        {
-         "kind": "detail",
-         "label": "List",
-         "text": "/redacted/2"
-        }
-       ],
-       "status": "ok",
-       "summary": "",
-       "title": "Explored"
-      }
-     ],
+     "display_cells_json": "[{\"id\":\"agy-think-9\",\"kind\":\"reasoning\",\"title\":\"Reasoned\",\"summary\":\"\",\"status\":\"ok\",\"lines\":[{\"label\":\"\",\"text\":\"Plan the listing.\",\"kind\":\"status\"}]},{\"id\":\"step-10\",\"kind\":\"exploration\",\"title\":\"Explored\",\"summary\":\"\",\"status\":\"ok\",\"lines\":[{\"label\":\"List\",\"text\":\"/redacted/2\",\"kind\":\"detail\"}]}]",
      "kind": null,
      "message_id": "msg-b14becec6db32850a57e",
      "origin": "heartbeat",
@@ -2192,29 +1240,12 @@
      "text": "Looking at 2.",
      "timestamp": "2026-10-11T08:22:02.000Z",
      "tool_name": null,
-     "tools_json": [
-      {
-       "action": "running command",
-       "command": "ls /redacted/2",
-       "description": "",
-       "exit_code": null,
-       "file_path": "",
-       "id": "step-10",
-       "input": {
-        "command": "ls /redacted/2",
-        "description": ""
-       },
-       "name": "Bash",
-       "result": "a\nb",
-       "status": "ok",
-       "summary": "list files"
-      }
-     ],
+     "tools_json": "[{\"name\":\"Bash\",\"summary\":\"list files\",\"action\":\"running command\",\"file_path\":\"\",\"status\":\"ok\",\"id\":\"step-10\",\"command\":\"ls /redacted/2\",\"description\":\"\",\"input\":{\"command\":\"ls /redacted/2\",\"description\":\"\"},\"exit_code\":null,\"result\":\"a\\nb\"}]",
      "trace_id": "tr-1",
      "turn_json": null
     },
     {
-     "display_cells_json": [],
+     "display_cells_json": "[]",
      "kind": null,
      "message_id": "msg-7906102a7ab7d7942a25",
      "origin": "heartbeat",
@@ -2228,48 +1259,12 @@
      "text": "Heartbeat check: no action needed.",
      "timestamp": "2026-10-11T08:22:05.000Z",
      "tool_name": null,
-     "tools_json": [],
+     "tools_json": "[]",
      "trace_id": "tr-1",
-     "turn_json": {
-      "ended_at_ms": 1791706866000,
-      "started_at_ms": 1791706860000,
-      "status": "completed",
-      "tool_count": 2,
-      "turn_id": "tr-1",
-      "worked_ms": 6000
-     }
+     "turn_json": "{\"turn_id\":\"tr-1\",\"status\":\"completed\",\"started_at_ms\":1791706860000,\"ended_at_ms\":1791706866000,\"worked_ms\":6000,\"tool_count\":2}"
     },
     {
-     "display_cells_json": [
-      {
-       "id": "agy-think-13",
-       "kind": "reasoning",
-       "lines": [
-        {
-         "kind": "status",
-         "label": "",
-         "text": "Plan the listing."
-        }
-       ],
-       "status": "ok",
-       "summary": "",
-       "title": "Reasoned"
-      },
-      {
-       "id": "step-14",
-       "kind": "exploration",
-       "lines": [
-        {
-         "kind": "detail",
-         "label": "List",
-         "text": "/redacted/3"
-        }
-       ],
-       "status": "ok",
-       "summary": "",
-       "title": "Explored"
-      }
-     ],
+     "display_cells_json": "[{\"id\":\"agy-think-13\",\"kind\":\"reasoning\",\"title\":\"Reasoned\",\"summary\":\"\",\"status\":\"ok\",\"lines\":[{\"label\":\"\",\"text\":\"Plan the listing.\",\"kind\":\"status\"}]},{\"id\":\"step-14\",\"kind\":\"exploration\",\"title\":\"Explored\",\"summary\":\"\",\"status\":\"ok\",\"lines\":[{\"label\":\"List\",\"text\":\"/redacted/3\",\"kind\":\"detail\"}]}]",
      "kind": null,
      "message_id": "msg-a7a7aa51eebb57a8f870",
      "origin": "agent",
@@ -2283,29 +1278,12 @@
      "text": "Looking at 3.",
      "timestamp": "2026-10-11T08:23:02.000Z",
      "tool_name": null,
-     "tools_json": [
-      {
-       "action": "running command",
-       "command": "ls /redacted/3",
-       "description": "",
-       "exit_code": null,
-       "file_path": "",
-       "id": "step-14",
-       "input": {
-        "command": "ls /redacted/3",
-        "description": ""
-       },
-       "name": "Bash",
-       "result": "a\nb",
-       "status": "ok",
-       "summary": "list files"
-      }
-     ],
+     "tools_json": "[{\"name\":\"Bash\",\"summary\":\"list files\",\"action\":\"running command\",\"file_path\":\"\",\"status\":\"ok\",\"id\":\"step-14\",\"command\":\"ls /redacted/3\",\"description\":\"\",\"input\":{\"command\":\"ls /redacted/3\",\"description\":\"\"},\"exit_code\":null,\"result\":\"a\\nb\"}]",
      "trace_id": "tr-3",
      "turn_json": null
     },
     {
-     "display_cells_json": [],
+     "display_cells_json": "[]",
      "kind": null,
      "message_id": "live-3",
      "origin": "agent",
@@ -2319,19 +1297,12 @@
      "text": "Done with 3. <speak>Done 3.</speak>",
      "timestamp": "2026-10-11T08:23:05.000Z",
      "tool_name": null,
-     "tools_json": [],
+     "tools_json": "[]",
      "trace_id": "tr-3",
-     "turn_json": {
-      "ended_at_ms": 1791706986000,
-      "started_at_ms": 1791706980000,
-      "status": "completed",
-      "tool_count": 1,
-      "turn_id": "tr-3",
-      "worked_ms": 6000
-     }
+     "turn_json": "{\"turn_id\":\"tr-3\",\"status\":\"completed\",\"started_at_ms\":1791706980000,\"ended_at_ms\":1791706986000,\"worked_ms\":6000,\"tool_count\":1}"
     },
     {
-     "display_cells_json": [],
+     "display_cells_json": "[]",
      "kind": null,
      "message_id": "msg-e14e86b68b08b28666d9",
      "origin": "user",
@@ -2345,41 +1316,12 @@
      "text": "request 4 about /redacted/4",
      "timestamp": "2026-10-11T08:24:00.000Z",
      "tool_name": null,
-     "tools_json": [],
+     "tools_json": "[]",
      "trace_id": "tr-4",
      "turn_json": null
     },
     {
-     "display_cells_json": [
-      {
-       "id": "agy-think-17",
-       "kind": "reasoning",
-       "lines": [
-        {
-         "kind": "status",
-         "label": "",
-         "text": "Plan the listing."
-        }
-       ],
-       "status": "ok",
-       "summary": "",
-       "title": "Reasoned"
-      },
-      {
-       "id": "step-18",
-       "kind": "exploration",
-       "lines": [
-        {
-         "kind": "detail",
-         "label": "List",
-         "text": "/redacted/4"
-        }
-       ],
-       "status": "ok",
-       "summary": "",
-       "title": "Explored"
-      }
-     ],
+     "display_cells_json": "[{\"id\":\"agy-think-17\",\"kind\":\"reasoning\",\"title\":\"Reasoned\",\"summary\":\"\",\"status\":\"ok\",\"lines\":[{\"label\":\"\",\"text\":\"Plan the listing.\",\"kind\":\"status\"}]},{\"id\":\"step-18\",\"kind\":\"exploration\",\"title\":\"Explored\",\"summary\":\"\",\"status\":\"ok\",\"lines\":[{\"label\":\"List\",\"text\":\"/redacted/4\",\"kind\":\"detail\"}]}]",
      "kind": null,
      "message_id": "msg-a8e567f923212e99a714",
      "origin": "user",
@@ -2393,29 +1335,12 @@
      "text": "Looking at 4.",
      "timestamp": "2026-10-11T08:24:02.000Z",
      "tool_name": null,
-     "tools_json": [
-      {
-       "action": "running command",
-       "command": "ls /redacted/4",
-       "description": "",
-       "exit_code": null,
-       "file_path": "",
-       "id": "step-18",
-       "input": {
-        "command": "ls /redacted/4",
-        "description": ""
-       },
-       "name": "Bash",
-       "result": "a\nb",
-       "status": "ok",
-       "summary": "list files"
-      }
-     ],
+     "tools_json": "[{\"name\":\"Bash\",\"summary\":\"list files\",\"action\":\"running command\",\"file_path\":\"\",\"status\":\"ok\",\"id\":\"step-18\",\"command\":\"ls /redacted/4\",\"description\":\"\",\"input\":{\"command\":\"ls /redacted/4\",\"description\":\"\"},\"exit_code\":null,\"result\":\"a\\nb\"}]",
      "trace_id": "tr-4",
      "turn_json": null
     },
     {
-     "display_cells_json": [],
+     "display_cells_json": "[]",
      "kind": null,
      "message_id": "msg-1caddcceac629bbc5fdf",
      "origin": "user",
@@ -2429,16 +1354,9 @@
      "text": "Done with 4. <speak>Done 4.</speak>",
      "timestamp": "2026-10-11T08:24:05.000Z",
      "tool_name": null,
-     "tools_json": [],
+     "tools_json": "[]",
      "trace_id": "tr-4",
-     "turn_json": {
-      "ended_at_ms": 1791707046000,
-      "started_at_ms": 1791707040000,
-      "status": "interrupted",
-      "tool_count": 1,
-      "turn_id": "tr-4",
-      "worked_ms": 6000
-     }
+     "turn_json": "{\"turn_id\":\"tr-4\",\"status\":\"interrupted\",\"started_at_ms\":1791707040000,\"ended_at_ms\":1791707046000,\"worked_ms\":6000,\"tool_count\":1}"
     }
    ],
    "step": "regrow"
@@ -2465,36 +1383,7 @@
    "import": "IntegrityError: UNIQUE constraint failed: messages.agent_id, messages.backend_session_id, messages.seq",
    "messages": [
     {
-     "display_cells_json": [
-      {
-       "id": "agy-think-5",
-       "kind": "reasoning",
-       "lines": [
-        {
-         "kind": "status",
-         "label": "",
-         "text": "Plan the listing."
-        }
-       ],
-       "status": "ok",
-       "summary": "",
-       "title": "Reasoned"
-      },
-      {
-       "id": "step-6",
-       "kind": "exploration",
-       "lines": [
-        {
-         "kind": "detail",
-         "label": "List",
-         "text": "/redacted/1"
-        }
-       ],
-       "status": "ok",
-       "summary": "",
-       "title": "Explored"
-      }
-     ],
+     "display_cells_json": "[{\"id\":\"agy-think-5\",\"kind\":\"reasoning\",\"title\":\"Reasoned\",\"summary\":\"\",\"status\":\"ok\",\"lines\":[{\"label\":\"\",\"text\":\"Plan the listing.\",\"kind\":\"status\"}]},{\"id\":\"step-6\",\"kind\":\"exploration\",\"title\":\"Explored\",\"summary\":\"\",\"status\":\"ok\",\"lines\":[{\"label\":\"List\",\"text\":\"/redacted/1\",\"kind\":\"detail\"}]}]",
      "kind": null,
      "message_id": "final-1",
      "origin": "user",
@@ -2508,29 +1397,12 @@
      "text": "Done with 1. <speak>Done 1.</speak>",
      "timestamp": "2026-10-11T08:21:05.000Z",
      "tool_name": null,
-     "tools_json": [
-      {
-       "action": "running command",
-       "command": "ls /redacted/1",
-       "description": "",
-       "exit_code": null,
-       "file_path": "",
-       "id": "step-6",
-       "input": {
-        "command": "ls /redacted/1",
-        "description": ""
-       },
-       "name": "Bash",
-       "result": "a\nb",
-       "status": "ok",
-       "summary": "list files"
-      }
-     ],
+     "tools_json": "[{\"name\":\"Bash\",\"summary\":\"list files\",\"action\":\"running command\",\"file_path\":\"\",\"status\":\"ok\",\"id\":\"step-6\",\"command\":\"ls /redacted/1\",\"description\":\"\",\"input\":{\"command\":\"ls /redacted/1\",\"description\":\"\"},\"exit_code\":null,\"result\":\"a\\nb\"}]",
      "trace_id": "tr-1",
      "turn_json": null
     },
     {
-     "display_cells_json": [],
+     "display_cells_json": "[]",
      "kind": null,
      "message_id": "u-c3",
      "origin": "agent",
@@ -2544,12 +1416,12 @@
      "text": "continue",
      "timestamp": "2026-10-11T08:22:59.500Z",
      "tool_name": null,
-     "tools_json": [],
+     "tools_json": "[]",
      "trace_id": "tr-3",
      "turn_json": null
     },
     {
-     "display_cells_json": [],
+     "display_cells_json": "[]",
      "kind": null,
      "message_id": "u-c1",
      "origin": "agent",
@@ -2563,12 +1435,12 @@
      "text": "request 1 about /redacted/1",
      "timestamp": "2026-10-11T08:20:59.500Z",
      "tool_name": null,
-     "tools_json": [],
+     "tools_json": "[]",
      "trace_id": "tr-1",
      "turn_json": null
     },
     {
-     "display_cells_json": [],
+     "display_cells_json": "[]",
      "kind": null,
      "message_id": "u-c0",
      "origin": "user",
@@ -2582,41 +1454,12 @@
      "text": "continue",
      "timestamp": "2026-10-11T08:19:59.500Z",
      "tool_name": null,
-     "tools_json": [],
+     "tools_json": "[]",
      "trace_id": null,
      "turn_json": null
     },
     {
-     "display_cells_json": [
-      {
-       "id": "agy-think-1",
-       "kind": "reasoning",
-       "lines": [
-        {
-         "kind": "status",
-         "label": "",
-         "text": "Plan the listing."
-        }
-       ],
-       "status": "ok",
-       "summary": "",
-       "title": "Reasoned"
-      },
-      {
-       "id": "step-2",
-       "kind": "exploration",
-       "lines": [
-        {
-         "kind": "detail",
-         "label": "List",
-         "text": "/redacted/0"
-        }
-       ],
-       "status": "ok",
-       "summary": "",
-       "title": "Explored"
-      }
-     ],
+     "display_cells_json": "[{\"id\":\"agy-think-1\",\"kind\":\"reasoning\",\"title\":\"Reasoned\",\"summary\":\"\",\"status\":\"ok\",\"lines\":[{\"label\":\"\",\"text\":\"Plan the listing.\",\"kind\":\"status\"}]},{\"id\":\"step-2\",\"kind\":\"exploration\",\"title\":\"Explored\",\"summary\":\"\",\"status\":\"ok\",\"lines\":[{\"label\":\"List\",\"text\":\"/redacted/0\",\"kind\":\"detail\"}]}]",
      "kind": null,
      "message_id": "msg-f573251188d63cabd329",
      "origin": "user",
@@ -2630,29 +1473,12 @@
      "text": "Looking at 0.",
      "timestamp": "2026-10-11T08:20:02.000Z",
      "tool_name": null,
-     "tools_json": [
-      {
-       "action": "running command",
-       "command": "ls /redacted/0",
-       "description": "",
-       "exit_code": null,
-       "file_path": "",
-       "id": "step-2",
-       "input": {
-        "command": "ls /redacted/0",
-        "description": ""
-       },
-       "name": "Bash",
-       "result": "a\nb",
-       "status": "ok",
-       "summary": "list files"
-      }
-     ],
+     "tools_json": "[{\"name\":\"Bash\",\"summary\":\"list files\",\"action\":\"running command\",\"file_path\":\"\",\"status\":\"ok\",\"id\":\"step-2\",\"command\":\"ls /redacted/0\",\"description\":\"\",\"input\":{\"command\":\"ls /redacted/0\",\"description\":\"\"},\"exit_code\":null,\"result\":\"a\\nb\"}]",
      "trace_id": null,
      "turn_json": null
     },
     {
-     "display_cells_json": [],
+     "display_cells_json": "[]",
      "kind": null,
      "message_id": "msg-0206b66d688ab53e9185",
      "origin": "user",
@@ -2666,12 +1492,12 @@
      "text": "Done with 0. <speak>Done 0.</speak>",
      "timestamp": "2026-10-11T08:20:05.000Z",
      "tool_name": null,
-     "tools_json": [],
+     "tools_json": "[]",
      "trace_id": null,
      "turn_json": null
     },
     {
-     "display_cells_json": [],
+     "display_cells_json": "[]",
      "kind": null,
      "message_id": "msg-f44cac0ef7a7b0887e86",
      "origin": "heartbeat",
@@ -2685,41 +1511,12 @@
      "text": "This is a continuity check, not a new task. Read HEARTBEAT.md if it exists (workspace context). Follow it strictly. Review the durable goal/task plan included below, current commitments, and queued team updates. If a pending or in-progress plan item can be advanced safely, continue it now; do not reply HEARTBEAT_OK merely because no new chat message arrived. Do not infer or repeat old tasks from prior chats. Do not restart completed or stale work. Audit durable background jobs and update any job whose displayed state is stale. Preserve genuine active work. If no current work can be advanced and nothing needs attention, reply HEARTBEAT_OK and take no action.",
      "timestamp": "2026-10-11T08:22:00.000Z",
      "tool_name": null,
-     "tools_json": [],
+     "tools_json": "[]",
      "trace_id": "tr-1",
      "turn_json": null
     },
     {
-     "display_cells_json": [
-      {
-       "id": "agy-think-9",
-       "kind": "reasoning",
-       "lines": [
-        {
-         "kind": "status",
-         "label": "",
-         "text": "Plan the listing."
-        }
-       ],
-       "status": "ok",
-       "summary": "",
-       "title": "Reasoned"
-      },
-      {
-       "id": "step-10",
-       "kind": "exploration",
-       "lines": [
-        {
-         "kind": "detail",
-         "label": "List",
-         "text": "/redacted/2"
-        }
-       ],
-       "status": "ok",
-       "summary": "",
-       "title": "Explored"
-      }
-     ],
+     "display_cells_json": "[{\"id\":\"agy-think-9\",\"kind\":\"reasoning\",\"title\":\"Reasoned\",\"summary\":\"\",\"status\":\"ok\",\"lines\":[{\"label\":\"\",\"text\":\"Plan the listing.\",\"kind\":\"status\"}]},{\"id\":\"step-10\",\"kind\":\"exploration\",\"title\":\"Explored\",\"summary\":\"\",\"status\":\"ok\",\"lines\":[{\"label\":\"List\",\"text\":\"/redacted/2\",\"kind\":\"detail\"}]}]",
      "kind": null,
      "message_id": "msg-b14becec6db32850a57e",
      "origin": "heartbeat",
@@ -2733,29 +1530,12 @@
      "text": "Looking at 2.",
      "timestamp": "2026-10-11T08:22:02.000Z",
      "tool_name": null,
-     "tools_json": [
-      {
-       "action": "running command",
-       "command": "ls /redacted/2",
-       "description": "",
-       "exit_code": null,
-       "file_path": "",
-       "id": "step-10",
-       "input": {
-        "command": "ls /redacted/2",
-        "description": ""
-       },
-       "name": "Bash",
-       "result": "a\nb",
-       "status": "ok",
-       "summary": "list files"
-      }
-     ],
+     "tools_json": "[{\"name\":\"Bash\",\"summary\":\"list files\",\"action\":\"running command\",\"file_path\":\"\",\"status\":\"ok\",\"id\":\"step-10\",\"command\":\"ls /redacted/2\",\"description\":\"\",\"input\":{\"command\":\"ls /redacted/2\",\"description\":\"\"},\"exit_code\":null,\"result\":\"a\\nb\"}]",
      "trace_id": "tr-1",
      "turn_json": null
     },
     {
-     "display_cells_json": [],
+     "display_cells_json": "[]",
      "kind": null,
      "message_id": "msg-7906102a7ab7d7942a25",
      "origin": "heartbeat",
@@ -2769,48 +1549,12 @@
      "text": "Heartbeat check: no action needed.",
      "timestamp": "2026-10-11T08:22:05.000Z",
      "tool_name": null,
-     "tools_json": [],
+     "tools_json": "[]",
      "trace_id": "tr-1",
-     "turn_json": {
-      "ended_at_ms": 1791706866000,
-      "started_at_ms": 1791706860000,
-      "status": "completed",
-      "tool_count": 2,
-      "turn_id": "tr-1",
-      "worked_ms": 6000
-     }
+     "turn_json": "{\"turn_id\":\"tr-1\",\"status\":\"completed\",\"started_at_ms\":1791706860000,\"ended_at_ms\":1791706866000,\"worked_ms\":6000,\"tool_count\":2}"
     },
     {
-     "display_cells_json": [
-      {
-       "id": "agy-think-13",
-       "kind": "reasoning",
-       "lines": [
-        {
-         "kind": "status",
-         "label": "",
-         "text": "Plan the listing."
-        }
-       ],
-       "status": "ok",
-       "summary": "",
-       "title": "Reasoned"
-      },
-      {
-       "id": "step-14",
-       "kind": "exploration",
-       "lines": [
-        {
-         "kind": "detail",
-         "label": "List",
-         "text": "/redacted/3"
-        }
-       ],
-       "status": "ok",
-       "summary": "",
-       "title": "Explored"
-      }
-     ],
+     "display_cells_json": "[{\"id\":\"agy-think-13\",\"kind\":\"reasoning\",\"title\":\"Reasoned\",\"summary\":\"\",\"status\":\"ok\",\"lines\":[{\"label\":\"\",\"text\":\"Plan the listing.\",\"kind\":\"status\"}]},{\"id\":\"step-14\",\"kind\":\"exploration\",\"title\":\"Explored\",\"summary\":\"\",\"status\":\"ok\",\"lines\":[{\"label\":\"List\",\"text\":\"/redacted/3\",\"kind\":\"detail\"}]}]",
      "kind": null,
      "message_id": "msg-a7a7aa51eebb57a8f870",
      "origin": "agent",
@@ -2824,29 +1568,12 @@
      "text": "Looking at 3.",
      "timestamp": "2026-10-11T08:23:02.000Z",
      "tool_name": null,
-     "tools_json": [
-      {
-       "action": "running command",
-       "command": "ls /redacted/3",
-       "description": "",
-       "exit_code": null,
-       "file_path": "",
-       "id": "step-14",
-       "input": {
-        "command": "ls /redacted/3",
-        "description": ""
-       },
-       "name": "Bash",
-       "result": "a\nb",
-       "status": "ok",
-       "summary": "list files"
-      }
-     ],
+     "tools_json": "[{\"name\":\"Bash\",\"summary\":\"list files\",\"action\":\"running command\",\"file_path\":\"\",\"status\":\"ok\",\"id\":\"step-14\",\"command\":\"ls /redacted/3\",\"description\":\"\",\"input\":{\"command\":\"ls /redacted/3\",\"description\":\"\"},\"exit_code\":null,\"result\":\"a\\nb\"}]",
      "trace_id": "tr-3",
      "turn_json": null
     },
     {
-     "display_cells_json": [],
+     "display_cells_json": "[]",
      "kind": null,
      "message_id": "live-3",
      "origin": "agent",
@@ -2860,19 +1587,12 @@
      "text": "Done with 3. <speak>Done 3.</speak>",
      "timestamp": "2026-10-11T08:23:05.000Z",
      "tool_name": null,
-     "tools_json": [],
+     "tools_json": "[]",
      "trace_id": "tr-3",
-     "turn_json": {
-      "ended_at_ms": 1791706986000,
-      "started_at_ms": 1791706980000,
-      "status": "completed",
-      "tool_count": 1,
-      "turn_id": "tr-3",
-      "worked_ms": 6000
-     }
+     "turn_json": "{\"turn_id\":\"tr-3\",\"status\":\"completed\",\"started_at_ms\":1791706980000,\"ended_at_ms\":1791706986000,\"worked_ms\":6000,\"tool_count\":1}"
     },
     {
-     "display_cells_json": [],
+     "display_cells_json": "[]",
      "kind": null,
      "message_id": "msg-e14e86b68b08b28666d9",
      "origin": "user",
@@ -2886,41 +1606,12 @@
      "text": "request 4 about /redacted/4",
      "timestamp": "2026-10-11T08:24:00.000Z",
      "tool_name": null,
-     "tools_json": [],
+     "tools_json": "[]",
      "trace_id": "tr-4",
      "turn_json": null
     },
     {
-     "display_cells_json": [
-      {
-       "id": "agy-think-17",
-       "kind": "reasoning",
-       "lines": [
-        {
-         "kind": "status",
-         "label": "",
-         "text": "Plan the listing."
-        }
-       ],
-       "status": "ok",
-       "summary": "",
-       "title": "Reasoned"
-      },
-      {
-       "id": "step-18",
-       "kind": "exploration",
-       "lines": [
-        {
-         "kind": "detail",
-         "label": "List",
-         "text": "/redacted/4"
-        }
-       ],
-       "status": "ok",
-       "summary": "",
-       "title": "Explored"
-      }
-     ],
+     "display_cells_json": "[{\"id\":\"agy-think-17\",\"kind\":\"reasoning\",\"title\":\"Reasoned\",\"summary\":\"\",\"status\":\"ok\",\"lines\":[{\"label\":\"\",\"text\":\"Plan the listing.\",\"kind\":\"status\"}]},{\"id\":\"step-18\",\"kind\":\"exploration\",\"title\":\"Explored\",\"summary\":\"\",\"status\":\"ok\",\"lines\":[{\"label\":\"List\",\"text\":\"/redacted/4\",\"kind\":\"detail\"}]}]",
      "kind": null,
      "message_id": "msg-a8e567f923212e99a714",
      "origin": "user",
@@ -2934,29 +1625,12 @@
      "text": "Looking at 4.",
      "timestamp": "2026-10-11T08:24:02.000Z",
      "tool_name": null,
-     "tools_json": [
-      {
-       "action": "running command",
-       "command": "ls /redacted/4",
-       "description": "",
-       "exit_code": null,
-       "file_path": "",
-       "id": "step-18",
-       "input": {
-        "command": "ls /redacted/4",
-        "description": ""
-       },
-       "name": "Bash",
-       "result": "a\nb",
-       "status": "ok",
-       "summary": "list files"
-      }
-     ],
+     "tools_json": "[{\"name\":\"Bash\",\"summary\":\"list files\",\"action\":\"running command\",\"file_path\":\"\",\"status\":\"ok\",\"id\":\"step-18\",\"command\":\"ls /redacted/4\",\"description\":\"\",\"input\":{\"command\":\"ls /redacted/4\",\"description\":\"\"},\"exit_code\":null,\"result\":\"a\\nb\"}]",
      "trace_id": "tr-4",
      "turn_json": null
     },
     {
-     "display_cells_json": [],
+     "display_cells_json": "[]",
      "kind": null,
      "message_id": "msg-1caddcceac629bbc5fdf",
      "origin": "user",
@@ -2970,16 +1644,9 @@
      "text": "Done with 4. <speak>Done 4.</speak>",
      "timestamp": "2026-10-11T08:24:05.000Z",
      "tool_name": null,
-     "tools_json": [],
+     "tools_json": "[]",
      "trace_id": "tr-4",
-     "turn_json": {
-      "ended_at_ms": 1791707046000,
-      "started_at_ms": 1791707040000,
-      "status": "interrupted",
-      "tool_count": 1,
-      "turn_id": "tr-4",
-      "worked_ms": 6000
-     }
+     "turn_json": "{\"turn_id\":\"tr-4\",\"status\":\"interrupted\",\"started_at_ms\":1791707040000,\"ended_at_ms\":1791707046000,\"worked_ms\":6000,\"tool_count\":1}"
     }
    ],
    "step": "rotate"

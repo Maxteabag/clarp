@@ -1,0 +1,41 @@
+{
+ "agy": {
+  "1": {
+   "checkpoints": "5b92a18ea5b1f7257253b5dece696806bcdd0db03af8255dfc68bb6c69add86b",
+   "parse": "e5d318b2e774abd6dd63998d7bd98adbf130d8ea6ce7aa2d45234a7e7793f846",
+   "store": "fde632a2f5a498f8c736044d4b910cf53f7c58abf15864889180f030e8062bdd"
+  }
+ },
+ "claude": {
+  "1": {
+   "checkpoints": "cc05b1ad96bdc742af72f307fc8f9cf1d0dcd00548b85bdbc22184b3ffad2044",
+   "parse": "0eac8f0ed77d67ae4721fe290db10daee0d32610dc2a0fc3600a4b42c642618f",
+   "store": "b07dddf56c26e91bf237f1abbe9d2df1faf8f6a604b00ad4b27ba16bc9fe8939"
+  }
+ },
+ "codex": {
+  "1": {
+   "checkpoints": "7cfc7ec1ff92ec8b931086d3c4b35b4be688903afdee8477661a7aa97a9f6447",
+   "parse": "ef776e9afd509adb43aa96727ac10493567892392624de7bcd60cb87fc40c553",
+   "store": "d96171c40579fbddd726ad8d0c311ed8c069ca925bf126c2810b2b1e32ef41a7"
+  }
+ },
+ "grok": {
+  "1": {
+   "parse": "b86c2365138fd670f5c45fb3341cd3af571c1ac1a8c4c962153abc9642a14e52",
+   "store": "521606b017922e48bb38748c9cead893c9239e258b0ca66c7361365a767da34d"
+  }
+ },
+ "muse": {
+  "1": {
+   "parse": "ac792a6a1361891f2ac2b8c508190308a08e0f1b66f7cd345d330aa8db6441e0",
+   "store": "bb8c9414a4435619e1d007523f6c0edfa9183890f95af875e8753ca832e10954"
+  }
+ },
+ "opencode": {
+  "1": {
+   "parse": "5344820bc03964070114e92e8c304addb44fd6c960ba082b18de54f8fc3de52f",
+   "store": "fadb6e3dc7114c04a19f782db394f647cafcc1440d1764f7a74ee3b3f268ea35"
+  }
+ }
+}

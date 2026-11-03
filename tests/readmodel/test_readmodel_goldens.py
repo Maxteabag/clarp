@@ -59,8 +59,10 @@ def _import_outcome(backend: str, transcript: pathlib.Path) -> str:
     return "ok"
 
 
-def _turns_view(turns: list[dict]) -> list[dict]:
-    return json.loads(json.dumps(turns, sort_keys=True, default=str))
+def _turns_view(turns: list[dict]) -> list[str]:
+    """One JSON string per turn, in the parser's key order (the store writes
+    tools in that order, and compares the strings)."""
+    return [json.dumps(turn, default=str, ensure_ascii=False) for turn in turns]
 
 
 def _check(name: str, actual) -> None:
