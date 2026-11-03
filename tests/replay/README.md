@@ -8,16 +8,19 @@ this directory.
 
 ## How to run
 
-Always through the program's one-slot wrapper; the machine also runs the live
-Host.
+Replay starts real test Hosts, so it **never runs on laptopstudio** (Peter's
+standing order of 2026-10-12: no test suites or test servers on the machine that
+runs his live Host). It runs on the buildbox through
+`/var/tmp/clarp-refactor-program/bin/heavy-remote` once that exists, or in
+GitHub Actions. Locally only `tests/replay/test_report.py` may run (one file,
+`-n 0`, through `heavy`); it starts no Host.
 
 ```bash
-H=/var/tmp/clarp-refactor-program/bin/heavy
 # A slice: base commit on main against the slice head.
-$H uv run --frozen python tests/replay/run.py compare --base <base-sha> --head <head-sha>
+uv run --frozen python tests/replay/run.py compare --base <base-sha> --head <head-sha>
 # The harness proof: unchanged code replayed against itself (twice) gives zero
 # differences, and every planted change is caught.
-$H uv run --frozen python tests/replay/run.py self-check --ref <sha>
+uv run --frozen python tests/replay/run.py self-check --ref <sha>
 # Remove the cached build worktrees.
 uv run --frozen python tests/replay/run.py clean
 ```
