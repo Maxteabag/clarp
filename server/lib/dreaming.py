@@ -928,53 +928,71 @@ def abandon_run(run_id: str, reason: str = "dreaming disabled while in flight", 
     if not run or run.get("status") != "active":
         return
     now = db.now_ms()
-    db.conn().execute(
-        """UPDATE dream_runs
-              SET status = 'abandoned', stage = 'abandoned',
-                  finished_at = ?, updated_at = ?,
-                  last_error = COALESCE(NULLIF(last_error, ''), ?)
-            WHERE run_id = ?""",
-        (now, now, reason, run_id),
-    )
-    db.conn().execute(
-        """UPDATE dream_rounds SET status = 'abandoned', updated_at = ?
-            WHERE run_id = ? AND status IN ('queued', 'sent')""",
-        (now, run_id),
-    )
+    with settings_store.transaction():
+        # Only a run still in flight is abandoned: a completion that won the
+        # race keeps the run (AUT-06 review). The cleanup intent is written
+        # with it and kept until the worktree is gone.
+        abandoned = db.conn().execute(
+            """UPDATE dream_runs
+                  SET status = 'abandoned', stage = 'abandoned',
+                      finished_at = ?, updated_at = ?,
+                      last_error = COALESCE(NULLIF(last_error, ''), ?)
+                WHERE run_id = ? AND status = 'active'""",
+            (now, now, reason, run_id),
+        ).rowcount
+        if abandoned:
+            db.conn().execute(
+                """UPDATE dream_rounds SET status = 'abandoned', updated_at = ?
+                    WHERE run_id = ? AND status IN ('queued', 'sent')""",
+                (now, run_id),
+            )
+            settings_store.set_text(_CLEANUP_PREFIX + run_id, run["agent_id"])
+    if not abandoned:
+        return
     log("dreamingAbandoned",
         f"run={run_id} session={run.get('session')} "
         f"rounds={run.get('completed_rounds')}")
     if not harvest:
         # Its backend still uses the worktree; the scheduler harvests it once
-        # that backend has stopped (_harvest_deadline_runs).
+        # that backend has stopped (_harvest_abandoned_runs).
         log("dreamHarvestDeferred", f"run={run_id}")
         return
+    _harvest_abandoned(run_id)
+
+
+_CLEANUP_PREFIX = "dreaming.cleanup_pending."
+_CLEANUP_BATCH = 50
+
+
+def _harvest_abandoned(run_id: str) -> None:
     try:
         harvest_worktree(run_id)
     except Exception as e:  # noqa: BLE001
         log_exception("dreamAbandonHarvestFail", e, detail=run_id)
+    if _dream_worktree_path(run_id) is None:
+        settings_store.delete(_CLEANUP_PREFIX + run_id)
 
 
-def _harvest_deadline_runs() -> None:
-    """Harvest the worktree of a run its deadline ended while its backend was
-    still busy, once that agent is quiet. Only runs ended in the last two
-    deadlines are looked at; a harvested worktree is gone from disk, so a run
-    abandoned and harvested at once is skipped by the path check."""
-    since = db.now_ms() - 2 * DREAM_RUN_DEADLINE_SEC * 1000
-    rows = db.conn().execute(
-        """SELECT run_id, agent_id FROM dream_runs
-            WHERE status = 'abandoned' AND finished_at >= ?""",
-        (since,)).fetchall()
-    for row in rows:
-        if _dream_worktree_path(row["run_id"]) is None:
+def _backend_quiet(agent: dict | None) -> bool:
+    """No turn and no backend handle on the agent: nothing writes in its dream
+    worktree. Unlike the dispatch check, routine activity is no exception."""
+    if agent is None:
+        return True
+    return not agents_db.is_busy(agent["agent_id"]) and not backends.active_handles(
+        agent.get("backend"), agent["agent_id"])
+
+
+def _harvest_abandoned_runs() -> None:
+    """Harvest the worktrees abandoned runs still hold, once their backend is
+    quiet. The intent stays until the worktree is gone; one bounded batch per
+    pass, in key order."""
+    low, high = settings_store._prefix_range(_CLEANUP_PREFIX)
+    for key, agent_id in settings_store.items_in_range(low, high, limit=_CLEANUP_BATCH):
+        run_id = key[len(_CLEANUP_PREFIX):]
+        if _dream_worktree_path(run_id) is not None and not _backend_quiet(
+                agents_db.get_by_agent_id(agent_id)):
             continue
-        agent = agents_db.get_by_agent_id(row["agent_id"])
-        if agent and _skip_busy_reason(agent):
-            continue
-        try:
-            harvest_worktree(row["run_id"])
-        except Exception as e:  # noqa: BLE001
-            log_exception("dreamAbandonHarvestFail", e, detail=row["run_id"])
+        _harvest_abandoned(run_id)
 
 
 def mark_active_noop(agent_id: str) -> None:
@@ -2295,7 +2313,7 @@ class DreamingScheduler:
 
     def run_once(self) -> int:
         sent = 0
-        _harvest_deadline_runs()
+        _harvest_abandoned_runs()
         for run in active_runs():
             sent += self._advance_run(run)
         for agent in pending_dreaming_agents(now=self.now()):
@@ -2329,7 +2347,7 @@ class DreamingScheduler:
             # The run ends now; a backend still writing in its worktree keeps
             # it until that backend stops (AUT-06 review).
             abandon_run(run["run_id"], reason=_DEADLINE_REASON,
-                        harvest=not _skip_busy_reason(agent))
+                        harvest=_backend_quiet(agent))
             return 0
         _recover_stale_sent_round(run["run_id"])
         reason = _skip_busy_reason(agent)
