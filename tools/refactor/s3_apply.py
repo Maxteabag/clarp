@@ -105,6 +105,7 @@ def load_recipe(path: pathlib.Path) -> list[dict]:
             raise Refusal(f"recipe: group {g['name']} listed twice")
         seen.add(g["name"])
         _check_module(g["name"], g["module"], g["class"])
+        _acknowledged(g, f"group {g['name']}")
     names = [m for g in groups for m in g["members"]]
     dup = sorted({m for m in names if names.count(m) > 1})
     if dup:
@@ -422,6 +423,49 @@ def _file_bindings(module: ast.Module) -> dict[str, list[tuple[ast.AST, bool]]]:
     return found
 
 
+def _server_module_names(module: ast.Module, bindings: dict) -> set[str]:
+    """Names that may refer to the server module in a file (fail closed): any
+    name containing 'server', a name bound by `import server`, and a name
+    assigned from module_from_spec(...) of a spec whose path mentions server.py."""
+    names = {name for name in bindings if "server" in name.lower()}
+    specs = set()
+    for node in ast.walk(module):
+        if isinstance(node, ast.Import):
+            names |= {a.asname or a.name for a in node.names if a.name == "server"}
+        elif isinstance(node, ast.Assign) and isinstance(node.value, ast.Call):
+            call = ast.unparse(node.value.func)
+            targets = [t.id for t in node.targets if isinstance(t, ast.Name)]
+            if call.endswith("spec_from_file_location") and "server.py" in ast.unparse(node.value):
+                specs |= set(targets)
+            elif call.endswith("module_from_spec") and any(
+                    isinstance(a, ast.Name) and a.id in specs for a in node.value.args):
+                names |= set(targets)
+    return names
+
+
+def _acknowledged(entry: dict, where: str) -> list[tuple[str, str]]:
+    """A recipe entry's acknowledged_patches: [{path, name, reason, evidence}].
+    Retargeting the patch to where the moved code reads the name is the default;
+    an acknowledgement states, with evidence (for example a trace showing the
+    moved code is never reached in that test, or identical results with the
+    patch also applied at the moved code's import site), that the test does not
+    depend on the moved code seeing the patch. G3 checks every one."""
+    out = []
+    for item in entry.get("acknowledged_patches", []):
+        if (not isinstance(item, dict) or not item.get("path") or not item.get("name")
+                or not str(item.get("reason", "")).strip() or not str(item.get("evidence", "")).strip()):
+            raise Refusal(f"recipe: {where} acknowledged_patches entries need path, name, reason and evidence")
+        out.append((str(item["path"]), str(item["name"])))
+    return out
+
+
+def _unacknowledged(records: list[tuple[str, int, str, str]],
+                    acknowledged: list[tuple[str, str]]) -> list[str]:
+    """Sites not waived: an acknowledgement matches exactly its file and the
+    exact patched name, never a substring of the site text."""
+    return [text for path, _, name, text in records if (path, name) not in set(acknowledged)]
+
+
 def _call_arg(call: ast.Call, position: int, *keywords: str):
     if len(call.args) > position and not any(isinstance(a, ast.Starred) for a in call.args[:position + 1]):
         return call.args[position]
@@ -431,7 +475,7 @@ def _call_arg(call: ast.Call, position: int, *keywords: str):
     return None
 
 
-def rebinding_sites(root: pathlib.Path, names: set[str]) -> list[str]:
+def rebinding_records(root: pathlib.Path, names: set[str], *, server_targets_only: bool = False) -> list[tuple[str, int, str, str]]:
     """Every place that could rebind one of `names` on the server module after it
     moved: in server.py any second binding at module scope (module_bindings);
     in any tracked Python file an attribute assignment or delete, a
@@ -442,14 +486,14 @@ def rebinding_sites(root: pathlib.Path, names: set[str]) -> list[str]:
     module-level import of lib.routes.helpers, or the dotted lib.routes.helpers
     where `lib` is only ever bound by plain `import lib...`; a string exempt only
     when it starts with `lib.routes.helpers.`."""
-    sites: list[str] = []
+    sites: list[tuple[str, int, str, str]] = []
     server = root / SERVER
     text = server.read_text()
     tree = ast.parse(text)
     for name, found in module_bindings(tree).items():
-        if name in names and len(found) > 1:
+        if not server_targets_only and name in names and len(found) > 1:
             other = found[1]
-            sites.append(f"{SERVER}:{other[1]}: {name} is also bound by a {other[0]}")
+            sites.append((SERVER, other[1], name, f"{SERVER}:{other[1]}: {name} is also bound by a {other[0]}"))
     helpers_module = "lib.routes." + pathlib.PurePosixPath(HELPERS_MODULE).stem
 
     for path in _tracked_python(root):
@@ -481,16 +525,33 @@ def rebinding_sites(root: pathlib.Path, names: set[str]) -> list[str]:
             return bool(found) and all(isinstance(n, ast.Import) and all(
                 a.asname is None or a.asname != "lib" for a in n.names) for n, _ in found)
 
+        server_names = _server_module_names(module, bindings)
+
         def target_ok(expr) -> bool:
+            if server_targets_only:
+                # Only a patch through the server module matters here.
+                return not (isinstance(expr, ast.Name) and expr.id in server_names)
             if isinstance(expr, ast.Name):
                 return helpers_alias(expr.id)
             return ast.unparse(expr) == helpers_module and lib_is_the_package()
 
         def string_ok(value: str) -> bool:
+            if server_targets_only:
+                return "server" not in value.split(".", 1)[0].lower()
             return value.startswith(helpers_module + ".")
 
         def named(value) -> str | None:
             return value.value if isinstance(value, ast.Constant) and isinstance(value.value, str) else None
+
+        def obj_ok(obj) -> bool:
+            # A string target ("server", "server.x") is judged by its string,
+            # never treated as an object expression.
+            if named(obj) is not None:
+                return string_ok(named(obj) + ".")
+            return obj is not None and target_ok(obj)
+
+        def add(lineno, name, text):
+            sites.append((rel, lineno, name, f"{rel}:{lineno}: {text}"))
 
         for node in ast.walk(module):
             if isinstance(node, (ast.Assign, ast.AugAssign, ast.AnnAssign, ast.Delete)):
@@ -498,32 +559,39 @@ def rebinding_sites(root: pathlib.Path, names: set[str]) -> list[str]:
                 for t in targets:
                     for sub in ast.walk(t):
                         if isinstance(sub, ast.Attribute) and sub.attr in names and not target_ok(sub.value):
-                            sites.append(f"{rel}:{node.lineno}: assigns or deletes .{sub.attr}")
+                            add(node.lineno, sub.attr, f"assigns or deletes .{sub.attr}")
             elif isinstance(node, ast.Call):
                 func = ast.unparse(node.func)
                 if func.endswith("patch.multiple"):
                     obj = _call_arg(node, 0, "target")
-                    attrs = [kw.arg for kw in node.keywords if kw.arg in names]
-                    if attrs and obj is not None and not (target_ok(obj) or (named(obj) and string_ok(named(obj) + "."))):
-                        sites.append(f"{rel}:{node.lineno}: {func}(..., {', '.join(attrs)}=...)")
+                    for attr in [kw.arg for kw in node.keywords if kw.arg in names]:
+                        if not obj_ok(obj):
+                            add(node.lineno, attr, f"{func}({ast.unparse(obj) if obj else '?'}, {attr}=...)")
                 elif func.endswith(("setattr", "delattr", "patch.object")):
                     obj = _call_arg(node, 0, "target")
                     attr = _call_arg(node, 1, "attribute" if func.endswith("patch.object") else "name")
-                    if named(obj) is not None and (func.endswith("setattr") or func.endswith("delattr")):
+                    if named(obj) is not None and func.endswith(("setattr", "delattr")):
                         # monkeypatch.setattr("module.attr", value) form
                         target = named(obj)
-                        if target.rpartition(".")[2] in names and "." in target and not string_ok(target):
-                            sites.append(f"{rel}:{node.lineno}: {func}({target!r})")
-                    elif named(attr) in names and not target_ok(obj):
-                        sites.append(f"{rel}:{node.lineno}: {func}({ast.unparse(obj) if obj else '?'}, {named(attr)!r})")
+                        name = target.rpartition(".")[2]
+                        if name in names and "." in target and not string_ok(target):
+                            add(node.lineno, name, f"{func}({target!r})")
+                    elif named(attr) in names and not obj_ok(obj):
+                        add(node.lineno, named(attr), f"{func}({ast.unparse(obj) if obj else '?'}, {named(attr)!r})")
                 elif func.endswith("patch"):
                     target = named(_call_arg(node, 0, "target"))
                     if target and "." in target and target.rpartition(".")[2] in names and not string_ok(target):
-                        sites.append(f"{rel}:{node.lineno}: {func}({target!r})")
+                        add(node.lineno, target.rpartition(".")[2], f"{func}({target!r})")
     return sorted(set(sites))
 
 
-def apply_helpers(root: pathlib.Path, names: list[str]) -> dict[str, str]:
+def rebinding_sites(root: pathlib.Path, names: set[str], *, server_targets_only: bool = False) -> list[str]:
+    """rebinding_records as printable lines."""
+    return [text for *_, text in rebinding_records(root, names, server_targets_only=server_targets_only)]
+
+
+def apply_helpers(root: pathlib.Path, names: list[str],
+                  acknowledged: list[tuple[str, str]] = ()) -> dict[str, str]:
     """The [helpers] step; {} when there is nothing to do or it is applied."""
     if not names:
         return {}
@@ -581,6 +649,10 @@ def apply_helpers(root: pathlib.Path, names: list[str]) -> dict[str, str]:
                 raise Refusal(f"helpers: {name} reads {read}, which server.py defines; list {read} too or keep {name}")
             elif not hasattr(builtins, read):
                 raise Refusal(f"helpers: {name} reads {read}, which server.py does not bind with a plain top-level import")
+    patched = _unacknowledged(rebinding_records(root, needed, server_targets_only=True), list(acknowledged))
+    if patched:
+        raise Refusal("helpers: imported names the moved helpers read are patched through the server "
+                      "module; after the move the patch would not reach them:\n  " + "\n  ".join(patched))
     nodes.sort(key=lambda item: item[1].lineno)
     spans = [_span(lines, stmt) for _, stmt in nodes]
     bodies = ["".join(lines[a:b]).rstrip("\n") + "\n" for a, b in spans]
@@ -610,7 +682,7 @@ def apply_helpers(root: pathlib.Path, names: list[str]) -> dict[str, str]:
     return {"server/" + HELPERS_MODULE: helpers_text, SERVER: "".join(out_lines)}
 
 
-def apply(root: pathlib.Path, groups: list[dict]) -> dict[str, str]:
+def apply(root: pathlib.Path, groups: list[dict], scan_root: pathlib.Path | None = None) -> dict[str, str]:
     """New text per changed file (paths relative to root); refuses on any problem."""
     tool = _ast_identity()
     server_path = root / SERVER
@@ -642,6 +714,12 @@ def apply(root: pathlib.Path, groups: list[dict]) -> dict[str, str]:
             start, end = _span(lines, node)
             cut.append((start, end))
             bodies.append("".join(lines[start:end]))
+        patched = _unacknowledged(rebinding_records(scan_root or root, set(reads), server_targets_only=True),
+                                  _acknowledged(g, f"group {g['name']}"))
+        if patched:
+            raise Refusal(f"group {g['name']}: imported names its members read are patched through the "
+                          "server module; after the move the patch would not reach them:\n  "
+                          + "\n  ".join(patched))
         body = "\n".join(b if b.endswith("\n") else b + "\n" for b in bodies)
         parts = [HEADER.format(cls=g["class"], group=g["name"])]
         futures = _futures(tree, lines)
@@ -696,6 +774,7 @@ def main(argv: list[str]) -> int:
     try:
         groups = load_recipe(recipe)
         helpers = load_helpers(recipe)
+        helpers_ack = _acknowledged(tomllib.loads(recipe.read_text()).get("helpers", {}), "[helpers]")
         if args.group:
             unknown = sorted(set(args.group) - {g["name"] for g in groups})
             if unknown:
@@ -704,7 +783,7 @@ def main(argv: list[str]) -> int:
             # Handler's bases always list the mixins in recipe order.
             last = max(i for i, g in enumerate(groups) if g["name"] in args.group)
             groups = groups[:last + 1]
-        changes = apply_helpers(root, helpers)
+        changes = apply_helpers(root, helpers, helpers_ack)
         if not args.helpers:
             if changes:
                 # Groups see server.py as the helpers step leaves it.
@@ -717,7 +796,7 @@ def main(argv: list[str]) -> int:
                     (staged / path).parent.mkdir(parents=True, exist_ok=True)
                     (staged / path).write_text(text)
                 try:
-                    changes.update(apply(staged, groups))
+                    changes.update(apply(staged, groups, scan_root=root))
                 finally:
                     shutil.rmtree(staged)
             else:
