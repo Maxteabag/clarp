@@ -286,3 +286,39 @@ def test_a_stop_that_fails_on_a_locked_database_does_not_strand_later_sends(
     world.send("u1")
     world._collect()
     assert world.started == ["u1"]
+
+
+def test_a_failed_stop_hands_work_admitted_meanwhile_to_the_free_slot(tmp_path, monkeypatch):
+    """QUEUE-N1 review: work the runtime's recovery admitted while the failed
+    Stop held its barrier must start once the barrier is rolled back, not
+    wait in memory for an unrelated send."""
+    import sqlite3
+    from lib.runtime_bridge import RuntimeRPCServer
+
+    world = World(tmp_path)
+    turn_queue.enqueue(queue_id="q-recovered", agent_id=world.agent, session="mike",
+                       text="recovered", trace_id="t-recovered", client_msg_id="recovered",
+                       synthesize_audio=False, origin="agent", sender_agent_id="other-agent")
+    runtime = RuntimeRPCServer(tmp_path / "runtime.sock",
+                               dispatch_service=world.service, release_id="test")
+    runtime.shutdown = lambda: None
+    real_pause = turn_queue.set_paused
+    admitted = []
+
+    def pause(agent_id, paused, **kwargs):
+        if paused:
+            admitted.append(world.service.recover_queued())   # a retry timer fires
+            raise sqlite3.OperationalError("database is locked")
+        return real_pause(agent_id, paused, **kwargs)
+
+    monkeypatch.setattr(turn_queue, "set_paused", pause)
+    try:
+        result = runtime.dispatch_request("begin_stop", {
+            "agent_id": world.agent, "backend": "claude", "strict": False, "hold": True})
+    finally:
+        monkeypatch.undo()
+        runtime.server_close()
+    assert not result["ok"] and admitted == [1]
+    assert not turn_queue.is_paused(world.agent)
+    world._collect()
+    assert world.started == ["recovered"]
