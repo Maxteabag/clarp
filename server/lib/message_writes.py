@@ -906,6 +906,43 @@ def _is_retry_echo(native_timestamp: Any, next_client_timestamp: Any) -> bool:
             and (next_at - native_at).total_seconds() > _RETRY_ECHO_SLACK_S)
 
 
+# Out of the transcript's range: a parked row is found again by its turn's
+# later-slot twin search, or removed as stale when the import ends (RM-N1b).
+_PARKED_SEQ_BASE = 10 ** 12
+
+
+def _park_adopted_occupant(database, agent_id: str, backend_session_id: str,
+                           source_file: str, seq: int, msg_id: str) -> bool:
+    """Move an adopted reply (its id is not its slot's hash) out of the slot
+    another turn is about to take: a record appeared earlier and turns shifted
+    up. Its own turn, later in this import, adopts it again in place."""
+    occupant = database.execute(
+        """SELECT message_id FROM messages
+            WHERE agent_id = ? AND backend_session_id = ? AND seq = ?
+              AND source_file = ? AND message_id <> ?""",
+        (agent_id, backend_session_id, seq, source_file, msg_id)).fetchone()
+    if occupant is None or occupant["message_id"] == _message_id(
+            agent_id, backend_session_id, source_file, seq):
+        return False
+    database.execute("UPDATE messages SET seq = ? WHERE message_id = ?",
+                     (_PARKED_SEQ_BASE + seq, occupant["message_id"]))
+    return True
+
+
+def _parked_twin(database, agent_id: str, backend_session_id: str,
+                 source_file: str, visible: str, *, exclude: set[str]):
+    """(message_id, seq) of the one parked reply with this visible text."""
+    found = [
+        (row["message_id"], int(row["seq"])) for row in database.execute(
+            """SELECT message_id, seq, text FROM messages
+                WHERE agent_id = ? AND backend_session_id = ? AND source_file = ?
+                  AND role = 'assistant' AND seq >= ?""",
+            (agent_id, backend_session_id, source_file, _PARKED_SEQ_BASE))
+        if row["message_id"] not in exclude
+        and _strip_voice_markup(row["text"]) == visible]
+    return found[0] if len(found) == 1 else None
+
+
 def _shifted_twin(database, agent_id: str, backend_session_id: str,
                   source_file: str, request_trace: str, visible: str, seq: int,
                   *, exclude: set[str]):
@@ -1353,6 +1390,13 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
                                       source_file, current_request_trace,
                                       _strip_voice_markup(text), seq,
                                       exclude=adopted_final_ids | placed_ids)
+            elif not slot:
+                # A reply this import parked (RM-N1b) whose request could not
+                # be linked: found again by its visible text, as a fresh
+                # import adopts an unlinked reply's final row.
+                moved = _parked_twin(database, agent_id, backend_session_id,
+                                     source_file, _strip_voice_markup(text),
+                                     exclude=adopted_final_ids | placed_ids)
             if moved is not None:
                 msg_id = moved[0]
                 adopted_final_ids.add(msg_id)
@@ -1439,6 +1483,9 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
         # skip it when every column it sets already holds that value.
         rewrite = not unchanged or existing["source_file"] != source_file \
             or existing["seq"] != seq
+        if rewrite and _park_adopted_occupant(database, agent_id, backend_session_id,
+                                              source_file, seq, msg_id):
+            skipped_slot_removed = True
         if rewrite:
             database.execute(
                 """INSERT INTO messages (
