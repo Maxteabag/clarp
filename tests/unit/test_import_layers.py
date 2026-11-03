@@ -8,6 +8,8 @@ tangle together (PT-14).
 Ratchet mode: the upward edges that exist today are UPWARD_BASELINE ("src ->
 dst"). A new upward edge fails; an edge that disappears must be removed from
 the baseline, so the list only shrinks until S1 makes the test strict.
+The persistence layer is strict already (S1 commit 6): it has no baseline
+entries, so an upward import from it fails unless it is a named exception.
 Separately, nothing in server/lib outside lib.routes imports lib.routes (the
 S3 route layer is reached only from server.py).
 
@@ -65,6 +67,10 @@ NAMED_EXCEPTIONS = {
     "lib.db_migrations -> lib.tool_explanation_learning": "v99 calls backfill_programs(con), live feature logic",
     "lib.db_migrations -> lib.goal_ledger": "v112 calls goal_ledger.backfill(con) and its ledger helpers",
     "lib.db_migrations -> lib.provider_background_jobs": "v121 calls expire_lost_evidence",
+    # Lazy SCHEMA imports of steps v84+; S1 commit 5 points them at persistence.schema_parts.
+    "lib.db_migrations -> lib.audio_bookkeeper": "lazy SCHEMA_STATEMENTS import, until S1 commit 5",
+    "lib.db_migrations -> lib.janitor_autonomy": "lazy SCHEMA import, until S1 commit 5",
+    "lib.db_migrations -> lib.judgments": "lazy SCHEMA import, until S1 commit 5",
 }
 
 UPWARD_BASELINE = frozenset({
@@ -129,9 +135,6 @@ UPWARD_BASELINE = frozenset({
     'lib.backend.stream_json -> lib.voice_markup',
     'lib.conversation -> lib.transcript_import_cache',
     'lib.conversation -> lib.transcript_incremental',
-    'lib.db_migrations -> lib.audio_bookkeeper',
-    'lib.db_migrations -> lib.janitor_autonomy',
-    'lib.db_migrations -> lib.judgments',
     'lib.dispatch_adapters -> lib.janitor_http',
     'lib.eventlog -> lib.diagnostics_settings',
     'lib.message_live -> lib.dreaming',
@@ -248,6 +251,12 @@ def test_no_new_upward_imports():
     assert not new, ("imports from a lower layer into a higher one (persistence < core < features < http):\n"
                      + "\n".join(f"{e}  ({LAYERS[layer(e.split(' -> ')[0])]} -> {LAYERS[layer(e.split(' -> ')[1])]})"
                                  for e in new))
+
+
+def test_persistence_is_strict():
+    """S1 commit 6: the persistence layer has no ratchet debt, only named exceptions."""
+    debt = sorted(e for e in UPWARD_BASELINE if layer(e.split(" -> ")[0]) == 0)
+    assert not debt, f"persistence imports upward only through NAMED_EXCEPTIONS: {debt}"
 
 
 def test_upward_baseline_only_shrinks():
