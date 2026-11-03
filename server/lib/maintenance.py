@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import datetime
-import json
 import pathlib
 import shutil
 import threading
@@ -97,18 +96,24 @@ def _row_count(result) -> int | None:
 def _prune_state_log(c, cutoff_ms: int) -> int:
     """Delete expired state rows, keeping each agent's newest, one bounded
     batch per autocommit statement. The newest rows are read once per sweep,
-    not once per batch; rows written since are newer than the cutoff."""
-    keep = json.dumps([row[0] for row in c.execute(
-        "SELECT MAX(state_id) FROM state_log GROUP BY agent_id")])
+    not once per batch, in one statement with the highest state_id; a row
+    written during the sweep is above it and left alone, even back-dated."""
+    high, keep = c.execute(
+        """SELECT (SELECT MAX(state_id) FROM state_log),
+                  (SELECT json_group_array(newest) FROM (
+                       SELECT MAX(state_id) AS newest FROM state_log GROUP BY agent_id))"""
+    ).fetchone()
+    if high is None:
+        return 0
     total = 0
     while True:
         deleted = c.execute(
             """DELETE FROM state_log WHERE state_id IN (
                    SELECT state_id FROM state_log
-                    WHERE ts < ?
+                    WHERE ts < ? AND state_id <= ?
                       AND state_id NOT IN (SELECT value FROM json_each(?))
                     LIMIT ?)""",
-            (cutoff_ms, keep, STATE_LOG_DELETE_BATCH),
+            (cutoff_ms, high, keep, STATE_LOG_DELETE_BATCH),
         ).rowcount
         total += deleted
         if deleted < STATE_LOG_DELETE_BATCH:
