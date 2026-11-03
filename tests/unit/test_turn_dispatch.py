@@ -544,6 +544,55 @@ def test_busy_agent_send_preempts_inflight_turn(tmp_path):
     assert agents_db.latest_state(agent_id)["kind"] == AgentState.DONE
 
 
+class _DyingProcess:
+    """A turn process that keeps writing its session until it is let go."""
+
+    def __init__(self):
+        self.alive = True
+
+    def is_alive(self):
+        return self.alive
+
+
+class _SlowExitBackends(_Backends):
+    """SIGTERM is accepted but the old CLI has not exited yet."""
+
+    def __init__(self):
+        super().__init__()
+        self.process = _DyingProcess()
+
+    def interrupt(self, backend, agent_id):
+        self.interrupted.append((backend, agent_id))
+        return 1
+
+    def active_handles(self, backend, agent_id):
+        return [self.process] if self.spawned and self.process.alive else []
+
+
+def test_preemption_does_not_spawn_until_the_old_process_exits(tmp_path, monkeypatch):
+    """TP-01: two CLIs on one native session interleave and corrupt it."""
+    import time
+    monkeypatch.setattr(_td, "_PROCESS_EXIT_POLL_S", 0.01)
+    monkeypatch.setattr(_td, "_PREEMPT_EXIT_WAIT_S", 0.05, raising=False)
+    service, backends, agent_id = _make_service(tmp_path)
+    slow = _SlowExitBackends()
+    service.backends = slow
+    service.dispatch(text="first", requested_session="mike", trace_id="tA",
+                     synthesize_audio=False)
+    assert len(slow.spawned) == 1
+
+    service.dispatch(text="second", requested_session="mike", trace_id="tB",
+                     synthesize_audio=False)
+    assert slow.interrupted == [("claude", agent_id)], "the old turn is preempted"
+    assert len(slow.spawned) == 1, "a second CLI started while the first still runs"
+
+    slow.process.alive = False                  # the SIGTERMed CLI exits
+    deadline = time.monotonic() + 3
+    while len(slow.spawned) < 2 and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert [call["trace_id"] for _b, call in slow.spawned] == ["tA", "tB"]
+
+
 def test_explicit_queue_waits_for_current_turn_without_interrupting(tmp_path):
     from lib import turn_queue
     service, backends, _agent_id = _make_service(tmp_path)
