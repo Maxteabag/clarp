@@ -2,10 +2,44 @@
 # Each [[group]] moves the listed Handler members out of server/server.py into
 # server/<module> as class <class>, applied by tools/refactor/s3_apply.py in this
 # order. A new or changed entry needs reviewer G3; re-applications need only the
-# automated gates. No group is approved yet.
-#
-# [[group]]
-# name = "vocab"
-# module = "lib/routes/vocab.py"
-# class = "VocabRoutes"
-# members = ["_handle_vocab_packs_get", "..."]
+# automated gates.
+
+# Module-level helpers of server.py read by moved members; moved first, imported back.
+[helpers]
+names = [
+    "_runtime_paths",
+    "_truthy_header",
+]
+
+[[group]]
+name = "vocab"
+module = "lib/routes/vocab.py"
+class = "VocabRoutes"
+members = [
+    "_handle_vocab_assignments_get",
+    "_handle_vocab_assign_post",
+    "_handle_vocab_budgets_get",
+    "_handle_vocab_packs_delete",
+    "_handle_vocab_packs_get",
+    "_handle_vocab_packs_post",
+    "_handle_vocab_packs_update",
+    "_handle_vocab_preview_get",
+    "_handle_vocab_profile_get",
+    "_handle_vocab_profile_packs_post",
+    "_handle_vocab_profile_packs_remove",
+    "_handle_vocab_profiles_delete",
+    "_handle_vocab_profiles_get",
+    "_handle_vocab_profiles_post",
+    "_handle_vocab_profile_workspace",
+    "_handle_vocab_run_get",
+    "_handle_vocab_runs_get",
+    "_handle_vocab_terms_delete",
+    "_handle_vocab_terms_get",
+    "_handle_vocab_terms_post",
+    "_handle_vocab_terms_update",
+    "_handle_vocab_unassign_post",
+    "_vocab_body",
+]
+acknowledged_patches = [
+    {path = "tests/unit/test_startup_runtime_wait.py", name = "log_exception", reason = "patches server.log_exception to observe _recover_after_start, which stays in server.py; no vocab route is exercised", evidence = "4 Nov 00:28, on the applied tree 5d3eda9c (s3_merge of this recipe into integration 1d860f00), heavy-remote with a call tracer on lib/routes/vocab.py (tests/s3_ack_trace.py plugin, all threads): the whole file tests/unit/test_startup_runtime_wait.py made 0 calls into lib/routes/vocab.py (exit 0); control: tests/integration/test_vocab_http_characterization.py made 103 calls in 5 tests (exit 0)"},
+]
