@@ -455,6 +455,24 @@ def test_a_shift_up_moves_an_adopted_row_with_its_turn(clock):
     assert head()[1] > before[1], "delta clients reload the moved slots"
 
 
+def test_a_removed_request_does_not_lend_its_adopted_row_to_the_next(clock):
+    """RM-N1b, widened (reviewer C's control): the first request and its reply
+    disappear, so the next reply's turn lands on the slot holding the removed
+    request's adopted row. The surviving reply keeps its own adopted id; it
+    never takes the other request's."""
+    client("c0", "ask0", at=0, trace="tr-0")
+    client("c1", "ask1", at=60, trace="tr-1")
+    assistant_row("final-0", "final:tr-0", "answer0", at=4, trace="tr-0", seq=-1000)
+    assistant_row("final-1", "final:tr-1", "answer1", at=64, trace="tr-1", seq=-1001)
+    store([u("ask0", .2), a("answer0", 5), u("ask1", 60.2), a("answer1", 65)])
+    assert view(transcript_rows(), "message_id", "seq") == [("final-0", 1), ("final-1", 3)]
+
+    store([u("ask1", 60.2), a("answer1", 65)])
+
+    surviving = [r for r in rows() if r["text"] == "answer1"]
+    assert view(surviving, "message_id", "seq") == [("final-1", 1)]
+
+
 # ---- agy turn authority ------------------------------------------------------
 
 def _authority(trace, start, end, message_id):
