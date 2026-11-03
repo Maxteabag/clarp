@@ -200,3 +200,35 @@ def test_state_retention_deletes_in_bounded_batches(monkeypatch):
         "SELECT agent_id, ts FROM state_log WHERE agent_id LIKE 'synthetic-%' ORDER BY agent_id"
     ).fetchall()
     assert [(r["agent_id"], r["ts"]) for r in rows] == [("synthetic-a", 10000), ("synthetic-b", 1)]
+
+
+def test_state_retention_keeps_rows_written_during_the_sweep(monkeypatch):
+    """PT-01 review: the newest rows are read once, before the first batch. A
+    state row written between batches (a back-dated launch receipt, say) is
+    then the newest of its agent and must survive the later batches."""
+    monkeypatch.setattr(maintenance, "STATE_LOG_DELETE_BATCH", 100, raising=False)
+    monkeypatch.setattr(maintenance, "STATE_LOG_BATCH_PAUSE_S", 0, raising=False)
+    connection = db.conn()
+    connection.executemany(
+        "INSERT INTO state_log(agent_id, ts, kind) VALUES (?, ?, 'idle')",
+        [("synthetic-a", 1)] * 250)
+    written = []
+
+    class WriteBetweenBatches:
+        def __getattr__(self, name):
+            return getattr(connection, name)
+
+        def execute(self, sql, parameters=()):
+            cursor = connection.execute(sql, parameters)
+            if " ".join(sql.upper().split()).startswith("DELETE FROM STATE_LOG") and not written:
+                written.append(connection.execute(
+                    "INSERT INTO state_log(agent_id, ts, kind) VALUES ('synthetic-late', 1, 'failed')"
+                ).lastrowid)
+            return cursor
+
+    monkeypatch.setattr(db, "conn", lambda: WriteBetweenBatches())
+    maintenance.prune_database(now_ms=10_000, policy=maintenance.Policy(state_max_age_ms=100))
+
+    assert connection.execute(
+        "SELECT agent_id FROM state_log WHERE state_id = ?", (written[0],)
+    ).fetchone() is not None
