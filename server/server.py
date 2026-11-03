@@ -1136,7 +1136,6 @@ class Handler(BaseHTTPRequestHandler):
         "/automation-settings", "/avatar-settings", "/paired-devices",
         "/tts/providers", "/network/", "/server-terminal",
         "/oracle/", "/agent-file", "/janitor-runs/", "/calls",
-        "/terminal/", "/dirs",
     )
     _LIMITED_DEVICE_POST_EXACT = frozenset({
         "/send", "/transcribe", "/upload", "/select", "/focus",
@@ -1152,6 +1151,9 @@ class Handler(BaseHTTPRequestHandler):
             path == prefix.rstrip("/") or path.startswith(prefix)
             for prefix in self._DEVICE_FULL_ONLY_PREFIXES
         ):
+            return True
+        # Exactly the routes, so unmatched paths keep their 404 (HTTP-01/03).
+        if path == "/dirs" or (path.startswith("/terminal/") and method == "GET"):
             return True
         if method == "GET":
             return False
@@ -5401,7 +5403,8 @@ class Handler(BaseHTTPRequestHandler):
         if not self._authorized():
             return self._reject_unauthorized()
         path = self.path.split("?", 1)[0]
-        if self._device_forbidden(path, "PATCH"):
+        if path.startswith("/schedules/") and self._device_forbidden(path, "PATCH"):
+            # Only the route: an unmatched PATCH keeps its 404 (HTTP-02).
             return self._json_error(403, "full device access required")
         if path.startswith("/schedules/"):
             return self._handle_schedule_patch(path[len("/schedules/"):].strip("/"))

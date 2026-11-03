@@ -105,11 +105,9 @@ DYNAMIC_SAMPLES = (
 # Pre-existing bugs from the code review (http-shell.md at 09ee9279). The
 # golden records them as they are; the fix lane changes them, not a move.
 KNOWN_ISSUES = {
-    "GET /terminal/s1": "HTTP-01: a limited device reaches the agent terminal",
-    "PATCH /schedules/s1": "HTTP-02: do_PATCH skips the device scope gate",
-    "GET /dirs": "HTTP-03: a limited device can browse host directories",
-    "GET /dirs?path=/": "HTTP-03: a limited device can browse host directories",
     "GET /past-sessions": "HTTP-03: a limited device lists every project's sessions",
+    # HTTP-03's scope=all refusal is inside the handler, so dispatch still
+    # admits a limited device here; the response golden records the 403.
     "GET /past-sessions?scope=all": "HTTP-03: a limited device lists every project's sessions",
 }
 
