@@ -130,12 +130,17 @@ def lane_names(frames: list[dict]) -> list[str]:
 
 
 def json_form(raw: str, parsed) -> str:
-    """How a JSON text was serialized (separators, key sorting, ASCII escaping)."""
-    for separators, name in ((None, 'default'), ((',', ':'), 'compact')):
-        for sort_keys in (False, True):
-            for ascii_ in (True, False):
-                if json.dumps(parsed, separators=separators, sort_keys=sort_keys, ensure_ascii=ascii_) == raw:
-                    return name + ('-sorted' if sort_keys else '') + ('' if ascii_ else '-utf8')
+    """How a JSON text was serialized (indent, separators, key sorting, ASCII escaping)."""
+    for indent in (None, 2, 4):
+        for separators, name in ((None, 'default'), ((',', ':'), 'compact')):
+            if indent is not None and separators is not None:
+                continue
+            for sort_keys in (False, True):
+                for ascii_ in (True, False):
+                    if json.dumps(parsed, indent=indent, separators=separators, sort_keys=sort_keys,
+                                  ensure_ascii=ascii_) == raw:
+                        return (name + (f'-indent{indent}' if indent else '') + ('-sorted' if sort_keys else '')
+                                + ('' if ascii_ else '-utf8'))
     return 'other'
 
 
