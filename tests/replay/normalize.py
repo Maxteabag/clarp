@@ -40,6 +40,7 @@ HEX = re.compile(r'(?<![0-9A-Za-z])[0-9a-f]{12,64}(?![0-9A-Za-z])')
 ISO = re.compile(r'^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?$')
 # Pairing codes and device tokens (device_pairing): random secrets in a fixed format.
 SECRET = re.compile(r'(?<![0-9A-Za-z])(clp|cld)_[A-Za-z0-9_-]{30,}')
+EPOCH_TEXT = re.compile(r'(?<![\d.])1[5-9]\d{8}(\.\d+)?(?![\d.])|(?<!\d)1[5-9]\d{11}(?!\d)')
 LOOPBACK = re.compile(r'127\.0\.0\.1(:|%3A)\d+')
 # A short generated tail after a word prefix, e.g. the goal turn's trace id 'goal-1c4f4f95';
 # applied only where ids are expected (id keys, paths, ID_COLUMNS), never to free text.
@@ -49,7 +50,7 @@ PREFIXED = re.compile(r'^([a-z][a-z0-9]{0,15}[-_])([0-9a-f]{12,64}|[0-9A-Za-z]{2
 # (review s0-harness-57d175ff finding 1): an epoch-range number or an ISO
 # timestamp under one of these keys becomes <time>; anywhere else it is content.
 CLOCK_KEYS = frozenset({
-    'admitted_at', 'at', 'available_at', 'claimed_at', 'created_at', 'ended_at', 'expires_at', 'finished_at',
+    'admitted_at', 'at', 'exited_at', 'available_at', 'claimed_at', 'created_at', 'ended_at', 'expires_at', 'finished_at',
     'last_run_at', 'last_seen_at', 'used_at', 'done_ts', 'ended_at_ms', 'enqueued_at', 'last_activity',
     'last_lap_ms', 'last_turn_end', 'latest_state_ts', 'latest_ts', 'observed_at', 'opened_at',
     'received_at', 'server_now_ms', 'settled_at', 'since_ms', 'started_at', 'started_at_ms',
@@ -68,7 +69,7 @@ DURATION_KEYS = frozenset({'duration_ms', 'worked_ms', 'elapsed_ms', 'source_del
                            'time_used_seconds', 'timeUsedSeconds', 'age_ms', 'age_sec'})
 # request_hash, cache_key: hashes over content that includes generated ids;
 # group: a live tool group named after its first item id (explore:cx:<id>).
-ID_KEYS = frozenset({'focus', 'dedupe_key', 'request_hash', 'cache_key', 'group', 'code_hash', 'token_hash', 'id', 'conv', 'epoch', 'cause', 'source', 'thread', 'threadId', 'turnId',
+ID_KEYS = frozenset({'turn_token', 'focus', 'dedupe_key', 'request_hash', 'cache_key', 'group', 'code_hash', 'token_hash', 'id', 'conv', 'epoch', 'cause', 'source', 'thread', 'threadId', 'turnId',
                      'native_session_id', 'backend_session_id', 'cause_message_id', 'client_msg_id'})
 # Lanes whose frames are pure invalidation signals ("refetch now"). How many the
 # Host sends, and whether one names the backend session, varies with timing
@@ -85,6 +86,9 @@ ID_COLUMNS = frozenset({('settings', 'key'), ('settings', 'value'),
 # with their details sorted (pre-existing nondeterminism, reported to the lead).
 STATE_TABLE, STATE_TYPE = 'state_log', 'agent-state'
 SORTED_LISTS = frozenset({'personas', 'roster'})
+# A process identity, '<boot id>:<process start time>' (provider_turns.start_token):
+# one surrogate for the whole value, so the same process keeps the same name.
+PROCESS_KEYS = frozenset({'start_token'})
 PID_KEYS = frozenset({'pid', 'pgid', 'ppid', 'port'})
 PATH_KEYS = frozenset({'source_file', 'file', 'cwd', 'path', 'file_path', 'transcript_path', 'root', 'audio_path'})
 
@@ -236,6 +240,8 @@ class Normalizer:
             return '<duration>'
         if key in PID_KEYS and isinstance(value, int):
             return '<pid>'
+        if key in PROCESS_KEYS and isinstance(value, str):
+            return self._id('process:' + value)
         if key in CLOCK_KEYS and is_epoch(value):
             return '<time>'
         if isinstance(value, str):
@@ -298,8 +304,10 @@ def normalize(capture: dict, harness_root: str) -> dict:
     out['files'] = [{'path': n.string(f['path'], 'path'), 'bytes': f['bytes'] if f.get('kind') == 'bytes' else None,
                      'digest': f['digest'] if f.get('kind') == 'bytes' else None,
                      'json': n.value(f['json']) if f.get('kind') == 'json' else None,
-                     # Small text files: compared as text with UUIDs (generated tokens) as surrogates.
-                     'text': UUID.sub(lambda m: n._id(m.group(0).lower()), n.paths_in(f['text']))
+                     # Small text files: compared as text with generated ids (UUIDs, hex
+                     # tokens) as surrogates and epoch readings (the claude source
+                     # markers: 'pwa-voice <session> <epoch> <trace> 0') as <time>.
+                     'text': EPOCH_TEXT.sub('<time>', n.ids_in(n.paths_in(f['text'])))
                      if f.get('kind') == 'text' else None}
                     for f in capture['files']]
     n.in_stream = True
