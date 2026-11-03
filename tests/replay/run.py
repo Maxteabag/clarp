@@ -28,6 +28,7 @@ not run.
 from __future__ import annotations
 
 import argparse
+import fcntl
 import concurrent.futures as futures
 import hashlib
 import json
@@ -49,7 +50,8 @@ import normalize  # noqa: E402
 import planted  # noqa: E402
 import scenarios  # noqa: E402
 
-DEFAULT_SCRATCH = Path(os.environ.get('CLARP_REPLAY_SCRATCH', '/var/tmp/clarp-refactor-program/rf-harness/scratch'))
+# Short on purpose: a Host makes AF_UNIX sockets under its state dir (108-byte limit).
+DEFAULT_SCRATCH = Path(os.environ.get('CLARP_REPLAY_SCRATCH', '/var/tmp/rfh'))
 HARNESS_FILES = ('capture.py', 'diff.py', 'host.py', 'normalize.py', 'planted.py', 'run.py', 'scenarios.py')
 
 
@@ -185,21 +187,77 @@ def _build_for(ref: str, scratch: Path, allow_path: bool) -> tuple[Path, str]:
         return path.resolve(), _clean_at(path.resolve(), None)
     sha = git('rev-parse', '--verify', f'{ref}^{{commit}}')
     target = scratch / 'builds' / sha
-    if not target.exists():
-        target.parent.mkdir(parents=True, exist_ok=True)
-        git('worktree', 'add', '--detach', str(target), sha)
-        _set_writable(target, False)
-    _clean_at(target, sha)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    # The build cache is shared between jobs: one creates a build, the others wait.
+    with open(scratch / 'builds' / '.lock', 'w') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if not target.exists():
+            git('worktree', 'add', '--detach', str(target), sha)
+            _set_writable(target, False)
+        _clean_at(target, sha)
     return target, sha
 
 
-def planted_copy(build: Path, change: dict, scratch: Path) -> Path:
+class RunRoot:
+    """This run's own directory under ``<scratch>/r/``: made with an exclusive mkdir
+    and held under an exclusive flock until the run ends, so no other job can
+    reuse it and ``clean`` can tell a live run from a finished one. Every Host
+    state dir, planted copy and raw capture of the run lives inside it; only the
+    SHA build cache (``<scratch>/builds``) is shared."""
+
+    def __init__(self, scratch: Path):
+        base = scratch / 'r'
+        base.mkdir(parents=True, exist_ok=True)
+        stamp = time.strftime('%m%d%H%M%S')
+        for attempt in range(100):
+            path = base / f'{stamp}-{os.getpid()}-{attempt}'
+            try:
+                path.mkdir()
+                break
+            except FileExistsError:
+                continue
+        else:
+            raise BuildError('could not claim a run directory')
+        self.path = path
+        self._lock = open(path / '.claim', 'w')
+        fcntl.flock(self._lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        self._lock.write(f'{os.getpid()}\n')
+        self._lock.flush()
+        self.labels: dict[str, str] = {}
+
+    def dir_for(self, label: str) -> Path:
+        """A short directory per build label (b, h, r1, p3, ...), recorded in labels.json."""
+        if label not in self.labels:
+            self.labels[label] = f'{len(self.labels):02d}'
+            (self.path / self.labels[label]).mkdir()
+            (self.path / 'labels.json').write_text(json.dumps(self.labels, indent=1) + '\n')
+        return self.path / self.labels[label]
+
+    def release(self, keep: bool) -> None:
+        if not keep:
+            _set_writable(self.path, True)
+            shutil.rmtree(self.path, ignore_errors=True)
+        self._lock.close()
+
+
+def live(run_dir: Path) -> bool:
+    """Whether a run directory is still claimed by a running job."""
+    claim = run_dir / '.claim'
+    if not claim.is_file():
+        return False
+    with open(claim) as handle:
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            return True
+        fcntl.flock(handle, fcntl.LOCK_UN)
+    return False
+
+
+def planted_copy(build: Path, change: dict, run: RunRoot) -> Path:
     """A fresh copy of ``build``'s server with one planted change; static is shared read-only."""
-    target = scratch / 'planted' / change['id']
-    if target.exists():
-        _set_writable(target, True)
-        shutil.rmtree(target)
-    target.mkdir(parents=True)
+    target = run.path / f"plant-{planted.CHANGES.index(change):02d}"
+    target.mkdir()
     shutil.copytree(build / 'server', target / 'server', ignore=shutil.ignore_patterns('__pycache__'))
     _set_writable(target / 'server', True)
     (target / 'static').symlink_to(build / 'static')
@@ -208,11 +266,12 @@ def planted_copy(build: Path, change: dict, scratch: Path) -> Path:
     return target
 
 
-def run_corpus(builds: dict[str, Path], chosen, scratch: Path, jobs: int) -> dict[str, dict[str, dict]]:
+def run_corpus(builds: dict[str, Path], chosen, run: RunRoot, jobs: int) -> dict[str, dict[str, dict]]:
     """Capture every scenario on every build; returns {label: {scenario: normalized}}."""
     out: dict[str, dict[str, dict]] = {label: {} for label in builds}
+    index = {s['id']: f's{i:02d}' for i, s in enumerate(scenarios.SCENARIOS)}
     with futures.ThreadPoolExecutor(max_workers=jobs) as pool:
-        tasks = {pool.submit(capture.capture, build, s, scratch / 'runs' / label): (label, s['id'])
+        tasks = {pool.submit(capture.capture, build, s, run.dir_for(label) / index[s['id']]): (label, s['id'])
                  for label, build in builds.items() for s in chosen}
         for task in futures.as_completed(tasks):
             label, sid = tasks[task]
@@ -221,8 +280,7 @@ def run_corpus(builds: dict[str, Path], chosen, scratch: Path, jobs: int) -> dic
             except Exception as exc:  # noqa: BLE001 - reported as a run error by class only
                 raw = {'scenario': sid, 'error': f'harness {type(exc).__name__}', 'root': '', 'build': '',
                        'http': [], 'sse': [], 'db': {'schema': [], 'pk': {}, 'tables': {}}, 'files': []}
-            (scratch / 'runs' / label).mkdir(parents=True, exist_ok=True)
-            (scratch / 'runs' / label / f'{sid}.raw.json').write_text(json.dumps(raw, default=str))
+            (run.dir_for(label) / f'{sid}.raw.json').write_text(json.dumps(raw, default=str))
             out[label][sid] = normalize.normalize(raw, str(HARNESS))
     return out
 
@@ -289,7 +347,19 @@ def cmd_compare(args) -> int:
     chosen = select(args.scenarios, scenarios.BY_ID, 'scenario')
     base, base_sha = build_for(args.base, scratch, args.allow_path)
     head, head_sha = build_for(args.head, scratch, args.allow_path)
-    results = run_corpus({'base': base, 'base2': base, 'head': head}, chosen, scratch, args.jobs)
+    run = RunRoot(scratch)
+    try:
+        status = _compare(args, run, chosen, base, base_sha, head, head_sha, started)
+    except BaseException:
+        run.release(keep=True)
+        raise
+    run.release(keep=args.keep or status != 0)
+    print(f"run directory: {run.path}{' (kept)' if args.keep or status != 0 else ' (removed)'}")
+    return status
+
+
+def _compare(args, run, chosen, base, base_sha, head, head_sha, started) -> int:
+    results = run_corpus({'base': base, 'base2': base, 'head': head}, chosen, run, args.jobs)
     # The base runs twice: a difference between its own runs means the scenario is not
     # reproducible, and its comparison with head proves nothing.
     calibration = ('base', 'base2') if args.cross_lane_order else ()
@@ -316,10 +386,22 @@ def cmd_self_check(args) -> int:
     changes = [] if args.no_planted else select(args.planted, planted.BY_ID, 'planted change')
     diagnostic = diagnostic or args.no_planted
     build, sha = build_for(args.ref, scratch, args.allow_path)
+    run = RunRoot(scratch)
+    try:
+        status = _self_check(args, run, chosen, changes, build, sha, diagnostic, started)
+    except BaseException:
+        run.release(keep=True)
+        raise
+    run.release(keep=args.keep or status != 0)
+    print(f"run directory: {run.path}{' (kept)' if args.keep or status != 0 else ' (removed)'}")
+    return status
+
+
+def _self_check(args, run, chosen, changes, build, sha, diagnostic, started) -> int:
     builds = {'run1': build, 'run2': build, 'run3': build, 'run4': build}
     for change in changes:
-        builds[f"planted-{change['id']}"] = planted_copy(build, change, scratch)
-    results = run_corpus(builds, chosen, scratch, args.jobs)
+        builds[f"planted-{change['id']}"] = planted_copy(build, change, run)
+    results = run_corpus(builds, chosen, run, args.jobs)
     if args.show_sse:
         for label in ('run1', 'run2', 'run3', 'run4'):
             for s in chosen:
@@ -367,9 +449,9 @@ def cmd_clean(args) -> int:
     scratch/builds that are clean. Anything else is refused and reported."""
     scratch = Path(args.scratch)
     registered = {line[len('worktree '):] for line in git('worktree', 'list', '--porcelain').splitlines()
-                  if line.startswith('worktree ')}
+                  if line.startswith('worktree ')} if has_git() else set()
     status = 0
-    for path in sorted((scratch / 'builds').glob('*')):
+    for path in sorted((scratch / 'builds').glob('*')) if has_git() else ():
         if str(path) not in registered or path.is_symlink():
             print('refused (not a worktree this harness made):', path.name)
             status = 1
@@ -384,12 +466,18 @@ def cmd_clean(args) -> int:
             continue
         git('worktree', 'remove', str(path))
         print('removed', path)
-    git('worktree', 'prune')
-    for sub in ('runs', 'planted'):
-        target = scratch / sub
-        if target.exists() and not target.is_symlink():
-            _set_writable(target, True)
-            shutil.rmtree(target)
+    if has_git():
+        git('worktree', 'prune')
+    for path in sorted((scratch / 'r').glob('*')):
+        if path.is_symlink() or not (path / '.claim').is_file():
+            print('refused (not a run directory):', path.name)
+            status = 1
+        elif live(path):
+            print('kept (a job is still running in it):', path.name)
+        else:
+            _set_writable(path, True)
+            shutil.rmtree(path)
+            print('removed run', path.name)
     return status
 
 
@@ -400,6 +488,7 @@ def main(argv=None) -> int:
     parser.add_argument('--scenarios', help='comma-separated scenario ids (default: all; a subset is diagnostic)')
     parser.add_argument('--cross-lane-order', action='store_true',
                         help='also report cross-producer SSE order changes (diagnostic; not a contract)')
+    parser.add_argument('--keep', action='store_true', help='keep the run directory (raw captures) after a clean run')
     parser.add_argument('--allow-path', action='store_true', help='accept a clean checkout path as REF (diagnostic)')
     sub = parser.add_subparsers(dest='cmd', required=True)
     p = sub.add_parser('compare')

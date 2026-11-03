@@ -59,14 +59,12 @@ def child_env() -> dict[str, str]:
     return env
 
 
-def owned_fresh_root(root: Path) -> None:
-    """Remove a scenario root only if the harness made it (a marker, no symlink)."""
-    if root.is_symlink():
-        raise StepFailed('scenario root is a symlink')
-    if root.exists():
-        if not (root / OWNED).is_file():
-            raise StepFailed('scenario root exists and is not owned by the replay harness')
-        shutil.rmtree(root)
+def fresh_root(root: Path) -> None:
+    """Create a scenario root that did not exist. Nothing is ever deleted here: a
+    root that exists belongs to someone (another job, an earlier run) and is refused."""
+    if root.is_symlink() or root.exists():
+        raise StepFailed('scenario root already exists; refusing to reuse it')
+    root.mkdir(parents=False)
 
 
 class Host:
@@ -78,7 +76,6 @@ class Host:
 
     def start(self):
         """Spawn the Host; the caller owns cleanup (call stop() in a finally)."""
-        self.root.mkdir(parents=True, exist_ok=True)
         (self.root / OWNED).touch()
         self.log = (self.root.parent / f'{self.root.name}.host.log').open('a')
         self.process = subprocess.Popen(
@@ -363,9 +360,9 @@ def list_files(root: Path) -> list[dict]:
     return files
 
 
-def capture(build: Path, scenario: dict, scratch: Path, python: str = sys.executable) -> dict:
-    root = scratch / scenario['id']
-    owned_fresh_root(root)
+def capture(build: Path, scenario: dict, root: Path, python: str = sys.executable) -> dict:
+    """Run ``scenario`` on ``build`` in the new directory ``root`` (its parent must exist)."""
+    fresh_root(root)
     started = time.monotonic()
     timings = {}
     host = Host(build, root, python)

@@ -42,9 +42,18 @@ checkouts as below.
 `compare` exits 0 with no unexplained difference, 1 with differences, 2 when a
 scenario could not run. `--intended FILE` takes registered difference ids
 (one per line, see "Classifying differences"). `--scenarios a,b` limits the
-corpus. Scratch space is `/var/tmp/clarp-refactor-program/rf-harness/scratch`
-(`--scratch` or `CLARP_REPLAY_SCRATCH` to move it); nothing is written to
-`~/.local/share/clarp` or `~/.config/clarp`.
+corpus. Scratch space is `/var/tmp/rfh` (`--scratch` or `CLARP_REPLAY_SCRATCH`; short
+on purpose, because each Host makes AF_UNIX sockets under its state dir).
+Every run claims its own directory `<scratch>/r/<stamp>-<pid>-<n>` with an
+exclusive mkdir and holds an exclusive flock on it until it ends; all its
+Host state dirs (`<label-index>/s<scenario-index>`, mapped in `labels.json`),
+planted copies and raw captures live there, and a scenario root that already
+exists is refused, never deleted. Concurrent runs therefore never share or
+remove each other's state. Only the SHA build cache `<scratch>/builds` is
+shared (created under a lock). A clean run removes its directory; a failed
+run, or one with `--keep`, keeps it and prints its path. `clean` removes run
+directories no job holds and refuses anything it did not make. Nothing is
+written to `~/.local/share/clarp` or `~/.config/clarp`.
 
 ## What runs
 
