@@ -56,7 +56,7 @@ Oracle require full scope. Host filesystem browsing (`/agent-file`,
 `/agent-files`, `/dirs` and `/past-sessions?scope=all`) also requires full
 scope: a caller-selected root can contain configuration credentials, even
 though the operation is read-only. So do an agent's interactive terminal
-(`/terminal/<session>`) and every `PATCH`.
+(`/terminal/<session>`) and `PATCH /schedules/<id>`.
 
 Limited scope is an API permission boundary, not an agent sandbox. It still
 allows sending work to agents that run with the host user's permissions.
