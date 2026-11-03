@@ -445,3 +445,62 @@ def test_a_stop_between_the_starts_read_and_write_still_wins(tmp_path, monkeypat
     turn_lifecycle.try_transition(agent_id, TurnEvent.SPAWN_STARTED,
                                   {"dispatch": "codex", "trace_id": "t-1"})
     assert real(agent_id) == AgentState.INTERRUPTED
+
+
+def _one_millisecond(monkeypatch):
+    stamp = turn_lifecycle.now_ms()
+    monkeypatch.setattr(turn_lifecycle, "now_ms", lambda: stamp)
+
+
+def _first_turn(agent_id):
+    turn_lifecycle.open_turn(agent_id=agent_id, source="pwa", trace_id="t-1")
+    turn_lifecycle.transition(agent_id, TurnEvent.SPAWN_STARTED,
+                              {"source": "pwa", "dispatch": "codex", "trace_id": "t-1"})
+
+
+def test_a_turn_opened_after_a_stop_in_the_same_millisecond_starts(tmp_path, monkeypatch):
+    """TP-N1 review: a clock tie is no order. The Stop settled the turn it
+    stopped, so it does not fence the turn opened after it."""
+    agent_id = _agent(tmp_path)
+    _one_millisecond(monkeypatch)
+    _first_turn(agent_id)
+    turn_lifecycle.transition(agent_id, TurnEvent.STOP_REQUESTED, {"source": "user_stop"})
+    turn_lifecycle.open_turn(agent_id=agent_id, source="pwa", trace_id="t-2")
+
+    started = turn_lifecycle.try_transition(agent_id, TurnEvent.SPAWN_STARTED,
+                                            {"source": "pwa", "dispatch": "codex", "trace_id": "t-2"})
+
+    assert started is not None
+    assert turn_lifecycle.current_kind(agent_id) == AgentState.THINKING
+
+
+def test_a_stop_naming_the_previous_trace_does_not_fence_the_next_turn(tmp_path, monkeypatch):
+    agent_id = _agent(tmp_path)
+    _one_millisecond(monkeypatch)
+    turn_lifecycle.transition(agent_id, TurnEvent.SPAWN_STARTED,
+                              {"source": "pwa", "dispatch": "codex", "trace_id": "t-1"})
+    turn_lifecycle.transition(agent_id, TurnEvent.STOP_REQUESTED,
+                              {"source": "user_stop", "trace_id": "t-1"})
+    turn_lifecycle.open_turn(agent_id=agent_id, source="pwa", trace_id="t-2")
+
+    started = turn_lifecycle.try_transition(agent_id, TurnEvent.SPAWN_STARTED,
+                                            {"source": "pwa", "dispatch": "codex", "trace_id": "t-2"})
+
+    assert started is not None
+    assert turn_lifecycle.current_kind(agent_id) == AgentState.THINKING
+
+
+def test_a_stop_after_a_turn_opened_in_the_same_millisecond_fences_it(tmp_path, monkeypatch):
+    """The opposite order: the Stop lands after the turn is opened, in the
+    same millisecond, so the turn's start is refused."""
+    agent_id = _agent(tmp_path)
+    _one_millisecond(monkeypatch)
+    _first_turn(agent_id)
+    turn_lifecycle.open_turn(agent_id=agent_id, source="pwa", trace_id="t-2")
+    turn_lifecycle.transition(agent_id, TurnEvent.STOP_REQUESTED, {"source": "user_stop"})
+
+    started = turn_lifecycle.try_transition(agent_id, TurnEvent.SPAWN_STARTED,
+                                            {"source": "pwa", "dispatch": "codex", "trace_id": "t-2"})
+
+    assert started is None
+    assert turn_lifecycle.current_kind(agent_id) == AgentState.INTERRUPTED
