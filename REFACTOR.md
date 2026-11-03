@@ -63,7 +63,10 @@ the hot spots; every high finding fixed or explicitly accepted.
 5. **No test suites, coverage, browsers or test servers on laptopstudio** (Peter's
    standing order of 2026-10-12; this machine runs his live Host). Locally, run at
    most one test file or node id with `-n 0` through
-   `/var/tmp/clarp-refactor-program/bin/heavy` (it refuses everything else).
+   `/var/tmp/clarp-refactor-program/bin/heavy` (it refuses everything else), and
+   only tests that start no server, Host process or listening socket. Any test
+   that starts an HTTP server (`build_server`, `ContextHTTPServer`, a running-server
+   fixture) or a Host runs on heavy-remote, even a single file (3 Nov evening).
    Full suites, coverage and replay runs go to the buildbox through
    `/var/tmp/clarp-refactor-program/bin/heavy-remote` (announced 3 Nov; four job
    slots of `-n 8`; `--status`, `--forget`). The landing gate is the merge captain's
@@ -186,7 +189,6 @@ commits land.
 
 | Since | Slice (owner) | Claimed | Until |
 |---|---|---|---|
-| 3 Nov 12:17 | S3 (`rf-routes-0f54`) | `server/server.py`: the `Handler` `do_GET`/`do_POST`/`do_PUT`/`do_DELETE`/`do_PATCH` dispatch chains, the three route tables, `_handle_diagnostics_health`; `server/lib/context.py` | the seam and rebinding commits land |
 | 3 Nov 12:17 | S5 (`rf-readmodel-12f8`) | `server/lib/message_writes.py` import section (`store_transcript_turns`, `_ImportWriter`, `_store_transcript_turns_txn` and its helpers, `_attach_authority_tools`, `stamp_turn`); `server/lib/message_store.py` facade re-exports; `tests/readmodel/` | the S5 extraction commits land; `rf-fix-c4ab`'s RM-N1 commit may edit the upsert and twin path |
 
 ## 7. How to work

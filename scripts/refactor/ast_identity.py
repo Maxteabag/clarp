@@ -57,11 +57,26 @@ classes:
 - a moved member may not use zero-argument `super()` or a private `__name`
   (both change meaning when the defining class changes).
 
+Reads, in both modes: every module-level name a moved definition or member
+reads resolves in its new home. A name the old file or the destination binds
+by import and also rebinds (imported from two places, imported again inside a
+try/if/with/for block, assigned, defined, a loop/with/except/walrus target or
+deleted at module level, or written through `global` in a function, by assignment or by an import)
+fails,
+because `top_imports` sees only the import and the moved reader may see
+another object. In top-level mode a read of a moved definition must be that
+definition in its new home (imported from it, or defined in the same file);
+any other changed binding must be the same object at HEAD.
+
 Identity is checked by importing both sides in one interpreter, in a sandboxed
 copy of HEAD (HOME, XDG and CLAUDE_PWA_DB point into a temp directory).
 
-Limits: exit 0 proves definitions and import bindings, not arbitrary
-module-level side effects of a one-to-many split; those need source review.
+Limits: exit 0 proves definitions, import bindings and module-level reads,
+not arbitrary module-level side effects of a one-to-many split, nor rebinding
+from other modules (`setattr(server, ...)`, monkeypatch, `globals()[...]`);
+those need source review (s3_apply's rebinding_sites covers the S3 helpers).
+An augmented assignment's reads are covered by the statement-order check of a
+whole-file move, not resolved one by one.
 """
 from __future__ import annotations
 
@@ -223,6 +238,15 @@ def compare(base: str, head: str, old: str, new: list[str]) -> tuple[list[str], 
         problems += found
         pairs += more
 
+    old_homes = {name: homes[name][0] for name in old_defs if name in homes}
+    for name, stmt in old_defs.items():
+        if name not in homes or isinstance(stmt, ast.AugAssign):
+            continue
+        path = homes[name][0]
+        found, more = check_reads(old, name, homes[name][1], old_tree, old, new_trees[path], path, old_homes)
+        problems += found
+        pairs += more
+
     if len(new_trees) == 1:
         (path, tree), = new_trees.items()
         keep = [blanked(s) for s in old_tree.body if not isinstance(s, _IMPORTS)]
@@ -275,6 +299,39 @@ def members(cls: ast.ClassDef) -> dict[str, ast.stmt]:
     return found
 
 
+def _comprehension_locals(member: ast.stmt) -> set[str]:
+    """Names every load of which (outside nested function, lambda and class
+    bodies) sits in a comprehension that binds that name. Python 3.12 inlines
+    comprehensions (PEP 709), so symtable lists their variables in the
+    enclosing scope as read; they are not module reads."""
+    loads: dict[str, list[bool]] = collections.defaultdict(list)
+
+    def visit(node, bound: frozenset[str]):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)) and node is not member:
+            return
+        if isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
+            inner = set(bound)
+            for gen in node.generators:
+                # The first iterable is evaluated outside the comprehension.
+                visit(gen.iter, bound if gen is node.generators[0] else frozenset(inner))
+                # Only plain names stored by the target are bound; a target
+                # like `holder.value` or `rows[i]` loads holder and rows.
+                inner |= {n.id for n in ast.walk(gen.target)
+                          if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store)}
+                visit(gen.target, frozenset(inner))
+                for cond in gen.ifs:
+                    visit(cond, frozenset(inner))
+            for part in ([node.key, node.value] if isinstance(node, ast.DictComp) else [node.elt]):
+                visit(part, frozenset(inner))
+            return
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+            loads[node.id].append(node.id in bound)
+        for child in ast.iter_child_nodes(node):
+            visit(child, bound)
+    visit(member, frozenset())
+    return {name for name, inside in loads.items() if all(inside)}
+
+
 def global_reads(member: ast.stmt) -> set[str]:
     """Names a member reads from module scope: those evaluated when it is defined
     (decorators, defaults, annotations, assigned values) and symtable's implicit
@@ -287,7 +344,12 @@ def global_reads(member: ast.stmt) -> set[str]:
 
     def visit(t):
         for sym in t.get_symbols():
-            if sym.is_global() and sym.is_referenced() and not sym.is_imported():
+            # symtable can report a function's own parameter or local as
+            # global too (seen on 3.12 with a generator expression in the
+            # body); a name bound in the scope is not a module read unless it
+            # is declared `global`.
+            if (sym.is_referenced() and not sym.is_imported()
+                    and (sym.is_declared_global() or (sym.is_global() and not sym.is_local()))):
                 found.add(sym.get_name())
         for child in t.get_children():
             visit(child)
@@ -295,8 +357,9 @@ def global_reads(member: ast.stmt) -> set[str]:
     # annotations, a class-level assignment's value) live in the root table.
     # A name the member also binds still counts when it is read: in a class
     # body `VALUE = VALUE` reads the module's VALUE before binding its own.
+    inlined = _comprehension_locals(member)
     for sym in table.get_symbols():
-        if sym.is_referenced() and not sym.is_imported():
+        if sym.is_referenced() and not sym.is_imported() and sym.get_name() not in inlined:
             found.add(sym.get_name())
     for child in table.get_children():
         visit(child)
@@ -317,6 +380,100 @@ def module_binding(tree: ast.Module, path: str, name: str) -> tuple[str, str | N
             if any(isinstance(n, ast.Name) and n.id == name for t in targets for n in ast.walk(t)):
                 return (_module(path), name)
     return None
+
+
+def _module_scope_imports(tree: ast.Module, package: str) -> dict[str, set[tuple[str, str | None]]]:
+    """Every import binding at module scope, nested blocks (try/if/with/for)
+    included and function or class bodies excluded: bound name -> targets."""
+    found: dict[str, set[tuple[str, str | None]]] = collections.defaultdict(set)
+
+    def visit(node):
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+                continue
+            if isinstance(child, _IMPORTS):
+                if not (isinstance(child, ast.ImportFrom) and child.module == "__future__"):
+                    for name, module, attr in bindings(child, package):
+                        found[name].add((module, attr))
+            visit(child)
+    visit(tree)
+    return found
+
+
+def rebound_imports(tree: ast.Module, path: str) -> dict[str, str]:
+    """Names a module binds by import and also binds some other way, so the
+    object a reader sees at run time need not be the import's: imported from
+    two different places, imported again inside a block, assigned, defined,
+    used as a loop/with/except/walrus target or deleted at module level, or
+    written through `global` in any function. A moved reader of such a name
+    may see a different object in its new home, which top_imports alone
+    cannot tell."""
+    import symtable
+    source = ast.unparse(tree)
+    imports = _module_scope_imports(tree, _package(path))
+    top = {name for s in tree.body if isinstance(s, _IMPORTS)
+           and not (isinstance(s, ast.ImportFrom) and s.module == "__future__")
+           for name, _, _ in bindings(s, _package(path))}
+    found: dict[str, str] = {}
+    for name, targets in imports.items():
+        if len(targets) > 1:
+            found[name] = f"imported from {len(targets)} different places"
+    blocks = (ast.If, ast.Try, ast.With, ast.For, ast.While, ast.AsyncWith, ast.AsyncFor)
+    for stmt in tree.body:
+        if isinstance(stmt, blocks):
+            for name in _module_scope_imports(ast.Module(body=[stmt], type_ignores=[]), _package(path)):
+                if name in top:
+                    found.setdefault(name, "imported again inside a block")
+    table = symtable.symtable(source, path, "exec")
+    for sym in table.get_symbols():
+        if sym.get_name() in imports and sym.is_assigned():
+            found.setdefault(sym.get_name(), "also bound at module level (assignment, definition, target or del)")
+
+    def visit(t):
+        for sym in t.get_symbols():
+            # A `global` name rebound by assignment or by `import ... as name`.
+            if sym.get_name() in imports and sym.is_declared_global() and (sym.is_assigned() or sym.is_imported()):
+                found.setdefault(sym.get_name(), f"written through `global` in {t.get_name()}")
+        for child in t.get_children():
+            visit(child)
+    for child in table.get_children():
+        visit(child)
+    return found
+
+
+def check_reads(old: str, name: str, stmt: ast.stmt, base_tree: ast.Module, old_path: str,
+                tree: ast.Module, path: str, homes: dict[str, str]) -> tuple[list[str], list[tuple]]:
+    """The module-level names a moved definition reads, resolved in its new
+    home: a name either side rebinds after importing it fails; an unbound or
+    newly bound name fails; a moved definition must be the object in its home;
+    any other changed binding must be the same object at HEAD."""
+    import builtins
+    problems: list[str] = []
+    pairs: list[tuple] = []
+    rebound_old, rebound_new = rebound_imports(base_tree, old_path), rebound_imports(tree, path)
+    for read in sorted(global_reads(stmt)):
+        for where, rebound in ((old_path, rebound_old), (path, rebound_new)):
+            if read in rebound:
+                problems.append(f"{old}: {name} reads {read}, which {where} imports and rebinds "
+                                f"({rebound[read]}): the moved reader may see another object")
+        was = module_binding(base_tree, old_path, read)
+        now = module_binding(tree, path, read)
+        if was is None and hasattr(builtins, read):
+            if now is not None:
+                problems.append(f"{old}: {path} binds builtin {read} that {name} reads")
+        elif now is None:
+            problems.append(f"{old}: {name} reads {read}, which {path} does not bind")
+        elif was is None:
+            problems.append(f"{old}: {name} reads {read}, which {old_path} did not bind at BASE")
+        elif read in homes:
+            if homes[read] != path:
+                if now != (_module(homes[read]), read):
+                    pairs.append((f"{path}: {read} (read by {name})", (_module(homes[read]), read), now))
+            elif now != (_module(path), read):
+                problems.append(f"{old}: {name} reads {read}, moved to {path}, but {path} binds it elsewhere")
+        elif was != now:
+            pairs.append((f"{path}: {read} (read by {name})", was, now))
+    return problems, pairs
 
 
 def _base_label(node: ast.expr) -> str:
@@ -353,6 +510,7 @@ def compare_methods(base: str, head: str, old: str, new: list[str]) -> tuple[lis
         return [f"{old}: class {old_name} not found at {'BASE' if cls_base is None else 'HEAD'}"], []
     base_members = members(cls_base)
     old_top = top_imports(base_tree, old_package)
+    rebound_old = rebound_imports(base_tree, old_path)
 
     mixins: list[tuple[str, str, ast.Module, ast.ClassDef]] = []
     for text in new:
@@ -396,6 +554,10 @@ def compare_methods(base: str, head: str, old: str, new: list[str]) -> tuple[lis
             # Module-level names it reads that the old module defined (not
             # imported: the import rule below covers those) or builtins.
             for read in sorted(global_reads(stmt)):
+                for where, rebound in ((old_path, rebound_old), (path, rebound_imports(tree, path))):
+                    if read in rebound:
+                        problems.append(f"{old}: {name} reads {read}, which {where} imports and rebinds "
+                                        f"({rebound[read]}): the moved reader may see another object")
                 if read in old_top:
                     continue
                 was = module_binding(base_tree, old_path, read)

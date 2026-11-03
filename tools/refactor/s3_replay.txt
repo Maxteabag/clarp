@@ -1,0 +1,6 @@
+# Commits whose server/server.py diff s3_merge.sh replays onto main's server.py,
+# in order (route-registry.md section 11): the route seam and every preparatory
+# edit. One full sha per line; '#' starts a comment. Filled in when each lands
+# on refactor/integration.
+052ac4ba06cbca8508235303d6f8de74ca42d13b  # S3 seam: Handler.do_<METHOD> dispatch through lib.routes.registry
+c1b7b999e3f5906cef4ca58a61962dabc82c18f9  # S3 rebinding: _handle_diagnostics_health reads srv.boot_config
