@@ -133,3 +133,32 @@ def test_a_retried_terminal_write_still_lands_after_its_own_turns_row(tmp_path, 
         assert lifecycle.current_kind(world.agent) == AgentState.DONE
     finally:
         dispatch.reset_for_tests()
+
+
+def test_a_stop_right_after_the_failed_attempt_still_wins(tmp_path, monkeypatch):
+    """TP-N1b review 5: a Stop that commits in the instant after the failed
+    attempt rolled back and released its lock, before anything else, still
+    fences the retry."""
+    world, _call = _world(tmp_path, monkeypatch, "first")
+    _locked_once(monkeypatch)
+    real_write = lifecycle.TurnStateMachine._write_terminal
+    stopped = []
+
+    def write_then_stop_on_failure(self, *args, **kwargs):
+        try:
+            return real_write(self, *args, **kwargs)
+        except sqlite3.OperationalError:
+            if not stopped:
+                assert not db.conn().in_transaction
+                lifecycle.transition(world.agent, TurnEvent.STOP_REQUESTED, {"source": "user_stop"})
+                stopped.append(True)
+            raise
+
+    monkeypatch.setattr(lifecycle.TurnStateMachine, "_write_terminal", write_then_stop_on_failure)
+    try:
+        assert lifecycle.try_transition(world.agent, TurnEvent.PROCESS_EXITED_OK,
+                                        {"trace_id": "t-first"}) is None
+        assert stopped == [True]
+        assert lifecycle.current_kind(world.agent) == AgentState.INTERRUPTED
+    finally:
+        dispatch.reset_for_tests()
