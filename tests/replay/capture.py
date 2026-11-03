@@ -13,6 +13,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import signal
 import sqlite3
 import subprocess
 import sys
@@ -46,7 +47,8 @@ class Host:
         self.log = (self.root.parent / f'{self.root.name}.host.log').open('a')
         self.process = subprocess.Popen(
             [self.python, str(HERE / 'host.py'), '--build', str(self.build), '--state-dir', str(self.root)],
-            stdout=self.log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL)
+            stdout=self.log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+            start_new_session=True)
         ready = self.root / 'host.json'
         deadline = time.monotonic() + READY_TIMEOUT_S
         while not ready.exists():
@@ -60,14 +62,14 @@ class Host:
         return self
 
     def stop(self):
+        """Kill the host's own process group (it leads one: start_new_session),
+        which takes the fake provider processes with it. The capture has already
+        read everything it needs; a graceful shutdown costs ~10 s per host."""
         if self.process is None:
             return
-        self.process.terminate()
-        try:
-            self.process.wait(timeout=8)
-        except subprocess.TimeoutExpired:
-            self.process.kill()
-            self.process.wait(timeout=3)
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(self.process.pid, signal.SIGKILL)
+        self.process.wait(timeout=5)
         self.log.close()
         self.process = None
 
@@ -90,11 +92,11 @@ class Host:
 class SSE:
     """Collects the Host's SSE stream; heartbeats are dropped (pure timing)."""
 
-    def __init__(self, host: Host):
+    def __init__(self, host: Host, sessions):
         self.events: list[dict] = []
         self.last_at = time.monotonic()
         self._stop = threading.Event()
-        req = urllib.request.Request(host.url + '/events', headers={'Authorization': f'Bearer {TOKEN}'})
+        req = urllib.request.Request(host.url + '/events?live=' + ','.join(sessions), headers={'Authorization': f'Bearer {TOKEN}'})
         self._resp = urllib.request.urlopen(req, timeout=60)
         self._thread = threading.Thread(target=self._read, daemon=True)
         self._thread.start()
@@ -230,24 +232,34 @@ def capture(build: Path, scenario: dict, scratch: Path, python: str = sys.execut
     root = scratch / scenario['id']
     if root.exists():
         shutil.rmtree(root)
+    started = time.monotonic()
+    timings = {}
     host = Host(build, root, python).start()
+    timings['start'] = round(time.monotonic() - started, 2)
     sse = None
     http: list = []
     error = None
-    started = time.monotonic()
+    sessions = scenario.get('sessions', ('rachel',))
+    db, files = {'schema': [], 'tables': {}}, []
     try:
-        sse = SSE(host)
+        sse = SSE(host, sessions)
         _poll('SSE connected', lambda: sse.events)
         for step in scenario['steps']:
             run_step(host, sse, step, http)
-        _quiesce(host, sse, scenario.get('sessions', ('rachel',)))
+        timings['steps'] = round(time.monotonic() - started, 2)
+        _quiesce(host, sse, sessions)
+        timings['quiet'] = round(time.monotonic() - started, 2)
+        db = dump_db(root / 'state.sqlite')
+        files = list_files(root)
     except StepFailed as exc:
         error = str(exc)
     finally:
         if sse is not None:
             sse.close()
         host.stop()
+    timings['stopped'] = round(time.monotonic() - started, 2)
     return {
+        'timings': timings,
         'scenario': scenario['id'],
         'error': error,
         'seconds': round(time.monotonic() - started, 2),
@@ -255,6 +267,6 @@ def capture(build: Path, scenario: dict, scratch: Path, python: str = sys.execut
         'build': str(build),
         'http': http,
         'sse': sse.events if sse else [],
-        'db': dump_db(root / 'state.sqlite'),
-        'files': list_files(root),
+        'db': db,
+        'files': files,
     }
