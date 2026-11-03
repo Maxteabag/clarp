@@ -65,8 +65,8 @@ the hot spots; every high finding fixed or explicitly accepted.
    most one test file or node id with `-n 0` through
    `/var/tmp/clarp-refactor-program/bin/heavy` (it refuses everything else).
    Full suites, coverage and replay runs go to the buildbox through
-   `/var/tmp/clarp-refactor-program/bin/heavy-remote` (announced 3 Nov; default
-   `-n 10`; `--status`, `--forget`). The landing gate is the merge captain's
+   `/var/tmp/clarp-refactor-program/bin/heavy-remote` (announced 3 Nov; four job
+   slots of `-n 8`; `--status`, `--forget`). The landing gate is the merge captain's
    GitHub Actions run on the exact commit. Never run `cargo` (repo rule).
 6. **Data.** The replay corpus is scrubbed with stable surrogates and read only
    through the harness. Tools print structure, counts and codes, never message
@@ -116,6 +116,13 @@ the hot spots; every high finding fixed or explicitly accepted.
 
 **Checkpoints (Peter, 3 Nov 11:3x):** "I dont want to approve for next stages. I just want a finshed refactored server". Both go/no-go checkpoints are the lead's decisions on the same evidence; no agent waits for Peter. Every gate in section 5 still applies.
 
+**Go/no-go 1: GO (lead, 3 Nov 12:12)** on the harness proof at `57d175ff`: two
+self-check runs, 9 scenarios, unchanged code 0/0/0 differences both times, all
+six planted changes caught. G2 is binding from then on. Behaviour-relevant
+landings start once a harness commit with reviewer B's SOURCE YES is on main, and
+not before the 3 Nov 18:00 release is done. Tests- and docs-only landings
+continue as before.
+
 ## 5. Gates
 
 - **G0 entry (per slice):** characterization tests for the code the slice will
@@ -125,13 +132,18 @@ the hot spots; every high finding fixed or explicitly accepted.
   except the quarantined tests (read the result, not a wrapper's exit code);
   move-only commits pass the AST-identity check once it exists; the layer test
   once it exists.
-- **G2 harness** (from the lead's go/no-go 1): replay of head against base: zero unexplained
-  differences.
+- **G2 harness** (binding since go/no-go 1): replay of head against its own base
+  on main with a harness commit that has reviewer B's SOURCE YES: zero
+  unexplained differences. On the laptop `python3 tests/replay/run.py prepare
+  <base> <head> --prune` (git only), then `heavy-remote uv run --frozen --group
+  dev python tests/replay/run.py --jobs 8 compare --base <base> --head <head>`;
+  exit 0 passes. Register intended differences with the lead before the run.
 - **G3 reviewer:** the area reviewer's first line `SOURCE YES <full sha>` on the
   exact commit. Reviewer A: turn engine, runtime boundary, agents and identity,
-  policies, backends and accounts, database and maintenance. Reviewer B:
-  everything else (HTTP layer, read model, voice, live calls and Oracle,
-  autonomy and goals, harness and test infrastructure).
+  policies, backends and accounts, database and maintenance. Reviewer C (from
+  3 Nov 13:05): read model and transcripts (S5, RM-*), voice (VP-*). Reviewer
+  B: everything else (HTTP layer, live calls and Oracle, autonomy and goals,
+  harness and test infrastructure, release tooling).
 - **G4 merge captain:** rebase onto current `origin/main`; the rebased diff's
   `git patch-id --stable` equals the reviewed diff's, otherwise back to review;
   rerun G1 (and G2) on the rebased commit; fast-forward push.
@@ -154,6 +166,7 @@ the hot spots; every high finding fixed or explicitly accepted.
 | Compute owner | `rf-compute-aa87` | Claude | `/var/tmp/clarp-refactor-program/bin/heavy-remote`, the buildbox ledger |
 | Reviewer A (core) | `rf-review-core-bbc1` | Codex | verdicts only |
 | Reviewer B (rest) | `rf-review-rest-a79f` | Codex | verdicts only |
+| Reviewer C (read model, voice) | `rf-review-readmodel-300e` | Codex | verdicts only |
 
 Reviewers never edit sources, never run jobs against the live Host and never
 grant more than the exact commit they reviewed.
@@ -161,7 +174,13 @@ grant more than the exact commit they reviewed.
 ### Claims
 
 Files a slice has claimed. Agents outside the program must not edit them; ask
-the lead. **None yet** (Phase 1 moves no code).
+the lead (`hobbles-18b0`). A claim is short-lived and ends when its slice
+commits land.
+
+| Since | Slice (owner) | Claimed | Until |
+|---|---|---|---|
+| 3 Nov 12:17 | S3 (`rf-routes-0f54`) | `server/server.py`: the `Handler` `do_GET`/`do_POST`/`do_PUT`/`do_DELETE`/`do_PATCH` dispatch chains, the three route tables, `_handle_diagnostics_health`; `server/lib/context.py` | the seam and rebinding commits land |
+| 3 Nov 12:17 | S5 (`rf-readmodel-12f8`) | `server/lib/message_writes.py` import section (`store_transcript_turns`, `_ImportWriter`, `_store_transcript_turns_txn` and its helpers, `_attach_authority_tools`, `stamp_turn`); `server/lib/message_store.py` facade re-exports; `tests/readmodel/` | the S5 extraction commits land; `rf-fix-c4ab`'s RM-N1 commit may edit the upsert and twin path |
 
 ## 7. How to work
 
@@ -180,14 +199,25 @@ the lead. **None yet** (Phase 1 moves no code).
 - A reviewed commit goes to the merge captain with its SOURCE YES line. The
   release owner ships what is on main in the next window.
 - **Pace.** Never wait for a person or a clock: ask the lead, then do the next
-  independent task. Never end a turn on "still running": wait inside the turn or
-  schedule a wake-up (`clarp-admin prompt --to <you> --from <you> --delay 10m
-  --text "..."`).
+  independent task. Keep turns short: never wait inside a turn for more than
+  about 10 minutes. Start CI runs, heavy-remote suites, canaries and other long
+  jobs with the clarp-background-jobs launcher
+  (`~/.claude/skills/clarp-background-jobs/scripts/run_detached_job.sh --goal
+  <your goal> ...`, which wakes you when the job ends) or schedule a wake-up
+  (`clarp-admin prompt --to <you> --from <you> --delay 10m --text "..."`), then
+  end the turn. Never end a turn on "still running" without one of the two.
+- **Inbox.** Clarp hands a busy agent one queued message per turn, so after a
+  long turn the rest wait, sometimes for hours. Run
+  `/var/tmp/clarp-refactor-program/bin/inbox <your session>` at the start of
+  every turn and before any decision, landing or ship. It prints every waiting
+  message and is read-only: the messages still arrive later as turns, so note
+  "handled via inbox" on one you already handled. Never delete queue rows: each
+  delete scans the whole messages table under the writer lock (QUEUE-N2).
 - **Messages.** One message per decision. Check whether your question was
   already answered before you send it. Never reverse an in-flight decision
   unless asked. No acknowledgements. Address agents by session slug.
 - **After any Host restart:** check your worktree (clean or WIP-committed), rerun
-  your gate, check your queue, then continue.
+  your gate, run your inbox, then continue.
 
 ## 8. Registers
 

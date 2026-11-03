@@ -299,6 +299,15 @@ def pytest_configure(config):
     config._clarp_guard = {"root": root, "session_log": str(session_log), "worker": worker}
 
 
+def pytest_collection_modifyitems(config, items):
+    try:
+        import quarantine  # the refactor program's flake list (tests/quarantine.txt)
+    except ImportError:    # a copy of this conftest in a test's temp dir has no sibling modules
+        return
+    if quarantine.active(os.environ):
+        quarantine.skip_listed(items, quarantine.load(), pytest.mark.skip(reason=quarantine.REASON))
+
+
 @pytest.hookimpl(trylast=True)
 def pytest_sessionfinish(session, exitstatus):
     """Fail the session for an attempt no test owned (after the session fixtures

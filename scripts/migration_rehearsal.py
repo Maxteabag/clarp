@@ -12,6 +12,16 @@ XDG_* and CLAUDE_PWA_DB inside a temporary directory, which is removed
 afterwards. Prints structure, counts and timings only.
 
     heavy uv run --frozen --group dev python scripts/migration_rehearsal.py --base v61
+
+To rehearse in the proportions of a real database on another machine, write
+its profile first: table names, approximate row counts and average row
+sizes, nothing else. The source is opened read-only (mode=ro) and is never
+counted (see write_profile). On the live Host's database, ask the program
+lead for a quiet slot first.
+
+    python scripts/migration_rehearsal.py --write-profile profile.json \
+        --from-db ~/.local/share/clarp/state.sqlite
+    python scripts/migration_rehearsal.py --base v61 --profile profile.json
 """
 from __future__ import annotations
 
@@ -23,6 +33,7 @@ import pathlib
 import re
 import shutil
 import sqlite3
+import stat
 import subprocess
 import sys
 import tempfile
@@ -150,14 +161,17 @@ def _value(table, col, decl, i, rows, refs, checks, pad):
     return f"{col}-{i}" + ("x" * pad if pad else "")
 
 
-def fill(con: sqlite3.Connection, scale: float, payload: float) -> tuple[dict[str, int], list[str]]:
+def fill(con: sqlite3.Connection, scale: float, payload: float,
+         profile: dict[str, tuple[int, int]] | None = None,
+         other_rows: int = OTHER_ROWS) -> tuple[dict[str, int], list[str]]:
     """Insert synthetic rows; returns the row counts and the tables left under half full."""
     con.execute("PRAGMA foreign_keys = OFF")
     con.execute("PRAGMA journal_mode = WAL")
     con.execute("PRAGMA synchronous = OFF")
     tables = [r[0] for r in con.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")]
-    rows = {t: max(1, int(PROFILE.get(t, (OTHER_ROWS, 0))[0] * scale)) for t in tables}
+    profile = PROFILE if profile is None else profile
+    rows = {t: max(1, int(profile.get(t, (other_rows, 0))[0] * scale)) for t in tables}
     for table in tables:
         sql = con.execute("SELECT sql FROM sqlite_master WHERE name=?", (table,)).fetchone()[0]
         if re.search(r"singleton\s+INTEGER\s+PRIMARY\s+KEY", sql, re.I):
@@ -174,7 +188,7 @@ def fill(con: sqlite3.Connection, scale: float, payload: float) -> tuple[dict[st
         text_cols = [c for c, d, pk in cols if not pk and "INT" not in (d or "").upper()
                      and (table, c) not in refs and c not in checks]
         pad_col = text_cols[0] if text_cols else None
-        pad = max(0, int(PROFILE.get(table, (0, 0))[1] * payload) - 16 * len(cols))
+        pad = max(0, int(profile.get(table, (0, 0))[1] * payload) - 16 * len(cols))
         rowid_pk = [c for c, d, pk in cols if pk == 1 and (d or "").upper() == "INTEGER"]
         names = [c for c, _, _ in cols if c not in rowid_pk]
         insert = f'INSERT OR IGNORE INTO "{table}" ({", ".join(names)}) VALUES ({", ".join("?" * len(names))})'
@@ -210,7 +224,115 @@ def _columns(con: sqlite3.Connection, table: str) -> list[str]:
     return [r[1] for r in con.execute(f'PRAGMA table_info("{table}")')]
 
 
-def rehearse(base: str, scale: float, payload: float, budget: float, keep: bool = False) -> dict:
+def write_profile(source: pathlib.Path, sample: int = 2_000) -> dict:
+    """Approximate row counts and average row bytes per table of `source`.
+
+    Cheap on purpose, because the source may be a live 4 GB database: no
+    count(*). A rowid table's rows are max(rowid) - min(rowid) + 1 (an upper
+    bound when rows were deleted), and its size is averaged over the newest
+    `sample` rows found by a rowid seek. A WITHOUT ROWID table records only its
+    first `sample` rows as a floor. Every statement is its own short read on a
+    read-only connection, so no snapshot is held across tables. Ask for a quiet
+    slot before pointing this at the live Host's database.
+    No value leaves this function: only names, counts and sizes.
+    """
+    con = sqlite3.connect(f"file:{source}?mode=ro", uri=True, isolation_level=None)
+    try:
+        tables, methods = {}, {}
+        names = [r[0] for r in con.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")]
+        for table in names:
+            sql = con.execute("SELECT sql FROM sqlite_master WHERE name=?", (table,)).fetchone()[0] or ""
+            columns = [r[1] for r in con.execute(f'PRAGMA table_info("{table}")')]
+            size = " + ".join(f'coalesce(length("{c}"), 0)' for c in columns) or "0"
+            if re.search(r"WITHOUT\s+ROWID", sql, re.I):
+                # Sizes are summed here, not counted in SQL: the floor is len() of a bounded fetch.
+                sizes = [r[0] for r in con.execute(f'SELECT {size} FROM "{table}" LIMIT ?', (sample,))]
+                rows, avg = len(sizes), (sum(sizes) / len(sizes) if sizes else 0)
+                methods[table] = "without_rowid_sample_floor"
+            else:
+                # Two statements: SQLite seeks min() or max() alone, but scans for both together.
+                low = con.execute(f'SELECT min(rowid) FROM "{table}"').fetchone()[0]
+                high = con.execute(f'SELECT max(rowid) FROM "{table}"').fetchone()[0]
+                rows = 0 if high is None else high - low + 1
+                avg = con.execute(
+                    f'SELECT avg(s) FROM (SELECT {size} AS s FROM "{table}" ORDER BY rowid DESC LIMIT ?)',
+                    (sample,)).fetchone()[0]
+                methods[table] = "rowid_span"
+            tables[table] = [int(rows), int(avg or 0)]
+        version = con.execute("PRAGMA user_version").fetchone()[0]
+    finally:
+        con.close()
+    return {"kind": "clarp-state-profile", "user_version": version, "sample_rows": sample,
+            "taken_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "row_methods": methods, "tables": tables}
+
+
+PROFILE_MAX_BYTES = 1 << 20  # a profile is a few kB; anything bigger is not one
+
+
+def _is_profile(path: pathlib.Path) -> bool:
+    """True only for a small regular file holding a clarp-state-profile; reads at most PROFILE_MAX_BYTES."""
+    info = path.stat()
+    if not stat.S_ISREG(info.st_mode) or info.st_size > PROFILE_MAX_BYTES:
+        return False
+    with path.open("rb") as handle:
+        head = handle.read(PROFILE_MAX_BYTES + 1)
+    if len(head) > PROFILE_MAX_BYTES or head.startswith(b"SQLite format 3"):
+        return False
+    try:
+        data = json.loads(head.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        return False
+    return isinstance(data, dict) and data.get("kind") == "clarp-state-profile"
+
+
+def check_destination(path: pathlib.Path, source: pathlib.Path | None = None) -> pathlib.Path:
+    """The expanded target, or SystemExit when writing it could touch anything but a profile."""
+    path = path.expanduser()
+    if source is not None:
+        source = source.expanduser()
+        # SQLite names the companions after the path it opens, which may be an
+        # alias, and after the file it resolves to: protect both families.
+        bases = {source, pathlib.Path(os.path.realpath(source))}
+        companions = [b.with_name(b.name + s) for b in bases for s in ("", "-wal", "-shm", "-journal")]
+        if any(os.path.realpath(path) == os.path.realpath(c) for c in companions) or (
+                path.exists() and source.exists() and os.path.samefile(path, source)):
+            raise SystemExit(f"refusing to overwrite {path}: it is the source database")
+    if path.is_symlink():
+        raise SystemExit(f"refusing to overwrite {path}: it is a symlink")
+    if path.exists() and not _is_profile(path):
+        raise SystemExit(f"refusing to overwrite {path}: it is not a clarp-state-profile")
+    return path
+
+
+def save_profile(path: pathlib.Path, profile: dict, source: pathlib.Path | None = None) -> None:
+    """Write a profile without ever touching another file.
+
+    Refuses the source database and its -wal/-shm/-journal companions, and any
+    existing file that is not already a profile (checked with a bounded read).
+    Stages in a new, exclusively created temp file beside the target, then
+    renames it into place, so no fixed staging name can collide with anything.
+    """
+    path = check_destination(path, source)
+    handle, staging = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".partial", dir=path.parent)
+    try:
+        with os.fdopen(handle, "w") as out:
+            out.write(json.dumps(profile, indent=1, sort_keys=True))
+        os.replace(staging, path)
+    except BaseException:
+        os.unlink(staging)
+        raise
+
+
+def load_profile(path: pathlib.Path) -> dict[str, tuple[int, int]]:
+    data = json.loads(path.read_text())
+    if data.get("kind") != "clarp-state-profile":
+        raise SystemExit(f"{path} is not a clarp-state-profile")
+    return {name: (int(rows), int(size)) for name, (rows, size) in data["tables"].items()}
+
+
+def rehearse(base: str, scale: float, payload: float, budget: float, keep: bool = False,
+             profile: dict[str, tuple[int, int]] | None = None) -> dict:
     work = pathlib.Path(tempfile.mkdtemp(prefix="clarp-migration-rehearsal-", dir="/var/tmp"))
     try:
         db_path = work / "state.sqlite"
@@ -218,7 +340,7 @@ def rehearse(base: str, scale: float, payload: float, budget: float, keep: bool 
         base_version = build_base(base, work, db_path, env)
         con = sqlite3.connect(str(db_path))
         started = time.monotonic()
-        before, underfilled = fill(con, scale, payload)
+        before, underfilled = fill(con, scale, payload, profile)
         fill_seconds = time.monotonic() - started
         violations: dict[str, int] = {}
         for row in con.execute("PRAGMA foreign_key_check"):
@@ -262,14 +384,24 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--payload", type=float, default=1.0, help="row-size multiplier")
     parser.add_argument("--budget", type=float, default=120.0, help="maximum migration seconds")
     parser.add_argument("--keep", action="store_true", help="keep the temporary directory")
+    parser.add_argument("--profile", type=pathlib.Path, help="row counts and sizes from --write-profile")
+    parser.add_argument("--write-profile", type=pathlib.Path, help="write the profile of --from-db and exit")
+    parser.add_argument("--from-db", type=pathlib.Path, help="database to profile (opened read-only)")
     args = parser.parse_args(argv)
+    if args.write_profile:
+        if not args.from_db:
+            parser.error("--write-profile needs --from-db")
+        check_destination(args.write_profile, args.from_db)  # refuse before reading anything
+        save_profile(args.write_profile, write_profile(args.from_db.expanduser()), source=args.from_db)
+        return 0
+    profile = load_profile(args.profile) if args.profile else PROFILE
     base = args.base or _git("merge-base", "HEAD", "origin/main")
-    estimate = sum(r * b for r, b in PROFILE.values()) * args.scale * args.payload
+    estimate = sum(r * b for r, b in profile.values()) * args.scale * args.payload
     free = shutil.disk_usage("/var/tmp").free
     if free < 3 * estimate:
         print(f"refusing: /var/tmp has {free >> 20} MiB free, need {3 * int(estimate) >> 20} MiB", file=sys.stderr)
         return 2
-    report = rehearse(base, args.scale, args.payload, args.budget, keep=args.keep)
+    report = rehearse(base, args.scale, args.payload, args.budget, keep=args.keep, profile=profile)
     print(json.dumps(report, indent=2, sort_keys=True))
     return 0 if report["ok"] else 1
 
