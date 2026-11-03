@@ -849,3 +849,32 @@ def test_an_agent_stop_over_the_runtime_rpc_leaves_pending_user_receipts(tmp_pat
         assert turn_queue.stop_generation("agent-2") > shared_before, "still a Stop"
     finally:
         turn_dispatch.reset_for_tests()
+
+
+@pytest.mark.parametrize("blocker, value", [
+    ("provider_turns", ["synthetic-agent"]),
+    ("unpersisted", ["synthetic-agent"]),
+    ("codex_account_recovery", {"checking": True, "recovering": True}),
+])
+def test_the_idle_fast_path_never_seals_over_work_a_handover_would_cut(tmp_path, blocker, value):
+    """TP-04: the fast path and the full handover check judge idleness alike, so
+    a release never seals while a provider turn, unpersisted held work or an
+    account recovery runs."""
+    server = RuntimeRPCServer(tmp_path / "runtime.sock",
+                              dispatch_service=SimpleNamespace(),
+                              status_provider=lambda: {blocker: value})
+    try:
+        assert server.handover_blockers()
+        assert not server.begin_drain_if_idle()
+    finally:
+        server.server_close()
+
+
+def test_the_idle_fast_path_still_seals_an_idle_runtime(tmp_path):
+    server = RuntimeRPCServer(tmp_path / "runtime.sock",
+                              dispatch_service=SimpleNamespace(),
+                              status_provider=lambda: {})
+    try:
+        assert server.begin_drain_if_idle()
+    finally:
+        server.server_close()
