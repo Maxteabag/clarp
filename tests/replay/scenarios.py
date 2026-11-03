@@ -94,6 +94,50 @@ SCENARIOS = [
             {'op': 'get', 'path': '/status?session=rachel'},
         ],
     },
+    {
+        'id': 'steer-into-running',
+        'what': 'a send without queue_if_busy while a turn runs is steered into it',
+        'steps': [
+            _send('rachel', '[qa-slow] synthetic running task', 'golf'),
+            {'op': 'wait_provider_started', 'marker': '[qa-slow] synthetic running task'},
+            {'op': 'wait_open', 'message_id': 'u-golf'},
+            _send('rachel', 'synthetic steering hotel', 'hotel'),
+            {'op': 'wait_settled', 'message_id': 'u-golf'},
+            {'op': 'wait_busy', 'session': 'rachel', 'busy': False},
+            {'op': 'get', 'path': '/log?session=rachel'},
+        ],
+    },
+    {
+        'id': 'focus-and-reads',
+        'what': 'focus moves between agents; the read model answers for both',
+        'sessions': ('rachel', 'mike'),
+        'steps': [
+            {'op': 'post', 'path': '/select', 'body': {'session': 'mike'}},
+            {'op': 'post', 'path': '/focus', 'body': {'session': 'rachel'}},
+            {'op': 'get', 'path': '/agents/snapshot'},
+            {'op': 'get', 'path': '/live?session=rachel'},
+            {'op': 'get', 'path': '/turn-queue?session=mike'},
+            {'op': 'get', 'path': '/attention'},
+            {'op': 'get', 'path': '/status?session=mike'},
+        ],
+    },
+    {
+        'id': 'voice-clip-turn',
+        'what': 'a recorded clip is transcribed (stub STT) and sent as a voice turn',
+        'steps': [
+            {'op': 'post', 'path': '/transcribe', 'name': 'transcribe india',
+             'raw': {'content_type': 'audio/webm', 'bytes': 'synthetic-audio-bytes-india'},
+             'headers': {'X-Transcription-Session': 'rachel', 'X-Utterance-ID': 'utt-india'}},
+            {'op': 'post', 'path': '/send', 'name': 'send india',
+             'body': {'session': 'rachel', 'text': 'replay voice prompt', 'client_msg_id': 'india',
+                      'synthesize_audio': False, 'utterance_id': 'utt-india'},
+             'body_from_last': {'trace_id': 'trace_id', 'transcription_id': 'transcription_id'}},
+            {'op': 'wait_settled', 'message_id': 'u-india'},
+            {'op': 'wait_busy', 'session': 'rachel', 'busy': False},
+            {'op': 'get', 'path': '/log?session=rachel'},
+            {'op': 'get', 'path': '/voice-events?session=rachel'},
+        ],
+    },
 ]
 
 BY_ID = {s['id']: s for s in SCENARIOS}
