@@ -3810,17 +3810,26 @@ def begin_stop(agent_id: str, *, user_stop: bool = False) -> tuple[dict, int, bo
     stop generation in the same transaction. A maintenance cancel uses the same
     barrier without it and never withdraws the user's own sends (see also
     fence_user_stop)."""
-    with _TURN_LOCK:
-        value = _SLOTS.get(agent_id) or None
-        recovery_parked = _recovery_parked(agent_id, value)
-        queue_was_paused = bool(turn_queue.state(agent_id)["paused"])
-        # As in clear_for_agent: the barrier keeps Stop atomic with
-        # _finish_turn(); the pause flag lands right after the release.
-        stop, dropped = _SLOTS.begin_stop(agent_id)
-        if user_stop:
-            _TURN_LOCK.defer(lambda: turn_queue.set_paused(agent_id, True, user_stop=True))
-        else:
-            _TURN_LOCK.defer(lambda: turn_queue.set_paused(agent_id, True))
+    stop = None
+    try:
+        with _TURN_LOCK:
+            value = _SLOTS.get(agent_id) or None
+            recovery_parked = _recovery_parked(agent_id, value)
+            queue_was_paused = bool(turn_queue.state(agent_id)["paused"])
+            # As in clear_for_agent: the barrier keeps Stop atomic with
+            # _finish_turn(); the pause flag lands right after the release.
+            stop, dropped = _SLOTS.begin_stop(agent_id)
+            if user_stop:
+                _TURN_LOCK.defer(lambda: turn_queue.set_paused(agent_id, True, user_stop=True))
+            else:
+                _TURN_LOCK.defer(lambda: turn_queue.set_paused(agent_id, True))
+    except Exception:
+        # The pause could not be written ('database is locked'): the Stop
+        # fails, and its barrier must not outlive it, or every later send
+        # waits behind it for a finish_stop that never comes (QUEUE-N1).
+        if stop is not None:
+            _SLOTS.restore_stop(agent_id, stop.as_dict())
+        raise
     snapshot = stop.as_dict()
     snapshot["account_recovery_parked"] = recovery_parked
     return snapshot, dropped, queue_was_paused

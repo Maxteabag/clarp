@@ -619,10 +619,28 @@ class RuntimeRPCServer(socketserver.ThreadingMixIn,
             # it is the user's: its pause moves the user stop generation and it
             # fences the agent's pending user receipts.
             user_stop = params.get("fence_user_receipts", True) is not False
-            snapshot, dropped, queue_was_paused = turn_dispatch.begin_stop(
-                agent_id, user_stop=user_stop)
+            try:
+                snapshot, dropped, queue_was_paused = turn_dispatch.begin_stop(
+                    agent_id, user_stop=user_stop)
+            except Exception as exc:
+                # Its barrier is already rolled back (QUEUE-N1); the Stop fails.
+                from .log import log_exception
+                log_exception("runtimeStopBeginFail", exc, detail=agent_id)
+                return {"ok": False, "status": 503, "error": str(exc)}
             if user_stop:
-                turn_dispatch.fence_user_stop(agent_id)
+                try:
+                    turn_dispatch.fence_user_stop(agent_id)
+                except Exception as exc:
+                    # Roll back as a failed interrupt does: a barrier left
+                    # behind holds every later send (QUEUE-N1).
+                    turn_dispatch.restore_stop_state(agent_id, snapshot)
+                    try:
+                        turn_queue.set_paused(agent_id, queue_was_paused)
+                    except Exception as restore_exc:  # noqa: BLE001
+                        from .log import log_exception
+                        log_exception("runtimeStopRollbackFail", restore_exc,
+                                      detail=agent_id)
+                    return {"ok": False, "status": 503, "error": str(exc)}
             try:
                 terminated = int(backends.interrupt(backend, agent_id) or 0)
             except Exception as exc:
