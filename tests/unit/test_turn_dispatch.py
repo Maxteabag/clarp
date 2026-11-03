@@ -673,6 +673,35 @@ def test_the_preempting_send_keeps_its_place_ahead_of_queued_work(tmp_path, monk
     slow.process.alive = False
 
 
+class _LeftoverProcessBackends(_SlowExitBackends):
+    """A turn process the Host already took for finished is still running."""
+
+    def active_handles(self, backend, agent_id):
+        return [self.process] if self.process.alive else []
+
+
+def test_a_send_behind_a_leftover_process_is_durable(tmp_path, monkeypatch):
+    """TP-01b: the free-slot-but-process-running branch acknowledges a waiting
+    send as queued, so it needs a durable row too."""
+    import time
+    monkeypatch.setattr(_td, "_PROCESS_EXIT_POLL_S", 0.01)
+    service, _backends, agent_id = _make_service(tmp_path)
+    leftover = _LeftoverProcessBackends()
+    service.backends = leftover
+    result = service.dispatch(text="first", requested_session="mike", trace_id="tA",
+                              client_msg_id="m-first", synthesize_audio=False)
+
+    assert result.queued is True and leftover.spawned == []
+    assert _durable_order(agent_id) == ["tA"]
+
+    leftover.process.alive = False
+    deadline = time.monotonic() + 3
+    while not leftover.spawned and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert [call["trace_id"] for _b, call in leftover.spawned] == ["tA"]
+    assert _durable_order(agent_id) == []
+
+
 def test_a_send_that_cannot_wait_durably_is_refused(tmp_path, monkeypatch):
     service, _backends, agent_id = _make_service(tmp_path)
     slow = _SlowExitBackends()
