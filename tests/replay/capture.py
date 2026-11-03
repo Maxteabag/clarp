@@ -111,10 +111,14 @@ class Host:
             self.log.close()
             self.log = None
 
-    def request(self, method: str, path: str, body=None):
-        data = json.dumps(body).encode() if body is not None else None
-        req = urllib.request.Request(self.url + path, data=data, method=method, headers={
-            'Authorization': f'Bearer {TOKEN}', 'Content-Type': 'application/json'})
+    def request(self, method: str, path: str, body=None, raw: dict | None = None, headers: dict | None = None):
+        sent = {'Authorization': f'Bearer {TOKEN}', 'Content-Type': 'application/json', **(headers or {})}
+        if raw is not None:
+            data = raw['bytes'].encode()
+            sent['Content-Type'] = raw['content_type']
+        else:
+            data = json.dumps(body).encode() if body is not None else None
+        req = urllib.request.Request(self.url + path, data=data, method=method, headers=sent)
         try:
             with urllib.request.urlopen(req, timeout=10) as resp:
                 status, raw, headers = resp.status, resp.read(), resp.headers
@@ -238,7 +242,13 @@ def _provider_started(root: Path, marker: str):
 def run_step(host: Host, step: dict, http: list):
     op = step['op']
     if op in ('get', 'post', 'put', 'delete'):
-        status, headers, payload = host.request(op.upper(), step['path'], step.get('body'))
+        body = step.get('body')
+        if step.get('body_from_last'):
+            # Carry fields from the previous response, e.g. /transcribe's trace_id into /send.
+            last = http[-1]['body'] if http and isinstance(http[-1]['body'], dict) else {}
+            body = {**(body or {}), **{k: last.get(src) for k, src in step['body_from_last'].items()}}
+        status, headers, payload = host.request(op.upper(), step['path'], body, step.get('raw'),
+                                                step.get('headers'))
         http.append({'step': step.get('name') or f"{op} {step['path']}", 'method': op.upper(),
                      'path': step['path'].split('?')[0], 'status': status, 'headers': headers,
                      'body': payload})
