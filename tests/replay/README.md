@@ -198,10 +198,14 @@ the evidence:
   sequence rules, and that result is compared (`sse / live-contract`): per
   stream (session, conversation, epoch) `lseq` is an integer rising by exactly
   1 per frame, and every op's `rev` is an integer one above the item's
-  previous rev. Then only the observed text-append shape (field `text`, a
-  `chunk`, nothing else) is merged into the text append on the same item
-  directly before it; frames emptied by that are dropped, each item's `rev`
-  is renumbered and an integer `lseq` becomes `<lseq>`. Every other op,
+  previous rev. Then a text append (field `text`, a `chunk`, nothing else) is
+  merged into the text append directly before it only when every other field
+  is identical (keys included, `chunk` and `rev` aside). A frame emptied by
+  that is dropped only if its envelope carries nothing of its own: no SSE
+  event name, a wire id that is absent or names the frame's own event, and the
+  same payload fields as the frame it merges into (clock readings aside);
+  otherwise it is kept unmerged. Each item's `rev` is renumbered and an integer
+  `lseq` becomes `<lseq>`. Every other op,
   including tool-output appends, is kept as is.
 - **Invalidation signals** (`transcript-updated`): unchanged replays send one
   to three per turn, sometimes naming the backend session; they are compared
