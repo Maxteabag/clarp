@@ -8,7 +8,6 @@ text the stream owns (``agy_turn_authority``).
 """
 from __future__ import annotations
 
-import json
 import pathlib
 
 from lib import db, message_store, message_writes
@@ -70,17 +69,11 @@ def seed(backend: str, clock: Clock) -> None:
     c.commit()
 
 
-def _json(value):
-    try:
-        return json.loads(value) if isinstance(value, str) else value
-    except ValueError:
-        return value
-
-
 def snapshot(transcript: pathlib.Path) -> dict:
     """The rows an import is responsible for, normalized: the transcript path
-    reads ``<transcript>``, JSON columns are decoded, ``updated_at`` (wall
-    clock) is left out."""
+    reads ``<transcript>`` and ``updated_at`` (wall clock) is left out. JSON
+    columns stay the exact stored strings: the import compares them as
+    strings, so a change of key order alone re-revisions every row."""
     c = db.conn()
     rows = []
     for r in c.execute("""SELECT message_id, source_file, seq, role, timestamp, text, kind,
@@ -91,8 +84,6 @@ def snapshot(transcript: pathlib.Path) -> dict:
         row = dict(r)
         if row["source_file"] == str(transcript):
             row["source_file"] = "<transcript>"
-        for name in ("tools_json", "display_cells_json", "turn_json"):
-            row[name] = _json(row[name])
         rows.append(row)
     heads = [dict(r) for r in c.execute(
         "SELECT * FROM conversation_heads WHERE agent_id = ? ORDER BY 1, 2", (AGENT,))]
