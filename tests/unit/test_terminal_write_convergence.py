@@ -89,3 +89,47 @@ def test_a_retried_terminal_write_never_overwrites_a_successor(tmp_path, monkeyp
         assert _turn_row(world.agent, "t-next")["settled_at"] is None
     finally:
         dispatch.reset_for_tests()
+
+
+import pytest
+
+
+@pytest.mark.parametrize("meanwhile", ["untraced-stop", "successor-then-untraced-row"])
+def test_a_retried_terminal_write_yields_to_any_row_not_its_own(tmp_path, monkeypatch, meanwhile):
+    """TP-N1b review 4: a row written during the backoff that is not this
+    turn's own, traced or not, wins over the retried terminal write."""
+    world, _call = _world(tmp_path, monkeypatch, "first")
+    before = db.conn().execute("SELECT MAX(state_id) FROM state_log WHERE agent_id = ?",
+                               (world.agent,)).fetchone()[0]
+
+    def intervene():
+        if meanwhile == "untraced-stop":
+            lifecycle.transition(world.agent, TurnEvent.STOP_REQUESTED, {"source": "user_stop"})
+        else:
+            lifecycle.open_turn(agent_id=world.agent, source="pwa", trace_id="t-next")
+            lifecycle.transition(world.agent, TurnEvent.SPAWN_STARTED, {"trace_id": "t-next"})
+            lifecycle.transition(world.agent, TurnEvent.TOOL_STARTED, {"source": "hook"})
+
+    _locked_once(monkeypatch, during_backoff=intervene)
+    try:
+        assert lifecycle.try_transition(world.agent, TurnEvent.PROCESS_EXITED_OK,
+                                        {"trace_id": "t-first"}) is None
+        kinds = [row["kind"] for row in db.conn().execute(
+            "SELECT kind FROM state_log WHERE agent_id = ? AND state_id > ? ORDER BY state_id",
+            (world.agent, before))]
+        assert AgentState.DONE not in kinds
+    finally:
+        dispatch.reset_for_tests()
+
+
+def test_a_retried_terminal_write_still_lands_after_its_own_turns_row(tmp_path, monkeypatch):
+    """Control: a row of the same turn written meanwhile does not block it."""
+    world, _call = _world(tmp_path, monkeypatch, "first")
+    _locked_once(monkeypatch, during_backoff=lambda: lifecycle.transition(
+        world.agent, TurnEvent.TOOL_STARTED, {"source": "hook", "trace_id": "t-first"}))
+    try:
+        assert lifecycle.try_transition(world.agent, TurnEvent.PROCESS_EXITED_OK,
+                                        {"trace_id": "t-first"}) is not None
+        assert lifecycle.current_kind(world.agent) == AgentState.DONE
+    finally:
+        dispatch.reset_for_tests()
