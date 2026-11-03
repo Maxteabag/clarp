@@ -399,21 +399,41 @@ def test_a_shorter_transcript_removes_the_stale_tail_and_bumps_replace(clock):
     assert head()[1] > before[1]
 
 
-def test_a_shifted_transcript_fails_on_an_adopted_row_in_the_shifted_range(clock):
-    """Pre-existing fault found by the S5 corpus: when an earlier record
-    disappears, later turns move down one slot; a slot still held by an
-    adopted twin (its id is not the slot hash) makes the upsert of a user
-    turn violate UNIQUE(agent_id, backend_session_id, seq). The import fails
-    every time and the rows stay as they were."""
+def test_a_shifted_transcript_moves_an_adopted_row_with_its_turn(clock):
+    """RM-N1 (fixed; was pinned as a fault): when an earlier record
+    disappears, later turns move down one slot. The adopted twin (its id is
+    not the slot hash) moves with the turn it answers, as a fresh import of
+    the shorter transcript would place it, instead of the next user turn's
+    upsert hitting UNIQUE(agent_id, backend_session_id, seq) for ever."""
     client("c0", "ask", at=0, trace="tr-0")
     assistant_row("final-0", "final:tr-0", "answer", at=4, trace="tr-0")
     store([u("hello", -10), a("hi", -9), u("ask", 0.2), a("answer", 5), u("next", 60), a("ok", 61)])
     assert {r["message_id"]: r["seq"] for r in rows()}["final-0"] == 3
-    before = rows()
-    import sqlite3
-    with pytest.raises(sqlite3.IntegrityError):
-        store([u("hello", -10), u("ask", 0.2), a("answer", 5), u("next", 60), a("ok", 61)])
-    assert rows() == before
+    before = head()
+
+    store([u("hello", -10), u("ask", 0.2), a("answer", 5), u("next", 60), a("ok", 61)])
+
+    moved = view(transcript_rows(), "seq", "message_id", "text")
+    slot = lambda seq: message_writes._message_id(AGENT, SESSION, SOURCE, seq)
+    assert moved == [(0, slot(0), "hello"), (2, "final-0", "answer"),
+                     (3, slot(3), "next"), (4, slot(4), "ok")]
+    assert head()[1] > before[1], "delta clients reload the moved slots"
+
+
+def test_two_equal_replies_to_one_request_reimport_without_change(clock):
+    """RM-N1 review (rf-readmodel): one request answered twice with the same
+    visible text, one reply adopted. Moving adopted rows with a shift must not
+    make an unchanged transcript ping-pong that row between the two slots."""
+    client("c0", "ask", at=0, trace="tr-0")
+    assistant_row("final-0", "final:tr-0", "OK", at=4, trace="tr-0")
+    turns = [u("ask", 0.2), a("OK", 3), a("OK", 5)]
+    store(turns)
+    first = rows()
+    clock_revision = db.conn().execute("SELECT revision FROM message_clock").fetchone()[0]
+    for _ in range(3):
+        store(turns)
+        assert rows() == first
+        assert db.conn().execute("SELECT revision FROM message_clock").fetchone()[0] == clock_revision
 
 
 # ---- agy turn authority ------------------------------------------------------
