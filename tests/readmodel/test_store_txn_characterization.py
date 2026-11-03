@@ -497,6 +497,33 @@ def test_a_removed_request_does_not_lend_its_adopted_row_to_the_next(clock, tmp_
         ("final-0", "final:tr-0", "final-band"), ("final-1", SOURCE, 1)]
 
 
+def test_requests_removed_one_import_after_another_all_return_to_the_final_band(clock):
+    """RM-N1c review (reviewer C's control): with no turn rows to name a seq,
+    each restored final row still gets a seq of its own; the second restore
+    never collides with the first."""
+    for i in range(3):
+        client(f"c{i}", f"ask{i}", at=60 * i, trace=f"tr-{i}")
+    for i in range(3):
+        assistant_row(f"final-{i}", f"final:tr-{i}", f"answer{i}", at=60 * i + 4,
+                      trace=f"tr-{i}", seq=-1000 - i)
+
+    def turns(start):
+        out = []
+        for i in range(start, 3):
+            out.extend([u(f"ask{i}", 60 * i + .2), a(f"answer{i}", 60 * i + 5)])
+        return out
+
+    store(turns(0))
+    store(turns(1))
+    store(turns(2))
+    kept = {r["message_id"]: r for r in rows()}
+    assert (kept["final-0"]["source_file"], kept["final-1"]["source_file"]) == (
+        "final:tr-0", "final:tr-1")
+    assert kept["final-0"]["seq"] < 0 and kept["final-1"]["seq"] < 0
+    assert kept["final-0"]["seq"] != kept["final-1"]["seq"]
+    assert (kept["final-2"]["source_file"], kept["final-2"]["seq"]) == (SOURCE, 1)
+
+
 # ---- agy turn authority ------------------------------------------------------
 
 def _authority(trace, start, end, message_id):
