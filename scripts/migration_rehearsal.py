@@ -12,6 +12,14 @@ XDG_* and CLAUDE_PWA_DB inside a temporary directory, which is removed
 afterwards. Prints structure, counts and timings only.
 
     heavy uv run --frozen --group dev python scripts/migration_rehearsal.py --base v61
+
+To rehearse in the proportions of a real database on another machine, write
+its profile first: table names, row counts and average row sizes, nothing
+else. The source is opened read-only (mode=ro).
+
+    python scripts/migration_rehearsal.py --write-profile profile.json \
+        --from-db ~/.local/share/clarp/state.sqlite
+    python scripts/migration_rehearsal.py --base v61 --profile profile.json
 """
 from __future__ import annotations
 
@@ -150,14 +158,17 @@ def _value(table, col, decl, i, rows, refs, checks, pad):
     return f"{col}-{i}" + ("x" * pad if pad else "")
 
 
-def fill(con: sqlite3.Connection, scale: float, payload: float) -> tuple[dict[str, int], list[str]]:
+def fill(con: sqlite3.Connection, scale: float, payload: float,
+         profile: dict[str, tuple[int, int]] | None = None,
+         other_rows: int = OTHER_ROWS) -> tuple[dict[str, int], list[str]]:
     """Insert synthetic rows; returns the row counts and the tables left under half full."""
     con.execute("PRAGMA foreign_keys = OFF")
     con.execute("PRAGMA journal_mode = WAL")
     con.execute("PRAGMA synchronous = OFF")
     tables = [r[0] for r in con.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")]
-    rows = {t: max(1, int(PROFILE.get(t, (OTHER_ROWS, 0))[0] * scale)) for t in tables}
+    profile = PROFILE if profile is None else profile
+    rows = {t: max(1, int(profile.get(t, (other_rows, 0))[0] * scale)) for t in tables}
     for table in tables:
         sql = con.execute("SELECT sql FROM sqlite_master WHERE name=?", (table,)).fetchone()[0]
         if re.search(r"singleton\s+INTEGER\s+PRIMARY\s+KEY", sql, re.I):
@@ -174,7 +185,7 @@ def fill(con: sqlite3.Connection, scale: float, payload: float) -> tuple[dict[st
         text_cols = [c for c, d, pk in cols if not pk and "INT" not in (d or "").upper()
                      and (table, c) not in refs and c not in checks]
         pad_col = text_cols[0] if text_cols else None
-        pad = max(0, int(PROFILE.get(table, (0, 0))[1] * payload) - 16 * len(cols))
+        pad = max(0, int(profile.get(table, (0, 0))[1] * payload) - 16 * len(cols))
         rowid_pk = [c for c, d, pk in cols if pk == 1 and (d or "").upper() == "INTEGER"]
         names = [c for c, _, _ in cols if c not in rowid_pk]
         insert = f'INSERT OR IGNORE INTO "{table}" ({", ".join(names)}) VALUES ({", ".join("?" * len(names))})'
@@ -210,7 +221,35 @@ def _columns(con: sqlite3.Connection, table: str) -> list[str]:
     return [r[1] for r in con.execute(f'PRAGMA table_info("{table}")')]
 
 
-def rehearse(base: str, scale: float, payload: float, budget: float, keep: bool = False) -> dict:
+def write_profile(source: pathlib.Path, sample: int = 20_000) -> dict:
+    """Counts and average row bytes per table of `source`, opened read-only.
+    Averages come from the newest `sample` rows; no value leaves this function."""
+    con = sqlite3.connect(f"file:{source}?mode=ro", uri=True)
+    try:
+        tables = {}
+        for (table,) in con.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"):
+            columns = [r[1] for r in con.execute(f'PRAGMA table_info("{table}")')]
+            size = " + ".join(f'coalesce(length("{c}"), 0)' for c in columns) or "0"
+            rows = con.execute(f'SELECT count(*) FROM "{table}"').fetchone()[0]
+            avg = con.execute(f'SELECT avg({size}) FROM (SELECT * FROM "{table}" LIMIT ? OFFSET ?)',
+                              (sample, max(0, rows - sample))).fetchone()[0]
+            tables[table] = [rows, int(avg or 0)]
+        version = con.execute("PRAGMA user_version").fetchone()[0]
+    finally:
+        con.close()
+    return {"kind": "clarp-state-profile", "user_version": version, "sample_rows": sample, "tables": tables}
+
+
+def load_profile(path: pathlib.Path) -> dict[str, tuple[int, int]]:
+    data = json.loads(path.read_text())
+    if data.get("kind") != "clarp-state-profile":
+        raise SystemExit(f"{path} is not a clarp-state-profile")
+    return {name: (int(rows), int(size)) for name, (rows, size) in data["tables"].items()}
+
+
+def rehearse(base: str, scale: float, payload: float, budget: float, keep: bool = False,
+             profile: dict[str, tuple[int, int]] | None = None) -> dict:
     work = pathlib.Path(tempfile.mkdtemp(prefix="clarp-migration-rehearsal-", dir="/var/tmp"))
     try:
         db_path = work / "state.sqlite"
@@ -218,7 +257,7 @@ def rehearse(base: str, scale: float, payload: float, budget: float, keep: bool 
         base_version = build_base(base, work, db_path, env)
         con = sqlite3.connect(str(db_path))
         started = time.monotonic()
-        before, underfilled = fill(con, scale, payload)
+        before, underfilled = fill(con, scale, payload, profile)
         fill_seconds = time.monotonic() - started
         violations: dict[str, int] = {}
         for row in con.execute("PRAGMA foreign_key_check"):
@@ -262,14 +301,23 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--payload", type=float, default=1.0, help="row-size multiplier")
     parser.add_argument("--budget", type=float, default=120.0, help="maximum migration seconds")
     parser.add_argument("--keep", action="store_true", help="keep the temporary directory")
+    parser.add_argument("--profile", type=pathlib.Path, help="row counts and sizes from --write-profile")
+    parser.add_argument("--write-profile", type=pathlib.Path, help="write the profile of --from-db and exit")
+    parser.add_argument("--from-db", type=pathlib.Path, help="database to profile (opened read-only)")
     args = parser.parse_args(argv)
+    if args.write_profile:
+        if not args.from_db:
+            parser.error("--write-profile needs --from-db")
+        args.write_profile.write_text(json.dumps(write_profile(args.from_db.expanduser()), indent=1, sort_keys=True))
+        return 0
+    profile = load_profile(args.profile) if args.profile else PROFILE
     base = args.base or _git("merge-base", "HEAD", "origin/main")
-    estimate = sum(r * b for r, b in PROFILE.values()) * args.scale * args.payload
+    estimate = sum(r * b for r, b in profile.values()) * args.scale * args.payload
     free = shutil.disk_usage("/var/tmp").free
     if free < 3 * estimate:
         print(f"refusing: /var/tmp has {free >> 20} MiB free, need {3 * int(estimate) >> 20} MiB", file=sys.stderr)
         return 2
-    report = rehearse(base, args.scale, args.payload, args.budget, keep=args.keep)
+    report = rehearse(base, args.scale, args.payload, args.budget, keep=args.keep, profile=profile)
     print(json.dumps(report, indent=2, sort_keys=True))
     return 0 if report["ok"] else 1
 
