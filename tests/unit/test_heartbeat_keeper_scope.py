@@ -90,3 +90,29 @@ def test_a_first_adoption_on_a_fresh_host_records_only_its_scope(tmp_path, monke
         scope={"agent_ids": [ids["included"]]})
     janitors.set_enabled("keeper", cfg["revision"], True)
     assert _fixed_heartbeats() == ["outside"]
+
+
+def test_the_first_record_keeps_a_legacy_adoption_after_its_keeper_is_deleted(scoped_keeper, tmp_path):
+    """AUT-02s review 2: the first record must store the adoption made before
+    records, even when the new keeper's scope is already among it; deleting
+    the old unscoped keeper afterwards must not hand the outside agent back to
+    the fixed heartbeat. The built-in keeper is scoped so its default cannot
+    stand in for the lost record."""
+    from lib import settings_store
+    ids, cfg = scoped_keeper
+    builtin = next(j for j in janitors.list_janitors(include_runtime=False)
+                   if j["template_id"] == "heartbeat-decider" and j["session"] != "keeper")
+    janitors.configure(builtin["session"], builtin["revision"], scope={"agent_ids": [ids["included"]]})
+    cfg = janitors.configure("keeper", cfg["revision"], scope={})
+    cfg = janitors.set_enabled("keeper", cfg["revision"], False)
+    settings_store.set_text("heartbeat.janitor_adopted_scopes", "[]")   # adopted before records
+
+    agents.create_agent(persona="second", voice_id="synthetic", cwd=str(tmp_path),
+                        session="second", backend="codex")
+    second = janitors.create("second", template_id="heartbeat-decider",
+                             scope={"agent_ids": [ids["included"]]})
+    janitors.set_enabled("second", second["revision"], True)
+    assert janitors.remove("keeper", cfg["revision"])
+
+    assert heartbeat.keeper_owns_heartbeat(agents.get_by_agent_id(ids["outside"]))
+    assert _fixed_heartbeats() == []
