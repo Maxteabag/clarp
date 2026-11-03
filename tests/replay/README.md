@@ -20,14 +20,24 @@ go/no-go proof runs) and in GitHub Actions as the permanent CI gate:
 `-n 0`, through `heavy`); it starts no Host.
 
 ```bash
-# A slice: base commit on main against the slice head.
-uv run --frozen python tests/replay/run.py compare --base <base-sha> --head <head-sha>
-# The harness proof: unchanged code replayed against itself (twice) gives zero
-# differences, and every planted change is caught.
-uv run --frozen python tests/replay/run.py self-check --ref <sha>
-# Remove the cached build worktrees.
-uv run --frozen python tests/replay/run.py clean
+# On the laptop (git only, starts nothing): extract the builds the VM needs.
+python3 tests/replay/run.py prepare <base-sha> <head-sha> --prune
+# On the buildbox: a slice, base commit against the slice head.
+/var/tmp/clarp-refactor-program/bin/heavy-remote uv run --frozen --group dev \
+  python tests/replay/run.py --jobs 8 compare --base <base-sha> --head <head-sha>
+# The harness proof on one commit (prepare it first).
+/var/tmp/clarp-refactor-program/bin/heavy-remote uv run --frozen --group dev \
+  python tests/replay/run.py --jobs 8 self-check --ref <sha>
+# Remove cached worktree builds (laptop or CI).
+python3 tests/replay/run.py clean
 ```
+
+heavy-remote copies the worktree without `.git`, so builds come from
+`.replay-builds/<sha>/`, which `prepare` makes with `git archive` (server/
+and static/, files read-only, a stamp with a SHA-256 over every file).
+`.replay-builds/` is untracked on purpose so heavy-remote ships it; never
+commit it. In CI, where `.git` exists, builds are `git worktree add --detach`
+checkouts as below.
 
 `compare` exits 0 with no unexplained difference, 1 with differences, 2 when a
 scenario could not run. `--intended FILE` takes registered difference ids
@@ -51,10 +61,14 @@ diff.py ────── aligns and compares, prints the report
 planted.py ─── deliberate behaviour changes for the proof
 ```
 
-- **Two builds, one harness.** A build is a commit added with
-  `git worktree add --detach` under `scratch/builds/<full sha>`, made
-  read-only, and reused only while it is still at that SHA and clean
-  (otherwise the run stops with a build error). `--allow-path` accepts an
+- **Two builds, one harness.** A build is a prepared tree whose stamp still
+  matches (checked before and after the replay), or, where git exists, a
+  commit added with `git worktree add --detach` under
+  `scratch/builds/<full sha>`, made read-only, and reused only while it is
+  still at that SHA and clean (otherwise the run stops with a build error).
+  Every build's `static/` mtimes are pinned to one constant: the Host's
+  `server-version` is the newest static mtime, which otherwise records when a
+  checkout or sync happened. `--allow-path` accepts an
   existing clean checkout for development; such a run is diagnostic. The
   launcher, fakes, corpus and normalizer always come from the harness tree,
   so base and head differ only in their server code. Every report starts
@@ -68,15 +82,21 @@ planted.py ─── deliberate behaviour changes for the proof
   inherited), and `host.py` points `HOME`, `TMPDIR`, `XDG_*`,
   `CLAUDE_PWA_DB`, the `CLARP_*` dirs, `CODEX_HOME` and `CLAUDE_CONFIG_DIR`
   into the state directory. Two codex-backed agents, `rachel` and `mike`.
-  The Host is a real `build_server` on a loopback port with a bearer token;
+  The fake provider runs under the harness's own interpreter (a generated
+  wrapper in the state dir). The Host is a real `build_server` on a loopback port with a bearer token;
   turns go through the real dispatcher, runner and provider process (the
   fake). Only the codex backend can spawn; anything else raises. This is
   not an OS sandbox: the executor provides that (CI runs inside
   `scripts/ci_contained.sh`: no network but loopback, no credentials, empty
   HOME; the buildbox's `heavy-remote` must give the equivalent).
 - **Waits poll state, never the clock**: a turn settled in `turns`, a provider
-  `turn/start` in the fake's request log, `/status` busy, and finally
-  quiescence (every scenario session idle, SSE quiet for 1 s).
+  `turn/start` in the fake's request log, state rows in `state_log`, `/status`
+  busy, and quiescence (every listed session idle, SSE quiet for 1 s), which
+  every scenario reaches before its final reads so they never race the Host's
+  background import.
+- **compare runs the base twice.** If the base differs from itself, the run
+  fails as `base is not reproducible` (exit 2): a comparison with head would
+  prove nothing.
 - **A frozen cut.** At quiescence the SSE reader is stopped and joined, then
   the Host's own process group is killed (which takes the fake provider
   with it), and only then are the database (one read transaction) and the
@@ -90,11 +110,25 @@ planted.py ─── deliberate behaviour changes for the proof
 | Channel | Captured | Compared as |
 |---|---|---|
 | `http` | every request a scenario makes: method, route, status, contract headers (`Content-Type`, `Location`, `Content-Range`, `Accept-Ranges`, `Content-Encoding`, `Cache-Control`, `Content-Disposition`, `ETag`, `WWW-Authenticate`, `Retry-After`), JSON body; a non-JSON body as length and SHA-256 | sequence, then field by field |
-| `sse` | every complete `/events?live=<sessions>` frame except heartbeats: event name, whether it carried an `id:`, data (multi-line data joined) | sequence aligned by signature (event name, type, kind, status, state, phase, action, live op names), then field by field |
+| `sse` | every complete `/events?live=<sessions>` frame except heartbeats: event name, whether it carried an `id:`, data (multi-line data joined) | per producer lane, an exact sequence aligned by signature (event name, type, kind, status, state, phase, action, live op names), then field by field; see "SSE order" |
+| `sse_log` | the `sse_events` table (the replay buffer behind `Last-Event-ID`), by event id | like `sse` |
 | `schema` | `sqlite_master` (type, name, table, SQL), raw | exact |
-| `table` | every non-empty table, all rows, with its primary key columns | multiset per table (exact counts); leftover rows paired by primary key and compared field by field, else reported as added or removed |
-| `files` | every file under the state directory except logs and the databases: path, size, and either the parsed JSON (`.json`, `.jsonl`) or a SHA-256 of the bytes | by path, then field by field |
+| `table` | every non-empty table except `sse_events`, all rows, with its primary key columns | multiset per table (exact counts); leftover rows paired by primary key and compared field by field, else reported as added or removed |
+| `files` | every file under the state directory except logs and the databases: path, and the parsed JSON (`.json`, `.jsonl`), the text (other UTF-8 files up to 64 KiB) or size and SHA-256 (anything else) | by path, then field by field |
 | `cli` | reserved for CLI scenarios (`clarp-admin` against the replay Host) | exact |
+
+**SSE order.** The Host broadcasts from several threads (the state
+watcher, the dispatcher, the live hub, the transcript streamer, the
+notifier), so their interleaving differs between runs of unchanged code. A
+frame's lane is its producer: event name, type, payload key set and session,
+except that the state watcher's `agent-state` (it always carries
+`status_text` and never `client_msg_id`) and `agent-activity` share one lane,
+because `state_watcher._poll_once` emits them in sequence from one thread.
+Each lane is compared as an exact sequence, so a reorder within a producer, a
+missing or extra event and any field change are differences. Order between
+independent producers is not a contract and is not compared;
+`--cross-lane-order` reports, as a diagnostic, cross-lane orders that both
+base runs agreed on and head broke.
 
 **Normalization** (`normalize.py`) follows an explicit contract and rewrites
 only what differs by nature between runs:
@@ -110,10 +144,33 @@ only what differs by nature between runs:
   (`<id:n>`), so the same id keeps the same surrogate within a run and an id
   that moves shows up. Hex in other fields (a checksum, free text) is content
   and compared;
-- event ids become `<eid:n>` by first appearance, keeping which frames name
-  the same event;
+- inside the SSE channels, an event id is named after the frame that
+  carries it, its lane and position (`<eid:agent-state#2@1a2b3c>`), so every
+  reference to the same event gets the same name whatever the interleaving;
+  elsewhere a field called `event_id` (for example `voice_events`) is an
+  ordinary value;
+- id surrogates are assigned in a deterministic order: the HTTP sequence,
+  then tables by name, then files, then the streams;
 - pids and ports under `PID_KEYS`, the loopback port in URLs, and the
-  scratch, build and harness paths.
+  scratch, build and harness paths;
+- in small text files, UUIDs (generated tokens such as the instance
+  generation); `settings.key` and `settings.value` hold generated ids
+  (launch receipts) and get id surrogates.
+
+Rules for behaviour that is nondeterministic in the Host itself. Each was
+reported to the lead as a pre-existing nondeterminism; each is as narrow as
+the evidence:
+
+- **Invalidation signals** (`transcript-updated`): unchanged replays send one
+  to three per turn, sometimes naming the backend session; they are compared
+  by presence, one per (type, session, agent).
+- **Two writers of one transition**: a turn's `thinking` is written by the
+  dispatcher's spawn and again when the provider turn starts, in racing
+  order. Consecutive state rows (and watcher `agent-state` frames) of one
+  agent with the same kind and trace are compared with their details sorted.
+- **Tied sort**: `/agents/snapshot` orders personas by `created_at`, and every
+  built-in is seeded in the same millisecond; `personas` and `roster` lists
+  are compared sorted.
 
 JSON stored in a text column or a file is parsed and compared as JSON (the
 stored string's key order and whitespace are not compared). Schema SQL is
@@ -170,10 +227,11 @@ does not guess the class.
 
 ## The proof (go/no-go 1)
 
-`run.py self-check --ref <sha>` replays the full corpus three times on the
+`run.py self-check --ref <sha>` replays the full corpus four times on the
 same build and once per planted change, then reports:
 
-- `unchanged run1 vs run2` and `run1 vs run3`: must be **0 differences**;
+- `unchanged run1 vs run2`, `run1 vs run3` and `run1 vs run4`: each must be
+  **0 differences**;
 - every planted change (`planted.py`): must be **CAUGHT**, meaning at least
   one difference matching that change's own expectation (channel, locator
   pattern and kinds), not just any difference;
@@ -195,7 +253,7 @@ run, so a planted change can never silently plant nothing.
 | `response-field` | `POST /send` stops returning `queue_depth` | http `….body.queue_depth` field-removed |
 | `db-write` | a finished turn no longer writes its `turn_usage` row | table `turn_usage…` |
 | `status-transition` | a user stop settles the turn `failed` instead of `interrupted` | table `turns[…].outcome` changed |
-| `sse-order` | `agent-activity` broadcast before `agent-state` for a state change | sse sequence difference |
+| `sse-order` | `agent-activity` broadcast before `agent-state` for a state change | sse watcher-lane sequence difference |
 | `header-only` | `Cache-Control: no-cache` instead of `no-store`, body unchanged | http `….headers.cache-control` changed |
 | `sse-envelope` | SSE frames lose their `id:` line, data unchanged | sse `….has_id` changed |
 
@@ -212,9 +270,18 @@ Synthetic turns only, all text invented here (`scenarios.py`). Target about
 |---|---|---|
 | `text-turn` | one plain text turn, transcript and status reads | done |
 | `queue-while-busy` | a queued send behind a slow turn, then drained | done |
-| `stop-mid-turn` | user Stop while a turn runs | done |
-| tool use, steer into a running turn, retry by client id, two agents, focus/select, failover on usage limit, voice clip (`/transcribe` with the stub STT), group call, helper spawn, goal turn, read-model reads (`/agents/snapshot`, `/live`, `/turn-queue`, `/attention`) | | next |
+| `stop-mid-turn` | user Stop while a turn runs (after both thinking rows) | done |
+| `retry-same-client-id` | a resend after a lost acknowledgement: one message, one turn | done |
+| `two-agents` | two agents take a turn each; nothing crosses | done |
+| `usage-limit` | the provider reports a usage limit and fails the turn | done |
+| `steer-into-running` | a send without `queue_if_busy` steered into a running turn | done |
+| `focus-and-reads` | `/select`, `/focus`, `/agents/snapshot`, `/live`, `/turn-queue`, `/attention`, `/status` | done |
+| `voice-clip-turn` | `/transcribe` (stub STT) then `/send` with its trace and transcription ids, `/voice-events` | done |
+| tool use, group call, helper spawn, goal turn, failover to another account, interrupt by a new prompt, queue cancel and resume, delete and restore, CLI (`clarp-admin`) against the replay Host | | next |
 | text-dependent paths (voice routing, command parsing, TTS segmentation) | synthetic-text scenarios, since scrubbed text cannot exercise them | next |
+
+Timing on the buildbox (`--jobs 8`): `compare` with 9 scenarios takes about
+50 s (27 Host runs); `self-check` takes about 150 s (90 Host runs).
 
 Corpus hygiene: the CI corpus is synthetic. If anything is ever recorded from
 real traffic it is scrubbed deterministically before it reaches this
@@ -234,6 +301,7 @@ scenario pack and fault hooks in the fakes:
 | backend crash | the fake provider exits non-zero mid-stream (control file in the provider root) |
 | usage limit | the fake's `quota-mode` (`blocked`, `stale`, `partial`) already exists |
 | stop or cancel mid-turn | `/stop` and turn-queue cancel at each turn phase |
+| stop at admission | `/stop` between a turn's two `thinking` rows: today the late row overwrites `interrupted` and the agent stays busy (reported pre-existing race); the scenario pins the fix |
 | restart mid-turn | SIGKILL the Host at a named phase, start a new Host on the same state dir (`restart_recovery=True`), then compare recovery |
 | preemption | a second send without `queue_if_busy` while a turn runs, and an agent switch |
 | voice-claim failure | the Oracle/voice claim path made to fail early (RTO-01), the claim must be released |
@@ -251,6 +319,9 @@ also runs the proof. Results go to the lead as the report above.
   them must publish its move map; the harness owner updates `host.py` with an
   import fallback so both builds still start.
 - Graceful shutdown and restart are not in the CI corpus (see the nightly).
+- Order between independent SSE producers is not compared (see "SSE
+  order"); a refactor that changes it is not caught unless it also changes a
+  lane, a row or a response.
 - Process cleanup kills the Host's process group. A backend launcher that
   starts its own session (`backend/stream_json.py`) would escape it; the
   corpus only runs the codex app-server, which stays in the group. As the
