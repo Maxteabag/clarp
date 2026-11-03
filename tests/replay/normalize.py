@@ -449,18 +449,22 @@ def _same_but_chunk(a: dict, b: dict) -> bool:
 
 def _envelope_ok(frame: dict, into: dict | None) -> bool:
     """A frame may be dropped after merging only with an envelope that carries
-    nothing of its own: no SSE event name, a wire id that is absent or names the
-    frame's own event, and the same payload fields (clock readings aside) as the
-    frame it merges into."""
+    nothing of its own: no SSE event name; a wire id present exactly when the
+    frame it merges into has one, and then naming the frame's own event; and the
+    same payload fields as that frame, where a clock reading may differ only
+    between two valid clock readings (an epoch-range number under CLOCK_KEYS)."""
     data = frame['data']
     wire = frame.get('id')
-    if frame.get('event') is not None or into is None:
+    if frame.get('event') is not None or into is None or into.get('event') is not None:
+        return False
+    if (wire is None) != (into.get('id') is None):
         return False
     if wire is not None and str(wire) != str(data.get('event_id')):
         return False
-    # Clock readings (server_now_ms) differ between any two frames by nature.
+
     def fields(d):
-        return {k: v for k, v in d.items() if k not in ('ops', 'lseq', 'event_id') and k not in CLOCK_KEYS}
+        return {k: ('<clock>' if k in CLOCK_KEYS and is_epoch(v) else v)
+                for k, v in d.items() if k not in ('ops', 'lseq', 'event_id')}
     return fields(data) == fields(into['data'])
 
 

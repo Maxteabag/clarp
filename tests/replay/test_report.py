@@ -515,3 +515,23 @@ def test_a_real_frame_whose_wire_id_names_its_event_still_merges():
                                wire_id='12'))
         return rows
     assert not _report(_capture(sse=frames(False)), _capture(sse=frames(True))).items
+
+
+# Reviewer B's controls (review s0-corpus-1e49c91e): clock and wire-id envelope cases.
+
+
+def frames(clock=1793692941182, wire=None):
+    return [_frame({"type":"live", "session":"s", "lseq":1, "event_id":11,
+                    "server_now_ms":1793692941181,
+                    "ops":[{"op":"append", "id":"i1", "rev":1, "field":"text", "chunk":"ab"}]}, wire_id=None),
+            _frame({"type":"live", "session":"s", "lseq":2, "event_id":12,
+                    "server_now_ms":clock,
+                    "ops":[{"op":"append", "id":"i1", "rev":2, "field":"text", "chunk":"cd"}]}, wire_id=wire)]
+
+
+def test_clock_schema_on_a_dropped_frame_remains_observable():
+    assert _report(_capture(sse=frames()), _capture(sse=frames(clock="broken"))).items
+
+
+def test_valid_wire_id_presence_on_a_dropped_frame_remains_observable():
+    assert _report(_capture(sse=frames()), _capture(sse=frames(wire="12"))).items
