@@ -167,3 +167,28 @@ def test_vocab_preview(fake_ctx, monkeypatch, preview, expected):
                         {"boom": staticmethod(boom), "echo": staticmethod(echo)}.get(preview))
     for base, _ctx, _srv in _running_context_server(fake_ctx):
         assert _call(base, "GET", "/vocab/preview?session=claude&model=m&delegated=1") == expected
+
+
+def test_update_routes_reject_bad_json_and_bad_numbers(running_server):
+    base, _ctx, _srv = running_server
+    post = lambda path, body: _call(base, "POST", path, body)  # noqa: E731
+    for path in ("/vocab/packs/update", "/vocab/terms/update"):
+        assert _call(base, "POST", path, raw=b"[1]") == (400, {"error": "bad json"})
+    pack_id = post("/vocab/packs", {"name": "Numbers", "terms": ["Argo"]})[1]["pack_id"]
+    status, body = post("/vocab/packs/update", {"pack_id": pack_id, "priority": "high"})
+    assert status == 400 and set(body) == {"error"}
+    term_id = _call(base, "GET", f"/vocab/terms?pack_id={pack_id}")[1]["terms"][0]["term_id"]
+    status, body = post("/vocab/terms/update", {"term_id": term_id, "rarity": "rare"})
+    assert status == 400 and set(body) == {"error"}
+
+
+@pytest.mark.parametrize("kept, audio_url", [(True, "/transcription-audio?trace_id=t1"), (False, None)])
+def test_vocab_run_for_a_recorded_trace(running_server, monkeypatch, kept, audio_url):
+    from lib import heard_audio, vocab_store
+    base, _ctx, _srv = running_server
+    monkeypatch.setattr(vocab_store, "run_for_trace",
+                        lambda trace_id: {"run_id": 4, "trace_id": trace_id} if trace_id == "t1" else None)
+    monkeypatch.setattr(heard_audio, "lookup",
+                        lambda cache_dir, trace_id: (cache_dir / "a.wav", {}) if kept else None)
+    assert _call(base, "GET", "/vocab/run?trace_id=t1") == (
+        200, {"run_id": 4, "trace_id": "t1", "audio_url": audio_url})
