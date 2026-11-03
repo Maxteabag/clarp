@@ -1,6 +1,8 @@
 # Route registry seam for server.py (refactor slice S3)
 
-Status: proposal for review (findings only). Author rf-routes (S3), 3 Nov 2026.
+Status: proposal, revision 2 (answers reviewer B's five design findings on
+c705bbaa and the lead's decisions of 3 Nov). Not approved; no seam code exists.
+Author rf-routes (S3), 3 Nov 2026.
 Inputs: `REFACTOR.md`, http-shell review section 3 (step 1 and step 4),
 `tests/fixtures/route_goldens/` (dispatch and response goldens).
 
@@ -26,128 +28,217 @@ limited `POST /x` is 403). Some checks live inside handlers
 (`/server-terminal`, `podcast_history_http`, controller-action `admin=True`,
 background-job log redaction, `_reject_janitor_control` in 9 POST handlers).
 
-Prefix matches are not segment-bound: `/artifacts/<rest>/html` takes `rest`
-with its slashes, `DELETE /agents/<rest>` does not strip, `/terminal/a/b`
-yields session `a/b`. Branch order matters (`/artifacts/x/events-config`
-must win over `/artifacts/x/events`). The registry must reproduce both.
+Prefix matches are not segment-bound and the branches' bodies differ in what
+they pass: `/artifacts/<rest>/html` takes `rest` with its slashes and decodes
+once (`%252F` arrives as `%2F`), `DELETE /agents/<rest>` neither strips nor
+decodes, `/terminal/a/b` yields session `a/b`, `DELETE /teams/t/members/a/b`
+splits on the first `/members/` into `('t', 'a/b')`, `/clips/x/stream` answers
+400 before any target, and `/clips/<id>/<file>` needs `ctx.audio_dir`. Order
+matters where matchers overlap: the generic `/artifacts/` branch must come
+after the suffix branches (moving it first changes 8 golden entries), and
+`POST /turn-queue/resume/send` reaches `_handle_turn_queue_send('resume')`,
+not the exact `/turn-queue/resume`.
 
-## 2. The seam
+## 2. The seam: predicate plus verbatim adapter
 
-New file `server/lib/routes/registry.py` (new package `lib.routes`; not
-`server/http/`, which would shadow the stdlib `http` because `server/` is on
-`sys.path`):
+New package `server/lib/routes/` (lead decision: inside `lib/`, because
+`install.sh` copies only `server.py`, `runtime.py` and `lib/`, and a top-level
+`server/http/` would also shadow the stdlib `http` on `sys.path`). The seam
+file is `server/lib/routes/registry.py`:
 
 ```python
 @dataclass(frozen=True)
 class Route:
-    method: str                  # GET POST PUT DELETE PATCH
-    pattern: Pattern             # Exact("/status") | Affix("/artifacts/", "/html", arg=unquote_strip)
-    handler: str                 # Handler method name, or "lib.<module>.<fn>"
-    auth: Auth                   # public | limited | full | local_admin  (declared, see 3)
-    janitor_guard: bool = False  # handler refuses janitor sessions (metadata until the fix lane)
-    note: str = ""               # e.g. "HTTP-01" for a known pre-existing bug
+    method: str                      # GET POST PUT DELETE PATCH
+    match: Callable[[str], bool]     # pure predicate on the bare path (no query)
+    adapter: Callable[[Handler, str], object]  # today's branch body, verbatim
+    admission: str                   # dispatch admission today: public|limited|full|local_admin
+    name: str                        # stable id used by the goldens and the move map
+    inner_checks: tuple[str, ...] = ()  # authorization the handler itself still does
+    janitor_guard: bool = False      # handler calls _reject_janitor_control (metadata)
+    note: str = ""                   # e.g. "HTTP-01"
+
+NOT_HANDLED = object()   # adapter result: keep walking, as today's fall-through
 ```
 
-`Affix(prefix, suffix="", arg=...)` matches `path.startswith(prefix) and
-path.endswith(suffix)` and passes `arg(path[len(prefix):len(path)-len(suffix)])`,
-which is exactly today's slicing (`strip("/")`, `unquote(...strip("/"))`,
-raw, or `int` with the 400 fallback). Library routers become one route with
-`Affix("/janitors/")` etc. and `handler="lib.janitor_http.handle"`.
+Matching and invocation are separate (finding 1):
 
-`ROUTES: dict[method, tuple[Route, ...]]` is **ordered**: the dispatcher walks
-it first-match, with the exact table folded in at the position it has today.
-`do_<METHOD>` keeps its gate prelude unchanged and replaces the table lookup
-and chain with `routes.dispatch(self, method, path)`. Nothing else changes in
-the first seam commit.
+- `match` is exactly today's `if` condition as a pure function of the bare
+  path, e.g. `lambda p: p.startswith("/teams/") and "/members/" in p`, or for
+  a library router the router's own predicate (`janitor_http.handles`, which
+  also accepts the exact `/janitors`, `/janitor-triggers`, `/janitor-policy`).
+  It never converts, decodes or responds.
+- `adapter(handler, path)` is today's branch body moved verbatim with `self`
+  renamed `handler` (the only edit; the AST check allows exactly that rename
+  in adapters). It does the slicing, `unquote`, `strip`, `int()` with its
+  400, the containment checks (`/static/`, `/audio/`), reads `handler.ctx`,
+  and calls the target with today's arguments: `(handler, "GET")` for library
+  routers, two stripped arguments for the team member split, `(handler,
+  ctx.audio_dir, clip_id, filename)` for HLS. Errors therefore happen at the
+  same point in the same order as today.
+- A branch that can fall through today (`/decisions/<id>/<other>` when no
+  action suffix matches) returns `NOT_HANDLED`, and the walk continues to the
+  next Route, as the `if` chain does now.
+- Exact-table entries are generated Routes `match=lambda p: p == "/status"`,
+  `adapter=lambda h, _p: getattr(h, "_handle_status")()`; the dispatcher keeps
+  a dict for them at the chain position the table has today, so lookup stays
+  O(1) and the order is unchanged.
 
-Generation: a one-off script reads `_GET_ROUTES/_POST_ROUTES/_PUT_ROUTES`
-and the chains (transcribed by hand, one Route per `if` branch, reviewed
-against the dispatch golden) and writes the literal `ROUTES` table. The
-script is not kept; the golden is the oracle.
+`ROUTES: dict[method, tuple[Route, ...]]` is ordered first-match.
+`do_<METHOD>` keeps its gate prelude byte-identical (lead decision: the
+unmatched-path answers, limited `GET /x` 404 and limited non-GET 403, stay
+exactly as today in the seam and every move) and replaces the hand-offs,
+table lookup and chain with `registry.dispatch(self, method, path)`, which
+ends in today's `self._send(404, b"not found")`.
 
-## 3. Auth: declared, checked, then enforced
+The table is written by hand from the source, one Route per `if` branch and
+per hand-off, in source order; the dispatch golden is the oracle, not a
+generator script.
 
-Two steps, so the seam commit changes no behaviour:
+## 3. Admission: declared, checked, then enforced
 
-1. **Seam (move lane).** `auth` on each Route is the value the dispatch
-   golden's `scope` column records today (computed from the gates, including
-   the three wrong ones). A test asserts declared `auth` equals the golden
-   scope for every route. The gates still decide; the declaration only
-   documents. HTTP-01/02/03 routes carry `note="HTTP-0x"` and their real
-   (wrong) scope `limited`.
+`admission` names **dispatch admission**: who gets past today's gates to the
+route. It is not the effective authorization of the request; handlers keep
+their own checks, listed in `inner_checks` and never removed by a later
+enforcement change: `/server-terminal` (validated credential),
+`podcast_history_http` (full scope), controller actions (`admin=True`
+changes), background-job detail (log hidden from limited devices), and
+`_reject_janitor_control` in 9 POST handlers (finding 2).
+
+One router can serve several admission levels today (finding 2): `GET
+/janitors` and `/janitor-policy` admit limited devices, `GET
+/janitor-runs/r1/context` only full; `POST /controller-actions/a1/invoke`
+admits limited, `POST /controller-actions` only full. So a router gets one
+Route per admission boundary, all with the same adapter, and their predicates
+together equal the router's own predicate, in an order that keeps the first
+match identical:
+
+| Method | Route name | match (in this order) | admission (golden) |
+|---|---|---|---|
+| GET | `janitor.runs` | `handles(p) and p.startswith("/janitor-runs/")` | full |
+| GET | `janitor.read` | `handles(p)` | limited |
+| POST, DELETE | `janitor.write` | `handles(p)` | full |
+| GET | `controller.read` | `handles(p)` | limited |
+| POST | `controller.invoke` | `handles(p) and limited_device_allowed(p, "POST")` | limited |
+| POST | `controller.manage` | `handles(p)` | full |
+
+The boundaries are today's gate rules (`/janitor-runs/` is a full-only
+prefix; `limited_device_allowed` admits only `/controller-actions/<id>/invoke`),
+so the split adds no new rule.
+
+Steps, so the seam changes no behaviour:
+
+1. **Seam (move lane).** For every golden key, the declared `admission` of
+   the first matching Route equals the golden `scope`, including the wrong
+   ones (HTTP-01/02/03, `note` set). The gates still decide; the declaration
+   is documentation checked by a test.
 2. **Fix lane (one commit and one test each).** The dispatcher enforces the
-   declared `auth` after `_authorized`; then HTTP-01 (`/terminal/` → full,
-   janitor refusal), HTTP-02 (PATCH gets the gate), HTTP-03 (`/dirs`,
-   `/past-sessions` → full) are each a one-line declaration change plus the
-   golden diff, registered in `differences.md`, with a `docs/compatibility.md`
-   row and a `HOST_CONTRACT` bump decided by the contract owner. The
-   unmatched-path behaviour (404 vs 403) stays as today unless Peter decides
-   otherwise.
+   declaration after `_authorized`; HTTP-01, -02 and -03 then become
+   declaration changes with their golden diff, `differences.md` entry,
+   `docs/compatibility.md` row and a contract decision by the contract owner.
+   The enforcement never relaxes an `inner_checks` entry.
 
-## 4. Parity test
+## 4. Parity
 
-`tests/integration/route_probe.py` already runs the real `do_<METHOD>` in
-process, stubs every handler and library router, and records the first
-target per (method, path, principal) for 1,360 requests and 7 principals.
-The parity tests for the seam:
+The oracle is `tests/integration/route_probe.py`: it runs the real
+`do_<METHOD>` in process with every handler and library router stubbed and
+records the first target with its exact arguments, or the inline response,
+per (method, path, principal). The dispatch golden now holds 1,620 method x
+path entries for 7 principals, including edge witnesses (finding 5): nested
+and empty remainders (`/terminal/a/b`, `/terminal/`, `/terminal//s1/`),
+encoded and double-encoded slashes (`/artifacts/a%2Fb/html`,
+`/artifacts/a%252Fb`, `DELETE /agents/a%2F1`), the infix split
+(`/teams/t1/members/a1/b`), prefix boundaries (`/janitorsx`,
+`/controller-actionsx`, `/podcast-historyx`, `/oracle-x`, `/static`),
+overlaps (`/turn-queue/resume/send`, `/artifacts/a1/events-config/events`,
+`/clips/1/a/b`, `/clips/%31/stream`) and query separation
+(`/send?path=/teams/t1/members`).
 
-- `test_dispatch_golden` unchanged must pass on the seam commit (zero diffs:
-  same target and arguments, same gate answer, for every path and principal).
-- Registry completeness: every non-404 golden target is produced by exactly
-  one Route; every Route's sample path resolves to its own handler (each
-  Route carries no sample; the test takes it from the golden key).
-- Declared auth equals the golden scope (section 3, step 1).
-- `test_response_golden` (real socket, minimal request, status + body shape
-  for admin and limited) must pass unchanged.
+Seam acceptance:
 
-The probe proves it can fail: adding `/terminal/` to the full-only prefixes
-turns one golden entry red.
+- `test_dispatch_golden` passes unchanged: for every key the **first selected
+  route and its exact invocation or inline response** are identical
+  (completeness is defined this way, not as one handler per Route, since a
+  router serves many keys).
+- Every Route is the first match for at least one golden key (no dead Route).
+- Declared admission equals the golden scope (section 3).
+- `test_response_golden` passes unchanged (status, type, full body shape for
+  admin and limited, over a real socket; minimal requests only, not value
+  parity, not stream bytes).
+
+Proven able to fail (planted on the old code, reverted): `/terminal/` added to
+the full-only prefixes (1 entry red); a binding change, terminal session
+`.split("/")[0]` (1 red, `/terminal/a/b`); a precedence change, generic
+`/artifacts/` before the suffix branches (8 red). A plant must clear
+`server/__pycache__`: a revert of the same size within the same second
+reuses the planted bytecode.
 
 ## 5. Where new routes go from day one
 
-- A new route is a `Route` in `server/lib/routes/<feature>.py`, collected into
-  `ROUTES` by `server/lib/routes/registry.py`. No new entry in server.py's tables or
-  chains: a ratchet test fails if `_GET_ROUTES`/`_POST_ROUTES`/`_PUT_ROUTES`
-  or the `do_*` chains gain an entry (counts pinned, may only go down).
-- Its handler is a function `(handler, **params)` in the feature module, so
-  it never adds to `Handler`. It declares `auth` and `janitor_guard`, and the
-  goldens are regenerated in the same commit.
-- Contract rules are unchanged: a new route a client may use bumps
+- A new route is a `Route` in `server/lib/routes/<feature>.py` with its
+  handler as a function `(handler, ...)` there; it never adds to `Handler`.
+  It declares `admission`, `inner_checks` and `janitor_guard`, and the goldens
+  are regenerated in the same commit.
+- A ratchet test pins the sizes of `_GET_ROUTES`, `_POST_ROUTES`,
+  `_PUT_ROUTES` and the number of `if` branches in each `do_*` method; they
+  may only go down.
+- Layering (lead decision): `lib.routes` is the HTTP adapter layer and is
+  exempt from the rule-8 guard (no `handler._*` from `server/lib`), by name
+  and only it; no other module in `server/lib` may import `lib.routes`, and
+  `lib.routes` never imports `server` or `__main__`.
+- Contract rules are unchanged: a route a client may use bumps
   `HOST_CONTRACT` and adds a `docs/compatibility.md` row.
 
-## 6. How handlers move (after go/no-go 1)
+## 6. How handlers move (Phase 2, after go/no-go 1)
 
-Move-only commits move `Handler` methods, byte-identical, into feature mixin
-classes in `server/lib/routes/<feature>.py` (`class VocabRoutes:` ...), and
-`Handler` inherits them. Why mixins first rather than functions:
+Lead decision: `Handler` methods move byte-identical into feature mixin
+classes in `server/lib/routes/<feature>.py`, and `Handler` inherits them.
+The AST-identity check compares each moved function by name: identical
+arguments, decorators and body; only the containing class and module change.
+The move map records old qualified name -> new `module:Class.name`. Turning
+mixin methods into `(req, ctx, resp)` functions is later, separate work with
+its own review.
 
-- The method bodies do not change at all, so the AST-identity check is a
-  plain comparison of `FunctionDef` nodes and review is mechanical.
-- `getattr(self, name)` dispatch, `self._json_ok` helpers and the library
-  modules that call handler methods (`_stop_agent_session` from three oracle
-  modules, `controller_actions_http`, HTTP-06) keep working unchanged.
-- Tests that patch `server_module.Handler` attributes (4 sites) keep working;
-  tests that patch server.py module globals used by a moved method (`log`,
-  `TurnDispatchService`, `OrchestratorService`, `TTSWorker`,
-  `_STT_ACTIVATION_LOCK`, `SERVER_TIMING`, `_deliver_decision_rows`,
-  `eventlog`, `agents_db`) must follow the global; each move's map lists the
-  test patch sites it retargets, in the same commit (test-only edit).
+### Binding contract (finding 3)
 
-Each move ships a move map (old `server.py:Handler.name` → new
-`lib/routes/<feature>.py:<Mixin>.name`) and the rebase helper REFACTOR.md asks for.
-Turning mixin methods into `(req, ctx, resp)` functions and extracting
-services (stop, delivery bracket, STT factory) is later, separate work
-(http-shell step 5) with its own review.
+AST identity does not prove that a moved function's global names still
+resolve to the same objects. Each move therefore needs:
 
-Module globals used by moved code: mutable ones (`_OUTDATED_CLIENTS_NOTED`,
-`_CARTESIA_PREVIEW_LOCKS`, `_STT_ACTIVATION_LOCK`) move with their only
-users or are imported as objects (never rebound); import-time config
-(`_CFG`, `PORT`, `BIND_ADDR`) stays in server.py and is read through
-`server` only where it is today.
+1. **Inventory.** For each function to move, its global loads
+   (`LOAD_GLOBAL` names via `dis`, minus builtins), classified: imported
+   module or function; immutable constant; **mutable or rebound state**
+   (assigned at runtime, `global` statements, or patched by tests on the
+   server module: `log`, `TurnDispatchService`, `OrchestratorService`,
+   `TTSWorker`, `_STT_ACTIVATION_LOCK`, `SERVER_TIMING`,
+   `_deliver_decision_rows`, `eventlog`, `agents_db`, `BIND_ADDR`); and
+   **composition-root state** (`_CFG`, `PORT`, `BIND_ADDR`, `_runtime_paths`).
+2. **Preparatory commit, separate from the move.** Any mutable or
+   composition-root name a moving function reads gets a leaf owner module
+   under `lib.routes` (for example `lib/routes/boot.py` owning the import-time
+   config snapshot that `_handle_diagnostics_health` reads as `_CFG`), and
+   server.py binds the same object from it (`from lib.routes.boot import
+   _CFG`). Test patch sites that rebind such a name move to the owner in the
+   same preparatory commit (test-only edits). This commit is reviewed as a
+   behaviour-neutral rebinding, with its own golden and replay run. A name
+   that cannot get a leaf owner keeps its function in server.py for now.
+3. **Move commit.** Pure move. A test loads server.py under the production
+   path name and under each test alias (`claude_pwa_server`,
+   `clarp_route_probe_server`) and asserts, for every global loaded by a
+   moved function, that the name in the mixin module **is** the object the
+   server module holds. A second test imports every `lib.routes` module in a
+   fresh interpreter and asserts that no `server` or `__main__`-from-server.py
+   module gets loaded. `lib.routes` never imports `server`, so
+   there is no cycle and no second composition root.
+4. Mutable state that only the moved code uses (`_OUTDATED_CLIENTS_NOTED`,
+   `_CARTESIA_PREVIEW_LOCKS`) moves with it in the preparatory commit.
+
+The oracle modules that call `handler._stop_agent_session` and
+`controller_actions_http` keep working because the method stays on
+`Handler` through inheritance; the move map lists them.
 
 ## 7. Order of moves (lowest risk first)
 
-0. Seam: `server/lib/routes/registry.py` + dispatcher call, no handler moves.
+0. Seam: `lib/routes/registry.py` and the dispatcher call; no handler moves.
 1. Settings and ops (providers, update, pairing, devices, diagnostics, dirs,
    clog): 57 methods, ~830 lines, mostly parse-call-respond.
 2. Vocabulary and transcription admin (not `_handle_transcribe`).
@@ -158,29 +249,34 @@ users or are imported as objects (never rebound); import-time config
 7. Voice out (voices, previews, clips).
 8. Send, select, orchestrator.
 9. Turn control (stop, repair, queue): runtime-adjacent; after canary x3.
-10. `/log` and the delivery bracket: last, coordinated with the runtime
-    boundary owner (reviewer A).
+10. `/log` and the delivery bracket: last, with the runtime boundary owner
+    (reviewer A).
 
-Each step is one or more move-only commits (one feature group, at most
-~800 lines each), each with G1, the AST-identity check, both route goldens
-unchanged, and replay (G2) from go/no-go 1. Streaming routes (`/events`,
-terminals, clip streams, HLS, growing audio, STT stream, Live sockets) move
-last within their group and are checked by the response golden only for
-their status line; byte-stream parity comes from the harness.
+Each group: characterization and G0 first, then the preparatory binding
+commit if any, then move-only commits of at most ~800 lines, each with G1,
+the AST-identity and binding-identity checks, both route goldens unchanged
+and replay (G2). Streaming routes (`/events`, terminals, clip streams, HLS,
+growing audio, STT stream, Live sockets) move last within their group; the
+response golden pins only their status line, byte-stream parity comes from
+the harness.
 
-## 8. Coverage entry gate (G0)
+## 8. Coverage entry gate (G0), for every group
 
-server.py line coverage on the full suite is measured with pytest-cov
-(`--cov=server`) and reported per feature group; the groups of step 1 to 3
-must reach 85% before their move. Gaps are closed with characterization
-tests against today's code, never by changing it.
+Every group that moves, 1 to 10 alike, enters only with characterization
+tests committed first and line coverage of exactly the functions it moves
+(and their adapters) at or above 85% on the full suite, measured with
+`--cov=server` on the buildbox (`heavy-remote`), or with an exception the
+lead has signed that names the uncovered functions and why (finding 4).
+G1 and the AST and binding checks do not replace G0. Gaps are closed with
+characterization tests against today's code, never by changing it.
 
-## 9. Open questions for the lead
+## 9. Decided and open
 
-1. Should the unmatched-path gate answers (limited non-GET 403 before 404)
-   stay forever, or be normalized in the fix lane? (Proposal: stay.)
-2. Mixins as the move vehicle (section 6) instead of free functions: needs
-   your agreement, since it shapes the AST-identity check the merge captain
-   builds.
-3. The review's step 7 rule-8 guard (no `handler._*` from `server/lib`)
-   must exempt `lib.routes`, which is the handler layer by design.
+Decided by the lead on 3 Nov: unmatched-path gate answers stay as today;
+mixins are the move vehicle with the by-name AST identity check; the package
+is `server/lib/routes`, exempt from rule 8 by name, imported by nothing else
+in `server/lib`.
+
+Open: the leaf owner for composition-root state (section 6, step 2) needs the
+lead's agreement before group 1 moves, because `_handle_diagnostics_health`
+reads `_CFG` and is in group 1.
