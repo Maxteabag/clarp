@@ -1136,6 +1136,7 @@ class Handler(BaseHTTPRequestHandler):
         "/automation-settings", "/avatar-settings", "/paired-devices",
         "/tts/providers", "/network/", "/server-terminal",
         "/oracle/", "/agent-file", "/janitor-runs/", "/calls",
+        "/terminal/", "/dirs",
     )
     _LIMITED_DEVICE_POST_EXACT = frozenset({
         "/send", "/transcribe", "/upload", "/select", "/focus",
@@ -1842,6 +1843,9 @@ class Handler(BaseHTTPRequestHandler):
         raw = str(recover_user_path(raw))
         backend = backends.normalize(qs.get("backend", [""])[0])
         all_projects = (qs.get("scope", [""])[0] or "").strip().lower() == "all"
+        if all_projects and getattr(self, "_request_device_scope", "") == "limited":
+            # Every project's sessions is host browsing: full scope only.
+            return self._json_error(403, "full device access required")
         limit = 100 if all_projects else 20
         sessions = backends.list_sessions(
             backend, raw, limit=limit, all_projects=all_projects)
@@ -5397,6 +5401,8 @@ class Handler(BaseHTTPRequestHandler):
         if not self._authorized():
             return self._reject_unauthorized()
         path = self.path.split("?", 1)[0]
+        if self._device_forbidden(path, "PATCH"):
+            return self._json_error(403, "full device access required")
         if path.startswith("/schedules/"):
             return self._handle_schedule_patch(path[len("/schedules/"):].strip("/"))
         return self._send(404, b"not found")
