@@ -329,6 +329,13 @@ class TurnStateMachine:
         if not force and not self.is_legal(from_state, event):
             self._refuse(agent_id, event, from_state, target)
             raise IllegalTransition(agent_id, event, from_state, target)
+        if (event == TurnEvent.SPAWN_STARTED and not force and from_state in TERMINAL
+                and self._turn_already_started(agent_id, (detail or {}).get("trace_id"))):
+            # A turn writes 'thinking' twice: the dispatcher's spawn and the
+            # provider's own turn start. A Stop between them ended the turn;
+            # the late second write must not make the agent busy for good
+            # (TP-N1).
+            raise TransitionNotWritten(agent_id, event, "turn_already_ended")
         stamp = now_ms() if ts is None else int(ts)
         if event == TurnEvent.TEXT_STREAMED and self._same_phase(agent_id, target, detail):
             # A backend reports every delta; the state only changes when the
@@ -430,6 +437,17 @@ class TurnStateMachine:
         return Transition(
             agent_id=agent_id, event=event, from_state=from_state, to_state=target,
             ts=stamp, detail=detail, state_id=int(cursor.lastrowid or 0))
+
+    @staticmethod
+    def _turn_already_started(agent_id: str, trace_id: Any) -> bool:
+        """Whether a recent 'thinking' row of this agent carries ``trace_id``."""
+        if not trace_id:
+            return False
+        return conn().execute(
+            """SELECT 1 FROM (SELECT kind, detail FROM state_log WHERE agent_id = ?
+                                ORDER BY state_id DESC LIMIT 50)
+                WHERE kind = 'thinking' AND json_extract(detail, '$.trace_id') = ?
+                LIMIT 1""", (agent_id, str(trace_id))).fetchone() is not None
 
     def record(self, agent_id: str, kind: str,
                detail: dict[str, Any] | None = None) -> Transition:
