@@ -112,19 +112,19 @@
   {
    "checkpoint": {
     "backend": "claude",
-    "boundary_offset": 4242,
-    "boundary_seq": 12,
-    "complete_size": 5164,
+    "boundary_offset": 3953,
+    "boundary_seq": 11,
+    "complete_size": 4875,
     "imports_since_audit": 0,
     "parser_carry_json": "{\"pending_tool_ids\":[],\"subagent_ids\":[]}",
-    "prefix_hash": "a9e6ad7ba6c98f9af7d063d5904ff9ab",
-    "prefix_turns_hash": "ed096ec82c785f114b30266e2a168826",
-    "size": 5164,
-    "store_carry_json": "{\"consumed_client_ids\":[\"u-c0\",\"u-c1\",\"u-c3\"],\"current_origin\":\"agent\",\"current_sender_agent_id\":\"agent-sender\",\"current_heartbeat_key\":\"\",\"assistant_ordinal\":8,\"authority_tools\":{},\"closed_authority\":[],\"unanswered_key\":\"\",\"current_request_trace\":\"tr-3\",\"adopted_final_ids\":[],\"newest_trace\":\"tr-3\"}",
+    "prefix_hash": "26ddd1295657fe6a19525ae9e53b81e6",
+    "prefix_turns_hash": "3bde90057904a3f0613b35a70f42c2b9",
+    "size": 4875,
+    "store_carry_json": "{\"consumed_client_ids\":[\"u-c0\",\"u-c1\",\"u-c3\"],\"current_origin\":\"agent\",\"current_sender_agent_id\":\"agent-sender\",\"current_heartbeat_key\":\"\",\"assistant_ordinal\":7,\"authority_tools\":{},\"closed_authority\":[],\"unanswered_key\":\"\",\"current_request_trace\":\"tr-3\",\"adopted_final_ids\":[\"final-1\",\"live-3\"],\"newest_trace\":\"tr-3\"}",
     "tail_hash": "e54b1f35d393e5a4592b8490302b8ecd",
-    "turn_count": 15
+    "turn_count": 14
    },
-   "import": "IntegrityError: UNIQUE constraint failed: messages.agent_id, messages.backend_session_id, messages.seq",
+   "import": "ok",
    "step": "rotate"
   }
  ]
