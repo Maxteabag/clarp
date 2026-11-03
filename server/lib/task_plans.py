@@ -365,6 +365,8 @@ def get_with_goal_text(plan_id: str) -> tuple[dict | None, str | None]:
     data = dict(plan)
     goal_text = data.pop("goal_json")
     data["goal"] = json.loads(goal_text or "{}") or None
+    if data["goal"] is not None:
+        _goal_expand(db.conn(), plan_id, data["goal"])
     data["history"] = json.loads(data.pop("history_json") or "[]")
     if data["goal"] is not None:
         from . import goal_ledger
@@ -435,6 +437,47 @@ def _goal_adopt_bound(goal):
     if bounded is not goal:
         goal["history"] = bounded["history"]
         goal["history_offset"] = bounded["history_offset"]
+
+
+# A goal history entry's large detail may be stored as a reference to the
+# append-only goal ledger, which mirrors every entry under "history:<index>":
+# {"ledger": key, "shape": key order}. The ledger keeps keys sorted, so the
+# shape records the original order wherever it differs. Reading expands every
+# reference back, byte for byte (AUT-N1b-reader). This build writes none;
+# the writer ships one release later, so a rollback to this build reads them.
+_LEDGER_REF = "ledger"
+_SHAPE = "shape"
+
+
+def _reshape(value, shape):
+    if shape is None:
+        return value
+    if "k" in shape and isinstance(value, dict):
+        kids = shape.get("c") or {}
+        ordered = {key: value[key] for key in shape["k"] if key in value}
+        ordered.update((key, item) for key, item in value.items() if key not in ordered)
+        return {key: _reshape(item, kids.get(key)) for key, item in ordered.items()}
+    if "a" in shape and isinstance(value, list):
+        return [_reshape(item, shape["a"]) for item in value]
+    if "l" in shape and isinstance(value, list):
+        return [_reshape(item, sub) for item, sub in zip(value, shape["l"])] + value[len(shape["l"]):]
+    return value
+
+
+def _goal_expand(con, plan_id, goal):
+    """The goal as clients read it: each spilled detail back from the ledger,
+    in its original key order."""
+    for position, entry in enumerate(goal.get("history") or []):
+        detail = entry.get("detail")
+        if not isinstance(detail, dict) or not (set(detail) <= {_LEDGER_REF, _SHAPE}) \
+                or _LEDGER_REF not in detail:
+            continue
+        row = con.execute(
+            "SELECT new_json FROM goal_events WHERE plan_id=? AND idempotency_key=?",
+            (plan_id, detail[_LEDGER_REF])).fetchone()
+        recorded = (json.loads(row[0] or "{}").get("detail") or {}) if row else {}
+        goal["history"][position] = {**entry, "detail": _reshape(recorded, detail.get(_SHAPE))}
+    return goal
 
 
 def _goal_save(con, plan_id, goal):
