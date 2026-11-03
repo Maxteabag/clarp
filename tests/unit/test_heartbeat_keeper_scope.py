@@ -51,3 +51,42 @@ def test_pausing_or_deleting_the_keeper_keeps_its_scope_off_the_fixed_heartbeat(
         assert janitors.remove("keeper", cfg["revision"])
     assert _fixed_heartbeats() == ["outside"]
     assert _next_fixed(ids, "included") is None
+
+
+def test_a_new_scoped_adoption_keeps_an_adoption_made_before_scopes_were_recorded(scoped_keeper, tmp_path):
+    """AUT-02s review: a Host that adopted a keeper before its scope was
+    recorded (the latch alone) keeps that adoption when a second, scoped
+    keeper is enabled; the outside agent stays off the fixed heartbeat."""
+    from lib import settings_store
+    ids, cfg = scoped_keeper
+    cfg = janitors.configure("keeper", cfg["revision"], scope={})
+    janitors.set_enabled("keeper", cfg["revision"], False)
+    settings_store.set_text("heartbeat.janitor_adopted_scopes", "[]")   # adopted before records
+    outside = agents.get_by_agent_id(ids["outside"])
+    assert heartbeat.keeper_owns_heartbeat(outside)
+
+    agents.create_agent(persona="second", voice_id="synthetic", cwd=str(tmp_path),
+                        session="second", backend="codex")
+    second = janitors.create("second", template_id="heartbeat-decider",
+                             scope={"agent_ids": [ids["included"]]})
+    janitors.set_enabled("second", second["revision"], True)
+
+    assert heartbeat.keeper_owns_heartbeat(outside)
+    assert _fixed_heartbeats() == []
+
+
+def test_a_first_adoption_on_a_fresh_host_records_only_its_scope(tmp_path, monkeypatch):
+    from lib import settings_store
+    monkeypatch.setattr(backends, "active_handles", lambda *_: [])
+    janitor_builtins.ensure_builtins(cwd=str(tmp_path))
+    ids = {}
+    for session in ("included", "outside", "keeper"):
+        ids[session] = agents.create_agent(persona=session, voice_id="synthetic",
+            cwd=str(tmp_path), session=session, backend="codex")
+        agents.record_state(ids[session], "done", {"source": "user"})
+    agents.update_agent(ids["outside"], heartbeat_enabled=True)
+    assert not settings_store.get_bool("heartbeat.janitor_adopted")
+    cfg = janitors.create("keeper", template_id="heartbeat-decider",
+        scope={"agent_ids": [ids["included"]]})
+    janitors.set_enabled("keeper", cfg["revision"], True)
+    assert _fixed_heartbeats() == ["outside"]
