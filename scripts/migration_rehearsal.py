@@ -33,6 +33,7 @@ import pathlib
 import re
 import shutil
 import sqlite3
+import stat
 import subprocess
 import sys
 import tempfile
@@ -266,20 +267,58 @@ def write_profile(source: pathlib.Path, sample: int = 2_000) -> dict:
             "taken_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "row_methods": methods, "tables": tables}
 
 
-def save_profile(path: pathlib.Path, profile: dict) -> None:
-    """Write a profile, never over a file that is not already a profile (a
-    database given by mistake, the source itself): write beside it, then rename."""
+PROFILE_MAX_BYTES = 1 << 20  # a profile is a few kB; anything bigger is not one
+
+
+def _is_profile(path: pathlib.Path) -> bool:
+    """True only for a small regular file holding a clarp-state-profile; reads at most PROFILE_MAX_BYTES."""
+    info = path.stat()
+    if not stat.S_ISREG(info.st_mode) or info.st_size > PROFILE_MAX_BYTES:
+        return False
+    with path.open("rb") as handle:
+        head = handle.read(PROFILE_MAX_BYTES + 1)
+    if len(head) > PROFILE_MAX_BYTES or head.startswith(b"SQLite format 3"):
+        return False
+    try:
+        data = json.loads(head.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        return False
+    return isinstance(data, dict) and data.get("kind") == "clarp-state-profile"
+
+
+def check_destination(path: pathlib.Path, source: pathlib.Path | None = None) -> pathlib.Path:
+    """The expanded target, or SystemExit when writing it could touch anything but a profile."""
     path = path.expanduser()
-    if path.exists():
-        try:
-            existing = json.loads(path.read_text())
-        except (UnicodeDecodeError, ValueError):
-            existing = None
-        if not isinstance(existing, dict) or existing.get("kind") != "clarp-state-profile":
-            raise SystemExit(f"refusing to overwrite {path}: it is not a clarp-state-profile")
-    partial = path.with_name(path.name + ".partial")
-    partial.write_text(json.dumps(profile, indent=1, sort_keys=True))
-    partial.replace(path)
+    if source is not None:
+        source = source.expanduser()
+        companions = [source] + [source.with_name(source.name + s) for s in ("-wal", "-shm", "-journal")]
+        if any(os.path.realpath(path) == os.path.realpath(c) for c in companions) or (
+                path.exists() and source.exists() and os.path.samefile(path, source)):
+            raise SystemExit(f"refusing to overwrite {path}: it is the source database")
+    if path.is_symlink():
+        raise SystemExit(f"refusing to overwrite {path}: it is a symlink")
+    if path.exists() and not _is_profile(path):
+        raise SystemExit(f"refusing to overwrite {path}: it is not a clarp-state-profile")
+    return path
+
+
+def save_profile(path: pathlib.Path, profile: dict, source: pathlib.Path | None = None) -> None:
+    """Write a profile without ever touching another file.
+
+    Refuses the source database and its -wal/-shm/-journal companions, and any
+    existing file that is not already a profile (checked with a bounded read).
+    Stages in a new, exclusively created temp file beside the target, then
+    renames it into place, so no fixed staging name can collide with anything.
+    """
+    path = check_destination(path, source)
+    handle, staging = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".partial", dir=path.parent)
+    try:
+        with os.fdopen(handle, "w") as out:
+            out.write(json.dumps(profile, indent=1, sort_keys=True))
+        os.replace(staging, path)
+    except BaseException:
+        os.unlink(staging)
+        raise
 
 
 def load_profile(path: pathlib.Path) -> dict[str, tuple[int, int]]:
@@ -349,7 +388,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.write_profile:
         if not args.from_db:
             parser.error("--write-profile needs --from-db")
-        save_profile(args.write_profile, write_profile(args.from_db.expanduser()))
+        check_destination(args.write_profile, args.from_db)  # refuse before reading anything
+        save_profile(args.write_profile, write_profile(args.from_db.expanduser()), source=args.from_db)
         return 0
     profile = load_profile(args.profile) if args.profile else PROFILE
     base = args.base or _git("merge-base", "HEAD", "origin/main")
