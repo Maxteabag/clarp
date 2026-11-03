@@ -757,3 +757,50 @@ def test_a_conversation_the_host_continued_keeps_its_goal_and_running_wake(tmp_p
     # Only a goal bound to the conversation that was continued moves.
     assert task_plans.carry_native_session(
         p["agent_id"], "native-goal-test", "elsewhere", "pruned") == []
+
+
+def _second_goal(first):
+    return task_plans.create(
+        session="goal-owner",
+        title="Second outcome",
+        items=[{"id": "other", "title": "Other method"}],
+        goal={"criteria": ["Other works"], "limits": "None", "enroll": True},
+    )
+
+
+def test_stop_pauses_a_goal_whose_revision_moved_after_the_scan(tmp_path, monkeypatch):
+    # The agent checkpoints while the user presses Stop: the pause must use the
+    # revision it reads inside its own transaction, not the one it scanned.
+    first = make_goal(tmp_path)
+    second = _second_goal(first)
+    real = task_plans._goal_mutate
+    moved = []
+
+    def checkpoint_first(plan_id, **kw):
+        if not moved:
+            moved.append(plan_id)
+            plan = task_plans.get(first["plan_id"])
+            act(plan, "checkpoint", {"progress": "Agent checkpoint during Stop",
+                                       "next_work": "Continue"})
+        return real(plan_id, **kw)
+
+    monkeypatch.setattr(task_plans, "_goal_mutate", checkpoint_first)
+    assert task_plans.pause_recovery_for_agent(first["agent_id"], "User stopped") == 2
+    for plan in (first, second):
+        assert task_plans.get(plan["plan_id"])["status"] == "paused"
+
+
+def test_stop_still_pauses_other_goals_when_one_pause_fails(tmp_path, monkeypatch):
+    first = make_goal(tmp_path)
+    second = _second_goal(first)
+    real = task_plans._goal_mutate
+
+    def locked_first(plan_id, **kw):
+        if plan_id == first["plan_id"]:
+            raise RuntimeError("database is locked")
+        return real(plan_id, **kw)
+
+    monkeypatch.setattr(task_plans, "_goal_mutate", locked_first)
+    assert task_plans.pause_recovery_for_agent(first["agent_id"], "User stopped") == 1
+    assert task_plans.get(first["plan_id"])["status"] == "active"
+    assert task_plans.get(second["plan_id"])["status"] == "paused"
