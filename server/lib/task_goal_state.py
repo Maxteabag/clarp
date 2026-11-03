@@ -3,6 +3,8 @@
 from .task_plans import (
     _goal_check_revision as check_revision,
     _goal_save as _save,
+    _goal_save_if_unchanged as save_if_unchanged,
+    _goal_serialize as serialize,
     _goal_initialize as initialize,
     _goal_record as record,
     _goal_require_completion as require_completion,

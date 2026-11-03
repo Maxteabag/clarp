@@ -830,3 +830,95 @@ def test_idle_ticks_before_the_due_time_do_not_rewrite_the_goal(tmp_path, monkey
     assert saves_first <= 1
     assert len(saves) == saves_first, "an unchanged goal was rewritten"
     assert events() == after_first
+
+
+def _history_keys(plan_id):
+    return sorted(
+        int(row[0].split(":", 1)[1])
+        for row in db.conn().execute(
+            "SELECT idempotency_key FROM goal_events WHERE plan_id=? "
+            "AND idempotency_key LIKE 'history:%'",
+            (plan_id,),
+        )
+    )
+
+
+def test_stored_history_is_bounded_and_the_ledger_keeps_every_entry(tmp_path):
+    p = make_goal(tmp_path)
+    plan_id = p["plan_id"]
+    goal = json.loads(
+        db.conn().execute("SELECT goal_json FROM task_plans WHERE plan_id=?", (plan_id,)).fetchone()[0]
+    )
+    first = len(goal["history"])
+    extra = task_plans.GOAL_HISTORY_LIMIT + 50
+    for n in range(extra):
+        goal["history"].append(dict(at=n, kind="wake_claim", revision=0, detail={"n": n}))
+    with recovery._transaction() as con:
+        goals._save(con, plan_id, goal)
+    stored = json.loads(
+        db.conn().execute("SELECT goal_json FROM task_plans WHERE plan_id=?", (plan_id,)).fetchone()[0]
+    )
+    total = first + extra
+    assert len(stored["history"]) == task_plans.GOAL_HISTORY_LIMIT
+    assert stored["history_offset"] == total - task_plans.GOAL_HISTORY_LIMIT
+    assert stored["history"][-1]["detail"] == {"n": extra - 1}
+    # The ledger holds every entry, keyed by its absolute position.
+    assert _history_keys(plan_id) == list(range(total))
+    # The next entry continues the numbering instead of colliding with old keys.
+    stored["history"].append(dict(at=extra, kind="wake_claim", revision=0, detail={"n": "next"}))
+    with recovery._transaction() as con:
+        goals._save(con, plan_id, stored)
+    assert _history_keys(plan_id) == list(range(total + 1))
+    again = json.loads(
+        db.conn().execute("SELECT goal_json FROM task_plans WHERE plan_id=?", (plan_id,)).fetchone()[0]
+    )
+    assert len(again["history"]) == task_plans.GOAL_HISTORY_LIMIT
+    assert again["history"][-1]["detail"] == {"n": "next"}
+
+
+def test_wake_claim_and_result_do_no_json_work_under_the_writer_lock(tmp_path, monkeypatch):
+    p = make_goal(tmp_path)
+
+    class Guard:
+        def __init__(self, real):
+            self.real = real
+
+        def __getattr__(self, name):
+            attr = getattr(self.real, name)
+            if name not in {"loads", "dumps"}:
+                return attr
+
+            def guarded(*args, **kwargs):
+                assert not db.conn().in_transaction, f"json.{name} under the writer lock"
+                return attr(*args, **kwargs)
+
+            return guarded
+
+    monkeypatch.setattr(recovery, "json", Guard(json))
+    monkeypatch.setattr(task_plans, "json", Guard(json))
+    now = db.now_ms() + 130000
+    claimed = recovery._claim(p["plan_id"], now)
+    assert claimed, "the due goal is claimed"
+    request = claimed[1]["continuation"]["request_id"]
+    recovery._result(p["plan_id"], request, now, "admitted", "accepted")
+    goal = task_plans.get(p["plan_id"])["goal"]
+    assert goal["continuation"]["state"] == "admitted"
+    assert [h["kind"] for h in goal["history"][-2:]] == ["wake_claim", "dispatch_admitted"]
+
+
+def test_a_goal_changed_after_the_snapshot_is_not_overwritten_by_a_claim(tmp_path, monkeypatch):
+    p = make_goal(tmp_path)
+    now = db.now_ms() + 130000
+    real_boundary = recovery.boundary
+
+    def concurrent_checkpoint(plan, goal, **kwargs):
+        # Another writer saves the goal after the claim read its snapshot.
+        if kwargs.get("check_live", True):
+            act(task_plans.get(p["plan_id"]), "checkpoint", {"progress": "moved on", "next_work": "x"})
+        return real_boundary(plan, goal, **kwargs)
+
+    monkeypatch.setattr(recovery, "boundary", concurrent_checkpoint)
+    assert recovery._claim(p["plan_id"], now) is None
+    goal = task_plans.get(p["plan_id"])["goal"]
+    assert goal["continuation"]["state"] != "dispatching"
+    assert goal["history"][-1]["kind"] == "checkpoint"
