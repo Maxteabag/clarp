@@ -76,7 +76,7 @@ planted.py ─── deliberate behaviour changes for the proof
   HOME; the buildbox's `heavy-remote` must give the equivalent).
 - **Waits poll state, never the clock**: a turn settled in `turns`, a provider
   `turn/start` in the fake's request log, `/status` busy, and finally
-  quiescence (every scenario session idle, SSE quiet for 0.4 s).
+  quiescence (every scenario session idle, SSE quiet for 1 s).
 - **A frozen cut.** At quiescence the SSE reader is stopped and joined, then
   the Host's own process group is killed (which takes the fake provider
   with it), and only then are the database (one read transaction) and the

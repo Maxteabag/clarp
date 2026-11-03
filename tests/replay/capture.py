@@ -33,7 +33,7 @@ HERE = Path(__file__).resolve().parent
 TOKEN = 'replay-host-token'
 READY_TIMEOUT_S = 30
 WAIT_TIMEOUT_S = 15
-QUIET_S = 0.4
+QUIET_S = 1.0
 OWNED = '.clarp-replay-owned'
 # Files the Host writes for its own diagnostics or that the capture reads separately.
 SKIP_PREFIXES = ('logs/', 'home/.cache/')
