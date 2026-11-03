@@ -212,7 +212,7 @@ resolve to the same objects. Each move therefore needs:
    `TTSWorker`, `_STT_ACTIVATION_LOCK`, `SERVER_TIMING`,
    `_deliver_decision_rows`, `eventlog`, `agents_db`, `BIND_ADDR`); and
    **composition-root state** (`_CFG`, `PORT`, `BIND_ADDR`, `_runtime_paths`).
-2. **Preparatory commit, separate from the move** (lead decision, 3 Nov:
+2. **Preparatory commit, separate from the move** (lead decisions, 3 Nov; composition-root state now goes on the server object, see section 10:
    S3 owns composition-root state that moved handlers read).
    - **Composition-root state** (`_CFG`, `PORT`, `BIND_ADDR`,
      `_runtime_paths`) is exposed through `ServerContext` as a read-only
@@ -293,3 +293,17 @@ handlers read; it reaches them through an identity-tested read-only
 `config.load()` and never by importing server.py (section 6, step 2).
 
 Open: none.
+
+## 10. Move map
+
+Old location -> new location, recorded as each commit lands. Old imports keep
+working unless a row says otherwise.
+
+| Commit | Old | New | Kind |
+|---|---|---|---|
+| seam | `server.py:Handler.do_GET/POST/PUT/DELETE/PATCH` route chains (after the gate prelude) | `lib/routes/registry.py:GET/POST/PUT/DELETE/PATCH` Routes + `dispatch()`; route tables stay on `Handler` | move (adapters verbatim, `self` -> `handler`) |
+| rebinding | `_handle_diagnostics_health` reads module global `_CFG.delivery` | reads `self.server.boot_config.delivery` | composition-root state on the server object (lead decision A, 3 Nov): `ContextHTTPServer.__init__` sets `self.boot_config = _CFG`, the same object, so `build_server`'s server, directly built servers and the LAN listener subclass all carry it; never `config.load()`; no further server attributes without the lead |
+
+Layer rules enforced by `tests/integration/test_route_registry.py`:
+`lib.routes` never imports `server` or `__main__`; no module in `server/lib`
+outside `lib.routes` imports it.
