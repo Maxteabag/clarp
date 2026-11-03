@@ -13,7 +13,7 @@ they are known to occur.
   of a prefixed id under an id key. Each becomes an ordinal surrogate by first
   appearance (``<id:3>``), so the same id keeps the same surrogate within a run
   and an id that moves shows up. Hex in free text is left alone.
-- Event ids are named after the frame that carries them: its lane (event
+- Inside the SSE channels (the stream and the sse_events table), event ids are named after the frame that carries them: its lane (event
   name, type, payload key set, session; see ``lane_key``) and its position in
   that lane (``<eid:agent-state#2@1a2b3c>``). Producers interleave
   differently between runs, a lane's own order does not; any reference to
@@ -44,8 +44,10 @@ DURATION_KEYS = frozenset({'duration_ms', 'worked_ms', 'elapsed_ms', 'source_del
                            'time_used_seconds', 'timeUsedSeconds', 'age_ms', 'age_sec'})
 ID_KEYS = frozenset({'focus', 'dedupe_key', 'id', 'conv', 'epoch', 'cause', 'source', 'thread', 'threadId', 'turnId',
                      'native_session_id', 'backend_session_id', 'cause_message_id', 'client_msg_id'})
-# Lanes whose frames are pure invalidation signals ("refetch now"); how many the
-# Host coalesces depends on timing, so only distinct frames are compared.
+# Lanes whose frames are pure invalidation signals ("refetch now"). How many the
+# Host sends, and whether one names the backend session, varies with timing
+# (1-3 per turn in unchanged replays), so each agent's signals are compared by
+# presence: one frame per (type, session, agent) keeping only those fields.
 COALESCED_TYPES = frozenset({'transcript-updated'})
 # Table columns that hold generated ids outside an id-named column.
 ID_COLUMNS = frozenset({('settings', 'key'), ('settings', 'value')})
@@ -111,6 +113,7 @@ class Normalizer:
         self.ids: dict[str, str] = {}
         self.eids: dict[str, str] = {}
         self.eid_names: dict[str, str] = {}
+        self.in_stream = False  # event ids are SSE ids only inside the SSE channels
 
     def _id(self, token: str) -> str:
         if token not in self.ids:
@@ -158,7 +161,8 @@ class Normalizer:
             return items
         if isinstance(value, bool) or value is None:
             return value
-        if (key == 'event_id' or key.endswith('_event_id')) and isinstance(value, (int, str)) and str(value).isdigit():
+        if (self.in_stream and (key == 'event_id' or key.endswith('_event_id'))
+                and isinstance(value, (int, str)) and str(value).isdigit()):
             return self._eid(value)
         if key in DURATION_KEYS and isinstance(value, (int, float)):
             return '<duration>'
@@ -223,10 +227,12 @@ def normalize(capture: dict, harness_root: str) -> dict:
                      'text': UUID.sub(lambda m: n._id(m.group(0).lower()), n.paths_in(f['text']))
                      if f.get('kind') == 'text' else None}
                     for f in capture['files']]
+    n.in_stream = True
     out['sse'] = [{'event': f.get('event'), 'has_id': f.get('has_id'), 'data': n.value(f.get('data'))}
                   for f in frames]
     out['sse_log'] = [{'event': None, 'has_id': True, 'data': n.value(_payload(r)),
                        'row': n.value({k: v for k, v in r.items() if k != 'payload'})} for r in log_rows]
+    n.in_stream = False
     out['sse_health'] = capture.get('sse_health')
     out['cli'] = [n.value(c) for c in capture.get('cli', [])]
     return out
@@ -273,13 +279,14 @@ def coalesce(frames: list[dict]) -> tuple[list[dict], dict[str, str]]:
     for frame in frames:
         data = frame.get('data') if isinstance(frame.get('data'), dict) else {}
         if data.get('type') in COALESCED_TYPES:
-            body = json.dumps({k: v for k, v in data.items() if k != 'event_id'}, sort_keys=True)
-            key = (lane_key(frame), body)
+            key = (data.get('type'), data.get('session'), data.get('agent_id'))
             if key in seen:
                 if data.get('event_id') is not None and seen[key] is not None:
                     alias[str(data['event_id'])] = str(seen[key])
                 continue
             seen[key] = data.get('event_id')
+            frame = {**frame, 'data': {k: data[k] for k in ('type', 'session', 'agent_id', 'event_id')
+                                       if k in data}}
         kept.append(frame)
     return kept, alias
 
