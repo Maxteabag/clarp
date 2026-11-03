@@ -11,10 +11,16 @@ the baseline, so the list only shrinks until S1 makes the test strict.
 Separately, nothing in server/lib outside lib.routes imports lib.routes (the
 S3 route layer is reached only from server.py).
 
-The layer map below is the contract owner's first cut for S1: persistence and
-core are listed by name, http is the entry points and HTTP/socket adapters,
-and every other module is a feature. Moving a module to another layer is an S1
-decision; update the map and the baseline in the same commit.
+The layer map follows docs/architecture/s1-layering.md (approved by the lead):
+persistence and core are listed by name or package prefix, http is the entry
+points and HTTP/socket adapters, and every other module is a feature. Moving a
+module to another layer is an S1 decision; update the map and the baseline in
+the same commit.
+
+Old module paths that S1 turns into sys.modules aliases (ALIASES) count as the
+module they alias, so importing lib.db_schema is an edge to
+lib.persistence.schema. Edges S1 keeps on purpose are NAMED_EXCEPTIONS, each
+with its reason; the list is exact (an exception that no longer exists fails).
 """
 from __future__ import annotations
 
@@ -26,25 +32,39 @@ SERVER = pathlib.Path(__file__).resolve().parents[2] / "server"
 LAYERS = ("persistence", "core", "features", "http")
 
 PERSISTENCE = frozenset({
-    "lib", "lib.clock", "lib.data_root_locks", "lib.db", "lib.db_migrations", "lib.db_schema",
+    "lib", "lib.clock", "lib.db", "lib.db_migrations", "lib.db_schema",
     "lib.lifecycle", "lib.paths", "lib.revisioned_cache", "lib.timing", "lib.xdg",
 })
+PERSISTENCE_PACKAGES = ("lib.persistence",)
 CORE = frozenset({f"lib.{m}" for m in (
     "agent_lifecycle", "agent_store", "agents", "backends", "config", "config_writer",
     "conversation", "deployment", "error_classify", "eventlog", "events", "hook_runtime",
-    "identity", "launch_receipts", "log", "message_live", "message_store", "message_turns",
+    "http_utils", "identity", "launch_receipts", "log", "message_live", "message_store", "message_turns",
     "message_writes", "origins", "proc_util", "process_registry", "prompt_admissions",
     "protocol", "roster", "roster_seed", "runtime_bridge", "runtime_events", "server_identity",
     "settings_store", "status_labels", "telemetry", "text_util", "trace", "turn_dispatch",
-    "turn_identity", "turn_lifecycle", "turn_queue", "turn_slots", "turn_usage",
+    "turn_identity", "turn_lifecycle", "turn_queue", "turn_slots", "turn_usage", "ws",
 )})
 CORE_PACKAGES = ("lib.backend", "lib.policies")
 HTTP = frozenset({"server", "runtime", "__init__"} | {f"lib.{m}" for m in (
-    "controller_actions_http", "http_utils", "janitor_http", "local_transport",
+    "bonjour", "controller_actions_http", "janitor_http", "local_transport",
     "podcast_history_http", "relay_connector", "request_security", "static_assets",
-    "terminal_ws", "ws",
+    "terminal_ws",
 )})
 ROUTES = "lib.routes"
+# Old paths kept as sys.modules aliases of their new home (S1 commits 2 and 5).
+# An alias applies once its target exists; until then the old module is real.
+ALIASES = {
+    "lib.db_schema": "lib.persistence.schema",
+    "lib.db_migrations": "lib.persistence.migrate",
+}
+# Upward edges kept on purpose (docs/architecture/s1-layering.md, section 2).
+NAMED_EXCEPTIONS = {
+    "lib.db -> lib.log": "logging is cross-cutting",
+    "lib.db_migrations -> lib.tool_explanation_learning": "v99 calls backfill_programs(con), live feature logic",
+    "lib.db_migrations -> lib.goal_ledger": "v112 calls goal_ledger.backfill(con) and its ledger helpers",
+    "lib.db_migrations -> lib.provider_background_jobs": "v121 calls expire_lost_evidence",
+}
 
 UPWARD_BASELINE = frozenset({
     'lib.agent_lifecycle -> lib.contact_assignment',
@@ -52,8 +72,6 @@ UPWARD_BASELINE = frozenset({
     'lib.agent_lifecycle -> lib.mcp_selection',
     'lib.agent_lifecycle -> lib.personas',
     'lib.agent_lifecycle -> lib.session_models',
-    'lib.agent_ring_live_socket -> lib.http_utils',
-    'lib.agent_ring_live_socket -> lib.ws',
     'lib.agents -> lib.artifacts',
     'lib.agents -> lib.clip_store',
     'lib.agents -> lib.goal_ledger',
@@ -108,22 +126,11 @@ UPWARD_BASELINE = frozenset({
     'lib.backend.stream_json -> lib.live_hub',
     'lib.backend.stream_json -> lib.live_pacing',
     'lib.backend.stream_json -> lib.voice_markup',
-    'lib.bonjour -> lib.local_transport',
-    'lib.clip_delivery.hls -> lib.http_utils',
-    'lib.clip_stream -> lib.http_utils',
     'lib.conversation -> lib.transcript_import_cache',
     'lib.conversation -> lib.transcript_incremental',
-    'lib.data_root_locks -> lib.deployment',
-    'lib.data_root_locks -> lib.host_generation',
-    'lib.data_root_locks -> lib.instance_backup',
-    'lib.data_root_locks -> lib.server_identity',
-    'lib.db -> lib.log',
     'lib.db_migrations -> lib.audio_bookkeeper',
-    'lib.db_migrations -> lib.goal_ledger',
     'lib.db_migrations -> lib.janitor_autonomy',
     'lib.db_migrations -> lib.judgments',
-    'lib.db_migrations -> lib.provider_background_jobs',
-    'lib.db_migrations -> lib.tool_explanation_learning',
     'lib.db_schema -> lib.agent_goals',
     'lib.db_schema -> lib.audio_bookkeeper',
     'lib.db_schema -> lib.goal_ledger',
@@ -153,13 +160,6 @@ UPWARD_BASELINE = frozenset({
     'lib.message_writes -> lib.team_leader',
     'lib.message_writes -> lib.team_store',
     'lib.message_writes -> lib.voice_markup',
-    'lib.oracle_live -> lib.http_utils',
-    'lib.oracle_live -> lib.ws',
-    'lib.oracle_live_calls -> lib.http_utils',
-    'lib.oracle_live_stable -> lib.http_utils',
-    'lib.oracle_live_stable -> lib.ws',
-    'lib.oracle_realtime -> lib.http_utils',
-    'lib.oracle_realtime -> lib.ws',
     'lib.policies.agent_spec -> lib.voice',
     'lib.runtime_bridge -> lib.compaction',
     'lib.runtime_bridge -> lib.janitor_autonomy',
@@ -169,8 +169,6 @@ UPWARD_BASELINE = frozenset({
     'lib.runtime_bridge -> lib.tool_explanation_commands',
     'lib.runtime_events -> lib.live_hub',
     'lib.runtime_events -> lib.live_pacing',
-    'lib.stt_stream -> lib.http_utils',
-    'lib.stt_stream -> lib.ws',
     'lib.turn_dispatch -> lib.account_failover',
     'lib.turn_dispatch -> lib.agent_rings',
     'lib.turn_dispatch -> lib.backend_usage',
@@ -200,7 +198,7 @@ UPWARD_BASELINE = frozenset({
 
 
 def layer(module: str) -> int:
-    if module in PERSISTENCE:
+    if module in PERSISTENCE or any(module == p or module.startswith(p + ".") for p in PERSISTENCE_PACKAGES):
         return 0
     if module in CORE or any(module == p or module.startswith(p + ".") for p in CORE_PACKAGES):
         return 1
@@ -235,7 +233,8 @@ def imports_of(name: str, path: pathlib.Path, known: dict) -> set[str]:
                 targets.append(candidate if candidate in known else target)
         elif isinstance(node, ast.Import):
             targets.extend(alias.name for alias in node.names)
-    return {t for t in targets if t in known and t != name}
+    found = {t for t in targets if t in known}
+    return {ALIASES[t] if ALIASES.get(t) in known else t for t in found} - {name}
 
 
 def edges() -> set[tuple[str, str]]:
@@ -247,8 +246,15 @@ def upward() -> set[str]:
     return {f"{src} -> {dst}" for src, dst in edges() if layer(dst) > layer(src)}
 
 
+def test_named_exceptions_are_exact():
+    now = upward()
+    stale = sorted(set(NAMED_EXCEPTIONS) - now)
+    assert not stale, f"remove from NAMED_EXCEPTIONS (no longer an upward edge): {stale}"
+    assert not set(NAMED_EXCEPTIONS) & UPWARD_BASELINE, "an edge is either a named exception or baseline debt"
+
+
 def test_no_new_upward_imports():
-    new = sorted(upward() - UPWARD_BASELINE)
+    new = sorted(upward() - UPWARD_BASELINE - set(NAMED_EXCEPTIONS))
     assert not new, ("imports from a lower layer into a higher one (persistence < core < features < http):\n"
                      + "\n".join(f"{e}  ({LAYERS[layer(e.split(' -> ')[0])]} -> {LAYERS[layer(e.split(' -> ')[1])]})"
                                  for e in new))
@@ -269,7 +275,8 @@ def test_only_the_route_layer_imports_routes():
 def test_layer_counts_are_sane():
     counts = collections.Counter(LAYERS[layer(m)] for m in modules())
     assert all(counts[name] for name in LAYERS), counts
-    stale = sorted((PERSISTENCE | CORE | HTTP) - set(modules()) - {"lib", "__init__"})
+    stale = sorted((PERSISTENCE | CORE | HTTP) - set(modules()) - {"lib", "__init__"}
+                   - set(ALIASES) - set(ALIASES.values()))
     assert not stale, f"layer map names modules that no longer exist: {stale}"
 
 
@@ -280,3 +287,13 @@ def test_the_resolver_sees_relative_absolute_and_lazy_imports(tmp_path):
     probe.write_text("from . import agents\nfrom .backend import registry\n"
                      "def f():\n    from lib.db import conn\n    import lib.routes\n")
     assert imports_of("lib.probe", probe, known) == {"lib.agents", "lib.backend.registry", "lib.db", "lib.routes"}
+
+
+def test_an_alias_import_counts_as_its_new_module(tmp_path):
+    known = {"lib": None, "lib.db_schema": None, "lib.persistence": None, "lib.persistence.schema": None}
+    probe = tmp_path / "probe.py"
+    probe.write_text("from . import db_schema\ndef f():\n    import lib.db_schema\n")
+    assert imports_of("lib.probe", probe, known) == {"lib.persistence.schema"}
+    # Before the target exists the old module is a real module and stays itself.
+    assert imports_of("lib.probe", probe, {"lib": None, "lib.db_schema": None}) == {"lib.db_schema"}
+    assert layer("lib.persistence.schema") == layer("lib.persistence.migrations.v099") == 0
