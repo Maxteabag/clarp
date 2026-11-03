@@ -466,6 +466,33 @@ def _park(spec: _TurnSpec, *, prefix: str = "stop-park") -> str:
     return park_id
 
 
+def _park_at_head(spec: _TurnSpec) -> str:
+    """Persist a preempting send ahead of everything its agent has open, as
+    it runs before the work already queued (TP-01)."""
+    park_id = f"preempt-park-{spec.trace_id}"
+    con = db.conn()
+    try:
+        con.execute("BEGIN IMMEDIATE")
+        try:
+            turn_queue.park_at_head(
+                queue_id=park_id, agent_id=spec.agent_id, session=spec.session,
+                text=spec.text, trace_id=spec.trace_id,
+                client_msg_id=spec.client_msg_id,
+                synthesize_audio=spec.synthesize_audio, origin=spec.origin,
+                sender_agent_id=spec.sender_agent_id,
+                prompt_admission_id=spec.prompt_admission_id)
+            if spec.bypass_pause:
+                turn_queue.allow_paused_for(park_id)
+            con.execute("COMMIT")
+        except BaseException:
+            con.execute("ROLLBACK")
+            raise
+    except Exception as exc:  # noqa: BLE001 - the caller refuses the send
+        log_exception("preemptParkPersistFail", exc, detail=spec.agent_id)
+        return ""
+    return park_id
+
+
 class DispatchError(RuntimeError):
     def __init__(self, status: int, message: str):
         self.status = status
@@ -1970,6 +1997,11 @@ class TurnDispatchService:
         park_id = ""
         if not spec.queue_id and _SLOTS.get(spec.agent_id) == _STOPPING_SENTINEL:
             park_id = _park(spec)
+        elif (not spec.queue_id
+              and str(_SLOTS.get(spec.agent_id) or "").startswith(_PROCESS_OWNER_PREFIX)):
+            # It will wait behind a turn process: durably, like the send
+            # that preempted that process (TP-01).
+            park_id = _park(spec, prefix="preempt-park")
         parked = False
         preempt: list = []
         try:
@@ -2042,6 +2074,12 @@ class TurnDispatchService:
                 _SLOTS.claim(agent_id, spec.trace_id)
                 return False, False
             if queue_if_busy or current.startswith(_PROCESS_OWNER_PREFIX):
+                parked = False
+                if not spec.queue_id and current.startswith(_PROCESS_OWNER_PREFIX):
+                    if not park_id:
+                        raise DispatchError(503, "could not durably queue message")
+                    spec = replace(spec, park_id=park_id)
+                    parked = True
                 depth = _SLOTS.enqueue(agent_id, spec)
                 defer_on(_TURN_LOCK, lambda: (
                     eventlog.emit("server", "turnQueued", context=spec.context,
@@ -2049,7 +2087,7 @@ class TurnDispatchService:
                     log("turnQueued",
                         f"agent={agent_id} depth={depth} "
                         f"trace={spec.trace_id or '∅'}")))
-                return False, True
+                return parked, True
             if _SLOTS.fenced:
                 # The release drain waits for this turn; never preempt it.
                 return self._hold_for_drain(spec, "behind a live turn")
@@ -2151,7 +2189,7 @@ class TurnDispatchService:
             f"new={spec.trace_id or '∅'} — busy, preempting and resuming")
         if not self._running_processes(spec):
             return False
-        park_id = "" if spec.park_id else _park(spec, prefix="preempt-park")
+        park_id = "" if spec.park_id else _park_at_head(spec)
         owner = f"{_PROCESS_OWNER_PREFIX}{spec.trace_id}"
         with _TURN_LOCK:
             if _SLOTS.get(spec.agent_id) != spec.trace_id:
