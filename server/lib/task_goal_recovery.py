@@ -199,6 +199,20 @@ def tick(dispatch, *, now=None, cursor=None):
     return count
 
 
+def _changed_beyond_observation(stored_json, goal):
+    """Whether goal differs from its stored form in more than the stamp of
+    the latest observation (observed_at, observed_reason)."""
+    def without_stamp(value):
+        continuation = {
+            k: v
+            for k, v in value.get("continuation", {}).items()
+            if k not in {"observed_at", "observed_reason"}
+        }
+        return {**value, "continuation": continuation}
+
+    return without_stamp(json.loads(stored_json)) != without_stamp(goal)
+
+
 def _claim(plan_id, now):
     snapshot = (
         db.conn()
@@ -312,7 +326,10 @@ def _claim(plan_id, now):
                     )
                 )
         if (state.get("due_at") or 0) > now:
-            task_goal_state._save(con, plan_id, goal)
+            # Every tick re-observes an idle owner; rewriting a goal (it can be
+            # megabytes) only to restamp that holds the writer lock for nothing.
+            if _changed_beyond_observation(plan["goal_json"], goal):
+                task_goal_state._save(con, plan_id, goal)
             return None
         if state.get("state") == "waiting":
             state.update(
