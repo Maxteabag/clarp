@@ -536,3 +536,36 @@ def test_a_stop_is_written_together_with_its_settlement_or_not_at_all(tmp_path, 
     late = turn_lifecycle.try_transition(agent_id, TurnEvent.SPAWN_STARTED,
                                          {"dispatch": "codex", "trace_id": "t-2"})
     assert late is None and turn_lifecycle.current_kind(agent_id) == AgentState.INTERRUPTED
+
+
+@pytest.mark.parametrize("event", [TurnEvent.PROCESS_EXITED_OK, TurnEvent.PROCESS_EXITED_FAILED,
+                                   TurnEvent.STOP_REQUESTED])
+def test_a_terminal_write_that_meets_one_lock_error_still_ends_settled(tmp_path, monkeypatch, event):
+    """TP-N1b (lead): the Host sees about 30 'database is locked' a hour. A
+    terminal row and its settlement are one write; a lock error rolls both
+    back and the write is retried (bounded), so the turn ends settled and the
+    agent does not stay 'thinking'."""
+    import sqlite3
+    agent_id = _agent(tmp_path)
+    turn = turn_lifecycle.open_turn(agent_id=agent_id, source="pwa", trace_id="t-1")
+    turn_lifecycle.transition(agent_id, TurnEvent.SPAWN_STARTED,
+                              {"source": "pwa", "dispatch": "codex", "trace_id": "t-1"})
+    rows_before = db.conn().execute("SELECT COUNT(*) FROM state_log WHERE agent_id = ?",
+                                    (agent_id,)).fetchone()[0]
+    real = turn_lifecycle._record_outcome
+    calls = []
+
+    def locked_once(*args, **kwargs):
+        calls.append(1)
+        if len(calls) == 1:
+            raise sqlite3.OperationalError("database is locked")
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(turn_lifecycle, "_record_outcome", locked_once)
+    turn_lifecycle.transition(agent_id, event, {"trace_id": "t-1"})
+
+    assert turn_lifecycle.current_kind(agent_id) not in turn_lifecycle.BUSY
+    assert db.conn().execute("SELECT COUNT(*) FROM state_log WHERE agent_id = ?",
+                             (agent_id,)).fetchone()[0] == rows_before + 1
+    assert db.conn().execute("SELECT settled_at FROM turns WHERE turn_id = ?",
+                             (turn,)).fetchone()["settled_at"] is not None
