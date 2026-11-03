@@ -68,6 +68,8 @@ run.py ── for each build × scenario (thread pool, --jobs 4) ──┐
     └─ fakes from the HARNESS tree:                                freezes, dumps db and files
        fake_provider.py: tests/qa/fake_codex.py (deterministic provider
        process) behind a proxy that injects tool items for marked turns,
+       fake_claude.py: a deterministic Claude print-mode stream-json CLI
+       (the `claude` shim first on the Host's PATH, agent `claire`),
        FakeTTSEngine, StubSTT, no provider CLI resolvable
 normalize.py ── rewrites clock readings, generated ids, pids, ports, scratch paths
 diff.py ────── aligns and compares, prints the report
@@ -102,6 +104,11 @@ planted.py ─── deliberate behaviour changes for the proof
   not an OS sandbox: the executor provides that (CI runs inside
   `scripts/ci_contained.sh`: no network but loopback, no credentials, empty
   HOME; the buildbox's `heavy-remote` must give the equivalent).
+- **No network, no terminals.** `host.py` refuses every non-loopback
+  connection and DNS lookup, and refuses to spawn a terminal PTY; `/terminal/`
+  scenarios send plain GETs, which are answered before any spawn. A scenario
+  may bring its own `config.toml` (`config`), e.g. to route TTS to a provider
+  with no key.
 - **Waits poll state, never the clock**: a turn settled in `turns`, a provider
   `turn/start` in the fake's request log, state rows in `state_log`, `/status`
   busy, and quiescence (every listed session idle, SSE quiet for 1 s), which
@@ -309,6 +316,10 @@ Synthetic turns only, all text invented here (`scenarios.py`). Target about
 | `queue-cancel` | `DELETE /turn-queue/<id>` before the queued message runs | done |
 | `tool-use` | reasoning, a command streaming output and succeeding (fake_provider.py injects the items) | done |
 | `tool-failure` | the same command failing with exit 2 | done |
+| `limited-device-scope` | a limited device (paired through the build's `clarp-admin pair create` + `/pairing/exchange`) on `/terminal/<session>`, `PATCH /schedules/<id>` (and DELETE as a control), `/dirs`, `/past-sessions?scope=all`, an unmatched PATCH (HTTP-01/02/03) | done; records today's behaviour |
+| `janitor-terminal` | a full device on a janitor's `/terminal/` (HTTP-01b) | done; records today's behaviour |
+| `voice-cartesia-no-key` | a spoken reply routed to Cartesia with no key or voice, raw-pcm delivery, elevenlabs fallback (VP-02); own config | done; records today's behaviour |
+| `preempt-live-process` | a plain send preempts a busy claude agent while its old CLI is still alive (TP-01); `provider/claude-procs.jsonl` records start/sigterm/exit order | done; records today's behaviour |
 | `goal-turn` | `POST /agent-goal`: the provider runs an unrequested goal turn and completes the goal | done |
 | `cli-prompt-and-sessions` | the build's own `clarp-admin sessions` and `prompt` against the replay Host (exit code, stdout, stderr in the `cli` channel) | done |
 | `stop-at-admission` | Stop between a turn's two thinking rows; **known bug TP-N1**, reported, not counted | done |
