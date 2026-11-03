@@ -24,7 +24,8 @@ import sys
 import threading
 
 HARNESS = Path(__file__).resolve().parents[2]
-FAKE_PROVIDER = HARNESS / 'tests/qa/fake_codex.py'
+# tests/qa/fake_codex.py behind the harness's tool-item proxy (fake_provider.py).
+FAKE_PROVIDER = HARNESS / 'tests/replay/fake_provider.py'
 TOKEN = 'replay-host-token'
 SESSIONS = ('rachel', 'mike')
 

@@ -183,6 +183,28 @@ SCENARIOS = [
         ],
     },
     {
+        'id': 'tool-use',
+        'what': 'a turn with reasoning and a command that streams output and succeeds',
+        'steps': [
+            _send('rachel', '[replay-tool] synthetic look around oscar', 'oscar'),
+            {'op': 'wait_settled', 'message_id': 'u-oscar'},
+            {'op': 'quiesce'},
+            {'op': 'get', 'path': '/log?session=rachel'},
+            {'op': 'get', 'path': '/live?session=rachel'},
+        ],
+    },
+    {
+        'id': 'tool-failure',
+        'what': 'a turn whose command fails (exit 2) before the reply',
+        'steps': [
+            _send('rachel', '[replay-tool-fail] synthetic look for papa', 'papa'),
+            {'op': 'wait_settled', 'message_id': 'u-papa'},
+            {'op': 'quiesce'},
+            {'op': 'get', 'path': '/log?session=rachel'},
+            {'op': 'get', 'path': '/live?session=rachel'},
+        ],
+    },
+    {
         'id': 'stop-at-admission',
         'what': 'a Stop between the two thinking rows of a turn start (pins TP-N1)',
         # Known bug: the late thinking row overwrites the stop and the agent stays busy,

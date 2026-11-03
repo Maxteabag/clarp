@@ -66,7 +66,8 @@ run.py ── for each build × scenario (thread pool, --jobs 4) ──┐
   host.py (subprocess, own process group, own state dir)  <──┘  drives HTTP, reads SSE frames,
     ├─ server/ and static/ from the BUILD under test               waits on observable state,
     └─ fakes from the HARNESS tree:                                freezes, dumps db and files
-       tests/qa/fake_codex.py (deterministic provider process),
+       fake_provider.py: tests/qa/fake_codex.py (deterministic provider
+       process) behind a proxy that injects tool items for marked turns,
        FakeTTSEngine, StubSTT, no provider CLI resolvable
 normalize.py ── rewrites clock readings, generated ids, pids, ports, scratch paths
 diff.py ────── aligns and compares, prints the report
@@ -304,7 +305,12 @@ Synthetic turns only, all text invented here (`scenarios.py`). Target about
 | `steer-into-running` | a send without `queue_if_busy` steered into a running turn | done |
 | `focus-and-reads` | `/select`, `/focus`, `/agents/snapshot`, `/live`, `/turn-queue`, `/attention`, `/status` | done |
 | `voice-clip-turn` | `/transcribe` (stub STT) then `/send` with its trace and transcription ids, `/voice-events` | done |
-| tool use, group call, helper spawn, goal turn, failover to another account, interrupt by a new prompt, queue cancel and resume, delete and restore, CLI (`clarp-admin`) against the replay Host | | next |
+| `stop-with-queue` | Stop while a message waits: turn interrupted, queue paused, `/turn-queue/resume` runs it | done |
+| `queue-cancel` | `DELETE /turn-queue/<id>` before the queued message runs | done |
+| `tool-use` | reasoning, a command streaming output and succeeding (fake_provider.py injects the items) | done |
+| `tool-failure` | the same command failing with exit 2 | done |
+| `stop-at-admission` | Stop between a turn's two thinking rows; **known bug TP-N1**, reported, not counted | done |
+| group call, helper spawn, goal turn, failover to another account, delete and restore, CLI (`clarp-admin`) against the replay Host | | next |
 | text-dependent paths (voice routing, command parsing, TTS segmentation) | synthetic-text scenarios, since scrubbed text cannot exercise them | next |
 
 Timing on the buildbox (`--jobs 8`): `compare` with 9 scenarios takes about
