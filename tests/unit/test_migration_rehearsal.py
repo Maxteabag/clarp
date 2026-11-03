@@ -39,7 +39,9 @@ def test_profile_holds_only_counts_and_sizes_and_drives_the_fill(tmp_path):
     source = tmp_path / "source.sqlite"
     con = sqlite3.connect(source)
     con.executescript("CREATE TABLE state_log (state_id INTEGER PRIMARY KEY, kind TEXT, detail TEXT);"
-                      "CREATE TABLE empty (x TEXT);")
+                      "CREATE TABLE empty (x TEXT);"
+                      "CREATE TABLE keyed (k TEXT PRIMARY KEY, v TEXT) WITHOUT ROWID;"
+                      "INSERT INTO keyed VALUES ('a', 'secret'), ('b', 'secret');")
     con.executemany("INSERT INTO state_log (kind, detail) VALUES (?, ?)", [("idle", "secret")] * 30)
     con.commit()
     con.close()
@@ -52,13 +54,39 @@ def test_profile_holds_only_counts_and_sizes_and_drives_the_fill(tmp_path):
     assert "secret" not in text and "idle" not in text
     data = json.loads(text)
     assert data["kind"] == "clarp-state-profile"
-    assert data["tables"] == {"empty": [0, 0], "state_log": [30, 11]}
+    assert data["tables"] == {"empty": [0, 0], "keyed": [2, 7], "state_log": [30, 11]}
+    assert data["row_methods"] == {"empty": "rowid_span", "keyed": "without_rowid_sample_floor",
+                                   "state_log": "rowid_span"}
 
     profile = rehearsal.load_profile(profile_path)
     report = rehearsal.rehearse("v61", scale=1.0, payload=0.05, budget=60.0,
                                 profile={**profile, "agents": (3, 50)})
     assert report["ok"], report
     assert report["state_log_rows"] == 30
+
+
+def test_profile_rows_come_from_the_rowid_span_without_counting(tmp_path, monkeypatch):
+    source = tmp_path / "source.sqlite"
+    con = sqlite3.connect(source)
+    con.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)")
+    con.executemany("INSERT INTO t VALUES (?, 'xx')", [(i,) for i in range(1, 101)])
+    con.execute("DELETE FROM t WHERE id BETWEEN 1 AND 10")
+    con.commit()
+    con.close()
+    statements = []
+    real_connect = sqlite3.connect
+
+    def traced(*args, **kwargs):
+        connection = real_connect(*args, **kwargs)
+        connection.set_trace_callback(statements.append)
+        return connection
+    monkeypatch.setattr(sqlite3, "connect", traced)
+
+    data = rehearsal.write_profile(source, sample=5)
+
+    # ids 11..100 span 90 rows; the newest five (96..100) average 2.2 + 2 bytes.
+    assert data["tables"]["t"] == [90, 4]
+    assert statements and not [s for s in statements if "count(" in s.lower()]
 
 
 def rehearsal_head_version() -> int:
