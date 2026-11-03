@@ -145,6 +145,11 @@ def _truthy_header(value: str | None) -> bool:
 _STT_ACTIVATION_LOCK = threading.Lock()
 
 
+class StopNotRecorded(RuntimeError):
+    """The Stop ran (process interrupted, barrier released) but its terminal
+    row could not be written after its bounded retries (TP-N1b)."""
+
+
 class ContextHTTPServer(ThreadingHTTPServer):
     """ThreadingHTTPServer with an attached ServerContext.
 
@@ -5123,9 +5128,12 @@ class Handler(BaseHTTPRequestHandler):
         actor, verified = self._control_actor(data)
         reason = str(data.get("reason") or "").strip()[:200]
         effects: dict = {}
-        n = self._stop_agent_session(session, strict=False, actor=actor,
-                                     actor_verified=verified, reason=reason,
-                                     effects=effects)
+        try:
+            n = self._stop_agent_session(session, strict=False, actor=actor,
+                                         actor_verified=verified, reason=reason,
+                                         effects=effects)
+        except StopNotRecorded:
+            return self._json_error(503, "stop was not recorded; send it again")
         # queue_paused and goals_paused appear only as committed effects read
         # back after the Stop; absent means unknown, never "not paused".
         return self._json_ok({"ok": True, "terminated": n, "stop_actor": actor,
@@ -5280,12 +5288,20 @@ class Handler(BaseHTTPRequestHandler):
                     effects["goals_paused"] = int(goals_paused)
             except Exception as exc:  # stop already succeeded
                 log_exception("turnStopBookkeepingFail", exc, detail=agent_id)
+            stop_unrecorded: Exception | None = None
             try:
-                stopped = turn_lifecycle.try_transition(
-                    agent_id, TurnEvent.STOP_REQUESTED,
-                    {"source": "user_stop", "message": "Turn stopped",
-                     "stop_actor": actor, "stop_actor_verified": actor_verified,
-                     "stop_reason": reason})
+                try:
+                    stopped = turn_lifecycle.try_transition(
+                        agent_id, TurnEvent.STOP_REQUESTED,
+                        {"source": "user_stop", "message": "Turn stopped",
+                         "stop_actor": actor, "stop_actor_verified": actor_verified,
+                         "stop_reason": reason})
+                except Exception as exc:  # the write failed after its bounded retries
+                    # The barrier is still released below; the caller hears the
+                    # Stop was not recorded and can send it again (TP-N1b).
+                    log_exception("turnStopRecordFail", exc, detail=agent_id)
+                    stop_unrecorded = exc
+                    raise
                 if getattr(self.ctx, "stream", None) is not None:
                     if stopped is not None:
                         # The persisted row's ts and detail, as the state
@@ -5325,6 +5341,9 @@ class Handler(BaseHTTPRequestHandler):
                             agent_id, stop_snapshot, cancelled_trace_ids)
                         turn_dispatch.finish_stop(
                             self.ctx, agent_id, backend_registry=backends)
+                if stop_unrecorded is not None:
+                    release(set())
+                    raise StopNotRecorded(agent_id) from stop_unrecorded
                 log("turnStop", f"session={session} terminated={n} barrier=held")
                 return n, release
             elif runtime_client is not None:
@@ -5332,6 +5351,8 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 turn_dispatch.finish_stop(
                     self.ctx, agent_id, backend_registry=backends)
+            if stop_unrecorded is not None:
+                raise StopNotRecorded(agent_id) from stop_unrecorded
         log("turnStop", f"session={session} terminated={n} actor={actor} "
                         f"reason={reason!r} queued_preserved={turn_queue.pending_count(agent_id) if agent else 0}")
         if defer_finish:

@@ -365,8 +365,13 @@ class TurnStateMachine:
             if target in TERMINAL and not conn().in_transaction:
                 # Atomic, so a lock error leaves nothing behind: retry the whole
                 # write (bounded, db.retry_locked) rather than strand the agent busy.
-                cursor, trace = db.retry_locked(lambda: self._write_terminal(
-                    agent_id, event, target, detail, runtime_id, stamp))
+                attempts = []
+
+                def write():
+                    attempts.append(1)
+                    return self._write_terminal(agent_id, event, target, detail, runtime_id,
+                                                stamp, recheck=len(attempts) > 1, force=force)
+                cursor, trace = db.retry_locked(write)
                 _after_settle(agent_id, event, target, trace)
             else:
                 cursor = conn().execute(
@@ -383,16 +388,20 @@ class TurnStateMachine:
             to_state=target, ts=stamp, detail=detail, forced=force,
             state_id=int(cursor.lastrowid or 0))
 
-    @staticmethod
-    def _write_terminal(agent_id: str, event: str, target: str,
-                        detail: dict[str, Any] | None, runtime_id, stamp: int):
+    def _write_terminal(self, agent_id: str, event: str, target: str,
+                        detail: dict[str, Any] | None, runtime_id, stamp: int, *,
+                        recheck: bool = False, force: bool = False):
         """A terminal row and its turn's settlement in one write transaction:
         the settlement attributes a Stop to its turn (the start guard reads it),
         so a row without it would be a Stop of unknown turn (TP-N1b). A failure
-        rolls both back and is raised."""
+        rolls both back and is raised. A retry (``recheck``) first checks, under
+        the lock, that the event is still legal and the agent's newest row is
+        not another trace's: a successor or a Stop written meanwhile wins."""
         database = conn()
         database.execute("BEGIN IMMEDIATE")
         try:
+            if recheck:
+                self._recheck_terminal(agent_id, event, target, detail, force=force)
             cursor = database.execute(
                 """INSERT INTO state_log (agent_id, runtime_id, ts, kind, detail)
                    VALUES (?, ?, ?, ?, ?)""",
@@ -405,6 +414,19 @@ class TurnStateMachine:
                 database.execute("ROLLBACK")
             raise
         return cursor, trace
+
+    def _recheck_terminal(self, agent_id: str, event: str, target: str,
+                          detail: dict[str, Any] | None, *, force: bool) -> None:
+        from_state = self.current_kind(agent_id)
+        if not force and not self.is_legal(from_state, event):
+            raise TransitionNotWritten(agent_id, event, "terminal_superseded")
+        trace = str((detail or {}).get("trace_id") or "")
+        newest = conn().execute(
+            """SELECT json_extract(detail, '$.trace_id') AS trace FROM state_log
+                WHERE agent_id = ? ORDER BY ts DESC, state_id DESC LIMIT 1""",
+            (agent_id,)).fetchone()
+        if trace and newest is not None and newest["trace"] not in (None, "", trace):
+            raise TransitionNotWritten(agent_id, event, "terminal_superseded")
 
     def _conditional_transition(self, agent_id: str, event: str,
                                 detail: dict[str, Any] | None, *, expect_trace: str,
