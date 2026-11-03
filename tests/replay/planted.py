@@ -1,6 +1,6 @@
 """Planted changes: deliberate behaviour changes the harness must catch.
 
-Each change is an exact text replacement in a copy of a build's server tree
+Each change is an exact text replacement (or a swap of two adjacent blocks) in a copy of a build's server tree
 (never in a checkout). ``find`` must occur exactly ``count`` times, so a
 change that no longer applies after code moves fails loudly instead of
 silently planting nothing; update its anchor then.
@@ -34,12 +34,40 @@ CHANGES = [
         'replace': '"stop_requested": "failed"',
         'expect_channels': {'table', 'http', 'sse'},
     },
+    {
+        'id': 'sse-order',
+        'what': 'a state change broadcasts agent-activity before agent-state',
+        'file': 'server/lib/state_watcher.py',
+        'swap': (
+            '            events.broadcast(self.stream, events.agent_state(\n'
+            '                agent_id=r["agent_id"],\n'
+            '                session=r["session"],\n'
+            '                persona=r["persona"],\n'
+            '                kind=r["kind"],\n'
+            '                ts=int(r["ts"]),\n'
+            '                detail=detail,\n'
+            '                status_text=r["custom_status"] or "",\n'
+            '            ))\n',
+            '            events.broadcast(self.stream, events.as_event(state_activity_event(\n'
+            '                agent_id=r["agent_id"],\n'
+            '                session=r["session"],\n'
+            '                persona=r["persona"],\n'
+            '                kind=r["kind"],\n'
+            '                ts=int(r["ts"]),\n'
+            '                detail=detail,\n'
+            '            )))\n',
+        ),
+        'expect_channels': {'sse'},
+    },
 ]
 
 
 def apply(change: dict, root: Path) -> None:
     path = root / change['file']
     text = path.read_text()
+    if 'swap' in change:
+        first, second = change['swap']
+        change = {**change, 'find': first + second, 'replace': second + first}
     found = text.count(change['find'])
     expected = change.get('count', 1)
     if found != expected:
