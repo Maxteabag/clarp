@@ -108,8 +108,13 @@ class _Client:
         self.auth_fingerprint = _auth_fingerprint()
         self.refresh_requested = False
         self.rate_limits = {}
-        env = {**os.environ, "CLAUDE_PWA_SESSION": session}
-        env.pop("CLARP_PROVIDER_TURN", None)   # one shared server has no turn identity
+        # One shared server serves every Codex agent: it has no turn identity
+        # and no agent identity. Naming the agent that started it would let a
+        # tool in any agent's shell act as that one; without it they refuse
+        # (BACKENDS-N1).
+        env = dict(os.environ)
+        env.pop("CLARP_PROVIDER_TURN", None)
+        env.pop("CLAUDE_PWA_SESSION", None)
         self.proc = subprocess.Popen(
             argv,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -514,6 +519,7 @@ class _Client:
             "developerInstructions": persona_identity_instruction(
                 str(agent.get("persona") or ""), agent["session"]),
             **({"model": agent["model"]} if agent.get("model") else {}),
+            **_thread_identity(agent["session"]),
         })
         self._loaded_threads.add(thread_id)
 
@@ -545,6 +551,7 @@ class _Client:
                     "approvalPolicy": "never", "sandbox": "danger-full-access",
                     "developerInstructions": developer_instructions,
                     **({"model": model} if model else {}),
+                    **_thread_identity(session),
                 })
             else:
                 result = self.request("thread/start", {
@@ -552,6 +559,7 @@ class _Client:
                     "sandbox": "danger-full-access",
                     "developerInstructions": developer_instructions,
                     **({"model": model} if model else {}),
+                    **_thread_identity(session),
                 })
             thread = result.get("thread") or {}
             thread_id = str(thread.get("id") or backend_session_id)
@@ -783,6 +791,16 @@ def recover_usage_failure(message: str) -> bool:
             return False
         message.quota_confirmed = _matching_bucket_blocked(previous, limits)
         return not message.quota_confirmed
+
+
+def _thread_identity(session: str) -> dict:
+    """The agent's session for this thread's shell only. The shared server
+    carries none (BACKENDS-N1); the app-server applies a thread's config
+    overrides to the commands that thread runs."""
+    if not session:
+        return {}
+    return {"config": {"shell_environment_policy": {"set": {
+        "CLAUDE_PWA_SESSION": session}}}}
 
 
 def _client(agent_id: str, session: str, stream=None) -> _Client:
