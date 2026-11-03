@@ -702,6 +702,41 @@ def test_a_send_behind_a_leftover_process_is_durable(tmp_path, monkeypatch):
     assert _durable_order(agent_id) == []
 
 
+def test_a_stop_finishing_after_the_send_parked_leaves_one_durable_row(tmp_path, monkeypatch):
+    """TP-01b review: the send parked behind a Stop barrier, then the Stop
+    finished before the send took the turn lock while the old CLI still runs.
+    That park row is the send's one durable row; no second row is left over."""
+    import time
+    monkeypatch.setattr(_td, "_PROCESS_EXIT_POLL_S", 0.01)
+    service, _backends, agent_id = _make_service(tmp_path)
+    leftover = _LeftoverProcessBackends()
+    service.backends = leftover
+    snapshot, _dropped, _was_paused = _td.begin_stop(agent_id)
+    real_park = _td._park
+    finished = []
+
+    def park_then_finish_stop(spec, **kwargs):
+        row = real_park(spec, **kwargs)
+        if kwargs.get("prefix", "stop-park") == "stop-park" and not finished:
+            _td.complete_stop(service.ctx, agent_id, snapshot, set(),
+                              backend_registry=leftover)
+            finished.append(True)
+        return row
+
+    monkeypatch.setattr(_td, "_park", park_then_finish_stop)
+    result = service.dispatch(text="waiting", requested_session="mike", trace_id="tW",
+                              client_msg_id="m-waiting", synthesize_audio=False)
+
+    assert result.queued and finished == [True] and leftover.spawned == []
+    assert _durable_order(agent_id) == ["tW"]
+    leftover.process.alive = False
+    deadline = time.monotonic() + 3
+    while not leftover.spawned and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert [call["trace_id"] for _b, call in leftover.spawned] == ["tW"]
+    assert _durable_order(agent_id) == []
+
+
 def test_a_send_that_cannot_wait_durably_is_refused(tmp_path, monkeypatch):
     service, _backends, agent_id = _make_service(tmp_path)
     slow = _SlowExitBackends()
