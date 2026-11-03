@@ -365,12 +365,20 @@ class TurnStateMachine:
             if target in TERMINAL and not conn().in_transaction:
                 # Atomic, so a lock error leaves nothing behind: retry the whole
                 # write (bounded, db.retry_locked) rather than strand the agent busy.
-                attempts = []
+                fence: list[int] = []
 
                 def write():
-                    attempts.append(1)
-                    return self._write_terminal(agent_id, event, target, detail, runtime_id,
-                                                stamp, recheck=len(attempts) > 1, force=force)
+                    try:
+                        return self._write_terminal(
+                            agent_id, event, target, detail, runtime_id, stamp,
+                            recheck=fence[0] if fence else None, force=force)
+                    except sqlite3.OperationalError:
+                        if not fence:
+                            # The state generation when the first attempt failed:
+                            # a retry writes only if every row since is this
+                            # turn's own. Read only on this failure path.
+                            fence.append(int(state_generation(agent_id) or 0))
+                        raise
                 cursor, trace = db.retry_locked(write)
                 _after_settle(agent_id, event, target, trace)
             else:
@@ -390,18 +398,19 @@ class TurnStateMachine:
 
     def _write_terminal(self, agent_id: str, event: str, target: str,
                         detail: dict[str, Any] | None, runtime_id, stamp: int, *,
-                        recheck: bool = False, force: bool = False):
+                        recheck: int | None = None, force: bool = False):
         """A terminal row and its turn's settlement in one write transaction:
         the settlement attributes a Stop to its turn (the start guard reads it),
         so a row without it would be a Stop of unknown turn (TP-N1b). A failure
-        rolls both back and is raised. A retry (``recheck``) first checks, under
-        the lock, that the event is still legal and the agent's newest row is
-        not another trace's: a successor or a Stop written meanwhile wins."""
+        rolls both back and is raised. A retry (``recheck``: the state generation
+        before the first attempt) first checks, under the lock, that the event is
+        still legal and that every row written since is this turn's own: a Stop,
+        a successor or any untraced row written meanwhile wins."""
         database = conn()
         database.execute("BEGIN IMMEDIATE")
         try:
-            if recheck:
-                self._recheck_terminal(agent_id, event, target, detail, force=force)
+            if recheck is not None:
+                self._recheck_terminal(agent_id, event, detail, since=recheck, force=force)
             cursor = database.execute(
                 """INSERT INTO state_log (agent_id, runtime_id, ts, kind, detail)
                    VALUES (?, ?, ?, ?, ?)""",
@@ -415,17 +424,21 @@ class TurnStateMachine:
             raise
         return cursor, trace
 
-    def _recheck_terminal(self, agent_id: str, event: str, target: str,
-                          detail: dict[str, Any] | None, *, force: bool) -> None:
+    def _recheck_terminal(self, agent_id: str, event: str, detail: dict[str, Any] | None,
+                          *, since: int, force: bool) -> None:
         from_state = self.current_kind(agent_id)
         if not force and not self.is_legal(from_state, event):
             raise TransitionNotWritten(agent_id, event, "terminal_superseded")
         trace = str((detail or {}).get("trace_id") or "")
-        newest = conn().execute(
-            """SELECT json_extract(detail, '$.trace_id') AS trace FROM state_log
-                WHERE agent_id = ? ORDER BY ts DESC, state_id DESC LIMIT 1""",
-            (agent_id,)).fetchone()
-        if trace and newest is not None and newest["trace"] not in (None, "", trace):
+        # Since the first attempt, a row that is not explicitly this turn's
+        # (another trace, or none) means someone else acted: it wins.
+        foreign = conn().execute(
+            """SELECT 1 FROM state_log
+                WHERE agent_id = ? AND state_id > ?
+                  AND (? = '' OR COALESCE(json_extract(detail, '$.trace_id'), '') <> ?)
+                LIMIT 1""",
+            (agent_id, since, trace, trace)).fetchone()
+        if foreign is not None:
             raise TransitionNotWritten(agent_id, event, "terminal_superseded")
 
     def _conditional_transition(self, agent_id: str, event: str,
