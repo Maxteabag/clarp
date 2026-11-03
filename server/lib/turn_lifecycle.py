@@ -43,7 +43,7 @@ from typing import Any, Iterable
 from . import db
 from .db import conn, now_ms
 from .timing import SQLITE_CRITICAL_BUSY_TIMEOUT_MS
-from .log import log
+from .log import log, log_exception
 from .protocol import AgentState, TurnSource
 
 # An agent with no state_log row yet.
@@ -192,19 +192,31 @@ def _record_outcome(agent_id: str, event: str, kind: str, detail: dict[str, Any]
 def _settle_turn(agent_id: str, event: str, target: str,
                  detail: dict[str, Any] | None, stamp: int) -> None:
     """A terminal change records the turn's outcome and re-stamps its /log
-    rows (lib.message_turns); bookkeeping never fails a transition."""
+    rows (lib.message_turns); bookkeeping never fails a transition. Used
+    inside a caller's transaction; a transition of its own writes the outcome
+    with its row (``_write_terminal``)."""
     if target not in TERMINAL:
         return
     try:
         trace = _record_outcome(agent_id, event, target, detail, stamp)
-        if trace:
-            from . import message_writes, turn_queue
-            from .message_turns import outcome_for
-            message_writes.restamp_turn(agent_id, trace)
-            turn_queue.settle_receipt(agent_id, trace,
-                                      outcome_for(event, target) or "")
     except Exception as exc:  # noqa: BLE001
-        log("turnSettleFail", f"agent={agent_id} event={event} error={exc}")
+        log_exception("turnSettleFail", exc, detail=f"agent={agent_id} event={event}")
+        return
+    _after_settle(agent_id, event, target, trace)
+
+
+def _after_settle(agent_id: str, event: str, target: str, trace: str | None) -> None:
+    """The settled turn's derived rows: its /log stamps and queue receipt. A
+    failure here is logged with its traceback and repaired by the next import."""
+    if not trace:
+        return
+    try:
+        from . import message_writes, turn_queue
+        from .message_turns import outcome_for
+        message_writes.restamp_turn(agent_id, trace)
+        turn_queue.settle_receipt(agent_id, trace, outcome_for(event, target) or "")
+    except Exception as exc:  # noqa: BLE001
+        log_exception("turnSettleFail", exc, detail=f"agent={agent_id} event={event}")
 
 
 class IllegalTransition(Exception):
@@ -350,12 +362,17 @@ class TurnStateMachine:
         # A phase delta is noise if lost; a lifecycle receipt is not.
         with (contextlib.nullcontext() if event == TurnEvent.TEXT_STREAMED
               else _critical_write()):
-            cursor = conn().execute(
-                """INSERT INTO state_log (agent_id, runtime_id, ts, kind, detail)
-                   VALUES (?, ?, ?, ?, ?)""",
-                (agent_id, runtime_id, stamp, target,
-                 json.dumps(detail) if detail else None))
-            _settle_turn(agent_id, event, target, detail, stamp)
+            if target in TERMINAL and not conn().in_transaction:
+                cursor, trace = self._write_terminal(agent_id, event, target, detail,
+                                                     runtime_id, stamp)
+                _after_settle(agent_id, event, target, trace)
+            else:
+                cursor = conn().execute(
+                    """INSERT INTO state_log (agent_id, runtime_id, ts, kind, detail)
+                       VALUES (?, ?, ?, ?, ?)""",
+                    (agent_id, runtime_id, stamp, target,
+                     json.dumps(detail) if detail else None))
+                _settle_turn(agent_id, event, target, detail, stamp)
         from . import live_hub
         live_hub.observe_transition(agent_id, event, target,
                                     {**(detail or {}), "_state_id": int(cursor.lastrowid or 0)})
@@ -363,6 +380,29 @@ class TurnStateMachine:
             agent_id=agent_id, event=event, from_state=from_state,
             to_state=target, ts=stamp, detail=detail, forced=force,
             state_id=int(cursor.lastrowid or 0))
+
+    @staticmethod
+    def _write_terminal(agent_id: str, event: str, target: str,
+                        detail: dict[str, Any] | None, runtime_id, stamp: int):
+        """A terminal row and its turn's settlement in one write transaction:
+        the settlement attributes a Stop to its turn (the start guard reads it),
+        so a row without it would be a Stop of unknown turn (TP-N1b). A failure
+        rolls both back and is raised."""
+        database = conn()
+        database.execute("BEGIN IMMEDIATE")
+        try:
+            cursor = database.execute(
+                """INSERT INTO state_log (agent_id, runtime_id, ts, kind, detail)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (agent_id, runtime_id, stamp, target,
+                 json.dumps(detail) if detail else None))
+            trace = _record_outcome(agent_id, event, target, detail, stamp)
+            database.execute("COMMIT")
+        except BaseException:
+            if database.in_transaction:
+                database.execute("ROLLBACK")
+            raise
+        return cursor, trace
 
     def _conditional_transition(self, agent_id: str, event: str,
                                 detail: dict[str, Any] | None, *, expect_trace: str,
