@@ -99,9 +99,6 @@ _STOPPING_SENTINEL = turn_slots.STOPPING_SENTINEL
 # sends wait behind it (see _claim_or_queue).
 _PROCESS_OWNER_PREFIX = "process:"
 _PROCESS_EXIT_POLL_S = 0.25
-# How long a preempting send waits for the SIGTERMed process to exit before
-# it waits behind that process instead (TP-01).
-_PREEMPT_EXIT_WAIT_S = 3.0
 # A settled turn whose slot is still held this long after it settled leaked
 # (see TurnDispatchService.release_leaked_slots).
 LEAKED_SLOT_GRACE_MS = 60_000
@@ -460,9 +457,10 @@ def _park(spec: _TurnSpec, *, prefix: str = "stop-park") -> str:
             synthesize_audio=spec.synthesize_audio, origin=spec.origin,
             sender_agent_id=spec.sender_agent_id,
             prompt_admission_id=spec.prompt_admission_id,
-            allow_paused=prefix == "drain-park" and spec.bypass_pause)
+            allow_paused=(prefix in {"drain-park", "preempt-park"}
+                          and spec.bypass_pause))
     except Exception as exc:  # noqa: BLE001 - memory still holds the send
-        log_exception(f"{'drain' if prefix == 'drain-park' else 'stop'}ParkPersistFail",
+        log_exception(f"{prefix.split('-')[0]}ParkPersistFail",
                       exc, detail=spec.agent_id)
         return ""
     return park_id
@@ -2138,9 +2136,10 @@ class TurnDispatchService:
 
     def _preempt_for(self, spec: _TurnSpec, killed: str) -> bool:
         """Interrupt the running turn for ``spec``. Two processes on one native
-        session interleave and corrupt it, so ``spec`` starts only once the
-        old process has exited; one that outlives ``_PREEMPT_EXIT_WAIT_S``
-        keeps the slot and ``spec`` waits behind it. Returns whether it waits."""
+        session interleave and corrupt it, so when the old process is still
+        running ``spec`` waits behind it, durably (a park row a restart
+        recovers), and starts when it exits. Returns whether it waits; a send
+        that cannot wait durably is refused."""
         try:
             self.backends.interrupt(spec.backend, spec.agent_id)
         except Exception as e:  # noqa: BLE001
@@ -2150,22 +2149,26 @@ class TurnDispatchService:
         log("turnPreempted",
             f"agent={spec.agent_id} killed={killed or '∅'} "
             f"new={spec.trace_id or '∅'} — busy, preempting and resuming")
-        deadline = time.monotonic() + _PREEMPT_EXIT_WAIT_S
-        while self._running_processes(spec):
-            if time.monotonic() < deadline:
-                time.sleep(_PROCESS_EXIT_POLL_S)
-                continue
-            owner = f"{_PROCESS_OWNER_PREFIX}{spec.trace_id}"
-            with _TURN_LOCK:
-                if _SLOTS.get(spec.agent_id) != spec.trace_id:
-                    return False    # a Stop or another send took the slot
-                _SLOTS.claim(spec.agent_id, owner)
-                _SLOTS.mark_spawned(spec.agent_id, owner)
-                _SLOTS.requeue_front(spec.agent_id, spec)
-                depth = _SLOTS.queue_depth(spec.agent_id)
-            self._wait_for_process_exit(spec, owner, depth)
-            return True
-        return False
+        if not self._running_processes(spec):
+            return False
+        park_id = "" if spec.park_id else _park(spec, prefix="preempt-park")
+        owner = f"{_PROCESS_OWNER_PREFIX}{spec.trace_id}"
+        with _TURN_LOCK:
+            if _SLOTS.get(spec.agent_id) != spec.trace_id:
+                # A Stop or another send took the slot meanwhile.
+                if park_id:
+                    defer_on(_TURN_LOCK, lambda: turn_queue.unpark(park_id))
+                return False
+            if not (park_id or spec.park_id):
+                _SLOTS.release(spec.agent_id, spec.trace_id)
+                raise DispatchError(503, "could not durably queue message")
+            _SLOTS.claim(spec.agent_id, owner)
+            _SLOTS.mark_spawned(spec.agent_id, owner)
+            _SLOTS.requeue_front(spec.agent_id, replace(
+                spec, park_id=park_id or spec.park_id))
+            depth = _SLOTS.queue_depth(spec.agent_id)
+        self._wait_for_process_exit(spec, owner, depth)
+        return True
 
     def _call_opening_claimed(self, spec: _TurnSpec) -> bool:
         """The dispatcher's claim of a listen-first initiative before it runs
