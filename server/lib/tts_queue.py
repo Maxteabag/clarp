@@ -154,6 +154,17 @@ def prune_old(*, max_age_ms: int) -> int:
     return int(cur.rowcount or 0)
 
 
+def fail_stale_in_flight(claimed_before_ms: int) -> int:
+    """Fail `synthesizing` rows claimed before the cutoff: after a restart
+    their reply is too old to speak (VP-05)."""
+    cur = conn().execute(
+        """UPDATE tts_queue SET status = ?, completed_at = ?, error = ?
+            WHERE status = ? AND claimed_at < ?""",
+        (FAILED, now_ms(), "stale after a restart", SYNTHESIZING, claimed_before_ms),
+    )
+    return int(cur.rowcount or 0)
+
+
 def reset_in_flight() -> int:
     """Reset rows stuck in `synthesizing` back to `queued`. Called at
     server start so a worker that died mid-claim doesn't strand its row."""
