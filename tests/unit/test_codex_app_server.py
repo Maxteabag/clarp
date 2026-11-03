@@ -670,27 +670,42 @@ def test_the_shared_app_server_speaks_for_no_agent(tmp_path, monkeypatch):
 def test_each_codex_thread_carries_its_own_agent_session(tmp_path, monkeypatch):
     """BACKENDS-N1: the shared app-server has no agent identity; each thread
     gets its own agent's session for its shell through the thread's config
-    (shell_environment_policy.set), on start and on resume."""
+    (shell_environment_policy.set), when it starts and when it resumes."""
     _install_fake_codex(tmp_path, monkeypatch)
     sent = []
     real_request = codex_app_server._Client.request
 
     def recording(self, method, params, timeout=30):
-        sent.append((method, dict(params)))
-        return real_request(self, method, params, timeout=timeout)
+        result = real_request(self, method, params, timeout=timeout)
+        sent.append((method, dict(params), result))
+        return result
 
     monkeypatch.setattr(codex_app_server._Client, "request", recording)
-    first = agents_db.create_agent(persona="One", voice_id="v", cwd=str(tmp_path),
-                                   session="one", backend="codex")
-    second = agents_db.create_agent(persona="Two", voice_id="v", cwd=str(tmp_path),
-                                    session="two", backend="codex")
+    agent_ids = {session: agents_db.create_agent(
+        persona=session.title(), voice_id="v", cwd=str(tmp_path), session=session,
+        backend="codex") for session in ("one", "two")}
+    threads = {}
     try:
-        for agent_id, session in ((first, "one"), (second, "two")):
+        for session, agent_id in agent_ids.items():
             handle = _spawn_fake_turn(tmp_path, agent_id=agent_id, session=session, text=session)
+            assert handle.wait(timeout=8) == 0
+            threads[session] = sent[-1][1].get("threadId") or [
+                result.get("thread", {}).get("id") for method, _p, result in sent
+                if method == "thread/start"][-1]
+        for session, agent_id in agent_ids.items():
+            handle = _spawn_fake_turn(tmp_path, agent_id=agent_id, session=session,
+                                      text=session + " again",
+                                      backend_session_id=threads[session],
+                                      is_new_session=False)
             assert handle.wait(timeout=8) == 0
     finally:
         codex_app_server.recycle_clients()
-    identities = [params.get("config", {}).get("shell_environment_policy", {})
-                  .get("set", {}).get("CLAUDE_PWA_SESSION")
-                  for method, params in sent if method in ("thread/start", "thread/resume")]
-    assert identities == ["one", "two"]
+
+    def identity(params):
+        return (params.get("config", {}).get("shell_environment_policy", {})
+                .get("set", {}).get("CLAUDE_PWA_SESSION"))
+
+    assert [(method, identity(params)) for method, params, _r in sent
+            if method in ("thread/start", "thread/resume")] == [
+        ("thread/start", "one"), ("thread/start", "two"),
+        ("thread/resume", "one"), ("thread/resume", "two")]
