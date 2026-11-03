@@ -330,21 +330,24 @@ def _public(row) -> dict:
             item["decision"]["input_hint"] = _input_hint(item["payload"])
     elif item["type"] == "plan" and item.get("reference_id"):
         from . import task_plans
-        plan, goal_text = task_plans.get_with_goal_text(item["reference_id"])
-        item["plan"] = _PlanWithGoalText(plan, goal_text) if plan is not None else None
+        plan, goal_text, bound = task_plans.get_with_goal_text_and_bound(item["reference_id"])
+        item["plan"] = _PlanWithGoalText(plan, goal_text, bound) if plan is not None else None
     return item
 
 
 class _PlanWithGoalText(dict):
-    """A plan dict that also remembers the exact goal_json text it came from.
+    """A plan dict that also remembers the exact goal_json text it came from,
+    and an upper bound on its history's UTF-8 size as read.
 
     It serializes exactly like the plain dict; only summary-v1 reads
-    ``goal_text`` to key the history digest (see _history_marker)."""
-    __slots__ = ("goal_text",)
+    ``goal_text`` to key the history digest and ``history_bound`` to budget
+    it (see _history_marker)."""
+    __slots__ = ("goal_text", "history_bound")
 
-    def __init__(self, plan: dict, goal_text: str | None) -> None:
+    def __init__(self, plan: dict, goal_text: str | None, history_bound: int | None = None) -> None:
         super().__init__(plan)
         self.goal_text = goal_text
+        self.history_bound = history_bound
 
 
 REPRESENTATIONS = ("", "flat-v1", "summary-v1")
@@ -583,10 +586,16 @@ def _history_marker(plan: dict, history: Any, goal_text: str | None,
         found, digest = _HISTORY_DIGEST.get(plan_id, goal_text, scope=scope)
         if not found:
             digest = None
-            # The canonical history is a part of the stored goal text, so its
-            # UTF-8 size is at most the text's: characters when ASCII, at most
-            # four bytes per character otherwise. Checked before serializing.
-            bound = len(goal_text) if goal_text.isascii() else 4 * len(goal_text)
+            # The canonical history's UTF-8 size is at most the stored text's
+            # (characters when ASCII, at most four bytes per character
+            # otherwise) plus what reading expanded from the goal ledger:
+            # history_bound, carried by the plan. Checked before serializing.
+            bound = getattr(plan, "history_bound", None)
+            if bound is None:
+                # No bound carried: the text bounds the history only when it
+                # holds no ledger reference; otherwise leave the digest pending.
+                bound = (float("inf") if '"ledger": "history:' in goal_text
+                         else len(goal_text) if goal_text.isascii() else 4 * len(goal_text))
             if bound <= budget.remaining:
                 canonical = json.dumps(
                     history, sort_keys=True, separators=(",", ":"), ensure_ascii=False
