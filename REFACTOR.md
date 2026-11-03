@@ -180,14 +180,24 @@ the lead. **None yet** (Phase 1 moves no code).
 - A reviewed commit goes to the merge captain with its SOURCE YES line. The
   release owner ships what is on main in the next window.
 - **Pace.** Never wait for a person or a clock: ask the lead, then do the next
-  independent task. Never end a turn on "still running": wait inside the turn or
-  schedule a wake-up (`clarp-admin prompt --to <you> --from <you> --delay 10m
-  --text "..."`).
+  independent task. Keep turns short: never wait inside a turn for more than
+  about 10 minutes. Start CI runs, heavy-remote suites, canaries and other long
+  jobs with the clarp-background-jobs launcher
+  (`~/.claude/skills/clarp-background-jobs/scripts/run_detached_job.sh --goal
+  <your goal> ...`, which wakes you when the job ends) or schedule a wake-up
+  (`clarp-admin prompt --to <you> --from <you> --delay 10m --text "..."`), then
+  end the turn. Never end a turn on "still running" without one of the two.
+- **Inbox.** Clarp hands a busy agent one queued message per turn, so after a
+  long turn the rest wait, sometimes for hours. Run
+  `/var/tmp/clarp-refactor-program/bin/inbox <your session>` at the start of
+  every turn and before any decision, landing or ship. It prints every waiting
+  message, keeps a copy in `messages/inbox-<session>.md` and takes them out of
+  your queue.
 - **Messages.** One message per decision. Check whether your question was
   already answered before you send it. Never reverse an in-flight decision
   unless asked. No acknowledgements. Address agents by session slug.
 - **After any Host restart:** check your worktree (clean or WIP-committed), rerun
-  your gate, check your queue, then continue.
+  your gate, run your inbox, then continue.
 
 ## 8. Registers
 
