@@ -54,7 +54,7 @@ from ..process_registry import TurnHandle
 from ..turn_lifecycle import TurnEvent
 from ..voice_preamble import apply_voice_preamble
 from .base import BackendBrand, CompactionStrategy, resolve
-from .stream_json import StreamJsonBackend
+from .stream_json import StreamJsonBackend, stop_after_drain_failure
 
 
 @dataclass
@@ -356,6 +356,7 @@ class CodexBackend(StreamJsonBackend):
         Swallows every exception per-line — a drainer crash must never take
         down a server thread."""
         st = TurnState(live_backend_session_id=backend_session_id)
+        reported = False        # a terminal outcome reached on_result/on_error
         try:
             if proc.stdout is None:
                 return
@@ -386,6 +387,7 @@ class CodexBackend(StreamJsonBackend):
                 log("codexExitErr", f"rc={rc} trace={trace_id or '∅'} "
                                     f"stderr={(err or '')[:500]!r}")
                 if on_error is not None and not st.failed_error:
+                    reported = True
                     try:
                         on_error(err or f"codex exited rc={rc}")
                     except Exception as e:         # noqa: BLE001
@@ -401,6 +403,7 @@ class CodexBackend(StreamJsonBackend):
                         },
                         "last_agent_message": st.last_agent_message,
                     }
+                    reported = True
                     try:
                         on_result(result)
                     except Exception as e:         # noqa: BLE001
@@ -411,6 +414,13 @@ class CodexBackend(StreamJsonBackend):
                     f"session_meta; history binding may be missing")
         except Exception as e:                     # noqa: BLE001
             log_exception("codexDrainFail", e, detail=trace_id)
+            # Nothing reads this CLI any more: stop it and end the turn once.
+            stop_after_drain_failure(proc, handle)
+            if not (reported or st.failed_error) and on_error is not None:
+                try:
+                    on_error(f"codex drain failed: {str(e)[:300]}")
+                except Exception as cb:            # noqa: BLE001
+                    log_exception("codexOnErrorFail", cb, detail=trace_id)
         finally:
             if agent_id:
                 self.unregister_handle(agent_id, handle)

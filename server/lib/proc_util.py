@@ -31,9 +31,19 @@ class StderrDrain:
         self._thread.start()
 
     def _pump(self, stream) -> None:
+        read = stream.read
         try:
             while True:
-                chunk = stream.read(4096)
+                try:
+                    chunk = read(4096)
+                except UnicodeDecodeError:
+                    # Strictly decoded text: keep draining the raw bytes, or
+                    # the child blocks on a full pipe (BACKENDS-03).
+                    raw = getattr(stream, "buffer", None)
+                    if raw is None:
+                        break
+                    read = getattr(raw, "read1", raw.read)
+                    continue
                 if not chunk:
                     break
                 if isinstance(chunk, bytes):

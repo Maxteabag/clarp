@@ -113,7 +113,7 @@ class _Client:
         self.proc = subprocess.Popen(
             argv,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE, text=True, bufsize=1,
+            stderr=subprocess.PIPE, text=True, errors="replace", bufsize=1,
             env=env,
         )
         self._write_lock = threading.Lock()
