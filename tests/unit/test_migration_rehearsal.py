@@ -8,8 +8,10 @@ opt-in: CLARP_MIGRATION_REHEARSAL=1, and run it through the heavy wrapper.
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import pathlib
+import sqlite3
 
 import pytest
 
@@ -31,6 +33,32 @@ def test_small_v61_rehearsal_upgrades_and_keeps_every_row():
     assert report["fk_violations_before"] == {}
     assert report["underfilled_tables"] == []
     assert report["dropped_tables"] == ["diagnostic_events"]
+
+
+def test_profile_holds_only_counts_and_sizes_and_drives_the_fill(tmp_path):
+    source = tmp_path / "source.sqlite"
+    con = sqlite3.connect(source)
+    con.executescript("CREATE TABLE state_log (state_id INTEGER PRIMARY KEY, kind TEXT, detail TEXT);"
+                      "CREATE TABLE empty (x TEXT);")
+    con.executemany("INSERT INTO state_log (kind, detail) VALUES (?, ?)", [("idle", "secret")] * 30)
+    con.commit()
+    con.close()
+    before = source.read_bytes()
+
+    profile_path = tmp_path / "profile.json"
+    assert rehearsal.main(["--write-profile", str(profile_path), "--from-db", str(source)]) == 0
+    assert source.read_bytes() == before
+    text = profile_path.read_text()
+    assert "secret" not in text and "idle" not in text
+    data = json.loads(text)
+    assert data["kind"] == "clarp-state-profile"
+    assert data["tables"] == {"empty": [0, 0], "state_log": [30, 11]}
+
+    profile = rehearsal.load_profile(profile_path)
+    report = rehearsal.rehearse("v61", scale=1.0, payload=0.05, budget=60.0,
+                                profile={**profile, "agents": (3, 50)})
+    assert report["ok"], report
+    assert report["state_log_rows"] == 30
 
 
 def rehearsal_head_version() -> int:
