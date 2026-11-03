@@ -3331,6 +3331,28 @@ def test_stop_leaves_effects_unknown_when_bookkeeping_fails(running_server, monk
     assert "goals_paused" not in json.loads(raw)
 
 
+def test_stop_is_recorded_and_broadcast_when_pausing_goals_fails(running_server, monkeypatch):
+    # A goal pause conflict must not skip the stop transition or its events.
+    from lib import agents as agents_db, db, task_plans
+    base, _ctx, _srv = running_server
+    agent_id = agents_db.get_by_session("claude")["agent_id"]
+
+    def fail(*_args, **_kw):
+        raise ValueError("plan changed; reload before editing")
+
+    monkeypatch.setattr(task_plans, "pause_recovery_for_agent", fail)
+    status, _raw = _post(base + "/stop", {"session": "claude"})
+
+    assert status == 200
+    row = db.conn().execute(
+        "SELECT kind FROM state_log WHERE agent_id = ? ORDER BY state_id DESC LIMIT 1",
+        (agent_id,)).fetchone()
+    assert row["kind"] == "interrupted"
+    types = [json.loads(r["payload"])["type"] for r in db.conn().execute(
+        "SELECT payload FROM sse_events WHERE agent_id = ? ORDER BY event_id", (agent_id,))]
+    assert "agent-state" in types and "queue-updated" in types
+
+
 def test_snapshot_after_stop_carries_its_provenance(running_server):
     # Wire proof for clients that reconnect: the snapshot row (not only the
     # replayed agent-state detail) says who stopped the agent and why.
