@@ -65,6 +65,7 @@ actually does:
 | `http_utils` | http | core | Principal/Responder value types and helpers that features take as parameters (rule 8); 8 feature edges point at it |
 | `ws` | http | core | WebSocket framing used by feature streams; 5 feature edges |
 | `bonjour` | features | http | LAN service advertisement for the local transport |
+| `lib.persistence` and every module under it | (new) | persistence | a namespace rule in the map, like `lib.backend` and `lib.policies` today, so a new file under it is classified without editing the map |
 
 `log` stays core. Four persistence edges remain as named exceptions, each with
 its reason, checked exactly rather than ratcheted (a new edge fails, a gone
@@ -93,11 +94,14 @@ features → http 1, core → http 1).
 ```
 server/lib/persistence/
     __init__.py           (empty)
-    schema.py             was db_schema.py, plus the feature SCHEMA constants
+    schema.py             was db_schema.py, unchanged except its 14 fragment imports
+    schema_parts/         one module per feature schema constant (3.1)
+        __init__.py       (empty)
+        html_forms.py ... provider_background_jobs.py
     migrate.py            was db_migrations.py: _migrate, _create_schema, _user_version
     migrations/
-        __init__.py       STEPS: ordered (version, fn) table, the single list
-        v062.py ... v121.py   one per version, as they run today
+        __init__.py       (empty)
+        v062.py ... v121.py   each holds its _migrate_to_vNNN, moved verbatim
 server/lib/db_schema.py      alias of lib.persistence.schema (see 3.3)
 server/lib/db_migrations.py  alias of lib.persistence.migrate
 server/lib/db.py             unchanged
@@ -105,27 +109,41 @@ server/lib/db.py             unchanged
 
 ### 3.1 Feature schema constants (PT-05)
 
-Each constant moves byte-identical into `persistence/schema.py` under a
-prefixed name. The feature module keeps its public name by importing
-downwards (`from .persistence.schema import HTML_FORMS_SCHEMA as SCHEMA`),
-so every existing import keeps working:
+Each constant moves byte-identical, under its unchanged name, into its own
+fragment module `persistence/schema_parts/<feature>.py`. Nothing is renamed:
 
-| Old | New |
+- The feature module imports it back under the same name
+  (`from .persistence.schema_parts.html_forms import SCHEMA`), so
+  `html_forms.SCHEMA` keeps working and is the same object.
+- `persistence/schema.py` changes only the source of its existing imports.
+  `from .html_forms import SCHEMA as _HTML_FORMS_SCHEMA` becomes
+  `from .schema_parts.html_forms import SCHEMA as _HTML_FORMS_SCHEMA`, binding
+  the same local name to the same object.
+- `schema.py` stays the one entry point that assembles `_SCHEMA_SQL`, and its
+  size does not change (1,398 lines today; the fragments add about 360 lines
+  in 15 small files instead of growing it past the 1,500-line target).
+
+| Old (feature module, name unchanged) | New home |
 |---|---|
-| `tool_explanation_mappings.SCHEMA` | `persistence.schema.EXPLANATION_MAPPINGS_SCHEMA` |
-| `tool_explanation_learning.SCHEMA` | `persistence.schema.EXPLANATION_LEARNING_SCHEMA` |
-| `html_forms.SCHEMA` | `persistence.schema.HTML_FORMS_SCHEMA` |
-| `model_fallbacks.SCHEMA` | `persistence.schema.MODEL_FALLBACKS_SCHEMA` |
-| `podcast_history.SCHEMA` | `persistence.schema.PODCAST_HISTORY_SCHEMA` |
-| `agent_goals.SCHEMA` | `persistence.schema.AGENT_GOALS_SCHEMA` |
-| `oracle_memory.SCHEMA` | `persistence.schema.ORACLE_MEMORY_SCHEMA` |
-| `audio_bookkeeper.SCHEMA_STATEMENTS` | `persistence.schema.AUDIO_BOOKKEEPING_STATEMENTS` |
-| `html_report_revisions.SCHEMA` | `persistence.schema.HTML_REPORT_REVISIONS_SCHEMA` |
-| `html_form_events.SCHEMA` | `persistence.schema.HTML_FORM_EVENTS_SCHEMA` |
-| `goal_ledger.SCHEMA` | `persistence.schema.GOAL_LEDGER_SCHEMA` |
-| `janitor_autonomy.SCHEMA` | `persistence.schema.JANITOR_AUTONOMY_SCHEMA` |
-| `judgments.SCHEMA` | `persistence.schema.JUDGMENTS_SCHEMA` |
-| `provider_background_jobs.SCHEMA`, `.TURN_SCHEMA` | `persistence.schema.PROVIDER_JOBS_SCHEMA`, `PROVIDER_TURNS_SCHEMA` |
+| `tool_explanation_mappings.SCHEMA` | `persistence/schema_parts/tool_explanation_mappings.py` |
+| `tool_explanation_learning.SCHEMA` | `persistence/schema_parts/tool_explanation_learning.py` |
+| `html_forms.SCHEMA` | `persistence/schema_parts/html_forms.py` |
+| `model_fallbacks.SCHEMA` | `persistence/schema_parts/model_fallbacks.py` |
+| `podcast_history.SCHEMA` | `persistence/schema_parts/podcast_history.py` |
+| `agent_goals.SCHEMA` | `persistence/schema_parts/agent_goals.py` |
+| `oracle_memory.SCHEMA` | `persistence/schema_parts/oracle_memory.py` |
+| `audio_bookkeeper.SCHEMA_STATEMENTS` | `persistence/schema_parts/audio_bookkeeper.py` |
+| `html_report_revisions.SCHEMA` | `persistence/schema_parts/html_report_revisions.py` |
+| `html_form_events.SCHEMA` | `persistence/schema_parts/html_form_events.py` |
+| `goal_ledger.SCHEMA` | `persistence/schema_parts/goal_ledger.py` |
+| `janitor_autonomy.SCHEMA` | `persistence/schema_parts/janitor_autonomy.py` |
+| `judgments.SCHEMA` | `persistence/schema_parts/judgments.py` |
+| `provider_background_jobs.SCHEMA`, `.TURN_SCHEMA` | `persistence/schema_parts/provider_background_jobs.py` (both names) |
+
+A feature module that reads its own constant elsewhere in the file keeps
+working through the re-import. If a fragment depends on anything besides string literals, it is
+listed in the move map and checked by the AST gate like any moved
+definition.
 
 `_SCHEMA_SQL` is assembled in the same order from the same strings, so
 `sqlite_master` of a fresh database is unchanged: the schema golden must pass
@@ -158,8 +176,8 @@ S1 moves code without changing any control flow:
   by its unchanged name, so the call sites are byte-identical. A lazy
   `from .judgments import SCHEMA as judgments_schema` (likewise
   janitor_autonomy, audio_bookkeeper, provider_background_jobs `SCHEMA` and
-  `TURN_SCHEMA`) becomes an import of the same object from
-  `persistence.schema` (3.1). The binding name and the call-time lookup stay
+  `TURN_SCHEMA`) becomes an import of the same object from its
+  `persistence.schema_parts` fragment (3.1). The binding name and the call-time lookup stay
   the same, and so does the value.
 - The v99, v112 and v121 steps keep their lazy feature imports and calls (the
   named exceptions in section 2).
@@ -193,8 +211,9 @@ executing the file, so `from . import db_schema`, `import lib.db_schema` and
 `lib.db_schema` as a package attribute all name the same object as
 `lib.persistence.schema`. A test proves it, including that a monkeypatch on
 the old name is seen by the new code. `db.__getattr__` keeps forwarding
-`db._migrate`, `db._SCHEMA_VERSION` and `db._migrate_to_vN` (it resolves the
-latter through the step table).
+`db._migrate`, `db._SCHEMA_VERSION` and `db._migrate_to_vN`: every step
+function stays an attribute of `persistence.migrate`, because `migrate.py`
+imports each one by its unchanged name, and `db_migrations` is that module.
 
 ## 4. Order of moves
 
@@ -203,11 +222,11 @@ the next starts.
 
 | # | Commit | Kind |
 |---|---|---|
-| 1 | layer map refinement (section 2) and the named-exception mechanism | test only |
+| 1 | layer map refinement and the `lib.persistence` namespace rule (section 2), and the named-exception mechanism | test only |
 | 2 | `lib/persistence/` package; `db_schema.py` moves to `persistence/schema.py`; alias | move |
-| 3 | the feature SCHEMA constants move into `persistence/schema.py` (3.1) | move |
+| 3 | the feature SCHEMA constants move into `persistence/schema_parts/` under unchanged names (3.1) | move |
 | 4 | the start-version matrix test (3.2), on the old layout | test only |
-| 5 | `db_migrations.py` moves to `persistence/migrate.py` and each `_migrate_to_vNNN` to `migrations/vNNN.py`, names and control flow unchanged; SCHEMA imports retargeted to `persistence.schema`; alias | move |
+| 5 | `db_migrations.py` moves to `persistence/migrate.py` and each `_migrate_to_vNNN` to `migrations/vNNN.py`, names and control flow unchanged; SCHEMA imports retargeted to `persistence.schema_parts`; alias | move |
 | 6 | persistence made strict in the layer test: zero upward edges besides the four named exceptions (section 2) | test only |
 
 Commit 2 is a pure rename plus the alias. Commit 5 is the largest, but every
