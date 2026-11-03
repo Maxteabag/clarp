@@ -285,39 +285,75 @@ isolation stays. The dream owner becomes its own durable receiver:
   `attempt_id = <round id>:<attempts>`, and stores that attempt's
   `trace_id` and `backend_session_id`. A new attempt always gets a new id. A
   redelivery of the same attempt always reuses the stored one.
-- **The launch fence and its owner.** The dispatch effect claims the launch
-  by compare-and-set: it stamps `launched_at` and `launch_owner` where the
-  round is sent, has this `attempt_id`, and `launched_at IS NULL`. The owner
-  is the dispatching server process: its boot id and pid. Dreams are
-  dispatched only from the server (the scheduler's `run_once` and the
-  `request_advance` threads). The winner also registers the attempt in the
-  owner's in-memory in-flight set, and keeps it registered until the
-  attempt's execution identity is recorded or the spawn has failed.
-  Recovery never replaces an attempt while that registration exists. So a
-  winner paused between the stamp and `spawn_turn` cannot launch after a
-  replacement: the replacement waits for the registration to end. Each
-  attempt therefore runs **at most once**. The output fence below is a
-  second line of defence, not the guard against overlap.
-- **Execution evidence per attempt.** Right after `spawn_turn` returns, the
-  owner records the attempt's execution identity on the attempt row. What
-  the identity is depends on the backend, as for `EXECUTION` in section 4:
-  - **Exec backends:** PID and start token. This includes Codex with
-    `isolated=True`, which runs `codex exec` (`codex_app_server.py:816-824`).
-    Its handles live in `active_exec_handles` (`backend/codex.py:220`), not in
-    `active_handles` (:196), which only sees the shared
-    app-server.
-  - **Shared app-server turns:** the thread and turn ids.
+- **The launch fence and its owner.**
+  - **Who launches.** Dreams are dispatched only from the server (the
+    scheduler's `run_once` and the `request_advance` threads). The owner is
+    that server process, identified by its boot id and pid.
+  - **Order of operations.** The owner's launch lock is taken before SQLite,
+    the project's usual owner-lock-before-SQLite order. Under that lock the
+    owner:
+    1. registers the attempt as tentatively in flight;
+    2. runs the compare-and-set that stamps `launched_at` and `launch_owner`,
+       where the round is sent, has this `attempt_id`, and
+       `launched_at IS NULL`;
+    3. drops the tentative registration if the compare-and-set loses.
 
-  The attempt's end evidence is one of:
-  - its own `on_result` or `on_error`, durably recorded as `ended_at`;
-  - for an exec identity, a check of that PID and start token showing the
-    process is gone or has been replaced.
+    Recovery in the same process reads launch rows only under the same lock.
+    So it can never see a committed `launched_at` from this boot without the
+    registration.
+  - **Releasing the registration.** It is released only after one of two
+    durable outcomes below, `handed_off` or `no_execution`. It is never
+    released by blind `finally` or exception cleanup. A paused winner
+    therefore cannot launch after a replacement. Each attempt runs **at most
+    once**. The output fence below is a second line of defence, not the
+    guard against overlap.
+- **Launch outcome, recorded durably on the attempt.** It is one of three
+  values:
+  - **`no_execution`:** the backend refused before handing off, meaning
+    before any process creation or app-server request. This needs a typed
+    pre-handoff refusal from the backend: `spawn_turn` raises it only before
+    `Popen` or the request. Proven nothing ran, so the round may be
+    re-queued.
+  - **`handed_off`:** `spawn_turn` returned a handle and the owner persisted
+    the execution identity. If persisting the identity fails (for example
+    the database is locked), the owner keeps the returned handle in memory
+    and retries. The registration stays until the write succeeds.
+  - **`uncertain`:** any other exception. Today a process can already exist
+    at that point: `stream_json.py:80-87` runs `Popen` before `make_handle`,
+    and Codex's `start_turn` launches at `backend/codex.py:322`, then does
+    more work (:323-335). An uncertain attempt is held, surfaces
+    `attention`, and is never replaced until authoritative execution
+    evidence turns up. Absence in the local registry does not count as that
+    evidence. If even the `uncertain` write fails, the in-flight
+    registration stays for the life of the process, which also holds the
+    round.
+- **Execution evidence per attempt.**
+  - **Identity, per backend** (as for `EXECUTION` in section 4):
+    - **exec backends:** PID and start token, plus the returned handle while
+      the owner process lives;
+    - **shared app-server turns:** the thread and turn ids.
+  - **No registry lookup.** Isolated attempts are deliberately not
+    registered. Codex with `isolated=True` runs `codex exec`
+    (`codex_app_server.py:816-824`) with an empty `runtime_agent_id`
+    (`backend/codex.py:319`). Isolated Claude does the same (:524), and
+    `register_handle` skips empty ids (`backend/base.py:273-276`). Neither
+    `active_handles` nor `active_exec_handles` can find them, so neither is
+    evidence. Only the returned handle and the persisted identity are.
+  - **The outcome is not the end.** `on_result` and `on_error` record the
+    attempt's outcome (`result_at` or `error`), not its end. Claude calls
+    `on_error` on a rate-limit event while the process is still running
+    (`backend/claude.py:615-623`, with `proc.wait` only at :705). It does
+    the same on a rejected session binding (:631-639).
+  - **The end is a normalized signal**, recorded as `ended_at`:
+    - **exec backends:** the returned handle's process exit, after
+      `proc.wait`; across boots, a check of the PID and start token showing
+      the process is gone or has been replaced;
+    - **shared app-server turns:** turn/completed or turn/aborted for that
+      turn. This is separate from the transport's own exit.
 
-  The generic `backends.active_handles` is never used as evidence for an
-  isolated attempt. A registry with no entry is not proof of an end: the
-  registry can be lost, for example after a runtime restart, while the
-  process lives on. This is `EXECUTION`'s fail-closed rule, and it applies
-  to dreams from conversion 2 on, not only to turns after S4.
+    A missing registry entry is never an end. This is `EXECUTION`'s
+    fail-closed rule, and it applies to dreams from conversion 2 on, not
+    only to turns after S4.
 - **Output fence.** `on_result` carries its `attempt_id`, and the output is
   recorded only while the round is still sent with that same `attempt_id`.
   Output from an earlier attempt gets a `Conflict` and is logged.
@@ -332,27 +368,25 @@ guarantee that a round runs exactly once. The cases:
   recovery re-runs the dispatch, with the same `attempt_id`, for a sent round
   that has no `launched_at` past a short grace. The fence makes that
   redelivery safe.
-- **`launched_at` set, no execution identity recorded yet:**
-  - If the launch owner is this server instance and the attempt is in its
-    in-flight set, the attempt is still launching. Recovery waits.
-  - If the owner is this instance and the attempt is not in flight, the
-    spawn ended without an identity, so `spawn_turn` failed. That is
-    recorded as the attempt's end, and the round is re-queued.
-  - If the owner is another boot, the outcome is **unknown**: the process
-    may have started and outlived its parent. The round stays sent and
-    surfaces `attention` after its deadline. It is never replaced
-    automatically.
-- **An execution identity is recorded:** the attempt may be running. It is
-  never redelivered. The eligibility hook for the sent deadline needs that
-  attempt's own end evidence, computed outside the lock and revalidated
-  inside:
-  - Confirmed end: the round is re-queued, and the next claim allocates a
+- **`launched_at` set, no launch outcome yet:**
+  - Owner is this boot: the attempt is in flight, because the registration
+    exists until an outcome is durable. Recovery waits.
+  - Owner is another boot: **unknown**. The round is held and surfaces
+    `attention` after its deadline. It is never replaced automatically.
+- **Outcome `no_execution`:** the round is re-queued as a new attempt.
+- **Outcome `uncertain`:** the round is held and surfaces `attention` until
+  authoritative evidence exists.
+- **Outcome `handed_off`:** the attempt may be running, and it is never
+  redelivered. The eligibility hook for the sent deadline uses the end
+  signal, checked outside the lock and revalidated inside:
+  - `ended_at` set: the round is re-queued, and the next claim allocates a
     new `attempt_id`.
-  - Still alive: the round stays sent.
-  - Unknown (the check fails, or the identity cannot be checked): the round
-    stays sent and surfaces `attention`. It is never replaced.
-- **A failed attempt followed by a new one:** attempt 1's error ends it.
-  The round is re-queued, and attempt 2 runs under its own id. Nothing of
+  - Still running, even with an error recorded: the round is held.
+  - Unknown: the round is held and surfaces `attention`. It is never
+    replaced.
+- **A failed attempt followed by a new one:** attempt 1 records its error.
+  When its real end is recorded, the round is re-queued, and attempt 2 runs
+  under its own id. Nothing of
   attempt 1 deduplicates it away.
 - **Busy refusal:** the dispatcher declines before the fence (the agent is
   not idle). The claim is reverted sent→queued with event `refused`, without
@@ -374,8 +408,9 @@ retries undelivered completed runs.
    together.
 2. Attempt identity, the launch fence with its owner and in-flight set, the
    execution evidence and the output fence. This needs a migration:
-   `attempt_id`, `launched_at`, `launch_owner`, the execution identity and
-   per-attempt evidence.
+   `attempt_id`, `launched_at`, `launch_owner`, `launch_outcome`, the
+   execution identity, `ended_at` and per-attempt evidence. It also needs a
+   typed pre-handoff refusal from the backends.
 3. Route the remaining writers through the kit.
 4. Delivery with `delivered_at`.
 5. The bounded reaper with the attempt cap and the run deadline.
@@ -387,15 +422,23 @@ retries undelivered completed runs.
   confirmed end;
 - a failed attempt followed by a new attempt that really runs;
 - late output from a superseded attempt is rejected;
-- an isolated Codex exec attempt that is alive, visible in
-  `active_exec_handles` but not in `active_handles`: the round is held;
-- a lost registry with the process alive: the round is held, and the missing
-  entry is not counted as an end;
-- a paused launch winner: the winner stamps `launched_at` and pauses before
-  `spawn_turn`, recovery runs, then the winner resumes. There is no
+- an isolated exec attempt that is alive and absent from every registry:
+  the round is held, using the returned handle or the persisted PID and
+  start token;
+- a pause between registration and the launch compare-and-set: recovery,
+  under the owner lock, never sees `launched_at` without the registration;
+- a spawn that creates the child and then raises before a handle returns:
+  the outcome is `uncertain`, the round is held, and there is no
+  replacement;
+- a successful spawn followed by a locked identity write: the registration
+  stays, the write is retried, and there is no replacement;
+- a non-terminal error (a rate-limit `on_error`) while a fake exec process
+  stays alive: the round is held through recovery, and it is replaced only
+  after the real exit;
+- a paused launch winner resumes after recovery has run: there is no
   replacement, and exactly one execution;
-- a launch owner from another boot with no identity: the round surfaces
-  `attention` and is not replaced;
+- a launch owner from another boot with no outcome recorded: the round
+  surfaces `attention` and is not replaced;
 - a busy refusal;
 - a delivery failure.
 
