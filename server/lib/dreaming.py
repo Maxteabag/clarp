@@ -821,6 +821,18 @@ def record_final_digest(*, agent_id: str, run_id: str, round_id: str,
     if row["status"] == "completed":
         return
     now = db.now_ms()
+    # Only a run still in flight completes: an abandoned (deadline, opt-out) or
+    # already finished run is left as it is and nothing is delivered (AUT-06b).
+    completed = db.conn().execute(
+        """UPDATE dream_runs
+              SET status = 'completed', stage = 'completed', finished_at = ?,
+                  updated_at = ?
+            WHERE run_id = ? AND status = 'active'""",
+        (now, now, run_id),
+    ).rowcount
+    if not completed:
+        log("dreamingDigestLate", f"run={run_id} round={round_id}")
+        return
     db.conn().execute(
         """UPDATE dream_rounds
               SET status = 'completed', response = ?, completed_at = ?,
@@ -829,13 +841,6 @@ def record_final_digest(*, agent_id: str, run_id: str, round_id: str,
         (digest, now, len(digest or ""), now, round_id),
     )
     _sync_run_progress(run_id, "completed")
-    db.conn().execute(
-        """UPDATE dream_runs
-              SET status = 'completed', stage = 'completed', finished_at = ?,
-                  updated_at = ?
-            WHERE run_id = ?""",
-        (now, now, run_id),
-    )
     log("dreamingDigestComplete",
         f"run={run_id} round={round_id} chars={len(digest or '')}")
     _deliver_digest(run_id=run_id, agent_id=agent_id, digest=digest)
