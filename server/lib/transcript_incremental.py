@@ -684,6 +684,45 @@ def import_transcript(*, backend: str, path: pathlib.Path, agent_id: str,
         shadow.finish()
 
 
+# The columns a turn re-stamp may change (turn_json) and those it must not.
+_RESTAMP_COLUMNS = ("message_id, source_file, seq, role, timestamp, text, kind, tool_name,"
+                    " tools_json, display_cells_json, origin, sender_agent_id,"
+                    " prompt_admission_id, trace_id, phase, turn_json")
+
+
+def _restamp_view(row) -> tuple:
+    """(trace_id, turn_json, every other content column) of one message row."""
+    content = tuple(row[name] for name in row.keys()
+                    if name not in ("message_id", "turn_json", "revision"))
+    return row["trace_id"] or "", row["turn_json"], content
+
+
+def _summary_moved_off(changed: set[str], planned: set[str],
+                       before: dict[str, tuple], after: dict[str, tuple]) -> set[str]:
+    """Changed rows whose only change is a turn summary moving to a planned row.
+
+    The plan applies no writes, so when a tail row belongs to a turn that began
+    before the boundary, re-stamping that turn (stamp_turn) moves its summary
+    off a row the plan never saw change; the tail import does the same. Such a
+    row is explained only if its content is identical, it lost the summary,
+    and the summary of its turn now sits on a row the plan did change."""
+    holders: dict[str, set[str]] = {}
+    for message_id, (trace, turn_json, _) in after.items():
+        if trace and turn_json is not None:
+            holders.setdefault(trace, set()).add(message_id)
+    explained = set()
+    for message_id in changed:
+        old, new = before.get(message_id), after.get(message_id)
+        if old is None or new is None:
+            continue
+        trace = new[0]
+        if (trace and old[0] == trace and old[2] == new[2]
+                and old[1] is not None and new[1] is None
+                and holders.get(trace) and holders[trace] <= planned):
+            explained.add(message_id)
+    return explained
+
+
 class _Shadow:
     """One shadow run beside a full import. Its own failures are logged and
     end the run; they never reach the authoritative import."""
@@ -702,6 +741,7 @@ class _Shadow:
         self.plan: dict[str, Any] | None = None
         self.old: Checkpoint | None = None
         self.ids_before: set[str] = set()
+        self.rows_before: dict[str, tuple] = {}
         self.out_seqs: list[int] = []
         self.failed = False
 
@@ -766,9 +806,10 @@ class _Shadow:
             if prefix_turns_hash(digests, old.boundary_seq) != old.prefix_turns_hash:
                 mismatches.append("prefix_changed")
             self.mismatches = mismatches
-            self.ids_before = {row[0] for row in database.execute(
-                "SELECT message_id FROM messages WHERE agent_id=? AND backend_session_id=?",
+            self.rows_before = {row["message_id"]: _restamp_view(row) for row in database.execute(
+                f"SELECT {_RESTAMP_COLUMNS} FROM messages WHERE agent_id=? AND backend_session_id=?",
                 (self.agent_id, self.backend_session_id)).fetchall()}
+            self.ids_before = set(self.rows_before)
             self.plan = message_writes.plan_transcript_tail(
                 agent_id=self.agent_id, backend_session_id=self.backend_session_id,
                 source_file=str(self.path), turns=tail, start_seq=old.boundary_seq,
@@ -828,15 +869,20 @@ class _Shadow:
             mismatches.append("prefix_rows_rewritten")
         database = db.conn()
         rows = database.execute(
-            """SELECT message_id, source_file, revision FROM messages
-                WHERE agent_id=? AND backend_session_id=?""",
+            f"SELECT {_RESTAMP_COLUMNS}, revision FROM messages"
+            " WHERE agent_id=? AND backend_session_id=?",
             (self.agent_id, self.backend_session_id)).fetchall()
         ids_after = {row["message_id"] for row in rows}
         transcript_changed = {row["message_id"] for row in rows
                               if row["source_file"] == str(self.path)
                               and int(row["revision"]) > floor}
-        planned_changed = {r["id"] for r in planned if int(r["revision"]) > floor}
-        if transcript_changed - planned_changed:
+        planned_changed = {r["id"] for r in planned if int(r["revision"]) > floor} \
+            | plan["updated"]
+        unexplained = transcript_changed - planned_changed
+        unexplained -= _summary_moved_off(
+            unexplained, planned_changed, getattr(self, "rows_before", {}),
+            {row["message_id"]: _restamp_view(row) for row in rows})
+        if unexplained:
             mismatches.append("changed_rows")
         # A row the plan adopts (a streamed twin) keeps its id; the plan, which
         # never applies its writes, still sees it as live and deletes it.
@@ -845,7 +891,7 @@ class _Shadow:
             mismatches.append("deleted_rows")
         self.detail["mismatches"] = mismatches
         if mismatches:
-            self.detail["examples"] = sorted(transcript_changed - planned_changed)[:5]
+            self.detail["examples"] = sorted(unexplained)[:5]
         self.verdict = "diverge:" + ",".join(mismatches) if mismatches else "match"
 
     def finish(self) -> None:
