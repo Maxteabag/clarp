@@ -28,6 +28,9 @@ HARNESS = Path(__file__).resolve().parents[2]
 FAKE_PROVIDER = HARNESS / 'tests/replay/fake_provider.py'
 TOKEN = 'replay-host-token'
 SESSIONS = ('rachel', 'mike')
+# A non-steerable backend for preemption scenarios: claude, served by fake_claude.py.
+CLAUDE_SESSIONS = ('claire',)
+FAKE_CLAUDE = HARNESS / 'tests/replay/fake_claude.py'
 
 
 # Every home, data, config, temp and provider directory, inside the state dir.
@@ -134,24 +137,32 @@ def main():
     fake.write_text(f'#!/bin/sh\nexec {shlex.quote(sys.executable)} {shlex.quote(str(FAKE_PROVIDER))} "$@"\n')
     fake.chmod(0o755)
     backends.by_id('codex').required_binary = str(fake)
+    # `claude` resolves on PATH (backend/claude.py executable()): a shim in the state
+    # dir, first on the Host's PATH, runs the fake under this interpreter.
+    shims = root / 'provider' / 'bin'
+    shims.mkdir(exist_ok=True)
+    claude_shim = shims / 'claude'
+    claude_shim.write_text(f'#!/bin/sh\nexec {shlex.quote(sys.executable)} {shlex.quote(str(FAKE_CLAUDE))} "$@"\n')
+    claude_shim.chmod(0o755)
+    os.environ['PATH'] = f"{shims}{os.pathsep}{os.environ.get('PATH', '')}" 
     from lib import provider_capabilities
     provider_capabilities._resolve_executable = (
-        lambda provider_id: str(fake) if provider_id == 'codex' else None)
+        lambda provider_id: {'codex': str(fake), 'claude': str(claude_shim)}.get(provider_id))
     provider_spawn = backends.spawn_turn
 
     def deterministic_spawn(backend, **kwargs):
-        if backends.normalize(backend) != 'codex':
-            raise RuntimeError('replay host supports only the deterministic Codex provider')
+        if backends.normalize(backend) not in ('codex', 'claude'):
+            raise RuntimeError('replay host supports only the deterministic Codex and Claude fakes')
         if not Path(kwargs['cwd']).resolve().is_relative_to(root):
             raise RuntimeError('replay provider workspace escaped the state dir')
         return provider_spawn(backend, **kwargs)
     backends.spawn_turn = deterministic_spawn
     workspace = root / 'workspace'
     workspace.mkdir(exist_ok=True)
-    for session in SESSIONS:
+    for session, backend in [*((s, 'codex') for s in SESSIONS), *((s, 'claude') for s in CLAUDE_SESSIONS)]:
         if not agents.get_by_session(session):
             aid = agents.create_agent(persona=session.title(), session=session,
-                                      voice_id='', cwd=str(workspace), backend='codex')
+                                      voice_id='', cwd=str(workspace), backend=backend)
             agents.start_runtime(aid, session)
     audio = root / 'audio'
     audio.mkdir(exist_ok=True)
@@ -159,7 +170,7 @@ def main():
                         agents_path=root / 'agents.json', default_session=SESSIONS[0],
                         tts=FakeTTSEngine(audio), stream=AudioStream(audio),
                         stt=StubSTT(text='replay voice prompt', ends_terminal=True),
-                        auth_token=TOKEN, roster_names=tuple(s.title() for s in SESSIONS))
+                        auth_token=TOKEN, roster_names=tuple(s.title() for s in (*SESSIONS, *CLAUDE_SESSIONS)))
     spec = importlib.util.spec_from_file_location('replay_server', build / 'server/server.py')
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

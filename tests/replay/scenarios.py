@@ -263,6 +263,23 @@ SCENARIOS = [
         ],
     },
     {
+        'id': 'preempt-live-process',
+        'what': 'a plain send to a busy non-steerable (claude) agent preempts it while the old CLI is still '
+                'alive (TP-01; provider/claude-procs.jsonl records start/sigterm/exit order)',
+        'sessions': ('claire',),
+        'steps': [
+            _send('claire', '[qa-slow][replay-linger] synthetic long claude task', 'victor'),
+            {'op': 'wait_open', 'message_id': 'u-victor'},
+            {'op': 'wait_busy', 'session': 'claire', 'busy': True},
+            {'op': 'wait_file', 'name': 'claude-procs.jsonl', 'contains': '"start"'},
+            _send('claire', 'synthetic preempting whiskey', 'whiskey'),
+            {'op': 'wait_settled', 'message_id': 'u-whiskey'},
+            {'op': 'quiesce', 'sessions': ('claire',)},
+            {'op': 'get', 'path': '/log?session=claire'},
+            {'op': 'get', 'path': '/status?session=claire'},
+        ],
+    },
+    {
         'id': 'goal-turn',
         'what': 'a goal is set on an agent; the provider runs an unrequested goal turn and completes it',
         'steps': [
