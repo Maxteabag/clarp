@@ -436,6 +436,25 @@ def test_two_equal_replies_to_one_request_reimport_without_change(clock):
         assert db.conn().execute("SELECT revision FROM message_clock").fetchone()[0] == clock_revision
 
 
+def test_a_shift_up_moves_an_adopted_row_with_its_turn(clock):
+    """RM-N1b: a record appears earlier (a parser change un-hides one) and an
+    unlinked user turn lands on the slot an adopted reply holds. The adopted
+    reply moves to its turn, as a fresh import would place it, instead of the
+    user turn's upsert hitting UNIQUE(agent_id, backend_session_id, seq)."""
+    client("c0", "ask", at=0, trace="tr-0")
+    assistant_row("final-0", "final:tr-0", "answer", at=4, trace="tr-0")
+    store([u("ask", 0.2), a("answer", 5)])
+    assert {r["message_id"]: r["seq"] for r in rows()}["final-0"] == 1
+    before = head()
+
+    store([u("ask", 0.2), u("typed in the terminal", 1), a("answer", 5)])
+
+    slot = lambda seq: message_writes._message_id(AGENT, SESSION, SOURCE, seq)
+    assert view(transcript_rows(), "seq", "message_id", "text") == [
+        (1, slot(1), "typed in the terminal"), (2, "final-0", "answer")]
+    assert head()[1] > before[1], "delta clients reload the moved slots"
+
+
 # ---- agy turn authority ------------------------------------------------------
 
 def _authority(trace, start, end, message_id):
