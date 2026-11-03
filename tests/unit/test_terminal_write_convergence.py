@@ -205,3 +205,36 @@ def test_a_terminal_row_is_newer_than_its_turns_row_committed_before_it_took_the
         assert lifecycle.current_kind(world.agent) == AgentState.DONE
     finally:
         dispatch.reset_for_tests()
+
+
+@pytest.mark.parametrize("foreign", ["stop", "successor"])
+def test_a_first_terminal_write_never_sorts_over_a_foreign_row_committed_before_its_lock(
+        tmp_path, monkeypatch, foreign):
+    """TP-N1b review 8: stamping the terminal row after the agent's newest row
+    covers its own turn only. A Stop or a successor that commits just before
+    the first attempt takes the lock stays the newest row, as before."""
+    world, _call = _world(tmp_path, monkeypatch, "first")
+    clock = [lifecycle.now_ms()]
+    monkeypatch.setattr(lifecycle, "now_ms", lambda: clock[0])
+    real_write = lifecycle.TurnStateMachine._write_terminal
+    calls = []
+
+    def foreign_row_before_the_lock(self, *args, **kwargs):
+        calls.append(1)
+        if len(calls) == 1:
+            clock[0] += 50
+            if foreign == "stop":
+                lifecycle.transition(world.agent, TurnEvent.STOP_REQUESTED, {"source": "user_stop"})
+            else:
+                lifecycle.open_turn(agent_id=world.agent, source="pwa", trace_id="t-next")
+                lifecycle.transition(world.agent, TurnEvent.SPAWN_STARTED,
+                                     {"source": "pwa", "dispatch": "claude", "trace_id": "t-next"})
+        return real_write(self, *args, **kwargs)
+
+    monkeypatch.setattr(lifecycle.TurnStateMachine, "_write_terminal", foreign_row_before_the_lock)
+    try:
+        lifecycle.try_transition(world.agent, TurnEvent.PROCESS_EXITED_OK, {"trace_id": "t-first"})
+        expected = AgentState.INTERRUPTED if foreign == "stop" else AgentState.THINKING
+        assert lifecycle.current_kind(world.agent) == expected
+    finally:
+        dispatch.reset_for_tests()
