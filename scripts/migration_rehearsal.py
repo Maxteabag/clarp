@@ -14,8 +14,10 @@ afterwards. Prints structure, counts and timings only.
     heavy uv run --frozen --group dev python scripts/migration_rehearsal.py --base v61
 
 To rehearse in the proportions of a real database on another machine, write
-its profile first: table names, row counts and average row sizes, nothing
-else. The source is opened read-only (mode=ro).
+its profile first: table names, approximate row counts and average row
+sizes, nothing else. The source is opened read-only (mode=ro) and is never
+counted (see write_profile). On the live Host's database, ask the program
+lead for a quiet slot first.
 
     python scripts/migration_rehearsal.py --write-profile profile.json \
         --from-db ~/.local/share/clarp/state.sqlite
@@ -221,24 +223,44 @@ def _columns(con: sqlite3.Connection, table: str) -> list[str]:
     return [r[1] for r in con.execute(f'PRAGMA table_info("{table}")')]
 
 
-def write_profile(source: pathlib.Path, sample: int = 20_000) -> dict:
-    """Counts and average row bytes per table of `source`, opened read-only.
-    Averages come from the newest `sample` rows; no value leaves this function."""
-    con = sqlite3.connect(f"file:{source}?mode=ro", uri=True)
+def write_profile(source: pathlib.Path, sample: int = 2_000) -> dict:
+    """Approximate row counts and average row bytes per table of `source`.
+
+    Cheap on purpose, because the source may be a live 4 GB database: no
+    count(*). A rowid table's rows are max(rowid) - min(rowid) + 1 (an upper
+    bound when rows were deleted), and its size is averaged over the newest
+    `sample` rows found by a rowid seek. A WITHOUT ROWID table records only its
+    first `sample` rows as a floor. Every statement is its own short read on a
+    read-only connection, so no snapshot is held across tables. Ask for a quiet
+    slot before pointing this at the live Host's database.
+    No value leaves this function: only names, counts and sizes.
+    """
+    con = sqlite3.connect(f"file:{source}?mode=ro", uri=True, isolation_level=None)
     try:
-        tables = {}
-        for (table,) in con.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"):
+        tables, methods = {}, {}
+        names = [r[0] for r in con.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")]
+        for table in names:
+            sql = con.execute("SELECT sql FROM sqlite_master WHERE name=?", (table,)).fetchone()[0] or ""
             columns = [r[1] for r in con.execute(f'PRAGMA table_info("{table}")')]
             size = " + ".join(f'coalesce(length("{c}"), 0)' for c in columns) or "0"
-            rows = con.execute(f'SELECT count(*) FROM "{table}"').fetchone()[0]
-            avg = con.execute(f'SELECT avg({size}) FROM (SELECT * FROM "{table}" LIMIT ? OFFSET ?)',
-                              (sample, max(0, rows - sample))).fetchone()[0]
-            tables[table] = [rows, int(avg or 0)]
+            if re.search(r"WITHOUT\s+ROWID", sql, re.I):
+                rows, avg = con.execute(
+                    f'SELECT count(*), avg(s) FROM (SELECT {size} AS s FROM "{table}" LIMIT ?)', (sample,)).fetchone()
+                methods[table] = "without_rowid_sample_floor"
+            else:
+                low, high = con.execute(f'SELECT min(rowid), max(rowid) FROM "{table}"').fetchone()
+                rows = 0 if high is None else high - low + 1
+                avg = con.execute(
+                    f'SELECT avg(s) FROM (SELECT {size} AS s FROM "{table}" ORDER BY rowid DESC LIMIT ?)',
+                    (sample,)).fetchone()[0]
+                methods[table] = "rowid_span"
+            tables[table] = [int(rows), int(avg or 0)]
         version = con.execute("PRAGMA user_version").fetchone()[0]
     finally:
         con.close()
-    return {"kind": "clarp-state-profile", "user_version": version, "sample_rows": sample, "tables": tables}
+    return {"kind": "clarp-state-profile", "user_version": version, "sample_rows": sample,
+            "taken_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "row_methods": methods, "tables": tables}
 
 
 def load_profile(path: pathlib.Path) -> dict[str, tuple[int, int]]:
