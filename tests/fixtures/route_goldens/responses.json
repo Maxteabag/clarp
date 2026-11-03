@@ -44,6 +44,7 @@
   "DELETE /turn-queue//send": {"admin": {"body": {"error": "str"}, "status": 404, "type": "application/json"}},
   "DELETE /turn-queue/q1": {"admin": {"body": {"error": "str"}, "status": 404, "type": "application/json"}},
   "DELETE /turn-queue/q1/send": {"admin": {"body": {"error": "str"}, "status": 404, "type": "application/json"}},
+  "DELETE /turn-queue/resume": {"admin": {"body": {"error": "str"}, "status": 404, "type": "application/json"}},
   "DELETE /turn-queue/resume/send": {"admin": {"body": {"error": "str"}, "status": 404, "type": "application/json"}},
   "GET /": {"admin": {"body": "bytes", "status": 200, "type": "text/html"}},
   "GET /agent-conversations": {"admin": {"body": {"conversations": []}, "status": 200, "type": "application/json"}},
@@ -408,6 +409,7 @@
   "POST /tts/providers": {"admin": {"body": {"error": "str"}, "status": 400, "type": "application/json"}},
   "POST /turn-queue//send": {"admin": {"body": {"error": "str"}, "status": 404, "type": "application/json"}},
   "POST /turn-queue/q1/send": {"admin": {"body": {"error": "str"}, "status": 404, "type": "application/json"}},
+  "POST /turn-queue/resume": {"admin": {"body": {"error": "str"}, "status": 404, "type": "application/json"}},
   "POST /turn-queue/resume/send": {"admin": {"body": {"error": "str"}, "status": 404, "type": "application/json"}},
   "POST /upload": {"admin": {"body": {"name": "str", "ok": "bool", "path": "str", "session": "str", "size": "num"}, "status": 200, "type": "application/json"}},
   "POST /viz/supersede": {"admin": {"body": {"error": "str"}, "status": 400, "type": "application/json"}},
@@ -431,6 +433,7 @@
   "PUT /turn-queue//send": {"admin": {"body": {"error": "str"}, "status": 400, "type": "application/json"}},
   "PUT /turn-queue/q1": {"admin": {"body": {"error": "str"}, "status": 400, "type": "application/json"}},
   "PUT /turn-queue/q1/send": {"admin": {"body": {"error": "str"}, "status": 400, "type": "application/json"}},
+  "PUT /turn-queue/resume": {"admin": {"body": {"error": "str"}, "status": 400, "type": "application/json"}},
   "PUT /turn-queue/resume/send": {"admin": {"body": {"error": "str"}, "status": 400, "type": "application/json"}}
  }
 }
