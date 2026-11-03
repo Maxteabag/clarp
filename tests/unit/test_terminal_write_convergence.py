@@ -286,3 +286,37 @@ def test_the_terminal_rows_own_turn_lookup_seeks_only_rows_after_the_fence(tmp_p
     assert len(seen) == 1
     plan = " ".join(row[3] for row in db.conn().execute("EXPLAIN QUERY PLAN " + seen[0]))
     assert "idx_state_log_agent_state (agent_id=? AND state_id>?)" in plan, plan
+
+
+@pytest.mark.parametrize("attempt", [1, 2])
+def test_a_stop_naming_the_same_turn_is_never_hidden_by_its_terminal_write(
+        tmp_path, monkeypatch, attempt):
+    """TP-N1b review 10: a Stop that names the turn's own trace (a janitor
+    cancel does) is still another actor's end of the turn. Committed before
+    the first attempt's lock, or during a retry's backoff, it stays current."""
+    world, _call = _world(tmp_path, monkeypatch, "first")
+    clock = [lifecycle.now_ms()]
+    monkeypatch.setattr(lifecycle, "now_ms", lambda: clock[0])
+
+    def named_stop():
+        clock[0] += 50
+        lifecycle.transition(world.agent, TurnEvent.STOP_REQUESTED,
+                             {"source": "janitor_pause", "trace_id": "t-first"})
+
+    if attempt == 1:
+        real_write = lifecycle.TurnStateMachine._write_terminal
+        calls = []
+
+        def stop_before_the_lock(self, *args, **kwargs):
+            calls.append(1)
+            if len(calls) == 1:
+                named_stop()
+            return real_write(self, *args, **kwargs)
+        monkeypatch.setattr(lifecycle.TurnStateMachine, "_write_terminal", stop_before_the_lock)
+    else:
+        _locked_once(monkeypatch, during_backoff=named_stop)
+    try:
+        lifecycle.try_transition(world.agent, TurnEvent.PROCESS_EXITED_OK, {"trace_id": "t-first"})
+        assert lifecycle.current_kind(world.agent) == AgentState.INTERRUPTED
+    finally:
+        dispatch.reset_for_tests()
