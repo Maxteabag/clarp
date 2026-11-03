@@ -535,3 +535,12 @@ def test_clock_schema_on_a_dropped_frame_remains_observable():
 
 def test_valid_wire_id_presence_on_a_dropped_frame_remains_observable():
     assert _report(_capture(sse=frames()), _capture(sse=frames(wire="12"))).items
+
+
+def test_a_hex_id_that_reads_as_a_json_number_is_still_an_id():
+    # rf-merge g2i-s3: a launch receipt's trace id '5533263533985e85' parsed as 5.5e+97.
+    def settings(trace):
+        return _capture(db={'schema': [], 'pk': {'settings': ['key']}, 'tables': {'settings': [
+            {'key': 'launch-receipt-seq:agent0000000a:00000000000000000002', 'value': trace}]}})
+    assert not _report(settings('5533263533985e85'), settings('51d510e6cbd138ab')).items
+    assert _report(settings('5533263533985e85'), settings('{"state": "attempted"}')).items
