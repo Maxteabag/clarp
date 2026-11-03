@@ -62,8 +62,7 @@ CHANGES = [
             '                detail=detail,\n'
             '            )))\n',
         ),
-        'expect': {'channel': 'sse', 'locator': r'->', 'kinds': {'sequence-replace', 'sequence-insert',
-                                                                  'sequence-delete'}},
+        'expect': {'channel': 'sse', 'locator': r'^order\[', 'kinds': {'order-changed'}},
     },
     {
         'id': 'header-only',

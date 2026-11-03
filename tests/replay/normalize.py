@@ -13,7 +13,15 @@ they are known to occur.
   of a prefixed id under an id key. Each becomes an ordinal surrogate by first
   appearance (``<id:3>``), so the same id keeps the same surrogate within a run
   and an id that moves shows up. Hex in free text is left alone.
-- Event ids become ``<eid:n>`` by first appearance, keeping their aliasing.
+- Event ids are named after the frame that carries them: its lane (event
+  name, type, payload key set, session; see ``lane_key``) and its position in
+  that lane (``<eid:agent-state#2@1a2b3c>``). Producers interleave
+  differently between runs, a lane's own order does not; any reference to
+  the same event id gets the same name.
+- Lists the Host orders by a tied sort key (``SORTED_LISTS``: the persona and
+  roster lists, ordered by ``created_at`` with every built-in seeded in the
+  same millisecond) are compared sorted. Registered as a pre-existing
+  nondeterminism.
 - Process ids and the loopback port; the scratch, build and harness paths.
 
 Schema SQL is compared raw. JSON held in a text column is parsed and compared
@@ -23,6 +31,7 @@ rule only with that evidence, and never one that hides a planted change.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 
@@ -35,8 +44,29 @@ DURATION_KEYS = frozenset({'duration_ms', 'worked_ms', 'elapsed_ms', 'source_del
                            'time_used_seconds', 'timeUsedSeconds', 'age_ms', 'age_sec'})
 ID_KEYS = frozenset({'id', 'conv', 'epoch', 'cause', 'source', 'thread', 'threadId', 'turnId',
                      'native_session_id', 'backend_session_id', 'cause_message_id', 'client_msg_id'})
+SORTED_LISTS = frozenset({'personas', 'roster'})
 PID_KEYS = frozenset({'pid', 'pgid', 'ppid', 'port'})
 PATH_KEYS = frozenset({'cwd', 'path', 'file_path', 'transcript_path', 'root', 'audio_path'})
+
+
+def lane_key(frame: dict) -> str:
+    """The producer lane of an SSE frame (or an sse_events row's payload)."""
+    data = frame.get('data') if isinstance(frame.get('data'), dict) else {}
+    return '|'.join([str(frame.get('event') or ''), str(data.get('type') or ''),
+                     ','.join(sorted(data)), str(data.get('session') or '')])
+
+
+def lane_names(frames: list[dict]) -> list[str]:
+    """Stable per-frame names: type, position in its lane, lane hash."""
+    seen: dict[str, int] = {}
+    names = []
+    for frame in frames:
+        lane = lane_key(frame)
+        seen[lane] = seen.get(lane, 0) + 1
+        data = frame.get('data') if isinstance(frame.get('data'), dict) else {}
+        names.append(f"{data.get('type') or frame.get('event') or '?'}#{seen[lane]}@"
+                     f"{hashlib.sha1(lane.encode()).hexdigest()[:6]}")
+    return names
 
 
 def is_id_key(key: str) -> bool:
@@ -54,6 +84,7 @@ class Normalizer:
         self.paths = sorted(((v, k) for k, v in paths.items() if v), key=lambda p: -len(p[0]))
         self.ids: dict[str, str] = {}
         self.eids: dict[str, str] = {}
+        self.eid_names: dict[str, str] = {}
 
     def _id(self, token: str) -> str:
         if token not in self.ids:
@@ -62,8 +93,10 @@ class Normalizer:
 
     def _eid(self, value) -> str:
         key = str(value)
+        if key in self.eid_names:
+            return f'<eid:{self.eid_names[key]}>'
         if key not in self.eids:
-            self.eids[key] = f'<eid:{len(self.eids) + 1}>'
+            self.eids[key] = f'<eid:?{len(self.eids) + 1}>'
         return self.eids[key]
 
     def paths_in(self, value: str) -> str:
@@ -93,10 +126,13 @@ class Normalizer:
         if isinstance(value, dict):
             return {k: self.value(v, k) for k, v in value.items()}
         if isinstance(value, list):
-            return [self.value(v, key) for v in value]
+            items = [self.value(v, key) for v in value]
+            if key in SORTED_LISTS:
+                items.sort(key=lambda v: json.dumps(v, sort_keys=True))
+            return items
         if isinstance(value, bool) or value is None:
             return value
-        if key == 'event_id':
+        if (key == 'event_id' or key.endswith('_event_id')) and isinstance(value, (int, str)) and str(value).isdigit():
             return self._eid(value)
         if key in DURATION_KEYS and isinstance(value, (int, float)):
             return '<duration>'
@@ -117,21 +153,46 @@ class Normalizer:
 
 def normalize(capture: dict, harness_root: str) -> dict:
     n = Normalizer({'<ROOT>': capture['root'], '<BUILD>': capture['build'], '<HARNESS>': harness_root})
+    db = capture['db']
+    frames = capture['sse']
+    log_rows = sorted(db['tables'].get('sse_events', []), key=lambda r: r.get('event_id') or 0)
+    log_frames = [{'event': None, 'data': _payload(r)} for r in log_rows]
+    # Event ids are named by lane position, from the stream first, then the stored log.
+    for frame, name in zip(frames, lane_names(frames)):
+        data = frame.get('data') if isinstance(frame.get('data'), dict) else {}
+        if data.get('event_id') is not None:
+            n.eid_names.setdefault(str(data['event_id']), name)
+    for row, name in zip(log_rows, lane_names(log_frames)):
+        if row.get('event_id') is not None:
+            n.eid_names.setdefault(str(row['event_id']), 'log:' + name)
     out = {'scenario': capture['scenario'], 'error': capture['error']}
-    # Order matters for the id surrogates: the wire first, then the database.
+    # Id surrogates by first appearance, deterministic channels first: the
+    # harness-driven HTTP sequence, then tables by name, then files; the
+    # interleaved streams last.
     out['http'] = [{'step': h['step'], 'method': h['method'], 'path': h['path'], 'status': h['status'],
                     'headers': n.value(h.get('headers', {})), 'body': n.value(h['body'])}
                    for h in capture['http']]
-    out['sse'] = [{'event': f.get('event'), 'has_id': f.get('has_id'), 'data': n.value(f.get('data'))}
-                  for f in capture['sse']]
-    out['sse_health'] = capture.get('sse_health')
-    db = capture['db']
     out['schema'] = db['schema']
     out['tables'] = {name: {'pk': db.get('pk', {}).get(name, []), 'rows': [n.value(r) for r in rows]}
-                     for name, rows in db['tables'].items()}
+                     for name, rows in sorted(db['tables'].items()) if name != 'sse_events'}
     out['files'] = [{'path': n.string(f['path'], 'path'), 'bytes': f['bytes'],
                      'digest': f['digest'] if f.get('kind') != 'json' else None,
                      'json': n.value(f['json']) if f.get('kind') == 'json' else None}
                     for f in capture['files']]
+    out['sse'] = [{'event': f.get('event'), 'has_id': f.get('has_id'), 'data': n.value(f.get('data'))}
+                  for f in frames]
+    out['sse_log'] = [{'event': None, 'has_id': True, 'data': n.value(_payload(r)),
+                       'row': n.value({k: v for k, v in r.items() if k != 'payload'})} for r in log_rows]
+    out['sse_health'] = capture.get('sse_health')
     out['cli'] = [n.value(c) for c in capture.get('cli', [])]
     return out
+
+
+def _payload(row: dict):
+    raw = row.get('payload')
+    if isinstance(raw, str):
+        try:
+            return json.loads(raw)
+        except ValueError:
+            return {'<unparsed>': raw}
+    return raw
