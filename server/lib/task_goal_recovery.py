@@ -199,7 +199,7 @@ def tick(dispatch, *, now=None, cursor=None):
     return count
 
 
-def _changed_beyond_observation(stored_json, goal):
+def _changed_beyond_observation(stored, goal):
     """Whether goal differs from its stored form in more than the stamp of
     the latest observation (observed_at, observed_reason)."""
     def without_stamp(value):
@@ -210,170 +210,217 @@ def _changed_beyond_observation(stored_json, goal):
         }
         return {**value, "continuation": continuation}
 
-    return without_stamp(json.loads(stored_json)) != without_stamp(goal)
+    return without_stamp(stored) != without_stamp(goal)
+
+
+def _commit(plan, text, stored, goal, *, enrolled=True):
+    """Store goal if the plan still holds text. The JSON is built here, before
+    the writer lock; the locked part only compares and writes (a goal can be
+    megabytes, and parsing it under the lock stalled every other writer)."""
+    new_text = task_goal_state.serialize(goal)
+    with _transaction() as con:
+        return task_goal_state.save_if_unchanged(
+            con, plan, text, stored, goal, new_text, enrolled=enrolled
+        )
 
 
 def _claim(plan_id, now):
-    snapshot = (
+    plan = (
         db.conn()
         .execute("SELECT * FROM task_plans WHERE plan_id=?", (plan_id,))
         .fetchone()
     )
-    if (
-        not snapshot
-        or snapshot["status"] != "active"
-        or not snapshot["recovery_enabled"]
-    ):
+    if not plan or plan["status"] != "active" or not plan["recovery_enabled"]:
         return None
-    previous = json.loads(snapshot["goal_json"])
-    if (previous["continuation"].get("lease_until") or 0) > now:
+    text = plan["goal_json"]
+    stored = json.loads(text)
+    if (stored["continuation"].get("lease_until") or 0) > now:
         return None
     # Runtime/process inspection must not hold SQLite's global writer lock.
-    live_gate = boundary(snapshot, previous)
-    with _transaction() as con:
-        plan = con.execute(
-            "SELECT * FROM task_plans WHERE plan_id=?", (plan_id,)
-        ).fetchone()
-        if not plan or plan["status"] != "active" or not plan["recovery_enabled"]:
-            return None
-        goal = json.loads(plan["goal_json"])
-        state = goal["continuation"]
-        if state.get("state") in {"blocked", "attention", "not_enrolled"}:
-            return None
-        # A still-live lease belongs to another scheduler, including after a restart.
-        if (state.get("lease_until") or 0) > now:
-            return None
-        if plan["revision"] != snapshot["revision"]:
-            return None
-        latest = agents.latest_state(plan["agent_id"]) or {}
-        if (
-            state.get("last_dispatch_at")
-            and latest.get("ts", 0) >= state["last_dispatch_at"]
-            and latest.get("kind") in {"done", "idle", "interrupted"}
-            and latest.get("ts") != state.get("execution_observed_at")
-        ):
-            detail = latest.get("detail") or {}
-            state["last_execution"] = {
-                "kind": latest["kind"],
-                "reason": detail.get("reason", ""),
-                "message": detail.get(
-                    "message", "Owner turn ended; outcome remains unfinished"
-                ),
-            }
-            state["execution_observed_at"] = latest["ts"]
-            goal["history"].append(
-                dict(
-                    at=latest["ts"],
-                    kind="execution_observed",
-                    revision=plan["revision"],
-                    detail=state["last_execution"],
-                )
-            )
-            task_goal_state._save(con, plan_id, goal)
-        gate = boundary(plan, goal, check_live=False) or live_gate
-        if gate:
-            execution, reason = gate
-            if state.get("observed_state") != execution:
-                state.update(
-                    observed_state=execution, observed_at=now, observed_reason=reason
-                )
-                task_goal_state._save(con, plan_id, goal)
-            return None
-        state.update(
-            observed_state="idle", observed_at=now, observed_reason="Owner is idle"
-        )
-        if state.get("state") == "waiting" and state.get("job_handle"):
-            from . import background_jobs
-
-            job_id, generation = background_jobs.parse_job_handle(state["job_handle"])
-            job = background_jobs.get(job_id, reconcile=False)
-            if (
-                not job
-                or job["agent_id"] != plan["agent_id"]
-                or job["generation"] != generation
-            ):
-                state.update(
-                    state="ready",
-                    due_at=now,
-                    reason="Background dependency disappeared or was superseded; inspect current work",
-                )
-            elif job["status"] in background_jobs.TERMINAL_STATUSES:
-                result = {
-                    "key": state["dependency_key"],
-                    "outcome": job["status"],
-                    # How the job ended is not what became of the work: a
-                    # worker that vanished leaves the outcome unknown.
-                    "outcome_state": job.get("outcome_state") or "unknown",
-                    "terminal_reason": job.get("terminal_reason") or "",
-                    "evidence": job.get("log_path")
-                    or job.get("terminal_reason")
-                    or job.get("detail")
-                    or "Recorded job terminal status",
-                    "job_handle": state["job_handle"],
-                }
-                state.update(
-                    state="ready",
-                    due_at=now,
-                    reason="Background job " + job["status"],
-                    dependency_result=result,
-                )
-                goal["history"].append(
-                    dict(
-                        at=now,
-                        kind="dependency_result",
-                        revision=plan["revision"],
-                        detail=result,
-                    )
-                )
-        if (state.get("due_at") or 0) > now:
-            # Every tick re-observes an idle owner; rewriting a goal (it can be
-            # megabytes) only to restamp that holds the writer lock for nothing.
-            if _changed_beyond_observation(plan["goal_json"], goal):
-                task_goal_state._save(con, plan_id, goal)
-            return None
-        if state.get("state") == "waiting":
-            state.update(
-                state="ready",
-                reason="External dependency deadline passed; inspect its actual outcome",
-            )
-        if state.get("attempts", 0) >= goal["recovery_limit"]:
-            state.update(
-                state="attention",
-                reason="Recovery attempt limit reached; checkpoint or resume to continue",
-            )
-            task_goal_state._save(con, plan_id, goal)
-            return None
-        # Successful admission followed by an idle owner is an unfinished turn,
-        # not a completed goal. A new generation gets one new receipt.
-        if (
-            state.get("state") in {"admitted", "queued"}
-            or state.get("plan_revision", plan["revision"]) != plan["revision"]
-        ):
-            state.update(generation=state["generation"] + 1, request_id="")
-        if not state.get("request_id"):
-            state["request_id"] = PREFIX + secrets.token_hex(16)
-        state.update(
-            state="dispatching",
-            plan_revision=plan["revision"],
-            lease_until=now + 60000,
-            attempts=state.get("attempts", 0) + 1,
-        )
+    live_gate = boundary(plan, stored)
+    # Everything below works on this snapshot outside the writer lock. Each
+    # write is a compare-and-swap on the snapshot (text, revision, status,
+    # enrolment): a plan that changed meanwhile, including a lease another
+    # scheduler took, is left for the next tick, as a revision change was.
+    goal = json.loads(text)
+    state = goal["continuation"]
+    if state.get("state") in {"blocked", "attention", "not_enrolled"}:
+        return None
+    changed = False
+    latest = agents.latest_state(plan["agent_id"]) or {}
+    if (
+        state.get("last_dispatch_at")
+        and latest.get("ts", 0) >= state["last_dispatch_at"]
+        and latest.get("kind") in {"done", "idle", "interrupted"}
+        and latest.get("ts") != state.get("execution_observed_at")
+    ):
+        detail = latest.get("detail") or {}
+        state["last_execution"] = {
+            "kind": latest["kind"],
+            "reason": detail.get("reason", ""),
+            "message": detail.get(
+                "message", "Owner turn ended; outcome remains unfinished"
+            ),
+        }
+        state["execution_observed_at"] = latest["ts"]
         goal["history"].append(
             dict(
-                at=now,
-                kind="wake_claim",
+                at=latest["ts"],
+                kind="execution_observed",
                 revision=plan["revision"],
-                detail={
-                    "request_id": state["request_id"],
-                    "generation": state["generation"],
-                },
+                detail=state["last_execution"],
             )
         )
-        task_goal_state._save(con, plan_id, goal)
-        return dict(plan), goal
+        changed = True
+    gate = boundary(plan, goal, check_live=False) or live_gate
+    if gate:
+        execution, reason = gate
+        if state.get("observed_state") != execution:
+            state.update(
+                observed_state=execution, observed_at=now, observed_reason=reason
+            )
+            changed = True
+        if changed:
+            _commit(plan, text, stored, goal)
+        return None
+    state.update(
+        observed_state="idle", observed_at=now, observed_reason="Owner is idle"
+    )
+    if state.get("state") == "waiting" and state.get("job_handle"):
+        from . import background_jobs
+
+        job_id, generation = background_jobs.parse_job_handle(state["job_handle"])
+        job = background_jobs.get(job_id, reconcile=False)
+        if (
+            not job
+            or job["agent_id"] != plan["agent_id"]
+            or job["generation"] != generation
+        ):
+            state.update(
+                state="ready",
+                due_at=now,
+                reason="Background dependency disappeared or was superseded; inspect current work",
+            )
+        elif job["status"] in background_jobs.TERMINAL_STATUSES:
+            result = {
+                "key": state["dependency_key"],
+                "outcome": job["status"],
+                # How the job ended is not what became of the work: a
+                # worker that vanished leaves the outcome unknown.
+                "outcome_state": job.get("outcome_state") or "unknown",
+                "terminal_reason": job.get("terminal_reason") or "",
+                "evidence": job.get("log_path")
+                or job.get("terminal_reason")
+                or job.get("detail")
+                or "Recorded job terminal status",
+                "job_handle": state["job_handle"],
+            }
+            state.update(
+                state="ready",
+                due_at=now,
+                reason="Background job " + job["status"],
+                dependency_result=result,
+            )
+            goal["history"].append(
+                dict(
+                    at=now,
+                    kind="dependency_result",
+                    revision=plan["revision"],
+                    detail=result,
+                )
+            )
+    if (state.get("due_at") or 0) > now:
+        # Every tick re-observes an idle owner; rewriting a goal (it can be
+        # megabytes) only to restamp that holds the writer lock for nothing.
+        if _changed_beyond_observation(stored, goal):
+            _commit(plan, text, stored, goal)
+        return None
+    if state.get("state") == "waiting":
+        state.update(
+            state="ready",
+            reason="External dependency deadline passed; inspect its actual outcome",
+        )
+    if state.get("attempts", 0) >= goal["recovery_limit"]:
+        state.update(
+            state="attention",
+            reason="Recovery attempt limit reached; checkpoint or resume to continue",
+        )
+        _commit(plan, text, stored, goal)
+        return None
+    # Successful admission followed by an idle owner is an unfinished turn,
+    # not a completed goal. A new generation gets one new receipt.
+    if (
+        state.get("state") in {"admitted", "queued"}
+        or state.get("plan_revision", plan["revision"]) != plan["revision"]
+    ):
+        state.update(generation=state["generation"] + 1, request_id="")
+    if not state.get("request_id"):
+        state["request_id"] = PREFIX + secrets.token_hex(16)
+    state.update(
+        state="dispatching",
+        plan_revision=plan["revision"],
+        lease_until=now + 60000,
+        attempts=state.get("attempts", 0) + 1,
+    )
+    goal["history"].append(
+        dict(
+            at=now,
+            kind="wake_claim",
+            revision=plan["revision"],
+            detail={
+                "request_id": state["request_id"],
+                "generation": state["generation"],
+            },
+        )
+    )
+    if not _commit(plan, text, stored, goal):
+        return None
+    return dict(plan), goal
+
+
+def _apply_result(plan, goal, request, now, state, reason):
+    """The dispatch outcome on goal; False when it no longer owns that wake."""
+    wake = goal["continuation"]
+    if wake.get("request_id") != request:
+        return False
+    backoff = min(3600000, 120000 * 2 ** min(wake.get("attempts", 1) - 1, 5))
+    wake.update(
+        state=state,
+        reason=reason,
+        lease_until=None,
+        due_at=now + backoff,
+        last_dispatch_at=now,
+    )
+    goal["history"].append(
+        dict(
+            at=now,
+            kind="dispatch_" + state,
+            revision=plan["revision"],
+            detail={"request_id": request, "reason": reason},
+        )
+    )
+    return True
 
 
 def _result(plan_id, request, now, state, reason):
+    # The outcome of an admitted dispatch must not be lost to a concurrent
+    # write: a few compare-and-swap attempts outside the lock, then the
+    # locked read-modify-write as before.
+    for _attempt in range(3):
+        plan = (
+            db.conn()
+            .execute("SELECT * FROM task_plans WHERE plan_id=?", (plan_id,))
+            .fetchone()
+        )
+        if not plan or plan["status"] != "active":
+            return
+        text = plan["goal_json"]
+        stored = json.loads(text)
+        goal = json.loads(text)
+        if not _apply_result(plan, goal, request, now, state, reason):
+            return
+        if _commit(plan, text, stored, goal, enrolled=False):
+            return
     with _transaction() as con:
         plan = con.execute(
             "SELECT * FROM task_plans WHERE plan_id=?", (plan_id,)
@@ -381,26 +428,8 @@ def _result(plan_id, request, now, state, reason):
         if not plan or plan["status"] != "active":
             return
         goal = json.loads(plan["goal_json"])
-        wake = goal["continuation"]
-        if wake.get("request_id") != request:
-            return
-        backoff = min(3600000, 120000 * 2 ** min(wake.get("attempts", 1) - 1, 5))
-        wake.update(
-            state=state,
-            reason=reason,
-            lease_until=None,
-            due_at=now + backoff,
-            last_dispatch_at=now,
-        )
-        goal["history"].append(
-            dict(
-                at=now,
-                kind="dispatch_" + state,
-                revision=plan["revision"],
-                detail={"request_id": request, "reason": reason},
-            )
-        )
-        task_goal_state._save(con, plan_id, goal)
+        if _apply_result(plan, goal, request, now, state, reason):
+            task_goal_state._save(con, plan_id, goal)
 
 
 def allows_paused_queue(request_id):

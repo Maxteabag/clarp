@@ -404,17 +404,73 @@ def _goal_check_revision(plan, revision):
         raise ValueError("plan changed; reload before editing")
 
 
+# The goal keeps its newest history entries inline; the append-only ledger keeps
+# every entry. Without a bound, routine wake entries grew single goals to tens of
+# megabytes, and every save of such a goal held SQLite's writer lock for seconds.
+GOAL_HISTORY_LIMIT = 200
+
+
+def _goal_bounded(goal):
+    """The goal as stored: at most GOAL_HISTORY_LIMIT history entries, and
+    ``history_offset`` counting the older ones that live only in the ledger."""
+    history = goal.get("history") or []
+    excess = len(history) - GOAL_HISTORY_LIMIT
+    if excess <= 0:
+        return goal
+    return {
+        **goal,
+        "history": history[excess:],
+        "history_offset": int(goal.get("history_offset") or 0) + excess,
+    }
+
+
+def _goal_serialize(goal):
+    """The stored text of a goal; callers can build it outside a transaction."""
+    return json.dumps(_goal_bounded(goal), ensure_ascii=False)
+
+
+def _goal_adopt_bound(goal):
+    """Trim the caller's goal in place to what was stored."""
+    bounded = _goal_bounded(goal)
+    if bounded is not goal:
+        goal["history"] = bounded["history"]
+        goal["history_offset"] = bounded["history_offset"]
+
+
 def _goal_save(con, plan_id, goal):
     from . import goal_ledger
 
     row = con.execute("SELECT goal_json FROM task_plans WHERE plan_id=?", (plan_id,)).fetchone()
     old = json.loads(row[0] or "{}") if row else {}
+    # Every appended history entry also lands in the append-only ledger, from
+    # the full history, before the stored copy drops its oldest entries.
+    goal_ledger.record_goal_save(con, plan_id, old, goal)
     con.execute(
         "UPDATE task_plans SET goal_json=? WHERE plan_id=?",
-        (json.dumps(goal, ensure_ascii=False), plan_id),
+        (_goal_serialize(goal), plan_id),
     )
-    # Every appended history entry also lands in the append-only ledger.
-    goal_ledger.record_goal_save(con, plan_id, old, goal)
+    _goal_adopt_bound(goal)
+
+
+def _goal_save_if_unchanged(con, plan, expected_text, old, goal, text, *, enrolled):
+    """Store ``text`` (``_goal_serialize(goal)``, built before the transaction)
+    only if the plan still holds ``expected_text`` at the same revision and
+    status. The writer lock covers this comparison and write, not the JSON work.
+    Returns whether it was stored; a changed plan is left for its next reader."""
+    from . import goal_ledger
+
+    sql = (
+        "UPDATE task_plans SET goal_json=? WHERE plan_id=? AND revision=? "
+        "AND status='active' AND goal_json=?"
+    )
+    if enrolled:
+        sql += " AND recovery_enabled=1"
+    cursor = con.execute(sql, (text, plan["plan_id"], plan["revision"], expected_text))
+    if cursor.rowcount != 1:
+        return False
+    goal_ledger.record_goal_save(con, plan["plan_id"], old, goal)
+    _goal_adopt_bound(goal)
+    return True
 
 
 def _goal_initialize(con, plan_id, agent, title, raw, now):
