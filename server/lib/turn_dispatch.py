@@ -2746,7 +2746,24 @@ class TurnDispatchService:
                 outcome = self._spawn_attempt_claimed(spec, attempt=attempt)
         else:
             outcome = self._spawn_attempt_claimed(spec, attempt=attempt)
+        if outcome is False:
+            return False
         return _ADMISSION_REFUSED if outcome is _ADMISSION_REFUSED else True
+
+    @staticmethod
+    def _still_owns(spec: _TurnSpec) -> bool:
+        with _TURN_LOCK:
+            return _INFLIGHT.get(spec.agent_id) == spec.trace_id
+
+    @staticmethod
+    def _interrupt_unowned(spec: _TurnSpec, handle) -> None:
+        log("spawnUnowned",
+            f"agent={spec.agent_id} trace={spec.trace_id or '∅'} — "
+            "Stop took the slot during the handoff; interrupting the started turn")
+        try:
+            handle.terminate()
+        except Exception as exc:  # noqa: BLE001 - the launch already happened
+            log_exception("spawnUnownedInterruptFail", exc, detail=spec.agent_id)
 
     def _resume_after_account_switch(self, spec, attempt, state):
         if (_INFLIGHT.get(spec.agent_id) != spec.trace_id
@@ -2837,11 +2854,12 @@ class TurnDispatchService:
                  "account_recovery": "waiting",
                  "message": f"Waiting for a {spec.backend} account with available usage"}))
 
-    def _spawn_attempt_claimed(self, spec: _TurnSpec, *, attempt: int) -> "_AdmissionRefused | None":
+    def _spawn_attempt_claimed(self, spec: _TurnSpec, *, attempt: int) -> "_AdmissionRefused | bool | None":
         """Spawn one attempt of a turn. Attempt 1 surfaces spawn failures as
         a DispatchError (so /send returns 500); later attempts run from a
         timer thread and just mark the agent INTERRUPTED on failure.
-        _ADMISSION_REFUSED only when the final call-open check refused it."""
+        _ADMISSION_REFUSED only when the final call-open check refused it; False
+        when a retry lost its slot before its handoff."""
         from . import task_goal_recovery, task_plans
         if spec.origin == "heartbeat" and task_plans.recovery_owns_agent(spec.agent_id):
             raise DispatchError(409, "Durable goal owns continuation")
@@ -2937,6 +2955,13 @@ class TurnDispatchService:
                 if attempt == 1:
                     # Later attempts follow a handoff already recorded here.
                     _record_launch_attempt(spec)
+                elif not self._still_owns(spec):
+                    # A retry runs outside the runtime's admission mutex: a Stop
+                    # may have taken the slot while it was prepared (TP-N1).
+                    log("spawnAbandoned",
+                        f"agent={spec.agent_id} trace={spec.trace_id or '∅'} — "
+                        "ownership lost before the retry's handoff")
+                    return False
                 state["spawn_started"] = True
                 handle = self.backends.spawn_turn(
                     spec.backend,
@@ -2958,6 +2983,10 @@ class TurnDispatchService:
                     run_if_owned=run_if_owned,
                 )
                 state["handle"] = handle
+                if handle is not None and not self._still_owns(spec):
+                    # A Stop during the handoff found no handle to interrupt yet;
+                    # one after this check finds it (TP-N1).
+                    self._interrupt_unowned(spec, handle)
                 team_store.mark_injected(spec.agent_id, spec.team_inbox_ids)
                 if account_attempt is not None:
                     account_attempt.handle = handle
