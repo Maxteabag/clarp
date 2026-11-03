@@ -5922,8 +5922,10 @@ class Handler(BaseHTTPRequestHandler):
         # Cancellation immediately closes the durable gate checked by workers
         # before each delivery/action. The prompt is cleanup: it lets the owner
         # tear down or reconfigure a shared process, but correctness does not
-        # depend on that best-effort dispatch succeeding.
-        if cancellation_changed:
+        # depend on that best-effort dispatch succeeding. A computer-owned job
+        # (no session) has no owner to clean up; an empty forced session would
+        # route the prompt to the default or sticky agent (AUT-04).
+        if cancellation_changed and job.get("session"):
             try:
                 import shlex
                 cancelled_handle = background_jobs.job_handle(job)
