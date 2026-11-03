@@ -620,6 +620,24 @@ def _publish_clip_event(*, stream: Any | None, herald: Any | None,
         ))
 
 
+
+# A clip claimed this long before a restart is not spoken again (VP-05).
+STALE_IN_FLIGHT_MS = 2 * 60 * 1000
+
+
+def recover_in_flight(*, now_ms: int | None = None) -> dict[str, int]:
+    """At start, before the worker claims anything: speech claimed long ago
+    fails instead of being spoken again, recent speech re-queues, and clips
+    left streaming by the dead process fail (their producer is gone)."""
+    from . import clip_store, db
+    now = db.now_ms() if now_ms is None else now_ms
+    return {
+        "failed": tts_queue.fail_stale_in_flight(now - STALE_IN_FLIGHT_MS),
+        "requeued": tts_queue.reset_in_flight(),
+        "clips_failed": clip_store.fail_streaming_clips("producer ended with a restart"),
+    }
+
+
 class TTSWorker:
     """Daemon thread that drains tts_queue at a fixed interval.
 
@@ -656,10 +674,14 @@ class TTSWorker:
         # Reset any rows stuck in 'synthesizing' from a previous run that
         # died mid-claim. Idempotent + cheap.
         try:
-            stranded = tts_queue.reset_in_flight()
-            if stranded:
+            recovered = recover_in_flight()
+            if recovered["requeued"]:
                 _emit("tts_worker", "resetInFlight",
-                      detail={"count": stranded})
+                      detail={"count": recovered["requeued"]})
+            if recovered["failed"] or recovered["clips_failed"]:
+                _emit("tts_worker", "staleInFlightFailed",
+                      detail={"count": recovered["failed"],
+                              "clips": recovered["clips_failed"]})
         except Exception as e:  # noqa: BLE001
             log_exception("ttsWorkerResetFail", e)
         self._thread = threading.Thread(target=self._loop, daemon=True,
