@@ -165,3 +165,32 @@ def test_cartesia_fallback_is_used_only_when_explicit(env, monkeypatch):
         voice_id="eleven-voice", session="claude", source=TurnSource.PWA)
     assert tts_worker.synth_one(audio_dir=env["audio_dir"]) is True
     assert tts_queue.recent(limit=1)[0]["status"] == tts_queue.DONE
+
+
+def test_a_restart_fails_stale_in_flight_speech_instead_of_speaking_it_again(env, patch_eleven):
+    """VP-05: a restart during synthesis re-spoke the reply, however old, and
+    left its clip row streaming for ever."""
+    from lib import db, tts_worker
+    from lib.protocol import ClipProducerStatus
+
+    stale = tts_queue.enqueue(agent_id=env["agent_id"], text="old answer", voice_id="V_MIKE",
+                              session="claude", source=TurnSource.PWA)
+    fresh = tts_queue.enqueue(agent_id=env["agent_id"], text="new answer", voice_id="V_MIKE",
+                              session="claude", source=TurnSource.PWA)
+    assert tts_queue.claim_next()["queue_id"] == stale
+    assert tts_queue.claim_next()["queue_id"] == fresh
+    now = db.now_ms()
+    db.conn().execute("UPDATE tts_queue SET claimed_at = ? WHERE queue_id = ?",
+                      (now - 2 * 60 * 60 * 1000, stale))
+    clip = agents_db.record_clip(agent_id=env["agent_id"], path=str(env["audio_dir"] / "dead.pcm"),
+                       voice_id="V_MIKE", trace_id="t-dead",
+                       producer_status=ClipProducerStatus.STREAMING)
+
+    tts_worker.recover_in_flight(now_ms=now)
+
+    rows = {r["queue_id"]: r["status"] for r in db.conn().execute(
+        "SELECT queue_id, status FROM tts_queue")}
+    assert rows == {stale: tts_queue.FAILED, fresh: tts_queue.QUEUED}
+    status = db.conn().execute(
+        "SELECT producer_status FROM clips WHERE clip_id = ?", (clip,)).fetchone()[0]
+    assert status == ClipProducerStatus.FAILED
