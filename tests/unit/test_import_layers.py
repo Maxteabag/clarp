@@ -52,8 +52,9 @@ HTTP = frozenset({"server", "runtime", "__init__"} | {f"lib.{m}" for m in (
     "terminal_ws",
 )})
 ROUTES = "lib.routes"
-# Old paths kept as sys.modules aliases of their new home (S1 commits 2 and 5).
-# An alias applies once its target exists; until then the old module is real.
+# Old paths and their new homes, one module object (S1 commits 2 and 5). Edges
+# are named by the new path once it exists. Until the final S1 move the code of
+# lib.db_schema stays in the old file and lib.persistence.schema aliases it.
 ALIASES = {
     "lib.db_schema": "lib.persistence.schema",
     "lib.db_migrations": "lib.persistence.migrate",
