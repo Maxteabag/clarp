@@ -69,7 +69,7 @@ def test_transcription_model_remove_accepts_unknown_ids(running_server):
     base, _ctx, _srv = running_server
     assert _call(base, "POST", "/transcription-models/remove", raw=b"{") == (
         400, {"error": "bad json"})
-    # Today an empty or unknown model id is "removed" with 200.
+    # Today an empty or unknown model id is "removed" with 200 (HTTP-N3, fix lane).
     assert _call(base, "POST", "/transcription-models/remove", {}) == (
         200, {"ok": True, "model_id": ""})
     assert _call(base, "POST", "/transcription-models/remove", {"model_id": "nope"}) == (

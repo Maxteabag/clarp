@@ -212,15 +212,25 @@ resolve to the same objects. Each move therefore needs:
    `TTSWorker`, `_STT_ACTIVATION_LOCK`, `SERVER_TIMING`,
    `_deliver_decision_rows`, `eventlog`, `agents_db`, `BIND_ADDR`); and
    **composition-root state** (`_CFG`, `PORT`, `BIND_ADDR`, `_runtime_paths`).
-2. **Preparatory commit, separate from the move.** Any mutable or
-   composition-root name a moving function reads gets a leaf owner module
-   under `lib.routes` (for example `lib/routes/boot.py` owning the import-time
-   config snapshot that `_handle_diagnostics_health` reads as `_CFG`), and
-   server.py binds the same object from it (`from lib.routes.boot import
-   _CFG`). Test patch sites that rebind such a name move to the owner in the
-   same preparatory commit (test-only edits). This commit is reviewed as a
-   behaviour-neutral rebinding, with its own golden and replay run. A name
-   that cannot get a leaf owner keeps its function in server.py for now.
+2. **Preparatory commit, separate from the move** (lead decision, 3 Nov:
+   S3 owns composition-root state that moved handlers read).
+   - **Composition-root state** (`_CFG`, `PORT`, `BIND_ADDR`,
+     `_runtime_paths`) is exposed through `ServerContext` as a read-only
+     accessor that returns the very object server.py holds, never a fresh
+     `config.load()` (that would turn the boot snapshot into live config and
+     change behaviour, see HTTP-12). Example: `_handle_diagnostics_health`
+     reads `_CFG.delivery`; the preparatory commit adds the accessor, edits the
+     handler **in server.py** to read it from `self.ctx`, and adds a test that
+     the accessor `is` server.py's `_CFG` under each load alias. The later move
+     of that handler is then byte-identical.
+   - **Mutable module state** only moving code uses (`_OUTDATED_CLIENTS_NOTED`,
+     `_CARTESIA_PREVIEW_LOCKS`) moves to a leaf owner module under
+     `lib.routes`, and server.py binds the same object from it.
+   - Test patch sites that rebind such a name move to the new owner in the
+     same commit (test-only edits). The commit is reviewed as a
+     behaviour-neutral rebinding, with both route goldens and a replay run.
+   - A moved module never imports server.py. A name that fits neither route
+     keeps its function in server.py for now.
 3. **Move commit.** Pure move. A test loads server.py under the production
    path name and under each test alias (`claude_pwa_server`,
    `clarp_route_probe_server`) and asserts, for every global loaded by a
@@ -277,6 +287,9 @@ mixins are the move vehicle with the by-name AST identity check; the package
 is `server/lib/routes`, exempt from rule 8 by name, imported by nothing else
 in `server/lib`.
 
-Open: the leaf owner for composition-root state (section 6, step 2) needs the
-lead's agreement before group 1 moves, because `_handle_diagnostics_health`
-reads `_CFG` and is in group 1.
+Decided by the lead on 3 Nov: S3 owns composition-root state that moved
+handlers read; it reaches them through an identity-tested read-only
+`ServerContext` accessor set up in a preparatory commit, never through
+`config.load()` and never by importing server.py (section 6, step 2).
+
+Open: none.
