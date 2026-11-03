@@ -44,7 +44,8 @@ PREFIXED = re.compile(r'^([a-z][a-z0-9]{0,15}[-_])([0-9a-f]{12,64}|[0-9A-Za-z]{2
 # (review s0-harness-57d175ff finding 1): an epoch-range number or an ISO
 # timestamp under one of these keys becomes <time>; anywhere else it is content.
 CLOCK_KEYS = frozenset({
-    'admitted_at', 'at', 'created_at', 'done_ts', 'ended_at_ms', 'enqueued_at', 'last_activity',
+    'admitted_at', 'at', 'available_at', 'claimed_at', 'created_at', 'expires_at', 'finished_at',
+    'last_run_at', 'done_ts', 'ended_at_ms', 'enqueued_at', 'last_activity',
     'last_lap_ms', 'last_turn_end', 'latest_state_ts', 'latest_ts', 'observed_at', 'opened_at',
     'received_at', 'server_now_ms', 'settled_at', 'since_ms', 'started_at', 'started_at_ms',
     'timestamp', 'ts', 'turn_started_ms', 'updated_at'})
@@ -53,14 +54,16 @@ CLOCK_KEYS = frozenset({
 JSON_COLUMNS = frozenset({
     ('agents', 'mcp_servers'), ('janitor_attachments', 'config_json'),
     ('janitor_configs', 'execution_json'), ('janitor_configs', 'options_json'),
-    ('janitor_configs', 'scope_json'), ('janitor_trigger_definitions', 'defaults_json'),
+    ('janitor_configs', 'scope_json'), ('janitor_runs', 'configuration_json'), ('janitor_trigger_definitions', 'defaults_json'),
     ('messages', 'display_cells_json'), ('messages', 'tools_json'), ('messages', 'turn_json'),
     ('personas', 'voice_id'), ('settings', 'value'), ('state_log', 'detail'),
     ('vocab_runs', 'dropped_json'), ('vocab_runs', 'included_json'), ('voice_events', 'detail')})
 JSON_HTTP_KEYS = frozenset({'voice_id'})
 DURATION_KEYS = frozenset({'duration_ms', 'worked_ms', 'elapsed_ms', 'source_delta_ms', 'latency_ms',
                            'time_used_seconds', 'timeUsedSeconds', 'age_ms', 'age_sec'})
-ID_KEYS = frozenset({'focus', 'dedupe_key', 'id', 'conv', 'epoch', 'cause', 'source', 'thread', 'threadId', 'turnId',
+# request_hash, cache_key: hashes over content that includes generated ids;
+# group: a live tool group named after its first item id (explore:cx:<id>).
+ID_KEYS = frozenset({'focus', 'dedupe_key', 'request_hash', 'cache_key', 'group', 'id', 'conv', 'epoch', 'cause', 'source', 'thread', 'threadId', 'turnId',
                      'native_session_id', 'backend_session_id', 'cause_message_id', 'client_msg_id'})
 # Lanes whose frames are pure invalidation signals ("refetch now"). How many the
 # Host sends, and whether one names the backend session, varies with timing
@@ -68,7 +71,9 @@ ID_KEYS = frozenset({'focus', 'dedupe_key', 'id', 'conv', 'epoch', 'cause', 'sou
 # presence: one frame per (type, session, agent) keeping only those fields.
 COALESCED_TYPES = frozenset({'transcript-updated'})
 # Table columns that hold generated ids outside an id-named column.
-ID_COLUMNS = frozenset({('settings', 'key'), ('settings', 'value')})
+ID_COLUMNS = frozenset({('settings', 'key'), ('settings', 'value'),
+                        # 'x:tool:<command> #<hash over the item id>'
+                        ('tool_explanation_decisions', 'signature')})
 # Two writers record the same transition for one turn (the dispatcher's spawn row
 # and the runner's provider turn-start row, both 'thinking'); their order races.
 # Consecutive state rows of one agent with the same kind and trace are compared
