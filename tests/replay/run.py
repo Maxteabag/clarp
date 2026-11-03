@@ -155,8 +155,26 @@ def _set_files_readonly(root: Path) -> None:
             path.chmod(path.stat().st_mode & ~(stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH))
 
 
+STATIC_MTIME = 1_700_000_000
+
+
+def pin_static_mtimes(build: Path) -> None:
+    """The Host's server-version (and service-worker version) is the newest
+    mtime under static/, which a checkout or sync sets to whenever it happened.
+    Every build gets the same mtimes, so that value differs only if code does."""
+    for path in (build / 'static').rglob('*'):
+        if not path.is_symlink():
+            os.utime(path, (STATIC_MTIME, STATIC_MTIME))
+
+
 def build_for(ref: str, scratch: Path, allow_path: bool) -> tuple[Path, str]:
     """A pinned, clean, read-only build for ``ref``; returns (path, sha)."""
+    build, sha = _build_for(ref, scratch, allow_path)
+    pin_static_mtimes(build)
+    return build, sha
+
+
+def _build_for(ref: str, scratch: Path, allow_path: bool) -> tuple[Path, str]:
     prepared = prepared_build(ref)
     if prepared is not None:
         return prepared

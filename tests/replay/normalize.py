@@ -220,7 +220,9 @@ def normalize(capture: dict, harness_root: str) -> dict:
         return n.value(r)
     out['tables'] = {name: {'pk': db.get('pk', {}).get(name, []), 'rows': [row(name, r) for r in rows]}
                      for name, rows in sorted(db['tables'].items()) if name != 'sse_events'}
-    out['files'] = [{'path': n.string(f['path'], 'path'), 'bytes': f['bytes'],
+    # Size only for opaque bytes: JSON and text embed scratch paths of varying length
+    # and are compared by their normalized content instead.
+    out['files'] = [{'path': n.string(f['path'], 'path'), 'bytes': f['bytes'] if f.get('kind') == 'bytes' else None,
                      'digest': f['digest'] if f.get('kind') == 'bytes' else None,
                      'json': n.value(f['json']) if f.get('kind') == 'json' else None,
                      # Small text files: compared as text with UUIDs (generated tokens) as surrogates.
