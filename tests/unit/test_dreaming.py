@@ -1199,26 +1199,40 @@ def test_a_dream_that_keeps_failing_ends_and_frees_the_next_night(tmp_path, monk
     assert ended["status"] != "active" and ended["last_error"]
 
 
-def test_a_run_past_its_deadline_is_harvested_only_once_its_backend_stops(tmp_path, monkeypatch):
+def _live_dream_worker(monkeypatch, tmp_path, agent_id, run, *, pid=True):
+    """Dispatch one isolated round of ``run`` whose worker is a real process
+    (or, with ``pid=False``, a handle that names no process)."""
+    import subprocess
+    from types import SimpleNamespace
+    proc = subprocess.Popen(["sleep", "60"])
+    handle = SimpleNamespace(pid=proc.pid, proc=proc) if pid else SimpleNamespace()
+    monkeypatch.setattr(dreaming, "_dream_scratch_cwd", lambda *_: tmp_path)
+    monkeypatch.setattr(dreaming.backends, "spawn_turn", lambda *_a, **_k: handle)
+    prompt = dreaming.next_round_for_run(run)["prompt"]
+    assert dreaming.dispatch_isolated_dream(agents_db.get_by_agent_id(agent_id), prompt)
+    return proc
+
+
+def _stop(proc):
+    proc.kill()
+    proc.wait()
+
+
+def test_a_run_past_its_deadline_is_harvested_only_once_its_worker_stops(tmp_path, monkeypatch):
     """AUT-06 review: the deadline ends the run at once, but its worktree is
-    committed and removed only when the dream's backend is no longer using it."""
-    agent_id = agents_db.create_agent(persona="Late", voice_id="v", cwd=str(tmp_path), session="late")
-    agents_db.update_agent(agent_id, dreaming_enabled=True)
-    run = dreaming.create_dream_run(agents_db.get_by_agent_id(agent_id), local_date="2026-01-01",
-                                    timezone_name="UTC", timezone_source="synthetic")
-    clock = int(run["started_at"]) + dreaming.DREAM_RUN_DEADLINE_SEC * 1000 + 1
-    monkeypatch.setattr(dreaming.db, "now_ms", lambda: clock)
+    committed and removed only when the run's own dream worker has exited."""
+    agent_id, run, _clock = _expired_dream_run(tmp_path, monkeypatch)
+    worker = _live_dream_worker(monkeypatch, tmp_path, agent_id, run)
     monkeypatch.setattr(dreaming, "_dream_worktree_path", lambda run_id: tmp_path)
-    harvested, handles = [], [object()]
+    harvested = []
     monkeypatch.setattr(dreaming, "harvest_worktree", harvested.append)
-    monkeypatch.setattr(dreaming.backends, "active_handles", lambda *_: list(handles))
     scheduler = dreaming.DreamingScheduler(send_dream=lambda *_: False)
-
-    scheduler._advance_run(run)
-
-    assert dreaming.get_run(run["run_id"])["status"] == "abandoned"
-    assert harvested == []
-    handles.clear()
+    try:
+        scheduler._advance_run(run)
+        assert dreaming.get_run(run["run_id"])["status"] == "abandoned"
+        assert harvested == []
+    finally:
+        _stop(worker)
     scheduler.run_once()
     assert harvested == [run["run_id"]]
 
@@ -1259,37 +1273,76 @@ def _expired_dream_run(tmp_path, monkeypatch, clock=None):
     return agent_id, run, clock
 
 
-def test_routine_activity_does_not_hide_a_busy_dream_backend_from_cleanup(tmp_path, monkeypatch):
+def test_routine_activity_does_not_hide_a_busy_dream_worker_from_cleanup(tmp_path, monkeypatch):
     """AUT-06 review 2 (B's control): scheduling ignores routine activity so a
-    dream is not starved, but a live backend still keeps its worktree."""
+    dream is not starved, but a live dream worker still keeps its worktree."""
     agent_id, run, _clock = _expired_dream_run(tmp_path, monkeypatch)
+    worker = _live_dream_worker(monkeypatch, tmp_path, agent_id, run)
     agents_db.record_state(agent_id, "thinking", {"origin": "heartbeat"})
-    monkeypatch.setattr(dreaming.backends, "active_handles", lambda *_: [object()])
     harvested = []
     monkeypatch.setattr(dreaming, "harvest_worktree", harvested.append)
-
-    dreaming.DreamingScheduler(send_dream=lambda *_: False)._advance_run(run)
-
+    try:
+        dreaming.DreamingScheduler(send_dream=lambda *_: False)._advance_run(run)
+    finally:
+        _stop(worker)
     assert dreaming.get_run(run["run_id"])["status"] == "abandoned"
     assert harvested == []
 
 
+@pytest.mark.parametrize("runtime_view", ["idle", "unavailable"])
+def test_a_runtime_view_without_the_dream_worker_does_not_free_its_worktree(tmp_path, monkeypatch, runtime_view):
+    """AUT-06 review 3 (B's control): the dream worker is a Host-local
+    process; a separate runtime's activity, idle or unreadable, says nothing
+    about it, so cleanup reads the run's own worker."""
+    agent_id, run, _clock = _expired_dream_run(tmp_path, monkeypatch)
+    worker = _live_dream_worker(monkeypatch, tmp_path, agent_id, run)
+    monkeypatch.setattr(dreaming.backends, "_RUNTIME_CLIENT", object())
+
+    def runtime_status():
+        if runtime_view == "unavailable":
+            raise RuntimeError("synthetic runtime status unavailable")
+        return {"active": {}, "spawning": [], "terminals": []}
+
+    monkeypatch.setattr(dreaming.backends, "runtime_status", runtime_status)
+    harvested = []
+    monkeypatch.setattr(dreaming, "harvest_worktree", harvested.append)
+    try:
+        dreaming.DreamingScheduler(send_dream=lambda *_: False)._advance_run(run)
+    finally:
+        _stop(worker)
+    assert harvested == []
+
+
+def test_a_dream_worker_of_unknown_identity_defers_cleanup(tmp_path, monkeypatch):
+    agent_id, run, _clock = _expired_dream_run(tmp_path, monkeypatch)
+    worker = _live_dream_worker(monkeypatch, tmp_path, agent_id, run, pid=False)
+    _stop(worker)
+    monkeypatch.setattr(dreaming, "_dream_worktree_path", lambda run_id: tmp_path)
+    harvested = []
+    monkeypatch.setattr(dreaming, "harvest_worktree", harvested.append)
+    scheduler = dreaming.DreamingScheduler(send_dream=lambda *_: False)
+    scheduler._advance_run(run)
+    scheduler.run_once()
+    assert harvested == []
+
+
 def test_a_deferred_cleanup_survives_a_day_of_downtime(tmp_path, monkeypatch):
-    """AUT-06 review 2 (B's control): the cleanup a busy backend deferred is
-    kept until it succeeds, however long the backend or the Host was away."""
+    """AUT-06 review 2 (B's control): the cleanup a live worker deferred is
+    kept until it succeeds, however long the worker or the Host was away."""
     agent_id, run, clock = _expired_dream_run(tmp_path, monkeypatch)
-    handles = [object()]
-    monkeypatch.setattr(dreaming.backends, "active_handles", lambda *_: list(handles))
+    worker = _live_dream_worker(monkeypatch, tmp_path, agent_id, run)
     monkeypatch.setattr(dreaming, "_dream_worktree_path", lambda _run_id: tmp_path)
     harvested = []
     monkeypatch.setattr(dreaming, "harvest_worktree", harvested.append)
     monkeypatch.setattr(dreaming, "pending_dreaming_agents", lambda **_: [])
     scheduler = dreaming.DreamingScheduler(send_dream=lambda *_: False)
-    scheduler._advance_run(run)
-    assert harvested == []
+    try:
+        scheduler._advance_run(run)
+        assert harvested == []
+    finally:
+        _stop(worker)
 
     clock[0] += 2 * dreaming.DREAM_RUN_DEADLINE_SEC * 1000 + 1
-    handles.clear()
     scheduler.run_once()
 
     assert harvested == [run["run_id"]]
