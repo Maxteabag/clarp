@@ -8,6 +8,8 @@ import threading
 import time
 from pathlib import Path
 
+import pytest
+
 from lib import agents as agents_db
 from lib import codex_app_server
 from lib.backend.codex import TurnState as _TurnState
@@ -587,3 +589,54 @@ def test_retiring_a_dead_reader_client_sends_no_request(monkeypatch):
         active.on_error.assert_called_once()
     finally:
         codex_app_server._CLIENTS.clear()
+
+
+def test_a_client_is_not_reused_while_its_reader_is_cleaning_up(monkeypatch):
+    # Admissions overlap the ended reader's cleanup: the pool must already
+    # treat the client as dead, and a request on it must fail at once
+    # instead of waiting out its timeout under the pool lock.
+    client, active = _client_with_turn("agent-cleanup")
+    client.proc.stdin = None
+    client.auth_fingerprint = codex_app_server._auth_fingerprint()
+    client.refresh_requested = False
+    client._next_id = 1
+    monkeypatch.setattr(client, "_callback", lambda callback, value: callback(value))
+    monkeypatch.setattr(client, "_send", lambda _message: None)
+    entered, release = threading.Event(), threading.Event()
+
+    class SlowWaiter(dict):
+        def __setitem__(self, key, value):
+            if key == "error":  # _fail_all has taken its pending snapshot
+                entered.set()
+                release.wait(3)
+            super().__setitem__(key, value)
+
+    client._pending[0] = (threading.Event(), SlowWaiter())
+
+    class FakeClient:
+        def __init__(self, agent_id, session, stream=None):
+            self.proc = _FakeProc()
+
+    monkeypatch.setattr(codex_app_server, "_Client", FakeClient)
+    codex_app_server._CLIENTS.clear()
+    codex_app_server._CLIENTS[codex_app_server._SHARED_KEY] = client
+    reader = threading.Thread(target=client._read)
+    reader.start()
+    try:
+        assert entered.wait(2)
+        started = time.monotonic()
+        try:
+            client.request("thread/resume", {"threadId": "thread-1"}, timeout=2)
+        except TimeoutError:
+            pytest.fail("request on a client nobody reads waited out its timeout")
+        except RuntimeError:
+            pass
+        assert time.monotonic() - started < 1
+        fresh = codex_app_server._client("agent-cleanup", "cleanup")
+        assert isinstance(fresh, FakeClient)
+    finally:
+        release.set()
+        reader.join(3)
+        codex_app_server._CLIENTS.clear()
+    assert not reader.is_alive()
+    assert active.on_error.call_count == 1, "one terminal outcome per turn"
