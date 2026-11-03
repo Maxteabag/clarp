@@ -1221,3 +1221,29 @@ def test_a_run_past_its_deadline_is_harvested_only_once_its_backend_stops(tmp_pa
     handles.clear()
     scheduler.run_once()
     assert harvested == [run["run_id"]]
+
+
+def test_a_late_digest_does_not_complete_an_abandoned_run(tmp_path, monkeypatch):
+    """AUT-06b (reviewer B's control): a synthesis result that arrives after
+    the run was abandoned (deadline or opt-out) neither completes the run nor
+    delivers its digest."""
+    agent_id = agents_db.create_agent(persona="Late", voice_id="v", cwd=str(tmp_path), session="late")
+    agents_db.update_agent(agent_id, dreaming_enabled=True)
+    run = dreaming.create_dream_run(agents_db.get_by_agent_id(agent_id), local_date="2026-01-01",
+                                    timezone_name="UTC", timezone_source="synthetic")
+    clock = int(run["started_at"]) + dreaming.DREAM_RUN_DEADLINE_SEC * 1000 + 1
+    monkeypatch.setattr(dreaming.db, "now_ms", lambda: clock)
+    harvested, delivered = [], []
+    monkeypatch.setattr(dreaming, "harvest_worktree", harvested.append)
+    monkeypatch.setattr(dreaming, "_deliver_digest", lambda **kw: delivered.append(kw))
+    round_id = dreaming._insert_round(run_id=run["run_id"], stage="synthesize",
+                                      round_index=100, target_tokens=100)
+    dreaming.mark_round_sent(round_id)
+    dreaming.DreamingScheduler(send_dream=lambda *_: False)._advance_run(run)
+    assert dreaming.get_run(run["run_id"])["status"] == "abandoned"
+
+    dreaming.record_final_digest(agent_id=agent_id, run_id=run["run_id"],
+                                 round_id=round_id, digest="synthetic late digest")
+
+    assert dreaming.get_run(run["run_id"])["status"] == "abandoned"
+    assert delivered == []
