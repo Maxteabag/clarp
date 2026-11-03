@@ -41,9 +41,9 @@ corpus. Scratch space is `/var/tmp/clarp-refactor-program/rf-harness/scratch`
 ```
 run.py ── for each build × scenario (thread pool, --jobs 4) ──┐
                                                              capture.py
-  host.py (subprocess, own process group, own state dir)  <──┘  drives HTTP, reads SSE,
+  host.py (subprocess, own process group, own state dir)  <──┘  drives HTTP, reads SSE frames,
     ├─ server/ and static/ from the BUILD under test               waits on observable state,
-    └─ fakes from the HARNESS tree:                                dumps the database
+    └─ fakes from the HARNESS tree:                                freezes, dumps db and files
        tests/qa/fake_codex.py (deterministic provider process),
        FakeTTSEngine, StubSTT, no provider CLI resolvable
 normalize.py ── rewrites clock readings, generated ids, pids, ports, scratch paths
@@ -51,63 +51,105 @@ diff.py ────── aligns and compares, prints the report
 planted.py ─── deliberate behaviour changes for the proof
 ```
 
-- **Two builds, one harness.** A build is a checkout: a commit is added with
-  `git worktree add --detach` under the scratch directory and cached by SHA;
-  an existing checkout path is used as is. The launcher, fakes, corpus and
-  normalizer always come from the harness tree, so base and head differ only
-  in their server code.
-- **Per scenario a fresh Host.** Each scenario starts its own Host process on
-  a fresh state directory (`HOME`, `XDG_*`, `CLAUDE_PWA_DB`, `CLARP_*` dirs all
-  inside it), with two codex-backed agents, `rachel` and `mike`. The Host is
-  a real `build_server` on a loopback port with a bearer token; turns go
-  through the real dispatcher, runner and provider process (the fake). Only
-  the codex backend can spawn; anything else raises.
+- **Two builds, one harness.** A build is a commit added with
+  `git worktree add --detach` under `scratch/builds/<full sha>`, made
+  read-only, and reused only while it is still at that SHA and clean
+  (otherwise the run stops with a build error). `--allow-path` accepts an
+  existing clean checkout for development; such a run is diagnostic. The
+  launcher, fakes, corpus and normalizer always come from the harness tree,
+  so base and head differ only in their server code. Every report starts
+  with a manifest: target SHA(s), harness commit (and `DIRTY` if
+  `tests/replay` has local changes), a digest of the harness files, the
+  scenario ids and the planted change ids.
+- **Per scenario a fresh Host.** Each scenario starts its own Host process
+  on a fresh state directory the harness created and marked; nothing is
+  deleted unless it carries that marker. The child gets a minimal
+  environment (`PATH=/usr/local/bin:/usr/bin:/bin`, locale, nothing else
+  inherited), and `host.py` points `HOME`, `TMPDIR`, `XDG_*`,
+  `CLAUDE_PWA_DB`, the `CLARP_*` dirs, `CODEX_HOME` and `CLAUDE_CONFIG_DIR`
+  into the state directory. Two codex-backed agents, `rachel` and `mike`.
+  The Host is a real `build_server` on a loopback port with a bearer token;
+  turns go through the real dispatcher, runner and provider process (the
+  fake). Only the codex backend can spawn; anything else raises. This is
+  not an OS sandbox: the executor provides that (CI runs inside
+  `scripts/ci_contained.sh`: no network but loopback, no credentials, empty
+  HOME; the buildbox's `heavy-remote` must give the equivalent).
 - **Waits poll state, never the clock**: a turn settled in `turns`, a provider
   `turn/start` in the fake's request log, `/status` busy, and finally
   quiescence (every scenario session idle, SSE quiet for 0.4 s).
-- **Shutdown.** The capture reads everything it needs at quiescence, then
-  kills the Host's own process group (a graceful shutdown costs about 10 s).
-  Shutdown behaviour is therefore not compared; restart scenarios belong to
-  the nightly corpus.
+- **A frozen cut.** At quiescence the SSE reader is stopped and joined, then
+  the Host's own process group is killed (which takes the fake provider
+  with it), and only then are the database (one read transaction) and the
+  files read: no writer runs during the dump. A stream that errors, sends a
+  non-JSON frame or ends early makes the run fail; it is never read as
+  quiet. Graceful shutdown (about 10 s) is not compared; restart scenarios
+  belong to the nightly corpus.
 
 ## What is compared
 
 | Channel | Captured | Compared as |
 |---|---|---|
-| `http` | every request a scenario makes: method, path, status, JSON body | sequence, then field by field |
-| `sse` | every `/events?live=<sessions>` event except heartbeats | sequence aligned by signature (type, kind, status, state, phase, action, live op names), then field by field |
-| `schema` | `sqlite_master` (type, name, table, SQL) | exact, after normalization |
-| `table` | every non-empty table, all rows | multiset per table; leftover rows paired by first column and compared field by field |
-| `files` | every file under the state directory except logs and the databases: path and size | exact |
+| `http` | every request a scenario makes: method, route, status, contract headers (`Content-Type`, `Location`, `Content-Range`, `Accept-Ranges`, `Content-Encoding`, `Cache-Control`, `Content-Disposition`, `ETag`, `WWW-Authenticate`, `Retry-After`), JSON body; a non-JSON body as length and SHA-256 | sequence, then field by field |
+| `sse` | every complete `/events?live=<sessions>` frame except heartbeats: event name, whether it carried an `id:`, data (multi-line data joined) | sequence aligned by signature (event name, type, kind, status, state, phase, action, live op names), then field by field |
+| `schema` | `sqlite_master` (type, name, table, SQL), raw | exact |
+| `table` | every non-empty table, all rows, with its primary key columns | multiset per table (exact counts); leftover rows paired by primary key and compared field by field, else reported as added or removed |
+| `files` | every file under the state directory except logs and the databases: path, size, and either the parsed JSON (`.json`, `.jsonl`) or a SHA-256 of the bytes | by path, then field by field |
 | `cli` | reserved for CLI scenarios (`clarp-admin` against the replay Host) | exact |
 
-JSON stored in text columns is parsed and normalized like the wire.
+**Normalization** (`normalize.py`) follows an explicit contract and rewrites
+only what differs by nature between runs:
 
-**Normalization** (`normalize.py`) rewrites only what differs by nature
-between runs: values under clock-like keys (`ts`, `*_at`, `*_ms`, `since`,
-durations) become `<time>`; epoch numbers and ISO timestamps anywhere;
-UUIDs, hex tokens and the random tail of prefixed ids (`pn-…`, `live-…`)
-become ordinal surrogates `<id:n>` by first appearance, so the same id keeps
-the same surrogate within a run; pids, ports and the scratch, build and
-harness paths. Event ids become `<event_id>` (their order is the sequence).
-Everything else, including counts, codes, ordering and presence of fields, is
-compared as is. Each rule exists because the unchanged-code check showed that
-noise; a rule must never hide a planted change.
+- a number in the epoch range (seconds or milliseconds) or an ISO timestamp
+  string becomes `<time>`; a setting such as `timeout_ms: 30000` is not in
+  that range and is compared as is;
+- the Host's measured durations, only under the keys in `DURATION_KEYS`;
+- generated ids, only where they are known to occur: a UUID or a 12–64
+  character hex token under an id key (`id`, `*_id`, `*_ids`, `ID_KEYS`) or in
+  a scratch path, and the random tail of a prefixed id (`pn-…`, `live-…`)
+  under an id key. Each becomes an ordinal surrogate by first appearance
+  (`<id:n>`), so the same id keeps the same surrogate within a run and an id
+  that moves shows up. Hex in other fields (a checksum, free text) is content
+  and compared;
+- event ids become `<eid:n>` by first appearance, keeping which frames name
+  the same event;
+- pids and ports under `PID_KEYS`, the loopback port in URLs, and the
+  scratch, build and harness paths.
+
+JSON stored in a text column or a file is parsed and compared as JSON (the
+stored string's key order and whitespace are not compared). Schema SQL is
+compared raw. Every rule exists because a replay of unchanged code showed
+that noise; a rule is added only with that evidence and never one that
+hides a planted change.
 
 ## The report
 
 Prints structure, counts and codes, **never message text**. A difference is
-`id class scenario / channel / locator / kind: base -> head`. A value is
-printed only when its key is a code key (`type`, `kind`, `status`, `op`,
-`outcome`, `state`, `method`, `path`, `reason`, …) and it looks like a code
-(`[\w./:<>?=&-]{1,48}`), or it is a number, boolean or null. Anything else is
-printed as `type[length]#hash8`, enough to tell values apart without showing
-them. Kinds: `changed`, `field-added`, `field-removed`, `row-added`,
-`row-removed`, `sequence-insert|delete|replace` (reorders show as
-replace/insert+delete in the aligned sequence).
+`id class scenario / channel / locator / kind: base -> head`.
 
-The id is a hash of scenario, channel, locator and kind, so the same
-difference has the same id on every run.
+- A value prints only if it is a number, boolean or null, a surrogate the
+  normalizer made (`<id:3>`, `<time>`), or a **code**: a string under a code
+  key (`type`, `kind`, `status`, `op`, `outcome`, `state`, `method`, `phase`,
+  `role`, `action`, `mode`, `event`, `field`, `backend`, `code`, …) that is
+  also an identifier-shaped string literal in the server source shipped with
+  the harness (the codebook). Text a user or agent wrote is not in the
+  source, so it prints as `str[length]#hash8`, enough to tell values apart
+  without showing them.
+- A key in a locator prints only if it is in the codebook or one of the
+  capture's own envelope keys; any other key (a map keyed by user text)
+  prints as `k#hash8`. Request paths print as their route shape with unknown
+  segments hashed; file paths print as a hash.
+- Run errors print as the build label, scenario, step index, op and what it
+  waited for; never Host output.
+
+Kinds: `changed`, `field-added`, `field-removed`, `row-added`, `row-removed`,
+`file-added`, `file-removed`, `run-failed`, `sequence-insert|delete|replace`
+(a reorder shows as replace, or insert plus delete, in the aligned
+sequence; both sides' signatures are printed).
+
+The id is a hash of scenario, channel, locator, kind **and both values**, so
+the same difference has the same id on every run, and a registered intended
+difference matches only that exact change: another change at the same place
+gets a new id and is unexplained.
 
 ## Classifying differences
 
@@ -128,24 +170,38 @@ does not guess the class.
 
 ## The proof (go/no-go 1)
 
-`run.py self-check --ref <sha>` replays the corpus three times on the same
-build and once per planted change, then reports:
+`run.py self-check --ref <sha>` replays the full corpus three times on the
+same build and once per planted change, then reports:
 
 - `unchanged run1 vs run2` and `run1 vs run3`: must be **0 differences**;
 - every planted change (`planted.py`): must be **CAUGHT**, meaning at least
-  one difference in the channel the change should show in;
-- `PROOF HOLDS` only when both hold and no scenario failed to run.
+  one difference matching that change's own expectation (channel, locator
+  pattern and kinds), not just any difference;
+- `PROOF HOLDS` only with the full scenario set, the full planted set, a
+  commit build, both of the above, and no run error.
 
-Planted changes are exact text replacements in a copy of the build's
-`server/` (never in a checkout); an anchor that no longer matches fails the
-run loudly so a planted change can never silently plant nothing.
+`--scenarios`, `--planted` or `--allow-path` make the run **diagnostic**: it
+prints `DIAGNOSTIC CLEAN|FAILED (not a proof)` and exits 1. Unknown scenario
+or planted ids are refused.
 
-| id | change | expected channel |
+Planted changes are exact text replacements (or a swap of two adjacent
+blocks) in a fresh copy of the build's `server/` (never in a checkout); an
+anchor that does not occur exactly the expected number of times fails the
+run, so a planted change can never silently plant nothing.
+`test_report.py` checks every anchor against the current tree.
+
+| id | change | must show as |
 |---|---|---|
-| `response-field` | `POST /send` stops returning `queue_depth` | http |
-| `db-write` | a finished turn no longer writes its `turn_usage` row | table |
-| `status-transition` | a user stop settles the turn `failed` instead of `interrupted` | table |
-| `sse-order` | two events of a turn are broadcast in swapped order | sse |
+| `response-field` | `POST /send` stops returning `queue_depth` | http `….body.queue_depth` field-removed |
+| `db-write` | a finished turn no longer writes its `turn_usage` row | table `turn_usage…` |
+| `status-transition` | a user stop settles the turn `failed` instead of `interrupted` | table `turns[…].outcome` changed |
+| `sse-order` | `agent-activity` broadcast before `agent-state` for a state change | sse sequence difference |
+| `header-only` | `Cache-Control: no-cache` instead of `no-store`, body unchanged | http `….headers.cache-control` changed |
+| `sse-envelope` | SSE frames lose their `id:` line, data unchanged | sse `….has_id` changed |
+
+Planned after the first full run (they need the observed data to pick
+anchors): a same-size file content change, a changed setting value, a
+schema default, and an event-id aliasing change.
 
 ## The CI corpus
 
@@ -195,3 +251,11 @@ also runs the proof. Results go to the lead as the report above.
   them must publish its move map; the harness owner updates `host.py` with an
   import fallback so both builds still start.
 - Graceful shutdown and restart are not in the CI corpus (see the nightly).
+- Process cleanup kills the Host's process group. A backend launcher that
+  starts its own session (`backend/stream_json.py`) would escape it; the
+  corpus only runs the codex app-server, which stays in the group. As the
+  corpus grows, the executor's namespace or cgroup teardown is the backstop,
+  and the run should check that nothing it started survives.
+- Isolation inside `host.py` is a convention, not a boundary; the executor
+  (CI containment, `heavy-remote`) is the boundary. The CI workflow's
+  containment is source-reviewed, not yet exercised.

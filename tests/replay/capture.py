@@ -1,14 +1,21 @@
 """Run one scenario against one build and capture what it produced.
 
 A capture holds the raw observables of one run: every HTTP exchange the
-scenario made, every SSE event the Host sent, the database (schema and rows),
-the files under the state directory and any CLI output. Captures stay in the
-harness's scratch directory; ``normalize`` and ``diff`` turn them into the
-report, which prints structure and codes only.
+scenario made (status, contract headers, body), every SSE frame the Host sent
+(event name, id presence, data), the database (schema, primary keys, rows),
+the files under the state directory (JSON parsed, anything else by digest)
+and any CLI output. Captures stay in the harness's scratch directory;
+``normalize`` and ``diff`` turn them into the report, which prints structure
+and codes only.
+
+The cut is frozen: at quiescence the SSE reader is stopped and joined, the
+Host's process group is killed, and only then are the database (one read
+transaction) and the files read, so no writer runs during the dump.
 """
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -27,51 +34,82 @@ TOKEN = 'replay-host-token'
 READY_TIMEOUT_S = 30
 WAIT_TIMEOUT_S = 15
 QUIET_S = 0.4
-# Files the Host writes for its own diagnostics: their content is timing, not behaviour.
-SKIP_FILES = ('logs/', 'host.json', '.clarp-replay-owned', 'state.sqlite-', 'telemetry.sqlite',
-              'host.log', 'home/.cache/')
+OWNED = '.clarp-replay-owned'
+# Files the Host writes for its own diagnostics or that the capture reads separately.
+SKIP_PREFIXES = ('logs/', 'home/.cache/')
+SKIP_NAMES = {'host.json', OWNED, 'state.sqlite', 'state.sqlite-wal', 'state.sqlite-shm',
+              'telemetry.sqlite', 'telemetry.sqlite-wal', 'telemetry.sqlite-shm'}
+# Response headers that belong to the HTTP contract (the rest are server/date noise).
+CONTRACT_HEADERS = ('content-type', 'location', 'content-range', 'accept-ranges', 'content-encoding',
+                    'cache-control', 'content-disposition', 'etag', 'www-authenticate', 'retry-after')
+# The child gets this environment and nothing it was not given (review finding 4);
+# host.py then points every home, data, config and provider directory into the state dir.
+CHILD_ENV_KEEP = ('LANG', 'LC_ALL', 'TZ')
+SYSTEM_PATH = '/usr/local/bin:/usr/bin:/bin'
 
 
 class StepFailed(AssertionError):
     pass
 
 
+def child_env() -> dict[str, str]:
+    env = {k: os.environ[k] for k in CHILD_ENV_KEEP if k in os.environ}
+    env.update({'PATH': SYSTEM_PATH, 'PYTHONHASHSEED': '0', 'PYTHONDONTWRITEBYTECODE': '1',
+                'CLARP_QA_STREAM_DELAY': os.environ.get('CLARP_QA_STREAM_DELAY', '0.02')})
+    return env
+
+
+def owned_fresh_root(root: Path) -> None:
+    """Remove a scenario root only if the harness made it (a marker, no symlink)."""
+    if root.is_symlink():
+        raise StepFailed('scenario root is a symlink')
+    if root.exists():
+        if not (root / OWNED).is_file():
+            raise StepFailed('scenario root exists and is not owned by the replay harness')
+        shutil.rmtree(root)
+
+
 class Host:
     def __init__(self, build: Path, root: Path, python: str = sys.executable):
         self.build, self.root, self.python = build, root, python
         self.process = None
+        self.log = None
         self.url = ''
 
     def start(self):
+        """Spawn the Host; the caller owns cleanup (call stop() in a finally)."""
         self.root.mkdir(parents=True, exist_ok=True)
+        (self.root / OWNED).touch()
         self.log = (self.root.parent / f'{self.root.name}.host.log').open('a')
         self.process = subprocess.Popen(
             [self.python, str(HERE / 'host.py'), '--build', str(self.build), '--state-dir', str(self.root)],
             stdout=self.log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
-            start_new_session=True)
+            env=child_env(), cwd=str(self.root), start_new_session=True)
         ready = self.root / 'host.json'
         deadline = time.monotonic() + READY_TIMEOUT_S
         while not ready.exists():
             if self.process.poll() is not None:
-                raise StepFailed(f'replay host exited during start: {self.process.returncode}')
+                raise StepFailed(f'host exited during start ({self.process.returncode})')
             if time.monotonic() > deadline:
-                self.stop()
-                raise StepFailed('replay host did not become ready')
+                raise StepFailed('host did not become ready')
             time.sleep(0.02)
-        self.url = json.loads(ready.read_text())['url']
+        try:
+            self.url = json.loads(ready.read_text())['url']
+        except (ValueError, KeyError) as exc:
+            raise StepFailed('host metadata unreadable') from exc
         return self
 
     def stop(self):
-        """Kill the host's own process group (it leads one: start_new_session),
-        which takes the fake provider processes with it. The capture has already
-        read everything it needs; a graceful shutdown costs ~10 s per host."""
-        if self.process is None:
-            return
-        with contextlib.suppress(ProcessLookupError):
-            os.killpg(self.process.pid, signal.SIGKILL)
-        self.process.wait(timeout=5)
-        self.log.close()
-        self.process = None
+        """Kill the Host's own process group (it leads one), which takes the fake
+        provider processes with it. Graceful shutdown costs ~10 s and is not compared."""
+        if self.process is not None:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(self.process.pid, signal.SIGKILL)
+            self.process.wait(timeout=5)
+            self.process = None
+        if self.log is not None:
+            self.log.close()
+            self.log = None
 
     def request(self, method: str, path: str, body=None):
         data = json.dumps(body).encode() if body is not None else None
@@ -79,49 +117,81 @@ class Host:
             'Authorization': f'Bearer {TOKEN}', 'Content-Type': 'application/json'})
         try:
             with urllib.request.urlopen(req, timeout=10) as resp:
-                status, raw, ctype = resp.status, resp.read(), resp.headers.get('Content-Type', '')
+                status, raw, headers = resp.status, resp.read(), resp.headers
         except urllib.error.HTTPError as err:
-            status, raw, ctype = err.code, err.read(), err.headers.get('Content-Type', '')
+            status, raw, headers = err.code, err.read(), err.headers
+        kept = {h: headers.get(h) for h in CONTRACT_HEADERS if headers.get(h) is not None}
         try:
             payload = json.loads(raw) if raw else None
         except ValueError:
-            payload = {'<non-json>': {'content_type': ctype.split(';')[0], 'bytes': len(raw)}}
-        return status, payload
+            payload = {'<bytes>': len(raw), '<sha256>': hashlib.sha256(raw).hexdigest()}
+        return status, kept, payload
 
 
 class SSE:
-    """Collects the Host's SSE stream; heartbeats are dropped (pure timing)."""
+    """Collects complete SSE frames (event name, id presence, data); heartbeats
+    are dropped (pure timing). Transport or parse errors are recorded, never
+    turned into quiet (review finding 7)."""
 
     def __init__(self, host: Host, sessions):
-        self.events: list[dict] = []
+        self.frames: list[dict] = []
+        self.errors: list[str] = []
+        self.ended = False
         self.last_at = time.monotonic()
+        self._lock = threading.Lock()
         self._stop = threading.Event()
-        req = urllib.request.Request(host.url + '/events?live=' + ','.join(sessions), headers={'Authorization': f'Bearer {TOKEN}'})
+        req = urllib.request.Request(host.url + '/events?live=' + ','.join(sessions),
+                                     headers={'Authorization': f'Bearer {TOKEN}'})
         self._resp = urllib.request.urlopen(req, timeout=60)
         self._thread = threading.Thread(target=self._read, daemon=True)
         self._thread.start()
 
-    def _read(self):
-        kind = None
-        with contextlib.suppress(Exception):
-            for raw in self._resp:
-                line = raw.decode('utf-8', 'replace').rstrip('\n')
-                if line.startswith('event:'):
-                    kind = line[6:].strip()
-                elif line.startswith('data:'):
-                    if kind != 'heartbeat':
-                        with contextlib.suppress(ValueError):
-                            self.events.append(json.loads(line[5:].strip()))
-                            self.last_at = time.monotonic()
-                elif not line:
-                    kind = None
-                if self._stop.is_set():
-                    return
+    def _frame(self, event, has_id, data_lines):
+        if event == 'heartbeat' or not data_lines:
+            return
+        text = '\n'.join(data_lines)
+        try:
+            data = json.loads(text)
+        except ValueError:
+            self.errors.append('non-json data frame')
+            data = {'<bytes>': len(text), '<sha256>': hashlib.sha256(text.encode()).hexdigest()}
+        with self._lock:
+            self.frames.append({'event': event, 'has_id': has_id, 'data': data})
+            self.last_at = time.monotonic()
 
-    def close(self):
+    def _read(self):
+        event, has_id, data = None, False, []
+        try:
+            for raw in self._resp:
+                line = raw.decode('utf-8').rstrip('\r\n')
+                if not line:
+                    self._frame(event, has_id, data)
+                    event, has_id, data = None, False, []
+                elif line.startswith(':'):
+                    continue
+                else:
+                    field, _, value = line.partition(':')
+                    value = value[1:] if value.startswith(' ') else value
+                    if field == 'event':
+                        event = value
+                    elif field == 'id':
+                        has_id = True
+                    elif field == 'data':
+                        data.append(value)
+            self.ended = True
+        except Exception as exc:  # noqa: BLE001 - recorded as a capture error unless we closed it
+            if not self._stop.is_set():
+                self.errors.append(f'stream error {type(exc).__name__}')
+
+    def close(self) -> list[dict]:
         self._stop.set()
         with contextlib.suppress(Exception):
             self._resp.close()
+        self._thread.join(timeout=5)
+        if self._thread.is_alive():
+            self.errors.append('reader did not stop')
+        with self._lock:
+            return list(self.frames)
 
 
 def _ro(root: Path):
@@ -165,21 +235,20 @@ def _provider_started(root: Path, marker: str):
     return False
 
 
-def run_step(host: Host, sse: SSE, step: dict, http: list):
+def run_step(host: Host, step: dict, http: list):
     op = step['op']
     if op in ('get', 'post', 'put', 'delete'):
-        status, payload = host.request(op.upper(), step['path'], step.get('body'))
+        status, headers, payload = host.request(op.upper(), step['path'], step.get('body'))
         http.append({'step': step.get('name') or f"{op} {step['path']}", 'method': op.upper(),
-                     'path': step['path'].split('?')[0], 'status': status, 'body': payload})
+                     'path': step['path'].split('?')[0], 'status': status, 'headers': headers,
+                     'body': payload})
         expect = step.get('expect_status')
         if expect is not None and status != expect:
-            raise StepFailed(f"{op} {step['path']}: status {status}, expected {expect}")
+            raise StepFailed(f'unexpected status {status}')
     elif op == 'wait_settled':
-        _poll(f"turn of {step['message_id']} settled",
-              lambda: _turns_settled(host.root, step['message_id'], True))
+        _poll('turn settled', lambda: _turns_settled(host.root, step['message_id'], True))
     elif op == 'wait_open':
-        _poll(f"turn of {step['message_id']} open",
-              lambda: _turns_settled(host.root, step['message_id'], False))
+        _poll('turn open', lambda: _turns_settled(host.root, step['message_id'], False))
     elif op == 'wait_provider_started':
         _poll('provider turn start', lambda: _provider_started(host.root, step['marker']))
     elif op == 'provider_file':
@@ -187,89 +256,113 @@ def run_step(host: Host, sse: SSE, step: dict, http: list):
         (host.root / 'provider' / step['name']).write_text(step['text'])
     elif op == 'wait_busy':
         def busy():
-            _, status = host.request('GET', f"/status?session={step['session']}")
+            status = host.request('GET', f"/status?session={step['session']}")[2]
             return isinstance(status, dict) and status.get('busy') is step['busy']
-        _poll(f"{step['session']} busy={step['busy']}", busy)
+        _poll('busy state', busy)
     else:
         raise StepFailed(f'unknown step op {op!r}')
 
 
 def _quiesce(host: Host, sse: SSE, sessions):
     for session in sessions:
-        _poll(f'{session} idle', lambda s=session: host.request('GET', f'/status?session={s}')[1].get('busy') is False)
+        _poll('sessions idle',
+              lambda s=session: (host.request('GET', f'/status?session={s}')[2] or {}).get('busy') is False)
     _poll('SSE quiet', lambda: time.monotonic() - sse.last_at >= QUIET_S)
 
 
 def dump_db(path: Path) -> dict:
-    out = {'schema': [], 'tables': {}}
+    """Schema, primary keys and all rows of every non-empty table, in one read transaction."""
+    out = {'schema': [], 'pk': {}, 'tables': {}}
     if not path.exists():
         return out
-    with contextlib.closing(sqlite3.connect(f'file:{path}?mode=ro', uri=True)) as db:
+    with contextlib.closing(sqlite3.connect(f'file:{path}?mode=ro', uri=True, isolation_level=None)) as db:
         db.row_factory = sqlite3.Row
+        db.execute('BEGIN')
         schema = db.execute("SELECT type, name, tbl_name, sql FROM sqlite_master "
                             "WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name").fetchall()
         out['schema'] = [dict(r) for r in schema]
         for r in schema:
             if r['type'] != 'table':
                 continue
+            info = db.execute(f'PRAGMA table_info("{r["name"]}")').fetchall()
+            out['pk'][r['name']] = [c['name'] for c in sorted(info, key=lambda c: c['pk']) if c['pk']]
             rows = db.execute(f'SELECT * FROM "{r["name"]}"').fetchall()
             if rows:
-                out['tables'][r['name']] = [{k: (v.hex() if isinstance(v, bytes) else v) for k, v in dict(row).items()}
-                                            for row in rows]
+                out['tables'][r['name']] = [{k: (v.hex() if isinstance(v, bytes) else v)
+                                             for k, v in dict(row).items()} for row in rows]
+        db.execute('COMMIT')
     return out
 
 
 def list_files(root: Path) -> list[dict]:
     files = []
     for path in sorted(root.rglob('*')):
-        if not path.is_file():
+        if not path.is_file() or path.is_symlink():
             continue
         rel = path.relative_to(root).as_posix()
-        if rel.startswith(SKIP_FILES) or rel in ('state.sqlite',):
+        if rel.startswith(SKIP_PREFIXES) or rel in SKIP_NAMES or rel.startswith('.host.json'):
             continue
-        files.append({'path': rel, 'bytes': path.stat().st_size})
+        raw = path.read_bytes()
+        entry = {'path': rel, 'bytes': len(raw), 'kind': 'bytes', 'digest': hashlib.sha256(raw).hexdigest()}
+        if path.suffix in ('.json', '.jsonl'):
+            try:
+                text = raw.decode()
+                parsed = (json.loads(text) if path.suffix == '.json'
+                          else [json.loads(line) for line in text.splitlines() if line.strip()])
+                entry.update(kind='json', json=parsed, digest=None)
+            except ValueError:
+                pass
+        files.append(entry)
     return files
 
 
 def capture(build: Path, scenario: dict, scratch: Path, python: str = sys.executable) -> dict:
     root = scratch / scenario['id']
-    if root.exists():
-        shutil.rmtree(root)
+    owned_fresh_root(root)
     started = time.monotonic()
     timings = {}
-    host = Host(build, root, python).start()
-    timings['start'] = round(time.monotonic() - started, 2)
+    host = Host(build, root, python)
     sse = None
+    frames: list = []
     http: list = []
     error = None
     sessions = scenario.get('sessions', ('rachel',))
-    db, files = {'schema': [], 'tables': {}}, []
+    db, files = {'schema': [], 'pk': {}, 'tables': {}}, []
     try:
+        host.start()
+        timings['start'] = round(time.monotonic() - started, 2)
         sse = SSE(host, sessions)
-        _poll('SSE connected', lambda: sse.events)
-        for step in scenario['steps']:
-            run_step(host, sse, step, http)
+        _poll('SSE connected', lambda: sse.frames)
+        for index, step in enumerate(scenario['steps']):
+            try:
+                run_step(host, step, http)
+            except StepFailed as exc:
+                raise StepFailed(f'step {index} ({step["op"]}): {exc}') from exc
         timings['steps'] = round(time.monotonic() - started, 2)
         _quiesce(host, sse, sessions)
         timings['quiet'] = round(time.monotonic() - started, 2)
-        db = dump_db(root / 'state.sqlite')
-        files = list_files(root)
     except StepFailed as exc:
         error = str(exc)
     finally:
         if sse is not None:
-            sse.close()
+            frames = sse.close()
         host.stop()
-    timings['stopped'] = round(time.monotonic() - started, 2)
+    if error is None:
+        db = dump_db(root / 'state.sqlite')
+        files = list_files(root)
+    health = {'errors': sse.errors if sse else ['not connected'], 'ended_early': bool(sse and sse.ended)}
+    if error is None and (health['errors'] or health['ended_early']):
+        error = 'SSE stream unhealthy'
+    timings['done'] = round(time.monotonic() - started, 2)
     return {
         'timings': timings,
         'scenario': scenario['id'],
         'error': error,
-        'seconds': round(time.monotonic() - started, 2),
         'root': str(root),
         'build': str(build),
         'http': http,
-        'sse': sse.events if sse else [],
+        'sse': frames,
+        'sse_health': health,
         'db': db,
         'files': files,
     }
