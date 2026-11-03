@@ -471,6 +471,15 @@ def test_a_removed_request_does_not_lend_its_adopted_row_to_the_next(clock):
 
     surviving = [r for r in rows() if r["text"] == "answer1"]
     assert view(surviving, "message_id", "seq") == [("final-1", 1)]
+    # As a fresh import from the seeded state leaves it: the removed request's
+    # reply stays its final:tr-0 row (the lead's RM-N1c bar), in the final band.
+    removed = [r for r in rows() if r["message_id"] == "final-0"]
+    assert view(removed, "source_file", "text", "trace_id") == [("final:tr-0", "answer0", "tr-0")]
+    assert removed[0]["seq"] < 0
+    assert view(transcript_rows(), "message_id") == [("final-1",)]
+    after = rows()
+    store([u("ask1", 60.2), a("answer1", 65)])
+    assert rows() == after, "re-importing the shortened transcript changes nothing"
 
 
 # ---- agy turn authority ------------------------------------------------------
