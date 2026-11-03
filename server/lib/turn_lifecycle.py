@@ -417,16 +417,20 @@ class TurnStateMachine:
             if own_since is not None:
                 # Under the writer lock: the row sorts after its OWN turn's rows
                 # written since the write began (activity that committed while it
-                # waited), never over another's: a Stop or successor that commits
-                # first stays the newest row. A retry has passed the fence, so no
-                # foreign row exists since it and it is stamped when it lands. A
-                # historical ts (own_since None) is kept as given.
+                # waited), and a retry is stamped when it lands; a historical ts
+                # (own_since None) is kept as given.
+                # Only when every row since is this turn's own: once another
+                # actor wrote in between, the row keeps the stamp it was given.
                 trace = str((detail or {}).get("trace_id") or "")
-                newest = database.execute(
-                    """SELECT MAX(ts) FROM state_log WHERE agent_id = ? AND state_id > ?
-                          AND ? <> '' AND COALESCE(json_extract(detail, '$.trace_id'), '') = ?""",
-                    (agent_id, own_since, trace, trace)).fetchone()[0]
-                stamp = max(stamp, int(newest or 0), now_ms() if recheck is not None else 0)
+                rows = database.execute(
+                    """SELECT MAX(ts) AS newest,
+                              MAX(? = '' OR COALESCE(json_extract(detail, '$.trace_id'), '') <> ?)
+                                  AS foreign_row
+                         FROM state_log WHERE agent_id = ? AND state_id > ?""",
+                    (trace, trace, agent_id, own_since)).fetchone()
+                if not rows["foreign_row"]:
+                    stamp = max(stamp, int(rows["newest"] or 0),
+                                now_ms() if recheck is not None else 0)
             cursor = database.execute(
                 """INSERT INTO state_log (agent_id, runtime_id, ts, kind, detail)
                    VALUES (?, ?, ?, ?, ?)""",
