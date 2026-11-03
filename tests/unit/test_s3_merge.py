@@ -1,0 +1,248 @@
+"""tools/refactor/s3_merge.sh: merging main into integration re-applies the S3
+moves instead of merging server.py by hand. A main edit to a moved member
+reaches the mixin; a replay that does not apply, a conflict outside server.py
+and a refused move each stop with their exit code. Uses a throwaway repository
+with a tiny server.py; the local gates skip because their test files are absent."""
+from __future__ import annotations
+
+import os
+import pathlib
+import shutil
+import subprocess
+import sys
+
+import pytest
+
+_REPO = pathlib.Path(__file__).resolve().parents[2]
+
+SERVER = '''import json
+
+
+def _helper():
+    return 1
+
+
+class Handler:
+    def do_GET(self):
+        path = self.path
+        if path == "/a":
+            return self.a()
+        return self.send(404)
+
+    def a(self):
+        return json.dumps({"a": 1})
+
+    def stays(self):
+        return 2
+'''
+
+RECIPE = '''[[group]]
+name = "feat"
+module = "lib/routes/feat.py"
+class = "FeatRoutes"
+members = ["a"]
+'''
+
+
+def _git(repo, *args):
+    return subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True,
+                          text=True).stdout.strip()
+
+
+def _commit(repo, message):
+    _git(repo, "add", "-A")
+    _git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", message)
+    return _git(repo, "rev-parse", "HEAD")
+
+
+@pytest.fixture
+def repo(tmp_path):
+    root = tmp_path / "repo"
+    for rel in ("tools/refactor/s3_apply.py", "tools/refactor/s3_merge.sh", "scripts/refactor/ast_identity.py"):
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(_REPO / rel, root / rel)
+    (root / "tools" / "refactor" / "s3_moves.toml").write_text(RECIPE)
+    (root / "tools" / "refactor" / "s3_replay.txt").write_text("# replay\n")
+    (root / "server" / "lib" / "routes").mkdir(parents=True)
+    (root / "server" / "lib" / "__init__.py").write_text("")
+    (root / "server" / "lib" / "routes" / "__init__.py").write_text("")
+    (root / "server" / "server.py").write_text(SERVER)
+    (root / "README").write_text("base\n")
+    _git(root, "init", "-q", "-b", "main")
+    _commit(root, "base")
+    # integration: a seam-like edit of server.py, listed for replay, then the move.
+    _git(root, "switch", "-q", "-c", "integration")
+    text = (root / "server" / "server.py").read_text().replace(
+        '        if path == "/a":\n            return self.a()\n        return self.send(404)\n',
+        '        return dispatch(self, path)\n')
+    (root / "server" / "server.py").write_text(text.replace("import json\n", "import json\nfrom lib.dispatch import dispatch\n"))
+    (root / "server" / "lib" / "dispatch.py").write_text(
+        'def dispatch(handler, path):\n    if path == "/a":\n        return handler.a()\n    return handler.send(404)\n')
+    seam = _commit(root, "seam")
+    (root / "tools" / "refactor" / "s3_replay.txt").write_text(f"# replay\n{seam}\n")
+    _commit(root, "replay list")
+    env = dict(os.environ, S3_PYTHON=sys.executable)
+    subprocess.run([sys.executable, "tools/refactor/s3_apply.py", "--all"], cwd=root, check=True,
+                   capture_output=True, env=env)
+    _commit(root, "move feat")
+    _git(root, "switch", "-q", "main")
+    # main gets the tooling too (it lands on main), with the same replay list.
+    _git(root, "checkout", "integration", "--", "tools/refactor/s3_replay.txt")
+    _commit(root, "tools on main")
+    return root
+
+
+def _merge(root, work="work"):
+    _git(root, "switch", "-q", "integration")
+    env = dict(os.environ, S3_PYTHON=sys.executable)
+    script = root.parent / "s3_merge.sh"           # run a copy: the merge rewrites the tree
+    shutil.copy(root / "tools" / "refactor" / "s3_merge.sh", script)
+    result = subprocess.run(["bash", str(script), "main", "integration", work], cwd=root,
+                            capture_output=True, text=True, env=env)
+    return result.returncode, result.stdout + result.stderr
+
+
+def test_a_main_edit_to_a_moved_member_reaches_the_mixin(repo):
+    text = (repo / "server" / "server.py").read_text().replace('{"a": 1}', '{"a": 2}')
+    (repo / "server" / "server.py").write_text(text)
+    _commit(repo, "main edits a")
+    code, out = _merge(repo)
+    assert code == 0, out
+    assert "ast_identity: 1 moves" in out and "0 problems" in out
+    assert '{"a": 2}' in (repo / "server" / "lib" / "routes" / "feat.py").read_text()
+    server = (repo / "server" / "server.py").read_text()
+    assert "def a(" not in server and "return dispatch(self, path)" in server
+    assert "class Handler(FeatRoutes):" in server
+
+
+def test_a_replay_that_no_longer_applies_stops_with_4(repo):
+    text = (repo / "server" / "server.py").read_text().replace(
+        '        return self.send(404)\n', '        return self.send(410)\n')
+    (repo / "server" / "server.py").write_text(text)
+    _commit(repo, "main edits the chain the seam replaced")
+    code, out = _merge(repo)
+    assert code == 4, out
+    assert "does not apply to main's server.py" in out
+
+
+def test_a_conflict_outside_server_py_stops_with_3(repo):
+    _git(repo, "switch", "-q", "integration")
+    (repo / "README").write_text("integration\n")
+    _commit(repo, "integration README")
+    _git(repo, "switch", "-q", "main")
+    (repo / "README").write_text("main\n")
+    _commit(repo, "main README")
+    code, out = _merge(repo)
+    assert code == 3, out
+    assert "conflict outside server.py and the generated files: README" in out
+
+
+def test_a_main_edit_the_generator_refuses_stops_with_5(repo):
+    text = (repo / "server" / "server.py").read_text().replace(
+        'return json.dumps({"a": 1})', 'return json.dumps({"a": _helper()})')
+    (repo / "server" / "server.py").write_text(text)
+    _commit(repo, "main makes a read a server.py helper")
+    code, out = _merge(repo)
+    assert code == 5, out
+    assert "reads _helper, which server.py defines" in out
+
+
+def test_a_merge_git_refuses_stops_with_3_and_no_commit(repo):
+    """F1 (review B): unrelated histories make git merge refuse; nothing may
+    continue as if main had been merged."""
+    _git(repo, "switch", "-q", "--orphan", "other")
+    (repo / "README").write_text("unrelated\n")
+    _commit(repo, "unrelated root")
+    _git(repo, "branch", "-f", "main", "other")
+    before = _git(repo, "rev-parse", "integration")
+    code, out = _merge(repo)
+    assert code == 3, out
+    assert "did not start a merge" in out
+    assert _git(repo, "rev-parse", "work") == before
+
+
+def test_untracked_work_under_server_is_refused_before_merging(repo):
+    """F2 (review B): an untracked server file is never swept into a commit."""
+    _git(repo, "switch", "-q", "integration")
+    (repo / "server" / "unrelated_work.py").write_text("x = 1\n")
+    env = dict(os.environ, S3_PYTHON=sys.executable)
+    script = repo.parent / "s3_merge.sh"
+    shutil.copy(repo / "tools" / "refactor" / "s3_merge.sh", script)
+    result = subprocess.run(["bash", str(script), "main", "integration", "work"], cwd=repo,
+                            capture_output=True, text=True, env=env)
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "server/unrelated_work.py" in result.stderr
+    assert (repo / "server" / "unrelated_work.py").exists()
+    branches = _git(repo, "branch", "--list", "work")
+    assert branches == ""
+
+
+HELPERS_RECIPE = '[helpers]\nnames = ["_helper"]\n\n' + RECIPE
+
+
+@pytest.fixture
+def repo_with_helpers(tmp_path):
+    """Like `repo`, but member a reads the server.py helper and the recipe moves
+    the helper too: integration carries both stages."""
+    root = tmp_path / "repo"
+    for rel in ("tools/refactor/s3_apply.py", "tools/refactor/s3_merge.sh", "scripts/refactor/ast_identity.py"):
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(_REPO / rel, root / rel)
+    (root / "tools" / "refactor" / "s3_moves.toml").write_text(HELPERS_RECIPE)
+    (root / "tools" / "refactor" / "s3_replay.txt").write_text("# replay\n")
+    (root / "server" / "lib" / "routes").mkdir(parents=True)
+    (root / "server" / "lib" / "__init__.py").write_text("")
+    (root / "server" / "lib" / "routes" / "__init__.py").write_text("")
+    (root / "server" / "server.py").write_text(
+        SERVER.replace('return json.dumps({"a": 1})', 'return json.dumps({"a": _helper()})'))
+    _git(root, "init", "-q", "-b", "main")
+    _commit(root, "base")
+    _git(root, "switch", "-q", "-c", "integration")
+    env = dict(os.environ, S3_PYTHON=sys.executable)
+    subprocess.run([sys.executable, "tools/refactor/s3_apply.py", "--helpers"], cwd=root, check=True,
+                   capture_output=True, env=env)
+    _commit(root, "helpers")
+    subprocess.run([sys.executable, "tools/refactor/s3_apply.py", "--all"], cwd=root, check=True,
+                   capture_output=True, env=env)
+    _commit(root, "groups")
+    _git(root, "switch", "-q", "main")
+    return root
+
+
+def test_a_merge_with_helpers_and_groups_commits_both_stages(repo_with_helpers):
+    """Review B (40747475) F1: stage B stages only server.py and helpers.py, stage
+    C the group mixins; a main edit to a moved member that reads a helper reaches
+    the mixin."""
+    repo = repo_with_helpers
+    text = (repo / "server" / "server.py").read_text().replace('{"a": _helper()}', '{"a": _helper() + 1}')
+    (repo / "server" / "server.py").write_text(text)
+    _commit(repo, "main edits a")
+    code, out = _merge(repo)
+    assert code == 0, out
+    assert out.count("0 problems") == 2
+    log = _git(repo, "log", "--format=%s", "-3", "work")
+    assert log.splitlines()[:2] == ["s3_apply: group moves", "s3_apply: helpers step"]
+    feat = (repo / "server" / "lib" / "routes" / "feat.py").read_text()
+    assert '{"a": _helper() + 1}' in feat and "from lib.routes.helpers import _helper" in feat
+
+
+def test_a_failing_status_query_is_never_read_as_clean(repo, tmp_path):
+    """Review B (40747475) F3: git status failing (128) on the tracked-tree query
+    must stop the script, not certify a clean tree."""
+    real_git = shutil.which("git")
+    shim_dir = tmp_path / "shim"
+    shim_dir.mkdir()
+    shim = shim_dir / "git"
+    shim.write_text("#!/bin/sh\n"
+                    'if [ "$1" = status ] && [ "$3" = "--untracked-files=no" ]; then exit 128; fi\n'
+                    f'exec {real_git} "$@"\n')
+    shim.chmod(0o755)
+    _git(repo, "switch", "-q", "integration")
+    env = dict(os.environ, S3_PYTHON=sys.executable, PATH=f"{shim_dir}:{os.environ['PATH']}")
+    script = repo.parent / "s3_merge.sh"
+    shutil.copy(repo / "tools" / "refactor" / "s3_merge.sh", script)
+    result = subprocess.run(["bash", str(script), "main", "integration", "work"], cwd=repo,
+                            capture_output=True, text=True, env=env)
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "git status failed" in result.stderr
+    assert _git(repo, "branch", "--list", "work") == ""

@@ -1,0 +1,4 @@
+# Commits whose server/server.py diff s3_merge.sh replays onto main's server.py,
+# in order (route-registry.md section 11): the route seam and every preparatory
+# edit. One full sha per line; '#' starts a comment. Filled in when each lands
+# on refactor/integration.
