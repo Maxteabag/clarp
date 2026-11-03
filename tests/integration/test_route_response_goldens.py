@@ -50,10 +50,16 @@ VOLATILE_BODY = {
 
 def _host_requirements(body):
     """managed_skills checks each skill's `requires` against the tools on the
-    host's PATH, so the list depends on the machine running the test."""
+    host's PATH, so which names the list holds depends on the machine running
+    the test. Only a well-formed list of strings is canonicalized, to one
+    marker element; any other value keeps its own shape, so a type change
+    still shows in the golden."""
     for skill in body.get("skills") or []:
-        if isinstance(skill, dict) and "missing_requirements" in skill:
-            skill["missing_requirements"] = "<host-dependent>"
+        if not isinstance(skill, dict):
+            continue
+        value = skill.get("missing_requirements")
+        if isinstance(value, list) and all(isinstance(item, str) for item in value):
+            skill["missing_requirements"] = ["<host-dependent>"]
     return body
 
 
@@ -274,3 +280,15 @@ def test_unexpected_provider_or_network_attempt_is_not_acknowledged():
                "socket.connect ('203.0.113.9', 443) [outside any test]"]
     assert unexpected_refusals([expected, *planted]) == [
         "Popen ['claude', '-p', 'hello']", "socket.connect ('203.0.113.9', 443)"]
+
+
+def test_host_dependent_requirements_keep_their_type():
+    def normalized(value):
+        return shape(_host_requirements({"skills": [{"id": "s", "missing_requirements": value}]}))
+    canonical = normalized([])
+    assert canonical == {"skills": [{"id": "str", "missing_requirements": ["str"]}]}
+    assert normalized(["node", "ffmpeg"]) == canonical
+    for corrupted in (None, "node", {"node": True}, 3, ["node", 3], [None], [["node"]]):
+        assert normalized(corrupted) != canonical, corrupted
+    without_field = shape(_host_requirements({"skills": [{"id": "s"}]}))
+    assert without_field == {"skills": [{"id": "str"}]}
