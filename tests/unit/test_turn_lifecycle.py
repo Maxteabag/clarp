@@ -400,3 +400,48 @@ def test_the_next_turn_still_starts_after_a_stop(tmp_path):
     turn_lifecycle.transition(agent_id, TurnEvent.SPAWN_STARTED,
                               {"source": "pwa", "dispatch": "codex", "trace_id": "t-2"})
     assert turn_lifecycle.current_kind(agent_id) == AgentState.THINKING
+
+
+def test_a_reconciler_idle_does_not_hide_the_same_running_turns_start(tmp_path):
+    """TP-N1 review: a reconciler's idle is an observation, not a Stop; the
+    running turn's provider start still lands after one."""
+    agent_id = _agent(tmp_path)
+    turn_lifecycle.transition(agent_id, TurnEvent.SPAWN_STARTED,
+                              {"source": "pwa", "dispatch": "codex", "trace_id": "t-1"})
+    turn_lifecycle.transition(agent_id, TurnEvent.RECONCILE_REPAIR, {"source": "reconcile"})
+    late = turn_lifecycle.try_transition(agent_id, TurnEvent.SPAWN_STARTED,
+                                         {"dispatch": "codex", "trace_id": "t-1"})
+    assert late is not None
+    assert turn_lifecycle.current_kind(agent_id) == AgentState.THINKING
+
+
+def test_the_stop_fence_does_not_expire_after_many_observations(tmp_path):
+    agent_id = _agent(tmp_path)
+    turn_lifecycle.transition(agent_id, TurnEvent.SPAWN_STARTED,
+                              {"source": "pwa", "dispatch": "codex", "trace_id": "t-1"})
+    turn_lifecycle.transition(agent_id, TurnEvent.STOP_REQUESTED, {"source": "user_stop"})
+    for _ in range(60):
+        turn_lifecycle.transition(agent_id, TurnEvent.AUDIT_NOTED, {"source": "synthetic-audit"})
+    turn_lifecycle.try_transition(agent_id, TurnEvent.SPAWN_STARTED,
+                                  {"dispatch": "codex", "trace_id": "t-1"})
+    assert turn_lifecycle.current_kind(agent_id) == AgentState.INTERRUPTED
+
+
+def test_a_stop_between_the_starts_read_and_write_still_wins(tmp_path, monkeypatch):
+    agent_id = _agent(tmp_path)
+    turn_lifecycle.transition(agent_id, TurnEvent.SPAWN_STARTED,
+                              {"source": "pwa", "dispatch": "codex", "trace_id": "t-1"})
+    real = turn_lifecycle.MACHINE.current_kind
+    armed = [True]
+
+    def read_then_stop(aid):
+        observed = real(aid)
+        if armed[0]:
+            armed[0] = False
+            turn_lifecycle.transition(aid, TurnEvent.STOP_REQUESTED, {"source": "user_stop"})
+        return observed
+
+    monkeypatch.setattr(turn_lifecycle.MACHINE, "current_kind", read_then_stop)
+    turn_lifecycle.try_transition(agent_id, TurnEvent.SPAWN_STARTED,
+                                  {"dispatch": "codex", "trace_id": "t-1"})
+    assert real(agent_id) == AgentState.INTERRUPTED
