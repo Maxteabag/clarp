@@ -48,6 +48,22 @@ VOLATILE_BODY = {
 }
 
 
+def _host_requirements(body):
+    """managed_skills checks each skill's `requires` against the tools on the
+    host's PATH, so the list depends on the machine running the test."""
+    for skill in body.get("skills") or []:
+        if isinstance(skill, dict) and "missing_requirements" in skill:
+            skill["missing_requirements"] = "<host-dependent>"
+    return body
+
+
+# Fields whose content depends on the machine running the test; each value is
+# replaced by a marker before its shape is taken, the rest stays pinned.
+HOST_DEPENDENT = {
+    "GET /managed-skills": _host_requirements,
+}
+
+
 _FIELD = re.compile(r"^[A-Za-z_][A-Za-z0-9_-]{0,40}$")
 MAP_KEY = "<map>"
 
@@ -114,7 +130,7 @@ def unexpected_refusals(attempts) -> list[str]:
     return sorted({normalize_refusal(a) for a in attempts} - EXPECTED_REFUSALS)
 
 
-def _exercise(port: int, method: str, path: str, headers: dict) -> dict:
+def _exercise(port: int, method: str, path: str, headers: dict, normalize=None) -> dict:
     connection = http.client.HTTPConnection("127.0.0.1", port, timeout=TIMEOUT)
     body = b"{}" if method != "GET" else None
     send_headers = dict(headers)
@@ -144,7 +160,8 @@ def _exercise(port: int, method: str, path: str, headers: dict) -> dict:
     connection.close()
     if result["type"] == "application/json":
         try:
-            result["body"] = shape(json.loads(data))
+            body = json.loads(data)
+            result["body"] = shape(normalize(body) if normalize else body)
         except ValueError:
             result["body"] = "invalid json"
     else:
@@ -191,9 +208,10 @@ def test_response_golden(fake_ctx, backend_cli_guard):
     routes = {}
     try:
         for method, path, limited_reaches in _routed_requests():
-            entry = {"admin": _exercise(port, method, path, principals["admin"])}
+            normalize = HOST_DEPENDENT.get(f"{method} {path}")
+            entry = {"admin": _exercise(port, method, path, principals["admin"], normalize)}
             if limited_reaches:
-                limited = _exercise(port, method, path, principals["limited"])
+                limited = _exercise(port, method, path, principals["limited"], normalize)
                 if limited != entry["admin"]:
                     entry["limited"] = limited
             if f"{method} {path}" in VOLATILE_BODY:
