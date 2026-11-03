@@ -287,12 +287,18 @@ def cmd_self_check(args) -> int:
     started = time.monotonic()
     diagnostic = bool(args.scenarios or args.planted or args.allow_path)
     chosen = select(args.scenarios, scenarios.BY_ID, 'scenario')
-    changes = select(args.planted, planted.BY_ID, 'planted change')
+    changes = [] if args.no_planted else select(args.planted, planted.BY_ID, 'planted change')
+    diagnostic = diagnostic or args.no_planted
     build, sha = build_for(args.ref, scratch, args.allow_path)
     builds = {'run1': build, 'run2': build, 'run3': build}
     for change in changes:
         builds[f"planted-{change['id']}"] = planted_copy(build, change, scratch)
     results = run_corpus(builds, chosen, scratch, args.jobs)
+    if args.show_sse:
+        for label in ('run1', 'run2', 'run3'):
+            for s in chosen:
+                sigs = [diff._signature(f) for f in results[label][s['id']]['sse']]
+                print(f"SSE {label} {s['id']}: " + ' || '.join(sigs))
     print(f"# Replay harness self-check{' (DIAGNOSTIC: subset or path build, not a proof)' if diagnostic else ''}")
     print('\n'.join(manifest(sha, chosen, changes)))
     ok = True
@@ -373,6 +379,8 @@ def main(argv=None) -> int:
     p.add_argument('--ref', default='HEAD')
     p.add_argument('--planted', help='comma-separated planted change ids (default: all; a subset is diagnostic)')
     p.add_argument('--verbose', action='store_true')
+    p.add_argument('--no-planted', action='store_true', help='skip planted changes (diagnostic)')
+    p.add_argument('--show-sse', action='store_true', help='print safe SSE signatures per run (diagnostic)')
     p = sub.add_parser('prepare')
     p.add_argument('refs', nargs='+')
     p.add_argument('--prune', action='store_true', help='remove prepared builds not named here')
