@@ -60,11 +60,15 @@ the hot spots; every high finding fixed or explicitly accepted.
    both directions); HTTP, SSE and WebSocket routes and payloads; CLI commands
    and their outputs; environment variables and file paths; hook and skill
    interfaces. **Out of scope:** stable message ids, Oracle engine convergence.
-5. **Heavy commands go through the one-slot wrapper**
-   `/var/tmp/clarp-refactor-program/bin/heavy` (it waits for the slot, runs at
-   low priority and caps pytest at 4 workers). Heavy means more than one test
-   file, coverage, replay runs and anything that spawns many processes. This
-   machine also runs Peter's live Host. Never run `cargo` (repo rule).
+5. **No test suites, coverage, browsers or test servers on laptopstudio** (Peter's
+   standing order of 2026-10-12; this machine runs his live Host). Locally, run at
+   most one test file or node id with `-n 0` through
+   `/var/tmp/clarp-refactor-program/bin/heavy` (it refuses everything else).
+   Full suites run on the buildbox through
+   `/var/tmp/clarp-refactor-program/bin/heavy-remote` once the lead announces it;
+   until then through GitHub Actions (`gh workflow run tests.yml -R
+   Maxteabag/clarp --ref <branch>`), which the merge captain drives. Never run
+   `cargo` (repo rule).
 6. **Data.** The replay corpus is scrubbed with stable surrogates and read only
    through the harness. Tools print structure, counts and codes, never message
    text. Never paste conversation content into messages, commits or reports. Read
@@ -116,7 +120,7 @@ the hot spots; every high finding fixed or explicitly accepted.
 - **G0 entry (per slice):** characterization tests for the code the slice will
   move, written against the old code and committed first; line coverage of that
   code at least 85%, or a lead-signed exception.
-- **G1 author:** `heavy uv run --frozen --group dev python -m pytest` is green
+- **G1 author:** the full suite (`heavy-remote uv run --frozen --group dev python -m pytest`, or GitHub Actions until heavy-remote exists) is green
   except the quarantined tests (read the result, not a wrapper's exit code);
   move-only commits pass the AST-identity check once it exists; the layer test
   once it exists.
@@ -146,6 +150,7 @@ the hot spots; every high finding fixed or explicitly accepted.
 | Fix-lane owner | `rf-fix-c4ab` | Claude | one fix per commit, in the files the lead names per fix |
 | Slice owner S3 | `rf-routes-0f54` | Claude | route goldens now; the route seam and route modules after go/no-go 1 |
 | Slice owner S5 | `rf-readmodel-12f8` | Claude | read-model goldens now; the read model after go/no-go 1 |
+| Compute owner | `rf-compute-aa87` | Claude | `/var/tmp/clarp-refactor-program/bin/heavy-remote`, the buildbox ledger |
 | Reviewer A (core) | `rf-review-core-bbc1` | Codex | verdicts only |
 | Reviewer B (rest) | `rf-review-rest-a79f` | Codex | verdicts only |
 
