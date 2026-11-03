@@ -929,6 +929,38 @@ def _park_adopted_occupant(database, agent_id: str, backend_session_id: str,
     return True
 
 
+def _restore_unadopted_parked(database, agent_id: str, backend_session_id: str,
+                              source_file: str) -> int:
+    """A parked reply no turn re-adopted belongs to a request that left the
+    transcript: it goes back to its final:<trace> row, as a fresh import would
+    leave it, instead of the stale cleanup deleting a reply the user saw
+    (RM-N1c). Its seq is the one a live final row takes (-800000 + the turn's
+    id), or one only it can hold. Without a trace it cannot be named, and the
+    stale cleanup takes it as before."""
+    restored = 0
+    for row in database.execute(
+            """SELECT message_id, seq, trace_id FROM messages
+                WHERE agent_id = ? AND backend_session_id = ? AND source_file = ?
+                  AND seq >= ?""",
+            (agent_id, backend_session_id, source_file, _PARKED_SEQ_BASE)).fetchall():
+        trace = row["trace_id"] or ""
+        if not trace:
+            continue
+        turn = database.execute(
+            """SELECT turn_id FROM turns WHERE agent_id = ? AND trace_id = ?
+                ORDER BY turn_id DESC LIMIT 1""", (agent_id, trace)).fetchone()
+        seq = -800000 + int(turn["turn_id"]) if turn is not None else None
+        if seq is None or database.execute(
+                "SELECT 1 FROM messages WHERE agent_id = ? AND backend_session_id = ? AND seq = ?",
+                (agent_id, backend_session_id, seq)).fetchone() is not None:
+            seq = -_PARKED_SEQ_BASE - (int(row["seq"]) - _PARKED_SEQ_BASE)
+        database.execute(
+            "UPDATE messages SET source_file = ?, seq = ?, revision = ? WHERE message_id = ?",
+            (f"final:{trace}", seq, _next_revision(database), row["message_id"]))
+        restored += 1
+    return restored
+
+
 def _parked_twin(database, agent_id: str, backend_session_id: str,
                  source_file: str, visible: str, *, exclude: set[str]):
     """(message_id, seq) of the one parked reply with this visible text."""
@@ -1596,6 +1628,8 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
                 "DELETE FROM messages WHERE message_id = ?",
                 (live["message_id"],),
             )
+    if _restore_unadopted_parked(database, agent_id, backend_session_id, source_file):
+        skipped_slot_removed = True
     stale = database.execute(
         """SELECT 1 FROM messages
             WHERE agent_id = ? AND backend_session_id = ? AND seq >= ?
