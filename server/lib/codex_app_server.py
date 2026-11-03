@@ -146,6 +146,8 @@ class _Client:
 
     def request(self, method: str, params: dict, timeout: float = 30) -> dict:
         with self._lock:
+            if getattr(self, "reader_dead", False):
+                raise RuntimeError("codex app-server reader ended")
             rid = self._next_id
             self._next_id += 1
             done = threading.Event()
@@ -183,11 +185,11 @@ class _Client:
             failure = str(exc) or failure
             log_exception("codexAppServerReadFail", exc, detail=self.agent_id)
         finally:
-            try:
-                self._fail_all(failure)
-            finally:
-                # Nothing reads this process any more: _client() replaces it.
+            # Nothing reads this process any more: before any cleanup, stop
+            # _client() reusing it and request() waiting on it.
+            with self._lock:
                 self.reader_dead = True
+            self._fail_all(failure)
 
     def _handle_message(self, message) -> None:
         if "id" in message and ("result" in message or "error" in message):
@@ -231,10 +233,14 @@ class _Client:
         if hasattr(self, "_actives"):
             self._actives.clear()
         for active in actives:
-            if active and not active.handle._done.is_set():
+            if not active:
+                continue
+            with self._lock:  # the reader and retire() may both fail it
+                if active.handle._done.is_set():
+                    continue
                 active.handle._done.set()
-                if active.on_error:
-                    self._callback(active.on_error, message)
+            if active.on_error:
+                self._callback(active.on_error, message)
 
     def _callback(self, callback: Callable, value: Any) -> None:
         """Never block the protocol reader in dispatch/queue lifecycle code."""
