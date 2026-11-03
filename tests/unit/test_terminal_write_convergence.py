@@ -1,0 +1,91 @@
+"""TP-N1b review (lead): a terminal row and its turn settlement are one write.
+On a lock error it is retried, bounded, as a whole; a retry rechecks that the
+turn is still the agent's, so it never overwrites a successor or a Stop."""
+from __future__ import annotations
+
+import sqlite3
+
+from lib import db, turn_dispatch as dispatch, turn_lifecycle as lifecycle
+from lib.protocol import AgentState
+from lib.turn_lifecycle import TurnEvent
+
+from test_drain_pause_parity import World
+
+
+def _locked_once(monkeypatch, during_backoff=None):
+    real = lifecycle._record_outcome
+    failures = []
+
+    def record(*args, **kwargs):
+        if not failures:
+            failures.append(True)
+            raise sqlite3.OperationalError("database is locked")
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(lifecycle, "_record_outcome", record)
+    if during_backoff is not None:
+        real_sleep = db.time.sleep
+        monkeypatch.setattr(db.time, "sleep", lambda s: (during_backoff(), real_sleep(0))[1])
+    return failures
+
+
+def _turn_row(agent_id, trace_id):
+    return db.conn().execute("SELECT settled_at, outcome FROM turns WHERE agent_id=? AND trace_id=?",
+                             (agent_id, trace_id)).fetchone()
+
+
+def _world(tmp_path, monkeypatch, cid):
+    monkeypatch.setattr(dispatch, "_RUNTIME_CLIENT", None)
+    dispatch.reset_for_tests()
+    world = World(tmp_path)
+    world.send(cid)
+    world.provider.live.discard(world.agent)
+    return world, world.provider.spawned[-1]
+
+
+def test_a_clean_result_that_meets_one_lock_ends_completed(tmp_path, monkeypatch):
+    world, call = _world(tmp_path, monkeypatch, "clean")
+    failures = _locked_once(monkeypatch)
+    try:
+        call["on_result"]({"result": "done"})
+        assert failures == [True]
+        assert lifecycle.current_kind(world.agent) == AgentState.DONE
+        assert _turn_row(world.agent, "t-clean")["outcome"] == "completed"
+    finally:
+        dispatch.reset_for_tests()
+
+
+def test_a_failed_result_that_meets_one_lock_ends_failed(tmp_path, monkeypatch):
+    world, call = _world(tmp_path, monkeypatch, "broken")
+    failures = _locked_once(monkeypatch)
+    try:
+        call["on_error"]("synthetic unclassified failure")
+        assert failures == [True]
+        assert lifecycle.current_kind(world.agent) not in lifecycle.BUSY
+        assert _turn_row(world.agent, "t-broken")["outcome"] == "failed"
+    finally:
+        dispatch.reset_for_tests()
+
+
+def test_a_retried_terminal_write_never_overwrites_a_successor(tmp_path, monkeypatch):
+    """The first attempt meets a lock; during the backoff the agent's next turn
+    starts. The retry finds the turn no longer the agent's and writes nothing."""
+    world, _call = _world(tmp_path, monkeypatch, "first")
+
+    def successor_starts():
+        lifecycle.open_turn(agent_id=world.agent, source="pwa", trace_id="t-next")
+        lifecycle.transition(world.agent, TurnEvent.SPAWN_STARTED,
+                             {"source": "pwa", "dispatch": "claude", "trace_id": "t-next"})
+
+    _locked_once(monkeypatch, during_backoff=successor_starts)
+    try:
+        written = lifecycle.try_transition(world.agent, TurnEvent.PROCESS_EXITED_OK,
+                                           {"trace_id": "t-first"})
+        assert written is None
+        latest = db.conn().execute(
+            "SELECT kind, json_extract(detail, '$.trace_id') AS trace FROM state_log"
+            " WHERE agent_id = ? ORDER BY state_id DESC LIMIT 1", (world.agent,)).fetchone()
+        assert (latest["kind"], latest["trace"]) == (AgentState.THINKING, "t-next")
+        assert _turn_row(world.agent, "t-next")["settled_at"] is None
+    finally:
+        dispatch.reset_for_tests()
