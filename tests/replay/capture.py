@@ -37,7 +37,8 @@ WAIT_TIMEOUT_S = 15
 QUIET_S = 1.0
 OWNED = '.clarp-replay-owned'
 # Files the Host writes for its own diagnostics or that the capture reads separately.
-SKIP_PREFIXES = ('logs/', 'home/.cache/')
+# cli-config/: the harness writes it for the CLI steps (it names the Host's random port).
+SKIP_PREFIXES = ('logs/', 'home/.cache/', 'cli-config/')
 SKIP_NAMES = {'host.json', OWNED, 'state.sqlite', 'state.sqlite-wal', 'state.sqlite-shm',
               'telemetry.sqlite', 'telemetry.sqlite-wal', 'telemetry.sqlite-shm'}
 # Response headers that belong to the HTTP contract (the rest are server/date noise).
