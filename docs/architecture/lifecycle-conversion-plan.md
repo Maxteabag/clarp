@@ -270,7 +270,8 @@ order of rows with equal positions, that is registered.
   - `attempts` is persisted and checked by the reaper's eligibility hook in
     the same transaction. At the cap (proposed: 3) the hook fires `abandon`
     instead of the expiry.
-- **`DREAM_RUN`:** active: `Deadline(48 h, abandoned)`.
+- **`DREAM_RUN`:** active: `Deadline(12 h, abandoned)`, as AUT-06 is signed
+  today; the conversion must not loosen it.
 
 **Dispatch.** Today a dream round does not go through the chat queue.
 `dispatch_adapters.dream` (:98-107) calls `dreaming.dispatch_isolated_dream`
@@ -444,7 +445,7 @@ retries undelivered completed runs.
 
 **Behaviour changes to register:**
 - A round that fails three times is abandoned (fixes AUT-06).
-- A run active for more than 48 h is abandoned.
+- A run active for more than 12 h is abandoned.
 - Concurrent advance paths no longer both dispatch one attempt, and an
   attempt is never launched twice.
 
@@ -688,16 +689,36 @@ TP-N1c stays accepted until this lands. It is not reopened in the fix lane.
 - A held slot of a turn whose execution confirmably ended, but which is
   still unsettled, is freed (TP-N1c).
 
-## Open questions for the lead
+## Decisions (lead, 3 Nov 2026)
 
-1. The order: queue, dream, goals, turns, with turns tied to S4.
-2. Phase 3 needs migrations: `entered_at` columns, reaper indexes, the goal
-   continuation column, the `dream_rounds` attempt fields (`attempts`, `attempt_id`, `launched_at`) and `delivered_at`. May the
-   contract owner make them, one per conversion, after the S1 end window?
-3. Values for these behaviour numbers:
-   - the dream attempt cap (3);
-   - the run deadline (48 h);
-   - the native-goal heartbeat window;
-   - the reaper's batch and tick budget.
-4. The goal follow-up, the byte bound with `prior_steps` moved to the
-   ledger. It can go through the fix lane now. Should it?
+1. **Order:** approved. Queue rows, then dream runs, then goals, then turns
+   (turns together with S4).
+2. **Migrations:** the contract owner makes them, one per conversion, on
+   refactor/integration when the conversion needs it. They do not wait for
+   the S1 end window.
+   - Each carries a provisional schema number, marked as `db_schema.py`
+     already marks one, and is renumbered at the end against the final main.
+   - A conflict with main's migrations on a main → integration merge is the
+     contract owner's to resolve, reviewed by A.
+   - Each migration runs on the production-size rehearsal, with its timing
+     recorded. The total stays within the release downtime budget, and no
+     migration holds the writer lock for long at Host start.
+   - If provisional numbering proves impractical, the lead revisits this.
+3. **Numbers:**
+   - Dream attempt cap: 3.
+   - Dream run deadline: 12 h, not 48 h, matching AUT-06 as signed.
+   - Native-goal heartbeat window: decided in the goals conversion packet,
+     from measured live heartbeat intervals (read-only counts).
+   - Reaper: batches of at most 100 rows, each batch transaction under
+     50 ms measured at production size. Each tick handles at most 500 rows
+     and at most 200 ms of database time.
+
+   Each conversion registers its behaviour changes as intended differences
+   when it lands.
+4. **Goal byte bound:** the byte bound, with `prior_steps` moved to the
+   ledger, goes to the fix lane now (rf-fix, reviewer B). The condition is
+   that every client-visible payload that exposes `prior_steps` or goal
+   history stays byte-identical, read back from the ledger. If that is
+   impossible without a payload change, the work stops and goes to the lead:
+   a contract change is Peter's call. The continuation column stays in
+   Phase 3.
