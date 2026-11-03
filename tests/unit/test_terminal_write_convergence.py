@@ -173,3 +173,35 @@ def test_a_stop_right_after_the_failed_attempt_still_wins(tmp_path, monkeypatch)
         assert lifecycle.current_kind(world.agent) == AgentState.INTERRUPTED
     finally:
         dispatch.reset_for_tests()
+
+
+@pytest.mark.parametrize("attempt", [1, 2])
+def test_a_terminal_row_is_newer_than_its_turns_row_committed_before_it_took_the_lock(
+        tmp_path, monkeypatch, attempt):
+    """TP-N1b review 7: a row of the same turn that commits after the terminal
+    write chose its stamp but before it holds the writer lock (on the first
+    attempt, or on a retry) still sorts before the terminal row."""
+    world, _call = _world(tmp_path, monkeypatch, "first")
+    clock = [lifecycle.now_ms()]
+    monkeypatch.setattr(lifecycle, "now_ms", lambda: clock[0])
+    if attempt == 2:
+        _locked_once(monkeypatch)
+    real_write = lifecycle.TurnStateMachine._write_terminal
+    calls = []
+
+    def own_row_before_the_lock(self, *args, **kwargs):
+        calls.append(1)
+        if len(calls) == attempt:
+            assert not db.conn().in_transaction
+            clock[0] += 50
+            lifecycle.transition(world.agent, TurnEvent.TOOL_STARTED,
+                                 {"source": "hook", "trace_id": "t-first"})
+        return real_write(self, *args, **kwargs)
+
+    monkeypatch.setattr(lifecycle.TurnStateMachine, "_write_terminal", own_row_before_the_lock)
+    try:
+        assert lifecycle.try_transition(world.agent, TurnEvent.PROCESS_EXITED_OK,
+                                        {"trace_id": "t-first"}) is not None
+        assert lifecycle.current_kind(world.agent) == AgentState.DONE
+    finally:
+        dispatch.reset_for_tests()
