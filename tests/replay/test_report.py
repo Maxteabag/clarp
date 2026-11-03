@@ -384,3 +384,18 @@ def test_step_placeholders_fill_from_run_variables():
     filled = capture.fill({'path': '/schedules/{schedule}', 'args': ['--url', 'http://127.0.0.1:{port}'],
                            'keep': '{unknown}'}, {'schedule': 'sched_1', 'port': 4242})
     assert filled == {'path': '/schedules/sched_1', 'args': ['--url', 'http://127.0.0.1:4242'], 'keep': '{unknown}'}
+
+
+def test_the_replay_host_refuses_network_but_not_loopback():
+    import subprocess
+    here = pathlib.Path(__file__).resolve().parent
+    probe = (
+        "import sys, socket; sys.path.insert(0, %r); import host; host.loopback_only()\n"
+        "s = socket.socket(); s.settimeout(1)\n"
+        "try:\n    s.connect(('192.0.2.1', 80)); print('connected')\n"
+        "except ConnectionRefusedError as e: print('refused')\n"
+        "print(socket.socket().connect_ex(('127.0.0.1', 9)) != 111 or 'loopback-tried')\n"
+        "try:\n    socket.getaddrinfo('example.com', 443); print('resolved')\n"
+        "except socket.gaierror: print('no-dns')\n") % str(here)
+    out = subprocess.run([sys.executable, '-c', probe], capture_output=True, text=True, timeout=20).stdout.split()
+    assert out[0] == 'refused' and out[2] == 'no-dns'

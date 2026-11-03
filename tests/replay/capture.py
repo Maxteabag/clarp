@@ -40,7 +40,7 @@ OWNED = '.clarp-replay-owned'
 # Files the Host writes for its own diagnostics or that the capture reads separately.
 # cli-config/: the harness writes it for the CLI steps (it names the Host's random port).
 SKIP_PREFIXES = ('logs/', 'home/.cache/', 'cli-config/')
-SKIP_NAMES = {'host.json', OWNED, 'state.sqlite', 'state.sqlite-wal', 'state.sqlite-shm',
+SKIP_NAMES = {'host.json', OWNED, 'scenario-config.toml', 'state.sqlite', 'state.sqlite-wal', 'state.sqlite-shm',
               'telemetry.sqlite', 'telemetry.sqlite-wal', 'telemetry.sqlite-shm'}
 # Response headers that belong to the HTTP contract (the rest are server/date noise).
 CONTRACT_HEADERS = ('content-type', 'location', 'content-range', 'accept-ranges', 'content-encoding',
@@ -77,9 +77,12 @@ class Host:
         self.log = None
         self.url = ''
 
-    def start(self):
-        """Spawn the Host; the caller owns cleanup (call stop() in a finally)."""
+    def start(self, config: str | None = None):
+        """Spawn the Host; the caller owns cleanup (call stop() in a finally).
+        ``config``: the scenario's own config.toml text (host.py uses it as is)."""
         (self.root / OWNED).touch()
+        if config is not None:
+            (self.root / 'scenario-config.toml').write_text(config)
         self.log = (self.root.parent / f'{self.root.name}.host.log').open('a')
         self.process = subprocess.Popen(
             [self.python, str(HERE / 'host.py'), '--build', str(self.build), '--state-dir', str(self.root)],
@@ -493,7 +496,7 @@ def capture(build: Path, scenario: dict, root: Path, python: str = sys.executabl
     sessions = scenario.get('sessions', ('rachel',))
     db, files = {'schema': [], 'pk': {}, 'tables': {}}, []
     try:
-        host.start()
+        host.start(scenario.get('config'))
         timings['start'] = round(time.monotonic() - started, 2)
         variables = {'port': host.url.rsplit(':', 1)[1], 'root': str(root)}
         sse = SSE(host, sessions)

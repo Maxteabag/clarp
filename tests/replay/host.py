@@ -52,7 +52,9 @@ def isolate(root: Path) -> None:
     for sub in ('home', 'tmp'):
         (root / sub).mkdir(exist_ok=True)
     (root / 'provider').mkdir(exist_ok=True)
-    (root / 'config.toml').write_text('[tts]\nprovider = "none"\n[network]\nadvertise_lan = false\n')
+    scenario_config = root / 'scenario-config.toml'
+    (root / 'config.toml').write_text(scenario_config.read_text() if scenario_config.is_file()
+                                      else '[tts]\nprovider = "none"\n[network]\nadvertise_lan = false\n')
     for key in tuple(os.environ):
         if key.endswith('_API_KEY') or key in (
                 'ELEVEN_API_KEY', 'CLAUDE_PWA_TTS_PROVIDER', 'CLAUDE_PWA_SESSION',
@@ -60,6 +62,44 @@ def isolate(root: Path) -> None:
             os.environ.pop(key, None)
     os.environ['CLARP_HEARTBEATS_DISABLED'] = '1'
     os.environ.setdefault('CLARP_QA_STREAM_DELAY', '0.02')
+
+
+def loopback_only() -> None:
+    """No connection leaves the machine: a scenario that routes TTS or STT to a
+    cloud provider must fail like a missing key, never reach the provider."""
+    import ipaddress
+    import socket
+
+    def allowed(address) -> bool:
+        if not isinstance(address, tuple):
+            return True  # AF_UNIX
+        host = address[0]
+        if host in ('localhost', ''):
+            return True
+        try:
+            return ipaddress.ip_address(host).is_loopback
+        except ValueError:
+            return False
+
+    real_connect, real_connect_ex = socket.socket.connect, socket.socket.connect_ex
+
+    def connect(self, address):
+        if not allowed(address):
+            raise ConnectionRefusedError('replay host: network access refused')
+        return real_connect(self, address)
+
+    def connect_ex(self, address):
+        if not allowed(address):
+            return 111
+        return real_connect_ex(self, address)
+    socket.socket.connect, socket.socket.connect_ex = connect, connect_ex
+    real_getaddrinfo = socket.getaddrinfo
+
+    def getaddrinfo(host, *args, **kwargs):
+        if host not in (None, 'localhost', '127.0.0.1', '::1'):
+            raise socket.gaierror('replay host: name resolution refused')
+        return real_getaddrinfo(host, *args, **kwargs)
+    socket.getaddrinfo = getaddrinfo
 
 
 def main():
@@ -72,6 +112,7 @@ def main():
     if root.is_symlink() or not marker.is_file():
         parser.error('state directory was not prepared by the replay harness')
     isolate(root)
+    loopback_only()
     sys.path.insert(0, str(build / 'server'))
 
     from lib import host_generation

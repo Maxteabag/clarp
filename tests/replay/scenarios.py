@@ -247,6 +247,22 @@ SCENARIOS = [
         ],
     },
     {
+        'id': 'voice-cartesia-no-key',
+        'what': 'a spoken reply routed to Cartesia with no key or voice, raw-pcm delivery, elevenlabs '
+                'fallback configured (VP-02; records today\'s behaviour until the fix lands)',
+        'config': ('[tts]\nprovider = "cartesia"\nfallback = "elevenlabs"\n'
+                   '[audio]\ndelivery = "raw-pcm"\n[network]\nadvertise_lan = false\n'),
+        'steps': [
+            {'op': 'post', 'path': '/send', 'name': 'send uniform (spoken)',
+             'body': {'session': 'rachel', 'text': 'synthetic spoken question uniform',
+                      'client_msg_id': 'uniform', 'synthesize_audio': True}},
+            {'op': 'wait_settled', 'message_id': 'u-uniform'},
+            {'op': 'quiesce'},
+            {'op': 'get', 'path': '/log?session=rachel'},
+            {'op': 'get', 'path': '/clips/recoverable'},
+        ],
+    },
+    {
         'id': 'goal-turn',
         'what': 'a goal is set on an agent; the provider runs an unrequested goal turn and completes it',
         'steps': [
