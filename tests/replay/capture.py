@@ -319,20 +319,19 @@ def save(step: dict, source, variables: dict) -> None:
 def run_step(host: Host, sse, step: dict, http: list, cli: list, variables: dict):
     op = step['op']
     if op in ('get', 'post', 'put', 'delete', 'patch'):
-        body = fill(step.get('body'), variables)
-        path = fill(step['path'], variables)
+        path_values = dict(variables)
         if step.get('from_last'):
-            # Fill {name} in the path from the previous response, e.g. a queue item id.
+            # {name} in the path from the previous response, e.g. a queue item id.
             last = http[-1]['body'] if http else None
-            values = {}
             for name, dotted in step['from_last'].items():
                 value = last
                 for part in dotted.split('.'):
                     value = value[int(part)] if isinstance(value, list) else (value or {}).get(part)
                 if value is None:
                     raise StepFailed(f'no {name} in the previous response')
-                values[name] = urllib.parse.quote(str(value), safe='')
-            path = path.format(**values)
+                path_values[name] = urllib.parse.quote(str(value), safe='')
+        body = fill(step.get('body'), variables)
+        path = fill(step['path'], path_values)
         if step.get('body_from_last'):
             # Carry fields from the previous response, e.g. /transcribe's trace_id into /send.
             last = http[-1]['body'] if http and isinstance(http[-1]['body'], dict) else {}

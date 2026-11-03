@@ -559,3 +559,15 @@ def test_a_prepared_build_from_an_older_harness_is_refused(tmp_path, monkeypatch
     (build / run.STAMP).write_text(json.dumps({'sha': 'a' * 40, 'digest': run.tree_digest(build)}))
     with pytest.raises(run.BuildError, match='older harness'):
         run.prepared_build('a' * 12)
+
+
+def test_a_path_field_from_the_previous_response_fills_its_placeholder():
+    # queue-cancel: DELETE /turn-queue/{queue_id} with the id from the GET before it.
+    import capture
+    from types import SimpleNamespace
+    sent = []
+    host = SimpleNamespace(request=lambda method, path, *a, **kw: (sent.append(path), (200, {}, {}))[1])
+    http = [{'body': {'items': [{'id': 'q 1'}]}}]
+    capture.run_step(host, None, {'op': 'delete', 'path': '/turn-queue/{queue_id}',
+                                  'from_last': {'queue_id': 'items.0.id'}}, http, [], {'port': 1})
+    assert sent == ['/turn-queue/q%201']
