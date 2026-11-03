@@ -583,6 +583,17 @@ def _effective_interval_sec(
     return min(cap, interval)
 
 
+def keeper_owns_heartbeat(agent: dict) -> bool:
+    """Whether a Heartbeat keeper, not the fixed heartbeat, serves ``agent``:
+    an enabled keeper whose scope covers it, or the scope of a keeper adopted
+    earlier, which pausing or deleting it keeps (Peter, AUT-02 keep_fixed)."""
+    from . import janitor_builtins, janitors
+    if janitor_builtins.resolve("heartbeat-decider", target_agent_id=agent["agent_id"]):
+        return True
+    return any(janitors._in_scope(scope, agent)
+               for scope in janitors.adopted_heartbeat_scopes())
+
+
 def agent_schedule(agent: dict, *, now: float | None = None) -> dict:
     """Authoritative profile projection for cadence, backoff, and dormancy."""
     current = time.time() if now is None else now
@@ -604,7 +615,8 @@ def agent_schedule(agent: dict, *, now: float | None = None) -> dict:
         state.dormant = True
     interval = int(_effective_interval_sec(state, is_interrupted=is_interrupted))
     next_at = None
-    if agent.get("heartbeat_enabled") and not state.dormant:
+    if (agent.get("heartbeat_enabled") and not state.dormant
+            and not keeper_owns_heartbeat(agent)):
         if latest_kind == AgentState.WAITING or (
             latest_kind == AgentState.INTERRUPTED and _is_user_stopped(latest)
         ):
@@ -844,13 +856,12 @@ class HeartbeatScheduler:
             self._thread.join(timeout=timeout)
 
     def run_once(self) -> int:
-        from . import janitor_builtins
-        if settings_store.get_bool("heartbeat.janitor_adopted") or janitor_builtins.resolve("heartbeat-decider"):
-            # The decision Janitor owns periodic continuity; startup never wakes agents.
-            return 0
         now = self.now()
         sent = 0
         for agent in pending_heartbeat_agents(now=now):
+            if keeper_owns_heartbeat(agent):
+                # The decision Janitor owns periodic continuity; startup never wakes agents.
+                continue
             agent_id = agent["agent_id"]
             session = agent["session"]
             try:

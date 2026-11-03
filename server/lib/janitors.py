@@ -574,9 +574,37 @@ def set_enabled(session: str, expected_revision: int, enabled: bool) -> dict:
         if enabled and row["template_id"] == "heartbeat-decider":
             from . import settings_store
             settings_store.set_bool("heartbeat.janitor_adopted", True)
+            _record_adopted_heartbeat_scope(_decode(row["scope_json"], {}))
         _fence(c, a["agent_id"], now)
         store.set_config_enabled(c, a["agent_id"], enabled, now)
     return get(session)
+
+
+_ADOPTED_HEARTBEAT_SCOPES = "heartbeat.janitor_adopted_scopes"
+
+
+def _record_adopted_heartbeat_scope(scope: dict) -> None:
+    """Remember where a Heartbeat keeper took over from the fixed heartbeat:
+    pausing or deleting it keeps fixed heartbeats off there (AUT-02s)."""
+    from . import settings_store
+    scopes = _decode(settings_store.get_text(_ADOPTED_HEARTBEAT_SCOPES, default="[]"), [])
+    if scope not in scopes:
+        settings_store.set_text(_ADOPTED_HEARTBEAT_SCOPES, _json([*scopes, scope]))
+
+
+def adopted_heartbeat_scopes() -> list[dict]:
+    """Every scope a Heartbeat keeper was adopted for. A keeper adopted before
+    scopes were recorded counts with the scopes of the keepers that exist, or
+    for every agent when none does."""
+    from . import settings_store
+    if not settings_store.get_bool("heartbeat.janitor_adopted"):
+        return []
+    scopes = _decode(settings_store.get_text(_ADOPTED_HEARTBEAT_SCOPES, default="[]"), [])
+    if scopes:
+        return scopes
+    known = [config["scope"] for config in list_janitors(include_runtime=False)
+             if config["template_id"] == "heartbeat-decider"]
+    return known or [{}]
 
 
 def remove(session: str, expected_revision: int) -> bool:
