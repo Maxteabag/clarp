@@ -272,29 +272,58 @@ order of rows with equal positions, that is registered.
     instead of the expiry.
 - **`DREAM_RUN`:** active: `Deadline(48 h, abandoned)`.
 
-**Dispatch.** The round is claimed queued→sent by compare-and-set, with
-`sent_at` and `attempts + 1`. The dispatch runs from the outbox and carries
-the round's id as its client id, so the queue's dedup on retries
-(`retry-same-client-id`) makes a re-send of the same round attempt a no-op.
+**Dispatch.** Today a dream round does not go through the chat queue.
+`dispatch_adapters.dream` (:98-107) calls `dreaming.dispatch_isolated_dream`
+(:1140-1198), which starts `backends.spawn_turn` directly with
+`isolated=True`, in a fresh backend session with no live-chat binding. The
+queue's client-id dedup is therefore not on this path, and the conversion
+does not route dreams into the agent's chat session to borrow it. The
+isolation stays. The dream owner becomes its own durable receiver:
 
-What this guarantees: **one winner per claim**, and **at least once,
-deduplicated per attempt**, for the dispatch. It does not guarantee that a
-round runs exactly once. The four cases:
-- **Crash after the claim commits, before dispatch:** the round sits in sent
-  with no turn. The sent deadline returns it to queued, and that counts an
-  attempt.
-- **Crash, or an unclear result, after dispatch and before the round's
-  output is recorded:** a provider turn may be running.
-  - Before the deadline re-queues the round, the eligibility hook needs a
-    liveness result for the dreamer agent. That result is computed outside
-    the lock, and the hook revalidates it inside.
-  - While the agent is live with this round's trace, the round stays sent.
-  - A late output for an attempt that has been superseded is recorded only
-    if the round is still in that attempt; otherwise it gets a `Conflict`.
-- **Busy refusal:** the claim is reverted sent→queued with event `refused`,
-  without counting an attempt, so a busy agent never uses up the cap.
-- **`EffectsFailed`:** logged. The round stays sent, and its deadline
-  applies.
+- **Attempt identity.** The claim (queued→sent, compare-and-set) allocates
+  the attempt in the same transaction. It sets `attempts + 1` and
+  `attempt_id = <round id>:<attempts>`, and stores that attempt's
+  `trace_id` and `backend_session_id`. A new attempt always gets a new id. A
+  redelivery of the same attempt always reuses the stored one.
+- **The launch fence.** Before calling `spawn_turn`, the dispatch effect runs
+  a short compare-and-set: stamp `launched_at` where the round is sent, has
+  this `attempt_id`, and `launched_at IS NULL`. Only the winner spawns. That
+  makes **each attempt run at most once**: the stamp commits before the spawn.
+- **Output fence.** `on_result` carries its `attempt_id`, and the output is
+  recorded only while the round is still sent with that same `attempt_id`.
+  Output from an earlier attempt gets a `Conflict` and is logged.
+- **Receipt history.** Each attempt keeps its row of evidence (attempt id,
+  trace, launched_at and outcome), kept as a tombstone when the attempt is
+  superseded. The ordinary queue's receipts are not involved.
+
+What this guarantees: **one winner per claim**, **at most one execution per
+attempt**, and a distinct identity for every new attempt. It does not
+guarantee that a round runs exactly once. The cases:
+- **Crash after the claim, before `launched_at`:** nothing ran. The owner's
+  recovery re-runs the dispatch for a sent round with no `launched_at` past a
+  short grace, with the same `attempt_id`. The fence makes that redelivery
+  safe.
+- **Crash, or an unclear result, after `launched_at`:** the attempt may be
+  running. It is never redelivered.
+  - The sent deadline's eligibility hook needs a liveness result for that
+    attempt's own execution: its trace in `backends.active_handles`, computed
+    outside the lock, with an inspection error counted as live.
+  - While the attempt is live, or its liveness is unknown, the round stays
+    sent.
+  - Only a confirmed end, or no handle past the deadline, re-queues it. The
+    next claim then allocates a new `attempt_id`.
+- **A failed attempt followed by a new one:** attempt 1's error ends it.
+  The round is re-queued, and attempt 2 runs under its own id. Nothing of
+  attempt 1 deduplicates it away.
+- **Busy refusal:** the dispatcher declines before the fence (the agent is
+  not idle). The claim is reverted sent→queued with event `refused`, without
+  counting an attempt.
+- **`EffectsFailed`** before the fence is the first case above. After the
+  fence it is the second.
+
+**G0 must prove the actual receiving boundary on the isolated path.** The
+`retry-same-client-id` evidence from the ordinary send path does not count
+here.
 
 **Digest delivery** (`_deliver_digest`, `harvest_worktree`) gets a durable
 `delivered_at`. The final transition commits first. Delivery then runs,
@@ -304,21 +333,27 @@ retries undelivered completed runs.
 **Commits:**
 1. Activate the declarations, with `UNCONVERTED` and `STATUS_WRITERS` removed
    together.
-2. The claim, then dispatch from the outbox with the client id.
+2. Attempt identity, the launch fence and the output fence. This needs a
+   migration: `attempt_id`, `launched_at` and per-attempt evidence.
 3. Route the remaining writers through the kit.
 4. Delivery with `delivered_at`.
 5. The bounded reaper with the attempt cap and the run deadline.
 
-**Fault cases for replay:**
-- a crash after the claim;
-- a crash after dispatch;
+**Fault cases for replay and characterization**, on the isolated path:
+- a crash after the claim, before the fence: the same attempt is redelivered
+  and runs once;
+- a crash after the fence: no redelivery, then a new attempt id after a
+  confirmed end;
+- a failed attempt followed by a new attempt that really runs;
+- late output from a superseded attempt is rejected;
 - a busy refusal;
 - a delivery failure.
 
 **Behaviour changes to register:**
 - A round that fails three times is abandoned (fixes AUT-06).
 - A run active for more than 48 h is abandoned.
-- Concurrent advance paths no longer both dispatch one attempt.
+- Concurrent advance paths no longer both dispatch one attempt, and an
+  attempt is never launched twice.
 
 These need the lead's classification as fixes inside a conversion.
 
@@ -449,12 +484,46 @@ state cannot be the lifecycle instance. The conversion declares:
 - **`TURN`:** one instance per turn, keyed by the turn row and its trace.
   Its states run from admitted, through launching and running, to settled.
   Final states carry the outcome.
-- **`LAUNCH`:** the CLI process, owned by the turn engine and the process
-  registry: launching, then alive, then exited.
-  - launching: a launch lease, `Deadline(launch grace, failed)`.
-  - alive: `WaitForever("the process is alive")`, backed by missed-exit
-    reconciliation. A process the registry cannot find past a grace is moved
-    to exited with an unknown status, through compare-and-set.
+- **`EXECUTION`:** one provider execution of the turn, not an OS process.
+  Its states are launching, running and ended, owned by the turn engine. Its
+  identity and its evidence of ending are specific to the backend:
+  - **Exec backends** (a CLI process per turn): the identity is PID plus start
+    token, and the end evidence is that process's exit.
+  - **Shared app-server backends** (Codex). `CodexBackend.spawn_turn`
+    (`backend/codex.py:187-197`) uses one app-server process for the whole
+    Host (`codex_app_server.py:782-806`).
+    - The identity is the logical thread and turn, held by its
+      `AppTurnHandle` (:73-94).
+    - The end evidence is turn/completed or turn/aborted for that turn
+      (:360-386).
+    - The transport's lifetime is separate: it is the Codex client
+      lifecycle. A turn ending never means killing or waiting for the shared
+      process, which serves other agents.
+  - **Native goal turns** map each provider continuation to an `EXECUTION`
+    the same way.
+
+  The waits:
+  - launching: a launch lease, `Deadline(launch grace, ...)`. It expires
+    only to a state that frees nothing unless an observation confirms there
+    is no execution (see unknown below).
+  - running: `WaitForever("the execution is running; its end evidence settles it")`.
+
+  **Missed-end reconciliation fails closed.** An observation that is missing
+  or failed is not proof of an end. This matches `_agent_has_live_turn`
+  today, which counts an inspection error as live
+  (`turn_dispatch.py:2228-2234`). There are three cases:
+  - **Confirmed end, unknown outcome:** the turn settles as `interrupted`.
+  - **Existence uncertain:** the execution stays running, and the slot stays
+    held. After a deadline it is surfaced to the user as `attention`. It is
+    never treated as free.
+  - **Preemption:** it never overlaps an execution whose existence is
+    uncertain.
+
+  **G0 cases:**
+  - two agents sharing the app-server;
+  - one logical turn ending while the transport and the other agent's turn
+    stay alive;
+  - a lost or unknown observation, which must keep the slot.
 - **The slot:** an in-memory lifecycle owned by `turn_slots`, tied to the
   turn instance that holds it.
 
@@ -481,31 +550,37 @@ Hook writes become events on the `TURN` instance. A late hook gets a
 **Settlement** is one transaction: the outcome, the restamp, the projection
 and the queue's settle edge (from conversion 1).
 
-**Spawn.** Commit `TURN` admitted→launching and `LAUNCH` created, then start
-the process from the outbox. There are three crash cases, covered by the
-launch lease and missed-exit reconciliation:
-- **A crash before the process starts:** launching expires to failed, and
-  the turn settles as failed.
-- **A crash after the process starts, before alive is recorded:** the
-  registry finds the process and moves it to alive, or the lease expires.
-- **Preemption (TP-01):** the new spawn's effect waits for the old `LAUNCH`
-  to reach exited.
+**Spawn.** Commit `TURN` admitted→launching and `EXECUTION` created, then
+start the execution from the outbox. There are three cases, covered by the
+launch lease and missed-end reconciliation:
+- **A crash before the execution starts:** no PID or handle was ever
+  recorded, and the backend confirms that nothing is running under the
+  turn's trace. Launching then expires to failed, and the turn settles as
+  failed.
+- **A crash after the execution starts, before running is recorded:** the
+  backend finds the execution by its identity (PID and start token, or the
+  thread and turn) and it moves to running. If the backend cannot tell, the
+  execution stays held.
+- **Preemption (TP-01):** the new spawn's effect waits for the old
+  `EXECUTION`'s own end evidence, for example the process exit or
+  turn/aborted after an interrupt. It does not wait for a shared transport.
 
 **TP-N1c's structural backstop is here.** TP-N1c is the lead-accepted
 residual: when `on_error` terminal persistence is exhausted, a slot can stay
 held. In Phase 3 the slot is tied to its `TURN` instance, and that instance
-is tied to a `LAUNCH` with a lease and missed-exit reconciliation. The
-owner's reaper frees a slot when its turn's process has exited and the turn
-is still unsettled past the grace. It also settles the turn (`interrupted`)
+is tied to an `EXECUTION` with a lease and fail-closed missed-end
+reconciliation. The owner's reaper frees a slot when its turn's execution has
+a confirmed end and the turn is still unsettled past the grace. It never
+frees a slot on an observation that is merely missing. It also settles the turn (`interrupted`)
 through compare-and-set, which retries the persistence that was exhausted.
 TP-N1c stays accepted until this lands. It is not reopened in the fix lane.
 
-**Waits.** The busy states are backed by `LAUNCH`, not by deadlines on
+**Waits.** The busy states are backed by `EXECUTION`, not by deadlines on
 `AgentState`:
 - **TURN:**
   - admitted: `Deadline(admission grace, interrupted)`;
   - launching: the launch lease;
-  - running: `WaitForever("its process is alive; LAUNCH's exit settles it")`.
+  - running: `WaitForever("its execution runs; EXECUTION's end evidence settles it")`.
 - **waiting** (a prompt to a person) is a projection of running:
   `WaitForever("a person answers")` at the turn level.
 - **background:** the projection of a finished turn with a background job.
@@ -514,15 +589,17 @@ TP-N1c stays accepted until this lands. It is not reopened in the fix lane.
 **Behaviour changes to register:**
 - A late hook cannot overwrite a settled turn.
 - `turns.ended_at` is set on normal completion (TP-11).
-- The next process starts only after the old one exits (TP-01). The
+- The next execution starts only after the old execution's own end
+  evidence (TP-01). The
   `preempt-live-process` scenario already reaches this.
-- A held slot of an exited, unsettled turn is freed (TP-N1c).
+- A held slot of a turn whose execution confirmably ended, but which is
+  still unsettled, is freed (TP-N1c).
 
 ## Open questions for the lead
 
 1. The order: queue, dream, goals, turns, with turns tied to S4.
 2. Phase 3 needs migrations: `entered_at` columns, reaper indexes, the goal
-   continuation column, `dream_rounds.attempts` and `delivered_at`. May the
+   continuation column, the `dream_rounds` attempt fields (`attempts`, `attempt_id`, `launched_at`) and `delivered_at`. May the
    contract owner make them, one per conversion, after the S1 end window?
 3. Values for these behaviour numbers:
    - the dream attempt cap (3);
