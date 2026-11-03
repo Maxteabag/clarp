@@ -81,7 +81,7 @@ with lk.transaction(con) as outbox:          # BEGIN IMMEDIATE ... COMMIT
 
 | Name | What it does |
 |---|---|
-| `Lifecycle(...)` | The declaration. Construction validates it and raises `LifecycleError` listing every problem: a non-final state without a wait, a deadline that does not end in a final state, an edge out of a final state, an event with two targets from one state, a state unreachable from `initial`, a state that cannot reach a final state, a bad SQL identifier. Leave `table`, `key`, `state_column` and `entered_column` empty for an in-memory lifecycle. |
+| `Lifecycle(...)` | The declaration. Construction validates it and raises `LifecycleError` listing every problem: a non-final state without a wait, a wait that is neither a `Deadline` nor a `WaitForever`, a deadline that does not end in a final state, an edge out of a final state, an event with two targets from one state, a state unreachable from `initial` (deadline expiries count as edges), a state that cannot reach a final state, a bad SQL identifier. Leave `table`, `key`, `state_column` and `entered_column` empty for an in-memory lifecycle. |
 | `Lifecycle.decide(state, event)` | Pure. The target state, or `IllegalTransition`. |
 | `Lifecycle.deadline(state, entered_at)` / `overdue(state, entered_at, now)` | Pure. When the state expires; `None` for final and `WaitForever` states. |
 | `lk.transaction(con)` | `BEGIN IMMEDIATE`; yields an `Outbox`; `COMMIT` then runs the outbox, or `ROLLBACK` and drops it. Refuses to nest inside an open transaction. |
@@ -108,11 +108,13 @@ so tests can find every declaration by scanning `server/` without a registry.
   reason to wait forever. A new status column, a stale entry or a longer
   `UNCONVERTED` list fails.
 - `tests/unit/test_table_writers.py`: a status column is written only by its
-  lifecycle's owner. Today's writers start in `STATUS_WRITERS`; an entry that
-  no longer matches a real writer, or that a declared lifecycle now owns,
-  fails, so the list only shrinks. An `UPDATE` with a dynamic `SET` (or an
-  `INSERT` with a dynamic column list) counts as writing every status column
-  of its table.
+  lifecycle's owner; once a column is declared, its legacy writers lose their
+  exemption. Today's writers start in `STATUS_WRITERS`; an entry that no
+  longer matches a real writer, or that a declared lifecycle now owns, fails,
+  so the list only shrinks. An `UPDATE` with a dynamic `SET` (or an `INSERT`
+  with a dynamic column list) counts as writing every status column of its
+  table. Quoted identifiers (`"status"`, `` `status` ``, `[status]`) count as
+  the column.
 
 ## Lifecycles to convert (Phase 3)
 

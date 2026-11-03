@@ -75,6 +75,10 @@ def test_decide_refuses_undeclared_edges(state, event):
                 "parked": WaitForever(" ")}}, "WaitForever of 'parked' needs a reason"),
     ({"waits": {"queued": Deadline(MIN, "failed"), "running": Deadline(MIN, "failed"),
                 "parked": WaitForever("user"), "done": Deadline(MIN, "failed")}}, "'done' has a wait"),
+    ({"waits": {"queued": "eventually", "running": Deadline(MIN, "failed"),
+                "parked": WaitForever("user")}}, "wait of 'queued' must be a Deadline or a WaitForever"),
+    ({"waits": {"queued": None, "running": Deadline(MIN, "failed"),
+                "parked": WaitForever("user")}}, "'queued' has no deadline or WaitForever"),
     ({"final": frozenset()}, "no final state"),
     ({"initial": "done"}, "initial state 'done' is final"),
     ({"table": "jobs; DROP TABLE x"}, "bad identifier"),
@@ -97,6 +101,27 @@ def test_decide_refuses_undeclared_edges(state, event):
 def test_malformed_declarations_are_refused(overrides, problem):
     with pytest.raises(lk.LifecycleError, match=problem.replace("(", r"\(")):
         _job(**overrides)
+
+
+def test_states_reached_only_by_a_deadline_are_reachable(con):
+    lease = Lifecycle(name="lease", owner="lib/lease.py", initial="held", final=frozenset({"expired"}),
+                      edges=(), waits={"held": Deadline(100, "expired")},
+                      table="jobs", key="job_id", state_column="status", entered_column="status_at")
+    with lk.transaction(con):
+        lk.create(con, lease, "l1", now=0)
+    with lk.transaction(con):
+        assert lk.reap(con, lease, now=100) == [lk.Transition("l1", lk.EXPIRED, "held", "expired", 100)]
+
+
+def test_the_documented_example_constructs():
+    Lifecycle(
+        name="background_job", owner="lib/background_jobs.py",
+        initial="queued", final=frozenset({"done", "failed", "cancelled"}),
+        edges=(Edge("start", frozenset({"queued"}), "running"),
+               Edge("finish", frozenset({"running"}), "done"),
+               Edge("cancel", frozenset({"queued", "running"}), "cancelled")),
+        waits={"queued": Deadline(10 * MIN, "failed"), "running": Deadline(30 * MIN, "failed")},
+        table="background_jobs", key="job_id", state_column="status", entered_column="status_at")
 
 
 def test_deadline_and_overdue():
