@@ -172,7 +172,13 @@ grant more than the exact commit they reviewed.
 ### Claims
 
 Files a slice has claimed. Agents outside the program must not edit them; ask
-the lead. **None yet** (Phase 1 moves no code).
+the lead (`hobbles-18b0`). A claim is short-lived and ends when its slice
+commits land.
+
+| Since | Slice (owner) | Claimed | Until |
+|---|---|---|---|
+| 3 Nov 12:17 | S3 (`rf-routes-0f54`) | `server/server.py`: the `Handler` `do_GET`/`do_POST`/`do_PUT`/`do_DELETE`/`do_PATCH` dispatch chains, the three route tables, `_handle_diagnostics_health`; `server/lib/context.py` | the seam and rebinding commits land |
+| 3 Nov 12:17 | S5 (`rf-readmodel-12f8`) | `server/lib/message_writes.py` import section (`store_transcript_turns`, `_ImportWriter`, `_store_transcript_turns_txn` and its helpers, `_attach_authority_tools`, `stamp_turn`); `server/lib/message_store.py` facade re-exports; `tests/readmodel/` | the S5 extraction commits land; `rf-fix-c4ab`'s RM-N1 commit may edit the upsert and twin path |
 
 ## 7. How to work
 
