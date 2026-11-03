@@ -63,14 +63,20 @@ PATH_KEYS = frozenset({'file', 'cwd', 'path', 'file_path', 'transcript_path', 'r
 # their relative order is compared: state_watcher._poll_once broadcasts each
 # state_log row as agent-state then agent-activity (the dispatcher's own
 # agent-state carries client_msg_id and is a different producer).
+# The watcher's agent-state always carries status_text and never client_msg_id;
+# the Stop path and the dispatcher broadcast agent-state of their own.
 PRODUCERS = {'agent-state': 'state-watcher', 'agent-activity': 'state-watcher'}
+
+
+def is_watcher_state(data: dict) -> bool:
+    return data.get('type') == 'agent-state' and 'status_text' in data and 'client_msg_id' not in data
 
 
 def lane_key(frame: dict) -> str:
     """The producer lane of an SSE frame (or an sse_events row's payload)."""
     data = frame.get('data') if isinstance(frame.get('data'), dict) else {}
     producer = PRODUCERS.get(str(data.get('type')))
-    if producer and 'client_msg_id' not in data:
+    if producer and (data.get('type') == 'agent-activity' or is_watcher_state(data)):
         return f"{producer}|{data.get('session') or ''}"
     return '|'.join([str(frame.get('event') or ''), str(data.get('type') or ''),
                      ','.join(sorted(data)), str(data.get('session') or '')])
@@ -282,8 +288,7 @@ def _canonical_frames(frames: list[dict]) -> list[dict]:
     """The watcher's agent-state frames, canonicalized like state_log rows
     (only agent-state frames take part; others in between do not break a run)."""
     frames = [{**f, 'data': dict(f['data'])} if isinstance(f.get('data'), dict) else f for f in frames]
-    states = [f for f in frames if isinstance(f.get('data'), dict) and f['data'].get('type') == STATE_TYPE
-              and 'client_msg_id' not in f['data']]
+    states = [f for f in frames if isinstance(f.get('data'), dict) and is_watcher_state(f['data'])]
     canonical_state_runs(states, lambda f: f['data'].get('detail'),
                          lambda f, d: f['data'].__setitem__('detail', d),
                          lambda f: _state_key(f['data'].get('session'), f['data'].get('kind'),
