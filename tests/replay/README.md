@@ -189,6 +189,13 @@ Rules for behaviour that is nondeterministic in the Host itself. Each was
 reported to the lead as a pre-existing nondeterminism; each is as narrow as
 the evidence:
 
+- **Live text coalescing**: how many `append` ops the live hub sends for
+  one streamed text depends on timing (one 27-character append in one run,
+  8 + 19 in the next). An append is merged into an append on the same item
+  directly before it, frames emptied by that are dropped, each item's `rev` is
+  renumbered, and `lseq` is compared by its contract only: per session it
+  rises by exactly 1 per frame (checked on the raw frames, reported under
+  `sse / live-contract`).
 - **Invalidation signals** (`transcript-updated`): unchanged replays send one
   to three per turn, sometimes naming the backend session; they are compared
   by presence, one per (type, session, agent).

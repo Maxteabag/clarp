@@ -230,6 +230,7 @@ def compare(a: dict, b: dict, report: Report, calibration: list[dict] | None = N
     _stream(report, s, 'sse_log', a.get('sse_log', []), b.get('sse_log', []),
             calibration and [c.get('sse_log', []) for c in calibration])
     _deep(report, s, 'schema', 'sqlite_master', a['schema'], b['schema'])
+    _deep(report, s, 'sse', 'live-contract', a.get('live', {}), b.get('live', {}))
     for table in sorted(set(a['tables']) | set(b['tables'])):
         _rows(report, s, table, a['tables'].get(table, {}), b['tables'].get(table, {}))
     _files(report, s, a['files'], b['files'])

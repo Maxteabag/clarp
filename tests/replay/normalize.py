@@ -267,10 +267,12 @@ def normalize(capture: dict, harness_root: str) -> dict:
         canonical_state_runs(rows, lambda r: r.get('detail'), lambda r, d: r.__setitem__('detail', d),
                              lambda r: _state_key(r.get('agent_id'), r.get('kind'), r.get('detail')))
         db['tables'][STATE_TABLE] = rows
-    frames, frame_alias = coalesce(_canonical_frames(capture['sse']))
+    live_frames, live_summary = canonical_live(capture['sse'])
+    frames, frame_alias = coalesce(_canonical_frames(live_frames))
     log_rows = sorted(db['tables'].get('sse_events', []), key=lambda r: r.get('event_id') or 0)
-    log_frames, log_alias = coalesce(_canonical_frames(
-        [{'event': None, 'data': _payload(r), 'row': r} for r in log_rows]))
+    log_live, log_live_summary = canonical_live(
+        [{'event': None, 'data': _payload(r), 'row': r} for r in log_rows])
+    log_frames, log_alias = coalesce(_canonical_frames(log_live))
     log_rows = [f['row'] for f in log_frames]
     # Event ids are named by lane position, from the stream first, then the stored log.
     for frame, name in zip(frames, lane_names(frames)):
@@ -326,6 +328,7 @@ def normalize(capture: dict, harness_root: str) -> dict:
                        'row': n.value({k: v for k, v in r.items() if k != 'payload'})} for r in log_rows]
     n.in_stream = False
     out['sse_health'] = capture.get('sse_health')
+    out['live'] = {'stream': n.value(live_summary), 'log': n.value(log_live_summary)}
     out['cli'] = [n.value(c) for c in capture.get('cli', [])]
     return out
 
@@ -391,6 +394,47 @@ def coalesce(frames: list[dict]) -> tuple[list[dict], dict[str, str]]:
                                        if k in data}}
         kept.append(frame)
     return kept, alias
+
+
+def canonical_live(frames: list[dict]) -> tuple[list[dict], dict]:
+    """How many 'append' ops the live hub sends for one streamed text depends on
+    timing (8+19 characters in one run, 27 in the next). Merge an append into an
+    append on the same item directly before it in the stream, drop frames left
+    empty, renumber each item's rev, and compare lseq by its contract only: per
+    session it must rise by exactly 1 per frame (checked on the raw frames)."""
+    live = [f for f in frames if isinstance(f.get('data'), dict) and f['data'].get('type') == 'live']
+    contiguous: dict[str, bool] = {}
+    last: dict[str, int] = {}
+    for f in live:
+        session, lseq = str(f['data'].get('session')), f['data'].get('lseq')
+        if isinstance(lseq, int):
+            if session in last and lseq != last[session] + 1:
+                contiguous[session] = False
+            contiguous.setdefault(session, True)
+            last[session] = lseq
+    out, previous, revs = [], None, {}
+    for f in frames:
+        data = f.get('data') if isinstance(f.get('data'), dict) else None
+        if not data or data.get('type') != 'live' or not isinstance(data.get('ops'), list):
+            out.append(f)
+            continue
+        ops = []
+        for op in data['ops']:
+            op = dict(op) if isinstance(op, dict) else op
+            if (isinstance(op, dict) and op.get('op') == 'append' and previous is not None
+                    and previous.get('op') == 'append' and previous.get('id') == op.get('id')
+                    and previous.get('field') == op.get('field')):
+                previous['chunk'] = str(previous.get('chunk') or '') + str(op.get('chunk') or '')
+                continue
+            if isinstance(op, dict) and 'rev' in op:
+                revs[op.get('id')] = revs.get(op.get('id'), 0) + 1
+                op['rev'] = revs[op.get('id')]
+            ops.append(op)
+            previous = op if isinstance(op, dict) else None
+        if ops or not data['ops']:  # drop only frames that merging emptied
+            out.append({**f, 'data': {**data, 'ops': ops, 'lseq': '<lseq>'}})
+    summary = {'lseq_contiguous': dict(sorted(contiguous.items()))} if contiguous else {}
+    return out, summary
 
 
 def _canonical_frames(frames: list[dict]) -> list[dict]:
