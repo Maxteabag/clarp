@@ -28,8 +28,8 @@ def _report(a, b):
     return report
 
 
-def _frame(data, event=None, has_id=True):
-    return {'event': event, 'has_id': has_id, 'data': data}
+def _frame(data, event=None, wire_id='1'):
+    return {'event': event, 'id': wire_id, 'data': data}
 
 
 def _http(body, status=200, headers=None):
@@ -94,8 +94,8 @@ def test_order_swap_removed_field_header_and_envelope_are_differences():
     header = _report(_capture(http=[_http({}, headers={'cache-control': 'no-store'})]),
                      _capture(http=[_http({}, headers={'cache-control': 'no-cache'})]))
     assert [d['locator'] for d in header.items] == ['[0].headers.cache-control']
-    envelope = _report(_capture(sse=[_frame({'type': 'x'})]), _capture(sse=[_frame({'type': 'x'}, has_id=False)]))
-    assert [d['locator'].split(']', 1)[1] for d in envelope.items] == ['[0].has_id']
+    envelope = _report(_capture(sse=[_frame({'type': 'x'})]), _capture(sse=[_frame({'type': 'x'}, wire_id=None)]))
+    assert [d['locator'].split(']', 1)[1] for d in envelope.items] == ['[0].id']
 
 
 def test_same_size_file_change_is_a_difference():
@@ -176,8 +176,8 @@ def test_racing_writers_of_one_transition_compare_equal_but_a_changed_detail_doe
         return {'schema': [], 'pk': {'state_log': ['state_id']}, 'tables': {'state_log': [
             {'state_id': 1, 'agent_id': 'a', 'kind': 'thinking', 'detail': json.dumps(first)},
             {'state_id': 2, 'agent_id': 'a', 'kind': 'thinking', 'detail': json.dumps(second)}]}}
-    spawn = {'trace_id': 't1', 'dispatch': 'codex', 'source': 'pwa'}
-    start = {'trace_id': 't1', 'dispatch': 'codex'}
+    spawn = {'source': 'pwa', 'dispatch': 'codex', 'origin': 'user', 'trace_id': 't1', 'backend_session_id': ''}
+    start = {'dispatch': 'codex', 'trace_id': 't1', 'origin': 'user'}
     assert not _report(_capture(db=rows(spawn, start)), _capture(db=rows(start, spawn))).items
     assert _report(_capture(db=rows(spawn, start)), _capture(db=rows(start, {**spawn, 'source': 'x'}))).items
 
@@ -204,3 +204,81 @@ def test_a_scenario_root_that_exists_is_refused_never_deleted(tmp_path):
     with pytest.raises(capture.StepFailed):
         capture.fresh_root(root)
     assert (root / 'keep').exists()
+
+
+# Controls from review s0-harness-57d175ff (reviewer B): behaviour changes that
+# must stay differences.
+
+@pytest.mark.parametrize('left,right', [
+    ({'text': '2026-01-01T00:00:00Z'}, {'text': '2026-02-01T00:00:00Z'}),
+    ({'text': '{"x":1, "y":2}'}, {'text': '{"y":2,"x":1}'}),
+    ({'max_bytes': 1_800_000_000}, {'max_bytes': 1_900_000_000}),
+])
+def test_content_is_not_clock_or_structured_column_noise(left, right):
+    assert _report(_capture(http=[_http(left)]), _capture(http=[_http(right)])).items
+
+
+def test_a_stored_json_column_keeps_its_form_and_key_order():
+    def table(raw):
+        return _capture(db={'schema': [], 'pk': {'state_log': ['state_id']}, 'tables': {'state_log': [
+            {'state_id': 1, 'agent_id': 'a', 'kind': 'done', 'detail': raw}]}})
+    assert not _report(table('{"a": 1, "b": 2}'), table('{"a": 1, "b": 2}')).items
+    assert _report(table('{"a": 1, "b": 2}'), table('{"b": 2, "a": 1}')).items
+    assert _report(table('{"a": 1, "b": 2}'), table('{"a":1,"b":2}')).items
+
+
+def _parse_sse(wire: bytes):
+    import capture
+    import io
+    import threading
+    import time
+    reader = capture.SSE.__new__(capture.SSE)
+    reader.frames, reader.errors, reader.ended = [], [], False
+    reader.last_at = time.monotonic()
+    reader._lock, reader._stop = threading.Lock(), threading.Event()
+    reader._resp = io.BytesIO(wire)
+    reader._read()
+    assert not reader.errors
+    return reader.frames
+
+
+def test_changed_sse_wire_id_is_a_difference_even_with_the_same_data():
+    frame = 'id: {}\ndata: {{"type":"agent-state","event_id":7}}\n\n'
+    same = _report(_capture(sse=_parse_sse(frame.format(7).encode())),
+                   _capture(sse=_parse_sse(frame.format(7).encode())))
+    moved = _report(_capture(sse=_parse_sse(frame.format(7).encode())),
+                    _capture(sse=_parse_sse(frame.format(999).encode())))
+    assert not same.items and moved.items
+
+
+def test_wire_id_and_payload_reference_stay_aliased():
+    wire = (b'id: 7\ndata: {"type":"agent-state","event_id":7}\n\n'
+            b'id: 8\ndata: {"type":"live","event_id":8,"after_event_id":7}\n\n')
+    out = normalize.normalize(_capture(sse=_parse_sse(wire)), '/h')['sse']
+    assert out[0]['id'] == out[0]['data']['event_id'] == out[1]['data']['after_event_id']
+    assert out[1]['id'] == out[1]['data']['event_id'] != out[0]['id']
+
+
+@pytest.mark.parametrize('channel', ['db', 'sse'])
+def test_done_details_are_not_the_documented_thinking_writer_race(channel):
+    first, second = {'trace_id': 't1', 'reason': 'first'}, {'trace_id': 't1', 'reason': 'second'}
+
+    def sample(details):
+        if channel == 'db':
+            rows = [{'state_id': i + 1, 'agent_id': 'a', 'kind': 'done', 'detail': json.dumps(d)}
+                    for i, d in enumerate(details)]
+            return _capture(db={'schema': [], 'pk': {'state_log': ['state_id']}, 'tables': {'state_log': rows}})
+        return _capture(sse=[_frame({'type': 'agent-state', 'status_text': '', 'session': 's', 'kind': 'done',
+                                     'detail': d}) for d in details])
+    assert _report(sample([first, second]), sample([second, first])).items
+
+
+def test_two_thinking_rows_that_are_not_the_spawn_start_pair_keep_their_order():
+    a = {'trace_id': 't1', 'dispatch': 'codex', 'origin': 'user'}
+    b = {'trace_id': 't1', 'dispatch': 'codex', 'origin': 'heartbeat'}
+
+    def rows(details):
+        return _capture(db={'schema': [], 'pk': {'state_log': ['state_id']}, 'tables': {'state_log': [
+            {'state_id': i + 1, 'agent_id': 'a', 'kind': 'thinking', 'detail': json.dumps(d)}
+            for i, d in enumerate(details)]}})
+    assert _report(rows([a, b]), rows([b, a])).items

@@ -40,6 +40,24 @@ HEX = re.compile(r'(?<![0-9A-Za-z])[0-9a-f]{12,64}(?![0-9A-Za-z])')
 ISO = re.compile(r'^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?$')
 LOOPBACK = re.compile(r'127\.0\.0\.1:\d+')
 PREFIXED = re.compile(r'^([a-z][a-z0-9]{0,15}[-_])([0-9a-f]{12,64}|[0-9A-Za-z]{20,})$')
+# Clock readings, by field name only where unchanged replays showed them
+# (review s0-harness-57d175ff finding 1): an epoch-range number or an ISO
+# timestamp under one of these keys becomes <time>; anywhere else it is content.
+CLOCK_KEYS = frozenset({
+    'admitted_at', 'at', 'created_at', 'done_ts', 'ended_at_ms', 'enqueued_at', 'last_activity',
+    'last_lap_ms', 'last_turn_end', 'latest_state_ts', 'latest_ts', 'observed_at', 'opened_at',
+    'received_at', 'server_now_ms', 'settled_at', 'since_ms', 'started_at', 'started_at_ms',
+    'timestamp', 'ts', 'turn_started_ms', 'updated_at'})
+# Text that holds serialized JSON, by storage location only where it was seen.
+# Parsed values are compared as JSON plus their serialization form and key order.
+JSON_COLUMNS = frozenset({
+    ('agents', 'mcp_servers'), ('janitor_attachments', 'config_json'),
+    ('janitor_configs', 'execution_json'), ('janitor_configs', 'options_json'),
+    ('janitor_configs', 'scope_json'), ('janitor_trigger_definitions', 'defaults_json'),
+    ('messages', 'display_cells_json'), ('messages', 'tools_json'), ('messages', 'turn_json'),
+    ('personas', 'voice_id'), ('settings', 'value'), ('state_log', 'detail'),
+    ('vocab_runs', 'dropped_json'), ('vocab_runs', 'included_json'), ('voice_events', 'detail')})
+JSON_HTTP_KEYS = frozenset({'voice_id'})
 DURATION_KEYS = frozenset({'duration_ms', 'worked_ms', 'elapsed_ms', 'source_delta_ms', 'latency_ms',
                            'time_used_seconds', 'timeUsedSeconds', 'age_ms', 'age_sec'})
 ID_KEYS = frozenset({'focus', 'dedupe_key', 'id', 'conv', 'epoch', 'cause', 'source', 'thread', 'threadId', 'turnId',
@@ -97,6 +115,37 @@ def lane_names(frames: list[dict]) -> list[str]:
     return names
 
 
+def json_form(raw: str, parsed) -> str:
+    """How a JSON text was serialized (separators, key sorting, ASCII escaping)."""
+    for separators, name in ((None, 'default'), ((',', ':'), 'compact')):
+        for sort_keys in (False, True):
+            for ascii_ in (True, False):
+                if json.dumps(parsed, separators=separators, sort_keys=sort_keys, ensure_ascii=ascii_) == raw:
+                    return name + ('-sorted' if sort_keys else '') + ('' if ascii_ else '-utf8')
+    return 'other'
+
+
+def key_order(value) -> list:
+    """Every object's key sequence (keys are field names, never values)."""
+    if isinstance(value, dict):
+        return [list(value), *[key_order(v) for v in value.values()]]
+    if isinstance(value, list):
+        return [key_order(v) for v in value]
+    return []
+
+
+def parse_json(raw):
+    """A stored JSON text as {'<json>': value, '<form>': how, '<keys>': key order}."""
+    if not isinstance(raw, str):
+        return None
+    try:
+        parsed = json.loads(raw)
+    except ValueError:
+        return None
+    return {'<json>': parsed, '<form>': json_form(raw, parsed),
+            '<keys>': hashlib.sha1(json.dumps(key_order(parsed)).encode()).hexdigest()[:12]}
+
+
 def is_id_key(key: str) -> bool:
     return key in ID_KEYS or key.endswith(('_id', '_ids', 'Id', 'Ids'))
 
@@ -114,6 +163,7 @@ class Normalizer:
         self.eids: dict[str, str] = {}
         self.eid_names: dict[str, str] = {}
         self.in_stream = False  # event ids are SSE ids only inside the SSE channels
+        self.json_here = False  # JSON_HTTP_KEYS are parsed only in HTTP bodies
 
     def _id(self, token: str) -> str:
         if token not in self.ids:
@@ -138,7 +188,7 @@ class Normalizer:
         return HEX.sub(lambda m: self._id(m.group(0)), value)
 
     def string(self, value: str, key: str) -> str:
-        if ISO.match(value.strip()):
+        if key in CLOCK_KEYS and ISO.match(value.strip()):
             return '<time>'
         replaced = self.paths_in(value)
         if is_id_key(key):
@@ -168,15 +218,13 @@ class Normalizer:
             return '<duration>'
         if key in PID_KEYS and isinstance(value, int):
             return '<pid>'
-        if is_epoch(value):
+        if key in CLOCK_KEYS and is_epoch(value):
             return '<time>'
         if isinstance(value, str):
-            stripped = value.strip()
-            if stripped[:1] in '{[' and len(stripped) > 1:
-                try:
-                    return {'<json>': self.value(json.loads(stripped), key)}
-                except ValueError:
-                    pass
+            if key in JSON_HTTP_KEYS and self.json_here:
+                parsed = parse_json(value)
+                if parsed is not None:
+                    return self.value(parsed, key)
             return self.string(value, key)
         return value
 
@@ -210,14 +258,21 @@ def normalize(capture: dict, harness_root: str) -> dict:
     # Id surrogates by first appearance, deterministic channels first: the
     # harness-driven HTTP sequence, then tables by name, then files; the
     # interleaved streams last.
+    n.json_here = True
     out['http'] = [{'step': h['step'], 'method': h['method'], 'path': h['path'], 'status': h['status'],
                     'headers': n.value(h.get('headers', {})), 'body': n.value(h['body'])}
                    for h in capture['http']]
+    n.json_here = False
     out['schema'] = db['schema']
     def row(table, r):
-        r = {k: (n.ids_in(v) if (table, k) in ID_COLUMNS and isinstance(v, str) and v[:1] not in '{[' else v)
-             for k, v in r.items()}
-        return n.value(r)
+        out = {}
+        for k, v in r.items():
+            if (table, k) in JSON_COLUMNS and parse_json(v) is not None:
+                v = parse_json(v)
+            elif (table, k) in ID_COLUMNS and isinstance(v, str):
+                v = n.ids_in(v)
+            out[k] = v
+        return n.value(out)
     out['tables'] = {name: {'pk': db.get('pk', {}).get(name, []), 'rows': [row(name, r) for r in rows]}
                      for name, rows in sorted(db['tables'].items()) if name != 'sse_events'}
     # Size only for opaque bytes: JSON and text embed scratch paths of varying length
@@ -230,9 +285,13 @@ def normalize(capture: dict, harness_root: str) -> dict:
                      if f.get('kind') == 'text' else None}
                     for f in capture['files']]
     n.in_stream = True
-    out['sse'] = [{'event': f.get('event'), 'has_id': f.get('has_id'), 'data': n.value(f.get('data'))}
+    # The wire id: named through the same event-id relation as payload references,
+    # so a wire id that no longer matches its event shows (finding 2).
+    out['sse'] = [{'event': f.get('event'),
+                   'id': (n._eid(f['id']) if str(f['id']).isdigit() else f['id']) if f.get('id') is not None else None,
+                   'data': n.value(f.get('data'))}
                   for f in frames]
-    out['sse_log'] = [{'event': None, 'has_id': True, 'data': n.value(_payload(r)),
+    out['sse_log'] = [{'event': None, 'id': None, 'data': n.value(_payload(r)),
                        'row': n.value({k: v for k, v in r.items() if k != 'payload'})} for r in log_rows]
     n.in_stream = False
     out['sse_health'] = capture.get('sse_health')
@@ -254,7 +313,8 @@ def canonical_state_runs(items: list[dict], get, put, key) -> None:
     run: list[dict] = []
 
     def flush():
-        if len(run) > 1:
+        # Only the exact pair: one spawn row and one provider-start row.
+        if len(run) == 2 and {frozenset(_detail(get(i))) for i in run} == {SPAWN_KEYS, START_KEYS}:
             details = sorted((get(i) for i in run), key=lambda d: json.dumps(_detail(d), sort_keys=True))
             for item, detail in zip(run, details):
                 put(item, detail)
@@ -268,10 +328,19 @@ def canonical_state_runs(items: list[dict], get, put, key) -> None:
     flush()
 
 
+# The demonstrated race, positively identified by its two detail shapes: the
+# dispatcher's spawn row and the runner's provider turn-start row of one trace.
+SPAWN_KEYS = frozenset({'source', 'dispatch', 'origin', 'trace_id', 'backend_session_id'})
+START_KEYS = frozenset({'dispatch', 'origin', 'trace_id'})
+
+
 def _state_key(agent, kind, detail):
     detail = _detail(detail)
-    trace = detail.get('trace_id') if isinstance(detail, dict) else None
-    return (agent, kind, trace) if trace else None
+    if kind != 'thinking' or not isinstance(detail, dict) or not detail.get('trace_id'):
+        return None
+    if set(detail) not in (SPAWN_KEYS, START_KEYS):
+        return None
+    return (agent, kind, detail['trace_id'])
 
 
 def coalesce(frames: list[dict]) -> tuple[list[dict], dict[str, str]]:
