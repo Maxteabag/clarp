@@ -15,6 +15,9 @@ def _send(session, text, msg_id, **extra):
                      'synthesize_audio': False, **extra}}
 
 
+UPGRADE = {'Upgrade': 'websocket', 'Connection': 'Upgrade', 'Sec-WebSocket-Version': '13',
+           'Sec-WebSocket-Key': 'cmVwbGF5LWhhcm5lc3Mta2V5'}  # a fixed synthetic key
+
 SCENARIOS = [
     {
         'id': 'text-turn',
@@ -233,7 +236,8 @@ SCENARIOS = [
     },
     {
         'id': 'janitor-terminal',
-        'what': 'a full-scope device asks for a janitor\'s terminal (HTTP-01b)',
+        'what': 'a full-scope device asks for a janitor\'s terminal, plain and as a WebSocket upgrade (HTTP-01b: '
+                'only the upgrade reaches the janitor check)',
         'steps': [
             {'op': 'cli', 'name': 'pair full', 'save': {'full_code': 'code'},
              'args': ['pair', 'create', '--scope', 'full', '--name', 'Replay full phone',
@@ -243,6 +247,13 @@ SCENARIOS = [
             {'op': 'save_sql', 'var': 'janitor',
              'sql': 'SELECT session FROM agents WHERE is_janitor = 1 AND deleted_at IS NULL ORDER BY session LIMIT 1'},
             {'op': 'get', 'path': '/terminal/{janitor}', 'auth': 'full', 'name': 'janitor terminal (full device)'},
+            # A valid upgrade reaches the janitor check (HTTP-01b); a plain GET is answered
+            # 426 before it. The replay Host refuses to spawn a PTY, so getting past every
+            # check ends without a response (status 0).
+            {'op': 'get', 'path': '/terminal/{janitor}', 'auth': 'full', 'name': 'janitor terminal upgrade (full device)',
+             'headers': UPGRADE},
+            {'op': 'get', 'path': '/terminal/rachel', 'auth': 'full', 'name': 'agent terminal upgrade (full device)',
+             'headers': UPGRADE},
             {'op': 'get', 'path': '/terminal/rachel', 'auth': 'full', 'name': 'agent terminal (full device)'},
         ],
     },

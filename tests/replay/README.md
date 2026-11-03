@@ -135,7 +135,7 @@ planted.py ─── deliberate behaviour changes for the proof
 | `schema` | `sqlite_master` (type, name, table, SQL), raw | exact |
 | `table` | every non-empty table except `sse_events`, all rows, with its primary key columns | multiset per table (exact counts); leftover rows paired by primary key and compared field by field, else reported as added or removed |
 | `files` | every file under the state directory except logs and the databases: path, and the parsed JSON (`.json`, `.jsonl`), the text (other UTF-8 files up to 64 KiB) or size and SHA-256 (anything else) | by path, then field by field |
-| `cli` | each `cli` step: the build's `bin/clarp-admin.py` run with the Host's state dirs and a config naming the replay Host; exit code, stdout (parsed when JSON), stderr | field by field |
+| `cli` | each `cli` step (JSON stdout kept with its layout, key order and final newline; a layout the harness cannot name stays raw text): the build's `bin/clarp-admin.py` run with the Host's state dirs and a config naming the replay Host; exit code, stdout (parsed when JSON), stderr | field by field |
 
 **SSE order.** The Host broadcasts from several threads, so their
 interleaving differs between runs of unchanged code. Each frame belongs to a
@@ -181,21 +181,28 @@ only what differs by nature between runs:
   then tables by name, then files, then the streams;
 - pids and ports under `PID_KEYS`, the loopback port in URLs, and the
   scratch, build and harness paths;
-- in small text files, UUIDs (generated tokens such as the instance
-  generation); `settings.key` and `settings.value` hold generated ids
-  (launch receipts) and get id surrogates.
+- generated text files only (`GENERATED_TEXT`, each seen in unchanged
+  replays): the instance generation token (a UUID) and the claude source
+  markers (`pwa-voice <session> <epoch> <trace> 0`); every other text file is
+  content, with only the scratch paths and pairing secrets rewritten;
+  `settings.key` and `settings.value` hold generated ids (launch receipts) and
+  get id surrogates.
 
 Rules for behaviour that is nondeterministic in the Host itself. Each was
 reported to the lead as a pre-existing nondeterminism; each is as narrow as
 the evidence:
 
-- **Live text coalescing**: how many `append` ops the live hub sends for
-  one streamed text depends on timing (one 27-character append in one run,
-  8 + 19 in the next). An append is merged into an append on the same item
-  directly before it, frames emptied by that are dropped, each item's `rev` is
-  renumbered, and `lseq` is compared by its contract only: per session it
-  rises by exactly 1 per frame (checked on the raw frames, reported under
-  `sse / live-contract`).
+- **Live text coalescing**: how many text `append` ops the live hub sends
+  for one streamed reply depends on timing (one 27-character append in one
+  run, 8 + 19 in the next). First the raw frames are checked against the live
+  sequence rules, and that result is compared (`sse / live-contract`): per
+  stream (session, conversation, epoch) `lseq` is an integer rising by exactly
+  1 per frame, and every op's `rev` is an integer one above the item's
+  previous rev. Then only the observed text-append shape (field `text`, a
+  `chunk`, nothing else) is merged into the text append on the same item
+  directly before it; frames emptied by that are dropped, each item's `rev`
+  is renumbered and an integer `lseq` becomes `<lseq>`. Every other op,
+  including tool-output appends, is kept as is.
 - **Invalidation signals** (`transcript-updated`): unchanged replays send one
   to three per turn, sometimes naming the backend session; they are compared
   by presence, one per (type, session, agent).
@@ -324,7 +331,7 @@ Synthetic turns only, all text invented here (`scenarios.py`). Target about
 | `tool-use` | reasoning, a command streaming output and succeeding (fake_provider.py injects the items) | done |
 | `tool-failure` | the same command failing with exit 2 | done |
 | `limited-device-scope` | a limited device (paired through the build's `clarp-admin pair create` + `/pairing/exchange`) on `/terminal/<session>`, `PATCH /schedules/<id>` (and DELETE as a control), `/dirs`, `/past-sessions?scope=all`, an unmatched PATCH (HTTP-01/02/03) | done; records today's behaviour |
-| `janitor-terminal` | a full device on a janitor's `/terminal/` (HTTP-01b) | done; records today's behaviour |
+| `janitor-terminal` | a full device on a janitor's `/terminal/`, plain GET (426 before any check) and as a WebSocket upgrade, which reaches the janitor check (HTTP-01b); the replay Host refuses the PTY, so passing every check ends without a response (status 0) | done; records today's behaviour |
 | `voice-cartesia-no-key` | a spoken reply routed to Cartesia with no key or voice, raw-pcm delivery, elevenlabs fallback (VP-02); own config | done; records today's behaviour |
 | `preempt-live-process` | a plain send preempts a busy claude agent while its old CLI is still alive (TP-01); `provider/claude-procs.jsonl` records start/sigterm/exit order | done; records today's behaviour |
 | `goal-turn` | `POST /agent-goal`: the provider runs an unrequested goal turn and completes the goal | done |
