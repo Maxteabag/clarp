@@ -1272,11 +1272,12 @@ def test_r6_an_unknown_end_never_replaces_a_stop_completed_after_its_ownership_c
 
 
 def test_r6_an_unknown_end_never_lands_between_a_stops_row_and_its_settlement(env, monkeypatch):
-    """The Stop's state row commits on its own, then its turn settlement runs. The opening's end
-    lands in exactly that gap: the trace still matches and the turn is still unsettled."""
+    """The Stop's state row and its turn settlement commit in one transaction (TP-N1b). The
+    opening's end arrives while that transaction is open, after the row and before the
+    settlement: it waits for the Stop's write lock and, once the Stop commits, is refused."""
     from lib.protocol import AgentState
     inserted, go, errors = threading.Event(), threading.Event(), []
-    real_settle = _td.turn_lifecycle._settle_turn
+    real_record = _td.turn_lifecycle._record_outcome
     stopper = threading.Thread(target=lambda: errors.append(None) if _user_stop(env.agent_id) is None
                                else None, name="r6-stopper")
 
@@ -1284,15 +1285,16 @@ def test_r6_an_unknown_end_never_lands_between_a_stops_row_and_its_settlement(en
         if event == _td.TurnEvent.STOP_REQUESTED and threading.current_thread() is stopper:
             inserted.set()
             if not go.wait(10):
-                errors.append("the opening's end never finished")
-        return real_settle(agent_id, event, target, detail, stamp)
-    monkeypatch.setattr(_td.turn_lifecycle, "_settle_turn", gated)
+                errors.append("the Stop's transaction was never released")
+        return real_record(agent_id, event, target, detail, stamp)
+    monkeypatch.setattr(_td.turn_lifecycle, "_record_outcome", gated)
 
     def stop_row_without_settlement(_trace):
         stopper.start()
         assert inserted.wait(10), "the Stop never inserted its row"
+        # Release the Stop while the opening's end waits for its write lock.
+        threading.Timer(0.5, go.set).start()
     trace = _unknown_end_with(env, monkeypatch, stop_row_without_settlement)
-    go.set()
     stopper.join(10)
     assert not stopper.is_alive() and errors == []
     state = agents_db.latest_state(env.agent_id)
