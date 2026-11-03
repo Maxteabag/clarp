@@ -126,18 +126,24 @@ planted.py ─── deliberate behaviour changes for the proof
 | `files` | every file under the state directory except logs and the databases: path, and the parsed JSON (`.json`, `.jsonl`), the text (other UTF-8 files up to 64 KiB) or size and SHA-256 (anything else) | by path, then field by field |
 | `cli` | reserved for CLI scenarios (`clarp-admin` against the replay Host) | exact |
 
-**SSE order.** The Host broadcasts from several threads (the state
-watcher, the dispatcher, the live hub, the transcript streamer, the
-notifier), so their interleaving differs between runs of unchanged code. A
-frame's lane is its producer: event name, type, payload key set and session,
-except that the state watcher's `agent-state` (it always carries
-`status_text` and never `client_msg_id`) and `agent-activity` share one lane,
-because `state_watcher._poll_once` emits them in sequence from one thread.
-Each lane is compared as an exact sequence, so a reorder within a producer, a
-missing or extra event and any field change are differences. Order between
-independent producers is not a contract and is not compared;
+**SSE order.** The Host broadcasts from several threads, so their
+interleaving differs between runs of unchanged code. Each frame belongs to a
+producer lane, and **each lane is compared as an exact sequence**: a reorder
+within a lane, a missing or extra event and any field change are
+differences. The lanes (`normalize.lane_key`):
+
+| Lane | Frames | Why one ordered lane |
+|---|---|---|
+| state watcher, per session | `agent-state` that carries `status_text` and no `client_msg_id`, and every `agent-activity` | `state_watcher._poll_once` emits each `state_log` row as `agent-state` then `agent-activity`, from one thread, rows in `state_id` order |
+| everything else | one lane per (SSE event name, `type`, payload key set, session) | no pairing is scoped yet, so each kind of frame is strict within itself |
+
+A frame from a new producer, or a new payload shape, lands in its own lane
+and is compared strictly within it until it is scoped here. Order **between**
+lanes is not a contract (independent threads) and is not compared;
 `--cross-lane-order` reports, as a diagnostic, cross-lane orders that both
-base runs agreed on and head broke.
+base runs agreed on and head broke; reviewers may run it on a suspicious
+slice. The `transcript-updated` invalidation lane is compared by presence
+(see below).
 
 **Normalization** (`normalize.py`) follows an explicit contract and rewrites
 only what differs by nature between runs:
