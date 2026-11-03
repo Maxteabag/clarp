@@ -9,12 +9,7 @@ from . import agents,db,janitors,janitor_builtins,settings_store,backends,janito
 from . import janitor_store
 from .protocol import AgentState
 
-SCHEMA='''CREATE TABLE IF NOT EXISTS janitor_continuity (
- target_id TEXT PRIMARY KEY, snapshot TEXT NOT NULL, run_id TEXT NOT NULL,
- decision_json TEXT NOT NULL, due_at INTEGER NOT NULL, status TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS janitor_quota_receipts (
- receipt_id TEXT PRIMARY KEY, run_id TEXT NOT NULL, payload_json TEXT NOT NULL,
- delivery_json TEXT, created_at INTEGER NOT NULL);'''
+from .persistence.schema_parts.janitor_autonomy import SCHEMA
 
 _SCHEMA_LOCK=threading.Lock()
 _SCHEMA_READY_FOR=None  # db.DB_PATH the schema was last applied to
