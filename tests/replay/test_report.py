@@ -180,3 +180,27 @@ def test_racing_writers_of_one_transition_compare_equal_but_a_changed_detail_doe
     start = {'trace_id': 't1', 'dispatch': 'codex'}
     assert not _report(_capture(db=rows(spawn, start)), _capture(db=rows(start, spawn))).items
     assert _report(_capture(db=rows(spawn, start)), _capture(db=rows(start, {**spawn, 'source': 'x'}))).items
+
+
+def test_run_roots_are_exclusive_and_clean_spares_a_live_one(tmp_path):
+    import run
+    first, second = run.RunRoot(tmp_path), run.RunRoot(tmp_path)
+    assert first.path != second.path
+    assert run.live(first.path) and run.live(second.path)
+    first.dir_for('run1'), first.dir_for('run1')
+    second.release(keep=True)
+    assert not run.live(second.path)
+    assert run.cmd_clean(type('A', (), {'scratch': str(tmp_path)})()) == 0
+    assert first.path.exists() and not second.path.exists()
+    first.release(keep=False)
+    assert not first.path.exists()
+
+
+def test_a_scenario_root_that_exists_is_refused_never_deleted(tmp_path):
+    import capture
+    root = tmp_path / 's00'
+    root.mkdir()
+    (root / 'keep').write_text('another job')
+    with pytest.raises(capture.StepFailed):
+        capture.fresh_root(root)
+    assert (root / 'keep').exists()
