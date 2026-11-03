@@ -328,17 +328,29 @@ def get(plan_id: str) -> dict | None:
 
 
 def get_with_goal_text(plan_id: str) -> tuple[dict | None, str | None]:
+    plan, goal_text, _bound = get_with_goal_text_and_bound(plan_id)
+    return plan, goal_text
+
+
+def _utf8_bound(text: str) -> int:
+    return len(text) if text.isascii() else 4 * len(text)
+
+
+def get_with_goal_text_and_bound(plan_id: str) -> tuple[dict | None, str | None, int]:
     """The plan as ``get`` returns it, and the exact ``goal_json`` text its goal
-    was decoded from. The artifact list's summary-v1 projection keys its plan
-    history digest on that text: ``_goal_save`` rewrites it without a revision
-    bump, so only the text itself proves the history unchanged."""
+    was decoded from, and an upper bound on the UTF-8 size of the goal's
+    history as read. The artifact list's summary-v1 projection keys its plan
+    history digest on that text (``_goal_save`` rewrites it without a revision
+    bump, so only the text itself proves the history unchanged) and checks the
+    bound before it serializes the history: with ledger references the stored
+    text is small while the expanded history is not."""
     plan = (
         db.conn()
         .execute("SELECT * FROM task_plans WHERE plan_id=?", (plan_id,))
         .fetchone()
     )
     if not plan:
-        return None, None
+        return None, None, 0
     now = db.now_ms()
     items = []
     for row in db.conn().execute(
@@ -365,8 +377,9 @@ def get_with_goal_text(plan_id: str) -> tuple[dict | None, str | None]:
     data = dict(plan)
     goal_text = data.pop("goal_json")
     data["goal"] = json.loads(goal_text or "{}") or None
+    bound = _utf8_bound(goal_text or "")
     if data["goal"] is not None:
-        _goal_expand(db.conn(), plan_id, data["goal"])
+        bound += _goal_expand(db.conn(), plan_id, data["goal"])
     data["history"] = json.loads(data.pop("history_json") or "[]")
     if data["goal"] is not None:
         from . import goal_ledger
@@ -385,7 +398,7 @@ def get_with_goal_text(plan_id: str) -> tuple[dict | None, str | None]:
         "completed_count": completed,
         "total_count": len(items),
         "server_now": now,
-    }, goal_text
+    }, goal_text, bound
 
 
 def list_for_session(session: str) -> list[dict]:
@@ -466,7 +479,9 @@ def _reshape(value, shape):
 
 def _goal_expand(con, plan_id, goal):
     """The goal as clients read it: each spilled detail back from the ledger,
-    in its original key order."""
+    in its original key order. Returns an upper bound on the UTF-8 bytes the
+    expansion added."""
+    added = 0
     for position, entry in enumerate(goal.get("history") or []):
         detail = entry.get("detail")
         if not isinstance(detail, dict) or not (set(detail) <= {_LEDGER_REF, _SHAPE}) \
@@ -477,7 +492,10 @@ def _goal_expand(con, plan_id, goal):
             (plan_id, detail[_LEDGER_REF])).fetchone()
         recorded = (json.loads(row[0] or "{}").get("detail") or {}) if row else {}
         goal["history"][position] = {**entry, "detail": _reshape(recorded, detail.get(_SHAPE))}
-    return goal
+        # The ledger row's text (spaced separators) is longer than the
+        # detail's compact form, so it bounds what this entry adds.
+        added += _utf8_bound(row[0] or "") if row else 0
+    return added
 
 
 def _goal_save(con, plan_id, goal):
