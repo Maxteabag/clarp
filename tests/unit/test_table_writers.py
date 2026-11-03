@@ -13,6 +13,8 @@ import functools
 import pathlib
 import re
 
+import pytest
+
 ROOT = pathlib.Path(__file__).resolve().parents[2] / "server"
 _WRITE = re.compile(
     r"\b(?:INSERT(?:\s+OR\s+\w+)?\s+INTO|REPLACE\s+INTO|UPDATE|DELETE\s+FROM)\s+([a-z_][a-z0-9_]*)\b")
@@ -131,10 +133,41 @@ def test_allowlist_entries_are_still_real():
 # real writer fails, so the list only shrinks. An UPDATE with a dynamic SET
 # (or an INSERT with a dynamic column list) counts as writing every status
 # column of its table.
-_UPDATE_SET = re.compile(
-    r"\bUPDATE\s+([a-z_][a-z0-9_]*)\s+SET\b(.*?)(?=\bWHERE\b|\bRETURNING\b|\Z)", re.S | re.I)
+# SQLite accepts an identifier bare or quoted as "x", `x` or [x].
+_TABLE = r"[\"`\[]?([a-z_][a-z0-9_]*)[\"`\]]?"
+_UPDATE_SET = re.compile(rf"\bUPDATE(?:\s+OR\s+\w+)?\s+{_TABLE}\s+SET\b", re.I)
+_CLAUSE_END = re.compile(r"\b(?:WHERE|RETURNING|FROM)\b", re.I)
+
+
+def _set_clause(text: str, start: int) -> str:
+    """The SET list from `start` to the first WHERE/RETURNING/FROM outside parentheses."""
+    depth, quote = 0, ""
+    for i in range(start, len(text)):
+        ch = text[i]
+        if quote:
+            quote = "" if ch == quote else quote
+            continue
+        if ch in "'\"`":
+            quote = ch
+            continue
+        depth += ch == "("
+        depth -= ch == ")"
+        if depth == 0 and ch.isalpha() and (i == 0 or not text[i - 1].isalnum()) and _CLAUSE_END.match(text, i):
+            return text[start:i]
+    return text[start:]
+
+
+def _update_sets(text: str):
+    """(table, SET list) for every UPDATE in text."""
+    for match in _UPDATE_SET.finditer(text):
+        yield match.group(1), _set_clause(text, match.end())
 _INSERT_COLUMNS = re.compile(
-    r"\b(?:INSERT(?:\s+OR\s+\w+)?|REPLACE)\s+INTO\s+([a-z_][a-z0-9_]*)\s*(?:\(([^)]*)\))?", re.I)
+    rf"\b(?:INSERT(?:\s+OR\s+\w+)?|REPLACE)\s+INTO\s+{_TABLE}\s*(?:\(([^)]*)\))?", re.I)
+
+
+def _names_column(text: str, column: str, *, assigned: bool) -> bool:
+    quoted = rf"(?<![\w\"`\[])[\"`\[]?{column}[\"`\]]?(?![\w\"`\]])"
+    return re.search(quoted + (r"\s*=" if assigned else ""), text, re.I) is not None
 _DYNAMIC = "{?}"
 
 STATUS_WRITERS: dict[tuple[str, str], set[str]] = {
@@ -182,8 +215,21 @@ def _sql_texts(tree: ast.AST):
              for v in node.values if isinstance(v, ast.Constant)}
     yield from (text for text in _sql_strings(tree) if text not in inner)
     for node in ast.walk(tree):
-        if isinstance(node, ast.JoinedStr) and id(node) not in inner:
+        if isinstance(node, ast.JoinedStr):
             yield "".join(v.value if isinstance(v, ast.Constant) else _DYNAMIC for v in node.values)
+
+
+def status_writes(text: str, by_table: dict[str, set[str]]) -> set[tuple[str, str]]:
+    """The (table, status column) pairs one SQL text may write."""
+    out = set()
+    for table, assigned in _update_sets(text):
+        out |= {(table, c) for c in by_table.get(table, ())
+                if _DYNAMIC in assigned or _names_column(assigned, c, assigned=True)}
+    for match in _INSERT_COLUMNS.finditer(text):
+        table, names = match.groups()
+        out |= {(table, c) for c in by_table.get(table, ())
+                if names is None or _DYNAMIC in names or _names_column(names, c, assigned=False)}
+    return out
 
 
 @functools.cache
@@ -199,45 +245,69 @@ def status_writers() -> dict[tuple[str, str], set[str]]:
         if "/tests/" in rel:
             continue
         for text in _sql_texts(ast.parse(path.read_text(), filename=str(path))):
-            for match in _UPDATE_SET.finditer(text):
-                assigned = match.group(2)
-                for column in by_table.get(match.group(1), ()):
-                    if _DYNAMIC in assigned or re.search(rf"\b{column}\s*=", assigned):
-                        found[(match.group(1), column)].add(rel)
-            for match in _INSERT_COLUMNS.finditer(text):
-                names = match.group(2)
-                for column in by_table.get(match.group(1), ()):
-                    if names is None or _DYNAMIC in names or re.search(rf"\b{column}\b", names):
-                        found[(match.group(1), column)].add(rel)
+            for key in status_writes(text, by_table):
+                found[key].add(rel)
     return found
 
 
-def test_status_writer_scan_sees_literal_and_dynamic_writes():
-    tree = ast.parse(
-        "a = 'UPDATE jobs SET note = ? WHERE id = ?'\n"
-        "b = 'UPDATE jobs SET status = ?, note = ? WHERE status = ?'\n"
-        "c = f'UPDATE jobs SET {fields} WHERE id = ?'\n"
-        "d = f'INSERT INTO jobs ({cols}) VALUES ({marks})'\n")
-    texts = list(_sql_texts(tree))
-    sets = [m.group(2) for t in texts for m in _UPDATE_SET.finditer(t)]
-    assert [bool(re.search(r"\bstatus\s*=", s)) or _DYNAMIC in s for s in sets] == [False, True, True]
-    assert any(_DYNAMIC in (m.group(2) or "") for t in texts for m in _INSERT_COLUMNS.finditer(t))
+@pytest.mark.parametrize("source,writes", [
+    ("'UPDATE jobs SET note = ? WHERE id = ?'", False),
+    ("'UPDATE jobs SET status = ?, note = ? WHERE status = ?'", True),
+    ("f'UPDATE jobs SET {fields} WHERE id = ?'", True),
+    ("'UPDATE OR IGNORE \"jobs\" SET \"status\" = ? WHERE id = ?'", True),
+    ("'UPDATE jobs SET [status]=? WHERE id = ?'", True),
+    ("'UPDATE jobs SET status_note = ?, `status` = ? WHERE id = ?'", True),
+    ("'UPDATE jobs SET old_status = ?, status_at = ? WHERE status = ?'", False),
+    ("'UPDATE jobs SET n = (SELECT 1 FROM t WHERE x = 1), status = ? WHERE id = ?'", True),
+    ("\"UPDATE jobs SET note = '(', status = ? WHERE id = ?\"", True),
+    ("f'INSERT INTO jobs ({cols}) VALUES ({marks})'", True),
+    ("'INSERT INTO \"jobs\" (id, \"status\") VALUES (?, ?)'", True),
+    ("'INSERT INTO jobs (id, note) VALUES (?, ?)'", False),
+    ("'INSERT OR REPLACE INTO jobs VALUES (?, ?)'", True),
+])
+def test_status_writer_scan_sees_literal_quoted_and_dynamic_writes(source, writes):
+    texts = _sql_texts(ast.parse("x = " + source))
+    found = any(status_writes(text, {"jobs": {"status"}}) for text in texts)
+    assert found is writes
+
+
+def status_writer_problems(found, owners, allowlist) -> list[str]:
+    """Writers outside the owner. A declared column has exactly one writer:
+    legacy exemptions end with the conversion."""
+    problems = []
+    for key, modules in sorted(found.items()):
+        allowed = {owners[key]} if key in owners else allowlist.get(key, set())
+        if modules - allowed:
+            problems.append(f"{key[0]}.{key[1]} written by {sorted(modules - allowed)}; go through its lifecycle owner")
+    return problems
+
+
+def stale_status_writers(found, owners, allowlist) -> list[tuple[tuple[str, str], str]]:
+    """Allowlist entries that no longer write, or whose column is now declared."""
+    return sorted((key, module) for key, modules in allowlist.items() for module in modules
+                  if module not in found.get(key, set()) or key in owners)
+
+
+def test_a_declared_owner_ends_the_legacy_exemptions():
+    key = ("clips", "status")
+    found = {key: {"lib/clip_store.py", "lib/new_clip_owner.py"}}
+    allowlist = {key: {"lib/clip_store.py"}}
+    assert status_writer_problems(found, {}, allowlist) == [
+        "clips.status written by ['lib/new_clip_owner.py']; go through its lifecycle owner"]
+    owners = {key: "lib/new_clip_owner.py"}
+    assert status_writer_problems(found, owners, allowlist) == [
+        "clips.status written by ['lib/clip_store.py']; go through its lifecycle owner"]
+    assert stale_status_writers(found, owners, allowlist) == [(key, "lib/clip_store.py")]
+    assert stale_status_writers({key: set()}, {}, allowlist) == [(key, "lib/clip_store.py")]
 
 
 def test_status_columns_are_written_only_through_their_lifecycle():
     from test_lifecycle_guards import lifecycle_owners
-    owners = lifecycle_owners()
-    problems = []
-    for key, modules in sorted(status_writers().items()):
-        extra = modules - STATUS_WRITERS.get(key, set()) - {owners.get(key)}
-        if extra:
-            problems.append(f"{key[0]}.{key[1]} written by {sorted(extra)}; go through its lifecycle owner")
+    problems = status_writer_problems(status_writers(), lifecycle_owners(), STATUS_WRITERS)
     assert not problems, "\n".join(problems)
 
 
 def test_status_writer_allowlist_entries_are_still_real():
     from test_lifecycle_guards import lifecycle_owners
-    found, owners = status_writers(), lifecycle_owners()
-    stale = sorted((key, module) for key, modules in STATUS_WRITERS.items() for module in modules
-                   if module not in found.get(key, set()) or owners.get(key) == module)
+    stale = stale_status_writers(status_writers(), lifecycle_owners(), STATUS_WRITERS)
     assert not stale, f"remove stale STATUS_WRITERS entries: {stale}"

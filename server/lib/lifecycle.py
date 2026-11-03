@@ -127,13 +127,16 @@ class Lifecycle:
                 out.append(f"non-final state {state!r} has no deadline or WaitForever")
             elif isinstance(wait, Deadline) and (wait.after_ms <= 0 or wait.expire_to not in self.final):
                 out.append(f"deadline of {state!r} must be positive and end in a final state")
+            elif not isinstance(wait, (Deadline, WaitForever)):
+                out.append(f"wait of {state!r} must be a Deadline or a WaitForever, not {type(wait).__name__}")
             elif isinstance(wait, WaitForever) and not wait.reason.strip():
                 out.append(f"WaitForever of {state!r} needs a reason")
         out += [f"final or unknown state {s!r} has a wait" for s in sorted(set(self.waits) - (self.states - self.final))]
-        reachable = _closure({self.initial}, {(s, e.target) for e in self.edges for s in e.sources})
+        expiries = {(s, w.expire_to) for s, w in self.waits.items() if isinstance(w, Deadline)}
+        forward = {(s, e.target) for e in self.edges for s in e.sources} | expiries
+        reachable = _closure({self.initial}, forward)
         out += [f"state {s!r} is unreachable from {self.initial!r}" for s in sorted(self.states - reachable)]
-        back = {(e.target, s) for e in self.edges for s in e.sources}
-        back |= {(w.expire_to, s) for s, w in self.waits.items() if isinstance(w, Deadline)}
+        back = {(b, a) for a, b in forward}
         out += [f"state {s!r} cannot reach a final state" for s in sorted(self.states - _closure(set(self.final), back))]
         return out
 
