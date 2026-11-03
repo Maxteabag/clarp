@@ -332,6 +332,15 @@ class TurnStateMachine:
         if expect_trace is not None:
             return self._conditional_transition(agent_id, event, detail, expect_trace=expect_trace,
                                                 anchor=anchor, s_open=s_open)
+        fence = None
+        if self._may_end_turn(event, kind) and not conn().in_transaction:
+            # A terminal write's causal baseline, read before anything else of
+            # this write (its state, stamp, runtime): a row after it is newer
+            # than this write began (TP-N1b). One index seek; not
+            # state_generation(), which marks the call-open path.
+            fence = int(conn().execute(
+                "SELECT COALESCE(MAX(state_id), 0) FROM state_log WHERE agent_id = ?",
+                (agent_id,)).fetchone()[0])
         from_state = self.current_kind(agent_id)
         if event == TurnEvent.RECORDED:
             if kind is None or not AgentState.is_valid(kind):
@@ -371,14 +380,13 @@ class TurnStateMachine:
             if target in TERMINAL and not conn().in_transaction:
                 # Atomic, so a lock error leaves nothing behind: retry the whole
                 # write (bounded, db.retry_locked) rather than strand the agent busy.
-                # The agent's newest state row before the first attempt (one index
-                # seek): a retry writes only if every row since is this turn's own,
-                # so a Stop or successor that commits while an attempt waits, fails
-                # or rolls back wins. Not state_generation(): that marks the
-                # call-open path, which ordinary turns never take.
-                fence = int(conn().execute(
-                    "SELECT COALESCE(MAX(state_id), 0) FROM state_log WHERE agent_id = ?",
-                    (agent_id,)).fetchone()[0])
+                # The baseline read at the top of transition(): a retry writes only
+                # if every row since is this turn's own, so a Stop or successor that
+                # commits while the write prepares, waits, fails or rolls back wins.
+                if fence is None:
+                    fence = int(conn().execute(
+                        "SELECT COALESCE(MAX(state_id), 0) FROM state_log WHERE agent_id = ?",
+                        (agent_id,)).fetchone()[0])
                 attempts: list[int] = []
 
                 def write():
@@ -447,6 +455,13 @@ class TurnStateMachine:
                 database.execute("ROLLBACK")
             raise
         return cursor, trace, stamp
+
+    def _may_end_turn(self, event: str, kind: str | None) -> bool:
+        if event == TurnEvent.RECORDED:
+            return kind in TERMINAL
+        if event == TurnEvent.AUDIT_NOTED:
+            return True
+        return (self.table.get(event) or (None,))[0] in TERMINAL
 
     def _recheck_terminal(self, agent_id: str, event: str, detail: dict[str, Any] | None,
                           *, since: int, force: bool) -> None:
