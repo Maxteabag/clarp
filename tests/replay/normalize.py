@@ -440,37 +440,72 @@ def live_contract(live: list[dict]) -> dict:
     return {'lseq': dict(sorted(lseq_state.items())), 'rev_faults': rev_faults} if streams else {}
 
 
+def _same_but_chunk(a: dict, b: dict) -> bool:
+    """Two text appends that differ only by timing: every field but chunk and rev
+    identical, keys included."""
+    return ({k: v for k, v in a.items() if k not in ('chunk', 'rev')}
+            == {k: v for k, v in b.items() if k not in ('chunk', 'rev')})
+
+
+def _envelope_ok(frame: dict, into: dict | None) -> bool:
+    """A frame may be dropped after merging only with an envelope that carries
+    nothing of its own: no SSE event name, a wire id that is absent or names the
+    frame's own event, and the same payload fields (clock readings aside) as the
+    frame it merges into."""
+    data = frame['data']
+    wire = frame.get('id')
+    if frame.get('event') is not None or into is None:
+        return False
+    if wire is not None and str(wire) != str(data.get('event_id')):
+        return False
+    # Clock readings (server_now_ms) differ between any two frames by nature.
+    def fields(d):
+        return {k: v for k, v in d.items() if k not in ('ops', 'lseq', 'event_id') and k not in CLOCK_KEYS}
+    return fields(data) == fields(into['data'])
+
+
 def canonical_live(frames: list[dict]) -> tuple[list[dict], dict]:
     """How many text 'append' ops the live hub sends for one streamed reply
     depends on timing (one 27-character append in one run, 8 + 19 in the next).
     After the raw frames pass live_contract (whose result is compared), a text
-    append is merged into the text append on the same item directly before it,
-    frames emptied by that are dropped, each item's rev is renumbered and lseq
-    becomes <lseq>. Any other op, including tool-output appends, is kept as is."""
+    append is merged into the text append directly before it when every other
+    field is identical (_same_but_chunk); a frame emptied by that is dropped only
+    if its envelope carries nothing of its own (_envelope_ok), otherwise it is
+    kept unmerged. Each item's rev is renumbered and an integer lseq becomes
+    <lseq>. Any other op, including tool-output appends, is kept as is."""
     live = [f for f in frames if isinstance(f.get('data'), dict) and f['data'].get('type') == 'live']
     summary = live_contract(live)
-    out, previous, revs = [], None, {}
+    out, previous, previous_frame, revs = [], None, None, {}
     for f in frames:
         data = f.get('data') if isinstance(f.get('data'), dict) else None
         if not data or data.get('type') != 'live' or not isinstance(data.get('ops'), list):
             out.append(f)
             continue
-        ops = []
-        for op in data['ops']:
-            op = dict(op) if isinstance(op, dict) else op
-            if (_text_append(op) and _text_append(previous) and previous.get('id') == op.get('id')
-                    and previous.get('conv') == op.get('conv')):
-                previous['chunk'] = previous['chunk'] + op['chunk']
+        raw_ops = [dict(op) if isinstance(op, dict) else op for op in data['ops']]
+        merges = []  # (target op, chunk) decided for this frame
+        keep = []
+        last, last_frame = previous, previous_frame
+        for op in raw_ops:
+            if _text_append(op) and _text_append(last) and _same_but_chunk(last, op):
+                merges.append((last, op['chunk']))
                 continue
-            if isinstance(op, dict) and isinstance(op.get('rev'), int):
-                key = (data.get('session'), data.get('conv'), data.get('epoch'), op.get('id'))
-                revs[key] = revs.get(key, 0) + 1
-                op['rev'] = revs[key]
-            ops.append(op)
-            previous = op if isinstance(op, dict) else None
-        if ops or not data['ops']:  # drop only frames that merging emptied
+            keep.append(op)
+            last = op if isinstance(op, dict) else None
+        if raw_ops and not keep and not _envelope_ok(f, last_frame):
+            merges, keep = [], raw_ops  # an envelope of its own: keep the frame as it was
+        for target, chunk in merges:
+            target['chunk'] = target['chunk'] + chunk
+        if keep or not raw_ops:
+            for op in keep:
+                if isinstance(op, dict) and isinstance(op.get('rev'), int):
+                    key = (data.get('session'), data.get('conv'), data.get('epoch'), op.get('id'))
+                    revs[key] = revs.get(key, 0) + 1
+                    op['rev'] = revs[key]
             lseq = '<lseq>' if isinstance(data.get('lseq'), int) else data.get('lseq')
-            out.append({**f, 'data': {**data, 'ops': ops, 'lseq': lseq}})
+            frame = {**f, 'data': {**data, 'ops': keep, 'lseq': lseq}}
+            out.append(frame)
+            previous_frame = f
+            previous = next((op for op in reversed(keep) if isinstance(op, dict)), None)
     return out, summary
 
 

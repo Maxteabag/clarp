@@ -418,7 +418,7 @@ def test_cli_json_output_form_remains_observable(tmp_path, monkeypatch):
 
 
 def _live(lseq, *ops):
-    return _frame({'type': 'live', 'session': 's', 'lseq': lseq, 'ops': list(ops)})
+    return _frame({'type': 'live', 'session': 's', 'lseq': lseq, 'ops': list(ops)}, wire_id=None)
 
 
 def test_live_appends_split_by_timing_compare_equal_but_text_and_lseq_gaps_do_not():
@@ -480,3 +480,38 @@ def test_arbitrary_text_file_numbers_are_content():
         return [{"path": "workspace/result.txt", "kind": "text", "bytes": len(text), "text": text}]
     assert _report(_capture(files=files("release number 1793692941")),
                    _capture(files=files("release number 1793692942"))).items
+
+
+# Reviewer B's controls (review s0-corpus-9ec1349a): append metadata and merged-away envelopes.
+
+
+def test_append_metadata_is_not_lost_when_chunks_merge():
+    def frames(kind):
+        return [_live(1, {"op": "upsert", "id": "i1", "rev": 1}),
+                _live(2, {"op": "append", "id": "i1", "kind": "message", "rev": 2, "field": "text", "chunk": "ab"}),
+                _live(3, {"op": "append", "id": "i1", "kind": kind, "rev": 3, "field": "text", "chunk": "cd"})]
+    assert _report(_capture(sse=frames("message")), _capture(sse=frames("tool"))).items
+
+
+def test_envelope_on_a_merged_away_frame_is_not_lost():
+    def frames(changed):
+        rows = [_live(1, {"op": "upsert", "id": "i1", "rev": 1}),
+                _live(2, {"op": "append", "id": "i1", "rev": 2, "field": "text", "chunk": "ab"}),
+                _live(3, {"op": "append", "id": "i1", "rev": 3, "field": "text", "chunk": "cd"})]
+        if changed:
+            rows[-1] = {**rows[-1], "event": "unexpected-event", "id": "999"}
+        return rows
+    assert _report(_capture(sse=frames(False)), _capture(sse=frames(True))).items
+
+
+def test_a_real_frame_whose_wire_id_names_its_event_still_merges():
+    def frames(split):
+        rows = [_frame({'type': 'live', 'session': 's', 'lseq': 1, 'event_id': 11,
+                        'ops': [{'op': 'append', 'id': 'i1', 'rev': 1, 'field': 'text', 'chunk': 'ab' if split else 'abcd'}]},
+                       wire_id='11')]
+        if split:
+            rows.append(_frame({'type': 'live', 'session': 's', 'lseq': 2, 'event_id': 12,
+                                'ops': [{'op': 'append', 'id': 'i1', 'rev': 2, 'field': 'text', 'chunk': 'cd'}]},
+                               wire_id='12'))
+        return rows
+    assert not _report(_capture(sse=frames(False)), _capture(sse=frames(True))).items
