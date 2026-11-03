@@ -424,7 +424,7 @@ per backend, with denominators: imports, admitted runs, skips by reason
 verdicts, checkpoint coverage and cost. A backend with little traffic does
 not borrow another backend's evidence.
 
-**Exit criteria** (lead signs, Peter at the phase gate):
+**Exit criteria** (the lead signs them and decides the phase gate):
 - zero `diverge` over the last 3 days, with at least 500 compared runs for
   each supported backend that has live traffic (a backend under that
   threshold stays full-only);
