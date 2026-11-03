@@ -1376,8 +1376,18 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
             # Keep the already visible completion identity when its exact
             # authored request and final text identify this transcript reply.
             # Never deduplicate equal replies belonging to different requests.
-            slot = database.execute("SELECT message_id FROM messages WHERE agent_id=? AND backend_session_id=? AND source_file=? AND seq=? AND role='assistant'",
+            slot = database.execute("SELECT message_id, trace_id FROM messages WHERE agent_id=? AND backend_session_id=? AND source_file=? AND seq=? AND role='assistant'",
                 (agent_id, backend_session_id, source_file, seq)).fetchone()
+            if (slot and current_request_trace
+                    and slot["message_id"] != _message_id(
+                        agent_id, backend_session_id, source_file, seq)
+                    and (slot["trace_id"] or "") != current_request_trace
+                    and _park_adopted_occupant(database, agent_id, backend_session_id,
+                                               source_file, seq, msg_id="")):
+                # Another request's adopted reply holds this slot (its turn left
+                # the transcript): it never lends its id to this reply (RM-N1b).
+                skipped_slot_removed = True
+                slot = None
             moved = None
             if current_request_trace and not (
                     slot and slot["message_id"] != _message_id(
