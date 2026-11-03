@@ -377,6 +377,12 @@ class TurnStateMachine:
 
                 def write():
                     attempts.append(1)
+                    nonlocal stamp
+                    if len(attempts) > 1 and ts is None:
+                        # A retry is a new write: it takes a fresh stamp (never an
+                        # earlier one), so it sorts after any row of its own turn
+                        # written during the backoff. A historical ts is kept.
+                        stamp = max(stamp, now_ms())
                     return self._write_terminal(
                         agent_id, event, target, detail, runtime_id, stamp,
                         recheck=fence if len(attempts) > 1 else None, force=force)
