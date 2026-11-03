@@ -65,8 +65,8 @@ the hot spots; every high finding fixed or explicitly accepted.
    most one test file or node id with `-n 0` through
    `/var/tmp/clarp-refactor-program/bin/heavy` (it refuses everything else).
    Full suites, coverage and replay runs go to the buildbox through
-   `/var/tmp/clarp-refactor-program/bin/heavy-remote` (announced 3 Nov; default
-   `-n 10`; `--status`, `--forget`). The landing gate is the merge captain's
+   `/var/tmp/clarp-refactor-program/bin/heavy-remote` (announced 3 Nov; four job
+   slots of `-n 8`; `--status`, `--forget`). The landing gate is the merge captain's
    GitHub Actions run on the exact commit. Never run `cargo` (repo rule).
 6. **Data.** The replay corpus is scrubbed with stable surrogates and read only
    through the harness. Tools print structure, counts and codes, never message
@@ -116,6 +116,13 @@ the hot spots; every high finding fixed or explicitly accepted.
 
 **Checkpoints (Peter, 3 Nov 11:3x):** "I dont want to approve for next stages. I just want a finshed refactored server". Both go/no-go checkpoints are the lead's decisions on the same evidence; no agent waits for Peter. Every gate in section 5 still applies.
 
+**Go/no-go 1: GO (lead, 3 Nov 12:12)** on the harness proof at `57d175ff`: two
+self-check runs, 9 scenarios, unchanged code 0/0/0 differences both times, all
+six planted changes caught. G2 is binding from then on. Behaviour-relevant
+landings start once a harness commit with reviewer B's SOURCE YES is on main, and
+not before the 3 Nov 18:00 release is done. Tests- and docs-only landings
+continue as before.
+
 ## 5. Gates
 
 - **G0 entry (per slice):** characterization tests for the code the slice will
@@ -125,8 +132,12 @@ the hot spots; every high finding fixed or explicitly accepted.
   except the quarantined tests (read the result, not a wrapper's exit code);
   move-only commits pass the AST-identity check once it exists; the layer test
   once it exists.
-- **G2 harness** (from the lead's go/no-go 1): replay of head against base: zero unexplained
-  differences.
+- **G2 harness** (binding since go/no-go 1): replay of head against its own base
+  on main with a harness commit that has reviewer B's SOURCE YES: zero
+  unexplained differences. On the laptop `python3 tests/replay/run.py prepare
+  <base> <head> --prune` (git only), then `heavy-remote uv run --frozen --group
+  dev python tests/replay/run.py --jobs 8 compare --base <base> --head <head>`;
+  exit 0 passes. Register intended differences with the lead before the run.
 - **G3 reviewer:** the area reviewer's first line `SOURCE YES <full sha>` on the
   exact commit. Reviewer A: turn engine, runtime boundary, agents and identity,
   policies, backends and accounts, database and maintenance. Reviewer B:
