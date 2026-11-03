@@ -130,7 +130,7 @@ class Host:
 
 
 class SSE:
-    """Collects complete SSE frames (event name, id presence, data); heartbeats
+    """Collects complete SSE frames (event name, wire id value, data); heartbeats
     are dropped (pure timing). Transport or parse errors are recorded, never
     turned into quiet (review finding 7)."""
 
@@ -147,7 +147,7 @@ class SSE:
         self._thread = threading.Thread(target=self._read, daemon=True)
         self._thread.start()
 
-    def _frame(self, event, has_id, data_lines):
+    def _frame(self, event, wire_id, data_lines):
         if event == 'heartbeat' or not data_lines:
             return
         text = '\n'.join(data_lines)
@@ -157,17 +157,17 @@ class SSE:
             self.errors.append('non-json data frame')
             data = {'<bytes>': len(text), '<sha256>': hashlib.sha256(text.encode()).hexdigest()}
         with self._lock:
-            self.frames.append({'event': event, 'has_id': has_id, 'data': data})
+            self.frames.append({'event': event, 'id': wire_id, 'data': data})
             self.last_at = time.monotonic()
 
     def _read(self):
-        event, has_id, data = None, False, []
+        event, wire_id, data = None, None, []
         try:
             for raw in self._resp:
                 line = raw.decode('utf-8').rstrip('\r\n')
                 if not line:
-                    self._frame(event, has_id, data)
-                    event, has_id, data = None, False, []
+                    self._frame(event, wire_id, data)
+                    event, wire_id, data = None, None, []
                 elif line.startswith(':'):
                     continue
                 else:
@@ -176,7 +176,7 @@ class SSE:
                     if field == 'event':
                         event = value
                     elif field == 'id':
-                        has_id = True
+                        wire_id = value  # the value itself (may be empty): Last-Event-ID depends on it
                     elif field == 'data':
                         data.append(value)
             if not self._stop.is_set():

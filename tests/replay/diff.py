@@ -36,7 +36,7 @@ CODE_KEYS = frozenset({'type', 'kind', 'status', 'op', 'outcome', 'state', 'meth
 CODE_SHAPE = re.compile(r'^[a-z][a-z0-9_./:-]{0,47}$')
 SURROGATE = re.compile(r'^(<id:\d+>|<eid:(\?\d+|(log:)?[a-z][a-z0-9_-]{0,40}#\d+@[0-9a-f]{6})>|<(time|duration|pid|port|json|bytes|sha256)>|<(ROOT|BUILD|HARNESS)>)$')
 # Keys the capture itself creates (envelopes, contract header names).
-HARNESS_KEYS = frozenset({'step', 'method', 'path', 'status', 'headers', 'body', 'event', 'has_id', 'data',
+HARNESS_KEYS = frozenset({'step', 'method', 'path', 'status', 'headers', 'body', 'event', 'id', 'data', '<form>', '<keys>',
                           'bytes', 'digest', 'json', 'kind', 'pk', 'rows', '<json>', '<bytes>', '<sha256>',
                           'content-type', 'location', 'content-range', 'accept-ranges', 'content-encoding',
                           'cache-control', 'content-disposition', 'etag', 'www-authenticate', 'retry-after',

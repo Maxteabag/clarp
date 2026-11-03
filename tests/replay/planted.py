@@ -80,7 +80,16 @@ CHANGES = [
         'find': '                        self.wfile.write(f"id: {event_id}\\n".encode())\n',
         'count': 2,
         'replace': '                        pass\n',
-        'expect': {'channel': 'sse', 'locator': r'\.has_id$', 'kinds': {'changed'}},
+        'expect': {'channel': 'sse', 'locator': r'\]\.id$', 'kinds': {'changed'}},
+    },
+    {
+        'id': 'sse-wire-id',
+        'what': 'SSE frames carry a wire id one past their event id (data unchanged)',
+        'file': 'server/server.py',
+        'find': '                        self.wfile.write(f"id: {event_id}\\n".encode())\n',
+        'count': 2,
+        'replace': '                        self.wfile.write(f"id: {int(event_id) + 1}\\n".encode())\n',
+        'expect': {'channel': 'sse', 'locator': r'\]\.id$', 'kinds': {'changed'}},
     },
 ]
 

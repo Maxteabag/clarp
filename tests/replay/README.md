@@ -119,7 +119,7 @@ planted.py ─── deliberate behaviour changes for the proof
 | Channel | Captured | Compared as |
 |---|---|---|
 | `http` | every request a scenario makes: method, route, status, contract headers (`Content-Type`, `Location`, `Content-Range`, `Accept-Ranges`, `Content-Encoding`, `Cache-Control`, `Content-Disposition`, `ETag`, `WWW-Authenticate`, `Retry-After`), JSON body; a non-JSON body as length and SHA-256 | sequence, then field by field |
-| `sse` | every complete `/events?live=<sessions>` frame except heartbeats: event name, whether it carried an `id:`, data (multi-line data joined) | per producer lane, an exact sequence aligned by signature (event name, type, kind, status, state, phase, action, live op names), then field by field; see "SSE order" |
+| `sse` | every complete `/events?live=<sessions>` frame except heartbeats: event name, the wire `id:` value (named through the same event-id relation as payload references, so a wire id that no longer matches its event is a difference), data (multi-line data joined) | per producer lane, an exact sequence aligned by signature (event name, type, kind, status, state, phase, action, live op names), then field by field; see "SSE order" |
 | `sse_log` | the `sse_events` table (the replay buffer behind `Last-Event-ID`), by event id | like `sse` |
 | `schema` | `sqlite_master` (type, name, table, SQL), raw | exact |
 | `table` | every non-empty table except `sse_events`, all rows, with its primary key columns | multiset per table (exact counts); leftover rows paired by primary key and compared field by field, else reported as added or removed |
@@ -142,9 +142,11 @@ base runs agreed on and head broke.
 **Normalization** (`normalize.py`) follows an explicit contract and rewrites
 only what differs by nature between runs:
 
-- a number in the epoch range (seconds or milliseconds) or an ISO timestamp
-  string becomes `<time>`; a setting such as `timeout_ms: 30000` is not in
-  that range and is compared as is;
+- a clock reading becomes `<time>` only under the field names in
+  `CLOCK_KEYS`, each seen holding one in unchanged replays: an epoch-range
+  number (seconds or milliseconds) or an ISO timestamp string there. The
+  same value under any other key (message text, a `max_bytes` setting) is
+  content and compared;
 - the Host's measured durations, only under the keys in `DURATION_KEYS`;
 - generated ids, only where they are known to occur: a UUID or a 12–64
   character hex token under an id key (`id`, `*_id`, `*_ids`, `ID_KEYS`) or in
@@ -174,15 +176,21 @@ the evidence:
   to three per turn, sometimes naming the backend session; they are compared
   by presence, one per (type, session, agent).
 - **Two writers of one transition**: a turn's `thinking` is written by the
-  dispatcher's spawn and again when the provider turn starts, in racing
-  order. Consecutive state rows (and watcher `agent-state` frames) of one
-  agent with the same kind and trace are compared with their details sorted.
+  dispatcher's spawn (detail keys `source, dispatch, origin, trace_id,
+  backend_session_id`) and again when the provider turn starts (`dispatch,
+  origin, trace_id`), in racing order. Only that exact pair, two consecutive
+  `thinking` rows (or watcher `agent-state` frames) of one agent and trace
+  with exactly those two shapes, is compared with its details sorted; every
+  other state keeps its order and detail association.
 - **Tied sort**: `/agents/snapshot` orders personas by `created_at`, and every
   built-in is seeded in the same millisecond; `personas` and `roster` lists
   are compared sorted.
 
-JSON stored in a text column or a file is parsed and compared as JSON (the
-stored string's key order and whitespace are not compared). Schema SQL is
+Serialized JSON is parsed only where it is stored by design: the table
+columns in `JSON_COLUMNS` and `voice_id` in HTTP bodies (each seen in
+unchanged replays), and `.json`/`.jsonl` files. A parsed value is compared as
+JSON together with its serialization form (separators, key sorting, ASCII
+escaping) and its key order. Any other JSON-looking text is compared as text. Schema SQL is
 compared raw. Every rule exists because a replay of unchanged code showed
 that noise; a rule is added only with that evidence and never one that
 hides a planted change.
@@ -264,7 +272,8 @@ run, so a planted change can never silently plant nothing.
 | `status-transition` | a user stop settles the turn `failed` instead of `interrupted` | table `turns[…].outcome` changed |
 | `sse-order` | `agent-activity` broadcast before `agent-state` for a state change | sse watcher-lane sequence difference |
 | `header-only` | `Cache-Control: no-cache` instead of `no-store`, body unchanged | http `….headers.cache-control` changed |
-| `sse-envelope` | SSE frames lose their `id:` line, data unchanged | sse `….has_id` changed |
+| `sse-envelope` | SSE frames lose their `id:` line, data unchanged | sse `….id` changed |
+| `sse-wire-id` | SSE frames carry a wire id one past their event id, data unchanged | sse `….id` changed |
 
 Planned after the first full run (they need the observed data to pick
 anchors): a same-size file content change, a changed setting value, a
