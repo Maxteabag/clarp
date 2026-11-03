@@ -320,3 +320,43 @@ def test_a_stop_naming_the_same_turn_is_never_hidden_by_its_terminal_write(
         assert lifecycle.current_kind(world.agent) == AgentState.INTERRUPTED
     finally:
         dispatch.reset_for_tests()
+
+
+def test_a_successor_after_the_stamp_but_before_the_write_is_never_hidden(tmp_path, monkeypatch):
+    """TP-N1b review 11: a successor that starts after the terminal write chose
+    its stamp but before it reaches its lock, followed by a late row of the
+    old turn, must stay current: the write's baseline is taken before its
+    stamp, so the successor is after it and foreign."""
+    from lib import agents as agents_db
+    world, _call = _world(tmp_path, monkeypatch, "first")
+    clock = [lifecycle.now_ms()]
+    monkeypatch.setattr(lifecycle, "now_ms", lambda: clock[0])
+    real_runtime = agents_db.current_runtime_id
+    real_write = lifecycle.TurnStateMachine._write_terminal
+    injected = []
+
+    def successor_while_preparing(agent_id):
+        if not injected:
+            injected.append("successor")
+            clock[0] += 50
+            lifecycle.open_turn(agent_id=world.agent, source="pwa", trace_id="t-next")
+            lifecycle.transition(world.agent, TurnEvent.SPAWN_STARTED,
+                                 {"source": "pwa", "dispatch": "claude", "trace_id": "t-next"})
+        return real_runtime(agent_id)
+
+    def old_row_before_the_lock(self, *args, **kwargs):
+        if injected == ["successor"]:
+            injected.append("old row")
+            clock[0] += 10
+            lifecycle.transition(world.agent, TurnEvent.TOOL_STARTED,
+                                 {"source": "hook", "trace_id": "t-first"}, force=True)
+        return real_write(self, *args, **kwargs)
+
+    monkeypatch.setattr(agents_db, "current_runtime_id", successor_while_preparing)
+    monkeypatch.setattr(lifecycle.TurnStateMachine, "_write_terminal", old_row_before_the_lock)
+    try:
+        lifecycle.try_transition(world.agent, TurnEvent.PROCESS_EXITED_OK, {"trace_id": "t-first"})
+        assert injected == ["successor", "old row"]
+        assert lifecycle.current_kind(world.agent) != AgentState.DONE
+    finally:
+        dispatch.reset_for_tests()
