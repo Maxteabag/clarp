@@ -455,31 +455,46 @@ def test_a_shift_up_moves_an_adopted_row_with_its_turn(clock):
     assert head()[1] > before[1], "delta clients reload the moved slots"
 
 
-def test_a_removed_request_does_not_lend_its_adopted_row_to_the_next(clock):
-    """RM-N1b, widened (reviewer C's control): the first request and its reply
-    disappear, so the next reply's turn lands on the slot holding the removed
-    request's adopted row. The surviving reply keeps its own adopted id; it
-    never takes the other request's."""
-    client("c0", "ask0", at=0, trace="tr-0")
-    client("c1", "ask1", at=60, trace="tr-1")
-    assistant_row("final-0", "final:tr-0", "answer0", at=4, trace="tr-0", seq=-1000)
-    assistant_row("final-1", "final:tr-1", "answer1", at=64, trace="tr-1", seq=-1001)
+def test_a_removed_request_does_not_lend_its_adopted_row_to_the_next(clock, tmp_path):
+    """RM-N1c (reviewer C's control; the lead's bar): the first request and its
+    reply disappear, so the next reply's turn lands on the slot holding the
+    removed request's adopted row. The surviving reply keeps its own adopted
+    id, the removed request's reply goes back to its final: row, and the end
+    state equals a fresh import of the shortened transcript from the same seed."""
+    def seed():
+        client("c0", "ask0", at=0, trace="tr-0")
+        client("c1", "ask1", at=60, trace="tr-1")
+        assistant_row("final-0", "final:tr-0", "answer0", at=4, trace="tr-0", seq=-1000)
+        assistant_row("final-1", "final:tr-1", "answer1", at=64, trace="tr-1", seq=-1001)
+
+    def state():
+        # Everything a client renders; the restored final row's seq is the
+        # one live final rows take, as its seed seq is gone after adoption.
+        return [(r["message_id"], r["source_file"], r["seq"] if r["seq"] >= 0 or
+                 r["source_file"].startswith("client:") else "final-band",
+                 r["role"], r["text"], r["origin"], r["sender_agent_id"],
+                 r["trace_id"], r["phase"], r["tools_json"]) for r in rows()]
+
+    seed()
     store([u("ask0", .2), a("answer0", 5), u("ask1", 60.2), a("answer1", 65)])
     assert view(transcript_rows(), "message_id", "seq") == [("final-0", 1), ("final-1", 3)]
-
     store([u("ask1", 60.2), a("answer1", 65)])
-
-    surviving = [r for r in rows() if r["text"] == "answer1"]
-    assert view(surviving, "message_id", "seq") == [("final-1", 1)]
-    # As a fresh import from the seeded state leaves it: the removed request's
-    # reply stays its final:tr-0 row (the lead's RM-N1c bar), in the final band.
-    removed = [r for r in rows() if r["message_id"] == "final-0"]
-    assert view(removed, "source_file", "text", "trace_id") == [("final:tr-0", "answer0", "tr-0")]
-    assert removed[0]["seq"] < 0
-    assert view(transcript_rows(), "message_id") == [("final-1",)]
+    shifted = state()
     after = rows()
     store([u("ask1", 60.2), a("answer1", 65)])
     assert rows() == after, "re-importing the shortened transcript changes nothing"
+
+    db.reset_for_tests(tmp_path / "fresh.sqlite")
+    for agent in (AGENT, SENDER):
+        db.conn().execute("INSERT INTO agents(agent_id, persona, voice_id, cwd, session, created_at, backend)"
+                          " VALUES (?,?,?,?,?,?,'claude')", (agent, agent, "v", "/redacted", agent, 1))
+    db.conn().commit()
+    seed()
+    store([u("ask1", 60.2), a("answer1", 65)])
+
+    assert shifted == state()
+    assert [r[:3] for r in shifted if r[0].startswith("final-")] == [
+        ("final-0", "final:tr-0", "final-band"), ("final-1", SOURCE, 1)]
 
 
 # ---- agy turn authority ------------------------------------------------------
