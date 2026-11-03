@@ -173,10 +173,18 @@ def update_for_queued_edit(admission_id: str, text: str) -> None:
         "UPDATE prompt_admissions SET original_text = ? WHERE admission_id = ?",
         (text, admission_id),
     )
+    # The admission's own user row, by key (QUEUE-N2): no scan of messages.
+    admitted = con.execute(
+        "SELECT message_id FROM prompt_admissions WHERE admission_id = ?",
+        (admission_id,),
+    ).fetchone()
+    if admitted is None:
+        return
+    message_id = str(admitted["message_id"])
     message = con.execute(
         """SELECT agent_id,backend_session_id FROM messages
-            WHERE prompt_admission_id = ? AND role = 'user'""",
-        (admission_id,),
+            WHERE message_id = ? AND prompt_admission_id = ? AND role = 'user'""",
+        (message_id, admission_id),
     ).fetchone()
     if message is None:
         return
@@ -187,8 +195,8 @@ def update_for_queued_edit(admission_id: str, text: str) -> None:
     revision = int(revision_row["revision"])
     con.execute(
         """UPDATE messages SET text = ?,updated_at = ?,revision = ?
-            WHERE prompt_admission_id = ? AND role = 'user'""",
-        (text, db.now_ms(), revision, admission_id),
+            WHERE message_id = ? AND prompt_admission_id = ? AND role = 'user'""",
+        (text, db.now_ms(), revision, message_id, admission_id),
     )
     con.execute(
         """INSERT INTO conversation_heads (
@@ -207,12 +215,15 @@ def update_for_queued_edit(admission_id: str, text: str) -> None:
 def delete_unmaterialized(admission_id: str) -> None:
     if not admission_id:
         return
+    # The admission's own user row is keyed by its message_id: one primary-key
+    # lookup, not a scan of every message under the writer lock (QUEUE-N2).
     db.conn().execute(
         """DELETE FROM prompt_admissions
             WHERE admission_id = ?
               AND NOT EXISTS (
                     SELECT 1 FROM messages
-                     WHERE prompt_admission_id = prompt_admissions.admission_id
+                     WHERE message_id = prompt_admissions.message_id
+                       AND prompt_admission_id = prompt_admissions.admission_id
               )""",
         (admission_id,),
     )
