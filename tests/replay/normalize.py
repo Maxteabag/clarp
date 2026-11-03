@@ -40,7 +40,7 @@ HEX = re.compile(r'(?<![0-9A-Za-z])[0-9a-f]{12,64}(?![0-9A-Za-z])')
 ISO = re.compile(r'^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?$')
 # Pairing codes and device tokens (device_pairing): random secrets in a fixed format.
 SECRET = re.compile(r'(?<![0-9A-Za-z])(clp|cld)_[A-Za-z0-9_-]{30,}')
-LOOPBACK = re.compile(r'127\.0\.0\.1:\d+')
+LOOPBACK = re.compile(r'127\.0\.0\.1(:|%3A)\d+')
 # A short generated tail after a word prefix, e.g. the goal turn's trace id 'goal-1c4f4f95';
 # applied only where ids are expected (id keys, paths, ID_COLUMNS), never to free text.
 SHORT_PREFIXED = re.compile(r'(?<![0-9A-Za-z])([a-z][a-z0-9]{0,15}-)([0-9a-f]{8,11})(?![0-9A-Za-z])')
@@ -50,7 +50,7 @@ PREFIXED = re.compile(r'^([a-z][a-z0-9]{0,15}[-_])([0-9a-f]{12,64}|[0-9A-Za-z]{2
 # timestamp under one of these keys becomes <time>; anywhere else it is content.
 CLOCK_KEYS = frozenset({
     'admitted_at', 'at', 'available_at', 'claimed_at', 'created_at', 'ended_at', 'expires_at', 'finished_at',
-    'last_run_at', 'done_ts', 'ended_at_ms', 'enqueued_at', 'last_activity',
+    'last_run_at', 'last_seen_at', 'used_at', 'done_ts', 'ended_at_ms', 'enqueued_at', 'last_activity',
     'last_lap_ms', 'last_turn_end', 'latest_state_ts', 'latest_ts', 'observed_at', 'opened_at',
     'received_at', 'server_now_ms', 'settled_at', 'since_ms', 'started_at', 'started_at_ms',
     'timestamp', 'ts', 'turn_started_ms', 'updated_at'})
@@ -68,7 +68,7 @@ DURATION_KEYS = frozenset({'duration_ms', 'worked_ms', 'elapsed_ms', 'source_del
                            'time_used_seconds', 'timeUsedSeconds', 'age_ms', 'age_sec'})
 # request_hash, cache_key: hashes over content that includes generated ids;
 # group: a live tool group named after its first item id (explore:cx:<id>).
-ID_KEYS = frozenset({'focus', 'dedupe_key', 'request_hash', 'cache_key', 'group', 'id', 'conv', 'epoch', 'cause', 'source', 'thread', 'threadId', 'turnId',
+ID_KEYS = frozenset({'focus', 'dedupe_key', 'request_hash', 'cache_key', 'group', 'code_hash', 'token_hash', 'id', 'conv', 'epoch', 'cause', 'source', 'thread', 'threadId', 'turnId',
                      'native_session_id', 'backend_session_id', 'cause_message_id', 'client_msg_id'})
 # Lanes whose frames are pure invalidation signals ("refetch now"). How many the
 # Host sends, and whether one names the backend session, varies with timing
@@ -192,7 +192,7 @@ class Normalizer:
     def paths_in(self, value: str) -> str:
         for path, name in self.paths:
             value = value.replace(path, name)
-        return LOOPBACK.sub('127.0.0.1:<port>', value)
+        return LOOPBACK.sub(lambda m: f'127.0.0.1{m.group(1)}<port>', value)
 
     def ids_in(self, value: str) -> str:
         value = UUID.sub(lambda m: self._id(m.group(0).lower()), value)
