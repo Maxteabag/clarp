@@ -247,3 +247,42 @@ def test_a_second_stop_while_holding_also_holds_the_kept_sends(tmp_path, monkeyp
     assert _waiting(world) == ["p_pre", "u_mid"]
     _resume(world)
     assert world.started == ["t0", "p_pre", "u_mid"]
+
+
+@pytest.mark.parametrize("failing", ["pause", "fence"])
+def test_a_stop_that_fails_on_a_locked_database_does_not_strand_later_sends(
+        tmp_path, monkeypatch, failing):
+    """Live, 2026-11-03 (QUEUE-N1): a Stop on an idle agent failed in the
+    runtime with 'database is locked' after it had installed its barrier.
+    Nothing released the barrier, the pause was never written, and every later
+    send waited behind it; Resume found nothing paused and did nothing."""
+    import sqlite3
+    from lib.runtime_bridge import RuntimeRPCServer
+
+    world = World(tmp_path)
+    runtime = RuntimeRPCServer(tmp_path / "runtime.sock",
+                               dispatch_service=world.service, release_id="test")
+    runtime.shutdown = lambda: None
+
+    def locked(*_args, **_kwargs):
+        raise sqlite3.OperationalError("database is locked")
+
+    if failing == "pause":
+        monkeypatch.setattr(turn_queue, "set_paused", locked)
+    else:
+        monkeypatch.setattr(td, "_fence_launch_receipts", locked)
+    try:
+        try:
+            result = runtime.dispatch_request("begin_stop", {
+                "agent_id": world.agent, "backend": "claude",
+                "strict": False, "hold": True})
+        except sqlite3.OperationalError:
+            result = {"ok": False}
+        assert not result["ok"], "the Stop could not be recorded"
+    finally:
+        monkeypatch.undo()
+        runtime.server_close()
+    assert not turn_queue.is_paused(world.agent)
+    world.send("u1")
+    world._collect()
+    assert world.started == ["u1"]
