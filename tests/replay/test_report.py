@@ -79,8 +79,12 @@ def test_codes_from_the_server_source_do_print():
 
 def test_order_swap_removed_field_header_and_envelope_are_differences():
     events = [_frame({'type': 'agent-state', 'kind': 'done'}), _frame({'type': 'agent-activity', 'state': 'idle'})]
-    assert [d['kind'] for d in _report(_capture(sse=events), _capture(sse=events[::-1])).items] == [
-        'order-changed']
+    # One producer (the state watcher) emits both: one lane, so a swap is a sequence difference.
+    assert {d['kind'] for d in _report(_capture(sse=events), _capture(sse=events[::-1])).items} == {
+        'sequence-insert', 'sequence-delete'}
+    # Independent producers: their interleaving is not compared without calibration.
+    live = _frame({'type': 'live', 'ops': []})
+    assert not _report(_capture(sse=[events[0], live]), _capture(sse=[live, events[0]])).items
     removed = _report(_capture(http=[_http({'ok': True, 'queue_depth': 0})]),
                       _capture(http=[_http({'ok': True})]))
     assert [(d['kind'], d['locator']) for d in removed.items] == [('field-removed', '[0].body.queue_depth')]

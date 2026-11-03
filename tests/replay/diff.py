@@ -157,7 +157,7 @@ def stable_order(runs: list[list[dict]]) -> set[tuple[str, str]]:
     return pairs or set()
 
 
-def _stream(report, scenario, channel, a, b, calibration):
+def _stream(report, scenario, channel, a, b, calibration=None):
     """An interleaved event stream: each producer lane is compared as an exact
     sequence; across lanes, only orders every calibration run agreed on count."""
     names_a, names_b = normalize.lane_names(a), normalize.lane_names(b)
@@ -169,6 +169,8 @@ def _stream(report, scenario, channel, a, b, calibration):
     for lane, (la, lb) in sorted(lanes.items()):
         label = _lane_label((la or lb)[0][0])
         _sequence(report, scenario, channel, [f for _, f in la], [f for _, f in lb], prefix=f'lane[{label}]')
+    if not calibration:
+        return
     position = {name: i for i, name in enumerate(names_b)}
     moved: dict[str, list[str]] = {}
     for x, y in stable_order(calibration):
@@ -214,18 +216,19 @@ def _rows(report, scenario, table, a, b):
 
 
 def compare(a: dict, b: dict, report: Report, calibration: list[dict] | None = None):
-    """``calibration``: normalized captures of the base (default ``[a]``) whose
-    common cross-lane orders a stream must keep."""
+    """Each producer lane of a stream is compared as an exact sequence. Order
+    across lanes (independent threads) is not a contract and is compared only
+    when ``calibration`` (normalized base captures) is given: a diagnostic
+    that reports orders every calibration run agreed on and ``b`` broke."""
     s = a['scenario']
-    calibration = calibration or [a]
     if a['error'] or b['error']:
         report.add(s, 'run', 'error', 'run-failed', 'failed' if a['error'] else 'ok',
                    'failed' if b['error'] else 'ok')
         return
     _sequence(report, s, 'http', a['http'], b['http'])
-    _stream(report, s, 'sse', a['sse'], b['sse'], [c['sse'] for c in calibration])
+    _stream(report, s, 'sse', a['sse'], b['sse'], calibration and [c['sse'] for c in calibration])
     _stream(report, s, 'sse_log', a.get('sse_log', []), b.get('sse_log', []),
-            [c.get('sse_log', []) for c in calibration])
+            calibration and [c.get('sse_log', []) for c in calibration])
     _deep(report, s, 'schema', 'sqlite_master', a['schema'], b['schema'])
     for table in sorted(set(a['tables']) | set(b['tables'])):
         _rows(report, s, table, a['tables'].get(table, {}), b['tables'].get(table, {}))
