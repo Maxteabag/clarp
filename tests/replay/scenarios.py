@@ -205,6 +205,33 @@ SCENARIOS = [
         ],
     },
     {
+        'id': 'goal-turn',
+        'what': 'a goal is set on an agent; the provider runs an unrequested goal turn and completes it',
+        'steps': [
+            _send('rachel', 'synthetic opener romeo', 'romeo'),
+            {'op': 'wait_settled', 'message_id': 'u-romeo'},
+            {'op': 'quiesce'},
+            {'op': 'post', 'path': '/agent-goal',
+             'body': {'session': 'rachel', 'objective': 'synthetic goal sierra'}},
+            {'op': 'wait_sql', 'sql': "SELECT count(*) FROM agent_goals g JOIN agents a ON a.agent_id = g.agent_id "
+                                      "WHERE a.session = 'rachel' AND g.status = 'complete'"},
+            {'op': 'quiesce'},
+            {'op': 'get', 'path': '/log?session=rachel'},
+            {'op': 'get', 'path': '/agents/snapshot'},
+        ],
+    },
+    {
+        'id': 'cli-prompt-and-sessions',
+        'what': "the build's clarp-admin lists sessions and prompts an agent through the replay Host",
+        'steps': [
+            {'op': 'cli', 'name': 'sessions', 'args': ['sessions']},
+            {'op': 'cli', 'name': 'prompt', 'args': ['prompt', '--to', 'rachel', '--text', 'synthetic cli quebec']},
+            {'op': 'quiesce'},
+            {'op': 'get', 'path': '/log?session=rachel'},
+            {'op': 'cli', 'name': 'sessions again', 'args': ['sessions']},
+        ],
+    },
+    {
         'id': 'stop-at-admission',
         'what': 'a Stop between the two thinking rows of a turn start (pins TP-N1)',
         # Known bug: the late thinking row overwrites the stop and the agent stays busy,

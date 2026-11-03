@@ -84,12 +84,13 @@ def _clean_at(path: Path, sha: str | None) -> str:
 
 
 PREPARED = HARNESS / '.replay-builds'
+BUILD_DIRS = ('server', 'static', 'bin')  # bin/: the CLI scenarios run the build's clarp-admin
 STAMP = '.replay-build.json'
 
 
 def tree_digest(build: Path) -> str:
     digest = hashlib.sha256()
-    for top in ('server', 'static'):
+    for top in BUILD_DIRS:
         for path in sorted((build / top).rglob('*')):
             if '__pycache__' in path.parts or path.is_dir():
                 continue
@@ -134,7 +135,7 @@ def cmd_prepare(args) -> int:
                 _set_writable(tmp, True)
                 shutil.rmtree(tmp)
             tmp.mkdir()
-            archive = subprocess.run(['git', 'archive', sha, 'server', 'static'], cwd=HARNESS,
+            archive = subprocess.run(['git', 'archive', sha, *BUILD_DIRS], cwd=HARNESS,
                                      check=True, capture_output=True).stdout
             subprocess.run(['tar', '-x', '-C', str(tmp)], input=archive, check=True)
             (tmp / STAMP).write_text(json.dumps({'sha': sha, 'digest': tree_digest(tmp)}) + '\n')
@@ -270,6 +271,7 @@ def planted_copy(build: Path, change: dict, run: RunRoot) -> Path:
     shutil.copytree(build / 'server', target / 'server', ignore=shutil.ignore_patterns('__pycache__'))
     _set_writable(target / 'server', True)
     (target / 'static').symlink_to(build / 'static')
+    (target / 'bin').symlink_to(build / 'bin')
     planted.apply(change, target)
     _set_writable(target / 'server', False)
     return target

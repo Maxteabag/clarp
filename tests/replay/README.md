@@ -128,7 +128,7 @@ planted.py ─── deliberate behaviour changes for the proof
 | `schema` | `sqlite_master` (type, name, table, SQL), raw | exact |
 | `table` | every non-empty table except `sse_events`, all rows, with its primary key columns | multiset per table (exact counts); leftover rows paired by primary key and compared field by field, else reported as added or removed |
 | `files` | every file under the state directory except logs and the databases: path, and the parsed JSON (`.json`, `.jsonl`), the text (other UTF-8 files up to 64 KiB) or size and SHA-256 (anything else) | by path, then field by field |
-| `cli` | reserved for CLI scenarios (`clarp-admin` against the replay Host) | exact |
+| `cli` | each `cli` step: the build's `bin/clarp-admin.py` run with the Host's state dirs and a config naming the replay Host; exit code, stdout (parsed when JSON), stderr | field by field |
 
 **SSE order.** The Host broadcasts from several threads, so their
 interleaving differs between runs of unchanged code. Each frame belongs to a
@@ -309,8 +309,10 @@ Synthetic turns only, all text invented here (`scenarios.py`). Target about
 | `queue-cancel` | `DELETE /turn-queue/<id>` before the queued message runs | done |
 | `tool-use` | reasoning, a command streaming output and succeeding (fake_provider.py injects the items) | done |
 | `tool-failure` | the same command failing with exit 2 | done |
+| `goal-turn` | `POST /agent-goal`: the provider runs an unrequested goal turn and completes the goal | done |
+| `cli-prompt-and-sessions` | the build's own `clarp-admin sessions` and `prompt` against the replay Host (exit code, stdout, stderr in the `cli` channel) | done |
 | `stop-at-admission` | Stop between a turn's two thinking rows; **known bug TP-N1**, reported, not counted | done |
-| group call, helper spawn, goal turn, failover to another account, delete and restore, CLI (`clarp-admin`) against the replay Host | | next |
+| group call, helper spawn, failover to another account, delete and restore, more CLI commands | | next |
 | text-dependent paths (voice routing, command parsing, TTS segmentation) | synthetic-text scenarios, since scrubbed text cannot exercise them | next |
 
 Timing on the buildbox (`--jobs 8`): `compare` with 9 scenarios takes about
