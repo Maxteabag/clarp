@@ -19,7 +19,8 @@ do not use it.
 
 1. **One owner.** Exactly one module writes the state. Everyone else asks the
    owner with an event (`transition(..., "cancel")`) and never writes the state
-   column, sets the in-memory field or deletes the row themselves.
+   column, sets the in-memory field or deletes the row themselves. The
+   status-column writer guard enforces this for database-backed lifecycles.
 2. **Atomic compare-and-set transitions.** A transition reads the state,
    decides and writes in one transaction, and the write names the state it
    expects:
@@ -96,6 +97,23 @@ the row entered its state. Writes outside `lk.transaction` are refused.
 Each owner declares its lifecycle as a module-level `Lifecycle(...)` constant,
 so tests can find every declaration by scanning `server/` without a registry.
 
+## Guard tests (ratchet mode)
+
+- `tests/unit/test_lifecycle_guards.py`: every status column in the schema
+  (`status`, `*_status`, `*_state`, `phase`, plus `state_log.kind`) belongs to
+  a declared lifecycle or is listed in `UNCONVERTED` with the lifecycle it will
+  become. Columns that are not lifecycles (free text, append-only logs) are
+  listed in `NOT_LIFECYCLES` with the reason. Every declared lifecycle passes
+  its own validation, so each of its non-final states has a deadline or a
+  reason to wait forever. A new status column, a stale entry or a longer
+  `UNCONVERTED` list fails.
+- `tests/unit/test_table_writers.py`: a status column is written only by its
+  lifecycle's owner. Today's writers start in `STATUS_WRITERS`; an entry that
+  no longer matches a real writer, or that a declared lifecycle now owns,
+  fails, so the list only shrinks. An `UPDATE` with a dynamic `SET` (or an
+  `INSERT` with a dynamic column list) counts as writing every status column
+  of its table.
+
 ## Lifecycles to convert (Phase 3)
 
 The order follows severity. Each conversion is its own slice: declare the
@@ -118,5 +136,5 @@ deadline that did not exist before) are registered intended differences.
 | Janitor run | `janitor_runner.py` | `janitor_runs` | 3: task-label and scheduled-prompt runs have no TTL | AUT-15 |
 | Login task | `backend_auth.py` | in memory (`_tasks`) | 3: a task can stay `running` forever and block every later sign-in | BACKENDS-17 |
 
-The other status columns in the schema convert when a slice touches them, not
-as a program of their own.
+The other status columns in the schema are listed as unconverted in the guard
+test; they convert when a slice touches them, not as a program of their own.
