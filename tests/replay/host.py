@@ -30,8 +30,8 @@ TOKEN = 'replay-host-token'
 SESSIONS = ('rachel', 'mike')
 
 
-def isolate(root: Path) -> None:
-    for key, suffix in {
+# Every home, data, config, temp and provider directory, inside the state dir.
+STATE_DIRS = {
         'HOME': 'home',
         'CLAUDE_PWA_DB': 'state.sqlite', 'CLAUDE_PWA_LOG_DIR': 'logs',
         'CLAUDE_PWA_CONFIG': 'config.toml', 'CLARP_CONFIG_DIR': 'config',
@@ -43,7 +43,11 @@ def isolate(root: Path) -> None:
         'CLAUDE_CONFIG_DIR': 'home/.claude', 'TMPDIR': 'tmp',
         'CLARP_MEDIA_DIR': 'media', 'CLARP_UPLOADS_DIR': 'uploads',
         'CLARP_WORKSPACE_ROOT': 'workspace',
-    }.items():
+}
+
+
+def isolate(root: Path) -> None:
+    for key, suffix in STATE_DIRS.items():
         os.environ[key] = str(root / suffix)
     for sub in ('home', 'tmp'):
         (root / sub).mkdir(exist_ok=True)

@@ -238,7 +238,7 @@ def _provider_started(root: Path, marker: str):
     return False
 
 
-def run_step(host: Host, sse, step: dict, http: list):
+def run_step(host: Host, sse, step: dict, http: list, cli: list):
     op = step['op']
     if op in ('get', 'post', 'put', 'delete'):
         body = step.get('body')
@@ -292,6 +292,27 @@ def run_step(host: Host, sse, step: dict, http: list):
         _poll('state rows', rows)
     elif op == 'quiesce':
         _quiesce(host, sse, step.get('sessions', ('rachel',)))
+    elif op == 'wait_sse':
+        # At least `count` SSE frames whose data matches every field in `match`.
+        def seen():
+            with sse._lock:
+                frames = list(sse.frames)
+            hits = [f for f in frames if isinstance(f.get('data'), dict)
+                    and all(f['data'].get(k) == v for k, v in step['match'].items())]
+            return len(hits) >= step.get('count', 1)
+        _poll('SSE frames', seen)
+    elif op == 'wait_sql':
+        # A harness-authored read-only query whose first column reaches `min`.
+        def counted():
+            try:
+                with _ro(host.root) as db:
+                    row = db.execute(step['sql'], step.get('params', ())).fetchone()
+            except sqlite3.Error:
+                return False
+            return bool(row) and (row[0] or 0) >= step.get('min', 1)
+        _poll('database state', counted)
+    elif op == 'cli':
+        cli.append(run_cli(host, step))
     elif op == 'wait_busy':
         def busy():
             status = host.request('GET', f"/status?session={step['session']}")[2]
@@ -311,6 +332,36 @@ def _state_tail(root: Path, session: str) -> str:
     except sqlite3.Error as exc:
         return f'state unreadable ({type(exc).__name__})'
     return 'last states ' + ','.join(reversed(kinds))
+
+
+CLI_TIMEOUT_S = 30
+
+
+def run_cli(host: Host, step: dict) -> dict:
+    """The build's own clarp-admin against the replay Host: the same state dirs as the
+    Host, and its own config naming the Host's loopback port and token."""
+    from host import STATE_DIRS
+    port = host.url.rsplit(':', 1)[1]
+    config = host.root / 'cli-config.toml'
+    config.write_text((host.root / 'config.toml').read_text()
+                      + f'\n[server]\nbind_addr = "127.0.0.1"\nport = {port}\nauth_token = "{TOKEN}"\n')
+    env = child_env()
+    env.update({key: str(host.root / suffix) for key, suffix in STATE_DIRS.items()})
+    env['CLAUDE_PWA_CONFIG'] = str(config)
+    env['CLARP_HEARTBEATS_DISABLED'] = '1'
+    try:
+        done = subprocess.run([host.python, str(host.build / 'bin' / 'clarp-admin.py'), *step['args']],
+                              env=env, cwd=str(host.root), capture_output=True, text=True,
+                              timeout=CLI_TIMEOUT_S, stdin=subprocess.DEVNULL)
+    except subprocess.TimeoutExpired as exc:
+        raise StepFailed('cli timed out') from exc
+    def parsed(text):
+        try:
+            return {'<json>': json.loads(text)} if text.strip() else ''
+        except ValueError:
+            return text
+    return {'step': step.get('name') or ' '.join(step['args'][:1]), 'exit': done.returncode,
+            'stdout': parsed(done.stdout), 'stderr': done.stderr}
 
 
 def _quiesce(host: Host, sse: SSE, sessions):
@@ -383,6 +434,7 @@ def capture(build: Path, scenario: dict, root: Path, python: str = sys.executabl
     sse = None
     frames: list = []
     http: list = []
+    cli: list = []
     error = None
     sessions = scenario.get('sessions', ('rachel',))
     db, files = {'schema': [], 'pk': {}, 'tables': {}}, []
@@ -393,7 +445,7 @@ def capture(build: Path, scenario: dict, root: Path, python: str = sys.executabl
         _poll('SSE connected', lambda: sse.frames)
         for index, step in enumerate(scenario['steps']):
             try:
-                run_step(host, sse, step, http)
+                run_step(host, sse, step, http, cli)
             except StepFailed as exc:
                 raise StepFailed(f'step {index} ({step["op"]}): {exc}') from exc
         timings['steps'] = round(time.monotonic() - started, 2)
@@ -423,4 +475,5 @@ def capture(build: Path, scenario: dict, root: Path, python: str = sys.executabl
         'sse_health': health,
         'db': db,
         'files': files,
+        'cli': cli,
     }
