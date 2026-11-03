@@ -79,6 +79,9 @@ SCENARIOS = [
         'steps': [
             _send('rachel', 'synthetic question for rachel', 'delta'),
             {'op': 'wait_settled', 'message_id': 'u-delta'},
+            # Message revisions come from one global clock: Rachel's background
+            # import must finish before Mike's send, or his revision races hers.
+            {'op': 'quiesce'},
             _send('mike', 'synthetic question for mike', 'echo'),
             {'op': 'wait_settled', 'message_id': 'u-echo'},
             {'op': 'quiesce', 'sessions': ('rachel', 'mike')},
