@@ -123,14 +123,25 @@ def test_a_retried_terminal_write_yields_to_any_row_not_its_own(tmp_path, monkey
 
 
 def test_a_retried_terminal_write_still_lands_after_its_own_turns_row(tmp_path, monkeypatch):
-    """Control: a row of the same turn written meanwhile does not block it."""
+    """Control: a row of the same turn written during the backoff does not
+    block the retry, and the terminal row it then writes is the agent's
+    newest (TP-N1b review 6: the retry takes a fresh stamp, not the first
+    attempt's, so it never sorts behind a row written meanwhile)."""
     world, _call = _world(tmp_path, monkeypatch, "first")
-    _locked_once(monkeypatch, during_backoff=lambda: lifecycle.transition(
-        world.agent, TurnEvent.TOOL_STARTED, {"source": "hook", "trace_id": "t-first"}))
+    clock = [lifecycle.now_ms()]
+    monkeypatch.setattr(lifecycle, "now_ms", lambda: clock[0])
+
+    def same_turn_tool_row_later():
+        clock[0] += 50
+        lifecycle.transition(world.agent, TurnEvent.TOOL_STARTED,
+                             {"source": "hook", "trace_id": "t-first"})
+
+    _locked_once(monkeypatch, during_backoff=same_turn_tool_row_later)
     try:
         assert lifecycle.try_transition(world.agent, TurnEvent.PROCESS_EXITED_OK,
                                         {"trace_id": "t-first"}) is not None
         assert lifecycle.current_kind(world.agent) == AgentState.DONE
+        assert _turn_row(world.agent, "t-first")["outcome"] == "completed"
     finally:
         dispatch.reset_for_tests()
 
