@@ -10,12 +10,8 @@ Database B, from the same seed, imports the tail from A's checkpoint wherever
 - B's rows equal A's: resuming from a checkpoint gives the full import's rows;
 - the decision taken at each step, and the shadow's verdict, equal their golden.
 
-The pinned verdicts include a false ``diverge:changed_rows`` (claude, codex,
-step ``complete``): a tail turn within reach of a prefix turn is attributed
-to it by time (``TurnIndex.trace_at``), so ``stamp_turn`` moves that turn's
-summary off a prefix row. The applied tail does the same (B equals A), but
-``_Shadow._compare`` counts only the planned rows, not the plan's recorded
-UPDATEs, as changed.
+The shadow's verdicts carry no divergence (RM-N3: its comparison used to
+report a turn summary re-stamped off a row the plan never saw change).
 
 The cut-by-cut variant does the same at every record boundary and inside every
 record. It checks equality only and pins the decisions.
@@ -149,3 +145,92 @@ def test_cut_by_cut_growth_resumed_from_checkpoints_matches_the_full_import(
     _check(f"{backend}-incremental-cuts",
            {"backend": backend, "cuts": len(cuts), "decisions": decisions})
 
+
+
+@pytest.mark.parametrize("backend", INCREMENTAL)
+def test_the_shadow_reports_no_divergence_where_the_tail_import_matches(
+        tmp_path, backend, importer):
+    """RM-N3: a tail turn attributed by time to a prefix turn re-stamps that
+    turn's summary off a row the plan never saw change. The tail import does
+    the same, so the shadow must not report it as a divergence."""
+    pair = Pair(tmp_path, backend, importer)
+    transcript = corpus.transcript_path(tmp_path, backend)
+    for step in corpus.GROWTH:
+        corpus.apply(transcript, backend, step)
+        got = pair.step(transcript)
+        assert got["b_rows"] == got["a_rows"]
+    assert not [v for v in importer.verdicts if v.startswith("diverge")], importer.verdicts
+
+
+def _corrupt_after_stamp(monkeypatch, *, trace: str, pick):
+    """During the authoritative (locked) import only, after it re-stamps
+    ``trace``, rewrite one more row of that trace: an extra write the plan
+    did not predict."""
+    real = message_writes.stamp_turn
+
+    def stamp_turn(database, agent_id, trace_id, next_revision):
+        out = real(database, agent_id, trace_id, next_revision)
+        if trace_id == trace and getattr(database, "locked", False) \
+                and isinstance(database, message_writes._ImportWriter):
+            rows = database.execute(
+                "SELECT message_id, turn_json FROM messages WHERE agent_id=? AND trace_id=?"
+                " AND source_file NOT LIKE 'client:%' ORDER BY seq",
+                (agent_id, trace_id)).fetchall()
+            victim = pick(rows)
+            database.execute("UPDATE messages SET text = text || ' [planted]', revision=? "
+                             "WHERE message_id=?", (next_revision(database), victim))
+        return out
+    monkeypatch.setattr(message_writes, "stamp_turn", stamp_turn)
+
+
+@pytest.mark.parametrize("victim", ["another_row_of_the_turn", "the_row_that_lost_the_summary"])
+def test_an_extra_write_on_a_restamped_turn_still_diverges(tmp_path, importer, monkeypatch, victim):
+    """RM-N3 negative controls (reviewer B): explaining a re-stamp must not
+    hide any other change to a row of the same turn."""
+    pick = {"another_row_of_the_turn": lambda rows: rows[0]["message_id"],
+            "the_row_that_lost_the_summary": lambda rows: next(
+                r["message_id"] for r in rows if r["message_id"] == "final-1")}[victim]
+    world.prepare(tmp_path / "state.sqlite", "claude")
+    world.seed("claude", importer)
+    transcript = corpus.transcript_path(tmp_path, "claude")
+    for step in ("grow", "partial"):
+        corpus.apply(transcript, "claude", step)
+        importer.ms += 1000
+        inc.import_transcript(backend="claude", path=transcript, agent_id=corpus.AGENT,
+                              backend_session_id=corpus.SESSION)
+    _corrupt_after_stamp(monkeypatch, trace="tr-1", pick=pick)
+    corpus.apply(transcript, "claude", "complete")
+    importer.ms += 1000
+    inc.import_transcript(backend="claude", path=transcript, agent_id=corpus.AGENT,
+                          backend_session_id=corpus.SESSION)
+    assert importer.verdicts[-1] == "diverge:changed_rows", importer.verdicts
+
+
+def test_the_comparator_flags_an_unpredicted_write_to_a_row_of_a_planned_turn(tmp_path):
+    """Comparator-level control, after reviewer B's probe: a prefix row of a
+    turn the plan changed, rewritten without losing a summary, diverges."""
+    from types import SimpleNamespace
+    world.prepare(tmp_path / "state.sqlite", "claude")
+    path = tmp_path / "synthetic.jsonl"
+    prefix, tail = message_store.store_transcript_turns(
+        agent_id=corpus.AGENT, backend_session_id=corpus.SESSION, source_file=str(path),
+        turns=[{"role": "assistant", "text": "synthetic prefix", "timestamp": corpus.iso(0, 0)},
+               {"role": "user", "text": "synthetic tail", "timestamp": corpus.iso(0, 1)}])
+    c = db.conn()
+    shadow = inc._Shadow.__new__(inc._Shadow)
+    shadow.agent_id, shadow.backend_session_id, shadow.path = corpus.AGENT, corpus.SESSION, path
+    shadow.rows_before = {r["message_id"]: inc._restamp_view(r) for r in c.execute(
+        f"SELECT {inc._RESTAMP_COLUMNS} FROM messages WHERE agent_id=?", (corpus.AGENT,))}
+    shadow.ids_before = set(shadow.rows_before)
+    floor = 10_000
+    c.execute("UPDATE messages SET trace_id='tr-x', revision=?, text='synthetic corruption' "
+              "WHERE message_id=?", (floor + 1, prefix["id"]))
+    c.execute("UPDATE messages SET trace_id='tr-x', revision=? WHERE message_id=?",
+              (floor + 2, tail["id"]))
+    c.commit()
+    shadow.old = SimpleNamespace(boundary_seq=1)
+    shadow.plan = {"revision_floor": floor, "out": [{**tail, "revision": floor + 2}],
+                   "updated": set(), "deleted": set()}
+    shadow.mismatches, shadow.out_seqs, shadow.detail = [], [0, 1], {}
+    shadow._compare([{**prefix, "revision": floor}, {**tail, "revision": floor + 2}])
+    assert shadow.verdict == "diverge:changed_rows", shadow.verdict

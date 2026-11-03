@@ -33,7 +33,7 @@
  "verdicts": [
   "fallback:no_checkpoint",
   "match",
-  "diverge:changed_rows",
+  "match",
   "match",
   "fallback:shrink",
   "match",
