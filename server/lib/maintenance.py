@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import datetime
+import json
 import pathlib
 import shutil
 import threading
@@ -14,6 +15,10 @@ from .protocol import ClipProducerStatus
 from .timing import MAINTENANCE_STARTUP_DELAY_SEC
 
 HOUR_MS = 60 * 60 * 1000
+# state_log retention deletes at most this many rows per statement and pauses
+# between statements, so other writers get the lock in between (PT-01).
+STATE_LOG_DELETE_BATCH = 5000
+STATE_LOG_BATCH_PAUSE_S = 0.05
 DAY_MS = 24 * HOUR_MS
 
 
@@ -89,6 +94,28 @@ def _row_count(result) -> int | None:
     return None
 
 
+def _prune_state_log(c, cutoff_ms: int) -> int:
+    """Delete expired state rows, keeping each agent's newest, one bounded
+    batch per autocommit statement. The newest rows are read once per sweep,
+    not once per batch; rows written since are newer than the cutoff."""
+    keep = json.dumps([row[0] for row in c.execute(
+        "SELECT MAX(state_id) FROM state_log GROUP BY agent_id")])
+    total = 0
+    while True:
+        deleted = c.execute(
+            """DELETE FROM state_log WHERE state_id IN (
+                   SELECT state_id FROM state_log
+                    WHERE ts < ?
+                      AND state_id NOT IN (SELECT value FROM json_each(?))
+                    LIMIT ?)""",
+            (cutoff_ms, keep, STATE_LOG_DELETE_BATCH),
+        ).rowcount
+        total += deleted
+        if deleted < STATE_LOG_DELETE_BATCH:
+            return total
+        time.sleep(STATE_LOG_BATCH_PAUSE_S)
+
+
 def _timed(phases: _Phases | None, name: str, fn):
     return fn() if phases is None else phases.run(name, fn)
 
@@ -108,14 +135,8 @@ def prune_database(*, now_ms: int | None = None,
               AND completed_at < ?""",
         (now_ms - policy.tts_max_age_ms,),
     ).rowcount)
-    counts["state_log"] = _timed(phases, "db.state_log", lambda: c.execute(
-        """DELETE FROM state_log
-            WHERE ts < ?
-              AND state_id NOT IN (
-                  SELECT MAX(state_id) FROM state_log GROUP BY agent_id
-              )""",
-        (now_ms - policy.state_max_age_ms,),
-    ).rowcount)
+    counts["state_log"] = _timed(phases, "db.state_log", lambda: _prune_state_log(
+        c, now_ms - policy.state_max_age_ms))
     counts["background_job_events"] = _timed(phases, "db.background_job_events", lambda: c.execute(
         """DELETE FROM background_job_events
             WHERE observed_at < ?
