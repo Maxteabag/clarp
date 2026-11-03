@@ -518,6 +518,11 @@ def _goal_require_completion(con, plan):
         raise ValueError("unfinished legacy work cannot be completed")
 
 
+# Internal callers that act on the plan as it is (Stop's pause) read the
+# revision inside _goal_mutate's own transaction instead of passing one.
+_REVISION_IN_TRANSACTION = object()
+
+
 def _goal_mutate(plan_id, *, revision, action, data=None):
     """Single transaction for checkpoint/evidence/next work and wake registration."""
     from . import task_plans, artifacts
@@ -532,6 +537,8 @@ def _goal_mutate(plan_id, *, revision, action, data=None):
         ).fetchone()
         if not plan:
             raise ValueError("task plan not found")
+        if revision is _REVISION_IN_TRANSACTION:
+            revision = plan["revision"]
         _goal_check_revision(plan, revision)
         goal = json.loads(plan["goal_json"] or "{}")
         was_legacy = not goal
@@ -882,19 +889,27 @@ def pause_recovery_for_agent(agent_id: str, reason: str) -> int:
     rows = (
         db.conn()
         .execute(
-            "SELECT plan_id,revision FROM task_plans WHERE agent_id=? AND goal_json!='{}' AND status='active'",
+            "SELECT plan_id FROM task_plans WHERE agent_id=? AND goal_json!='{}' AND status='active'",
             (agent_id,),
         )
         .fetchall()
     )
     paused = 0
     for row in rows:
-        _goal_mutate(
-            row["plan_id"],
-            revision=row["revision"],
-            action="pause",
-            data={"reason": reason},
-        )
+        # The agent may checkpoint while Stop runs; one goal's failure must not
+        # leave the others active.
+        try:
+            _goal_mutate(
+                row["plan_id"],
+                revision=_REVISION_IN_TRANSACTION,
+                action="pause",
+                data={"reason": reason},
+            )
+        except Exception as exc:  # noqa: BLE001 - attempt every goal
+            from .log import log_exception
+
+            log_exception("goalPauseOnStopFail", exc, detail=row["plan_id"])
+            continue
         paused += 1
     return paused
 

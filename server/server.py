@@ -5265,6 +5265,7 @@ class Handler(BaseHTTPRequestHandler):
             # state so clients update immediately instead of on the next poll.
             # Durable user-requested queue entries remain visible and paused;
             # stopping work must never silently delete acknowledged messages.
+            # Pausing goals must not skip recording the stop and its events.
             try:
                 from lib import goal_ledger, task_plans
                 if actor == "user":
@@ -5277,6 +5278,9 @@ class Handler(BaseHTTPRequestHandler):
                         agent_id, f"{stopped_by}: {reason}" if reason else stopped_by)
                 if effects is not None:
                     effects["goals_paused"] = int(goals_paused)
+            except Exception as exc:  # stop already succeeded
+                log_exception("turnStopBookkeepingFail", exc, detail=agent_id)
+            try:
                 stopped = turn_lifecycle.try_transition(
                     agent_id, TurnEvent.STOP_REQUESTED,
                     {"source": "user_stop", "message": "Turn stopped",
