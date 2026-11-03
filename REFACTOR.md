@@ -1,0 +1,190 @@
+# Clarp server refactor program — the brief
+
+Read this whole file before you start. It is the single source of truth for every
+agent in the program. The lead is **Hobbles** (Clarp session `hobbles-18b0`); the
+owner is **Peter**. Ask the lead, never Peter directly. Only the lead edits this
+file. Refresh it with `git fetch origin && git show origin/main:REFACTOR.md`.
+
+Approved by Peter on 3 Nov 2026 ("Ok i trust your judgement. So. Can we get
+started today?"): every recommended answer in the plan, starting today, plus the
+lifecycle kit.
+
+- Review behind the program: `/var/tmp/clarp-refactor-program/plan/review-report.html`
+  and the area reports in `/var/tmp/clarp-refactor-program/reports/` (findings are
+  cited by id, for example `TP-01`, at commit `09ee9279`).
+- Plan: `/var/tmp/clarp-refactor-program/plan/plan.html`.
+- Decision log (lead only, append-only): `/var/tmp/clarp-refactor-program/decision-log.md`.
+
+## 1. Outcome and how we prove it
+
+**Outcome.** The Clarp server restructured per the plan, with behaviour unchanged
+except registered intended differences, and the 29 high findings fixed or
+explicitly accepted by Peter.
+
+**The oracle.** Main moves under every slice, so each slice's head is replayed
+against **its own base commit on main**, with the same corpus on both builds. The
+harness compares normalized HTTP responses, SSE event order, rows of the tables
+the slice touches, files written and CLI output. Every difference is exactly one
+of:
+
+1. **Refactor bug** — fix it in the slice.
+2. **Intended difference** — registered in `registers/differences.md`, checked by
+   the area's reviewer, signed by the lead. Fix-lane changes are registered once.
+3. **Pre-existing bug** — registered in `registers/bugs.md`, fixed in the fix
+   lane, never inside a move slice.
+
+The harness counts only once it has proven it can fail: replay of unchanged code
+gives zero differences twice, **and** every planted change (SSE order, a missing
+database write, a response field, a status transition) shows up as a difference.
+
+**Done** (Peter's targets): zero unexplained replay differences; import layering
+enforced in CI; no module over 1,500 lines; `server/server.py` at most 1,500 lines
+with no business logic; no function over 150 lines; no silently swallowed broad
+excepts; suite time, startup time and memory no worse; characterization tests on
+the hot spots; every high finding fixed or explicitly accepted.
+
+## 2. Hard rules
+
+1. **Only the release owner restarts, updates or deploys the live Host**, inside
+   the windows **12:00 and 18:00 Europe/Oslo**. Runtime-class releases only at
+   18:00, at most one a day. Longest downtime 5 minutes. A failed health check
+   rolls back automatically. Never run `make deploy`, `install.sh`,
+   `make deploy-static`, `clarp-admin update` or `systemctl ... clarp*` yourself.
+2. **Main moves through the merge captain** for program work. You commit on your
+   own branch and never push.
+3. **Refactor slices change no behaviour.** Fixes go through the fix lane, one
+   commit and one test each. A move-only commit contains nothing but moves.
+4. **Frozen surfaces** (changing one needs Peter's decision through the lead): the
+   iOS contract (`contract/`, `HOST_CONTRACT`, `MIN_IOS_CONTRACT`);
+   `state.sqlite` compatibility (expand then contract, one release compatible in
+   both directions); HTTP, SSE and WebSocket routes and payloads; CLI commands
+   and their outputs; environment variables and file paths; hook and skill
+   interfaces. **Out of scope:** stable message ids, Oracle engine convergence.
+5. **Heavy commands go through the one-slot wrapper**
+   `/var/tmp/clarp-refactor-program/bin/heavy` (it waits for the slot, runs at
+   low priority and caps pytest at 4 workers). Heavy means more than one test
+   file, coverage, replay runs and anything that spawns many processes. This
+   machine also runs Peter's live Host. Never run `cargo` (repo rule).
+6. **Data.** The replay corpus is scrubbed with stable surrogates and read only
+   through the harness. Tools print structure, counts and codes, never message
+   text. Never paste conversation content into messages, commits or reports. Read
+   the live database only with `sqlite3 -readonly`. Never write to
+   `~/.local/share/clarp` or `~/.config/clarp`.
+7. **Peter's own agents come first.** When capacity is tight the lead pauses
+   program agents.
+8. **Ownership.** Edit only what section 6 gives you. Ask the lead before
+   touching anything else. Run agents never edit this brief or files they were
+   given to read.
+9. **Never** `pkill -f` or `pgrep -f` (your own command line matches). Never
+   force-push, never rewrite main, never commit secrets.
+10. **Fail safe.** Unknown, partial or contradictory means stop and report. Never
+    retry a write that may have landed; read back first. Postpone rather than
+    improvise.
+
+## 3. Decisions already made (do not reopen)
+
+- Keep the stdlib HTTP server; no ASGI move.
+- Trunk: small reviewed merges, released by tag in windows. No long-lived
+  refactor branch.
+- Claude authors (the fix lane included); Codex reviewers, a different model
+  family.
+- Seams before moves: new code goes into new files (a route registry, a
+  turn-callback seam, harness scenario packs) before shared files move.
+- Server-only slices first. Runtime-class slices (turn engine, backends) start
+  only after the canary path has worked three times.
+- **Lifecycle kit.** Long-lived things become explicit lifecycles: one owner,
+  transitions as atomic compare-and-set writes
+  (`UPDATE … SET state=? WHERE id=? AND state=?` in one transaction, zero rows
+  means conflict), a deadline on every non-final state with a reaper, and
+  decide-then-act (a pure decision under the lock, effects after commit). Not for
+  request handling, parsers, importers or config.
+- Unmerged branches are parked, not landed. Each slice publishes a move map (old
+  path → new path, old import → new import) and a rebase helper.
+
+## 4. Phases
+
+| Phase | Content | Exit |
+|---|---|---|
+| F0 (today) | AUT-01 (Stop pauses goals and always records the stop), RTO-01 (voice claim released on early Oracle failure), BACKENDS-02 (one bad Codex message no longer kills the shared reader) | released in windows |
+| 1 (days 1–3) | this brief; flakes quarantined; parked-branch manifest; route goldens; schema golden; migration rehearsal; lifecycle kit contract; harness S0; each slice's characterization tests | **Go/no-go 1** (Peter) on the harness proof |
+| 2 | S3 route seam then moves; S5 read model; S1 layering (move-only); S2 guards; F1 fixes with replay evidence; then S4 turn engine and S6 backends after canary ×3 | **Go/no-go 2** (Peter) |
+| 3 | deep work: lifecycle conversions, incremental transcript import, locks out of I/O, database behaviour (P) | lead's done check |
+| 4 | close-out: archive agents, remove worktrees, update ARCHITECTURE.md, delete this file | — |
+
+## 5. Gates
+
+- **G0 entry (per slice):** characterization tests for the code the slice will
+  move, written against the old code and committed first; line coverage of that
+  code at least 85%, or a lead-signed exception.
+- **G1 author:** `heavy uv run --frozen --group dev python -m pytest` is green
+  except the quarantined tests (read the result, not a wrapper's exit code);
+  move-only commits pass the AST-identity check once it exists; the layer test
+  once it exists.
+- **G2 harness** (from go/no-go 1): replay of head against base: zero unexplained
+  differences.
+- **G3 reviewer:** the area reviewer's first line `SOURCE YES <full sha>` on the
+  exact commit. Reviewer A: turn engine, runtime boundary, agents and identity,
+  policies, backends and accounts, database and maintenance. Reviewer B:
+  everything else (HTTP layer, read model, voice, live calls and Oracle,
+  autonomy and goals, harness and test infrastructure).
+- **G4 merge captain:** rebase onto current `origin/main`; the rebased diff's
+  `git patch-id --stable` equals the reviewed diff's, otherwise back to review;
+  rerun G1 (and G2) on the rebased commit; fast-forward push.
+- **G5 release owner:** tag `refactor-<yyyymmdd>-<n>` on main inside a window;
+  backup; deploy; health check; automatic rollback on failure; entry in
+  `registers/releases.md`.
+
+## 6. Roles and ownership
+
+| Role | Session | Model | Owns |
+|---|---|---|---|
+| Lead | `hobbles-18b0` | Claude | this brief, scope, decisions, registers, sign-offs |
+| Merge captain | see table update | Claude | landing on main, the gate script, the flake quarantine list, the parked-branch manifest |
+| Release owner | see table update | Claude | windows, tags, backup, deploy, health check, rollback, break-glass, the canary node |
+| Harness owner | see table update | Claude | `tests/replay/` (new), the corpus tools, planted changes, diff report |
+| Contract owner | see table update | Claude | `server/lib/db_schema.py`, `server/lib/db_migrations.py`, `contract/`, `server/lib/server_identity.py` contract constants, the lifecycle kit (`server/lib/lifecycle.py`, `docs/architecture/lifecycles.md`), schema goldens |
+| Fix-lane owner | see table update | Claude | one fix per commit, in the files the lead names per fix |
+| Slice owner S3 | see table update | Claude | route goldens now; the route seam and route modules after go/no-go 1 |
+| Slice owner S5 | see table update | Claude | read-model goldens now; the read model after go/no-go 1 |
+| Reviewer A (core) | see table update | Codex | verdicts only |
+| Reviewer B (rest) | see table update | Codex | verdicts only |
+
+Reviewers never edit sources, never run jobs against the live Host and never
+grant more than the exact commit they reviewed.
+
+### Claims
+
+Files a slice has claimed. Agents outside the program must not edit them; ask
+the lead. **None yet** (Phase 1 moves no code).
+
+## 7. How to work
+
+- Your worktree is `~/GIT/clarp-worktrees/refactor-<role>` on branch
+  `refactor/<role>`, created by the lead. Make further branches inside it if your
+  role needs them. One worktree per agent.
+- Commit WIP after every meaningful step (conventional commits). You may be
+  restarted and must resume from your commits.
+- Report to the lead with
+  `clarp-admin prompt --to hobbles-18b0 --from <your session> --text "..."`:
+  branch, head SHA, done, next, blockers. Report a blocker or a CRITICAL at once.
+- Ask for review with a packet: branch, base SHA, candidate SHA, `git patch-id
+  --stable` of the diff, gate result, what changed and why, open questions.
+  Reviewers answer on the first line: `SOURCE YES <sha>`, `CHANGES NEEDED <sha>;
+  <n> findings` or `HOLD <sha>`.
+- A reviewed commit goes to the merge captain with its SOURCE YES line. The
+  release owner ships what is on main in the next window.
+- **Pace.** Never wait for a person or a clock: ask the lead, then do the next
+  independent task. Never end a turn on "still running": wait inside the turn or
+  schedule a wake-up (`clarp-admin prompt --to <you> --from <you> --delay 10m
+  --text "..."`).
+- **Messages.** One message per decision. Check whether your question was
+  already answered before you send it. Never reverse an in-flight decision
+  unless asked. No acknowledgements. Address agents by session slug.
+- **After any Host restart:** check your worktree (clean or WIP-committed), rerun
+  your gate, check your queue, then continue.
+
+## 8. Registers
+
+In `/var/tmp/clarp-refactor-program/registers/` (the lead keeps them; send
+entries to the lead): `differences.md`, `bugs.md`, `releases.md` (release
+owner writes), `parked-branches.json` (merge captain writes).
