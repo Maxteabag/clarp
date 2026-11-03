@@ -238,3 +238,35 @@ def test_a_first_terminal_write_never_sorts_over_a_foreign_row_committed_before_
         assert lifecycle.current_kind(world.agent) == expected
     finally:
         dispatch.reset_for_tests()
+
+
+def test_a_first_terminal_write_is_not_promoted_past_a_successor_by_its_own_late_row(
+        tmp_path, monkeypatch):
+    """TP-N1b review 9: before the first attempt's lock, a successor starts and
+    then a late row of the old turn lands. Promoting to the old turn's newest
+    row would jump over the successor; with a foreign row in between, the
+    terminal row keeps its own stamp and the successor stays current."""
+    world, _call = _world(tmp_path, monkeypatch, "first")
+    clock = [lifecycle.now_ms()]
+    monkeypatch.setattr(lifecycle, "now_ms", lambda: clock[0])
+    real_write = lifecycle.TurnStateMachine._write_terminal
+    calls = []
+
+    def successor_then_old_row(self, *args, **kwargs):
+        calls.append(1)
+        if len(calls) == 1:
+            clock[0] += 50
+            lifecycle.open_turn(agent_id=world.agent, source="pwa", trace_id="t-next")
+            lifecycle.transition(world.agent, TurnEvent.SPAWN_STARTED,
+                                 {"source": "pwa", "dispatch": "claude", "trace_id": "t-next"})
+            clock[0] += 10
+            lifecycle.transition(world.agent, TurnEvent.TOOL_STARTED,
+                                 {"source": "hook", "trace_id": "t-first"}, force=True)
+        return real_write(self, *args, **kwargs)
+
+    monkeypatch.setattr(lifecycle.TurnStateMachine, "_write_terminal", successor_then_old_row)
+    try:
+        lifecycle.try_transition(world.agent, TurnEvent.PROCESS_EXITED_OK, {"trace_id": "t-first"})
+        assert lifecycle.current_kind(world.agent) != AgentState.DONE
+    finally:
+        dispatch.reset_for_tests()
