@@ -18,6 +18,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import shlex
 import signal
 import sys
 import threading
@@ -82,10 +83,14 @@ def main():
     from lib.audio_stream import AudioStream
     from lib.context import ServerContext, StubSTT
     from lib.tts_engine import FakeTTSEngine
-    backends.by_id('codex').required_binary = str(FAKE_PROVIDER)
+    # The fake runs under this interpreter, whatever python3 the minimal PATH finds.
+    fake = root / 'provider' / 'fake-codex'
+    fake.write_text(f'#!/bin/sh\nexec {shlex.quote(sys.executable)} {shlex.quote(str(FAKE_PROVIDER))} "$@"\n')
+    fake.chmod(0o755)
+    backends.by_id('codex').required_binary = str(fake)
     from lib import provider_capabilities
     provider_capabilities._resolve_executable = (
-        lambda provider_id: str(FAKE_PROVIDER) if provider_id == 'codex' else None)
+        lambda provider_id: str(fake) if provider_id == 'codex' else None)
     provider_spawn = backends.spawn_turn
 
     def deterministic_spawn(backend, **kwargs):
