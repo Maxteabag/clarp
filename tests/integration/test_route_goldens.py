@@ -91,7 +91,7 @@ DYNAMIC_SAMPLES = (
     "/teams/t1/members/a1/b", "/teams//members/", "/teams/t1/members/",
     "/agents/a%2F1", "/agents/a1/", "/agents//fork", "/agents/a1/fork/x",
     "/decisions/d%2F1/resolve", "/decisions//dismiss",
-    "/turn-queue/resume/send", "/turn-queue//send", "/turn-queue/",
+    "/turn-queue/resume", "/turn-queue/resume/send", "/turn-queue//send", "/turn-queue/",
     "/background-jobs/", "/background-jobs/a/b", "/schedules/", "/schedules/a/b",
     "/stt/stream/x", "/static", "/static/", "/audio/", "/media/",
     "/clips/1/a/b", "/clips//stream", "/clips/1/", "/clips/%31/stream",
