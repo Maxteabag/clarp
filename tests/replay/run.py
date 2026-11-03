@@ -114,6 +114,10 @@ def prepared_build(ref: str) -> tuple[Path, str] | None:
     if len(matches) != 1:
         return None
     stamp = json.loads((matches[0] / STAMP).read_text())
+    if stamp.get('dirs') != list(BUILD_DIRS):
+        raise BuildError(f"prepared build {stamp['sha'][:12]} was made by an older harness "
+                         f"(it holds {stamp.get('dirs', ['server', 'static'])}, this one needs {list(BUILD_DIRS)}): "
+                         f"run `python3 tests/replay/run.py prepare` again on the laptop")
     if tree_digest(matches[0]) != stamp['digest']:
         raise BuildError(f"prepared build {stamp['sha'][:12]} does not match its stamp")
     return matches[0], stamp['sha']
@@ -129,6 +133,12 @@ def cmd_prepare(args) -> int:
         sha = git('rev-parse', '--verify', f'{ref}^{{commit}}')
         wanted.add(sha)
         target = PREPARED / sha
+        stamp = target / STAMP
+        if stamp.is_file() and json.loads(stamp.read_text()).get('dirs') != list(BUILD_DIRS):
+            # Made by an older harness with fewer directories (e.g. before bin/): make it again.
+            _set_writable(target, True)
+            shutil.rmtree(target)
+            print(f'remade {sha[:12]} (prepared by an older harness)')
         if not target.exists():
             tmp = PREPARED / f'.{sha}.partial'
             if tmp.exists():
@@ -138,7 +148,8 @@ def cmd_prepare(args) -> int:
             archive = subprocess.run(['git', 'archive', sha, *BUILD_DIRS], cwd=HARNESS,
                                      check=True, capture_output=True).stdout
             subprocess.run(['tar', '-x', '-C', str(tmp)], input=archive, check=True)
-            (tmp / STAMP).write_text(json.dumps({'sha': sha, 'digest': tree_digest(tmp)}) + '\n')
+            (tmp / STAMP).write_text(json.dumps({'sha': sha, 'dirs': list(BUILD_DIRS),
+                                                 'digest': tree_digest(tmp)}) + '\n')
             _set_files_readonly(tmp)
             tmp.rename(target)
         print(f'prepared {ref} {sha}')
