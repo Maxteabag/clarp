@@ -571,3 +571,17 @@ def test_a_path_field_from_the_previous_response_fills_its_placeholder():
     capture.run_step(host, None, {'op': 'delete', 'path': '/turn-queue/{queue_id}',
                                   'from_last': {'queue_id': 'items.0.id'}}, http, [], {'port': 1})
     assert sent == ['/turn-queue/q%201']
+
+
+def test_the_stored_event_log_gets_the_same_canonical_rules_as_the_stream():
+    # rf-merge g2-mainint3: sse_events rows were rebuilt from raw payloads after canonicalizing.
+    spawn = {'source': 'pwa', 'dispatch': 'codex', 'origin': 'user', 'trace_id': 't1', 'backend_session_id': ''}
+    start = {'dispatch': 'codex', 'trace_id': 't1', 'origin': 'user'}
+
+    def log(first, second):
+        rows = [{'event_id': i + 1, 'ts': 1, 'type': 'agent-state', 'session': 'mike', 'agent_id': 'a',
+                 'payload': json.dumps({'type': 'agent-state', 'status_text': '', 'session': 'mike',
+                                        'kind': 'thinking', 'detail': d})} for i, d in enumerate((first, second))]
+        return _capture(db={'schema': [], 'pk': {'sse_events': ['event_id']}, 'tables': {'sse_events': rows}})
+    assert not _report(log(spawn, start), log(start, spawn)).items
+    assert _report(log(spawn, start), log(start, {**spawn, 'source': 'x'})).items
