@@ -140,3 +140,28 @@ def test_a_heartbeat_pass_reads_the_keepers_once_however_many_agents(scoped_keep
 
     assert len(listed) == 1
     assert ids["included"] not in snapshots
+
+
+def test_a_heartbeat_pass_loads_only_the_enabled_keepers_and_skips_served_agents_first(scoped_keeper, tmp_path, monkeypatch):
+    """AUT-02s bench (lead, production counts): loading every Janitor config
+    and checking every agent's goal recovery before the keeper test cost
+    ~130 ms a pass. Only enabled Heartbeat keepers are loaded, and an agent a
+    keeper serves is dropped before anything about it is read."""
+    ids, _cfg = scoped_keeper
+    for n in range(3):
+        agents.create_agent(persona=f"other{n}", voice_id="synthetic", cwd=str(tmp_path),
+                            session=f"other{n}", backend="codex")
+        janitors.create(f"other{n}", template_id="heartbeat-decider",
+                        scope={"agent_ids": [ids["outside"]]})
+    loaded = []
+    real_get = janitors.get
+    monkeypatch.setattr(janitors, "get", lambda agent_id, **kw: loaded.append(agent_id) or real_get(agent_id, **kw))
+    checked = []
+    real_enabled = heartbeat.heartbeat_enabled
+    monkeypatch.setattr(heartbeat, "heartbeat_enabled",
+                        lambda agent: checked.append(agent["agent_id"]) or real_enabled(agent))
+
+    assert _fixed_heartbeats() == ["outside"]
+
+    assert len(loaded) == 1, "only the one enabled Heartbeat keeper is loaded"
+    assert ids["included"] not in checked
