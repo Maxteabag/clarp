@@ -58,6 +58,12 @@ TERMINAL: frozenset[str] = frozenset({
     AgentState.STOPPED,
 })
 ALL: frozenset[str] = frozenset(AgentState.valid()) | {NONE}
+# A state row written after a terminal write's fence that is not that turn's
+# own activity: another trace, no trace, or any terminal kind (a Stop or end
+# written by someone else, whatever trace it names). Binds (trace, trace).
+_FOREIGN_ROW_SQL = (
+    "(? = '' OR COALESCE(json_extract(detail, '$.trace_id'), '') <> ?"
+    " OR kind IN (" + ", ".join(f"'{kind}'" for kind in sorted(TERMINAL)) + "))")
 # Any agent that has at least one row.
 STARTED: frozenset[str] = ALL - {NONE}
 # States in which in-turn activity (tools, compaction) is legitimate. IDLE is
@@ -423,10 +429,8 @@ class TurnStateMachine:
                 # actor wrote in between, the row keeps the stamp it was given.
                 trace = str((detail or {}).get("trace_id") or "")
                 rows = database.execute(
-                    """SELECT MAX(ts) AS newest,
-                              MAX(? = '' OR COALESCE(json_extract(detail, '$.trace_id'), '') <> ?)
-                                  AS foreign_row
-                         FROM state_log WHERE agent_id = ? AND state_id > ?""",
+                    f"""SELECT MAX(ts) AS newest, MAX({_FOREIGN_ROW_SQL}) AS foreign_row
+                          FROM state_log WHERE agent_id = ? AND state_id > ?""",
                     (trace, trace, agent_id, own_since)).fetchone()
                 if not rows["foreign_row"]:
                     stamp = max(stamp, int(rows["newest"] or 0),
@@ -453,10 +457,9 @@ class TurnStateMachine:
         # Since the first attempt, a row that is not explicitly this turn's
         # (another trace, or none) means someone else acted: it wins.
         foreign = conn().execute(
-            """SELECT 1 FROM state_log
-                WHERE agent_id = ? AND state_id > ?
-                  AND (? = '' OR COALESCE(json_extract(detail, '$.trace_id'), '') <> ?)
-                LIMIT 1""",
+            f"""SELECT 1 FROM state_log
+                 WHERE agent_id = ? AND state_id > ? AND {_FOREIGN_ROW_SQL}
+                 LIMIT 1""",
             (agent_id, since, trace, trace)).fetchone()
         if foreign is not None:
             raise TransitionNotWritten(agent_id, event, "terminal_superseded")
