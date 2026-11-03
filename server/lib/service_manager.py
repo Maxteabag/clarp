@@ -347,6 +347,10 @@ def restore_after_failed_install(
         return
     _run("systemctl", "--user", "daemon-reload", check=False, runner=runner)
     if had_previous:
+        # A release that crash-looped hit systemd's start limit; a plain
+        # restart is then refused and the Host stays down (OPS-N2).
+        _run("systemctl", "--user", "reset-failed", "clarp.service",
+             check=False, runner=runner)
         _run("systemctl", "--user", "restart", "clarp.service",
              check=False, runner=runner)
     else:
