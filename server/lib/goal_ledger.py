@@ -188,27 +188,37 @@ def record_goal_save(con, plan_id: str, old_goal: dict, new_goal: dict) -> None:
     """
     old_history = old_goal.get("history") or []
     new_history = new_goal.get("history") or []
-    start = len(old_history)
-    if len(new_history) < start or new_history[:start] != old_history:
-        start = 0   # rewritten history: keys dedupe what is already recorded
+    # A stored goal keeps only its newest entries; history_offset is the
+    # absolute index of its first one, so keys stay stable as old ones drop.
+    old_offset = int(old_goal.get("history_offset") or 0)
+    new_offset = int(new_goal.get("history_offset") or 0)
+    old_end = old_offset + len(old_history)
+    new_end = new_offset + len(new_history)
+    shared = max(old_offset, new_offset)
+    start = old_end
+    if not (new_offset <= old_end <= new_end) or (
+        new_history[shared - new_offset:old_end - new_offset]
+        != old_history[shared - old_offset:]
+    ):
+        start = new_offset   # rewritten history: keys dedupe what is already recorded
     prior = {f: old_goal.get(f) for f in TRACKED_FIELDS if old_goal.get(f) != new_goal.get(f)}
     new = {f: new_goal.get(f) for f in prior}
     owner = new_goal.get("owner_agent_id", "")
     actor = _attribute(_actor.get(), owner)
     status = _last_status(con, plan_id)
     entries = []
-    for index in range(start, len(new_history)):
-        kind = str(new_history[index].get("kind") or "change")
+    for index in range(start, new_end):
+        kind = str(new_history[index - new_offset].get("kind") or "change")
         system = kind in SYSTEM_KINDS or (
             kind == "dependency_result" and actor["kind"] == "unattributed")
         entries.append((index, kind, system))
     if prior or any(not system for _, _, system in entries):
         guard_principal_goal(con, owner, actor)
     for index, kind, system in entries:
-        entry = new_history[index]
+        entry = new_history[index - new_offset]
         this_actor = {"kind": "system"} if system else actor
         detail = entry.get("detail") or {}
-        first = index == len(new_history) - 1 or index == start
+        first = index == new_end - 1 or index == start
         before = dict(prior) if (first and prior) else {}
         after = {"detail": detail, **({"goal": new} if first and prior else {})}
         if not system and this_actor["kind"] in ("owner", "peer", "unattributed"):
@@ -315,7 +325,8 @@ def backfill(con) -> int:
     for row in con.execute("SELECT plan_id, goal_json, status, revision FROM task_plans "
                            "WHERE goal_json NOT IN ('', '{}')").fetchall():
         goal = json.loads(row[1] or "{}")
-        for index, entry in enumerate(goal.get("history") or []):
+        offset = int(goal.get("history_offset") or 0)
+        for index, entry in enumerate(goal.get("history") or [], start=offset):
             if append(con, row[0], kind=str(entry.get("kind") or "change"),
                       key=f"history:{index}", subject=_history_subject(entry),
                       actor={"kind": "legacy"},
