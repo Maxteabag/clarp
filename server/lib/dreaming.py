@@ -848,7 +848,7 @@ def record_final_digest(*, agent_id: str, run_id: str, round_id: str,
         harvest_worktree(run_id)
     except Exception as e:  # noqa: BLE001
         log_exception("dreamHarvestUnexpected", e, detail=run_id)
-    settings_store.delete(_WORKERS_PREFIX + run_id)
+    _forget_workers(run_id)
 
 
 class _AlreadyPublished(Exception):
@@ -972,7 +972,7 @@ def _harvest_abandoned(run_id: str) -> None:
         log_exception("dreamAbandonHarvestFail", e, detail=run_id)
     if _dream_worktree_path(run_id) is None:
         settings_store.delete(_CLEANUP_PREFIX + run_id)
-        settings_store.delete(_WORKERS_PREFIX + run_id)
+        _forget_workers(run_id)
 
 
 _WORKERS_PREFIX = "dreaming.workers."
@@ -987,32 +987,39 @@ def _process_start(pid: int) -> str | None:
     return stat.rsplit(")", 1)[-1].split()[19]
 
 
-def _record_worker(run_id: str, pid: int | None) -> None:
-    """Append (pid None: a spawn under way) or fill in the run's last worker."""
-    workers = _decode_workers(run_id)
-    entry = {"pid": pid, "start": _process_start(pid) if pid else None}
-    if pid is not None and workers and workers[-1]["pid"] is None:
-        workers[-1] = entry
-    else:
-        workers.append(entry)
-    settings_store.set_text(_WORKERS_PREFIX + run_id, json.dumps(workers))
+def _claim_worker(run_id: str) -> str:
+    """Before a spawn: a claim of its own (one key, one upsert, no list to
+    rewrite), unknown until the spawn reports its pid. Returns the claim key."""
+    key = f"{_WORKERS_PREFIX}{run_id}.{uuid.uuid4().hex}"
+    settings_store.set_text(key, json.dumps({"pid": None, "start": None}))
+    return key
 
 
-def _decode_workers(run_id: str) -> list[dict]:
-    try:
-        workers = json.loads(settings_store.get_text(_WORKERS_PREFIX + run_id, default="[]"))
-    except ValueError:
-        return [{"pid": None, "start": None}]
-    return workers if isinstance(workers, list) else [{"pid": None, "start": None}]
+def _fill_worker(claim: str, pid: int) -> None:
+    settings_store.set_text(claim, json.dumps({"pid": pid, "start": _process_start(pid)}))
+
+
+def _worker_claims(run_id: str) -> list[tuple[str, str]]:
+    low, high = settings_store._prefix_range(f"{_WORKERS_PREFIX}{run_id}.")
+    return settings_store.items_in_range(low, high, limit=1000)
+
+
+def _forget_workers(run_id: str) -> None:
+    settings_store.delete_keys([key for key, _value in _worker_claims(run_id)])
 
 
 def _workers_gone(run_id: str) -> bool:
-    """Positive proof that no dream worker of the run is alive: every recorded
-    worker's process has exited (or its pid now belongs to another process).
-    A worker whose pid was never learned is unknown, which is not proof. A
-    run that recorded none never spawned one. The workers are Host-local
+    """Positive proof that no dream worker of the run is alive: every claimed
+    worker's process has exited, or its pid now belongs to another process
+    (a KNOWN recorded start time that differs). A claim without a pid, or a
+    live pid whose original start was unreadable, is unknown, which is not
+    proof. A run with no claims never spawned one. The workers are Host-local
     processes, so a separate runtime's view of the agent is not consulted."""
-    for worker in _decode_workers(run_id):
+    for _key, raw in _worker_claims(run_id):
+        try:
+            worker = json.loads(raw)
+        except ValueError:
+            return False
         pid = worker.get("pid") if isinstance(worker, dict) else None
         if not isinstance(pid, int) or pid <= 0:
             return False
@@ -1022,8 +1029,8 @@ def _workers_gone(run_id: str) -> bool:
             continue
         except PermissionError:
             pass
-        start = _process_start(pid)
-        if start is None or start == worker.get("start"):
+        recorded, current = worker.get("start"), _process_start(pid)
+        if recorded is None or current is None or current == recorded:
             return False
     return True
 
@@ -1383,10 +1390,11 @@ def dispatch_isolated_dream(agent: dict, prompt: str) -> bool:
                 (f"isolated round failed: {str(message or '')[:400]}",
                  db.now_ms(), run_id))
 
+    claim = ""
     if run_id:
         # Before the spawn, so a worker is never alive unrecorded: cleanup of
-        # the run's worktree waits for every recorded worker (AUT-06).
-        _record_worker(run_id, None)
+        # the run's worktree waits for every claimed worker (AUT-06).
+        claim = _claim_worker(run_id)
     handle = backends.spawn_turn(
         backend,
         text=text,
@@ -1408,8 +1416,8 @@ def dispatch_isolated_dream(agent: dict, prompt: str) -> bool:
         hook_session="",
     )
     pid = getattr(handle, "pid", None)
-    if run_id and isinstance(pid, int):
-        _record_worker(run_id, pid)
+    if claim and isinstance(pid, int):
+        _fill_worker(claim, pid)
     log("dreamingIsolatedDispatch",
         f"agent={agent_id} session={session} backend={backend} "
         f"bsid={backend_session_id} trace={trace_id} cwd={cwd}")
