@@ -230,15 +230,21 @@ class SSE:
             if not self._stop.is_set():
                 self.errors.append(f'stream error {type(exc).__name__}')
 
-    def close(self) -> list[dict]:
+    def freeze(self) -> list[dict]:
+        """Stop recording (the stream is quiet) and return the frames so far. The
+        reader ends when its socket closes: when the Host is stopped, or close()."""
         self._stop.set()
+        with self._lock:
+            return list(self.frames)
+
+    def close(self) -> list[dict]:
+        frames = self.freeze()
         with contextlib.suppress(Exception):
             self._resp.close()
         self._thread.join(timeout=5)
         if self._thread.is_alive():
             self.errors.append('reader did not stop')
-        with self._lock:
-            return list(self.frames)
+        return frames
 
 
 def _ro(root: Path):
@@ -570,11 +576,20 @@ def capture(build: Path, scenario: dict, root: Path, python: str = sys.executabl
     except StepFailed as exc:
         error = str(exc)
     finally:
+        # Freeze the stream first, then stop the Host: its process group dies, the
+        # server side of the SSE socket closes and the reader ends at once
+        # (closing the response from this thread does not interrupt its read).
         if sse is not None:
-            frames = sse.close()
+            frames = sse.freeze()
+        timings['frozen'] = round(time.monotonic() - started, 2)
         host.stop()
+        timings['stopped'] = round(time.monotonic() - started, 2)
+        if sse is not None:
+            sse.close()
+        timings['reader_joined'] = round(time.monotonic() - started, 2)
     # Dumped on a failed run too: the frozen state is the diagnostic (structure only in reports).
     db = dump_db(root / 'state.sqlite')
+    timings['db_dumped'] = round(time.monotonic() - started, 2)
     files = list_files(root)
     health = {'errors': sse.errors if sse else ['not connected'], 'ended_early': bool(sse and sse.ended)}
     if error is None and (health['errors'] or health['ended_early']):

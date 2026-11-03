@@ -288,6 +288,18 @@ def planted_copy(build: Path, change: dict, run: RunRoot) -> Path:
     return target
 
 
+TIMINGS: list[dict] = []
+
+
+def timing_summary() -> str:
+    """Median seconds since a capture's start at each phase, over every capture of the run."""
+    import statistics
+    phases = [p for p in ('start', 'steps', 'quiet', 'frozen', 'stopped', 'reader_joined', 'db_dumped', 'done')
+              if any(p in t for t in TIMINGS)]
+    return 'timings (median s): ' + ', '.join(
+        f"{p} {statistics.median(t[p] for t in TIMINGS if p in t):.1f}" for p in phases)
+
+
 def run_corpus(builds: dict[str, Path], chosen, run: RunRoot, jobs: int) -> dict[str, dict[str, dict]]:
     """Capture every scenario on every build; returns {label: {scenario: normalized}}."""
     out: dict[str, dict[str, dict]] = {label: {} for label in builds}
@@ -304,6 +316,7 @@ def run_corpus(builds: dict[str, Path], chosen, run: RunRoot, jobs: int) -> dict
                        'http': [], 'sse': [], 'db': {'schema': [], 'pk': {}, 'tables': {}}, 'files': []}
             (run.dir_for(label) / f'{sid}.raw.json').write_text(json.dumps(raw, default=str))
             out[label][sid] = normalize.normalize(raw, str(HARNESS))
+            TIMINGS.append(raw.get('timings') or {})
     return out
 
 
@@ -411,6 +424,7 @@ def _compare(args, run, chosen, base, base_sha, head, head_sha, started) -> int:
         broken.append(f'base is not reproducible: {len(noise.items)} differences between its two runs')
         print('\n'.join(diff.shapes(noise)))
     print(diff.render(report, intended, f'{base_sha[:12]} -> {head_sha[:12]}', broken), end='')
+    print(timing_summary())
     print(f'seconds: {time.monotonic() - started:.1f}')
     if broken:
         return 2
@@ -475,6 +489,7 @@ def _self_check(args, run, chosen, changes, build, sha, diagnostic, started) -> 
         print(line)
     for line in broken:
         print('RUN ERROR', line)
+    print(timing_summary())
     print(f'seconds: {time.monotonic() - started:.1f}')
     if broken:
         print('PROOF FAILED (run errors)')
