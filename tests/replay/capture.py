@@ -15,6 +15,7 @@ transaction) and the files read, so no writer runs during the dump.
 from __future__ import annotations
 
 import contextlib
+import http.client
 import hashlib
 import json
 import os
@@ -124,18 +125,53 @@ class Host:
             sent['Content-Type'] = raw['content_type']
         else:
             data = json.dumps(body).encode() if body is not None else None
+        if 'Upgrade' in sent:
+            return self._upgrade_request(method, path, sent)
         req = urllib.request.Request(self.url + path, data=data, method=method, headers=sent)
         try:
             with urllib.request.urlopen(req, timeout=10) as resp:
                 status, raw, headers = resp.status, resp.read(), resp.headers
         except urllib.error.HTTPError as err:
             status, raw, headers = err.code, err.read(), err.headers
+        except (urllib.error.URLError, ConnectionError, http.client.HTTPException) as err:
+            # The Host dropped the connection without a response (no exception-to-500
+            # mapping, HTTP-04): a result to compare, recorded as status 0.
+            reason = getattr(err, 'reason', err)
+            return 0, {}, {'<no-response>': type(reason).__name__}
         kept = {h: headers.get(h) for h in CONTRACT_HEADERS if headers.get(h) is not None}
         try:
             payload = json.loads(raw) if raw else None
         except ValueError:
             payload = {'<bytes>': len(raw), '<sha256>': hashlib.sha256(raw).hexdigest()}
         return status, kept, payload
+
+
+def _host_upgrade_request(self, method: str, path: str, sent: dict):
+    """A WebSocket upgrade request (urllib would force Connection: close). The
+    replay Host refuses to spawn a PTY, so a request that gets past the route's
+    checks ends without a response, which is recorded as status 0."""
+    host, port = self.url.split('//', 1)[1].split(':')
+    conn = http.client.HTTPConnection(host, int(port), timeout=10)
+    try:
+        conn.putrequest(method, path, skip_accept_encoding=True)
+        for name, value in sent.items():
+            conn.putheader(name, value)
+        conn.endheaders()
+        resp = conn.getresponse()
+        return _upgrade_response(resp.status, resp.read() if resp.status != 101 else b'', resp.headers)
+    except (OSError, http.client.HTTPException) as err:
+        return 0, {}, {'<no-response>': type(err).__name__}
+    finally:
+        conn.close()
+
+
+def _upgrade_response(status, raw, headers):
+    kept = {h: headers.get(h) for h in CONTRACT_HEADERS if headers.get(h) is not None}
+    try:
+        payload = json.loads(raw) if raw else None
+    except ValueError:
+        payload = {'<bytes>': len(raw), '<sha256>': hashlib.sha256(raw).hexdigest()}
+    return status, kept, payload
 
 
 class SSE:
@@ -426,8 +462,8 @@ def run_cli(host: Host, step: dict) -> dict:
             return text
         body = text[:-1] if text.endswith('\n') else text
         form = normalize.parse_json(body)
-        if form is None:
-            return text
+        if form is None or form['<form>'] == 'other':
+            return text  # not JSON, or a layout we cannot name: the bytes themselves
         return {**form, '<newline>': text.endswith('\n')}
     return {'step': step.get('name') or ' '.join(step['args'][:1]), 'exit': done.returncode,
             'stdout': parsed(done.stdout), 'stderr': done.stderr}
@@ -547,3 +583,6 @@ def capture(build: Path, scenario: dict, root: Path, python: str = sys.executabl
         'files': files,
         'cli': cli,
     }
+
+
+Host._upgrade_request = _host_upgrade_request

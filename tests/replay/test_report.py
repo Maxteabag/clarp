@@ -436,3 +436,47 @@ def test_live_appends_split_by_timing_compare_equal_but_text_and_lseq_gaps_do_no
     assert _report(_capture(sse=whole), _capture(sse=other_item)).items
     gap = [whole[0], whole[1], _live(5, {'op': 'done', 'id': 'i1', 'rev': 3})]
     assert any('live-contract' in d['locator'] for d in _report(_capture(sse=whole), _capture(sse=gap)).items)
+
+
+# Reviewer B's controls (review s0-corpus-55526c31): changes that must stay differences.
+
+
+def test_live_item_revision_gap_remains_a_difference():
+    baseline = [_live(1, {"op": "upsert", "id": "i1", "rev": 1}),
+                _live(2, {"op": "append", "id": "i1", "rev": 2, "field": "text", "chunk": "hello"})]
+    broken = [baseline[0], _live(2, {"op": "append", "id": "i1", "rev": 9, "field": "text", "chunk": "hello"})]
+    assert _report(_capture(sse=baseline), _capture(sse=broken)).items
+
+
+def test_later_tool_output_lines_remain_observable():
+    def frames(last):
+        return [_live(1, {"op": "upsert", "id": "i1", "rev": 1}),
+                _live(2, {"op": "append", "id": "i1", "rev": 2, "field": "tool.output", "lines": ["first"], "total_lines": 1}),
+                _live(3, {"op": "append", "id": "i1", "rev": 3, "field": "tool.output", "lines": [last], "total_lines": 2})]
+    assert _report(_capture(sse=frames("second")), _capture(sse=frames("CHANGED"))).items
+
+
+def test_unrecognized_cli_json_layout_keeps_its_bytes(tmp_path, monkeypatch):
+    import capture
+    from types import SimpleNamespace
+    (tmp_path / "config.toml").write_text('[tts]\nenabled = false\n')
+    host = SimpleNamespace(root=tmp_path, build=tmp_path / "build", python=sys.executable,
+                           url="http://127.0.0.1:17991")
+    outputs = iter(['{"a": 1,"b":2}\n', '{"a":1, "b":2}\n'])
+    monkeypatch.setattr(capture.subprocess, "run", lambda *a, **kw:
+                        SimpleNamespace(returncode=0, stdout=next(outputs), stderr=""))
+    assert capture.run_cli(host, {"args": ["sessions"]}) != capture.run_cli(host, {"args": ["sessions"]})
+
+
+def test_a_malformed_live_sequence_stays_observable():
+    baseline = [_live(1, {"op": "upsert", "id": "i1", "rev": 1}),
+                _live(2, {"op": "done", "id": "i1", "rev": 2})]
+    broken = [baseline[0], _live("broken", {"op": "done", "id": "i1", "rev": 2})]
+    assert _report(_capture(sse=baseline), _capture(sse=broken)).items
+
+
+def test_arbitrary_text_file_numbers_are_content():
+    def files(text):
+        return [{"path": "workspace/result.txt", "kind": "text", "bytes": len(text), "text": text}]
+    assert _report(_capture(files=files("release number 1793692941")),
+                   _capture(files=files("release number 1793692942"))).items

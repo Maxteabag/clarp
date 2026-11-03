@@ -314,8 +314,7 @@ def normalize(capture: dict, harness_root: str) -> dict:
                      # Small text files: compared as text with generated ids (UUIDs, hex
                      # tokens) as surrogates and epoch readings (the claude source
                      # markers: 'pwa-voice <session> <epoch> <trace> 0') as <time>.
-                     'text': EPOCH_TEXT.sub('<time>', n.ids_in(n.paths_in(f['text'])))
-                     if f.get('kind') == 'text' else None}
+                     'text': text_file(n, f['path'], f['text']) if f.get('kind') == 'text' else None}
                     for f in capture['files']]
     n.in_stream = True
     # The wire id: named through the same event-id relation as payload references,
@@ -396,22 +395,60 @@ def coalesce(frames: list[dict]) -> tuple[list[dict], dict[str, str]]:
     return kept, alias
 
 
-def canonical_live(frames: list[dict]) -> tuple[list[dict], dict]:
-    """How many 'append' ops the live hub sends for one streamed text depends on
-    timing (8+19 characters in one run, 27 in the next). Merge an append into an
-    append on the same item directly before it in the stream, drop frames left
-    empty, renumber each item's rev, and compare lseq by its contract only: per
-    session it must rise by exactly 1 per frame (checked on the raw frames)."""
-    live = [f for f in frames if isinstance(f.get('data'), dict) and f['data'].get('type') == 'live']
-    contiguous: dict[str, bool] = {}
-    last: dict[str, int] = {}
+TEXT_APPEND_KEYS = frozenset({'op', 'conv', 'id', 'kind', 'rev', 'field', 'chunk'})
+
+
+def _text_append(op) -> bool:
+    """The observed streamed-text shape: an append of a text chunk and nothing else."""
+    return (isinstance(op, dict) and op.get('op') == 'append' and op.get('field') == 'text'
+            and isinstance(op.get('chunk'), str) and set(op) <= TEXT_APPEND_KEYS)
+
+
+def live_contract(live: list[dict]) -> dict:
+    """The live sequence rules, checked on the raw frames (docs/live-items.md):
+    per stream (session, conversation, epoch) lseq is an integer rising by
+    exactly 1 per frame; per item, every op's rev is an integer one above the
+    item's previous rev. Streams are named by order of appearance."""
+    streams: dict = {}
+    lseq_state: dict = {}
+    last_lseq: dict = {}
+    revs: dict = {}
+    rev_faults = 0
     for f in live:
-        session, lseq = str(f['data'].get('session')), f['data'].get('lseq')
-        if isinstance(lseq, int):
-            if session in last and lseq != last[session] + 1:
-                contiguous[session] = False
-            contiguous.setdefault(session, True)
-            last[session] = lseq
+        data = f['data']
+        scope = (data.get('session'), data.get('conv'), data.get('epoch'))
+        name = streams.setdefault(scope, f'stream{len(streams) + 1}')
+        lseq = data.get('lseq')
+        if not isinstance(lseq, int) or isinstance(lseq, bool):
+            lseq_state[name] = 'non-integer'
+        else:
+            if name in last_lseq and lseq != last_lseq[name] + 1:
+                lseq_state.setdefault(name, 'gap')
+                if lseq_state[name] == 'ok':
+                    lseq_state[name] = 'gap'
+            lseq_state.setdefault(name, 'ok')
+            last_lseq[name] = lseq
+        for op in data.get('ops') or []:
+            if not isinstance(op, dict) or 'rev' not in op:
+                continue
+            key = (scope, op.get('id'))
+            rev = op['rev']
+            if not isinstance(rev, int) or isinstance(rev, bool) or (key in revs and rev != revs[key] + 1):
+                rev_faults += 1
+            if isinstance(rev, int):
+                revs[key] = rev
+    return {'lseq': dict(sorted(lseq_state.items())), 'rev_faults': rev_faults} if streams else {}
+
+
+def canonical_live(frames: list[dict]) -> tuple[list[dict], dict]:
+    """How many text 'append' ops the live hub sends for one streamed reply
+    depends on timing (one 27-character append in one run, 8 + 19 in the next).
+    After the raw frames pass live_contract (whose result is compared), a text
+    append is merged into the text append on the same item directly before it,
+    frames emptied by that are dropped, each item's rev is renumbered and lseq
+    becomes <lseq>. Any other op, including tool-output appends, is kept as is."""
+    live = [f for f in frames if isinstance(f.get('data'), dict) and f['data'].get('type') == 'live']
+    summary = live_contract(live)
     out, previous, revs = [], None, {}
     for f in frames:
         data = f.get('data') if isinstance(f.get('data'), dict) else None
@@ -421,19 +458,19 @@ def canonical_live(frames: list[dict]) -> tuple[list[dict], dict]:
         ops = []
         for op in data['ops']:
             op = dict(op) if isinstance(op, dict) else op
-            if (isinstance(op, dict) and op.get('op') == 'append' and previous is not None
-                    and previous.get('op') == 'append' and previous.get('id') == op.get('id')
-                    and previous.get('field') == op.get('field')):
-                previous['chunk'] = str(previous.get('chunk') or '') + str(op.get('chunk') or '')
+            if (_text_append(op) and _text_append(previous) and previous.get('id') == op.get('id')
+                    and previous.get('conv') == op.get('conv')):
+                previous['chunk'] = previous['chunk'] + op['chunk']
                 continue
-            if isinstance(op, dict) and 'rev' in op:
-                revs[op.get('id')] = revs.get(op.get('id'), 0) + 1
-                op['rev'] = revs[op.get('id')]
+            if isinstance(op, dict) and isinstance(op.get('rev'), int):
+                key = (data.get('session'), data.get('conv'), data.get('epoch'), op.get('id'))
+                revs[key] = revs.get(key, 0) + 1
+                op['rev'] = revs[key]
             ops.append(op)
             previous = op if isinstance(op, dict) else None
         if ops or not data['ops']:  # drop only frames that merging emptied
-            out.append({**f, 'data': {**data, 'ops': ops, 'lseq': '<lseq>'}})
-    summary = {'lseq_contiguous': dict(sorted(contiguous.items()))} if contiguous else {}
+            lseq = '<lseq>' if isinstance(data.get('lseq'), int) else data.get('lseq')
+            out.append({**f, 'data': {**data, 'ops': ops, 'lseq': lseq}})
     return out, summary
 
 
@@ -447,6 +484,23 @@ def _canonical_frames(frames: list[dict]) -> list[dict]:
                          lambda f: _state_key(f['data'].get('session'), f['data'].get('kind'),
                                               f['data'].get('detail')))
     return frames
+
+
+# Text files whose content is generated, and how (each seen in unchanged replays):
+# the instance generation token (a UUID) and the claude source markers
+# ('pwa-voice <session> <epoch> <trace> 0'). Every other text file is content:
+# only the scratch, build and harness paths and pairing secrets are rewritten.
+GENERATED_TEXT = (('share/clarp/backups/instance.generation', 'uuid'), ('cache/source-markers/', 'marker'))
+
+
+def text_file(n: 'Normalizer', path: str, text: str) -> str:
+    text = SECRET.sub(lambda m: n._secret(m.group(0)), n.paths_in(text))
+    for prefix, kind in GENERATED_TEXT:
+        if path == prefix or (prefix.endswith('/') and path.startswith(prefix)):
+            if kind == 'uuid':
+                return UUID.sub(lambda m: n._id(m.group(0).lower()), text)
+            return EPOCH_TEXT.sub('<time>', n.ids_in(text))
+    return text
 
 
 def _payload(row: dict):
