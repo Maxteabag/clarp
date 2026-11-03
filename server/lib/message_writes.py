@@ -1469,6 +1469,21 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
             commit_batch()
         latest_revision = max(latest_revision, stamp_turn(
             database, agent_id, trace, _next_revision))
+    _finish_import(database, agent_id, backend_session_id,
+                   batch_finals=batch_finals, total_turns=total_turns,
+                   skipped_slot_removed=skipped_slot_removed,
+                   latest_revision=latest_revision, authority_tools=agy.tools)
+    return out
+
+
+# --- turn summaries (docs/live-items.md §9; helpers in lib.message_turns) ---
+
+def _finish_import(database, agent_id: str, backend_session_id: str, *,
+                   batch_finals: list[tuple[str, str]], total_turns: int,
+                   skipped_slot_removed: bool, latest_revision: int,
+                   authority_tools: dict[str, tuple[str, list, list]]) -> None:
+    """The import's work after its rows: leftover live twins, the stale tail,
+    the replace revision, stream-owned agy tools and the conversation head."""
     # Compare markup-normalized so a streamed live row (with <speak>/<vox>/…)
     # still matches its durable copy (markup stripped); raw startswith missed it.
     live_replace_revision = 0
@@ -1518,7 +1533,7 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
     replace_revision = max(stale_replace_revision, live_replace_revision)
     latest_revision = max(latest_revision, replace_revision)
     latest_revision = max(latest_revision,
-                          _attach_authority_tools(database, agent_id, agy.tools))
+                          _attach_authority_tools(database, agent_id, authority_tools))
     head = database.execute(
         """SELECT revision, replace_revision FROM conversation_heads
             WHERE agent_id = ? AND backend_session_id = ?""",
@@ -1526,7 +1541,7 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
     if database.began_at is None and head is not None \
             and head["revision"] >= latest_revision \
             and head["replace_revision"] >= replace_revision:
-        return out  # nothing written, and the head already covers every row
+        return  # nothing written, and the head already covers every row
     database.execute(
         """INSERT INTO conversation_heads (
                agent_id, backend_session_id, revision, replace_revision
@@ -1539,10 +1554,7 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
                )""",
         (agent_id, backend_session_id, latest_revision, replace_revision),
     )
-    return out
 
-
-# --- turn summaries (docs/live-items.md §9; helpers in lib.message_turns) ---
 
 def _attach_authority_tools(database, agent_id: str,
                             collected: dict[str, tuple[str, list, list]]) -> int:
