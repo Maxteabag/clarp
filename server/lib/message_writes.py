@@ -955,7 +955,9 @@ def _restore_unadopted_parked(database, agent_id: str, backend_session_id: str,
                 (agent_id, backend_session_id, seq)).fetchone() is not None:
             seq = -_PARKED_SEQ_BASE - (int(row["seq"]) - _PARKED_SEQ_BASE)
         database.execute(
-            "UPDATE messages SET source_file = ?, seq = ?, revision = ? WHERE message_id = ?",
+            # As a final row is written: no transcript phase, no empty sender.
+            "UPDATE messages SET source_file = ?, seq = ?, revision = ?, phase = NULL,"
+            " sender_agent_id = NULLIF(sender_agent_id, '') WHERE message_id = ?",
             (f"final:{trace}", seq, _next_revision(database), row["message_id"]))
         restored += 1
     return restored
