@@ -848,6 +848,7 @@ def record_final_digest(*, agent_id: str, run_id: str, round_id: str,
         harvest_worktree(run_id)
     except Exception as e:  # noqa: BLE001
         log_exception("dreamHarvestUnexpected", e, detail=run_id)
+    settings_store.delete(_WORKERS_PREFIX + run_id)
 
 
 class _AlreadyPublished(Exception):
@@ -971,15 +972,78 @@ def _harvest_abandoned(run_id: str) -> None:
         log_exception("dreamAbandonHarvestFail", e, detail=run_id)
     if _dream_worktree_path(run_id) is None:
         settings_store.delete(_CLEANUP_PREFIX + run_id)
+        settings_store.delete(_WORKERS_PREFIX + run_id)
 
 
-def _backend_quiet(agent: dict | None) -> bool:
-    """No turn and no backend handle on the agent: nothing writes in its dream
-    worktree. Unlike the dispatch check, routine activity is no exception."""
+_WORKERS_PREFIX = "dreaming.workers."
+
+
+def _process_start(pid: int) -> str | None:
+    """The kernel's start time of ``pid`` (Linux), to tell a reused pid apart."""
+    try:
+        stat = pathlib.Path(f"/proc/{pid}/stat").read_text()
+    except OSError:
+        return None
+    return stat.rsplit(")", 1)[-1].split()[19]
+
+
+def _record_worker(run_id: str, pid: int | None) -> None:
+    """Append (pid None: a spawn under way) or fill in the run's last worker."""
+    workers = _decode_workers(run_id)
+    entry = {"pid": pid, "start": _process_start(pid) if pid else None}
+    if pid is not None and workers and workers[-1]["pid"] is None:
+        workers[-1] = entry
+    else:
+        workers.append(entry)
+    settings_store.set_text(_WORKERS_PREFIX + run_id, json.dumps(workers))
+
+
+def _decode_workers(run_id: str) -> list[dict]:
+    try:
+        workers = json.loads(settings_store.get_text(_WORKERS_PREFIX + run_id, default="[]"))
+    except ValueError:
+        return [{"pid": None, "start": None}]
+    return workers if isinstance(workers, list) else [{"pid": None, "start": None}]
+
+
+def _workers_gone(run_id: str) -> bool:
+    """Positive proof that no dream worker of the run is alive: every recorded
+    worker's process has exited (or its pid now belongs to another process).
+    A worker whose pid was never learned is unknown, which is not proof. A
+    run that recorded none never spawned one. The workers are Host-local
+    processes, so a separate runtime's view of the agent is not consulted."""
+    for worker in _decode_workers(run_id):
+        pid = worker.get("pid") if isinstance(worker, dict) else None
+        if not isinstance(pid, int) or pid <= 0:
+            return False
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            continue
+        except PermissionError:
+            pass
+        start = _process_start(pid)
+        if start is None or start == worker.get("start"):
+            return False
+    return True
+
+
+def _cleanup_quiet(run_id: str, agent_id: str) -> bool:
+    """Nothing may still write in the run's worktree: every recorded dream
+    worker is gone, and neither the Host-local backend nor the backends facade
+    reports a handle for the agent. Any one of them saying busy, or failing to
+    answer, defers the cleanup; the worker proof does not need the agent."""
+    if not _workers_gone(run_id):
+        return False
+    agent = agents_db.get_by_agent_id(agent_id) if agent_id else None
     if agent is None:
         return True
-    return not agents_db.is_busy(agent["agent_id"]) and not backends.active_handles(
-        agent.get("backend"), agent["agent_id"])
+    backend = backends.normalize(get_settings().backend or agent.get("backend"))
+    try:
+        return not (backends.by_id(backend).active_handles(agent_id)
+                    or backends.active_handles(backend, agent_id))
+    except Exception:  # noqa: BLE001 - an unreadable registry is no proof
+        return False
 
 
 def _harvest_abandoned_runs() -> None:
@@ -989,8 +1053,7 @@ def _harvest_abandoned_runs() -> None:
     low, high = settings_store._prefix_range(_CLEANUP_PREFIX)
     for key, agent_id in settings_store.items_in_range(low, high, limit=_CLEANUP_BATCH):
         run_id = key[len(_CLEANUP_PREFIX):]
-        if _dream_worktree_path(run_id) is not None and not _backend_quiet(
-                agents_db.get_by_agent_id(agent_id)):
+        if _dream_worktree_path(run_id) is not None and not _cleanup_quiet(run_id, agent_id):
             continue
         _harvest_abandoned(run_id)
 
@@ -1320,7 +1383,11 @@ def dispatch_isolated_dream(agent: dict, prompt: str) -> bool:
                 (f"isolated round failed: {str(message or '')[:400]}",
                  db.now_ms(), run_id))
 
-    backends.spawn_turn(
+    if run_id:
+        # Before the spawn, so a worker is never alive unrecorded: cleanup of
+        # the run's worktree waits for every recorded worker (AUT-06).
+        _record_worker(run_id, None)
+    handle = backends.spawn_turn(
         backend,
         text=text,
         cwd=cwd,
@@ -1340,6 +1407,9 @@ def dispatch_isolated_dream(agent: dict, prompt: str) -> bool:
         isolated=True,
         hook_session="",
     )
+    pid = getattr(handle, "pid", None)
+    if run_id and isinstance(pid, int):
+        _record_worker(run_id, pid)
     log("dreamingIsolatedDispatch",
         f"agent={agent_id} session={session} backend={backend} "
         f"bsid={backend_session_id} trace={trace_id} cwd={cwd}")
@@ -2347,7 +2417,7 @@ class DreamingScheduler:
             # The run ends now; a backend still writing in its worktree keeps
             # it until that backend stops (AUT-06 review).
             abandon_run(run["run_id"], reason=_DEADLINE_REASON,
-                        harvest=_backend_quiet(agent))
+                        harvest=_cleanup_quiet(run["run_id"], run["agent_id"]))
             return 0
         _recover_stale_sent_round(run["run_id"])
         reason = _skip_busy_reason(agent)
