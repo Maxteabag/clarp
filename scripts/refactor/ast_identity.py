@@ -366,6 +366,31 @@ def global_reads(member: ast.stmt) -> set[str]:
     return found
 
 
+def mixin_reads(tree: ast.Module) -> set[str]:
+    """Names a mixin file uses from its module scope: the module reads of every
+    member of its classes (global_reads, so a method's own local that happens to
+    share an imported module's name is not one), every name a member declares
+    `global` (a pure global write or delete reads nothing but changes the
+    module's binding), and every name in its other module-level statements,
+    imports aside."""
+    found: set[str] = set()
+    for stmt in tree.body:
+        if isinstance(stmt, _IMPORTS):
+            continue
+        if isinstance(stmt, ast.ClassDef):
+            found |= {n.id for part in (*stmt.bases, *stmt.keywords, *stmt.decorator_list)
+                      for n in ast.walk(part) if isinstance(n, ast.Name)}
+            for member in stmt.body:
+                found |= global_reads(member)
+                # A pure `global name` write or delete reads nothing, yet it
+                # changes the module that binds the name: it counts as use.
+                found |= {name for node in ast.walk(member) if isinstance(node, ast.Global)
+                          for name in node.names}
+        else:
+            found |= used_names(stmt)
+    return found
+
+
 def module_binding(tree: ast.Module, path: str, name: str) -> tuple[str, str | None] | None:
     """Where a module binds `name`: an import target, or (module, name) for a
     module-level definition; None when the module does not bind it."""
@@ -607,7 +632,7 @@ def compare_methods(base: str, head: str, old: str, new: list[str]) -> tuple[lis
             problems.append(f"{old}: compiler directives differ in {path}: "
                             f"{sorted(futures(base_tree))} -> {sorted(futures(tree))}")
         new_top = top_imports(tree, _package(path))
-        used = used_names(tree)
+        used = used_names(tree) if path == old_path else mixin_reads(tree)
         for bound, target in old_top.items():
             if bound not in used:
                 continue

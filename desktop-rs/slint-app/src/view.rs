@@ -636,6 +636,7 @@ pub(crate) fn message_row(
         // The pane decides once the grace period has passed.
         status_due: false,
         failed: m.delivery_failed,
+        failure: m.delivery_error.as_str().into(),
         activity_label: label.into(),
         group_id: group_id.into(),
         expanded: open,

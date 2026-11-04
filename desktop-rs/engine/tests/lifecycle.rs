@@ -275,10 +275,55 @@ fn a_failed_send_is_retried() {
     host.control("/__control/outage", json!({"seconds": 1}));
     d.engine.send("Try again");
     d.until("failed", |e| !e.sending() && e.conversation("rachel").unwrap().rows().iter().any(|r| r.delivery_failed));
+    let failed_id = d.engine.conversation("rachel").unwrap().rows().iter().find(|r| r.delivery_failed).unwrap().id.clone();
     d.settle(Duration::from_millis(1200));
     d.engine.retry_latest_failed_message();
     d.until("retried and answered", |e| e.conversation("rachel").unwrap().rows().iter().any(|r| r.text == "Echo: Try again"));
     let rows = d.engine.conversation("rachel").unwrap().rows();
     assert!(!rows.iter().any(|r| r.delivery_failed), "the failed copy is gone");
     assert_eq!(rows.iter().filter(|r| r.text == "Try again").count(), 1);
+    // Resent under its own id, so the Host launches it once (CLIENT-SEND-500).
+    assert!(rows.iter().any(|r| r.id == failed_id && r.text == "Try again"), "same client_msg_id");
+}
+
+#[test]
+fn a_late_answer_after_the_delivery_timer_and_a_chat_switch_confirms_the_chat_that_sent_it() {
+    // Reviewer B on da3fb668: the 20 s timer marks the send failed but the
+    // POST goes on; its 2xx must confirm the chat that sent it, never the one
+    // selected by then, or the row stays failed for good (CLIENT-SEND-500).
+    let host = Host::start("late-send");
+    let mut d = Driver::new(&host.base);
+    d.connect();
+    d.until("rachel open", |e| e.conversation("rachel").is_some_and(|c| c.rows().len() == 2));
+    host.control("/__control/send-delay", json!({"seconds": 23}));
+    d.engine.send("Slow one");
+    d.until_within("the delivery timer marks it failed", Duration::from_secs(30), |e, _| {
+        e.conversation("rachel").unwrap().rows().iter().any(|r| r.text == "Slow one" && r.delivery_failed)
+    });
+    d.engine.select("mike");
+    d.until_within("the late 2xx confirms rachel's send", Duration::from_secs(15), |e, _| {
+        e.conversation("rachel").unwrap().rows().iter().any(|r| r.text == "Slow one" && !r.delivery_failed && !r.pending)
+    });
+}
+
+#[test]
+fn a_late_error_after_the_delivery_timer_shows_the_hosts_reason_in_the_chat_that_sent_it() {
+    // Reviewer B on dddfc512: the timer has marked the send failed when the
+    // Host's late non-2xx arrives; its reason must still reach that chat's
+    // bubble, whichever chat is selected by then (CLIENT-SEND-500).
+    let host = Host::start("late-error");
+    let mut d = Driver::new(&host.base);
+    d.connect();
+    d.until("rachel open", |e| e.conversation("rachel").is_some_and(|c| c.rows().len() == 2));
+    host.control("/__control/send-delay", json!({"seconds": 23}));
+    host.control("/__control/fail", json!({"path": "/send", "status": 500, "count": 1}));
+    d.engine.send("Slow and refused");
+    d.until_within("the delivery timer marks it failed", Duration::from_secs(30), |e, _| {
+        e.conversation("rachel").unwrap().rows().iter().any(|r| r.text == "Slow and refused" && r.delivery_failed)
+    });
+    d.engine.select("mike");
+    d.until_within("the late error's reason on rachel's failed send", Duration::from_secs(15), |e, _| {
+        e.conversation("rachel").unwrap().rows().iter()
+            .any(|r| r.text == "Slow and refused" && r.delivery_failed && !r.delivery_error.is_empty())
+    });
 }

@@ -381,6 +381,42 @@ SCENARIOS = [
         ],
     },
     {
+        'id': 'stop-holds-then-edit-queue',
+        'what': 'a Stop holds three queued sends; the held queue is edited (PUT text), one is '
+                'cancelled (DELETE), one is sent at once while paused (POST /send), then the queue '
+                'resumes: which turn runs, with which text, in what order (QUEUE-N1, TP-N1/N2, RM-N1)',
+        'steps': [
+            _send('rachel', '[qa-slow] synthetic task before an edited queue', 'quebec'),
+            {'op': 'wait_provider_started', 'marker': '[qa-slow] synthetic task before an edited queue'},
+            {'op': 'wait_open', 'message_id': 'u-quebec'},
+            {'op': 'wait_state', 'session': 'rachel', 'kind': 'thinking', 'count': 2},
+            _send('rachel', 'synthetic queued romeo', 'romeo', queue_if_busy=True),
+            _send('rachel', 'synthetic queued sierra', 'sierra', queue_if_busy=True),
+            _send('rachel', 'synthetic queued tango', 'tango3', queue_if_busy=True),
+            {'op': 'post', 'path': '/stop', 'body': {'session': 'rachel'}},
+            {'op': 'wait_settled', 'message_id': 'u-quebec'},
+            {'op': 'quiesce'},
+            # The held queue: romeo, sierra, tango3 (paused).
+            {'op': 'get', 'path': '/turn-queue?session=rachel'},
+            {'op': 'put', 'path': '/turn-queue/{queue_id}', 'from_last': {'queue_id': 'items.0.id'},
+             'body': {'text': 'synthetic edited romeo'}},
+            {'op': 'get', 'path': '/turn-queue?session=rachel'},
+            {'op': 'delete', 'path': '/turn-queue/{queue_id}', 'from_last': {'queue_id': 'items.1.id'}},
+            {'op': 'get', 'path': '/turn-queue?session=rachel'},
+            # tango3 sent at once while the queue is still paused.
+            {'op': 'post', 'path': '/turn-queue/{queue_id}/send', 'from_last': {'queue_id': 'items.1.id'}},
+            {'op': 'wait_settled', 'message_id': 'u-tango3'},
+            {'op': 'quiesce'},
+            {'op': 'get', 'path': '/turn-queue?session=rachel'},
+            # Resumed: the edited romeo runs, with its new text.
+            {'op': 'post', 'path': '/turn-queue/resume', 'body': {'session': 'rachel'}},
+            {'op': 'wait_settled', 'message_id': 'u-romeo'},
+            {'op': 'quiesce'},
+            {'op': 'get', 'path': '/turn-queue?session=rachel'},
+            {'op': 'get', 'path': '/log?session=rachel'},
+        ],
+    },
+    {
         'id': 'voice-streamed-clip',
         'what': 'a spoken reply streamed through the real Cartesia adapter (synthetic offline response, '
                 'host.py) with chunked-file delivery: the clip file, its stream bytes and its chunks',

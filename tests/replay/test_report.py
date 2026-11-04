@@ -820,3 +820,42 @@ def test_the_throttle_plant_needs_more_pushes_not_a_changed_push():
     priority_only = _report(_relay(priority='5'), _relay(priority='10')).items
     assert priority_only and not planted.caught(change, priority_only)
     assert planted.caught(change, _report(_relay(count=2), _relay(count=3)).items)
+
+
+def test_clean_keeps_cited_and_young_runs_and_removes_old_released_ones(tmp_path):
+    import os
+    import time
+    import run as run_module
+    runs = tmp_path / 'r'
+    for name in ('cited', 'young', 'old'):
+        (runs / name).mkdir(parents=True)
+        (runs / name / '.claim').write_text('1\n')
+    (runs / 'stray').mkdir()                          # no claim: not a run directory
+    old = time.time() - 3 * 86400
+    for name in ('cited', 'old'):
+        os.utime(runs / name / '.claim', (old, old))
+    keep_file = tmp_path / 'keep.txt'
+    keep_file.write_text('# run id, then the finding it serves\ncited TP-N3 on main\n\n')
+    keep = run_module.keep_list(keep_file)
+    assert keep == {'cited': 'TP-N3 on main'}
+    status = run_module._clean_runs(tmp_path, 0, keep, 2 * 86400)
+    assert sorted(p.name for p in runs.iterdir()) == ['cited', 'stray', 'young']
+    assert status == 1                                # the stray directory is refused, not removed
+
+
+def test_clean_refuses_a_missing_named_keep_list_and_a_bad_age_before_removing_anything(tmp_path, monkeypatch):
+    # Reviewer B s0-retention-0d99750e.
+    import run as run_module
+    run_dir = tmp_path / 'r' / 'cited'
+    run_dir.mkdir(parents=True)
+    (run_dir / '.claim').write_text('1\n')
+    (tmp_path / 'keep.txt').write_text('cited FINDING-1\n')
+    monkeypatch.setattr(run_module, '_clean_builds', lambda scratch: 0)
+    assert run_module.main(['--scratch', str(tmp_path), 'clean', '--keep-file', str(tmp_path / 'typo.txt')]) != 0
+    for age in ('nan', 'inf', '-1'):
+        assert run_module.main(['--scratch', str(tmp_path), 'clean', '--older-than-days', age]) != 0
+    assert run_dir.exists()
+    # The default keep list may be absent: clean then simply keeps nothing extra.
+    (tmp_path / 'keep.txt').unlink()
+    assert run_module.main(['--scratch', str(tmp_path), 'clean', '--older-than-days', '2']) == 0
+    assert run_dir.exists()                          # young: kept by age

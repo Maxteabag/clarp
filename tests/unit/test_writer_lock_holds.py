@@ -367,6 +367,19 @@ def test_inotify_burst_imports_each_agent_once(tmp_path, monkeypatch):
 
     monkeypatch.setattr(transcript_watcher, "INOTIFY_COALESCE_SEC", 0.3)
     dispatcher = transcript_watcher.InotifyDispatcher(Pool())
+    # The coalescing wait (the dispatcher's own window after the first event) ends
+    # once the whole burst is written, not after a fixed 0.3 s that a loaded machine
+    # can outlast mid-burst (G1 flake: two ticks each). A dispatcher that does not
+    # wait for the burst at all never reaches this and still ticks too often.
+    burst_written = threading.Event()
+    real_wait = dispatcher._wait
+
+    def wait(fds, timeout):
+        if fds == [dispatcher._stop_pipe_r] and timeout:
+            assert burst_written.wait(15)
+            return []
+        return real_wait(fds, timeout)
+    dispatcher._wait = wait
     paths = {agent_id: tmp_path / f"{agent_id}.jsonl" for agent_id in watchers}
     for agent_id, path in paths.items():
         dispatcher.watch(agent_id, path)
@@ -378,7 +391,8 @@ def test_inotify_burst_imports_each_agent_once(tmp_path, monkeypatch):
                 with path.open("a") as handle:
                     handle.write(f'{{"n": {i}}}\n')
             time.sleep(0.01)
-        assert all(w.ticked.wait(3) for w in watchers.values())
+        burst_written.set()
+        assert all(w.ticked.wait(15) for w in watchers.values())
         time.sleep(0.4)
     finally:
         dispatcher.stop()
