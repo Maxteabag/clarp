@@ -116,3 +116,23 @@ def test_grants_and_declines_can_coexist():
                         ["Rachel", "Bella"])
     assert r.grants == ["Rachel"]
     assert r.declines == ["Bella"]
+
+
+# ---------- a grant/decline inside a longer instruction (RTO-02) ----------
+# /transcribe blanks the text of any utterance that grants or declines a
+# herald, so an instruction riding along with the name would be dropped.
+
+def test_instruction_addressed_to_the_herald_agent_is_not_a_grant():
+    r = classify_intent("OK Rachel, rerun the failing tests", ["Rachel"])
+    assert r.has_signal is False
+
+
+def test_decline_word_inside_an_instruction_to_another_agent_is_not_a_decline():
+    r = classify_intent("I'll look at that later - Mike, deploy it", ["Rachel"])
+    assert r.has_signal is False
+
+
+def test_short_grants_and_declines_with_a_few_extra_words_still_count():
+    assert classify_intent("Not now Rachel, I'm busy", ["Rachel"]).declines == ["Rachel"]
+    assert classify_intent("rachel what's going on", ["Rachel"]).grants == ["Rachel"]
+    assert classify_intent("yes please rachel go ahead", ["Rachel"]).grants == ["Rachel"]
