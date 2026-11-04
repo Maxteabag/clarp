@@ -150,8 +150,8 @@ continue as before.
 - **G3 reviewer:** the area reviewer's first line `SOURCE YES <full sha>` on the
   exact commit. Reviewer A: turn engine, runtime boundary, agents and identity,
   policies, backends and accounts, database and maintenance. Reviewer C (from
-  3 Nov 13:05): read model and transcripts (S5, RM-*), voice (VP-*). Reviewer
-  B: everything else (HTTP layer, live calls and Oracle, autonomy and goals,
+  3 Nov 13:05): read model and transcripts (S5, RM-*), voice (VP-*), autonomy and goals (AUT-*, from 4 Nov). Reviewer
+  B: everything else (HTTP layer, live calls and Oracle,
   harness and test infrastructure, release tooling).
 - **G4 merge captain:** rebase onto the current target (`origin/main` for
   fixes, tests and tools; `refactor/integration` for slices); the rebased diff's
@@ -171,6 +171,7 @@ continue as before.
 | Harness owner | `rf-harness-eeb2` | Claude | `tests/replay/` (new), the corpus tools, planted changes, diff report |
 | Contract owner | `rf-contract-80af` | Claude | `server/lib/db_schema.py`, `server/lib/db_migrations.py`, `contract/`, `server/lib/server_identity.py` contract constants, the lifecycle kit (`server/lib/lifecycle.py`, `docs/architecture/lifecycles.md`), schema goldens |
 | Fix-lane owner | `rf-fix-c4ab` | Claude | one fix per commit, in the files the lead names per fix |
+| Fix-lane author 2 | `rf-fix2-56f3` | Claude | one fix per commit (voice, Oracle, autonomy findings), in the files the lead names |
 | Slice owner S3 | `rf-routes-0f54` | Claude | route goldens now; the route seam and route modules after go/no-go 1 |
 | Slice owner S5 | `rf-readmodel-12f8` | Claude | read-model goldens now; the read model after go/no-go 1 |
 | Compute owner | `rf-compute-aa87` | Claude | `/var/tmp/clarp-refactor-program/bin/heavy-remote`, the buildbox ledger |
