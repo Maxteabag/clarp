@@ -149,6 +149,20 @@ def synthetic_cartesia() -> None:
     cartesia_tts.urllib.request.urlopen = urlopen
 
 
+def observe_stop(root: Path) -> None:
+    """Record, before it takes the turn lock, that a Stop is under way: a scenario
+    can then release a held provider start knowing the Stop is already waiting
+    (codex-pool-stop-during-start). Observation only; the Stop itself is unchanged."""
+    from lib import turn_dispatch
+    snapshot = turn_dispatch.snapshot_stop_state
+
+    def observed(agent_id):
+        with (root / 'provider' / 'host-events.jsonl').open('a') as handle:
+            handle.write(json.dumps({'event': 'stop-waiting'}) + '\n')
+        return snapshot(agent_id)
+    turn_dispatch.snapshot_stop_state = observed
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--build', type=Path, required=True)
@@ -205,6 +219,7 @@ def main():
             raise RuntimeError('replay provider workspace escaped the state dir')
         return provider_spawn(backend, **kwargs)
     backends.spawn_turn = deterministic_spawn
+    observe_stop(root)
     workspace = root / 'workspace'
     workspace.mkdir(exist_ok=True)
     for session, backend in [*((s, 'codex') for s in SESSIONS), *((s, 'claude') for s in CLAUDE_SESSIONS)]:
