@@ -10,6 +10,7 @@ names = [
     "_runtime_paths",
     "_truthy_header",
     "_safe_upload_name",
+    "_raw_query_value",
 ]
 
 [[group]]
@@ -258,4 +259,46 @@ members = [
 acknowledged_patches = [
     {path = "tests/unit/test_startup_runtime_wait.py", name = "log_exception", reason = "patches server.log_exception to observe _recover_after_start, which stays in server.py; no heartbeat route is exercised", evidence = "4 Nov 06:40, on the applied tree cac5f461 (s3_merge of this recipe into integration 7f913cd7, one commit per group), heavy-remote with a call tracer on lib/routes/heartbeat.py (tests/s3_ack_trace.py plugin, all threads): the whole file tests/unit/test_startup_runtime_wait.py made 0 calls into lib/routes/heartbeat.py, as did every other acknowledged file in the run; control in the same run (exit 0): tests/integration/test_autonomy_http_characterization.py, test_autonomy_gaps_http_characterization.py and test_autonomy_g0_http_characterization.py made 15 calls in 5 tests"},
     {path = "tests/unit/test_server_helpers_characterization.py", name = "log_exception", reason = "patches server.log_exception to observe _spawn_voice_metrics, which stays in server.py; no heartbeat route is exercised", evidence = "4 Nov 06:40, on the applied tree cac5f461 (s3_merge of this recipe into integration 7f913cd7, one commit per group), heavy-remote with a call tracer on lib/routes/heartbeat.py (tests/s3_ack_trace.py plugin, all threads): the whole file tests/unit/test_server_helpers_characterization.py made 0 calls into lib/routes/heartbeat.py, as did every other acknowledged file in the run; control in the same run (exit 0): tests/integration/test_autonomy_http_characterization.py, test_autonomy_gaps_http_characterization.py and test_autonomy_g0_http_characterization.py made 15 calls in 5 tests"},
+]
+
+[[group]]
+name = "agents"
+module = "lib/routes/agents.py"
+class = "AgentRoutes"
+members = [
+    "_handle_agent_archive",
+    "_handle_agent_assign",
+    "_handle_agent_avatar",
+    "_handle_agent_conversations",
+    "_handle_agent_file",
+    "_handle_agent_files",
+    "_handle_agent_fork",
+    "_handle_agent_llm",
+    "_handle_agent_mcp",
+    "_handle_agent_model_options",
+    "_handle_agent_rename",
+    "_handle_create_agent",
+    "_handle_delete_agent",
+    "_handle_prompt_history",
+    "_handle_snapshot",
+]
+acknowledged_patches = [
+    {path = "tests/integration/test_media_range.py", name = "log", reason = "patches server.log to observe fileShortRead from the /media/ range stream, which stays in server.py; no agents route is exercised", evidence = "4 Nov 08:05, on the applied tree 18dffdca (s3_merge of this recipe into integration f4501742, one commit per group), heavy-remote with a call tracer on lib/routes/agents.py (tests/s3_ack_trace.py plugin, all threads, setup included): its only calls into lib/routes/agents.py are _handle_snapshot, one per test, from the shared server fixture's readiness probe of /agents/snapshot; _handle_snapshot and every Handler method it reaches (_send, _drain_request_body) read neither log nor log_exception, so the patched server.log is never read through moved code; the patched test asserts only fileShortRead from the /media/ stream, which stays in server.py"},
+    {path = "tests/unit/test_delivery_admission_v1.py", name = "log", reason = "patches server.log to observe the delivery observation bracket, which stays in server.py; no agents route is exercised", evidence = "4 Nov 08:05, on the applied tree 18dffdca (s3_merge of this recipe into integration f4501742, one commit per group), heavy-remote with a call tracer on lib/routes/agents.py (tests/s3_ack_trace.py plugin, all threads, setup included): the whole file made 0 calls into lib/routes/agents.py; control in the same run (exit 0): tests/integration/test_agents_admin_http_characterization.py and test_agents_g0_http_characterization.py reached it"},
+]
+
+[[group]]
+name = "personas"
+module = "lib/routes/personas.py"
+class = "PersonaRoutes"
+members = [
+    "_handle_agent_portrait_content",
+    "_handle_agent_portrait_generation_start",
+    "_handle_agent_portrait_generation_status",
+    "_handle_agent_portraits_list",
+    "_handle_agent_portraits_update",
+    "_handle_create_persona",
+    "_handle_delete_persona",
+    "_handle_persona_avatar",
+    "_handle_update_persona",
 ]
