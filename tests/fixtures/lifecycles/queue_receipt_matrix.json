@@ -1,0 +1,6676 @@
+{
+ "allow_paused_for": {
+  "cancelled": {
+   "error": null,
+   "returned": null,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "cancelled",
+     "hello",
+     49940000,
+     null,
+     1
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "claimed": {
+   "error": null,
+   "returned": null,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "claimed",
+     "hello",
+     null,
+     49940000,
+     1
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "done": {
+   "error": null,
+   "returned": null,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "done",
+     "hello",
+     49940000,
+     null,
+     1
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "ended": {
+   "error": null,
+   "returned": null,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "ended",
+     "hello",
+     49940000,
+     null,
+     1
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "failed": {
+   "error": null,
+   "returned": null,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "failed",
+     "hello",
+     49940000,
+     null,
+     1
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "interrupted": {
+   "error": null,
+   "returned": null,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "interrupted",
+     "hello",
+     49940000,
+     null,
+     1
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "parked": {
+   "error": null,
+   "returned": null,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "parked",
+     "hello",
+     null,
+     null,
+     1
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "queued": {
+   "error": null,
+   "returned": null,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "queued",
+     "hello",
+     null,
+     null,
+     1
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "started": {
+   "error": null,
+   "returned": null,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "started",
+     "hello",
+     49940000,
+     null,
+     1
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "unknown": {
+   "error": null,
+   "returned": null,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "unknown",
+     "hello",
+     49940000,
+     null,
+     1
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "withdrawn": {
+   "error": null,
+   "returned": null,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "withdrawn",
+     "hello",
+     49940000,
+     null,
+     1
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  }
+ },
+ "cancel": {
+  "cancelled": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "cancelled",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "claimed": {
+   "error": null,
+   "returned": true,
+   "revision_bumped": true,
+   "rows": [
+    [
+     "q1",
+     "cancelled",
+     "",
+     null,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "done": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "done",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "ended": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "ended",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "failed": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "failed",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "interrupted": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "interrupted",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "parked": {
+   "error": null,
+   "returned": true,
+   "revision_bumped": true,
+   "rows": [
+    [
+     "q1",
+     "cancelled",
+     "",
+     null,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "queued": {
+   "error": null,
+   "returned": true,
+   "revision_bumped": true,
+   "rows": [
+    [
+     "q1",
+     "cancelled",
+     "",
+     null,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "started": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "started",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "unknown": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "unknown",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "withdrawn": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "withdrawn",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  }
+ },
+ "cancel_for_traces": {
+  "cancelled": {
+   "error": null,
+   "returned": null,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "cancelled",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "cancelled",
+     "",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "claimed": {
+   "error": null,
+   "returned": null,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "cancelled",
+     "",
+     null,
+     49940000,
+     0
+    ],
+    [
+     "q2",
+     "cancelled",
+     "",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "done": {
+   "error": null,
+   "returned": null,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "done",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "cancelled",
+     "",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "ended": {
+   "error": null,
+   "returned": null,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "ended",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "cancelled",
+     "",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "failed": {
+   "error": null,
+   "returned": null,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "failed",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "cancelled",
+     "",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "interrupted": {
+   "error": null,
+   "returned": null,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "interrupted",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "cancelled",
+     "",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "parked": {
+   "error": null,
+   "returned": null,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "parked",
+     "hello",
+     null,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "cancelled",
+     "",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "queued": {
+   "error": null,
+   "returned": null,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "cancelled",
+     "",
+     null,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "cancelled",
+     "",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "started": {
+   "error": null,
+   "returned": null,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "started",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "cancelled",
+     "",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "unknown": {
+   "error": null,
+   "returned": null,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "unknown",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "cancelled",
+     "",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "withdrawn": {
+   "error": null,
+   "returned": null,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "withdrawn",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "cancelled",
+     "",
+     null,
+     null,
+     0
+    ]
+   ]
+  }
+ },
+ "claim": {
+  "cancelled": {
+   "error": null,
+   "returned": null,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "cancelled",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "claimed": {
+   "error": null,
+   "returned": null,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "claimed",
+     "hello",
+     null,
+     49940000,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "done": {
+   "error": null,
+   "returned": null,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "done",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "ended": {
+   "error": null,
+   "returned": null,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "ended",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "failed": {
+   "error": null,
+   "returned": null,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "failed",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "interrupted": {
+   "error": null,
+   "returned": null,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "interrupted",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "parked": {
+   "error": null,
+   "returned": null,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "parked",
+     "hello",
+     null,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "queued": {
+   "error": null,
+   "returned": {
+    "agent_id": "a-1",
+    "allow_paused": 0,
+    "claimed_at": 50000000,
+    "client_msg_id": "q1",
+    "enqueued_at": 49940000,
+    "origin": "user",
+    "prompt_admission_id": "",
+    "queue_id": "q1",
+    "sender_agent_id": "",
+    "session": "s",
+    "started_at": null,
+    "status": "claimed",
+    "synthesize_audio": 1,
+    "text": "hello",
+    "trace_id": "t-1"
+   },
+   "revision_bumped": true,
+   "rows": [
+    [
+     "q1",
+     "claimed",
+     "hello",
+     null,
+     50000000,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "started": {
+   "error": null,
+   "returned": null,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "started",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "unknown": {
+   "error": null,
+   "returned": null,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "unknown",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "withdrawn": {
+   "error": null,
+   "returned": null,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "withdrawn",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  }
+ },
+ "claim_for_dispatch": {
+  "cancelled": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "cancelled",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "claimed": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "claimed",
+     "hello",
+     null,
+     49940000,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "done": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "done",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "ended": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "ended",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "failed": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "failed",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "interrupted": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "interrupted",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "parked": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "parked",
+     "hello",
+     null,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "queued": {
+   "error": null,
+   "returned": true,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "claimed",
+     "hello",
+     null,
+     50000000,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "started": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "started",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "unknown": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "unknown",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "withdrawn": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "withdrawn",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  }
+ },
+ "discard_parked": {
+  "cancelled": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "cancelled",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "claimed": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "claimed",
+     "hello",
+     null,
+     49940000,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "done": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "done",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "ended": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "ended",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "failed": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "failed",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "interrupted": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "interrupted",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "parked": {
+   "error": null,
+   "returned": 1,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "queued": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "started": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "started",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "unknown": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "unknown",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "withdrawn": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "withdrawn",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  }
+ },
+ "mark_launched_call_open_unknown": {
+  "cancelled": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "cancelled",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "claimed": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "claimed",
+     "hello",
+     null,
+     49940000,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "done": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "done",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "ended": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "ended",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "failed": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "failed",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "interrupted": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "interrupted",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "parked": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "parked",
+     "hello",
+     null,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "queued": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "started": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "started",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "unknown": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "unknown",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "withdrawn": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "withdrawn",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  }
+ },
+ "mark_started": {
+  "cancelled": {
+   "error": null,
+   "returned": null,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "cancelled",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "claimed": {
+   "error": null,
+   "returned": null,
+   "revision_bumped": true,
+   "rows": [
+    [
+     "q1",
+     "started",
+     "",
+     50000000,
+     49940000,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "done": {
+   "error": null,
+   "returned": null,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "done",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "ended": {
+   "error": null,
+   "returned": null,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "ended",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "failed": {
+   "error": null,
+   "returned": null,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "failed",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "interrupted": {
+   "error": null,
+   "returned": null,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "interrupted",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "parked": {
+   "error": null,
+   "returned": null,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "parked",
+     "hello",
+     null,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "queued": {
+   "error": null,
+   "returned": null,
+   "revision_bumped": true,
+   "rows": [
+    [
+     "q1",
+     "started",
+     "",
+     50000000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "started": {
+   "error": null,
+   "returned": null,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "started",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "unknown": {
+   "error": null,
+   "returned": null,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "unknown",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "withdrawn": {
+   "error": null,
+   "returned": null,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "withdrawn",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  }
+ },
+ "mark_unknown": {
+  "cancelled": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "cancelled",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "claimed": {
+   "error": null,
+   "returned": true,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "unknown",
+     "",
+     null,
+     49940000,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "done": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "done",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "ended": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "ended",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "failed": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "failed",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "interrupted": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "interrupted",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "parked": {
+   "error": null,
+   "returned": true,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "unknown",
+     "",
+     null,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "queued": {
+   "error": null,
+   "returned": true,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "unknown",
+     "",
+     null,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "started": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "started",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "unknown": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "unknown",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "withdrawn": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "withdrawn",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  }
+ },
+ "move_to_back": {
+  "cancelled": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "cancelled",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "claimed": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "claimed",
+     "hello",
+     null,
+     49940000,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "done": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "done",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "ended": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "ended",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "failed": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "failed",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "interrupted": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "interrupted",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "parked": {
+   "error": null,
+   "returned": true,
+   "revision_bumped": true,
+   "rows": [
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ],
+    [
+     "q1",
+     "parked",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "queued": {
+   "error": null,
+   "returned": true,
+   "revision_bumped": true,
+   "rows": [
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ],
+    [
+     "q1",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "started": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "started",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "unknown": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "unknown",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "withdrawn": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "withdrawn",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  }
+ },
+ "release_claim": {
+  "cancelled": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "cancelled",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "claimed": {
+   "error": null,
+   "returned": true,
+   "revision_bumped": true,
+   "rows": [
+    [
+     "q1",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "done": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "done",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "ended": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "ended",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "failed": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "failed",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "interrupted": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "interrupted",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "parked": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "parked",
+     "hello",
+     null,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "queued": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "started": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "started",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "unknown": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "unknown",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "withdrawn": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "withdrawn",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  }
+ },
+ "remove": {
+  "cancelled": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "cancelled",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "claimed": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "claimed",
+     "hello",
+     null,
+     49940000,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "done": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "done",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "ended": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "ended",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "failed": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "failed",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "interrupted": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "interrupted",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "parked": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "parked",
+     "hello",
+     null,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "queued": {
+   "error": null,
+   "returned": true,
+   "revision_bumped": true,
+   "rows": [
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "started": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "started",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "unknown": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "unknown",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "withdrawn": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "withdrawn",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  }
+ },
+ "remove_for_agent": {
+  "cancelled": {
+   "error": null,
+   "returned": 2,
+   "revision_bumped": true,
+   "rows": []
+  },
+  "claimed": {
+   "error": null,
+   "returned": 2,
+   "revision_bumped": true,
+   "rows": []
+  },
+  "done": {
+   "error": null,
+   "returned": 2,
+   "revision_bumped": true,
+   "rows": []
+  },
+  "ended": {
+   "error": null,
+   "returned": 2,
+   "revision_bumped": true,
+   "rows": []
+  },
+  "failed": {
+   "error": null,
+   "returned": 2,
+   "revision_bumped": true,
+   "rows": []
+  },
+  "interrupted": {
+   "error": null,
+   "returned": 2,
+   "revision_bumped": true,
+   "rows": []
+  },
+  "parked": {
+   "error": null,
+   "returned": 2,
+   "revision_bumped": true,
+   "rows": []
+  },
+  "queued": {
+   "error": null,
+   "returned": 2,
+   "revision_bumped": true,
+   "rows": []
+  },
+  "started": {
+   "error": null,
+   "returned": 2,
+   "revision_bumped": true,
+   "rows": []
+  },
+  "unknown": {
+   "error": null,
+   "returned": 2,
+   "revision_bumped": true,
+   "rows": []
+  },
+  "withdrawn": {
+   "error": null,
+   "returned": 2,
+   "revision_bumped": true,
+   "rows": []
+  }
+ },
+ "remove_taken_over": {
+  "cancelled": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "cancelled",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "claimed": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "claimed",
+     "hello",
+     null,
+     49940000,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "done": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "done",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "ended": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "ended",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "failed": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "failed",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "interrupted": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "interrupted",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "parked": {
+   "error": null,
+   "returned": true,
+   "revision_bumped": true,
+   "rows": [
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "queued": {
+   "error": null,
+   "returned": true,
+   "revision_bumped": true,
+   "rows": [
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "started": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "started",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "unknown": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "unknown",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "withdrawn": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "withdrawn",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  }
+ },
+ "requeue_parked": {
+  "cancelled": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "cancelled",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "claimed": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "claimed",
+     "hello",
+     null,
+     49940000,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "done": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "done",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "ended": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "ended",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "failed": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "failed",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "interrupted": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "interrupted",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "parked": {
+   "error": null,
+   "returned": 1,
+   "revision_bumped": true,
+   "rows": [
+    [
+     "q1",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "queued": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "started": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "started",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "unknown": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "unknown",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "withdrawn": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "withdrawn",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  }
+ },
+ "requeue_rows": {
+  "cancelled": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "cancelled",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "claimed": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "claimed",
+     "hello",
+     null,
+     49940000,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "done": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "done",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "ended": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "ended",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "failed": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "failed",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "interrupted": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "interrupted",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "parked": {
+   "error": null,
+   "returned": 1,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "queued": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "started": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "started",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "unknown": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "unknown",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "withdrawn": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "withdrawn",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  }
+ },
+ "reset_stale_claims": {
+  "cancelled": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "cancelled",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "claimed": {
+   "error": null,
+   "returned": 1,
+   "revision_bumped": true,
+   "rows": [
+    [
+     "q1",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "done": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "done",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "ended": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "ended",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "failed": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "failed",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "interrupted": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "interrupted",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "parked": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "parked",
+     "hello",
+     null,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "queued": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "started": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "started",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "unknown": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "unknown",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "withdrawn": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "withdrawn",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  }
+ },
+ "reset_stale_claims[exclude]": {
+  "cancelled": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "cancelled",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "claimed": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "claimed",
+     "hello",
+     null,
+     49940000,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "done": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "done",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "ended": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "ended",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "failed": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "failed",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "interrupted": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "interrupted",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "parked": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "parked",
+     "hello",
+     null,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "queued": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "started": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "started",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "unknown": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "unknown",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "withdrawn": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "withdrawn",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  }
+ },
+ "settle_receipt[completed]": {
+  "cancelled": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "cancelled",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "claimed": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "claimed",
+     "hello",
+     null,
+     49940000,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "done": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "done",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "ended": {
+   "error": null,
+   "returned": 1,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "done",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "failed": {
+   "error": null,
+   "returned": 1,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "done",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "interrupted": {
+   "error": null,
+   "returned": 1,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "done",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "parked": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "parked",
+     "hello",
+     null,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "queued": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "started": {
+   "error": null,
+   "returned": 1,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "done",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "unknown": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "unknown",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "withdrawn": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "withdrawn",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  }
+ },
+ "settle_receipt[failed]": {
+  "cancelled": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "cancelled",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "claimed": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "claimed",
+     "hello",
+     null,
+     49940000,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "done": {
+   "error": null,
+   "returned": 1,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "failed",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "ended": {
+   "error": null,
+   "returned": 1,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "failed",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "failed": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "failed",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "interrupted": {
+   "error": null,
+   "returned": 1,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "failed",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "parked": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "parked",
+     "hello",
+     null,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "queued": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "started": {
+   "error": null,
+   "returned": 1,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "failed",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "unknown": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "unknown",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "withdrawn": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "withdrawn",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  }
+ },
+ "settle_receipt[interrupted]": {
+  "cancelled": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "cancelled",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "claimed": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "claimed",
+     "hello",
+     null,
+     49940000,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "done": {
+   "error": null,
+   "returned": 1,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "interrupted",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "ended": {
+   "error": null,
+   "returned": 1,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "interrupted",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "failed": {
+   "error": null,
+   "returned": 1,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "interrupted",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "interrupted": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "interrupted",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "parked": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "parked",
+     "hello",
+     null,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "queued": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "started": {
+   "error": null,
+   "returned": 1,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "interrupted",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "unknown": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "unknown",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "withdrawn": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "withdrawn",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  }
+ },
+ "settle_receipt[other]": {
+  "cancelled": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "cancelled",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "claimed": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "claimed",
+     "hello",
+     null,
+     49940000,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "done": {
+   "error": null,
+   "returned": 1,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "ended",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "ended": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "ended",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "failed": {
+   "error": null,
+   "returned": 1,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "ended",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "interrupted": {
+   "error": null,
+   "returned": 1,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "ended",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "parked": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "parked",
+     "hello",
+     null,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "queued": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "started": {
+   "error": null,
+   "returned": 1,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "ended",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "unknown": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "unknown",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "withdrawn": {
+   "error": null,
+   "returned": 0,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "withdrawn",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  }
+ },
+ "take_over_at_head": {
+  "cancelled": {
+   "error": "RuntimeError",
+   "returned": null,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "cancelled",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "claimed": {
+   "error": "RuntimeError",
+   "returned": null,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "claimed",
+     "hello",
+     null,
+     49940000,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "done": {
+   "error": "RuntimeError",
+   "returned": null,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "done",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "ended": {
+   "error": "RuntimeError",
+   "returned": null,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "ended",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "failed": {
+   "error": "RuntimeError",
+   "returned": null,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "failed",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "interrupted": {
+   "error": "RuntimeError",
+   "returned": null,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "interrupted",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "parked": {
+   "error": "RuntimeError",
+   "returned": null,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "parked",
+     "hello",
+     null,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "queued": {
+   "error": null,
+   "returned": null,
+   "revision_bumped": true,
+   "rows": [
+    [
+     "q1",
+     "parked",
+     "hello",
+     null,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "started": {
+   "error": "RuntimeError",
+   "returned": null,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "started",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "unknown": {
+   "error": "RuntimeError",
+   "returned": null,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "unknown",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "withdrawn": {
+   "error": "RuntimeError",
+   "returned": null,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "withdrawn",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  }
+ },
+ "unpark": {
+  "cancelled": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "cancelled",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "claimed": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "claimed",
+     "hello",
+     null,
+     49940000,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "done": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "done",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "ended": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "ended",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "failed": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "failed",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "interrupted": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "interrupted",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "parked": {
+   "error": null,
+   "returned": true,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "queued": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "started": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "started",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "unknown": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "unknown",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "withdrawn": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "withdrawn",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  }
+ },
+ "update_text": {
+  "cancelled": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "cancelled",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "claimed": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "claimed",
+     "hello",
+     null,
+     49940000,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "done": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "done",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "ended": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "ended",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "failed": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "failed",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "interrupted": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "interrupted",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "parked": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "parked",
+     "hello",
+     null,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "queued": {
+   "error": null,
+   "returned": true,
+   "revision_bumped": true,
+   "rows": [
+    [
+     "q1",
+     "queued",
+     "edited",
+     null,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "started": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "started",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "unknown": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "unknown",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "withdrawn": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "withdrawn",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  }
+ },
+ "withdraw_claimed": {
+  "cancelled": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "cancelled",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "claimed": {
+   "error": null,
+   "returned": true,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "withdrawn",
+     "",
+     null,
+     49940000,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "done": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "done",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "ended": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "ended",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "failed": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "failed",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "interrupted": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "interrupted",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "parked": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "parked",
+     "hello",
+     null,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "queued": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "started": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "started",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "unknown": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "unknown",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "withdrawn": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "withdrawn",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  }
+ },
+ "withdraw_unclaimed": {
+  "cancelled": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "cancelled",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "claimed": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "claimed",
+     "hello",
+     null,
+     49940000,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "done": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "done",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "ended": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "ended",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "failed": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "failed",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "interrupted": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "interrupted",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "parked": {
+   "error": null,
+   "returned": true,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "withdrawn",
+     "",
+     null,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "queued": {
+   "error": null,
+   "returned": true,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "withdrawn",
+     "",
+     null,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "started": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "started",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "unknown": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "unknown",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "withdrawn": {
+   "error": null,
+   "returned": false,
+   "revision_bumped": false,
+   "rows": [
+    [
+     "q1",
+     "withdrawn",
+     "hello",
+     49940000,
+     null,
+     0
+    ],
+    [
+     "q2",
+     "queued",
+     "hello",
+     null,
+     null,
+     0
+    ]
+   ]
+  }
+ }
+}
