@@ -79,7 +79,12 @@ the hot spots; every high finding fixed or explicitly accepted.
    fixture) or a Host runs on heavy-remote, even a single file (3 Nov evening).
    Full suites, coverage and replay runs go to the buildbox through
    `/var/tmp/clarp-refactor-program/bin/heavy-remote` (announced 3 Nov; four job
-   slots of `-n 8`; `--status`, `--forget`). The landing gate is the merge captain's
+   slots of `-n 8`; `--status`, `--forget`). It holds the last 5 NOK of Peter's
+   100 NOK daily cap for releases: other jobs stop at `CLARP_REMOTE_RESERVE_NOK`
+   (95), while jobs from `release-src/` worktrees or with `HEAVY_RELEASE=1` may use
+   all 100. Only the release owner and the merge captain set `HEAVY_RELEASE=1`, for
+   release canaries and release-candidate gates; nobody raises
+   `CLARP_REMOTE_RESERVE_NOK` (4 Nov). The landing gate is the merge captain's
    GitHub Actions run on the exact commit. Never run `cargo` (repo rule).
 6. **Data.** The replay corpus is scrubbed with stable surrogates and read only
    through the harness. Tools print structure, counts and codes, never message
