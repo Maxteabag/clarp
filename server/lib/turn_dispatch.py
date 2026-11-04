@@ -2259,6 +2259,13 @@ class TurnDispatchService:
             self.backends.interrupt(spec.backend, spec.agent_id)
         except Exception as e:  # noqa: BLE001
             log_exception("preemptInterruptFail", e, detail=spec.agent_id)
+        if killed and killed != spec.trace_id:
+            # The preempted turn's speech not yet synthesized is dropped, not
+            # spoken late over the new turn (VP-06).
+            try:
+                tts_queue.cancel(spec.agent_id, killed, reason="turn preempted")
+            except Exception as e:  # noqa: BLE001
+                log_exception("preemptSpeechCancelFail", e, detail=spec.agent_id)
         eventlog.emit("server", "turnPreempted", context=spec.context,
                       detail={"killed_trace": killed})
         log("turnPreempted",
