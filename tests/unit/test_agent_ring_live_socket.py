@@ -177,6 +177,20 @@ def _wait(cond, timeout=15.0):
     raise AssertionError("condition not met")
 
 
+def _settles(cond, timeout=15.0):
+    """Wait (bounded) for what retire() finishes on other threads after the serve
+    thread ends: the upstream close runs on its own worker by design. Returns on
+    timeout too, so the assert after it reports the actual values."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            if cond():
+                return
+        except (IndexError, KeyError, StopIteration):
+            pass  # not there yet
+        time.sleep(0.01)
+
+
 _SERVED: list = []      # (thread, handler) of every serve a test starts through _serve
 
 
@@ -328,6 +342,7 @@ def test_a_live_call_joins_opens_once_talks_and_hangs_up(call):
     closed = h.wfile.frames()[-1]
     assert closed == {"type": "agent_live.closed", "call_id": g["call_id"], "call_epoch": 1,
                       "attempt_id": g["attempt_id"], "reason": "user_hangup"}
+    _settles(lambda: _ring_of(g)["_live_phase"] == "retired" and call.up.of("session.close") and call.up.closed)
     assert _ring_of(g)["_live_phase"] == "retired" and call.up.of("session.close") and call.up.closed
     assert oracle_realtime._ACTIVE_PRINCIPALS == {} and live._SESSIONS == {}
     assert g["owner_nonce"] not in bytes(h.wfile.data).decode(errors="replace")
@@ -522,6 +537,7 @@ def test_an_http_close_retires_authority_then_ends_the_socket(call):
     assert out["state"] == "retired"
     thread.join(15)
     assert not thread.is_alive() and h.wfile.frames()[-1]["type"] == "agent_live.closed"
+    _settles(lambda: h.wfile.frames()[-1]["reason"] == "user_hangup" and call.up.closed)
     assert h.wfile.frames()[-1]["reason"] == "user_hangup" and call.up.closed
 
 
@@ -538,6 +554,7 @@ def test_a_lost_phone_ends_the_call(call):
     h, thread = _admitted(call)
     h.rfile.close()
     thread.join(15)
+    _settles(lambda: _ring_of(call.grant)["_live_retired_reason"] == "transport_lost" and call.up.closed)
     assert _ring_of(call.grant)["_live_retired_reason"] == "transport_lost" and call.up.closed
 
 
