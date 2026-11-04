@@ -1114,12 +1114,15 @@ def _recover_stale_sent_round(run_id: str, *, now_ms: int | None = None) -> bool
     age_ms = now_ms - int(row["sent_at"] or 0)
     if age_ms < timeout_sec * 1000:
         return False
-    db.conn().execute(
+    # Only the expired claim read above: another scheduler may have recovered
+    # it and claimed the round afresh since (AUT-11, reviewer C).
+    if not db.conn().execute(
         """UPDATE dream_rounds
               SET status = 'queued', sent_at = NULL, updated_at = ?
-            WHERE round_id = ? AND status = 'sent'""",
-        (now_ms, row["round_id"]),
-    )
+            WHERE round_id = ? AND status = 'sent' AND sent_at = ?""",
+        (now_ms, row["round_id"], row["sent_at"]),
+    ).rowcount:
+        return False
     db.conn().execute(
         "UPDATE dream_runs SET updated_at = ? WHERE run_id = ?",
         (now_ms, run_id),
