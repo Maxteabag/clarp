@@ -119,11 +119,11 @@ for path in $generated; do stray=$(printf '%s\n' "$stray" | grep -v " $path$" ||
 $stray"
 git merge-base --is-ancestor "$main" HEAD || die 3 "the result does not contain $main"
 
-# Local gates: in-process tests only (one file each; no test servers on the laptop).
+# Local gates: in-process tests only (one file each; no test servers or subprocesses
+# on the laptop; test_s3_apply.py runs git, so it is a buildbox gate below).
 heavy=/var/tmp/clarp-refactor-program/bin/heavy
 for test in tests/integration/test_route_goldens.py tests/unit/test_import_layers.py \
-            tests/unit/test_handler_boundary.py tests/integration/test_s3_helpers_identity.py \
-            tests/unit/test_s3_apply.py; do
+            tests/unit/test_handler_boundary.py tests/integration/test_s3_helpers_identity.py; do
   [ -f "$test" ] || continue
   "$heavy" "$PY" -m pytest -n 0 -q -p no:cacheprovider "$test" >/dev/null 2>&1 || die 7 "local gate failed: $test"
   echo "s3_merge: gate ok: $test"
@@ -133,7 +133,8 @@ cat <<EOT
 s3_merge: done. A=$A B=$B C=$C (work branch $work)
 Next (merge captain), on the buildbox (these gates start test servers, never on the laptop):
   Server gates: /var/tmp/clarp-refactor-program/bin/heavy-remote uv run --frozen --group dev python -m pytest -n 0 -q \
-                  tests/integration/test_route_registry.py tests/integration/test_route_response_goldens.py
+                  tests/integration/test_route_registry.py tests/integration/test_route_response_goldens.py \
+                  tests/unit/test_s3_apply.py
   G1: /var/tmp/clarp-refactor-program/bin/heavy-remote uv run --frozen --group dev python -m pytest -q
   G2 (merge parity, lead condition 2: main against the merged integration, zero differences):
       python3 tests/replay/run.py prepare $main $C --prune

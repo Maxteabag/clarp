@@ -326,8 +326,9 @@ def normalize(capture: dict, harness_root: str) -> dict:
                    'id': (n._eid(f['id']) if str(f['id']).isdigit() else f['id']) if f.get('id') is not None else None,
                    'data': n.value(f.get('data'))}
                   for f in frames]
-    out['sse_log'] = [{'event': None, 'id': None, 'data': n.value(_payload(r)),
-                       'row': n.value({k: v for k, v in r.items() if k != 'payload'})} for r in log_rows]
+    # The canonicalized frames (live merges, the thinking pair), not the raw payloads.
+    out['sse_log'] = [{'event': None, 'id': None, 'data': n.value(f['data']),
+                       'row': n.value({k: v for k, v in f['row'].items() if k != 'payload'})} for f in log_frames]
     n.in_stream = False
     out['sse_health'] = capture.get('sse_health')
     out['live'] = {'stream': n.value(live_summary), 'log': n.value(log_live_summary)}
