@@ -500,9 +500,21 @@ class _Client:
                 self._mark_goal_unknown(thread_id, "write")
             log_exception("codexGoalMirrorFail", exc, detail=thread_id)
 
+    def _goal_answer_begin(self, thread_id: str) -> None:
+        with self._goal_state_lock:
+            inflight = self._goal_activations()
+            inflight[thread_id] = inflight.get(thread_id, 0) + 1
+
+    def _goal_answer_end(self, thread_id: str) -> None:
+        with self._goal_state_lock:
+            inflight = self._goal_activations()
+            inflight[thread_id] -= 1
+            if not inflight[thread_id]:
+                del inflight[thread_id]
+
     def _goal_activations(self) -> dict[str, int]:
-        """Threads with a goal start/resume in flight, and how many (call
-        under _goal_state_lock)."""
+        """Threads with a goal request whose answer is outstanding, and how
+        many (call under _goal_state_lock)."""
         inflight = getattr(self, "goal_activations_inflight", None)
         if inflight is None:
             inflight = self.goal_activations_inflight = {}
@@ -605,18 +617,13 @@ class _Client:
         if action not in ("start", "pause", "resume", "clear", "get"):
             raise ValueError(f"unknown goal action: {action}")
         activating = action in ("start", "resume")
-        if activating:
-            # A recycle never kills while an activation could start a turn,
-            # and none starts on a process being recycled (BACKENDS-07b).
-            # This activation protects its thread until its own answer is
-            # mirrored; no other mirror write can end that (codex replies
-            # before it reports the update, so older updates can interleave).
-            with self._lock:
-                if getattr(self, "recycled", False):
-                    raise RuntimeError("Codex is restarting a stuck session; try again in a moment")
-                with self._goal_state_lock:
-                    inflight = self._goal_activations()
-                    inflight[thread_id] = inflight.get(thread_id, 0) + 1
+        # Every goal request is an outstanding answer until its own answer is
+        # mirrored; no recycle while one is (BACKENDS-07b, the lead's coarse
+        # rule). No activation starts on a process being recycled.
+        with self._lock:
+            if activating and getattr(self, "recycled", False):
+                raise RuntimeError("Codex is restarting a stuck session; try again in a moment")
+            self._goal_answer_begin(thread_id)
         try:
             try:
                 result = self._goal_request(agent, action, thread_id, objective)
@@ -628,12 +635,7 @@ class _Client:
             goal = result.get("goal") if isinstance(result, dict) else None
             self._mirror_goal(thread_id, goal if isinstance(goal, dict) else None)
         finally:
-            if activating:
-                with self._goal_state_lock:
-                    inflight = self._goal_activations()
-                    inflight[thread_id] -= 1
-                    if not inflight[thread_id]:
-                        del inflight[thread_id]
+            self._goal_answer_end(thread_id)
         return agent_goals.public(agent_goals.get(agent_id))
 
     def _goal_request(self, agent: dict, action: str, thread_id: str, objective: str) -> dict:
@@ -795,10 +797,14 @@ class _Client:
             row = agent_goals.get(active.agent_id)
             if not row or row.get("status") != agent_goals.ACTIVE or not active.thread_id:
                 return
-            result = self.request("thread/goal/set", {
-                "threadId": active.thread_id, "status": "paused"}, timeout=10)
-            goal = result.get("goal") if isinstance(result, dict) else None
-            self._mirror_goal(active.thread_id, goal if isinstance(goal, dict) else None)
+            self._goal_answer_begin(active.thread_id)
+            try:
+                result = self.request("thread/goal/set", {
+                    "threadId": active.thread_id, "status": "paused"}, timeout=10)
+                goal = result.get("goal") if isinstance(result, dict) else None
+                self._mirror_goal(active.thread_id, goal if isinstance(goal, dict) else None)
+            finally:
+                self._goal_answer_end(active.thread_id)
         except Exception as exc:  # noqa: BLE001 - the interrupt itself must still go out
             log_exception("codexGoalPauseFail", exc, detail=active.agent_id)
 
@@ -812,8 +818,8 @@ class _Client:
         with _LOCK:
             with self._lock:
                 with self._goal_state_lock:
-                    unknown = ((self._goal_unknown() | set(self._goal_activations()))
-                               - set(getattr(self, "detached_executions", ())))
+                    unknown = (bool(self._goal_activations()) or bool(
+                        self._goal_unknown() - set(getattr(self, "detached_executions", ()))))
                 if (not getattr(self, "detached_agents", None)
                         or getattr(self, "recycled", False) or _busy(self) or unknown):
                     return
@@ -851,21 +857,25 @@ class _Client:
                 log("codexRecycleUnconfirmed", f"type={type(exc).__name__}")
 
     def _goal_may_continue(self) -> bool:
-        """Could codex start a turn here by itself? Only for an active goal on
-        a thread loaded in this process (not a detached one, which dies with
-        it), for a goal with an activation in flight, or one whose state a
-        failed mirror write or an unanswered activation left unknown. Otherwise Clarp's
-        mirror is current: codex reports thread/goal/updated before the
-        turn/completed that ends a turn. Unknown means yes."""
+        """Could codex start a turn here by itself? The lead's coarse rule: yes
+        while any goal answer is outstanding, while a goal's state is unknown
+        (a failed mirror write or an unanswered activation), and for any goal
+        on a thread loaded here (not a detached one, which dies with it) that
+        is not known to be complete or paused. Unknown means yes."""
         detached = getattr(self, "detached_executions", set())
         with self._goal_state_lock:
-            if (self._goal_unknown() | set(self._goal_activations())) - set(detached):
+            # Any outstanding goal answer, on any thread, holds the process
+            # (each request is bounded by its timeout).
+            if self._goal_activations() or (self._goal_unknown() - set(detached)):
                 return True
         try:
             for thread_id in set(getattr(self, "_loaded_threads", ())) - set(detached):
                 agent = agents_db.get_by_backend_session(thread_id)
                 row = agent_goals.get(agent["agent_id"]) if agent else None
-                if row and row.get("status") == agent_goals.ACTIVE:
+                # Coarse rule (lead): only a goal known to be complete or
+                # paused lets the process go; blocked and limited ones may
+                # still continue.
+                if row and row.get("status") not in (agent_goals.COMPLETE, agent_goals.PAUSED):
                     return True
         except Exception as exc:  # noqa: BLE001 - fail closed: keep the process
             log_exception("codexRecycleGoalCheckFail", exc, detail=self.agent_id)
