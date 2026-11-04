@@ -1350,19 +1350,24 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
         elif role == "assistant":
             text = strip_hidden_blocks(text)
             heartbeat_accounting = ""
-            skip, text = heartbeat.strip_heartbeat_ack(text)
+            # Each token counts only in its own automation's turn (AUT-07).
+            skip, text = origins.ack_for_origin(
+                heartbeat.strip_heartbeat_ack(text), text, token=heartbeat.HEARTBEAT_OK,
+                origin=current_origin, own="heartbeat")
             if skip:
                 if current_origin == "heartbeat":
                     heartbeat_accounting = "noop"
                 text = "Heartbeat check: no action needed."
             # The probe only transforms; the locked pass records, once.
             skip, text = dreaming.process_assistant_text(
-                agent_id, text, live=not database.locked)
+                agent_id, text, live=not database.locked, origin=current_origin)
             if skip:
                 text = "Dreaming check: no action needed."
-            skip, text = team_leader.strip_leader_noop(text)
+            skip, text = origins.ack_for_origin(
+                team_leader.strip_leader_noop(text), text, token=team_leader.LEADER_NOOP,
+                origin=current_origin, own="leader_tick")
             if skip:
-                if database.locked:
+                if database.locked and current_origin == "leader_tick":
                     team_leader.record_leader_noop(agent_id)
                 text = "Leader check: no action needed."
             if (

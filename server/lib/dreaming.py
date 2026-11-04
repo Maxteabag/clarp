@@ -353,8 +353,8 @@ def strip_dreaming_ack(text: str) -> tuple[bool, str]:
     return False, remaining
 
 
-def process_assistant_text(agent_id: str, text: str, *, live: bool = False
-                           ) -> tuple[bool, str]:
+def process_assistant_text(agent_id: str, text: str, *, origin: str,
+                           live: bool = False) -> tuple[bool, str]:
     """Capture dreaming control markers and return display decision.
 
     Live streamed text is suppressed/cleaned but does not advance the ledger;
@@ -387,9 +387,13 @@ def process_assistant_text(agent_id: str, text: str, *, live: bool = False
             )
         return False, visible
 
-    skip, stripped = strip_dreaming_ack(raw)
+    # DREAMING_OK counts only in a dreaming turn (AUT-07); every caller names
+    # the turn's origin, so a new caller cannot get the dream side effects by
+    # default.
+    skip, stripped = origins.ack_for_origin(
+        strip_dreaming_ack(raw), raw, token=DREAMING_OK, origin=origin, own="dreaming")
     if skip:
-        if not live:
+        if not live and origin == "dreaming":
             mark_active_noop(agent_id)
         return True, ""
     return False, stripped
@@ -1248,7 +1252,7 @@ def dispatch_isolated_dream(agent: dict, prompt: str) -> bool:
             log("dreamingIsolatedNoOutput",
                 f"agent={agent_id} session={session} trace={trace_id}")
             return
-        process_assistant_text(agent_id, assistant_text, live=False)
+        process_assistant_text(agent_id, assistant_text, live=False, origin="dreaming")
 
     def on_error(message: str) -> None:
         log("dreamingIsolatedError",
