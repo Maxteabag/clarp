@@ -77,6 +77,7 @@ def recover_runtime(
                        mark_interrupted(stream=getattr(ctx, "stream", None)))
         reconciled = int(reconcile() or 0)
     queued = int(dispatch.recover_queued() or 0)
+    _recover_goal_moves_later()
     if repair_receipts is None:
         repair_receipts = _terminalize_ended_receipts
     try:
@@ -90,6 +91,21 @@ def recover_runtime(
         "queued": queued,
         "receipts": receipts,
     }
+
+
+def _recover_goal_moves_later() -> None:
+    """Finish or clear the Codex goal moves a crash or a rollback left
+    (BACKENDS-06b), off the boot path: a resume talks to codex."""
+    import threading
+
+    def run() -> None:
+        try:
+            from . import codex_app_server
+            codex_app_server.recover_goal_moves()
+        except Exception as exc:  # noqa: BLE001 - never blocks or fails a boot
+            log_exception("codexGoalMoveRecoverFail", exc)
+
+    threading.Thread(target=run, daemon=True, name="codex-goal-move-recovery").start()
 
 
 def _terminalize_ended_receipts() -> dict[str, int]:
