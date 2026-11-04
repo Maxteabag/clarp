@@ -5222,6 +5222,7 @@ class Handler(BaseHTTPRequestHandler):
         effects: dict | None = None,
     ):
         """Authoritative local stop shared by /stop and Oracle cancellation."""
+        from lib import tts_queue
         from lib import turn_dispatch
         from lib import turn_queue
         agent = identity.lookup(session)
@@ -5281,6 +5282,13 @@ class Handler(BaseHTTPRequestHandler):
             # Durable user-requested queue entries remain visible and paused;
             # stopping work must never silently delete acknowledged messages.
             # Pausing goals must not skip recording the stop and its events.
+            if fence_user_receipts:
+                # The user's Stop drops the agent's speech not yet synthesized
+                # instead of speaking it late (VP-06).
+                try:
+                    tts_queue.cancel(agent_id, reason="user stop")
+                except Exception as exc:  # stop already succeeded
+                    log_exception("turnStopSpeechCancelFail", exc, detail=agent_id)
             try:
                 from lib import goal_ledger, task_plans
                 if actor == "user":
