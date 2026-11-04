@@ -3804,3 +3804,39 @@ def test_a_usage_limit_while_the_credential_switch_waits_fails_visibly_without_f
     state = agents_db.latest_state(agent_id)
     assert state["kind"] == AgentState.INTERRUPTED
     assert "switch" in state["detail"]["message"].lower()
+
+
+class _HeldSessionBackends(_ProcessBackends):
+    """A process outside any turn still holds the agent's native session (a
+    detached, stuck Codex turn: BACKENDS-07b)."""
+
+    def __init__(self):
+        super().__init__()
+        self.holders = []
+
+    def turn_holders(self, backend, agent_id):
+        return [h for h in self.holders if h.alive]
+
+
+def test_a_send_waits_behind_a_process_that_still_holds_the_session(tmp_path):
+    """Lead (stage 1): a send to an agent whose stopped turn is stuck in the
+    shared Codex process is queued until that process is recycled. Failing it
+    loses the composed text in the PWA and desktop, which clear the composer
+    before /send and turn the failed bubble into a normal row on the next sync."""
+    service, _, agent_id = _make_service(tmp_path)
+    backends = _HeldSessionBackends()
+    service.backends = backends
+    service.dispatch(text="first", requested_session="mike", trace_id="t1",
+                     synthesize_audio=False)
+    held = _Process()
+    backends.holders.append(held)
+    backends.processes[0].alive = False
+    backends.spawned[0][1]["on_result"]({"duration_ms": 9})
+
+    sent = service.dispatch(text="after the stop", requested_session="mike",
+                            trace_id="t2", synthesize_audio=False)
+    assert sent.queued is True and len(backends.spawned) == 1
+
+    held.alive = False
+    assert _wait_until(lambda: len(backends.spawned) == 2)
+    assert backends.spawned[1][1]["text"] == "after the stop"
