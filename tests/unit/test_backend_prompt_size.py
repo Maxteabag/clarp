@@ -203,3 +203,34 @@ def test_a_failed_stdin_open_leaves_no_prompt_file(tmp_path, monkeypatch):
                                   on_result=lambda *_a, **_k: None,
                                   on_error=lambda *_a, **_k: None, trace_id="t-codex")
     assert not list(temp.iterdir()), "a failed stdin open left the prompt file behind"
+
+
+# Reviewer A's probe on 1ce34dc3 (b8516c80), unchanged.
+def test_a_failed_fdopen_closes_the_still_owned_raw_descriptor(tmp_path, monkeypatch):
+    import os
+    real_mkdtemp, real_open = long_prompt.tempfile.mkdtemp, long_prompt.os.open
+    captured = []
+    def capture_open(*args, **kw):
+        fd = real_open(*args, **kw)
+        if str(args[0]).endswith('/prompt.txt'):
+            captured.append(fd)
+        return fd
+    def no_wrapper(*args, **kw):
+        raise OSError(errno.EMFILE, 'synthetic failure constructing the file wrapper')
+    with monkeypatch.context() as patch:
+        patch.setattr(long_prompt.tempfile, 'mkdtemp', lambda **kw: real_mkdtemp(dir=tmp_path, **kw))
+        patch.setattr(long_prompt.os, 'open', capture_open)
+        patch.setattr(long_prompt.os, 'fdopen', no_wrapper)
+        with pytest.raises(OSError):
+            long_prompt.PromptFile('synthetic prompt')
+    assert len(captured) == 1
+    try:
+        with pytest.raises(OSError) as error:
+            os.fstat(captured[0])
+        assert error.value.errno == errno.EBADF
+    finally:
+        try:
+            os.close(captured[0])
+        except OSError:
+            pass
+    assert not list(tmp_path.iterdir())
