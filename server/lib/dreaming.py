@@ -1049,7 +1049,8 @@ def _cleanup_quiet(run_id: str, agent_id: str) -> bool:
     try:
         return not (backends.by_id(backend).active_handles(agent_id)
                     or backends.active_handles(backend, agent_id))
-    except Exception:  # noqa: BLE001 - an unreadable registry is no proof
+    except Exception as exc:  # noqa: BLE001 - an unreadable registry is no proof
+        log_exception("dreamCleanupQuietCheckFail", exc, detail=run_id)
         return False
 
 
