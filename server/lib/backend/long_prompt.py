@@ -32,7 +32,15 @@ class PromptFile:
         self.path = os.path.join(self.dir, "prompt.txt")
         try:
             fd = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            try:
+                fh = os.fdopen(fd, "w", encoding="utf-8")
+            except BaseException:
+                try:
+                    os.close(fd)        # no wrapper owns it yet
+                except OSError:
+                    pass
+                raise
+            with fh:
                 fh.write(prompt)
         except BaseException:
             # No caller owns it yet: a partial prompt must not stay behind.
