@@ -56,3 +56,23 @@ SUPPRESSED_ORIGINS = (
     (ROUTINE_AUTOMATION_ORIGINS - {"leader_tick"})
     | {"oracle", "agent", "schedule", "automation"}
 )
+
+
+# The automations' acknowledgement tokens (HEARTBEAT_OK, DREAMING_OK,
+# LEADER_NOOP) count only in their own automation's turns. In any other turn
+# a reply is kept verbatim, unless it is nothing but the token (AUT-07).
+def ack_only_token(text: str, token: str) -> bool:
+    """The reply says nothing besides the token (and punctuation)."""
+    import re
+    return token in text and not re.sub(r"\W+", "", text.replace(token, ""))
+
+
+def ack_for_origin(result: tuple[bool, str], text: str, *, token: str,
+                   origin: str, own: str) -> tuple[bool, str]:
+    """`result` is the automation's own (skip, text) decision for `text`; it
+    stands only in a turn of that automation (`origin == own`)."""
+    if origin == own:
+        return result
+    if ack_only_token(text, token):
+        return True, ""
+    return False, text

@@ -3769,7 +3769,7 @@ def _record_dreaming_result(agent_id: str, event: dict) -> None:
         return
     try:
         from . import dreaming
-        dreaming.process_assistant_text(agent_id, text, live=False)
+        dreaming.process_assistant_text(agent_id, text, live=False, origin="dreaming")
     except Exception as e:  # noqa: BLE001
         log_exception("dreamingResultParseFail", e, detail=agent_id)
 
