@@ -75,6 +75,8 @@ class _TransactionOwner:
     begin_sql: str
     last_sql: str
     stack: tuple[str, ...]
+    # Opened by a transcript import's write batch (RM-N7; the long-wait log).
+    is_import: bool = False
 
 
 _TRANSACTION_OWNERS: dict[int, _TransactionOwner] = {}
@@ -133,6 +135,7 @@ def _record_transaction_begin(connection: sqlite3.Connection, sql: object) -> No
         begin_sql=_sql_template(sql),
         last_sql=_sql_template(sql),
         stack=tuple(traceback.format_stack(limit=14)[:-1]),
+        is_import=bool(getattr(_LOCAL, "import_batch", False)),
     )
     with _TRANSACTION_LOCK:
         _TRANSACTION_OWNERS[id(connection)] = owner
@@ -261,15 +264,97 @@ def change_stamp() -> tuple[int, int]:
         return data_version, _WRITE_GENERATION
 
 
+# RM-N7. SQLite's busy handler sleeps 1, 2, 5, ... 50 then 100 ms between
+# attempts, so a waiter on its long steps keeps missing a transcript import's
+# short gaps and can wait out the whole import. A statement that only acquires
+# the write lock (and has done nothing when it fails with BUSY) is retried here
+# every few milliseconds instead, up to the same deadline, so it gets in at the
+# next gap. Statements inside a transaction keep SQLite's own handling.
+_LOCK_POLL_SECONDS = 0.002
+_LONG_WRITE_WAIT_SECONDS = 0.25
+_LOCK_BEGINS = ("BEGIN IMMEDIATE", "BEGIN EXCLUSIVE")
+def note_import_holds_lock(holding: bool) -> None:
+    """Called by the transcript import on its own thread just before it opens
+    a write batch, and when the batch ends: the transaction that thread opens
+    meanwhile is recorded as an import's (for the long-wait log line; another
+    process's import is invisible here)."""
+    _LOCAL.import_batch = holding
+
+
+def _import_holds_lock() -> bool:
+    """Whether a transcript import of this process holds a transaction now."""
+    me = threading.get_ident()
+    with _TRANSACTION_LOCK:
+        return any(o.is_import and o.thread_id != me for o in _TRANSACTION_OWNERS.values())
+
+
+def _is_lock_contention(exc: BaseException) -> bool:
+    """Plain SQLITE_BUSY only: another connection holds the write lock, so a
+    later attempt can succeed. Extended codes are not contention a poll can
+    wait out (SQLITE_BUSY_SNAPSHOT: this connection's own read snapshot is
+    stale, e.g. an unfinished autocommit SELECT cursor), and they fail at once
+    as before."""
+    return isinstance(exc, sqlite3.OperationalError) and \
+        getattr(exc, "sqlite_errorcode", 0) == sqlite3.SQLITE_BUSY \
+        and "database is locked" in str(exc).lower()
+
+
 class _TrackedConnection(sqlite3.Connection):
     """Connection that records explicit transaction ownership for diagnostics."""
+
+    def _only_acquires_lock(self, template: str) -> bool:
+        """Whether this statement, failing with BUSY, has done nothing: a
+        locking BEGIN, or a single write in autocommit mode with no
+        transaction open (no implicit BEGIN: isolation_level is None)."""
+        if self.in_transaction or self.isolation_level is not None:
+            return False
+        upper = template.upper()
+        return upper.startswith(_LOCK_BEGINS) or upper.partition(" ")[0] in _WRITE_VERBS
+
+    def _execute_polled(self, sql, parameters, template: str):
+        """Run a lock-acquiring statement, retrying plain BUSY every few ms
+        until the connection's own busy deadline; then fail exactly as SQLite
+        would. A wait over 250 ms logs one sqliteWriteWait line, admitted or
+        not; whether this process's import held the lock is sampled while
+        waiting."""
+        deadline_ms = int(super().execute("PRAGMA busy_timeout").fetchone()[0])
+        if deadline_ms <= 0:
+            return super().execute(sql, parameters)
+        started = time.monotonic()
+        saw_import = admitted = False
+        super().execute("PRAGMA busy_timeout = 0")
+        try:
+            while True:
+                try:
+                    cursor = super().execute(sql, parameters)
+                    admitted = True
+                    return cursor
+                except sqlite3.OperationalError as exc:
+                    if not _is_lock_contention(exc) or \
+                            (time.monotonic() - started) * 1000 >= deadline_ms:
+                        raise
+                    saw_import = saw_import or _import_holds_lock()
+                time.sleep(_LOCK_POLL_SECONDS)
+        finally:
+            super().execute(f"PRAGMA busy_timeout = {deadline_ms}")
+            waited = time.monotonic() - started
+            if waited > _LONG_WRITE_WAIT_SECONDS:
+                from .log import log
+                log("sqliteWriteWait",
+                    f"waited_ms={round(waited * 1000)} "
+                    f"outcome={'admitted' if admitted else 'gave_up'} "
+                    f"import_in_process={saw_import} "
+                    f"thread={threading.current_thread().name!r} sql={template[:60]!r}")
 
     def execute(self, sql, parameters=(), /):  # type: ignore[override]
         template = _sql_template(sql)
         measured = getattr(_LOCAL, "request_metrics", None) is not None
         started = time.perf_counter() if measured else None
         try:
-            cursor = super().execute(sql, parameters)
+            if self._only_acquires_lock(template):
+                cursor = self._execute_polled(sql, parameters, template)
+            else:
+                cursor = super().execute(sql, parameters)
         except sqlite3.OperationalError as exc:
             if "database is locked" in str(exc).lower():
                 _report_database_locked(template)
