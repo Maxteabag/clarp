@@ -15,6 +15,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from tests.patching import patch_shared
 from lib import agent_rings, agents as agents_db, db, group_calls, prompt_admissions, turn_queue
 import lib.turn_dispatch as _td
 from lib.turn_dispatch import TurnDispatchService
@@ -75,7 +76,7 @@ def env(tmp_path, monkeypatch, paired_answerer):
     backends = _Backends()
     for name, value in (("_kick_queue", lambda: None), ("_push", lambda ring, kind: {}),
                         ("_push_voip", lambda ring: {}), ("_schedule_expiry", lambda ring: None)):
-        monkeypatch.setattr(agent_rings, name, value)
+        patch_shared(monkeypatch, agent_rings, name, value)
     ctx = SimpleNamespace(stream=None, tts=None)
     agent_rings.bind(ctx)
     group_calls.bind(ctx)

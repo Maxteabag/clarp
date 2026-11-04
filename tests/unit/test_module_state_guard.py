@@ -230,8 +230,11 @@ def module_state(path: pathlib.Path) -> set[str]:
 
 
 def found() -> set[tuple[str, str]]:
+    # State in an S9 split part is reported under its old module (the facade's
+    # path), so ALLOWED names one place on main and on integration alike.
+    from tests.patching import split_origin
     paths = sorted((SERVER / "lib").rglob("*.py")) + [SERVER / "server.py"]
-    return {(p.relative_to(SERVER).as_posix(), name) for p in paths for name in module_state(p)}
+    return {(split_origin(p.relative_to(SERVER).as_posix()), name) for p in paths for name in module_state(p)}
 
 
 def test_no_new_module_state():

@@ -41,6 +41,19 @@ def split_family(module: types.ModuleType, recipes: pathlib.Path = _RECIPES) -> 
     return parts
 
 
+def split_origin(path: str, recipes: pathlib.Path = _RECIPES) -> str:
+    """The old module a split part came from, in the same spelling as `path`
+    ("server/lib/x.py" or "lib/x.py"); `path` itself when no recipe lists it.
+    Lets path-based guards keep naming the old module on integration."""
+    prefix = "server/" if path.startswith("server/") else ""
+    rel = path[len(prefix):]
+    for recipe in sorted(recipes.glob("*.toml")) if recipes.is_dir() else ():
+        for split in tomllib.loads(recipe.read_text()).get("split", []):
+            if any(part.get("module") == rel for part in split.get("part", [])):
+                return prefix + str(split["module"])
+    return path
+
+
 def patch_shared(monkeypatch, module: types.ModuleType, name: str, value,
                  recipes: pathlib.Path = _RECIPES, *, raising: bool = True) -> None:
     """monkeypatch.setattr(module, name, value, raising=raising), and the same on

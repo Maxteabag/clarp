@@ -2,6 +2,7 @@ import pytest
 from pathlib import Path
 from types import SimpleNamespace
 
+from tests.patching import patch_shared
 from lib import agents as agents_db
 from lib import heartbeat, team_leader, team_store
 from lib import tts_queue, turn_queue
@@ -2999,7 +3000,7 @@ def _call_open_admitted(tmp_path, monkeypatch):
     backends.live = False
     for name, value in (("_kick_queue", lambda: None), ("_push", lambda ring, kind: {}),
                         ("_push_voip", lambda ring: {}), ("_schedule_expiry", lambda ring: None)):
-        monkeypatch.setattr(agent_rings, name, value)
+        patch_shared(monkeypatch, agent_rings, name, value)
     ctx = SimpleNamespace(stream=None, tts=None)
     agent_rings.bind(ctx)
     group_calls.bind(ctx)
