@@ -1,0 +1,21 @@
+# S7 voice pipeline (rf-fix2): step 1a.
+# Applied by tools/refactor/split_apply.py at every main->integration merge, from main's
+# text; see its docstring. tts_providers keeps _wav_to_mp3 as a facade re-export.
+
+[[split]]
+name = "tts-providers-audio-codec"
+module = "lib/tts_providers.py"
+
+[[split.part]]
+# WAV to MP3 (mono, 24 kHz) for custom adapters that answer audio/wav. Moving it out
+# breaks the lazy import cycle tts_providers <-> custom_tts_adapters.
+module = "lib/audio_codec.py"
+names = ["_wav_to_mp3"]
+
+[[repoint]]
+name = "s7-wav-to-mp3-import"
+# custom_tts_adapters' lazy 'from .tts_providers import _wav_to_mp3' reads it from its new home.
+file = "lib/custom_tts_adapters.py"
+from_module = ".tts_providers"
+to_module = ".audio_codec"
+names = ["_wav_to_mp3"]
