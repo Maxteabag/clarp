@@ -64,6 +64,30 @@ def app_server():
     auth_file = Path(home) / "auth.json" if home else None
     auth_tag = auth_file.read_text().strip() if auth_file and auth_file.is_file() else ""
 
+    # Goal state lives under CODEX_HOME like codex's state database, so a
+    # second process on the same home sees the goals the first one set.
+    goals_file = Path(home) / "fake-goals.json" if home else None
+
+    def save_goal(thread_id):
+        if goals_file is None:
+            return
+        with state_lock:
+            stored = json.loads(goals_file.read_text()) if goals_file.exists() else {}
+            if thread_id in goals:
+                stored[thread_id] = goals[thread_id]
+            else:
+                stored.pop(thread_id, None)
+            goals_file.write_text(json.dumps(stored))
+
+    def load_goal(thread_id):
+        if goals_file is None or not goals_file.exists():
+            return
+        stored = json.loads(goals_file.read_text()).get(thread_id)
+        if stored is not None:
+            goals[thread_id] = stored
+        else:
+            goals.pop(thread_id, None)
+
     def record_auth(kind, thread_id):
         if os.environ.get("CLARP_QA_RECORD_AUTH"):
             record(kind, {"threadId": thread_id, "authTag": auth_tag, "pid": os.getpid()})
@@ -96,7 +120,8 @@ def app_server():
             return None
         return {"threadId": thread_id, "objective": goal["objective"], "status": goal["status"],
                 "tokenBudget": None, "tokensUsed": goal["tokens"], "timeUsedSeconds": 1,
-                "createdAt": goal["created"], "updatedAt": int(time.time() * 1000)}
+                "createdAt": goal["created"],
+                "updatedAt": goal.get("updated") or goal["created"]}
 
     def goal_turn(thread_id):
         """Codex continues an active goal with a turn nobody requested."""
@@ -116,17 +141,24 @@ def app_server():
             if stop.wait(float(os.environ.get("CLARP_QA_GOAL_TURN_HOLD", "0"))):
                 emit({"method": "turn/completed", "params": {"threadId": thread_id,
                       "turn": {"id": turn_id, "threadId": thread_id, "status": "interrupted"}}})
+                record_auth("goal_turn_interrupted", thread_id)
                 return
             mid = str(uuid.uuid4())
+            goal = goals.get(thread_id) or goal   # a get may have reloaded it meanwhile
             emit({"method": "item/completed", "params": {"threadId": thread_id, "turnId": turn_id,
                   "item": {"id": mid, "type": "agentMessage", "text": "Goal step: " + goal["objective"]}}})
             goal["tokens"] += 7
+            # Codex accounts usage on paused goals too and bumps updatedAt
+            # (state/runtime/goals.rs account_thread_goal_usage).
+            goal["updated"] = int(time.time() * 1000) + 1
             if goal["status"] == "active":   # a pause during the turn stays a pause
                 goal["status"] = "complete"
+            save_goal(thread_id)
             emit({"method": "thread/goal/updated", "params": {
                 "threadId": thread_id, "turnId": turn_id, "goal": goal_payload(thread_id)}})
             emit({"method": "turn/completed", "params": {
                 "threadId": thread_id, "turn": {"id": turn_id, "threadId": thread_id, "status": "completed"}}})
+            record_auth("goal_turn_end", thread_id)
         finally:
             turn_running(thread_id, -1)
 
@@ -269,6 +301,7 @@ def app_server():
                 continue
             with state_lock:
                 unloading.discard(thread_id)
+            load_goal(thread_id)
             persist(thread_id, "session_meta", {
                 "id": thread_id, "cwd": params.get("cwd", "")})
             result = {"thread": {"id": thread_id}}
@@ -323,13 +356,17 @@ def app_server():
             result = {}
         elif method == "thread/goal/set":
             thread_id = params.get("threadId") or current_thread
+            if thread_id not in goals:
+                load_goal(thread_id)
             goal = goals.get(thread_id) or {"objective": "", "status": "active", "tokens": 0,
                                             "created": int(time.time() * 1000)}
             if params.get("objective"):
                 goal["objective"] = params["objective"]
             if params.get("status"):
                 goal["status"] = params["status"]
+            goal["updated"] = max(int(time.time() * 1000), goal.get("updated", 0) + 1)
             goals[thread_id] = goal
+            save_goal(thread_id)
             emit({"id": request["id"], "result": {"goal": goal_payload(thread_id)}})
             emit({"method": "thread/goal/updated", "params": {
                 "threadId": thread_id, "goal": goal_payload(thread_id)}})
@@ -340,10 +377,12 @@ def app_server():
             continue
         elif method == "thread/goal/get":
             thread_id = params.get("threadId") or current_thread
+            load_goal(thread_id)
             result = {"goal": goal_payload(thread_id)}
         elif method == "thread/goal/clear":
             thread_id = params.get("threadId") or current_thread
             result = {"cleared": goals.pop(thread_id, None) is not None}
+            save_goal(thread_id)
             emit({"method": "thread/goal/cleared", "params": {"threadId": thread_id}})
         emit({"id": request["id"], "result": result})
         if method == "turn/start":

@@ -109,3 +109,85 @@ def test_a_thread_moves_only_after_the_old_process_closed_it(fake, tmp_path, mon
     assert done.wait(8) and outcome == ["completed"], f"resume after the move failed: {outcome}"
     assert _auth_of(fake, thread[0]) == "account-two"
     assert busy_done.wait(8)
+
+
+def _goal_turns(home, thread_id, kind="goal_turn"):
+    return [row["authTag"] for row in _records(home, kind) if row["threadId"] == thread_id]
+
+
+def _goal_agent(fake, tmp_path, monkeypatch, name="goal"):
+    monkeypatch.setenv("CLARP_QA_GOAL_TURN_HOLD", "1.5")
+    agent = _agent(tmp_path, name)
+    done, _, thread = _turn(tmp_path, agent, name, "hello")
+    assert done.wait(8)
+    cas.goal(agent, "start", objective="keep going", stream=_NullStream())
+    assert _wait(lambda: _goal_turns(fake, thread[0]) == ["account-one"]), "no continuation on gen1"
+    return agent, thread[0]
+
+
+def test_a_goal_moves_paused_and_continues_on_the_new_generation(fake, tmp_path, monkeypatch):
+    agent, thread = _goal_agent(fake, tmp_path, monkeypatch)
+    (fake / "auth.json").write_text("account-two")
+    _turn(tmp_path, _agent(tmp_path, "other"), "other", "starts the new generation")
+    assert _wait(lambda: cas._move_get(thread) is not None), "no durable move record before the pause"
+
+    assert _wait(lambda: _goal_turns(fake, thread) == ["account-one", "account-two"], 15), \
+        "the goal did not continue on the new generation"
+    assert _goal_turns(fake, thread, "goal_turn_end")[:1] == ["account-one"]
+    assert not _goal_turns(fake, thread, "goal_turn_interrupted"), "the move interrupted a running turn"
+    assert _wait(lambda: cas._move_get(thread) is None), "the move record was left behind"
+
+
+def test_a_users_pause_during_the_move_wins(fake, tmp_path, monkeypatch):
+    agent, thread = _goal_agent(fake, tmp_path, monkeypatch)
+    (fake / "auth.json").write_text("account-two")
+    _turn(tmp_path, _agent(tmp_path, "other"), "other", "starts the new generation")
+    assert _wait(lambda: cas._move_get(thread) is not None)
+    cas.goal(agent, "pause", stream=_NullStream())           # the user, mid-move
+    assert cas._move_get(thread) is None, "a user's pause must end the move's claim"
+    assert _wait(lambda: not cas.turn_holders(agent), 15)
+    time.sleep(1.0)
+    assert _goal_turns(fake, thread) == ["account-one"], "the move re-activated a goal the user paused"
+
+
+def _leftover(fake, tmp_path, monkeypatch, name):
+    """A thread whose goal is paused, as a crash or rollback mid-move leaves it."""
+    agent = _agent(tmp_path, name)
+    done, _, thread = _turn(tmp_path, agent, name, "hello")
+    assert done.wait(8)
+    cas.goal(agent, "start", objective="keep going", stream=_NullStream())
+    cas.goal(agent, "pause", stream=_NullStream())
+    client = cas._client(agent, name)
+    goal = client.request("thread/goal/get", {"threadId": thread[0]})["goal"]
+    return agent, thread[0], goal
+
+
+def test_recovery_restores_a_moving_goal_only_when_it_is_unchanged(fake, tmp_path, monkeypatch):
+    monkeypatch.setenv("CLARP_QA_GOAL_TURN_HOLD", "0")
+    moved, moved_thread, goal = _leftover(fake, tmp_path, monkeypatch, "moved")
+    before = len(_goal_turns(fake, moved_thread))
+    cas._move_put(moved_thread, {"agent_id": moved, "thread": moved_thread, "phase": "moving",
+                                 "generation": "old", "updated_at": goal["updatedAt"]})
+    changed, changed_thread, goal2 = _leftover(fake, tmp_path, monkeypatch, "changed")
+    cas._move_put(changed_thread, {"agent_id": changed, "thread": changed_thread, "phase": "moving",
+                                   "generation": "old", "updated_at": goal2["updatedAt"] - 5})
+    pausing, pausing_thread, _ = _leftover(fake, tmp_path, monkeypatch, "pausing")
+    cas._move_put(pausing_thread, {"agent_id": pausing, "thread": pausing_thread, "phase": "pausing",
+                                   "generation": "old"})
+    cas._move_put("gone-thread", {"agent_id": "gone", "thread": "gone-thread", "phase": "moving",
+                                  "generation": "old", "updated_at": 1})
+
+    cas.recover_goal_moves()
+
+    assert _wait(lambda: len(_goal_turns(fake, moved_thread)) == before + 1), "an unchanged moved goal was not restored"
+    for thread in (moved_thread, changed_thread, pausing_thread, "gone-thread"):
+        assert cas._move_get(thread) is None, f"a leftover record stayed for {thread}"
+    assert agents_db.get_by_agent_id(changed) and cas.goal(changed, "get")["status"] == "paused"
+    assert cas.goal(pausing, "get")["status"] == "paused"
+
+
+def test_a_turn_interrupted_without_a_stop_is_logged(fake, tmp_path, capsys):
+    agent = _agent(tmp_path, "unasked")
+    done, outcome, _ = _turn(tmp_path, agent, "unasked", "[qa-self-interrupt]")
+    assert done.wait(8)
+    assert "codexTurnInterruptedUnasked" in capsys.readouterr().err
