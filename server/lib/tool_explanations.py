@@ -31,7 +31,7 @@ import subprocess
 import tempfile
 import threading
 import time
-from .log import log
+from .log import log, log_exception
 from . import backends, db
 from . import janitor_builtins, janitor_store, janitors, judgment_sites, judgments, model_fallbacks
 from . import tool_explanation_commands as commands
@@ -165,6 +165,7 @@ class ToolExplanations:
         self._ledger = learning.Ledger()
         self._evidence = []
         self._flushed = 0.0
+        self._active_run = None  # the Janitor run of the batch being drained
         self._thread = threading.Thread(target=self._work, name="tool-explanations", daemon=True)
         self._thread.start()
 
@@ -383,6 +384,24 @@ class ToolExplanations:
                 with self._condition:
                     if not self._closed:
                         self._condition.wait(timeout=1)
+            except Exception as error:  # noqa: BLE001 - the only drain thread must survive one bad batch
+                # RM-06: fail the batch this drain holds, close its run, keep draining.
+                log_exception("toolExplanationDrainFail", error)
+                self._fail_held_batch()
+                with self._condition:
+                    if not self._closed:
+                        self._condition.wait(timeout=1)
+
+    def _fail_held_batch(self):
+        run, self._active_run = self._active_run, None
+        try:
+            durable_queue.fail_owned(self._owner, "translator_failed", self._failure_ttl)
+            if run is not None:
+                janitor_builtins.complete_run(run["run_id"], outcome="failed", error="translator_failed",
+                                              result={"summary": "Tool explanation generation failed",
+                                                      "status": "failed", "reason": "translator_failed"})
+        except Exception as error:  # noqa: BLE001 - leases and the run TTL still recover them
+            log_exception("toolExplanationDrainFailCleanup", error)
 
     def _drain(self):
         try:
@@ -411,6 +430,7 @@ class ToolExplanations:
                 run = janitor_builtins.begin_run(ROLE, uuid.uuid4().hex, context={
                     "request_hash": request_hash, "item_count": len(batch), "detail_level": level},
                     target_agent_id=identity.get("target_agent_id"))
+                self._active_run = run
                 if run is None:
                     # Another admitted invocation owns the Janitor. Keep the
                     # durable demand and retry without a tight claim loop.
