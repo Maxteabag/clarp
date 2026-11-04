@@ -66,6 +66,7 @@ ALLOWED: dict[tuple[str, str], str] = {
     # F4 delivery admission: health-only, process-local counters (never an
     # admission input), reset on restart and by reset_*_for_tests.
     ("lib/launch_receipts.py", "_RECONCILE_HEALTH"): THROTTLE,
+    ("lib/outdated_clients.py", "_OUTDATED_CLIENTS_NOTED"): THROTTLE,
     ("lib/runtime_attestation.py", "_HEALTH"): THROTTLE,
     # The one manager-probe slot and start-rate bucket of this Host process: a
     # rate limit by design; it only withholds work and never proves anything.
@@ -193,7 +194,6 @@ ALLOWED: dict[tuple[str, str], str] = {
     ("lib/viz_owner_avatar.py", "_retry"): THROTTLE,
     ("lib/vocab_compile.py", "_MODEL_BUDGETS"): CACHE,
     ("lib/workspace_vocab.py", "_CACHE"): CACHE,
-    ("server.py", "_OUTDATED_CLIENTS_NOTED"): THROTTLE,
 }
 
 
