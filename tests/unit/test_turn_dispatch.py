@@ -3860,3 +3860,34 @@ def test_a_wait_behind_a_stuck_session_has_its_own_log_line(tmp_path, capsys):
     assert "turnQueuedBehindStuckSession" in capsys.readouterr().err
     held.alive = False
     assert _wait_until(lambda: len(backends.spawned) == 2)
+
+
+def test_the_leak_release_leaves_a_send_waiting_behind_a_held_session(tmp_path):
+    """Reviewer A2's probe (Thursday combined pre-review): a send waiting
+    behind a stuck Codex session is not started by the leaked-slot release
+    while the session is still held, even once the stuck turn's terminal row
+    is older than the grace."""
+    from lib import db
+    service, _, agent_id = _make_service(tmp_path)
+    backends = _HeldSessionBackends()
+    service.backends = backends
+    service.dispatch(text="first", requested_session="mike", trace_id="t1",
+                     synthesize_audio=False)
+    held = _Process()
+    backends.holders.append(held)
+    backends.processes[0].alive = False
+    backends.spawned[0][1]["on_result"]({"duration_ms": 9})
+    sent = service.dispatch(text="after the stop", requested_session="mike",
+                            trace_id="t2", synthesize_audio=False)
+    assert sent.queued is True and len(backends.spawned) == 1
+    # The stuck process outlives the 60 s grace (its recycle waits for the
+    # other Codex agents to finish).
+    db.conn().execute("UPDATE state_log SET ts = ts - 600000 WHERE agent_id = ?",
+                      (agent_id,))
+
+    released = service.release_leaked_slots()
+
+    assert len(backends.spawned) == 1, ("started behind a held session", released)
+    assert released == {}
+    held.alive = False
+    assert _wait_until(lambda: len(backends.spawned) == 2)
