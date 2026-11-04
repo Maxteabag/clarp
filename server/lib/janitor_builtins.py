@@ -27,7 +27,8 @@ DEMAND_ROLES = ROLES + OPTIONAL_ROLES
 SEED_VERSION = 1
 DEMAND_RUN_TTL_MS = 180_000  # Two bounded 60-second routing probes plus overhead.
 _METADATA_KEYS = frozenset({"input_hash", "request_hash", "candidate_count", "item_count",
-    "detail_level", "target_count", "target_agent_id", "policy_revision", "summary", "status", "reason"})
+    "detail_level", "target_count", "target_agent_id", "policy_revision", "summary", "status", "reason",
+    "decision_id", "http_status"})
 
 
 def _role(role: str) -> str:
