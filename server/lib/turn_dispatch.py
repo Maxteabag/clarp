@@ -1538,8 +1538,12 @@ class TurnDispatchService:
         # resume target for the binding, drop it and start fresh. (A CLI that
         # resumes by session id always has one; only a transcript-file CLI
         # checks the disk.)
-        if (backend_session_id and backends.by_id(backend).resume_target(
-                backend_session_id, str(cwd), self.home) is None):
+        # Only a binding nothing is using: a turn that is starting or running
+        # writes its transcript only once its CLI has begun, so a disk miss
+        # then is not a ghost (TP-05).
+        if (backend_session_id and not self._turn_in_flight(agent_id)
+                and backends.by_id(backend).resume_target(
+                    backend_session_id, str(cwd), self.home) is None):
             log("ghostSessionReset",
                 f"agent={agent_id} bsid={backend_session_id} — resume target "
                 f"has no transcript on disk; starting a fresh session")
@@ -2712,6 +2716,16 @@ class TurnDispatchService:
             herald.set_awaiting(session)
         except Exception as e:
             log_exception("heraldSetAwaitingFail", e, detail=session)
+
+    @staticmethod
+    def _turn_in_flight(agent_id: str) -> bool:
+        """A turn of this agent holds its slot here (claimed, spawning or
+        running), or its state says it is busy (a turn owned elsewhere)."""
+        try:
+            return bool(_SLOTS.get(agent_id)) or agents_db.is_busy(agent_id)
+        except Exception as exc:  # noqa: BLE001 - unknown is not 'nothing uses it'
+            log_exception("ghostGuardLiveCheckFail", exc, detail=agent_id)
+            return True
 
     def _bind_new_session(self, backend: str, agent_id: str, session: str) -> str:
         """The backend session id pre-minted for a new session, or "" when
