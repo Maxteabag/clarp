@@ -6,6 +6,8 @@ on `ready` only when a `/transcribe` request arrives.
 """
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import json
 import io
 import os
@@ -22,6 +24,26 @@ from typing import Iterable
 
 from .judgment_sites import is_junk
 from .log import log, log_exception
+
+
+# How long a variant request may wait for another variant's selection, load
+# and inference before it is busy. None waits as long as that takes; the
+# transcription pipeline bounds it only when a fallback engine follows (VP-08).
+_SELECTION_WAIT: contextvars.ContextVar[float | None] = contextvars.ContextVar(
+    "transcription_selection_wait", default=None)
+
+
+@contextlib.contextmanager
+def bounded_selection_wait(seconds: float | None):
+    token = _SELECTION_WAIT.set(seconds)
+    try:
+        yield
+    finally:
+        _SELECTION_WAIT.reset(token)
+
+
+def current_selection_wait() -> float | None:
+    return _SELECTION_WAIT.get()
 
 
 class STTBusyError(RuntimeError):
@@ -211,7 +233,13 @@ class WhisperSTT:
         # Serialize selection + loading + inference so two requests cannot warm
         # different multi-gigabyte variants at once. The inner inference lock is
         # still shared with the configured default model.
-        with self._selection_lock:
+        limit = current_selection_wait()
+        if limit is None:
+            self._selection_lock.acquire()
+        elif not (self._selection_lock.acquire(timeout=limit) if limit > 0
+                  else self._selection_lock.acquire(blocking=False)):
+            raise STTBusyError("transcription model busy")
+        try:
             with self._variants_lock:
                 variant = self._variants.get(selected)
                 if variant is None:
@@ -248,6 +276,8 @@ class WhisperSTT:
                     f"could not load transcription model {selected}: {variant.load_error}")
             return variant.transcribe_bytes(
                 audio_bytes, content_type, vocab_prompt, wait=wait)
+        finally:
+            self._selection_lock.release()
 
     def start_loading(self) -> None:
         threading.Thread(target=self._load, daemon=True).start()
