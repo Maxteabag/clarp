@@ -143,7 +143,7 @@ class AppTurnHandle:
 
 
 class _Client:
-    # Guards each client's goal_state_unknown set. Taken after self._lock,
+    # Guards each client's goal-state marks. Taken after self._lock,
     # never before it; the goal mirror takes only this one.
     _goal_state_lock = threading.Lock()
 
@@ -469,6 +469,9 @@ class _Client:
         if not thread_id:
             return
         recorded = False
+        with self._goal_state_lock:
+            # Marks set after this point are newer than what this write saw.
+            started_at = getattr(self, "goal_mark_seq", 0)
         try:
             agent = agents_db.get_by_backend_session(thread_id)
             if not agent:
@@ -483,7 +486,10 @@ class _Client:
                 row = None
             recorded = True
             with self._goal_state_lock:
-                self._goal_unknown().discard(thread_id)
+                mark = self._goal_marks().get(thread_id)
+                # Only a failed write it began after can this write resolve.
+                if mark and mark[0] == "write" and mark[1] <= started_at:
+                    del self._goal_marks()[thread_id]
             stream = getattr(self, "stream", None)
             if stream is not None:
                 events.broadcast(stream, events.as_event(agent_goals.event(agent, row)))
@@ -491,8 +497,7 @@ class _Client:
             if not recorded:
                 # The mirror may now be stale: the recycle treats this
                 # goal as possibly active until a later write records it.
-                with self._goal_state_lock:
-                    self._goal_unknown().add(thread_id)
+                self._mark_goal_unknown(thread_id, "write")
             log_exception("codexGoalMirrorFail", exc, detail=thread_id)
 
     def _goal_activations(self) -> dict[str, int]:
@@ -503,14 +508,27 @@ class _Client:
             inflight = self.goal_activations_inflight = {}
         return inflight
 
+    def _goal_marks(self) -> dict[str, tuple[str, int]]:
+        """Threads whose goal state is unknown: (kind, sequence). "write": a
+        failed mirror write, resolved by a successful write that began after
+        it. "unanswered": a start/resume whose answer was lost; nothing proves
+        which state codex settled on, so it lasts for this process (call
+        under _goal_state_lock)."""
+        marks = getattr(self, "goal_state_marks", None)
+        if marks is None:
+            marks = self.goal_state_marks = {}
+        return marks
+
+    def _mark_goal_unknown(self, thread_id: str, kind: str) -> None:
+        with self._goal_state_lock:
+            self.goal_mark_seq = getattr(self, "goal_mark_seq", 0) + 1
+            marks = self._goal_marks()
+            if (marks.get(thread_id) or ("",))[0] != "unanswered":
+                marks[thread_id] = (kind, self.goal_mark_seq)
+
     def _goal_unknown(self) -> set[str]:
-        """Threads whose goal state a failed mirror write or an unanswered
-        activation left unknown, until a later write records it (call under
-        _goal_state_lock)."""
-        unknown = getattr(self, "goal_state_unknown", None)
-        if unknown is None:
-            unknown = self.goal_state_unknown = set()
-        return unknown
+        """Threads whose goal state is unknown (call under _goal_state_lock)."""
+        return set(self._goal_marks())
 
     def _detached_execution(self, params: dict) -> bool:
         detached = getattr(self, "detached_executions", None)
@@ -605,8 +623,7 @@ class _Client:
             except Exception:
                 if activating:
                     # It may have reached codex: possibly active from now on.
-                    with self._goal_state_lock:
-                        self._goal_unknown().add(thread_id)
+                    self._mark_goal_unknown(thread_id, "unanswered")
                 raise
             goal = result.get("goal") if isinstance(result, dict) else None
             self._mirror_goal(thread_id, goal if isinstance(goal, dict) else None)
