@@ -20,7 +20,8 @@ from . import eventlog, health
 from . import trace as _trace
 from .log import log, log_exception
 from .paths import RuntimePaths
-from .stt import STTBusyError, STTModelLoadingError, STTUnknownModelError, bounded_selection_wait
+from .stt import (STTBusyError, STTEngineReplacedError, STTModelLoadingError,
+                  STTUnknownModelError, bounded_selection_wait)
 from .focus import current_focus_session
 
 RecordVoice = Callable[..., None]
@@ -49,6 +50,34 @@ def _cache_dir() -> pathlib.Path:
     return RuntimePaths.from_home(pathlib.Path.home()).cache_dir
 
 
+class _SwapRetry:
+    """The engine a request started with. A transcription that finds it
+    closed by a model swap runs once more on the engine published now, so a
+    swap never fails the user's dictation (VP-07)."""
+
+    _RETRIED = ("transcribe_bytes", "transcribe_model_bytes")
+
+    def __init__(self, ctx):
+        self._ctx = ctx
+        self._engine = ctx.stt
+
+    def __getattr__(self, name):
+        value = getattr(self._engine, name)
+        if name not in self._RETRIED or not callable(value):
+            return value
+
+        def call(*args, **kwargs):
+            try:
+                return value(*args, **kwargs)
+            except STTEngineReplacedError:
+                current = self._ctx.stt
+                if current is self._engine:
+                    raise
+                log("sttEngineReplacedRetry", name)
+                return getattr(current, name)(*args, **kwargs)
+        return call
+
+
 def transcribe(ctx, *, audio_bytes: bytes, ctype: str, hands_free: bool,
                requested_model: str, transcription_id: str, fingerprint: str,
                utterance_id: str = "", client_ts: int | None = None,
@@ -72,7 +101,7 @@ def transcribe(ctx, *, audio_bytes: bytes, ctype: str, hands_free: bool,
 
     # One request sees one engine: `_activate_transcription_if_default` may
     # swap ctx.stt on another thread while this request runs.
-    stt = ctx.stt
+    stt = _SwapRetry(ctx)
     if getattr(stt, "available", True) is False:
         return TranscriptionOutcome.error(503, "server transcription disabled")
     call_stt = None
