@@ -55,6 +55,7 @@ from ..turn_lifecycle import TurnEvent
 from ..voice_preamble import apply_voice_preamble
 from .base import BackendBrand, CompactionStrategy, resolve
 from .stream_json import StreamJsonBackend, stop_after_drain_failure
+from .long_prompt import PromptFile, fits_argv
 
 
 @dataclass
@@ -306,12 +307,21 @@ class CodexBackend(StreamJsonBackend):
         # when this is a spoken turn.
         agent = agents_db.get_by_agent_id(agent_id) if agent_id else None
         persona = (agent or {}).get("persona") or ""
-        cmd.append(apply_voice_preamble(
+        prompt = apply_voice_preamble(
             text,
             voice=voice_preamble,
             persona=persona,
             session=session,
-        ))
+        )
+        stdin: Any = subprocess.DEVNULL
+        prompt_file = None
+        if fits_argv(prompt):
+            cmd.append(prompt)
+        else:
+            # Past one argv string: `-` reads the prompt from stdin (BACKENDS-08).
+            prompt_file = PromptFile(prompt)
+            stdin = prompt_file.open()
+            cmd.append("-")
         flag = "resume" if (backend_session_id and not is_new_session) else "new"
         log("codexSpawn", f"cwd={cwd} {flag}={backend_session_id or '∅'} "
                           f"text_len={len(text)} trace={trace_id or '∅'} "
@@ -319,7 +329,13 @@ class CodexBackend(StreamJsonBackend):
         runtime_agent_id = "" if isolated else agent_id
         from .. import provider_background_jobs as provider_jobs
         turn_token, identity = provider_jobs.identity_env(runtime_agent_id)
-        proc, handle = self.launch(cmd, cwd=cwd, session=session, env_extra=identity)
+        try:
+            proc, handle = self.launch(cmd, cwd=cwd, session=session, stdin=stdin,
+                                       env_extra=identity)
+        finally:
+            if prompt_file is not None:
+                stdin.close()           # the child holds its own descriptor
+                prompt_file.remove()
         provider_jobs.record_identity(turn_token, agent_id=runtime_agent_id,
                                       provider=self.id, pid=proc.pid)
         self.register_handle(runtime_agent_id, handle)
