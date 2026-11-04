@@ -275,10 +275,13 @@ fn a_failed_send_is_retried() {
     host.control("/__control/outage", json!({"seconds": 1}));
     d.engine.send("Try again");
     d.until("failed", |e| !e.sending() && e.conversation("rachel").unwrap().rows().iter().any(|r| r.delivery_failed));
+    let failed_id = d.engine.conversation("rachel").unwrap().rows().iter().find(|r| r.delivery_failed).unwrap().id.clone();
     d.settle(Duration::from_millis(1200));
     d.engine.retry_latest_failed_message();
     d.until("retried and answered", |e| e.conversation("rachel").unwrap().rows().iter().any(|r| r.text == "Echo: Try again"));
     let rows = d.engine.conversation("rachel").unwrap().rows();
     assert!(!rows.iter().any(|r| r.delivery_failed), "the failed copy is gone");
     assert_eq!(rows.iter().filter(|r| r.text == "Try again").count(), 1);
+    // Resent under its own id, so the Host launches it once (CLIENT-SEND-500).
+    assert!(rows.iter().any(|r| r.id == failed_id && r.text == "Try again"), "same client_msg_id");
 }
