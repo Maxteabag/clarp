@@ -3783,3 +3783,24 @@ def test_an_agent_stop_then_resume_and_restart_keeps_the_pending_user_retry(tmp_
     turn_queue.set_paused(agent_id, False)                 # the user resumes
     _td.reset_for_tests()                                  # and the runtime restarts
     _assert_retry_delivers_once(service, backends, agent_id)
+
+
+def test_a_usage_limit_while_the_credential_switch_waits_fails_visibly_without_failover(
+        tmp_path, monkeypatch):
+    """BACKENDS-06 (c): the account was already switched, but the shared Codex
+    process still runs the old credentials because another agent is busy. A
+    usage limit then does not start another failover (which would loop and
+    mark accounts); the turn ends visibly, saying the switch waits."""
+    coordinator, scheduled = _enable_account_failover(monkeypatch)
+    service, backend, agent_id = _make_service(tmp_path)
+    claude = _td.backends.by_id("claude")
+    monkeypatch.setattr(claude, "credential_switch_pending", lambda message: True, raising=False)
+    service.dispatch(text="hello", requested_session="mike", trace_id="t-limit",
+                     synthesize_audio=False)
+    backend.live = False
+    backend.spawned[-1][1]["on_error"]("You've hit your usage limit. Try again at 3:29 PM.")
+
+    assert not coordinator.recovering and scheduled == []
+    state = agents_db.latest_state(agent_id)
+    assert state["kind"] == AgentState.INTERRUPTED
+    assert "switch" in state["detail"]["message"].lower()
