@@ -29,7 +29,8 @@ def test_note_outdated_client_emits_once_per_platform_and_build(monkeypatch):
     emitted = []
     monkeypatch.setattr(server_module.eventlog, "emit",
                         lambda *args, **kwargs: emitted.append((args, kwargs)))
-    monkeypatch.setattr(server_module, "_OUTDATED_CLIENTS_NOTED", set())
+    from lib import outdated_clients
+    monkeypatch.setattr(outdated_clients, "_OUTDATED_CLIENTS_NOTED", set())
     client = {"platform": "ios", "build": "9", "contract": 1, "reason": "old"}
     server_module._note_outdated_client(client)
     server_module._note_outdated_client(dict(client))
