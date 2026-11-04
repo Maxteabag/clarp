@@ -217,3 +217,70 @@ def test_any_failure_of_a_replaced_engines_worker_counts_as_replaced():
     engine._proc = proc
     with pytest.raises(STTEngineReplacedError):
         engine._run_inference("/tmp/clip.wav", "")
+
+
+# ---- VP-07 composed with VP-08's bounded selection wait (reviewer C) ----
+from types import SimpleNamespace  # noqa: E402
+from lib import stt as sm, stt_language  # noqa: E402
+from tests.unit.test_transcription_pipeline import (  # noqa: E402,F401
+    ModelSTT, Recorder, _ctx, _quiet_engine_settings, _run)
+
+
+def test_a_swap_during_a_bounded_variant_wait_retries_the_new_primary(monkeypatch):
+    """Reviewer C on the VP-07 re-pin over VP-08: a selection wait that runs
+    out after the swap closed this engine is the swap's doing, so the request
+    runs on the new engine instead of skipping its primary."""
+    primary = 'faster-whisper:medium'
+    fallback = 'faster-whisper:base.en'
+    old = sm.SubprocessWhisperSTT('base.en','int8',model_source='unused')
+    old.ready.set()
+    old.load_done.set()
+    class Fresh(ModelSTT):
+        def transcribe_model_bytes(self, model, *args, **kwargs):
+            self.calls.append(model)
+            if model != primary:
+                raise sm.STTModelLoadingError('fallback model is not loaded')
+            return 'fresh primary result', True, .1
+    fresh = Fresh()
+    ctx = _ctx(old)
+    monkeypatch.setattr(stt_language, 'engines_for', lambda _: [primary,fallback])
+    monkeypatch.setattr(sm, '_installed_model_records', lambda:[{'id':primary,'_local_path':'unused'}])
+    monkeypatch.setattr(old, '_spawn_worker', lambda: pytest.fail('no real worker may start'))
+    class SelectionWait:
+        def acquire(self, *, timeout):
+            assert timeout == 10.0
+            # The wait expires after activation published and closed this
+            # request's original engine. No real ten-second sleep needed.
+            ctx.stt = fresh
+            old.close()
+            return False
+        def release(self):
+            pytest.fail('a refused selector was released')
+    old._selection_lock = SelectionWait()
+    outcome = _run(ctx, Recorder(), focus='rachel')
+    assert outcome.status == 200, (outcome.status, outcome.payload, fresh.calls)
+    assert outcome.payload['text'] == 'fresh primary result'
+    assert fresh.calls == [primary]
+
+
+def test_a_busy_unreplaced_selector_keeps_the_existing_fallback(monkeypatch):
+    """Its control: a selector that is merely busy keeps VP-08's bounded
+    fallback."""
+    primary = 'faster-whisper:medium'
+    fallback = 'faster-whisper:base.en'
+    old = sm.SubprocessWhisperSTT('base.en','int8',model_source='unused')
+    old.ready.set()
+    old.load_done.set()
+    monkeypatch.setattr(stt_language, 'engines_for', lambda _: [primary,fallback])
+    monkeypatch.setattr(sm, '_installed_model_records', lambda:[{'id':primary,'_local_path':'unused'}])
+    class Busy:
+        def acquire(self, *, timeout):
+            assert timeout == 10.0
+            return False
+        def release(self):
+            pytest.fail('a refused selector was released')
+    old._selection_lock = Busy()
+    monkeypatch.setattr(old, '_run_inference', lambda *args:[SimpleNamespace(text='fallback result.',no_speech_prob=0.0)])
+    outcome = _run(_ctx(old), Recorder(), focus='rachel')
+    assert outcome.status == 200, outcome.payload
+    assert outcome.payload['text'] == 'fallback result.'
