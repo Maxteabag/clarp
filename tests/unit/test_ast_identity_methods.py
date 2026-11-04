@@ -339,3 +339,62 @@ def test_harmless_double_bindings_are_not_rebinding(repo, capsys, harmless):
     base = _commit(path, {"server.py": SERVER.replace("from lib import helper\n", "from lib import helper\n" + harmless)})
     server = SERVER_MOVED.replace("from lib import helper\n", "from lib import helper\n" + harmless)
     assert _run(path, base, server=server) == 0, capsys.readouterr().out
+
+
+SERVER_LOCAL = '''from lib import helper
+
+
+class Handler:
+    def keep(self):
+        return helper.VALUE
+
+    def e(self, data):
+        helper = data.get("helper")
+        return helper
+'''
+
+SERVER_LOCAL_MOVED = '''from lib import helper
+from lib.routes.feat import FeatRoutes
+
+
+class Handler(FeatRoutes):
+    def keep(self):
+        return helper.VALUE
+'''
+
+
+@pytest.mark.parametrize("body, problem", [
+    # A local that shares an imported module's name reads nothing from the module.
+    ('        helper = data.get("helper")\n        return helper\n', None),
+    # A real read of the module name still needs the import in the mixin.
+    ('        return helper.VALUE\n', "uses helper but no longer imports it"),
+])
+def test_a_local_named_like_an_import_is_not_a_module_read(tmp_path, capsys, body, problem):
+    _git(tmp_path, "init", "-q")
+    server = SERVER_LOCAL.replace('        helper = data.get("helper")\n        return helper\n', body)
+    base = _commit(tmp_path, {"lib/__init__.py": "", "lib/helper.py": HELPER,
+                              "lib/routes/__init__.py": "", "server.py": server})
+    feat = "class FeatRoutes:\n    def e(self, data):\n" + body
+    code = _run(tmp_path, base, server=SERVER_LOCAL_MOVED, feat=feat)
+    out = capsys.readouterr().out
+    if problem is None:
+        assert code == 0, out
+    else:
+        assert code != 0 and problem in out
+
+
+@pytest.mark.parametrize("write", ["        helper = value\n", "        del helper\n"])
+def test_a_pure_global_write_still_needs_the_import(tmp_path, capsys, write):
+    """Review B (176903c9): `global helper; helper = value` reads nothing, but
+    moved without the import it would rebind the mixin module's helper instead
+    of server.py's."""
+    _git(tmp_path, "init", "-q")
+    member = "    def e(self, value):\n        global helper\n" + write
+    base = _commit(tmp_path, {"lib/__init__.py": "", "lib/helper.py": HELPER,
+                              "lib/routes/__init__.py": "",
+                              "server.py": SERVER_LOCAL_MOVED.replace(
+                                  "from lib.routes.feat import FeatRoutes\n", "").replace(
+                                  "class Handler(FeatRoutes):", "class Handler:") + "\n" + member})
+    code = _run(tmp_path, base, server=SERVER_LOCAL_MOVED, feat="class FeatRoutes:\n" + member)
+    out = capsys.readouterr().out
+    assert code != 0 and "uses helper but no longer imports it" in out, out
