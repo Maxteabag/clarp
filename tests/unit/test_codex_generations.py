@@ -171,19 +171,43 @@ def test_recovery_restores_a_moving_goal_only_when_it_is_unchanged(fake, tmp_pat
     changed, changed_thread, goal2 = _leftover(fake, tmp_path, monkeypatch, "changed")
     cas._move_put(changed_thread, {"agent_id": changed, "thread": changed_thread, "phase": "moving",
                                    "generation": "old", "updated_at": goal2["updatedAt"] - 5})
-    pausing, pausing_thread, _ = _leftover(fake, tmp_path, monkeypatch, "pausing")
-    cas._move_put(pausing_thread, {"agent_id": pausing, "thread": pausing_thread, "phase": "pausing",
-                                   "generation": "old"})
     cas._move_put("gone-thread", {"agent_id": "gone", "thread": "gone-thread", "phase": "moving",
                                   "generation": "old", "updated_at": 1})
 
     cas.recover_goal_moves()
 
     assert _wait(lambda: len(_goal_turns(fake, moved_thread)) == before + 1), "an unchanged moved goal was not restored"
-    for thread in (moved_thread, changed_thread, pausing_thread, "gone-thread"):
+    for thread in (moved_thread, changed_thread, "gone-thread"):
         assert cas._move_get(thread) is None, f"a leftover record stayed for {thread}"
-    assert agents_db.get_by_agent_id(changed) and cas.goal(changed, "get")["status"] == "paused"
-    assert cas.goal(pausing, "get")["status"] == "paused"
+    assert cas.goal(changed, "get")["status"] == "paused"
+
+
+def test_a_recent_pausing_leftover_is_restored_and_an_old_one_only_cleared(fake, tmp_path, monkeypatch, capsys):
+    """Lead 4 Nov: a 'pausing' or 'paused' leftover found within 30 minutes
+    of its write is restored if the goal is still paused (the surviving
+    record proves no user goal action through Clarp since); an older one is
+    only cleared, and its goal stays visibly paused."""
+    monkeypatch.setenv("CLARP_QA_GOAL_TURN_HOLD", "0")
+    recent, recent_thread, _ = _leftover(fake, tmp_path, monkeypatch, "recent")
+    before = len(_goal_turns(fake, recent_thread))
+    cas._move_put(recent_thread, {"agent_id": recent, "thread": recent_thread, "phase": "paused",
+                                  "generation": "old"})
+    old, old_thread, _ = _leftover(fake, tmp_path, monkeypatch, "old")
+    cas._move_put(old_thread, {"agent_id": old, "thread": old_thread, "phase": "pausing",
+                               "generation": "old"})
+    agents_db.conn().execute("UPDATE settings SET updated_at = ? WHERE key = ?",
+                             (int(time.time() * 1000) - 31 * 60 * 1000, cas._MOVE_PREFIX + old_thread))
+    old_before = len(_goal_turns(fake, old_thread))
+
+    cas.recover_goal_moves()
+
+    assert _wait(lambda: len(_goal_turns(fake, recent_thread)) == before + 1), "a recent leftover was not restored"
+    assert cas._move_get(recent_thread) is None and cas._move_get(old_thread) is None
+    time.sleep(0.5)
+    assert len(_goal_turns(fake, old_thread)) == old_before
+    assert cas.goal(old, "get")["status"] == "paused", "an old leftover must stay visibly paused"
+    err = capsys.readouterr().err
+    assert "codexGoalMoveRestored" in err and "codexGoalMoveDropped" in err and "reason=stale" in err
 
 
 def test_a_turn_interrupted_without_a_stop_is_logged(fake, tmp_path, capsys):
