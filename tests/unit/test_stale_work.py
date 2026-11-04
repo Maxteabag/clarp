@@ -124,6 +124,38 @@ def test_a_progress_line_counts_as_a_sign_of_life():
     assert background_jobs.get("ci-wait", reconcile=False)["status"] == "running"
 
 
+def test_progress_keeps_a_default_timeout_job_alive_until_it_too_goes_quiet():
+    # AUT-16: the heartbeat timeout (10 min by default) must read the same
+    # sign of life as the stale-work rule, or a worker that only reports
+    # progress is failed while it is still talking.
+    _agent()
+    job = background_jobs.upsert(session="boss", job_id="render", kind="render", title="Render")
+    beat = job["heartbeat_at"]
+    db.conn().execute("UPDATE background_jobs SET progress_at=? WHERE job_id='render'",
+                      (beat + 9 * MIN,))
+    assert background_jobs.reconcile_stale(now_ms=beat + 12 * MIN, thresholds=LIMITS) == []
+    assert background_jobs.get("render", reconcile=False)["status"] == "running"
+
+    assert background_jobs.reconcile_stale(now_ms=beat + 20 * MIN, thresholds=LIMITS) == ["render"]
+    failed = background_jobs.get("render", reconcile=False)
+    assert failed["status"] == "failed"
+    assert failed["terminal_reason"] == "heartbeat_expired"
+
+
+def test_a_progress_only_running_job_reads_fresh(monkeypatch):
+    # The payload must agree with the fail rule: a job kept alive by its
+    # progress line is not shown as stale.
+    _agent()
+    job = background_jobs.upsert(session="boss", job_id="render", kind="render", title="Render")
+    beat = job["heartbeat_at"]
+    db.conn().execute("UPDATE background_jobs SET progress_at=? WHERE job_id='render'",
+                      (beat + 9 * MIN,))
+    monkeypatch.setattr(db, "now_ms", lambda: beat + 12 * MIN)
+    shown = background_jobs.get("render", reconcile=False)
+    assert shown["status"] == "running"
+    assert shown["worker_freshness"] == "fresh"
+
+
 def test_verified_live_worker_pid_is_never_touched():
     _agent()
     job = _silent_job(worker_pid=os.getpid(),
