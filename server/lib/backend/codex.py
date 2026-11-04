@@ -315,13 +315,8 @@ class CodexBackend(StreamJsonBackend):
         )
         stdin: Any = subprocess.DEVNULL
         prompt_file = None
-        if fits_argv(prompt):
-            cmd.append(prompt)
-        else:
-            # Past one argv string: `-` reads the prompt from stdin (BACKENDS-08).
-            prompt_file = PromptFile(prompt)
-            stdin = prompt_file.open()
-            cmd.append("-")
+        # Past one argv string, `-` reads the prompt from stdin (BACKENDS-08).
+        cmd.append(prompt if fits_argv(prompt) else "-")
         flag = "resume" if (backend_session_id and not is_new_session) else "new"
         log("codexSpawn", f"cwd={cwd} {flag}={backend_session_id or '∅'} "
                           f"text_len={len(text)} trace={trace_id or '∅'} "
@@ -330,11 +325,15 @@ class CodexBackend(StreamJsonBackend):
         from .. import provider_background_jobs as provider_jobs
         turn_token, identity = provider_jobs.identity_env(runtime_agent_id)
         try:
+            if cmd[-1] == "-":
+                prompt_file = PromptFile(prompt)
+                stdin = prompt_file.open()
             proc, handle = self.launch(cmd, cwd=cwd, session=session, stdin=stdin,
                                        env_extra=identity)
         finally:
             if prompt_file is not None:
-                stdin.close()           # the child holds its own descriptor
+                if stdin is not subprocess.DEVNULL:
+                    stdin.close()       # the child holds its own descriptor
                 prompt_file.remove()
         provider_jobs.record_identity(turn_token, agent_id=runtime_agent_id,
                                       provider=self.id, pid=proc.pid)

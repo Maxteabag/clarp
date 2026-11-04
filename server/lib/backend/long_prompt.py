@@ -30,9 +30,14 @@ class PromptFile:
     def __init__(self, prompt: str) -> None:
         self.dir = tempfile.mkdtemp(prefix="clarp-prompt-")
         self.path = os.path.join(self.dir, "prompt.txt")
-        fd = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(prompt)
+        try:
+            fd = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(prompt)
+        except BaseException:
+            # No caller owns it yet: a partial prompt must not stay behind.
+            self.remove()
+            raise
 
     def open(self):
         return open(self.path, encoding="utf-8")
