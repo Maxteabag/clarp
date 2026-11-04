@@ -376,14 +376,21 @@ def _should_scan_broader(
 
 
 def record_routing_message(*, session: str, role: str, text: str,
-                           trace_id: str = "", source: str = "orchestrator") -> None:
+                           trace_id: str = "", source: str = "orchestrator",
+                           once: bool = False) -> None:
+    """``once``: only if the session has no row of this role under this
+    trace yet, decided by the INSERT itself so concurrent callers add one
+    (RTO-07, a retried routed dispatch)."""
     agent = identity.lookup(session)
     if not agent or not text.strip():
         return
     conn().execute(
         """INSERT INTO agent_routing_messages
               (agent_id, session, role, text, trace_id, source, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+           SELECT ?, ?, ?, ?, ?, ?, ?
+            WHERE NOT ? OR NOT EXISTS (
+                SELECT 1 FROM agent_routing_messages
+                 WHERE session = ? AND role = ? AND trace_id = ?)""",
         (
             agent["agent_id"],
             session,
@@ -392,6 +399,10 @@ def record_routing_message(*, session: str, role: str, text: str,
             trace_id,
             source,
             now_ms(),
+            once,
+            session,
+            role,
+            trace_id,
         ),
     )
 
@@ -656,12 +667,8 @@ class OrchestratorService:
         # trace: a later same-id retry is answered by turn_dispatch's dedup
         # and must not add it again (lead, RTO-07 amendment).
         routed_trace = row["trace_id"] or trace_id
-        if not conn().execute(
-                "SELECT 1 FROM agent_routing_messages WHERE session = ? AND role = 'user'"
-                " AND trace_id = ? LIMIT 1",
-                (recipient["session"], routed_trace)).fetchone():
-            record_routing_message(session=recipient["session"], role="user",
-                                   text=text_to_send, trace_id=routed_trace)
+        record_routing_message(session=recipient["session"], role="user",
+                               text=text_to_send, trace_id=routed_trace, once=True)
         return OrchestratorOutcome(
             handled=True, ok=True, session=result.session, dispatch=result.backend,
             trace_id=trace_id, action=FINAL_ROUTE, decision_id=receipt.get("decision_id"))
