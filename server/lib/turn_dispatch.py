@@ -1925,16 +1925,18 @@ class TurnDispatchService:
         log_exception("spawnAbandonedUnlaunched", error, detail=spec.session)
         eventlog.emit("server", "spawnAbandonedUnlaunched", context=spec.context,
                       detail={"error": str(error)[:200]})
+        marked = False
         try:
             turn_lifecycle.record_unlaunched(spec.agent_id, spec.trace_id)
-        except Exception as marker_error:  # noqa: BLE001 - the 500 below must still go out
-            log_exception("spawnAbandonedMarkerFail", marker_error, detail=spec.session)
-            self._retry_unlaunched_marker(spec, len(_UNLAUNCHED_MARKER_RETRY_SEC))
-        try:
+            marked = True
             if turn_id:
                 turn_lifecycle.close_turn(turn_id)
         except Exception as close_error:  # noqa: BLE001
             log_exception("spawnAbandonedCloseFail", close_error, detail=spec.session)
+            if not marked:
+                # As before, a failed marker skips the close: no second write
+                # waits before the 500. The marker is retried in the background.
+                self._retry_unlaunched_marker(spec, len(_UNLAUNCHED_MARKER_RETRY_SEC))
 
     def _retry_unlaunched_marker(self, spec: _TurnSpec, attempts_left: int) -> None:
         """The 'never started' marker is what lets the client's same-id resend
@@ -1953,7 +1955,12 @@ class TurnDispatchService:
             except Exception as error:  # noqa: BLE001 - logged; one more try if left
                 log_exception("spawnAbandonedMarkerFail", error, detail=spec.session)
                 self._retry_unlaunched_marker(spec, attempts_left - 1)
-        self.retry_scheduler(delay, retry)
+        try:
+            self.retry_scheduler(delay, retry)
+        except Exception as error:  # noqa: BLE001 - never a second abandonment
+            # No timer thread (the same exhaustion that failed the write):
+            # the dispatch failure stands, the marker stays as it is.
+            log_exception("spawnAbandonedMarkerRetryFail", error, detail=spec.session)
 
     def _slot_snapshot(self, spec: _TurnSpec) -> tuple[str, bool]:
         """(in-flight trace, whether that slot is spawning or has a live
