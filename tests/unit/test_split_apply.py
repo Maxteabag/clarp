@@ -14,6 +14,14 @@ split_apply = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(split_apply)
 Refusal = split_apply.Refusal
 
+
+@pytest.fixture(autouse=True)
+def _no_git(monkeypatch):
+    # The rebinding scan lists files with `git ls-files`; these trees are not
+    # repositories, and a local gate may not start subprocesses.
+    monkeypatch.setattr(split_apply, "_tracked_python",
+                        lambda root: sorted(p for p in pathlib.Path(root).rglob("*.py")))
+
 OLD = textwrap.dedent('''\
     """An old module."""
     from __future__ import annotations
@@ -154,3 +162,11 @@ def test_a_repoint_rewrites_only_the_named_import_and_is_idempotent(tmp_path):
 def test_the_shipped_recipes_load():
     splits, repoints = split_apply.load_recipes(_TOOL.parent / "splits")
     assert any(s["module"] == "lib/agent_live_tools.py" for s in splits)
+
+
+def test_a_repoint_of_server_py_or_an_s3_mixin_is_a_bad_recipe(tmp_path):
+    for target in ("server.py", "lib/routes/vocab.py"):
+        (tmp_path / "t.toml").write_text(
+            f'[[repoint]]\nname = "r"\nfile = "{target}"\nfrom_module = ".a"\nto_module = ".b"\nnames = ["x"]\n')
+        with pytest.raises(Refusal, match="S3 stages"):
+            split_apply.load_recipes(tmp_path)
