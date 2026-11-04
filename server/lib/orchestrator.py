@@ -685,6 +685,21 @@ class OrchestratorService:
                     and control_target is not None
                     and not agents_db.interaction_capabilities(control_target)["can_voice_target"]):
                 decision = self._as_clarify(decision, "That agent does not accept voice commands.")
+            # The agent the action will act on, the requested session when the
+            # model names none; create acts on no existing agent.
+            action = (decision.control_action or "").strip().lower()
+            acted_on = (None if decision.kind == DECISION_AGENT_CONTROL and action == "create"
+                        else identity.lookup(decision.target_session or requested_session))
+            if (decision.kind in {DECISION_CONTROL, DECISION_AGENT_CONTROL}
+                    and (not self._route_confidently(decision, settings)
+                         or (acted_on is not None and acted_on["session"] not in sessions))):
+                # A command clears the bar a message does and acts only on the
+                # agents of this packet, a group call's participants (RTO-03).
+                decision = self._as_clarify(decision, "I am not sure what you wanted me to do.")
+            elif (decision.kind == DECISION_AGENT_CONTROL
+                    and action == "fork"):
+                # No fork source is trusted from the router (RTO-03).
+                decision = self._as_clarify(decision, "Please fork agents from the app.")
             if fallback_request and decision.kind not in {
                 DECISION_AGENT_MESSAGE,
                 DECISION_CORRECTION,
@@ -975,28 +990,33 @@ class OrchestratorService:
             if agent:
                 backends.interrupt_any(agent["agent_id"])
             return target
-        if action in {"relaunch", "restart", "resume", "fork", "create"}:
+        if action in {"relaunch", "restart", "resume", "create"}:
             return self._lifecycle_action(decision, target)
         self._speak_as_session("I am not sure how to do that yet.", requested_session)
         return target
 
     def _lifecycle_action(self, decision: OrchestratorDecision, target: str) -> str:
-        payload = dict(decision.control_payload or {})
         from .agent_lifecycle import AgentLifecycleService
 
+        # The model read other agents' transcript text, so its payload is
+        # untrusted: only a name crosses. Identity, directory, backend, tools
+        # and any fork or resume source come from the agent's own record.
+        name = (decision.control_payload or {}).get("name")
+        payload: dict[str, Any] = {"name": name.strip()} if isinstance(name, str) and name.strip() else {}
         existing = identity.lookup(target) if target else None
         if existing and (decision.control_action or "").lower() in {
             "relaunch",
             "restart",
             "resume",
         }:
-            payload.setdefault("name", existing["persona"])
-            payload.setdefault("session", existing["session"])
-            payload.setdefault("replace_sid", existing["session"])
-            payload.setdefault("cwd", existing["cwd"])
-            payload.setdefault("backend", existing["backend"])
-        if "synthesize_audio" not in payload:
-            payload["synthesize_audio"] = True
+            payload.update(
+                name=existing["persona"],
+                session=existing["session"],
+                replace_sid=existing["session"],
+                cwd=existing["cwd"],
+                backend=existing["backend"],
+            )
+        payload["synthesize_audio"] = True
         result = AgentLifecycleService(self.ctx).create(payload)
         return result.session
 
