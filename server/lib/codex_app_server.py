@@ -1450,23 +1450,23 @@ def _move_get(thread_id: str) -> dict | None:
     paused by a rollback stays visibly paused for the user to resume."""
     if not thread_id:
         return None
-    row = agents_db.conn().execute("SELECT value FROM settings WHERE key = ?",
-                                   (_MOVE_PREFIX + thread_id,)).fetchone()
+    value = settings_store.get(_MOVE_PREFIX + thread_id)
     try:
-        return json.loads(row["value"]) if row else None
+        return json.loads(value) if value is not None else None
     except (TypeError, ValueError):
         return None
 
 
 def _move_put(thread_id: str, record: dict) -> None:
-    agents_db.conn().execute(
-        "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)"
-        " ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
-        (_MOVE_PREFIX + thread_id, json.dumps(record), int(time.time() * 1000)))
+    """Through settings_store, the settings table's only writer. The record
+    carries the time of its first write (the move decision, ms) for the
+    recovery window; later phases keep it."""
+    record = {**record, "written_at": record.get("written_at") or int(time.time() * 1000)}
+    settings_store.set_text(_MOVE_PREFIX + thread_id, json.dumps(record))
 
 
 def _move_forget(thread_id: str) -> None:
-    agents_db.conn().execute("DELETE FROM settings WHERE key = ?", (_MOVE_PREFIX + thread_id,))
+    settings_store.delete(_MOVE_PREFIX + thread_id)
 
 
 def _continue_move(thread_id: str) -> None:
@@ -1549,24 +1549,27 @@ def recover_goal_moves() -> int:
     'paused' one written within MOVE_RESTORE_WINDOW_MS is restored if codex
     still shows the goal paused; an older one is only cleared, and its goal
     stays visibly paused (lead, 4 Nov)."""
-    rows = agents_db.conn().execute(
-        "SELECT key, updated_at FROM settings WHERE key LIKE ?", (_MOVE_PREFIX + "%",)).fetchall()
+    keys = settings_store.keys_with_prefix(_MOVE_PREFIX)
     now_ms = int(time.time() * 1000)
-    for row in rows:
-        thread_id = row["key"][len(_MOVE_PREFIX):]
+    for key in keys:
+        thread_id = key[len(_MOVE_PREFIX):]
         record = _move_get(thread_id) or {}
         phase = record.get("phase")
         try:
+            written_at = int(record.get("written_at") or 0)
+        except (TypeError, ValueError):
+            written_at = 0
+        try:
             if phase == "moving":
                 _continue_move(thread_id)
-            elif phase in ("pausing", "paused") and now_ms - int(row["updated_at"] or 0) <= MOVE_RESTORE_WINDOW_MS:
+            elif phase in ("pausing", "paused") and now_ms - written_at <= MOVE_RESTORE_WINDOW_MS:
                 _restore_paused(thread_id)
             else:
                 _move_forget(thread_id)
                 log("codexGoalMoveDropped", f"thread={thread_id[:8]} reason=stale phase={phase or 'invalid'}")
         except Exception as exc:  # noqa: BLE001 - one record never stops the others
             log_exception("codexGoalMoveRecoverFail", exc, detail=thread_id[:8])
-    return len(rows)
+    return len(keys)
 
 
 def _begin_drain(client: _Client) -> None:
