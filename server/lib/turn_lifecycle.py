@@ -331,14 +331,17 @@ class TurnStateMachine:
                    detail: dict[str, Any] | None = None, *,
                    kind: str | None = None, force: bool = False,
                    ts: int | None = None, expect_trace: str | None = None,
-                   anchor: int | None = None, s_open: int | None = None) -> Transition:
+                   anchor: int | None = None, s_open: int | None = None,
+                   begun_at: int | None = None) -> Transition:
         """Apply ``event`` to ``agent_id`` and write its ``state_log`` row.
 
         ``kind`` is only read for :attr:`TurnEvent.RECORDED`, the compatibility
         event whose target the caller names. ``force`` skips the legality
         check (repairs); ``ts`` back-dates the row (historical receipts).
         ``expect_trace`` selects the conditional write (``anchor``, ``s_open``):
-        see :meth:`_conditional_transition`.
+        see :meth:`_conditional_transition`. ``begun_at`` is the caller's
+        causal baseline (a state_generation read when it decided to write);
+        a traced non-terminal write is refused if its trace ended after it.
         """
         if expect_trace is not None:
             return self._conditional_transition(agent_id, event, detail, expect_trace=expect_trace,
@@ -354,6 +357,8 @@ class TurnStateMachine:
             late_fence = int(conn().execute(
                 "SELECT COALESCE(MAX(state_id), 0) FROM state_log WHERE agent_id = ?",
                 (agent_id,)).fetchone()[0])
+            if begun_at is not None:
+                late_fence = min(late_fence, int(begun_at))
         if self._may_end_turn(event, kind) and not conn().in_transaction:
             # A terminal write's causal baseline, read before anything else of
             # this write (its state, stamp, runtime): a row after it is newer
@@ -879,10 +884,11 @@ MACHINE = TurnStateMachine()
 def transition(agent_id: str, event: str, detail: dict[str, Any] | None = None,
                *, kind: str | None = None, force: bool = False,
                ts: int | None = None, expect_trace: str | None = None,
-               anchor: int | None = None, s_open: int | None = None) -> Transition:
+               anchor: int | None = None, s_open: int | None = None,
+               begun_at: int | None = None) -> Transition:
     return MACHINE.transition(agent_id, event, detail, kind=kind, force=force,
                               ts=ts, expect_trace=expect_trace, anchor=anchor,
-                              s_open=s_open)
+                              s_open=s_open, begun_at=begun_at)
 
 
 def try_transition(agent_id: str, event: str,
@@ -896,6 +902,13 @@ def try_transition(agent_id: str, event: str,
         return transition(agent_id, event, detail, force=force)
     except IllegalTransition:
         return None
+
+
+def causal_baseline(agent_id: str) -> int:
+    """The agent's newest state row id, as a write's causal baseline (TP-N2).
+    Not state_generation(), which marks the call-open path."""
+    return int(conn().execute("SELECT COALESCE(MAX(state_id), 0) FROM state_log WHERE agent_id = ?",
+                              (agent_id,)).fetchone()[0])
 
 
 def state_generation(agent_id: str) -> int | None:

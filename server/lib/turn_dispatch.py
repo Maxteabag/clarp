@@ -2652,6 +2652,10 @@ class TurnDispatchService:
         if spec.queue_id:
             self._broadcast_queue_state(spec, started=True)
         try:
+            # The causal baseline of this write, read before the check below:
+            # a terminal row of this trace committed after it (the provider
+            # finished meanwhile, in another process) refuses the write (TP-N2).
+            begun_at = turn_lifecycle.causal_baseline(spec.agent_id)
             # A very fast backend may complete before spawn_turn returns. Do
             # not overwrite its terminal state with a late THINKING record.
             latest = agents_db.latest_state(spec.agent_id)
@@ -2660,17 +2664,25 @@ class TurnDispatchService:
                 if (detail.get("trace_id") == spec.trace_id
                         or agents_db.get_trace(spec.agent_id) != spec.trace_id):
                     return
-            turn_lifecycle.try_transition(
-                spec.agent_id,
-                TurnEvent.SPAWN_STARTED,
-                {
-                    "source": "pwa",
-                    "dispatch": spec.backend,
-                    "origin": spec.origin,
-                    "trace_id": spec.trace_id,
-                    "backend_session_id": spec.backend_session_id,
-                },
-            )
+            try:
+                turn_lifecycle.transition(
+                    spec.agent_id,
+                    TurnEvent.SPAWN_STARTED,
+                    {
+                        "source": "pwa",
+                        "dispatch": spec.backend,
+                        "origin": spec.origin,
+                        "trace_id": spec.trace_id,
+                        "backend_session_id": spec.backend_session_id,
+                    },
+                    begun_at=begun_at,
+                )
+            except turn_lifecycle.TransitionNotWritten:
+                # The turn already ended (or was stopped): no 'thinking'
+                # frame for it either, or clients would show it busy.
+                return
+            except turn_lifecycle.IllegalTransition:
+                pass                    # as try_transition: logged and counted
             if getattr(self.ctx, "stream", None) is not None:
                 events.broadcast(self.ctx.stream, events.agent_state(
                     session=spec.session,
