@@ -254,7 +254,11 @@ def test_streamer_broadcasts_for_tool_use_lines_too(tmp_path, monkeypatch):
                                                 backend_session_id="cs-tool")
     streamer.start()
     try:
-        _wait_for(lambda: streamer.pool.has(agent_id), timeout=2.0)
+        # As in the text-block test above: the pick-up wait is asserted, and both
+        # waits poll their condition with a deadline that outlasts a loaded
+        # machine's scheduling (G1 flake with 2 s).
+        assert _wait_for(lambda: streamer.pool.has(agent_id), timeout=15.0), \
+            "the streamer never picked the agent up"
         # Write ONLY a tool_use entry (no assistant text). The streamer
         # must still broadcast — the history pane should update so the
         # user sees the tool invocation appear.
@@ -264,7 +268,7 @@ def test_streamer_broadcasts_for_tool_use_lines_too(tmp_path, monkeypatch):
         ok = _wait_for(
             lambda: any(e.get("type") == SSEType.TRANSCRIPT_UPDATED
                           for e in fake_stream.events),
-            timeout=2.0)
+            timeout=15.0)
         assert ok, (
             "tool_use line should broadcast TRANSCRIPT_UPDATED even though "
             "it produces no TTS — the history pane needs to update"

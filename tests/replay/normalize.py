@@ -41,6 +41,17 @@ ISO = re.compile(r'^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2
 # Pairing codes and device tokens (device_pairing): random secrets in a fixed format.
 SECRET = re.compile(r'(?<![0-9A-Za-z])(clp|cld)_[A-Za-z0-9_-]{30,}')
 EPOCH_TEXT = re.compile(r'(?<![\d.])1[5-9]\d{8}(\.\d+)?(?![\d.])|(?<!\d)1[5-9]\d{11}(?!\d)')
+# A clip's file name starts with its creation time in ms: '<epoch ms>__<session>.mp3'
+# (and its '.mp3.json' sidecar). Only the clips this run created (files captured
+# under cache/audio/) are rewritten, and only as a whole value that is the name or
+# a path or URL ending in it; any other text, even one shaped like a clip, is content.
+CLIP_NAME = re.compile(r'^(.*/)?(1[5-9][0-9]{11})(__[A-Za-z0-9._-]+\.mp3)(\.json)?$')
+CLIP_FILE = re.compile(r'^cache/audio/(1[5-9][0-9]{11}__[A-Za-z0-9._-]+\.mp3)(?:\.json)?$')
+
+
+def generated_clips(files: list[dict]) -> set[str]:
+    """The clip names ('<epoch ms>__<session>.mp3') this run wrote under cache/audio/."""
+    return {m.group(1) for f in files for m in [CLIP_FILE.match(str(f.get('path') or ''))] if m}
 LOOPBACK = re.compile(r'127\.0\.0\.1(:|%3A)\d+')
 # A short generated tail after a word prefix, e.g. the goal turn's trace id 'goal-1c4f4f95';
 # applied only where ids are expected (id keys, paths, ID_COLUMNS), never to free text.
@@ -50,7 +61,7 @@ PREFIXED = re.compile(r'^([a-z][a-z0-9]{0,15}[-_])([0-9a-f]{12,64}|[0-9A-Za-z]{2
 # (review s0-harness-57d175ff finding 1): an epoch-range number or an ISO
 # timestamp under one of these keys becomes <time>; anywhere else it is content.
 CLOCK_KEYS = frozenset({
-    'admitted_at', 'at', 'exited_at', 'available_at', 'claimed_at', 'created_at', 'ended_at', 'expires_at', 'finished_at',
+    'admitted_at', 'at', 'broadcast_at', 'completed_at', 'exited_at', 'available_at', 'claimed_at', 'created_at', 'ended_at', 'expires_at', 'finished_at',
     'last_run_at', 'last_seen_at', 'used_at', 'done_ts', 'ended_at_ms', 'enqueued_at', 'last_activity',
     'last_lap_ms', 'last_turn_end', 'latest_state_ts', 'latest_ts', 'observed_at', 'opened_at',
     'received_at', 'server_now_ms', 'settled_at', 'since_ms', 'started_at', 'started_at_ms',
@@ -60,7 +71,7 @@ CLOCK_KEYS = frozenset({
 JSON_COLUMNS = frozenset({
     ('agents', 'mcp_servers'), ('janitor_attachments', 'config_json'),
     ('janitor_configs', 'execution_json'), ('janitor_configs', 'options_json'),
-    ('janitor_configs', 'scope_json'), ('janitor_runs', 'configuration_json'), ('janitor_trigger_definitions', 'defaults_json'),
+    ('janitor_configs', 'scope_json'), ('janitor_demand_results', 'result_json'), ('janitor_runs', 'configuration_json'), ('janitor_trigger_definitions', 'defaults_json'),
     ('messages', 'display_cells_json'), ('messages', 'tools_json'), ('messages', 'turn_json'),
     ('personas', 'voice_id'), ('settings', 'value'), ('state_log', 'detail'),
     ('vocab_runs', 'dropped_json'), ('vocab_runs', 'included_json'), ('voice_events', 'detail')})
@@ -182,6 +193,7 @@ class Normalizer:
         self.eids: dict[str, str] = {}
         self.eid_names: dict[str, str] = {}
         self.secrets: dict[str, str] = {}
+        self.clips: set[str] = set()  # generated_clips() of this capture
         self.in_stream = False  # event ids are SSE ids only inside the SSE channels
         self.json_here = False  # JSON_HTTP_KEYS are parsed only in HTTP bodies
 
@@ -201,6 +213,9 @@ class Normalizer:
     def paths_in(self, value: str) -> str:
         for path, name in self.paths:
             value = value.replace(path, name)
+        clip = CLIP_NAME.match(value)
+        if clip and clip.group(2) + clip.group(3) in self.clips:
+            value = (clip.group(1) or '') + '<clip-time>' + clip.group(3) + (clip.group(4) or '')
         return LOOPBACK.sub(lambda m: f'127.0.0.1{m.group(1)}<port>', value)
 
     def ids_in(self, value: str) -> str:
@@ -260,6 +275,7 @@ class Normalizer:
 
 def normalize(capture: dict, harness_root: str) -> dict:
     n = Normalizer({'<ROOT>': capture['root'], '<BUILD>': capture['build'], '<HARNESS>': harness_root})
+    n.clips = generated_clips(capture['files'])
     db = capture['db']
     db = {**db, 'tables': dict(db['tables'])}
     if STATE_TABLE in db['tables']:

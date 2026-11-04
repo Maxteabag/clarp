@@ -313,6 +313,7 @@ run, so a planted change can never silently plant nothing.
 | `header-only` | `Cache-Control: no-cache` instead of `no-store`, body unchanged | http `….headers.cache-control` changed |
 | `sse-envelope` | SSE frames lose their `id:` line, data unchanged | sse `….id` changed |
 | `sse-wire-id` | SSE frames carry a wire id one past their event id, data unchanged | sse `….id` changed |
+| `on-chunk-signature` | the TTS worker hands adapters a one-argument chunk callback (VP-01 candidate daaad27c); adapters swallow the TypeError | any difference in `voice-streamed-clip` (the live stream comes back empty) |
 
 Planned after the first full run (they need the observed data to pick
 anchors): a same-size file content change, a changed setting value, a
@@ -342,6 +343,7 @@ Synthetic turns only, all text invented here (`scenarios.py`). Target about
 | `janitor-terminal` | a full device on a janitor's `/terminal/`, plain GET (426 before any check) and as a WebSocket upgrade, which reaches the janitor check (HTTP-01b); the replay Host refuses the PTY, so passing every check ends without a response (status 0) | done; records today's behaviour |
 | `voice-cartesia-no-key` | a spoken reply routed to Cartesia with no key or voice, raw-pcm delivery, elevenlabs fallback (VP-02); own config | done; records today's behaviour |
 | `preempt-live-process` | a plain send preempts a busy claude agent while its old CLI is still alive (TP-01); `provider/claude-procs.jsonl` records start/sigterm/exit order | done; records today's behaviour |
+| `voice-streamed-clip` | a spoken reply (a `<speak>` block) through the real Cartesia adapter, whose transport `host.py` replaces for its own URL only with a paced synthetic MP3 stream (no network); chunked-file delivery; the clip's live stream joined mid-production (every chunk the adapter hands over through `on_chunk(index, bytes)`), then its file stream, the clip file and its row | done |
 | `goal-turn` | `POST /agent-goal`: the provider runs an unrequested goal turn and completes the goal | done |
 | `cli-prompt-and-sessions` | the build's own `clarp-admin sessions` and `prompt` against the replay Host (exit code, stdout, stderr in the `cli` channel) | done |
 | `stop-at-admission` | Stop between a turn's two thinking rows; **known bug TP-N1**, reported, not counted | done |

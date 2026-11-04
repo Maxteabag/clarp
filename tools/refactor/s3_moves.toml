@@ -51,52 +51,86 @@ module = "lib/routes/settings.py"
 class = "SettingsRoutes"
 members = [
     "_connection_server_info",
-    "_handle_application_activity",
     "_handle_automation_settings_get",
     "_handle_automation_settings_post",
     "_handle_avatar_settings_get",
     "_handle_avatar_settings_post",
-    "_handle_backend_auth",
-    "_handle_backend_auth_login",
-    "_handle_backend_auth_login_code",
-    "_handle_backend_auth_logout",
-    "_handle_desktop_presence",
     "_handle_diagnostics_health",
     "_handle_diagnostics_settings_get",
     "_handle_diagnostics_settings_post",
     "_handle_dirs",
     "_handle_favorite_paths",
-    "_handle_harness_provider_login",
-    "_handle_harness_provider_login_code",
-    "_handle_harness_provider_logout",
-    "_handle_harness_provider_models",
-    "_handle_harness_providers",
     "_handle_herald_settings_get",
     "_handle_herald_settings_post",
     "_handle_judgments_decisions_get",
     "_handle_judgments_settings_get",
     "_handle_judgments_settings_post",
     "_handle_launch_directories",
+    "_handle_past_sessions",
+    "_handle_personalities_settings_get",
+    "_handle_personalities_settings_post",
+    "_handle_relay_status",
+    "_handle_tool_explanation_settings_get",
+    "_handle_tool_explanation_settings_post",
+    "_handle_tool_explanations",
+    "_handle_tool_explanations_stats",
+]
+acknowledged_patches = [
+    {path = "tests/unit/test_startup_runtime_wait.py", name = "log_exception", reason = "patches server.log_exception to observe _recover_after_start, which stays in server.py; no settings route is exercised", evidence = "4 Nov 03:35, on the applied tree 2186b723 (s3_merge of this recipe into integration 32b11246, one commit per group), heavy-remote with a call tracer on lib/routes/settings.py (tests/s3_ack_trace.py plugin, all threads): the whole file tests/unit/test_startup_runtime_wait.py made 0 calls into lib/routes/settings.py, as did every other acknowledged file in the run; control in the same run (exit 0): tests/integration/test_settings_ops_http_characterization.py and test_settings_g0_http_characterization.py made 17 calls in 6 tests"},
+    {path = "tests/unit/test_server_helpers_characterization.py", name = "log_exception", reason = "patches server.log_exception to observe _spawn_voice_metrics, which stays in server.py; no settings route is exercised", evidence = "4 Nov 03:35, on the applied tree 2186b723 (s3_merge of this recipe into integration 32b11246, one commit per group), heavy-remote with a call tracer on lib/routes/settings.py (tests/s3_ack_trace.py plugin, all threads): the whole file tests/unit/test_server_helpers_characterization.py made 0 calls into lib/routes/settings.py, as did every other acknowledged file in the run; control in the same run (exit 0): tests/integration/test_settings_ops_http_characterization.py and test_settings_g0_http_characterization.py made 17 calls in 6 tests"},
+]
+
+[[group]]
+name = "providers"
+module = "lib/routes/providers.py"
+class = "ProviderRoutes"
+members = [
+    "_handle_application_activity",
+    "_handle_backend_auth",
+    "_handle_backend_auth_login",
+    "_handle_backend_auth_login_code",
+    "_handle_backend_auth_logout",
+    "_handle_desktop_presence",
+    "_handle_harness_provider_login",
+    "_handle_harness_provider_login_code",
+    "_handle_harness_provider_logout",
+    "_handle_harness_provider_models",
+    "_handle_harness_providers",
     "_handle_managed_skills",
     "_handle_managed_skills_update",
     "_handle_paired_device_revoke",
     "_handle_paired_devices",
     "_handle_pairing_exchange",
-    "_handle_past_sessions",
-    "_handle_personalities_settings_get",
-    "_handle_personalities_settings_post",
-    "_handle_relay_status",
     "_handle_server_update",
     "_handle_server_update_status",
-    "_handle_tool_explanation_settings_get",
-    "_handle_tool_explanation_settings_post",
-    "_handle_tool_explanations",
-    "_handle_tool_explanations_stats",
     "_handle_tts_providers_get",
     "_handle_tts_providers_post",
     "_harness_provider_call",
 ]
 acknowledged_patches = [
-    {path = "tests/unit/test_startup_runtime_wait.py", name = "log_exception", reason = "patches server.log_exception to observe _recover_after_start, which stays in server.py; no settings route is exercised", evidence = "4 Nov 02:05, on the applied tree eeeda1be (s3_merge of this recipe into integration c2075b06; tree 1a674fff, identical to the merge into 32b11246), heavy-remote with a call tracer on lib/routes/settings.py (tests/s3_ack_trace.py plugin, all threads): the whole file tests/unit/test_startup_runtime_wait.py made 0 calls into lib/routes/settings.py; control in the same run (exit 0): tests/integration/test_settings_g0_http_characterization.py and test_settings_ops_http_characterization.py made 37 calls in 16 tests"},
-    {path = "tests/unit/test_server_helpers_characterization.py", name = "log_exception", reason = "patches server.log_exception to observe _spawn_voice_metrics, which stays in server.py; no settings route is exercised", evidence = "4 Nov 02:05, on the applied tree eeeda1be (s3_merge of this recipe into integration c2075b06; tree 1a674fff, identical to the merge into 32b11246), heavy-remote with a call tracer on lib/routes/settings.py (tests/s3_ack_trace.py plugin, all threads): the whole file tests/unit/test_server_helpers_characterization.py made 0 calls into lib/routes/settings.py; control in the same run (exit 0): tests/integration/test_settings_g0_http_characterization.py and test_settings_ops_http_characterization.py made 37 calls in 16 tests"},
+    {path = "tests/unit/test_startup_runtime_wait.py", name = "log_exception", reason = "patches server.log_exception to observe _recover_after_start, which stays in server.py; no provider route is exercised", evidence = "4 Nov 03:35, on the applied tree 2186b723 (s3_merge of this recipe into integration 32b11246, one commit per group), heavy-remote with a call tracer on lib/routes/providers.py (tests/s3_ack_trace.py plugin, all threads): the whole file tests/unit/test_startup_runtime_wait.py made 0 calls into lib/routes/providers.py, as did every other acknowledged file in the run; control in the same run (exit 0): tests/integration/test_settings_g0_http_characterization.py made 20 calls in 10 tests"},
+    {path = "tests/unit/test_server_helpers_characterization.py", name = "log_exception", reason = "patches server.log_exception to observe _spawn_voice_metrics, which stays in server.py; no provider route is exercised", evidence = "4 Nov 03:35, on the applied tree 2186b723 (s3_merge of this recipe into integration 32b11246, one commit per group), heavy-remote with a call tracer on lib/routes/providers.py (tests/s3_ack_trace.py plugin, all threads): the whole file tests/unit/test_server_helpers_characterization.py made 0 calls into lib/routes/providers.py, as did every other acknowledged file in the run; control in the same run (exit 0): tests/integration/test_settings_g0_http_characterization.py made 20 calls in 10 tests"},
+]
+
+[[group]]
+name = "ops"
+module = "lib/routes/ops.py"
+class = "OpsRoutes"
+members = [
+    "_handle_clog",
+    "_handle_crash",
+    "_handle_focus",
+    "_handle_get_location",
+    "_handle_register_device",
+    "_handle_remote_action",
+    "_handle_remote_action_get",
+    "_handle_request_calendar",
+    "_handle_request_location",
+    "_handle_set_location",
+]
+acknowledged_patches = [
+    {path = "tests/unit/test_startup_runtime_wait.py", name = "log_exception", reason = "patches server.log_exception to observe _recover_after_start, which stays in server.py; no ops route is exercised", evidence = "4 Nov 03:35, on the applied tree 2186b723 (s3_merge of this recipe into integration 32b11246, one commit per group), heavy-remote with a call tracer on lib/routes/ops.py (tests/s3_ack_trace.py plugin, all threads): the whole file tests/unit/test_startup_runtime_wait.py made 0 calls into lib/routes/ops.py, as did every other acknowledged file in the run; control in the same run (exit 0): tests/integration/test_ops_g0_http_characterization.py and test_clog_http_characterization.py made 13 calls in 12 tests"},
+    {path = "tests/unit/test_server_helpers_characterization.py", name = "log_exception", reason = "patches server.log_exception to observe _spawn_voice_metrics, which stays in server.py; no ops route is exercised", evidence = "4 Nov 03:35, on the applied tree 2186b723 (s3_merge of this recipe into integration 32b11246, one commit per group), heavy-remote with a call tracer on lib/routes/ops.py (tests/s3_ack_trace.py plugin, all threads): the whole file tests/unit/test_server_helpers_characterization.py made 0 calls into lib/routes/ops.py, as did every other acknowledged file in the run; control in the same run (exit 0): tests/integration/test_ops_g0_http_characterization.py and test_clog_http_characterization.py made 13 calls in 12 tests"},
+    {path = "tests/integration/test_media_range.py", name = "log", reason = "patches server.log to observe fileShortRead from the /media/ range stream, which stays in server.py; no ops route is exercised", evidence = "4 Nov 03:35, on the applied tree 2186b723 (s3_merge of this recipe into integration 32b11246, one commit per group), heavy-remote with a call tracer on lib/routes/ops.py (tests/s3_ack_trace.py plugin, all threads): the whole file tests/integration/test_media_range.py made 0 calls into lib/routes/ops.py, as did every other acknowledged file in the run; control in the same run (exit 0): tests/integration/test_ops_g0_http_characterization.py and test_clog_http_characterization.py made 13 calls in 12 tests"},
+    {path = "tests/unit/test_delivery_admission_v1.py", name = "log", reason = "patches server.log to observe the delivery observation bracket, which stays in server.py; no ops route is exercised", evidence = "4 Nov 03:35, on the applied tree 2186b723 (s3_merge of this recipe into integration 32b11246, one commit per group), heavy-remote with a call tracer on lib/routes/ops.py (tests/s3_ack_trace.py plugin, all threads): the whole file tests/unit/test_delivery_admission_v1.py made 0 calls into lib/routes/ops.py, as did every other acknowledged file in the run; control in the same run (exit 0): tests/integration/test_ops_g0_http_characterization.py and test_clog_http_characterization.py made 13 calls in 12 tests"},
 ]
