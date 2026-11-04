@@ -619,6 +619,10 @@ def test_a_send_waiting_for_a_preempted_process_survives_a_restart(tmp_path, mon
     while len(slow.spawned) < 2 and time.monotonic() < deadline:
         time.sleep(0.01)
     assert [call["trace_id"] for _b, call in slow.spawned] == ["tA", "tB"]
+    # The park row clears only after the launch returns (a failed launch keeps
+    # it), so it may still be there the moment the spawn is recorded.
+    while ("tB", "parked") in _open_rows(agent_id) and time.monotonic() < deadline:
+        time.sleep(0.01)
     assert ("tB", "parked") not in _open_rows(agent_id), "a launched send keeps no park row"
 
 
@@ -651,6 +655,9 @@ def test_a_follow_up_behind_a_preempted_process_is_durable_too(tmp_path, monkeyp
     while len(slow.spawned) < 2 and time.monotonic() < deadline:
         time.sleep(0.01)
     assert [call["trace_id"] for _b, call in slow.spawned] == ["tA", "tB"]
+    # tB's park row clears only after its launch returns (see above).
+    while _durable_order(agent_id) != ["tC"] and time.monotonic() < deadline:
+        time.sleep(0.01)
     assert _durable_order(agent_id) == ["tC"]
 
 
