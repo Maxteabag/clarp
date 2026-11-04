@@ -162,7 +162,7 @@ class AccountFailover:
                                  if key[0] != attempt.agent_id or key[1] == attempt.trace_id}
             self.attempts[attempt.agent_id] = attempt
             self.awaiting.discard(attempt.agent_id)
-            if self.recovering:
+            if self.recovering and not self._expired(attempt):
                 attempt.state["account_recovery"] = True
                 attempt.pause()
                 attempt.spawned.set()
@@ -198,7 +198,7 @@ class AccountFailover:
             self.parked_since = self.now()
             self.command = tuple(command)
             for attempt in self.attempts.values():
-                if attempt.owned():
+                if attempt.owned() and not self._expired(attempt):
                     attempt.state["account_recovery"] = True
                     attempt.pause()
         self.schedule(0.0, self.recover)
@@ -209,7 +209,12 @@ class AccountFailover:
         # replacement takes ownership away and therefore cancels recovery.
         self.attempts = {key: value for key, value in self.attempts.items()
                          if value.owned()}
-        return list(self.attempts.values())
+        # Work whose park expired runs and fails visibly; no recovery,
+        # whoever started it, parks or holds it again (BACKENDS-05).
+        return [value for value in self.attempts.values() if not self._expired(value)]
+
+    def _expired(self, attempt: Attempt) -> bool:
+        return (attempt.agent_id, attempt.trace_id) in self.park_expired
 
     def _plan(self) -> FailoverPlan:
         return FailoverPlan(parked_since=self.parked_since, next_check=self.next_check,
