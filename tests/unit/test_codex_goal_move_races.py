@@ -1,4 +1,4 @@
-# Reviewer A's probes on 9cb75a05 (WIP be7b998b, extends 8f3638fa), unchanged, as the stage-2 round-4 regression.
+# Reviewer A's probes on c1763727 (WIP a0e6a4b0, extends be7b998b), unchanged, as the stage-2 round-5 regression.
 """Moving a goal must preserve user pause intent and recover failed activation."""
 import threading
 import pytest
@@ -158,3 +158,32 @@ def test_a_goal_admitted_after_the_last_drain_snapshot_is_not_killed(fake, tmp_p
     assert not worker.is_alive()
     assert all(isinstance(error, RuntimeError) for error in errors), errors
     assert not cut_running, 'a goal admitted after the quiet snapshot was interrupted by drain shutdown'
+
+
+def test_a_credential_switch_does_not_kill_an_unadopted_native_continuation(fake, tmp_path, monkeypatch):
+    from tests.unit.test_codex_generations import _agent, _turn
+    monkeypatch.setenv('CLARP_QA_GOAL_TURN_HOLD', '3')
+    agent, thread, _ = _leftover(fake, tmp_path, monkeypatch, 'refresh-native-start')
+    assert _wait(lambda: not cas.active_handles(agent))
+    client = cas._client(agent, 'refresh-native-start')
+    delivered, release = threading.Event(), threading.Event()
+    original = client._notification
+    def notification(method, params):
+        if method == 'turn/started' and params.get('threadId') == thread:
+            delivered.set()
+            assert release.wait(8)
+        return original(method, params)
+    monkeypatch.setattr(client, '_notification', notification)
+    before = len(_goal_turns(fake, thread))
+    try:
+        cas.goal(agent, 'resume')
+        assert delivered.wait(5)
+        assert _wait(lambda: len(_goal_turns(fake, thread)) == before + 1)
+        assert not cas.active_handles(agent), 'control: native start is still in delivery'
+        (fake / 'auth.json').write_text('account-two')
+        nxt = _agent(tmp_path, 'switch-next')
+        done, outcome, _ = _turn(tmp_path, nxt, 'switch-next', 'new credential turn')
+        assert done.wait(5) and outcome == ['completed']
+        assert client.proc.poll() is None, 'credential refresh called an executing native goal idle and killed its process'
+    finally:
+        release.set()
