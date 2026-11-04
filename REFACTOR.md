@@ -60,6 +60,11 @@ the hot spots; every high finding fixed or explicitly accepted.
    both directions); HTTP, SSE and WebSocket routes and payloads; CLI commands
    and their outputs; environment variables and file paths; hook and skill
    interfaces. **Out of scope:** stable message ids, Oracle engine convergence.
+   **Clients (Peter, 4 Nov):** the iOS app and the Rust desktop client are the clients
+   that matter; the PWA (web version) is discarded for now. Do no PWA-only fixes or
+   checks, and do not remove PWA routes or assets without a separate decision. A
+   behaviour change's client check covers iOS and the Rust desktop (its code compiles
+   only in GitHub Actions: never run cargo on Peter's machines).
 5. **No test suites, coverage, browsers or test servers on laptopstudio** (Peter's
    standing order of 2026-10-12; this machine runs his live Host). Locally, run at
    most one test file or node id with `-n 0` through
