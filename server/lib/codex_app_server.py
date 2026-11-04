@@ -617,6 +617,8 @@ class _Client:
         each idle thread is unsubscribed, a running turn is never interrupted
         and its thread follows at turn/completed. While a codex subagent turn
         runs here, nothing moves. Exits once nothing is left."""
+        if getattr(self, "exiting", False) or _DRAINING.get(id(self)) is not self:
+            return
         if self.foreign_turns or self.unsubscribe_unsupported:
             self._exit_if_drained()
             return
@@ -701,14 +703,22 @@ class _Client:
 
     def _exit_if_drained(self, *, backstop: bool = False) -> None:
         with _LOCK:
-            if _DRAINING.get(id(self)) is not self or _busy(self) or self.foreign_turns:
+            if (_DRAINING.get(id(self)) is not self or getattr(self, "exiting", False)
+                    or _busy(self) or self.foreign_turns):
                 return
             if self._loaded_threads and not (backstop or self.unsubscribe_unsupported):
                 return
-            del _DRAINING[id(self)]
+            # It stays in _DRAINING until the process has exited: its threads'
+            # holds (and their writer locks) end only then.
+            self.exiting = True
         log("codexGenerationExited", f"gen={self.generation} backstop={backstop} "
                                      f"loaded={len(self._loaded_threads)}")
-        self.shutdown()
+        try:
+            self.shutdown()
+        finally:
+            with _LOCK:
+                if _DRAINING.get(id(self)) is self and self.proc.poll() is not None:
+                    del _DRAINING[id(self)]
 
     def _detached_execution(self, params: dict) -> bool:
         detached = getattr(self, "detached_executions", None)
