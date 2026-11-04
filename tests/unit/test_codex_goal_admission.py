@@ -1,4 +1,4 @@
-# Reviewer A's probe on 0dabadfb (WIP f0d6105b), adapted (see below) as the round-9 regression.
+# Reviewer A's probe (WIP 61b3f873, supersedes f0d6105b), unchanged.
 """Coarse goal-call admission shares the retirement fence for every action."""
 import threading
 
@@ -8,13 +8,9 @@ from lib import agent_goals
 
 
 def test_a_goal_call_picked_before_retirement_cannot_enter_after_its_mark(tmp_path, monkeypatch):
-    client, agent = _loaded_goal(tmp_path, monkeypatch, agent_goals.ACTIVE)
+    client, agent = _loaded_goal(tmp_path, monkeypatch, agent_goals.PAUSED)
     monkeypatch.setattr(cas, '_auth_fingerprint', lambda: b'old')
-    # Round 9 adaptation (disclosed): the user-paused state is set in the
-    # mirror directly; a goal() pause's own answer end now re-triggers the
-    # recycle (round 8), which would retire the client before this probe.
-    agent_goals.upsert(agent['agent_id'], session=agent['session'], backend='codex',
-        goal=agent_goals.from_codex({'objective': 'synthetic', 'status': 'paused'}))
+    client.request = lambda *_a, **_k: {'goal': {'objective': 'synthetic', 'status': 'paused'}}
     looked_up = threading.Event()
     begin = threading.Event()
     request_or_done = threading.Event()
