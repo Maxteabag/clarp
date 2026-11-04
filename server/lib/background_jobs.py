@@ -11,6 +11,7 @@ import signal
 import stat
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from typing import Any, Callable
@@ -1052,6 +1053,32 @@ def run_terminal_generation_cleanup(
         raise
 
 
+# A suspend or a forward clock step ages every heartbeat at once: the wall
+# clock moves while the monotonic clock (which stops in a suspend) does not.
+# A worker whose PID and start token still verify then gets one full timeout
+# from the reconcile that saw the jump before it counts as wedged (AUT-03).
+# This process's start counts as such a moment: it cannot see a jump that
+# happened before it ran, so a worker it adopts gets one timeout too.
+_CLOCK_JUMP_MS = 5_000
+_clock: dict[str, int | None] = {"offset": None, "jump_at": int(time.time() * 1000)}
+_clock_lock = threading.Lock()
+
+
+def _wall_minus_monotonic_ms() -> int:
+    return (time.time_ns() - time.monotonic_ns()) // 1_000_000
+
+
+def _clock_jump_at(now: int) -> int:
+    """`now` of the last reconcile that saw the wall clock jump ahead."""
+    offset = _wall_minus_monotonic_ms()
+    with _clock_lock:
+        last = _clock["offset"]
+        _clock["offset"] = offset
+        if last is not None and offset - last > _CLOCK_JUMP_MS:
+            _clock["jump_at"] = now
+        return int(_clock["jump_at"] or 0)
+
+
 def reconcile_stale(
     *, job_id: str | None = None, now_ms: int | None = None,
     process_probe: Callable[[int, str], bool] | None = None,
@@ -1076,6 +1103,7 @@ def reconcile_stale(
         from . import config
         thresholds = stale_work_policy.from_config(config.load())
     stale_ms = max(0, int(thresholds.job_stale_after_ms))
+    jump_at = _clock_jump_at(now)
     params: list[Any] = [now, stale_ms, now, stale_ms]
     job_clause = ""
     if job_id:
@@ -1113,6 +1141,10 @@ def reconcile_stale(
         pid = int(row["worker_pid"] or 0)
         token = str(row["worker_start_token"] or "")
         alive = bool(pid and token and probe(pid, token))
+        if alive and expired and now - max(
+                int(row["heartbeat_at"] or row["updated_at"]), jump_at) <= int(
+                row["heartbeat_timeout_ms"]):
+            continue  # its heartbeat aged across a suspend or clock jump
         if not expired and not (pid and token):
             if str(row["owner_kind"] or "agent") != "agent":
                 continue
