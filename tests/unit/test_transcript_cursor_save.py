@@ -11,13 +11,14 @@ from lib.transcript_watcher import TranscriptWatcher
 
 
 class _LockedOnce:
-    """db.conn() whose cursor_positions write fails the given number of times."""
+    """db.conn() whose cursor_positions WRITE fails the given number of times
+    (reads pass, so a slow verification read cannot hit the injected lock)."""
 
     def __init__(self, real, failures=1):
         self._real, self.failures = real, failures
 
     def execute(self, sql, *args):
-        if "cursor_positions" in sql and self.failures > 0:
+        if "INSERT INTO cursor_positions" in sql and self.failures > 0:
             self.failures -= 1
             raise sqlite3.OperationalError("database is locked")
         return self._real.execute(sql, *args)
@@ -92,9 +93,12 @@ def test_an_idle_transcript_catches_up_through_the_dispatcher_retry(tmp_path, mo
                           persist_offset=True)
     pool.add("agent", w)
     dispatcher = transcript_watcher.InotifyDispatcher(pool)
+    # Registered before start: no registration wake reaches the loop, so only
+    # the bounded retry wake can save the cursor (a dispatcher without it
+    # sleeps until the next write, which never comes here).
+    dispatcher.watch("agent", path)
     dispatcher.start()
     try:
-        dispatcher.watch("agent", path)
         deadline = time.monotonic() + 10
         while _persisted("sess-3") != path.stat().st_size and time.monotonic() < deadline:
             time.sleep(0.05)
