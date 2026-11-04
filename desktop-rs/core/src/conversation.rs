@@ -329,6 +329,12 @@ impl Conversation {
     }
 
     pub fn mark_delivery_failed(&mut self, client_message_id: &str) {
+        self.mark_delivery_failed_because(client_message_id, "");
+    }
+
+    /// A failed send with the Host's reason, its first line, shown on the
+    /// bubble (empty: none, as for a lost connection).
+    pub fn mark_delivery_failed_because(&mut self, client_message_id: &str, reason: &str) {
         let Some(row) = self.index_of(&format!("u-{client_message_id}")) else { return };
         if !self.messages[row].pending {
             return;
@@ -336,6 +342,7 @@ impl Conversation {
         let mut message = self.messages[row].clone();
         message.delivery_failed = true;
         message.pending = false;
+        message.delivery_error = reason.lines().next().unwrap_or_default().trim().to_owned();
         self.update(row, message, vec![Role::Pending, Role::DeliveryFailed]);
     }
 
@@ -350,6 +357,7 @@ impl Conversation {
         let mut message = self.messages[row].clone();
         message.pending = false;
         message.delivery_failed = false;
+        message.delivery_error.clear();
         self.update(row, message, vec![Role::Pending, Role::DeliveryFailed]);
         self.emit(Signal::DeliveryConfirmed(client_message_id.to_owned()));
     }
@@ -362,6 +370,7 @@ impl Conversation {
         let client_id = message_id.strip_prefix("u-")?.to_owned();
         let mut message = self.messages[row].clone();
         message.delivery_failed = false;
+        message.delivery_error.clear();
         message.pending = true;
         let text = message.text.clone();
         self.update(row, message, vec![Role::Pending, Role::DeliveryFailed]);
@@ -541,6 +550,7 @@ impl Conversation {
                 let local = optimistic.remove(at);
                 message.pending = local.pending;
                 message.delivery_failed = local.delivery_failed;
+                message.delivery_error = local.delivery_error;
             }
         }
         rows.extend(optimistic);
@@ -566,6 +576,7 @@ impl Conversation {
                 let mut incoming = incoming;
                 incoming.pending = previous.pending;
                 incoming.delivery_failed = previous.delivery_failed || incoming.delivery_failed;
+                incoming.delivery_error = previous.delivery_error.clone();
                 let roles = changed_roles(previous, &incoming);
                 self.update(existing, incoming, roles);
                 continue;
@@ -750,7 +761,8 @@ fn changed_roles(previous: &Message, incoming: &Message) -> Vec<Role> {
     check(previous.reply_to_session != incoming.reply_to_session, Role::ReplyToSession);
     check(previous.delivery != incoming.delivery, Role::Delivery);
     check(previous.pending != incoming.pending, Role::Pending);
-    check(previous.delivery_failed != incoming.delivery_failed, Role::DeliveryFailed);
+    check(previous.delivery_failed != incoming.delivery_failed
+        || previous.delivery_error != incoming.delivery_error, Role::DeliveryFailed);
     check(previous.activity != incoming.activity, Role::Activity);
     check(previous.tools != incoming.tools, Role::Tools);
     check(previous.display_cells != incoming.display_cells, Role::DisplayCells);
