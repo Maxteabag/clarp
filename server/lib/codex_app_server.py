@@ -1774,7 +1774,11 @@ def goal(agent_id: str, action: str, *, objective: str = "", stream=None) -> dic
         with _LOCK:
             # During a move the thread is still open in the draining
             # generation: act there, never open it twice (BACKENDS-06b).
-            client = _moving_owner(thread_id) or _client(agent_id, agent["session"], stream=stream)
+            # _client() first: it may itself turn the current process into a
+            # draining generation (a credential change), so the owner is
+            # resolved after it.
+            current = _client(agent_id, agent["session"], stream=stream)
+            client = _moving_owner(thread_id) or current
         if action != "get" and thread_id:
             # The user's own word on the goal ends a move's claim and
             # replaces a pending Stop-pause.
