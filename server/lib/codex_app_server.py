@@ -16,6 +16,7 @@ import signal
 import subprocess
 import sys
 import threading
+import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -340,6 +341,8 @@ class _Client:
         return self.active
 
     def _notification(self, method: str, params: dict) -> None:
+        if self._suppressed(method, params):
+            return
         active = self._pick_active(params)
         if method == "account/rateLimits/updated":
             self.rate_limits = params
@@ -511,6 +514,10 @@ class _Client:
             inflight[thread_id] -= 1
             if not inflight[thread_id]:
                 del inflight[thread_id]
+        if getattr(self, "detached_agents", None):
+            # An outstanding answer may be all that held a stuck process.
+            threading.Thread(target=self.recycle_if_quiet, daemon=True,
+                             name="codex-recycle").start()
 
     def _goal_activations(self) -> dict[str, int]:
         """Threads with a goal request whose answer is outstanding, and how
@@ -654,6 +661,56 @@ class _Client:
                 result = self.request("thread/goal/set", params)
         return result
 
+    def _suppressed(self, method: str, params: dict) -> bool:
+        """A continuation codex starts while a stopped goal is being paused
+        after a resume is the user's Stop being undone: it is interrupted at
+        turn/started and nothing of it is taken for a Clarp turn."""
+        turn = params.get("turn") if isinstance(params.get("turn"), dict) else {}
+        turn_id = str(turn.get("id") or params.get("turnId") or "")
+        dropped = getattr(self, "suppressed_turns", set())
+        if turn_id and turn_id in dropped:
+            return True
+        thread_id = str(params.get("threadId") or turn.get("threadId") or "")
+        if method != "turn/started" or thread_id not in getattr(self, "pausing_stopped", set()):
+            return False
+        self.suppressed_turns = dropped | {turn_id}
+        log("codexStoppedGoalContinuationInterrupted", f"thread={thread_id[:8]} turn={turn_id[:8]}")
+        threading.Thread(target=self._interrupt_quietly, args=(thread_id, turn_id),
+                         daemon=True, name="codex-stop-continuation").start()
+        return True
+
+    def _interrupt_quietly(self, thread_id: str, turn_id: str) -> None:
+        try:
+            self.request("turn/interrupt", {"threadId": thread_id, "turnId": turn_id}, timeout=10)
+        except Exception as exc:  # noqa: BLE001
+            log_exception("codexStoppedGoalInterruptFail", exc, detail=thread_id[:8])
+
+    def _resume_stopped_safely(self, thread_id: str, resume) -> dict:
+        """Resume ``thread_id``; if its Stop-pause never applied (the stuck
+        process did not answer it), pause the goal right after the resume,
+        before anything else runs, and interrupt any continuation codex
+        starts first (BACKENDS-07b, lead round 8)."""
+        if not _stop_pause_get(thread_id):
+            return resume()
+        self.pausing_stopped = getattr(self, "pausing_stopped", set()) | {thread_id}
+        try:
+            result = resume()
+            self._goal_answer_begin(thread_id)
+            try:
+                answer = self.request("thread/goal/set", {"threadId": thread_id, "status": "paused"},
+                                      timeout=10)
+                goal = answer.get("goal") if isinstance(answer, dict) else None
+                self._mirror_goal(thread_id, goal if isinstance(goal, dict) else None)
+                _stop_pause_forget(thread_id)
+                log("codexStoppedGoalPausedOnResume", f"thread={thread_id[:8]}")
+            except Exception as exc:  # noqa: BLE001 - kept for the next resume
+                log_exception("codexStoppedGoalPauseFail", exc, detail=thread_id[:8])
+            finally:
+                self._goal_answer_end(thread_id)
+            return result
+        finally:
+            self.pausing_stopped = getattr(self, "pausing_stopped", set()) - {thread_id}
+
     def _ensure_loaded(self, agent: dict, thread_id: str) -> None:
         """A goal call needs the thread open in this process; a live turn or an
         earlier resume already did that."""
@@ -664,14 +721,14 @@ class _Client:
                 self._loaded_threads.add(thread_id)
                 return
         cwd = pathlib.Path(os.path.expanduser(str(agent.get("cwd") or "~"))).resolve()
-        self.request("thread/resume", {
+        self._resume_stopped_safely(thread_id, lambda: self.request("thread/resume", {
             "threadId": thread_id, "cwd": str(cwd),
             "approvalPolicy": "never", "sandbox": "danger-full-access",
             "developerInstructions": persona_identity_instruction(
                 str(agent.get("persona") or ""), agent["session"]),
             **({"model": agent["model"]} if agent.get("model") else {}),
             **_thread_identity(agent["session"]),
-        })
+        }))
         self._loaded_threads.add(thread_id)
 
     def start(self, *, text: str, cwd: pathlib.Path, backend_session_id: str,
@@ -697,13 +754,14 @@ class _Client:
         self._actives[owner] = active
         try:
             if backend_session_id and not is_new_session:
-                result = self.request("thread/resume", {
-                    "threadId": backend_session_id, "cwd": str(cwd),
-                    "approvalPolicy": "never", "sandbox": "danger-full-access",
-                    "developerInstructions": developer_instructions,
-                    **({"model": model} if model else {}),
-                    **_thread_identity(session),
-                })
+                result = self._resume_stopped_safely(backend_session_id, lambda: self.request(
+                    "thread/resume", {
+                        "threadId": backend_session_id, "cwd": str(cwd),
+                        "approvalPolicy": "never", "sandbox": "danger-full-access",
+                        "developerInstructions": developer_instructions,
+                        **({"model": model} if model else {}),
+                        **_thread_identity(session),
+                    }))
             else:
                 result = self.request("thread/start", {
                     "cwd": str(cwd), "approvalPolicy": "never",
@@ -799,8 +857,14 @@ class _Client:
                 return
             self._goal_answer_begin(active.thread_id)
             try:
-                result = self.request("thread/goal/set", {
-                    "threadId": active.thread_id, "status": "paused"}, timeout=10)
+                try:
+                    result = self.request("thread/goal/set", {
+                        "threadId": active.thread_id, "status": "paused"}, timeout=10)
+                except Exception:
+                    # A stuck process may never apply it: the next resume of
+                    # this thread pauses the goal first (Stop means stop).
+                    _stop_pause_put(active.thread_id)
+                    raise
                 goal = result.get("goal") if isinstance(result, dict) else None
                 self._mirror_goal(active.thread_id, goal if isinstance(goal, dict) else None)
             finally:
@@ -818,8 +882,10 @@ class _Client:
         with _LOCK:
             with self._lock:
                 with self._goal_state_lock:
-                    unknown = (bool(self._goal_activations()) or bool(
-                        self._goal_unknown() - set(getattr(self, "detached_executions", ()))))
+                    detached = set(getattr(self, "detached_executions", ()))
+                    # Other agents' threads only: the stopped agent's own
+                    # Stop-pause may never be answered by a stuck process.
+                    unknown = bool((set(self._goal_activations()) | self._goal_unknown()) - detached)
                 if (not getattr(self, "detached_agents", None)
                         or getattr(self, "recycled", False) or _busy(self) or unknown):
                     return
@@ -864,9 +930,9 @@ class _Client:
         is not known to be complete or paused. Unknown means yes."""
         detached = getattr(self, "detached_executions", set())
         with self._goal_state_lock:
-            # Any outstanding goal answer, on any thread, holds the process
-            # (each request is bounded by its timeout).
-            if self._goal_activations() or (self._goal_unknown() - set(detached)):
+            # Any outstanding goal answer on another agent's thread holds the
+            # process (each request is bounded by its timeout).
+            if (set(self._goal_activations()) | self._goal_unknown()) - set(detached):
                 return True
         try:
             for thread_id in set(getattr(self, "_loaded_threads", ())) - set(detached):
@@ -950,6 +1016,33 @@ def _auth_fingerprint() -> bytes:
         return hashlib.sha256((backend_usage._codex_home() / "auth.json").read_bytes()).digest()
     except OSError:
         return b""
+
+
+_STOP_PAUSE_PREFIX = "codex.stop_pause."
+
+
+def _stop_pause_get(thread_id: str) -> int | None:
+    """A Stop-pause the app-server never answered for ``thread_id`` (when it
+    was recorded), in the settings table like other small markers."""
+    if not thread_id:
+        return None
+    row = agents_db.conn().execute("SELECT updated_at FROM settings WHERE key = ?",
+                                   (_STOP_PAUSE_PREFIX + thread_id,)).fetchone()
+    return int(row["updated_at"]) if row else None
+
+
+def _stop_pause_put(thread_id: str) -> None:
+    if thread_id:
+        agents_db.conn().execute(
+            "INSERT INTO settings (key, value, updated_at) VALUES (?, '1', ?)"
+            " ON CONFLICT(key) DO UPDATE SET updated_at = excluded.updated_at",
+            (_STOP_PAUSE_PREFIX + thread_id, int(time.time() * 1000)))
+
+
+def _stop_pause_forget(thread_id: str) -> None:
+    if thread_id:
+        agents_db.conn().execute("DELETE FROM settings WHERE key = ?",
+                                 (_STOP_PAUSE_PREFIX + thread_id,))
 
 
 def _busy(client) -> bool:
@@ -1174,6 +1267,9 @@ def goal(agent_id: str, action: str, *, objective: str = "", stream=None) -> dic
         raise ValueError("no such agent")
     with _LOCK:
         client = _client(agent_id, agent["session"], stream=stream)
+    if action != "get":
+        # The user's own word on the goal replaces a pending Stop-pause.
+        _stop_pause_forget(agents_db.live_backend_session(agent_id))
     return client.goal(agent, action, objective)
 
 
