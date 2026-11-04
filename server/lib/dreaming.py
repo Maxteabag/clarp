@@ -466,6 +466,10 @@ def active_runs() -> list[dict[str, Any]]:
     return [dict(r) for r in rows]
 
 
+class ActiveDreamRunExists(ValueError):
+    """The agent already has an active dream run (AUT-11)."""
+
+
 def create_dream_run(agent: dict, *, local_date: str, timezone_name: str,
                      timezone_source: str,
                      settings: DreamingSettings | None = None,
@@ -486,14 +490,18 @@ def create_dream_run(agent: dict, *, local_date: str, timezone_name: str,
         dose = dream_seeds.DOSE_FULL
     material = _gather_seed_material(agent, strategy)
     first_stage = "roleplay_day" if strategy == dream_seeds.ROLEPLAY else "seed"
-    db.conn().execute(
+    # One active run per agent, decided by this one statement: a check before
+    # it (a manual start, the nightly loop) can be overtaken by the other.
+    inserted = db.conn().execute(
         """INSERT INTO dream_runs (
                run_id, agent_id, session, local_date, timezone, timezone_source,
                status, stage, min_directions, planned_directions,
                planned_rounds, target_tokens, target_minutes, started_at,
                updated_at, seed_strategy, context_dose, seed_material
-           ) VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?,
-                     ?, ?, ?)""",
+           ) SELECT ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?
+              WHERE NOT EXISTS (SELECT 1 FROM dream_runs
+                                 WHERE agent_id = ? AND status = 'active')""",
         (
             run_id,
             agent["agent_id"],
@@ -512,8 +520,12 @@ def create_dream_run(agent: dict, *, local_date: str, timezone_name: str,
             strategy,
             dose,
             material,
+            agent["agent_id"],
         ),
-    )
+    ).rowcount
+    if not inserted:
+        raise ActiveDreamRunExists(
+            f"{agent.get('session')} already has an active dream run")
     _insert_round(run_id=run_id, stage=first_stage, round_index=1,
                   target_tokens=stage_tokens["seed"])
     return get_run(run_id) or {}
@@ -674,13 +686,37 @@ def next_round_for_run(run: dict[str, Any]) -> dict[str, Any] | None:
     return dict(queued) if queued else None
 
 
+def claim_round(round_id: str) -> bool:
+    """Take a queued round for sending (AUT-11): only one caller, in any
+    process, moves it from queued, so only that one sends it. A crash after
+    the claim is recovered like any stale sent round."""
+    now = db.now_ms()
+    return bool(db.conn().execute(
+        """UPDATE dream_rounds
+              SET status = 'sent', sent_at = ?, updated_at = ?
+            WHERE round_id = ? AND status = 'queued'""",
+        (now, now, round_id),
+    ).rowcount)
+
+
+def release_round(round_id: str) -> None:
+    """A claimed round whose send failed goes back to queued for a later tick."""
+    db.conn().execute(
+        """UPDATE dream_rounds
+              SET status = 'queued', sent_at = NULL, updated_at = ?
+            WHERE round_id = ? AND status = 'sent'""",
+        (db.now_ms(), round_id),
+    )
+
+
 def mark_round_sent(round_id: str) -> None:
     now = db.now_ms()
+    # A round that was abandoned or completed meanwhile is left as it is.
     db.conn().execute(
         """UPDATE dream_rounds
               SET status = 'sent', sent_at = COALESCE(sent_at, ?),
                   updated_at = ?
-            WHERE round_id = ?""",
+            WHERE round_id = ? AND status IN ('queued', 'sent')""",
         (now, now, round_id),
     )
     row = db.conn().execute(
@@ -2169,14 +2205,18 @@ class DreamingScheduler:
             sent += self._advance_run(run)
         for agent in pending_dreaming_agents(now=self.now()):
             strategy, dose = self.recipe_chooser()
-            run = create_dream_run(
-                agent,
-                local_date=agent["dreaming_local_date"],
-                timezone_name=agent["dreaming_timezone"],
-                timezone_source=agent["dreaming_timezone_source"],
-                seed_strategy=strategy,
-                context_dose=dose,
-            )
+            try:
+                run = create_dream_run(
+                    agent,
+                    local_date=agent["dreaming_local_date"],
+                    timezone_name=agent["dreaming_timezone"],
+                    timezone_source=agent["dreaming_timezone_source"],
+                    seed_strategy=strategy,
+                    context_dose=dose,
+                )
+            except ActiveDreamRunExists:
+                # A manual start created its run after the listing.
+                continue
             sent += self._advance_run(run)
         return sent
 
@@ -2199,13 +2239,25 @@ class DreamingScheduler:
         dream_round = next_round_for_run(run)
         if not dream_round:
             return 0
+        # Claimed before the send, so a second advance (the wake thread, the
+        # loop, another Host process) cannot send it too (AUT-11).
+        if not claim_round(dream_round["round_id"]):
+            log("dreamingSkip",
+                f"agent={run['agent_id']} session={run['session']} reason=claimed")
+            return 0
         try:
             dispatched = self._send_dream(run["session"], dream_round["prompt"])
-            if dispatched is False:
-                log("dreamingSkip",
-                    f"agent={run['agent_id']} session={run['session']} "
-                    "reason=dispatch-busy")
-                return 0
+        except Exception as e:  # noqa: BLE001
+            release_round(dream_round["round_id"])
+            log_exception("dreamingTickFail", e, detail=run.get("session") or "")
+            return 0
+        if dispatched is False:
+            release_round(dream_round["round_id"])
+            log("dreamingSkip",
+                f"agent={run['agent_id']} session={run['session']} "
+                "reason=dispatch-busy")
+            return 0
+        try:
             mark_round_sent(dream_round["round_id"])
             if dream_round["round_index"] == 1:
                 mark_dream_started(run["agent_id"], run["local_date"])
