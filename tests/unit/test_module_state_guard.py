@@ -58,6 +58,7 @@ ALLOWED: dict[tuple[str, str], str] = {
     # This process's view of its own wall and monotonic clocks (its start and
     # the last suspend or clock jump it saw); meaningless in any other process.
     ("lib/background_jobs.py", "_clock"): THROTTLE,
+    ("lib/task_goal_recovery.py", "_FAILURE_LOGGED"): THROTTLE,
     # Stop's in-process epoch backs up a durable fence write that failed; the
     # durable fence stays the authority, so losing it on restart is intended.
     ("lib/launch_receipts.py", "_STOP_EPOCH"): THROTTLE,
