@@ -539,10 +539,11 @@ impl Conversation {
     // ---- merging ---------------------------------------------------------
 
     fn replace_rows(&mut self, mut rows: Vec<Message>) {
-        // This client's unconfirmed and failed sends survive an authoritative
+        // This client's unconfirmed sends survive an authoritative
         // replacement, in the order they were sent. A new row with the same
-        // id takes their place but keeps their pending/failed flags: only the
-        // /send answer confirms them (CLIENT-SEND-500).
+        // id as an unconfirmed or failed send takes its place but keeps its
+        // pending/failed flags: only the /send answer confirms it
+        // (CLIENT-SEND-500).
         let mut optimistic: Vec<Message> =
             self.messages.iter().filter(|m| m.pending || m.delivery_failed).cloned().collect();
         for message in rows.iter_mut() {
@@ -553,6 +554,9 @@ impl Conversation {
                 message.delivery_error = local.delivery_error;
             }
         }
+        // A failed send the new rows do not carry goes with the replaced
+        // chat, as before; an unconfirmed one stays at the end.
+        optimistic.retain(|local| local.pending);
         rows.extend(optimistic);
         self.reset(rows);
         self.emit(Signal::CountChanged);
@@ -621,7 +625,9 @@ impl Conversation {
             if candidate.delivery_failed && written_after(incoming, candidate) {
                 continue;
             }
-            if candidate.pending || candidate.delivery_failed || candidate.kind == "live" {
+            // An unconfirmed send the Host already carries (it has a
+            // revision) is a Host row here: its answer goes below it.
+            if (candidate.pending && candidate.revision == 0) || candidate.delivery_failed || candidate.kind == "live" {
                 return row;
             }
             if incoming.revision > 0 && candidate.revision > incoming.revision {
