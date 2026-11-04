@@ -86,3 +86,63 @@ def test_a_marker_that_landed_before_its_error_is_not_written_again(tmp_path, mo
     assert rows == 1
     _assert_retry_delivers_once(service, provider, agent_id)
 
+
+
+def test_a_failed_retry_scheduling_keeps_one_marker_and_the_dispatch_failure(tmp_path, monkeypatch):
+    """Reviewer B on ca75ed42: the same resource exhaustion that failed the
+    observation's thread can fail the retry's timer. That must stay inside the
+    abandonment: no second abandonment, no second marker, the original error."""
+    original = live_hub.observe_transition
+    original_start = threading.Thread.start
+
+    def no_forward_worker(self):
+        if self.name == "live-forward":
+            raise RuntimeError("synthetic thread creation failure")
+        return original_start(self)
+
+    def observe(agent_id, event, target, detail):
+        if event != turn_lifecycle.TurnEvent.UNLAUNCHED:
+            return original(agent_id, event, target, detail)
+        with monkeypatch.context() as failure:
+            failure.setattr(live_hub, "_HUB", None)
+            failure.setattr(backends_module, "_RUNTIME_CLIENT",
+                            SimpleNamespace(live_observe=lambda *a: None))
+            failure.setattr(threading.Thread, "start", no_forward_worker)
+            return original(agent_id, event, target, detail)
+    monkeypatch.setattr(live_hub, "observe_transition", observe)
+    provider = _SpawnDiesOnce()
+    service, agent_id = _codex_service(tmp_path, provider)
+
+    def no_timer(_delay, _fn):
+        raise RuntimeError("synthetic timer thread creation failure")
+    service.retry_scheduler = no_timer
+    with pytest.raises(DispatchError):
+        service.dispatch(text="synthetic request", requested_session="cipher",
+                         trace_id="t-died", client_msg_id="u-lost")
+    rows = agents.conn().execute(
+        "SELECT COUNT(*) AS n FROM state_log WHERE agent_id=? AND json_extract(detail,'$.trace_id')='t-died' "
+        "AND json_extract(detail,'$.dispatch_not_started')=1", (agent_id,)).fetchone()["n"]
+    assert rows == 1
+    service.retry_scheduler = lambda _delay, fn: None
+    _assert_retry_delivers_once(service, provider, agent_id)
+
+
+def test_a_failed_marker_adds_no_database_write_before_the_500(tmp_path, monkeypatch):
+    """Reviewer B on ca75ed42: as before the fix, a failed marker skips the
+    turn's close, so a locked database costs no second critical-write wait on
+    the way to the 500; the marker is retried in the background only."""
+    def locked(*args, **kwargs):
+        raise sqlite3.OperationalError("database is locked")
+    monkeypatch.setattr(turn_lifecycle, "record_unlaunched", locked)
+    closed = []
+    monkeypatch.setattr(turn_lifecycle, "close_turn", lambda turn_id: closed.append(turn_id))
+    backends = _SpawnDiesOnce()
+    service, _agent_id = _codex_service(tmp_path, backends)
+    scheduled = []
+    service.retry_scheduler = lambda delay, fn: scheduled.append(delay)
+    with pytest.raises(DispatchError):
+        service.dispatch(text="full control over the pipeline",
+                         requested_session="cipher", trace_id="t-died",
+                         client_msg_id="u-lost")
+    assert closed == []
+    assert scheduled == [_td._UNLAUNCHED_MARKER_RETRY_SEC[0]]
