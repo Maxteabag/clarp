@@ -556,6 +556,25 @@ class _Client:
             raise ValueError("objective required")
         if action not in ("start", "pause", "resume", "clear", "get"):
             raise ValueError(f"unknown goal action: {action}")
+        activating = action in ("start", "resume")
+        if activating:
+            # A recycle never kills while an activation could start a turn,
+            # and none starts on a process being recycled (BACKENDS-07b).
+            with self._lock:
+                if getattr(self, "recycled", False):
+                    raise RuntimeError("Codex is restarting a stuck session; try again in a moment")
+                self._goal_activations = getattr(self, "_goal_activations", 0) + 1
+        try:
+            result = self._goal_request(agent, action, thread_id, objective)
+        finally:
+            if activating:
+                with self._lock:
+                    self._goal_activations -= 1
+        goal = result.get("goal") if isinstance(result, dict) else None
+        self._mirror_goal(thread_id, goal if isinstance(goal, dict) else None)
+        return agent_goals.public(agent_goals.get(agent_id))
+
+    def _goal_request(self, agent: dict, action: str, thread_id: str, objective: str) -> dict:
         if action == "get":
             result = self.request("thread/goal/get", {"threadId": thread_id})
         else:
@@ -569,9 +588,7 @@ class _Client:
                 if action == "start":
                     params["objective"] = objective.strip()
                 result = self.request("thread/goal/set", params)
-        goal = result.get("goal") if isinstance(result, dict) else None
-        self._mirror_goal(thread_id, goal if isinstance(goal, dict) else None)
-        return agent_goals.public(agent_goals.get(agent_id))
+        return result
 
     def _ensure_loaded(self, agent: dict, thread_id: str) -> None:
         """A goal call needs the thread open in this process; a live turn or an
@@ -733,11 +750,22 @@ class _Client:
         with _LOCK:
             with self._lock:
                 if (not getattr(self, "detached_agents", None)
-                        or getattr(self, "recycled", False) or _busy(self)):
+                        or getattr(self, "recycled", False) or _busy(self)
+                        or getattr(self, "_goal_activations", 0)):
                     return
                 self.recycled = True
+            # After the mark no goal activation starts here (goal() refuses).
+            # Recheck what codex may have started on its own: a turn adopted
+            # before the mark is busy now, and an active goal on a thread
+            # loaded here can start a continuation at any moment.
+            if _busy(self) or self._goal_may_continue():
+                with self._lock:
+                    self.recycled = False
+                return
             if _CLIENTS.get(_SHARED_KEY) is self:
                 _CLIENTS.clear()
+            # Its thread stays held (turn_holders) until the process is gone.
+            _RETIRING[id(self)] = self
             log("codexStuckProcessRecycled",
                 f"detached={len(self.detached_agents)}")
             try:
@@ -753,8 +781,27 @@ class _Client:
             try:
                 # Dead before the next process resumes the stuck thread.
                 self.proc.wait(timeout=5)
-            except (OSError, ValueError, subprocess.TimeoutExpired):
-                pass
+            except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
+                # No exit evidence: the stopped agent's thread stays held and
+                # its send keeps waiting until proc.poll() reports the exit.
+                log("codexRecycleUnconfirmed", f"type={type(exc).__name__}")
+
+    def _goal_may_continue(self) -> bool:
+        """Could codex start a turn here by itself? Only for an active goal on
+        a thread loaded in this process (not a detached one, which dies with
+        it). Clarp's mirror is current: codex reports thread/goal/updated
+        before the turn/completed that ends a turn. Unknown means yes."""
+        detached = getattr(self, "detached_executions", set())
+        try:
+            for thread_id in set(getattr(self, "_loaded_threads", ())) - set(detached):
+                agent = agents_db.get_by_backend_session(thread_id)
+                row = agent_goals.get(agent["agent_id"]) if agent else None
+                if row and row.get("status") == agent_goals.ACTIVE:
+                    return True
+        except Exception as exc:  # noqa: BLE001 - fail closed: keep the process
+            log_exception("codexRecycleGoalCheckFail", exc, detail=self.agent_id)
+            return True
+        return False
 
     def shutdown(self) -> None:
         """EOF stdin so the stdio app-server exits and drops its writer lock."""
@@ -812,6 +859,8 @@ def _normalize_item(item: dict) -> dict:
 
 
 _CLIENTS: dict[str, _Client] = {}
+# Recycled clients whose process has not been seen to exit (BACKENDS-07b).
+_RETIRING: dict[int, _Client] = {}
 _LOCK = threading.RLock()
 _SHARED_KEY = "__shared__"
 
@@ -859,9 +908,9 @@ class _StuckSessionHold:
         self.client, self.agent_id = client, agent_id
 
     def is_alive(self) -> bool:
+        # Only process-exit evidence releases the thread, not the kill.
         client = self.client
         return (self.agent_id in (getattr(client, "detached_agents", None) or ())
-                and not getattr(client, "recycled", False)
                 and client.proc.poll() is None)
 
 
@@ -869,7 +918,11 @@ def turn_holders(agent_id: str) -> list[_StuckSessionHold]:
     """Processes that still hold ``agent_id``'s thread outside any turn
     (BACKENDS-07b): a send waits behind them instead of failing."""
     with _LOCK:
-        clients = list({id(client): client for client in _CLIENTS.values()}.values())
+        for key, client in list(_RETIRING.items()):
+            if client.proc.poll() is not None:
+                del _RETIRING[key]
+        clients = list({id(client): client for client in
+                        [*_CLIENTS.values(), *_RETIRING.values()]}.values())
     holds = [_StuckSessionHold(client, agent_id) for client in clients]
     return [hold for hold in holds if hold.is_alive()]
 
