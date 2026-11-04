@@ -75,13 +75,16 @@ _LEADER_EXITS_CHILD_IGNORES = (
     "time.sleep(120)\n")
 
 
-def _alive(pid):
-    import os
+def _dead(pid):
+    """Gone, or a zombie: killed and waiting for whoever inherited it to reap
+    it. os.kill(pid, 0) still succeeds for a zombie, which made a killed
+    child read as alive on a runner that reaps orphans late."""
     try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    return True
+        with open(f"/proc/{pid}/stat") as fh:
+            stat = fh.read()
+    except (FileNotFoundError, ProcessLookupError):
+        return True
+    return stat.rsplit(")", 1)[1].split()[0] == "Z"
 
 
 def test_a_tool_child_keeps_the_full_grace_after_its_leader_exits_on_sigterm(tmp_path):
@@ -94,10 +97,50 @@ def test_a_tool_child_keeps_the_full_grace_after_its_leader_exits_on_sigterm(tmp
         registry.interrupt("synthetic", event="synthetic-interrupt")
         handle.wait(timeout=5)                       # the leader is gone at once
         time.sleep(max(0.0, STOP_KILL_DEADLINE_SEC - 2 - (time.monotonic() - started)))
-        assert _alive(child), "the group was killed before its grace ran out"
+        assert not _dead(child), "the group was killed before its grace ran out"
         deadline = time.monotonic() + 7
-        while _alive(child) and time.monotonic() < deadline:
+        while not _dead(child) and time.monotonic() < deadline:
             time.sleep(0.2)
-        assert not _alive(child), "the SIGTERM-ignoring child outlived the deadline"
+        assert _dead(child), "the SIGTERM-ignoring child outlived the deadline"
     finally:
         _cleanup(proc, handle)
+
+
+def test_the_death_check_counts_a_zombie_as_dead_and_a_running_child_as_alive(tmp_path):
+    """Controls for _dead: a killed child nobody has reaped yet is dead; a
+    child nobody kills stays alive."""
+    running = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    try:
+        assert not _dead(running.pid)
+        running.kill()
+        deadline = time.monotonic() + 5
+        while not _dead(running.pid) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert _dead(running.pid), "a killed, unreaped child (a zombie) read as alive"
+    finally:
+        running.kill()
+        running.wait(timeout=5)
+    assert _dead(running.pid)
+
+
+def test_a_child_that_is_never_killed_still_reads_as_alive(tmp_path, monkeypatch):
+    """Control: with the escalation disabled, the SIGTERM-ignoring child is
+    never killed, and the check must keep seeing it, so the deadline
+    assertion above still fails for a child that truly outlives its stop."""
+    proc, handle, registry = _launched(tmp_path, _LEADER_EXITS_CHILD_IGNORES)
+    child = int(proc.stdout.readline().strip())
+    monkeypatch.setattr(registry, "_escalate_later", lambda *_a, **_k: None)
+    try:
+        registry.interrupt("synthetic", event="synthetic-interrupt")
+        handle.wait(timeout=5)                       # the leader is gone at once
+        time.sleep(2.0)
+        assert not _dead(child), "a running child read as dead"
+    finally:
+        import os
+        import signal
+        try:
+            os.kill(child, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        _cleanup(proc, handle)
+
