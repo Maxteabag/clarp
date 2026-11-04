@@ -41,7 +41,9 @@ def test_a_limited_device_cannot_patch_a_schedule(monkeypatch):
     assert handler.denied == [403] and not handler.reached
 
 
-@pytest.mark.parametrize("path", ["/dirs?path=/", "/past-sessions?cwd=/&scope=all"])
+@pytest.mark.parametrize("path", ["/dirs?path=/", "/past-sessions?cwd=/&scope=all",
+                                  "/past-sessions?cwd=/synthetic&scope=workspace",
+                                  "/past-sessions?cwd=/synthetic", "/past-sessions"])
 def test_a_limited_device_cannot_browse_host_directories(monkeypatch, path):
     from lib import backends
     handler = _handler(path)
@@ -52,9 +54,13 @@ def test_a_limited_device_cannot_browse_host_directories(monkeypatch, path):
     assert handler.denied == [403] and not handler.reached
 
 
-def test_a_limited_device_still_lists_its_workspace_past_sessions(monkeypatch):
+@pytest.mark.parametrize("path", ["/past-sessions?cwd=/synthetic&scope=workspace",
+                                  "/past-sessions?cwd=/&scope=all"])
+def test_a_full_device_still_lists_past_sessions(monkeypatch, path):
+    # HTTP-03b: a caller-chosen cwd discloses another project's sessions one
+    # directory at a time, so every /past-sessions is full scope; full keeps it.
     from lib import backends
-    handler = _handler("/past-sessions?cwd=/synthetic&scope=workspace")
+    handler = _handler(path, scope="full")
     handler._send = lambda status, *_a, **_k: handler.reached.append(status)
     monkeypatch.setattr(backends, "list_sessions", lambda *_a, **_k: [])
     handler.do_GET()
