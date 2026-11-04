@@ -104,12 +104,7 @@ DYNAMIC_SAMPLES = (
 
 # Pre-existing bugs from the code review (http-shell.md at 09ee9279). The
 # golden records them as they are; the fix lane changes them, not a move.
-KNOWN_ISSUES = {
-    "GET /past-sessions": "HTTP-03: a limited device lists every project's sessions",
-    # HTTP-03's scope=all refusal is inside the handler, so dispatch still
-    # admits a limited device here; the response golden records the 403.
-    "GET /past-sessions?scope=all": "HTTP-03: a limited device lists every project's sessions",
-}
+KNOWN_ISSUES: dict[str, str] = {}
 
 PRINCIPAL_ORDER = ("anonymous", "local_no_token", "limited", "full", "admin",
                    "open_local", "open_remote")
