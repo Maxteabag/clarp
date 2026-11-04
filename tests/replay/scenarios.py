@@ -319,6 +319,12 @@ SCENARIOS = [
             {**_send('rachel', '[qa-slow][replay-hold-start] synthetic pool turn to stop', 'pool-a'),
              'background': 'send pool-a'},
             {'op': 'wait_file', 'name': 'codex-procs.jsonl', 'contains': '"held"'},
+            # rachel's own follow-up while her start is held: her launching send above
+            # waits for its start by design; a follow-up answers at once (queued).
+            {**_send('rachel', 'synthetic follow-up while the start is held', 'pool-a2'),
+             'background': 'send pool-a2'},
+            {'op': 'wait_sql', 'sql': "SELECT count(*) >= 2 FROM prompt_admissions p JOIN agents a "
+                                      "ON a.agent_id = p.agent_id WHERE a.session = 'rachel'"},
             {**_send('mike', 'synthetic pool turn for mike', 'pool-b'), 'background': 'send pool-b'},
             # mike's send is admitted (its admission row is written) and then waits
             # behind rachel's start; it gets no turn while the start is held.
@@ -333,10 +339,17 @@ SCENARIOS = [
             {'op': 'provider_file', 'name': 'release-start', 'text': '1'},
             {'op': 'join', 'name': 'stop rachel'},
             {'op': 'join', 'name': 'send pool-a'},
+            {'op': 'join', 'name': 'send pool-a2'},
             {'op': 'join', 'name': 'send pool-b'},
             {'op': 'wait_settled', 'message_id': 'u-pool-a'},
             {'op': 'wait_settled', 'message_id': 'u-pool-b'},
+            # A user Stop withdraws the agent's admitted-but-unlaunched sends (existing
+            # semantics): the follow-up's launch receipt is fenced, its park row gone.
+            {'op': 'wait_sql', 'sql': "SELECT count(*) FROM settings WHERE key LIKE 'launch-receipt:%' "
+                                      "AND json_extract(value, '$.client_msg_id') = 'pool-a2' "
+                                      "AND json_extract(value, '$.state') = 'fenced'"},
             {'op': 'quiesce', 'sessions': ('rachel', 'mike')},
+            {'op': 'get', 'path': '/turn-queue?session=rachel'},
             {'op': 'get', 'path': '/log?session=rachel'},
             {'op': 'get', 'path': '/log?session=mike'},
             {'op': 'get', 'path': '/agents/snapshot'},
