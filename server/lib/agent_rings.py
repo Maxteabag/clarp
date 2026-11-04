@@ -156,7 +156,9 @@ def _expire(records: list[dict]) -> list[dict]:
 def _settle(records: list[dict]) -> list[dict]:
     expired = False
     for ring in records:
-        if (ring.get("_user_call") and ring.get("_live_phase") == "answered_waiting_join"
+        # A user call's or an agent ring's Live answer alike: past its one-use join
+        # ticket nobody can join it (_join refuses), so it stops counting as live (RTO-04).
+        if (ring.get("_live_phase") == "answered_waiting_join"
                 and now_ms() >= ring.get("_live_join_expires_at", 0)):
             ring.update(_live_phase="retired", _live_retired_reason="live_join_expired")
             expired = True
