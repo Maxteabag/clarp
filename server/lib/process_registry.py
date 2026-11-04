@@ -14,6 +14,7 @@ from typing import Callable
 # SIGTERM is killed (BACKENDS-07): a CLI or a tool child that ignores SIGTERM
 # must not hold the agent for ever. The same 10 s as account_failover's stop.
 STOP_KILL_DEADLINE_SEC = 10.0
+_GROUP_POLL_SEC = 0.2
 
 
 @dataclass
@@ -125,15 +126,22 @@ class ProcessRegistry:
     def _escalate_later(self, agent_id: str, handle: TurnHandle, event: str) -> None:
         """Kill the turn if SIGTERM has not ended it by the stop deadline."""
         def escalate() -> None:
+            # The grace runs from the SIGTERM, for the whole turn: a leader that
+            # exits at once does not cut short the grace of a child in its group.
+            deadline = time.monotonic() + STOP_KILL_DEADLINE_SEC
             timed_out = False
             try:
                 handle.proc.wait(timeout=STOP_KILL_DEADLINE_SEC)
             except subprocess.TimeoutExpired:
                 timed_out = True
+            if handle.process_group is not None:
+                while handle.outlived_stop() and time.monotonic() < deadline:
+                    time.sleep(_GROUP_POLL_SEC)
             try:
                 # Without its own group, the turn is its leader: kill it only if
                 # it outlived the deadline. With a group, any member still
-                # there (a tool child holding it) is the turn outliving its stop.
+                # there at the deadline (a tool child holding it) is the turn
+                # outliving its stop.
                 if (handle.outlived_stop() if handle.process_group is not None
                         else timed_out and handle.is_alive()):
                     handle.kill()
