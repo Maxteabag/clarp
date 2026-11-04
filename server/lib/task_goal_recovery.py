@@ -28,6 +28,7 @@ def boundary(plan, goal, *, check_live=True):
     from . import (
         artifacts,
         agent_goals,
+        backends,
         turn_queue,
         reconcile,
         turn_dispatch,
@@ -78,6 +79,12 @@ def boundary(plan, goal, *, check_live=True):
         native_goal
         and native_goal.get("native")
         and native_goal["status"] != "complete"
+        # A switch away never clears the row (AUT-20). The backend the agent
+        # left owns it only while its goal is active: the shared Codex
+        # app-server may still continue it, and two drivers must never run.
+        and (backends.normalize(native_goal.get("backend"))
+             == backends.normalize(agent.get("backend"))
+             or native_goal["status"] == agent_goals.ACTIVE)
     ):
         # Codex owns native continuation. Never run a competing Host goal loop.
         return (
