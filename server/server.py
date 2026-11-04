@@ -251,13 +251,7 @@ def broadcast_boot_version(ctx: ServerContext) -> None:
     events.broadcast(ctx.stream, events.server_version(ctx.sw_version()))
 
 
-_CARTESIA_PREVIEW_LOCKS: dict[str, threading.Lock] = {}
-_CARTESIA_PREVIEW_LOCKS_GUARD = threading.Lock()
-
-
-def _cartesia_preview_lock(voice_id: str) -> threading.Lock:
-    with _CARTESIA_PREVIEW_LOCKS_GUARD:
-        return _CARTESIA_PREVIEW_LOCKS.setdefault(voice_id, threading.Lock())
+from lib.cartesia_preview_locks import _cartesia_preview_lock  # noqa: E402
 
 
 def _raw_query_value(path: str, key: str) -> str:
