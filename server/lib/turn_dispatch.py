@@ -719,6 +719,17 @@ def _janitor_spawn_lock(agent_id: str):
 # Background ticks their schedulers regenerate: never readmitted by recovery.
 _REGENERATED_ORIGINS = frozenset({"heartbeat", "leader_tick"})
 
+# Background retries of an unlaunched spawn's marker: waits before each.
+_UNLAUNCHED_MARKER_RETRY_SEC = (1.0, 5.0)
+
+
+def _unlaunched_marked(agent_id: str, trace_id: str) -> bool:
+    return db.conn().execute(
+        """SELECT 1 FROM state_log WHERE agent_id = ?
+              AND json_extract(detail, '$.trace_id') = ?
+              AND json_extract(detail, '$.dispatch_not_started')
+            LIMIT 1""", (agent_id, trace_id)).fetchone() is not None
+
 
 def _remove_queued_run(queue_id: str) -> None:
     # Use the queue API to preserve revisions and unmaterialized admissions.
@@ -1916,10 +1927,33 @@ class TurnDispatchService:
                       detail={"error": str(error)[:200]})
         try:
             turn_lifecycle.record_unlaunched(spec.agent_id, spec.trace_id)
+        except Exception as marker_error:  # noqa: BLE001 - the 500 below must still go out
+            log_exception("spawnAbandonedMarkerFail", marker_error, detail=spec.session)
+            self._retry_unlaunched_marker(spec, len(_UNLAUNCHED_MARKER_RETRY_SEC))
+        try:
             if turn_id:
                 turn_lifecycle.close_turn(turn_id)
         except Exception as close_error:  # noqa: BLE001
             log_exception("spawnAbandonedCloseFail", close_error, detail=spec.session)
+
+    def _retry_unlaunched_marker(self, spec: _TurnSpec, attempts_left: int) -> None:
+        """The 'never started' marker is what lets the client's same-id resend
+        launch this message once; without it the resend is refused for ever
+        (CLIENT-SEND-500). Write it again in the background, never delaying
+        the 500, and only if it is not already there: its INSERT may have
+        committed before the error (CLIENT-SEND-500, reviewer B)."""
+        if attempts_left <= 0:
+            return
+        delay = _UNLAUNCHED_MARKER_RETRY_SEC[-attempts_left]
+
+        def retry() -> None:
+            try:
+                if not _unlaunched_marked(spec.agent_id, spec.trace_id):
+                    turn_lifecycle.record_unlaunched(spec.agent_id, spec.trace_id)
+            except Exception as error:  # noqa: BLE001 - logged; one more try if left
+                log_exception("spawnAbandonedMarkerFail", error, detail=spec.session)
+                self._retry_unlaunched_marker(spec, attempts_left - 1)
+        self.retry_scheduler(delay, retry)
 
     def _slot_snapshot(self, spec: _TurnSpec) -> tuple[str, bool]:
         """(in-flight trace, whether that slot is spawning or has a live
