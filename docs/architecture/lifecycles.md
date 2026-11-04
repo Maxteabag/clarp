@@ -36,10 +36,15 @@ do not use it.
    same rule holds under the owner's lock: compare, decide and assign without
    releasing it.
 3. **A deadline on every non-final state.** Every state that is not final
-   declares either a `Deadline(after_ms, expire_to=<final state>)` or a
-   `WaitForever(reason)`. A reaper moves rows past their deadline to the final
-   state with the reserved event `deadline_expired`, through the same
-   compare-and-set. `WaitForever` is for states that legitimately wait on a
+   declares either a `Deadline(after_ms, expire_to=<state>)` or a
+   `WaitForever(reason)`. A reaper moves rows past their deadline on with the
+   reserved event `deadline_expired`, through the same compare-and-set,
+   usually to a final state. A deadline may return a row to an earlier
+   non-final state (a stale claim back to queued) when that state has its own
+   wait; deadlines alone may never form a cycle, and a cycle that also needs an
+   event (claim, expire, claim) is capped by its owner with a persisted count
+   decided in the same transaction. The reaper works in bounded batches, each
+   its own short transaction. `WaitForever` is for states that legitimately wait on a
    person (a decision the user has not answered); the reason says who ends it.
    "It will finish eventually" is not a reason.
 4. **Decide, then act.** The decision is a pure function of the current state
@@ -81,14 +86,16 @@ with lk.transaction(con) as outbox:          # BEGIN IMMEDIATE ... COMMIT
 
 | Name | What it does |
 |---|---|
-| `Lifecycle(...)` | The declaration. Construction validates it and raises `LifecycleError` listing every problem: a non-final state without a wait, a wait that is neither a `Deadline` nor a `WaitForever`, a deadline that does not end in a final state, an edge out of a final state, an event with two targets from one state, a state unreachable from `initial` (deadline expiries count as edges), a state that cannot reach a final state, a bad SQL identifier. Leave `table`, `key`, `state_column` and `entered_column` empty for an in-memory lifecycle. |
-| `Lifecycle.decide(state, event)` | Pure. The target state, or `IllegalTransition`. |
+| `Lifecycle(...)` | The declaration. Construction validates it and raises `LifecycleError` listing every problem: a non-final state without a wait, a wait that is neither a `Deadline` nor a `WaitForever`, a deadline that does not end in another declared state, deadlines that alone form a cycle, an edge out of a final state (other than a correction), a correction that is not between final states or lists its own target as a source, an event with two targets from one state, a state unreachable from `initial` (deadline expiries count as edges), a state that cannot reach a final state, a bad SQL identifier. Leave `table`, `key`, `state_column` and `entered_column` empty for an in-memory lifecycle. |
+| `Lifecycle.decide(state, event)` | Pure. The target state, or `IllegalTransition`. A correction already in its target returns that state (a no-op). |
+| `Edge(event, sources, target, correction=True)` | A correction: rewrites one final state to another (a newer settlement wins). Only between final states; the declaration lists every allowed pair. `transition` with a correction that already holds writes nothing. |
 | `Lifecycle.deadline(state, entered_at)` / `overdue(state, entered_at, now)` | Pure. When the state expires; `None` for final and `WaitForever` states. |
 | `lk.transaction(con)` | `BEGIN IMMEDIATE`; yields an `Outbox`; `COMMIT` then runs the outbox, or `ROLLBACK` and drops it. Refuses to nest inside an open transaction. |
 | `lk.create(con, lc, key, now=, values=)` | Inserts the row in `initial`. |
 | `lk.transition(con, lc, key, event, now=, values=)` | Reads the state, decides, compare-and-sets. `IllegalTransition` or `Conflict`. |
 | `lk.compare_and_set(con, lc, key, event=, source=, target=, now=, values=)` | The raw CAS, for owners that decided already (for example from a batch). |
-| `lk.reap(con, lc, now=)` | Moves every row whose state's deadline has passed to the deadline's final state. Returns the transitions so the caller can queue their effects. |
+| `lk.reap(con, lc, now=, limit=100, after=, eligible=)` | One bounded batch in the caller's transaction: at most `limit` overdue rows in keyset order `(state, entered_at, key)` after the cursor `after`. `eligible(row)` decides per row: `None` skips it (it counts, and the next pass from the start sees it again), `EXPIRED` moves it to its deadline's target, any other legal event goes through `decide`. It must be pure or read only SQLite. Returns `ReapBatch(moved, examined, cursor)`; `cursor` is `None` when every overdue row was seen. |
+| `lk.reap_tick(con, lc, now=, cursor=, batch=100, max_rows=500, max_ms=200, eligible=, effects=)` | A host's tick: `reap` batches, each in its own `transaction`, until `max_rows` rows were examined, `max_ms` were spent inside the batches, or the cursor wrapped. `effects(outbox, moved)` queues each batch's after-commit effects. Returns the moved transitions and the next cursor. The program's budget (lead, 3 Nov): batches of at most 100 rows under 50 ms at production size, at most 500 rows and 200 ms per tick. |
 | `Outbox.add(fn)` / `Outbox.run()` | After-commit effects; usable on its own by in-memory owners. |
 
 Every write sets `entered_column` to `now`, so deadlines count from the moment
