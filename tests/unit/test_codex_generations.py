@@ -193,10 +193,10 @@ def test_a_recent_pausing_leftover_is_restored_and_an_old_one_only_cleared(fake,
     cas._move_put(recent_thread, {"agent_id": recent, "thread": recent_thread, "phase": "paused",
                                   "generation": "old"})
     old, old_thread, _ = _leftover(fake, tmp_path, monkeypatch, "old")
+    # The record carries its own write time (settings_store owns the table).
     cas._move_put(old_thread, {"agent_id": old, "thread": old_thread, "phase": "pausing",
-                               "generation": "old"})
-    agents_db.conn().execute("UPDATE settings SET updated_at = ? WHERE key = ?",
-                             (int(time.time() * 1000) - 31 * 60 * 1000, cas._MOVE_PREFIX + old_thread))
+                               "generation": "old",
+                               "written_at": int(time.time() * 1000) - 31 * 60 * 1000})
     old_before = len(_goal_turns(fake, old_thread))
 
     cas.recover_goal_moves()
