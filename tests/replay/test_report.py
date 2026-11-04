@@ -886,3 +886,66 @@ def test_wait_explained_holds_until_every_announced_tool_is_settled():
     assert not capture.live_tools_explained([_explain_frame('a1', _announced_tool('t1')), _explain_frame('a2', _explain_patch('t1', 'failed'))])
     # Non-live frames are ignored.
     assert not capture.live_tools_explained([{'data': {'type': 'agent-state', 'ops': [_announced_tool('t1')]}}])
+
+
+def _explained(lseq, status, rev=2):
+    return _live(lseq, {'op': 'upsert', 'id': 't1', 'kind': 'tool', 'rev': rev,
+                        'item': {'tool': {'explain': {'text': None, 'level': 1, 'status': status}}}})
+
+
+def test_the_explainer_patch_is_its_own_lane_but_stays_compared():
+    tool = _live(1, {'op': 'upsert', 'id': 't1', 'kind': 'tool', 'rev': 1, 'item': {'id': 't1', 'kind': 'tool'}})
+    done = _live(2, {'op': 'done', 'id': 'm1', 'rev': 1})
+    turn = _live(3, {'op': 'turn', 'turn': {'status': 'completed'}})
+    after = [tool, done, turn, _explained(4, 'failed')]
+    before = [tool, _explained(2, 'failed'), _live(3, done['data']['ops'][0]), _live(4, turn['data']['ops'][0])]
+    # Where the explainer's patch falls among the turn's frames is timing.
+    assert not _report(_capture(sse=after), _capture(sse=before)).items
+    # Its content, its presence and the order inside its own lane are still compared.
+    assert _report(_capture(sse=after), _capture(sse=[tool, done, turn, _explained(4, 'ready')])).items
+    assert _report(_capture(sse=after), _capture(sse=[tool, done, _live(3, turn['data']['ops'][0])])).items
+    pending_then_failed = [tool, _explained(2, 'pending'), _live(3, done['data']['ops'][0]),
+                           _live(4, turn['data']['ops'][0]), _explained(5, 'failed', rev=3)]
+    failed_then_pending = [tool, _explained(2, 'failed'), _live(3, done['data']['ops'][0]),
+                           _live(4, turn['data']['ops'][0]), _explained(5, 'pending', rev=3)]
+    assert _report(_capture(sse=pending_then_failed), _capture(sse=failed_then_pending)).items
+    # A frame that carries anything besides an explanation stays in the turn's lane.
+    mixed = _live(4, {'op': 'upsert', 'id': 't1', 'kind': 'tool', 'rev': 2,
+                      'item': {'tool': {'explain': {'status': 'failed'}, 'output': 'x'}}})
+    mixed_early = _live(2, mixed['data']['ops'][0])
+    assert _report(_capture(sse=[tool, done, turn, mixed]),
+                   _capture(sse=[tool, mixed_early, _live(3, done['data']['ops'][0]), _live(4, turn['data']['ops'][0])])).items
+
+
+def test_an_explainer_patch_crossing_into_the_next_turn_stays_a_difference():
+    # Reviewer B's probe (review s0-explainlane-83bb8fc6): past the next turn's start a
+    # client's live view has reset, and a late patch brings the old tool item back.
+    from lib.live_items import LiveView
+
+    def frame(lseq, op):
+        result = _live(lseq, {**op, 'conv': 'conversation'})
+        result['data'].update(conv='conversation', epoch='boot', agent_id='agent')
+        return result
+    start = {'op': 'turn', 'turn': {'turn_id': 'old-turn', 'status': 'running'}}
+    tool = {'op': 'upsert', 'id': 't1', 'kind': 'tool', 'rev': 1,
+            'item': {'id': 't1', 'kind': 'tool', 'turn_id': 'old-turn', 'ordinal': 1,
+                     'status': 'running', 'tool': {'name': 'synthetic'}}}
+    explain = {'op': 'upsert', 'id': 't1', 'kind': 'tool', 'rev': 2,
+               'item': {'tool': {'explain': {'status': 'failed'}}}}
+    done = {'op': 'turn', 'turn': {'turn_id': 'old-turn', 'status': 'completed'}}
+    next_turn = {'op': 'turn', 'turn': {'turn_id': 'next-turn', 'status': 'running'}}
+    before = [frame(1, start), frame(2, tool), frame(3, explain), frame(4, next_turn)]
+    after = [frame(1, start), frame(2, tool), frame(3, next_turn), frame(4, explain)]
+
+    def reduce(frames):
+        view = LiveView()
+        view.apply_snapshot({'epoch': 'boot', 'lseq': 0, 'items': [], 'turn': None})
+        for item in frames:
+            assert view.apply_event(item['data']) == []
+        return [i['id'] for i in view.items()]
+    assert (reduce(before), reduce(after)) == ([], ['t1'])
+    assert _report(_capture(sse=before), _capture(sse=after)).items
+    # Past the same turn's own completion it is still timing.
+    in_turn = [frame(1, start), frame(2, tool), frame(3, explain), frame(4, done)]
+    after_done = [frame(1, start), frame(2, tool), frame(3, done), frame(4, explain)]
+    assert not _report(_capture(sse=in_turn), _capture(sse=after_done)).items
