@@ -10,6 +10,12 @@ from dataclasses import dataclass
 from typing import Callable
 
 
+# An interrupted turn whose process group is still there this long after its
+# SIGTERM is killed (BACKENDS-07): a CLI or a tool child that ignores SIGTERM
+# must not hold the agent for ever. The same 10 s as account_failover's stop.
+STOP_KILL_DEADLINE_SEC = 10.0
+
+
 @dataclass
 class TurnHandle:
     proc: subprocess.Popen
@@ -61,6 +67,18 @@ class TurnHandle:
             return True
         return False
 
+    def outlived_stop(self) -> bool:
+        """A member of the turn's own process group still runs."""
+        if self.process_group is None:
+            return self.is_alive()
+        try:
+            os.killpg(self.process_group, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        return True
+
     def kill(self) -> None:
         if self.process_group is not None:
             try:
@@ -99,6 +117,31 @@ class ProcessRegistry:
             try:
                 if handle.terminate():
                     count += 1
+                    self._escalate_later(agent_id, handle, event)
             except Exception as error:
                 self._log_exception(event, error, detail=agent_id)
         return count
+
+    def _escalate_later(self, agent_id: str, handle: TurnHandle, event: str) -> None:
+        """Kill the turn if SIGTERM has not ended it by the stop deadline."""
+        def escalate() -> None:
+            timed_out = False
+            try:
+                handle.proc.wait(timeout=STOP_KILL_DEADLINE_SEC)
+            except subprocess.TimeoutExpired:
+                timed_out = True
+            try:
+                # Without its own group, the turn is its leader: kill it only if
+                # it outlived the deadline. With a group, any member still
+                # there (a tool child holding it) is the turn outliving its stop.
+                if (handle.outlived_stop() if handle.process_group is not None
+                        else timed_out and handle.is_alive()):
+                    handle.kill()
+                    from .log import log
+                    log("turnStopKilled", f"agent={agent_id} pid={handle.proc.pid} "
+                        f"after={STOP_KILL_DEADLINE_SEC:g}s")
+            except Exception as error:
+                self._log_exception(f"{event}Kill", error, detail=agent_id)
+
+        threading.Thread(target=escalate, daemon=True,
+                         name=f"turn-stop-escalation-{agent_id}").start()
