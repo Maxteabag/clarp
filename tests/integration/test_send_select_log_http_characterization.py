@@ -233,12 +233,13 @@ def test_compact(running_server, monkeypatch, ok, expected_status):
         expected_status, {"ok": ok, "session": "claude"})
 
 
-def test_orchestrator_settings_post_errors(running_server, monkeypatch):
+def test_orchestrator_settings_post_errors(running_server):
+    """The settings' own validation refuses before anything is written, so the
+    error branch is reached without patching the handler's binding (S3 moves
+    the handler out of server.py)."""
     base, _ctx, _srv = running_server
     assert _call(base, "POST", "/orchestrator/settings", raw=b"{") == (400, {"error": "bad json"})
-
-    def refuse(data):
-        raise ValueError("confidence_threshold must be between 0 and 1")
-    monkeypatch.setattr(server_module, "update_orchestrator_settings", refuse)
-    assert _call(base, "POST", "/orchestrator/settings", {"confidence_threshold": 7}) == (
-        400, {"error": "confidence_threshold must be between 0 and 1"})
+    assert _call(base, "POST", "/orchestrator/settings", {"enabled": "yes"}) == (
+        400, {"error": "Enabled must be a boolean"})
+    assert _call(base, "POST", "/orchestrator/settings", {"bogus": 1}) == (
+        400, {"error": "Unsupported orchestrator settings"})
