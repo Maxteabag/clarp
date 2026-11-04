@@ -120,7 +120,7 @@ class AppTurnHandle:
         timer = threading.Timer(STOP_DETACH_SEC, self._detach_if_running)
         timer.daemon = True
         timer.start()
-        self.client.interrupt_active(self.agent_id, handle=self)
+        self.client.interrupt_active(self.agent_id, handle=self, by_user=True)
 
     def _detach_if_running(self) -> None:
         """The server never ended this stopped turn: detach it (BACKENDS-07b).
@@ -1101,12 +1101,16 @@ class _Client:
         self.request("turn/steer", params)
         return True
 
-    def interrupt_active(self, agent_id: str = "", *, handle: "AppTurnHandle | None" = None) -> None:
+    def interrupt_active(self, agent_id: str = "", *, handle: "AppTurnHandle | None" = None,
+                         by_user: bool = False) -> None:
         """Interrupt the agent's active turn; with ``handle``, only if that turn
         is the one the handle was returned for."""
         active = self._actives.get(agent_id) if agent_id else self.active
         if active and (handle is None or active.handle is handle):
-            active.handle.stop_requested = True
+            if by_user:
+                # Only a user's Stop: an internal interrupt (a shutdown, a
+                # move) must stay visible to codexTurnInterruptedUnasked.
+                active.handle.stop_requested = True
             self._pause_goal_for_stop(active)
             if not active.turn_id:
                 if len(getattr(self, "_actives", {})) <= 1:
@@ -1848,7 +1852,7 @@ def interrupt(agent_id: str) -> int:
     client = _client_running(agent_id) or _shared_client()
     if client is None:
         return 0
-    client.interrupt_active(agent_id)
+    client.interrupt_active(agent_id, by_user=True)
     return 0
 
 
