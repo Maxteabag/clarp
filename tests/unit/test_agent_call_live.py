@@ -415,3 +415,17 @@ def test_binding_persistence_failure_cannot_advertise_success_or_silent_normal(o
     monkeypatch.setattr(settings_store, "set_text", fail)
     with pytest.raises(sqlite3.OperationalError, match="simulated persistence failure"):
         build_agent_snapshot(None)
+
+
+def test_an_unjoined_agent_live_answer_expires_and_no_longer_blocks_a_user_call(opted):
+    # RTO-04: only user-placed calls expired their join; an agent-placed Live
+    # ring answered on this phone but never joined (the app was killed) kept
+    # its phase, and every later user call answered 409 live_call_active.
+    ring = _live_ring()["ring"]
+    rings.answer(PHONE, ring["ring_id"], conversation_mode="agent_live_v1",
+                 request_id="ring-req", client_nonce="n-ring")
+    _refused(409, live.CALL_ACTIVE, _call)
+    opted.clock.advance(60)
+    assert _call()["changed"] is True
+    stale = next(r for r in rings._load() if r["ring_id"] == ring["ring_id"])
+    assert (stale["_live_phase"], stale["_live_retired_reason"]) == ("retired", "live_join_expired")
