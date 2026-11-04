@@ -28,6 +28,20 @@ TERMINAL = frozenset(("changed", "same_task", "insufficient_context", "skipped",
 RECHECK_MS = 30_000
 MAX_RETRIES = 1
 MAX_EVENTS = 500
+# Deadline for a task-labels or scheduled run that never gets a terminal (its
+# queued turn was removed, or dispatch fails every time). Real runs end within
+# minutes (live maximum 18); without it such a run stayed open for 18 days
+# and its attachment never admitted again. Demand runs have their own TTL.
+RUN_TTL_MS = 2 * 60 * 60 * 1000
+
+
+def _expired(run: dict, now: int) -> dict | None:
+    """A synthetic error terminal for an open run past RUN_TTL_MS, else None."""
+    if run["status"] in TERMINAL or now - int(run["created_at"]) < RUN_TTL_MS:
+        return None
+    from .log import log
+    log("janitorRunExpired", f"run={run['run_id']} age_ms={now - int(run['created_at'])}")
+    return {"kind": "error", "detail": json.dumps({"error": "Run expired without a terminal"})}
 
 
 def _detail(event: dict) -> dict:
@@ -263,6 +277,9 @@ class JanitorRunner:
                 self._open_occurrence(state, now)
             state["cursor"] = high
             if not application_active:
+                # Admission waits for activity; retiring an admitted run past
+                # its deadline does not (AUT-15). Nothing is dispatched here.
+                self._retire_expired(attachment, state, now)
                 self._save(attachment, state)
                 return 0
             if due:
@@ -288,7 +305,7 @@ class JanitorRunner:
         if active:
             run = self.store.get_run(active)
             if run:
-                terminal = self.source.terminal(run)
+                terminal = self.source.terminal(run) or _expired(run, now)
                 if run["status"] in TERMINAL or terminal:
                     self._reconcile_run(attachment, state, run, terminal, now)
                 else:
@@ -331,8 +348,10 @@ class JanitorRunner:
             elif result["decision"] == "defer":
                 pending["eligible_at"] = int((result.get("eligible_at") or (now / 1000 + 30)) * 1000)
             else:
+                spent = (review.get("retry_count", 0) if review and all(
+                    review.get(key) == context.get(key) for key in ("task_key", "change_key", "fingerprint")) else 0)
                 context["retry_count"] = (0 if result["reason"] in ("new_task", "meaningful_change")
-                                          else pending.get("retry_count", 0))
+                                          else max(pending.get("retry_count", 0), spent))
                 candidates.append(context)
                 if len(candidates) >= max(1, min(int(config.get("max_targets", 3)), 3)):
                     break
@@ -353,6 +372,13 @@ class JanitorRunner:
         run = self.store.create_run(aid, generation, candidates, run_id=run_id, progress=state)
         return self._dispatch(attachment, state, run, now)
 
+    def _retire_expired(self, attachment: dict, state: dict, now: int) -> None:
+        run = self.store.get_run(state["active_run_id"]) if state.get("active_run_id") else None
+        if run and not self.source.terminal(run):
+            expired = _expired(run, now)
+            if expired:
+                self._reconcile_run(attachment, state, run, expired, now)
+
     def _scheduled_tick(self, attachment: dict, now: int) -> int:
         """A scheduled task: one run per due occurrence, no targets, no label
         admission; the closing report sets the next occurrence (adaptive)."""
@@ -368,7 +394,7 @@ class JanitorRunner:
                 state["last_error"] = "The admitted run is missing; configuration requires review"
                 self._save(attachment, state)
                 return 0
-            terminal = self.source.terminal(run)
+            terminal = self.source.terminal(run) or _expired(run, now)
             if run["status"] not in TERMINAL and not terminal:
                 self._save(attachment, state)
                 return self._dispatch(attachment, state, run, now)
@@ -448,6 +474,9 @@ class JanitorRunner:
             if outcome == "error" and retry < MAX_RETRIES:
                 self._pending(state, context, now)
                 state["pending"][session].update(retry_count=retry + 1, eligible_at=now + RECHECK_MS)
+                # Pending is cleared while the user is inactive; the review
+                # keeps the spent retry with its evidence (AUT-15).
+                review["retry_count"] = retry + 1
             elif outcome == "error":
                 review["retry_exhausted"] = True
         if run["status"] not in TERMINAL:
