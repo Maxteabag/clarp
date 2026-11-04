@@ -3,9 +3,11 @@ same-id resend and delivered once; a 4xx stays terminal with its own status.
 Before, both became a final 500 receipt that every retry replayed."""
 from __future__ import annotations
 
+import threading
 from types import SimpleNamespace
 
 from lib import agents as agents_db
+from lib import db, orchestrator
 from lib import prompt_admissions, settings_store
 from lib.db import conn
 from lib.orchestrator import OrchestratorService
@@ -128,3 +130,44 @@ def test_routing_context_gets_the_retried_message_once(tmp_path):
     rows = conn().execute(
         "SELECT text FROM agent_routing_messages WHERE session='antoni' AND role='user'").fetchall()
     assert [r["text"] for r in rows] == ["please ship the settings screen"]
+
+
+def test_concurrent_same_id_retries_record_one_routing_message(tmp_path, monkeypatch):
+    """Reviewer B on 5ef68825: two same-id retries at once both found no
+    routing row and both inserted one. The check and the insert are one
+    statement now."""
+    _agents()
+    models = []
+    service = OrchestratorService(_ctx(tmp_path), model_call=_model(models))
+    dispatch = _Dispatcher(DispatchError(503, "temporary dispatch failure"))
+    admission = _admission()
+    assert _send(service, dispatch, admission).status == 503
+    asked = len(models)
+    barrier = threading.Barrier(2, timeout=10)
+    record = orchestrator.record_routing_message
+
+    def simultaneous_insert(**kwargs):
+        barrier.wait()          # both retries reach the write together
+        return record(**kwargs)
+    monkeypatch.setattr(orchestrator, "record_routing_message", simultaneous_insert)
+    outcomes, errors = [], []
+
+    def retry():
+        try:
+            outcomes.append(_send(service, dispatch, admission))
+        except BaseException as exc:
+            errors.append(exc)
+        finally:
+            db.close_local()
+    workers = [threading.Thread(target=retry) for _ in range(2)]
+    for thread in workers:
+        thread.start()
+    for thread in workers:
+        thread.join(20)
+    assert not any(thread.is_alive() for thread in workers)
+    assert errors == []
+    assert len(outcomes) == 2 and all(r.ok and r.status == 200 for r in outcomes)
+    assert len(models) == asked
+    rows = conn().execute(
+        "SELECT text, trace_id FROM agent_routing_messages WHERE session='antoni' AND role='user'").fetchall()
+    assert [tuple(r) for r in rows] == [("please ship the settings screen", "trace-hands-free")]
