@@ -416,11 +416,17 @@ def test_pings_do_not_extend_the_readiness_deadline(call, monkeypatch):
     # provider was ready, and provider_ready never came (G1 flake: 'condition not met').
     h, thread = _provider_ready(call)
     session = _session(call)
-    monkeypatch.setattr(sock, "READY_S", 0.5)                       # read on every tick
+    # The window counts from the join and is read on every tick: it ends 0.5 s from now,
+    # however long the provider took, so pings really run inside it before it ends.
+    monkeypatch.setattr(sock, "READY_S", time.monotonic() - session.joined_at + 0.5)
     deadline = time.monotonic() + 15                                # pings that extend it fail, not hang
+    pings = 0
     while not session.closed.is_set() and thread.is_alive() and time.monotonic() < deadline:
         h.rfile.feed(_masked(0x9, b"p"))                            # ping traffic only
+        pings += 1
         thread.join(0.05)
+    assert pings >= 2, "the window ended before any ping traffic ran in it"
+    assert time.monotonic() < deadline, "the session outlived its window while pings ran"
     thread.join(15)
     _settles(lambda: _ring_of(call.grant)["_live_retired_reason"] == "not_ready")
     assert _ring_of(call.grant)["_live_retired_reason"] == "not_ready"
