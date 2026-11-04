@@ -30,6 +30,9 @@ python3 tests/replay/run.py prepare <base-sha> <head-sha> --prune
   python tests/replay/run.py --jobs 8 self-check --ref <sha>
 # Remove cached worktree builds (laptop or CI).
 python3 tests/replay/run.py clean
+# The retention rule (the nightly on the buildbox): keep the runs a finding cites
+# (<scratch>/keep.txt), remove the other released runs once 2 days old.
+python3 tests/replay/run.py clean --older-than-days 2
 ```
 
 heavy-remote copies the worktree without `.git`, so builds come from
@@ -57,7 +60,11 @@ on the cache for its whole life. A clean run removes its directory; a failed
 run, or one with `--keep`, keeps it and prints its path. `clean` removes cached
 builds only while holding that lease exclusively (so never while any run is
 live) and the creation lock, removes run directories no job holds, and
-refuses anything it did not make. Nothing is
+refuses anything it did not make. It never removes a run that a line of
+`<scratch>/keep.txt` cites (`<run id> <finding id>`, `#` comments; or
+`--keep-file`), and with `--older-than-days N` only a run whose claim is at
+least that old: an open finding or review packet that cites a run adds it to
+the keep list, and the line goes when the finding closes. Nothing is
 written to `~/.local/share/clarp` or `~/.config/clarp`.
 
 ## What runs
