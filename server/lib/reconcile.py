@@ -95,6 +95,24 @@ def _slot_is_spawning(agent_id: str) -> bool:
             or agent_id in (status.get("admitting") or ()))
 
 
+def _runtime_owns_now(agent_id: str) -> bool:
+    """A fresh read of an external runtime's ownership, for a destructive
+    repair only: the shared status may be up to RUNTIME_STATUS_TTL old and
+    predate a send the runtime has started admitting (TP-05b). Read after the
+    binding was seen, so an admission that bound it shows here. Unreadable
+    means owned: never unbind on an unknown."""
+    if getattr(backends, "_RUNTIME_CLIENT", None) is None:
+        return False   # in process, has_live_work read the slot table itself
+    try:
+        status = backends.runtime_status(max_age=0)
+    except Exception:  # noqa: BLE001 - runtime_status logs the outage
+        return True
+    return (agent_id in (status.get("active") or {})
+            or agent_id in (status.get("spawning") or ())
+            or agent_id in (status.get("admitting") or ())
+            or agent_id in (status.get("terminals") or ()))
+
+
 def _runtime_slot_may_have_leaked(agent_id: str) -> bool:
     """Whether to ask the external runtime to check this agent's slot.
 
@@ -170,7 +188,8 @@ def reconcile_agent(agent_id: str, backend: str | None = None, *,
         if bsid:
             if (backends.by_id(backend).resume_target(bsid, "", home) is None
                     and agents_db.live_backend_session(agent_id) == bsid
-                    and not has_live_work(agent_id, backend)):
+                    and not has_live_work(agent_id, backend)
+                    and not _runtime_owns_now(agent_id)):
                 agents_db.end_current_runtime(agent_id)
                 log("reconcileGhostSession",
                     f"agent={agent_id} bsid={bsid} has no transcript; unbound")
