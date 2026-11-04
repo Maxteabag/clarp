@@ -158,8 +158,9 @@ continue as before.
   dev python tests/replay/run.py --jobs 8 compare --base <base> --head <head>`;
   exit 0 passes. Register intended differences with the lead before the run.
 - **G3 reviewer:** the area reviewer's first line `SOURCE YES <full sha>` on the
-  exact commit. Reviewer A: turn engine, runtime boundary, agents and identity,
-  policies, backends and accounts, database and maintenance. Reviewer C (from
+  exact commit. Reviewer A: the Codex pool, backends and accounts (narrowed on
+  4 Nov). Reviewer A2 (from 4 Nov): turn engine and dispatch, runtime boundary,
+  agents and identity, policies, database and maintenance. Reviewer C (from
   3 Nov 13:05): read model and transcripts (S5, RM-*), voice (VP-*), autonomy and goals (AUT-*, from 4 Nov). Reviewer
   B: everything else (HTTP layer, live calls and Oracle,
   harness and test infrastructure, release tooling).
@@ -182,12 +183,14 @@ continue as before.
 | Contract owner | `rf-contract-80af` | Claude | `server/lib/db_schema.py`, `server/lib/db_migrations.py`, `contract/`, `server/lib/server_identity.py` contract constants, the lifecycle kit (`server/lib/lifecycle.py`, `docs/architecture/lifecycles.md`), schema goldens |
 | Fix-lane owner | `rf-fix-c4ab` | Claude | one fix per commit, in the files the lead names per fix |
 | Fix-lane author 2 | `rf-fix2-56f3` | Claude | one fix per commit (voice, Oracle, autonomy findings), in the files the lead names |
+| Fix-lane author 3 | `rf-fix3-9875` | Claude | one fix per commit, pulled from `registers/backlog.md` (B and C areas) |
 | Slice owner S3 | `rf-routes-0f54` | Claude | route goldens now; the route seam and route modules after go/no-go 1 |
 | Slice owner S5 | `rf-readmodel-12f8` | Claude | read-model goldens now; the read model after go/no-go 1 |
 | Compute owner | `rf-compute-aa87` | Claude | `/var/tmp/clarp-refactor-program/bin/heavy-remote`, the buildbox ledger |
 | Reviewer A (core) | `rf-review-core-bbc1` | Codex | verdicts only |
 | Reviewer B (rest) | `rf-review-rest-a79f` | Codex | verdicts only |
 | Reviewer C (read model, voice) | `rf-review-readmodel-300e` | Codex | verdicts only |
+| Reviewer A2 (turn engine, database) | `rf-review-core2-cf19` | Claude | verdicts only |
 
 Reviewers never edit sources, never run jobs against the live Host and never
 grant more than the exact commit they reviewed.
