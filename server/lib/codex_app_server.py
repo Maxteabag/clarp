@@ -20,7 +20,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from . import agent_goals, agents as agents_db, backend_usage, eventlog, tts_queue
+from . import agent_goals, agents as agents_db, backend_usage, eventlog, settings_store, tts_queue
 from .backend.codex import CodexBackend, TurnState
 from .backend.registry import by_id
 from .log import log, log_exception
@@ -704,8 +704,12 @@ class _Client:
                 self._mirror_goal(thread_id, goal if isinstance(goal, dict) else None)
                 _stop_pause_forget(thread_id)
                 log("codexStoppedGoalPausedOnResume", f"thread={thread_id[:8]}")
-            except Exception as exc:  # noqa: BLE001 - kept for the next resume
+            except Exception as exc:
+                # The goal the user stopped may still run: admit nothing on
+                # this thread. The marker stays for the next resume.
                 log_exception("codexStoppedGoalPauseFail", exc, detail=thread_id[:8])
+                raise RuntimeError("Could not pause the stopped Codex goal; "
+                                   "the message waits for the next try") from exc
             finally:
                 self._goal_answer_end(thread_id)
             return result
@@ -1024,26 +1028,24 @@ _STOP_PAUSE_PREFIX = "codex.stop_pause."
 
 def _stop_pause_get(thread_id: str) -> int | None:
     """A Stop-pause the app-server never answered for ``thread_id`` (when it
-    was recorded), in the settings table like other small markers."""
+    was recorded), a small marker kept through settings_store."""
     if not thread_id:
         return None
-    row = agents_db.conn().execute("SELECT updated_at FROM settings WHERE key = ?",
-                                   (_STOP_PAUSE_PREFIX + thread_id,)).fetchone()
-    return int(row["updated_at"]) if row else None
+    value = settings_store.get(_STOP_PAUSE_PREFIX + thread_id)
+    try:
+        return int(value) if value is not None else None
+    except ValueError:
+        return 0
 
 
 def _stop_pause_put(thread_id: str) -> None:
     if thread_id:
-        agents_db.conn().execute(
-            "INSERT INTO settings (key, value, updated_at) VALUES (?, '1', ?)"
-            " ON CONFLICT(key) DO UPDATE SET updated_at = excluded.updated_at",
-            (_STOP_PAUSE_PREFIX + thread_id, int(time.time() * 1000)))
+        settings_store.set_text(_STOP_PAUSE_PREFIX + thread_id, str(int(time.time() * 1000)))
 
 
 def _stop_pause_forget(thread_id: str) -> None:
     if thread_id:
-        agents_db.conn().execute("DELETE FROM settings WHERE key = ?",
-                                 (_STOP_PAUSE_PREFIX + thread_id,))
+        settings_store.delete(_STOP_PAUSE_PREFIX + thread_id)
 
 
 def _busy(client) -> bool:
