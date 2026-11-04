@@ -285,3 +285,23 @@ fn a_failed_send_is_retried() {
     // Resent under its own id, so the Host launches it once (CLIENT-SEND-500).
     assert!(rows.iter().any(|r| r.id == failed_id && r.text == "Try again"), "same client_msg_id");
 }
+
+#[test]
+fn a_late_answer_after_the_delivery_timer_and_a_chat_switch_confirms_the_chat_that_sent_it() {
+    // Reviewer B on da3fb668: the 20 s timer marks the send failed but the
+    // POST goes on; its 2xx must confirm the chat that sent it, never the one
+    // selected by then, or the row stays failed for good (CLIENT-SEND-500).
+    let host = Host::start("late-send");
+    let mut d = Driver::new(&host.base);
+    d.connect();
+    d.until("rachel open", |e| e.conversation("rachel").is_some_and(|c| c.rows().len() == 2));
+    host.control("/__control/send-delay", json!({"seconds": 23}));
+    d.engine.send("Slow one");
+    d.until_within("the delivery timer marks it failed", Duration::from_secs(30), |e, _| {
+        e.conversation("rachel").unwrap().rows().iter().any(|r| r.text == "Slow one" && r.delivery_failed)
+    });
+    d.engine.select("mike");
+    d.until_within("the late 2xx confirms rachel's send", Duration::from_secs(15), |e, _| {
+        e.conversation("rachel").unwrap().rows().iter().any(|r| r.text == "Slow one" && !r.delivery_failed && !r.pending)
+    });
+}
