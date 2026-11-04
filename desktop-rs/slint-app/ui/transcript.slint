@@ -114,6 +114,8 @@ export struct MessageRow {
     pending: bool,
     status-due: bool,
     failed: bool,
+    // A failed send's one-line reason from the Host ("" when none).
+    failure: string,
     // Tool activity: the toggle's label, whether the cards show, the cards.
     activity-label: string,
     group-id: string,
@@ -906,6 +908,16 @@ component TranscriptRow inherits HorizontalLayout {
                 horizontal-alignment: root.message.author == "user" ? right : left;
                 accessible-role: text;
                 accessible-id: root.measuring ? "" : "status:" + root.message.id;
+                accessible-label: self.text;
+            }
+            if root.message.failed && root.message.failure != "" && (root.message.prompt.key == "" || root.message.prompt.expanded): Text {
+                text: root.message.failure;
+                color: Palette.danger;
+                font-size: ChatText.note;
+                overflow: elide;
+                horizontal-alignment: root.message.author == "user" ? right : left;
+                accessible-role: text;
+                accessible-id: root.measuring ? "" : "failure:" + root.message.id;
                 accessible-label: self.text;
             }
             if !((root.message.pending && root.message.status-due) || root.message.failed) && root.message.stamp != "" && (root.message.prompt.key == "" || root.message.prompt.expanded): Text {

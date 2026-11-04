@@ -1567,7 +1567,10 @@ impl Engine {
             });
         } else if let Some(client_id) = tag.strip_prefix("send:") {
             if let Some((session, _)) = self.deliveries.remove(client_id) {
-                self.with_conversation(&session, |c| c.mark_delivery_failed(client_id));
+                // The Host answered with a reason (e.g. 413 'too long for this
+                // agent'): the bubble says it, so Resend is not pressed blindly.
+                let reason = if status > 0 { message } else { "" };
+                self.with_conversation(&session, |c| c.mark_delivery_failed_because(client_id, reason));
             }
             if self.deliveries.is_empty() {
                 self.set_sending(false);
