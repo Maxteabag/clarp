@@ -660,12 +660,17 @@ class _Client:
         intent is recorded first (decide, then act); pausing never interrupts
         the running turn (ext/goal runtime.rs:248-253)."""
         agent = agents_db.get_by_backend_session(thread_id)
-        row = agent_goals.get(agent["agent_id"]) if agent else None
-        if not row or row.get("status") != agent_goals.ACTIVE or _move_get(thread_id):
+        if not agent:
             return
         record = {"agent_id": agent["agent_id"], "thread": thread_id, "phase": "pausing",
                   "generation": f"{os.getpid()}:{self.generation}"}
-        _move_put(thread_id, record)
+        with _GOAL_MOVE_LOCK:
+            # Under the lock users' goal actions take: decided on the state
+            # they leave, never on one they are changing.
+            row = agent_goals.get(agent["agent_id"])
+            if not row or row.get("status") != agent_goals.ACTIVE or _move_get(thread_id):
+                return
+            _move_put(thread_id, record)
         self._goal_answer_begin(thread_id)
         try:
             result = self.request("thread/goal/set", {"threadId": thread_id, "status": "paused"},
@@ -677,7 +682,11 @@ class _Client:
             return
         finally:
             self._goal_answer_end(thread_id)
-        _move_put(thread_id, {**record, "phase": "paused"})
+        if not _move_advance(thread_id, "pausing", {**record, "phase": "paused"}):
+            # A user's goal action ended the claim while the pause was out:
+            # the user's word stands, nothing of the move is restored.
+            log("codexGoalMoveYielded", f"thread={thread_id[:8]} at=paused")
+            return
         log("codexThreadMoveStart", f"thread={thread_id[:8]} from={self.generation} goal_paused=True")
 
     def _capture_move(self, thread_id: str) -> bool:
@@ -696,9 +705,13 @@ class _Client:
             return False
         goal = result.get("goal") if isinstance(result, dict) else None
         if not isinstance(goal, dict) or goal.get("status") != "paused":
-            _move_forget(thread_id)          # completed, cleared or changed: nothing to restore
+            with _GOAL_MOVE_LOCK:            # completed, cleared or changed: nothing to restore
+                if (_move_get(thread_id) or {}).get("phase") == "paused":
+                    _move_forget(thread_id)
             return True
-        _move_put(thread_id, {**record, "phase": "moving", "updated_at": goal.get("updatedAt")})
+        if not _move_advance(thread_id, "paused",
+                             {**record, "phase": "moving", "updated_at": goal.get("updatedAt")}):
+            log("codexGoalMoveYielded", f"thread={thread_id[:8]} at=moving")
         return True
 
     def _exit_if_drained(self, *, backstop: bool = False) -> None:
@@ -1469,6 +1482,18 @@ def _move_forget(thread_id: str) -> None:
     settings_store.delete(_MOVE_PREFIX + thread_id)
 
 
+def _move_advance(thread_id: str, expected_phase: str, record: dict) -> bool:
+    """Compare-and-set: write ``record`` only while the stored record is
+    still in ``expected_phase`` (a user's goal action deletes it under the
+    same lock). False: the claim is gone and stays gone."""
+    with _GOAL_MOVE_LOCK:
+        current = _move_get(thread_id)
+        if not current or current.get("phase") != expected_phase:
+            return False
+        _move_put(thread_id, {**record, "written_at": current.get("written_at")})
+        return True
+
+
 def _continue_move(thread_id: str) -> None:
     """After the move: resume the thread on the current generation and set
     its goal active again, only if it is still paused exactly as the move
@@ -1498,11 +1523,16 @@ def _continue_move(thread_id: str) -> None:
         goal = result.get("goal") if isinstance(result, dict) else None
         unchanged = (isinstance(goal, dict) and goal.get("status") == "paused"
                      and goal.get("updatedAt") == record.get("updated_at"))
-        _move_forget(thread_id)
         if not unchanged:
+            _move_forget(thread_id)
             log("codexGoalMoveRefused", f"thread={thread_id[:8]} status={(goal or {}).get('status')}")
             return
-        client.goal(agent, "resume")
+        try:
+            client.goal(agent, "resume")
+        except Exception as exc:  # noqa: BLE001 - the record stays: the next pass retries
+            log_exception("codexGoalMoveResumeFail", exc, detail=thread_id[:8])
+            return
+        _move_forget(thread_id)       # only once the goal is active again
         log("codexGoalMoveResumed", f"thread={thread_id[:8]} to={client.generation}")
 
 
@@ -1535,11 +1565,16 @@ def _restore_paused(thread_id: str) -> None:
                 return
             raise
         goal = result.get("goal") if isinstance(result, dict) else None
-        _move_forget(thread_id)
         if not isinstance(goal, dict) or goal.get("status") != "paused":
+            _move_forget(thread_id)
             log("codexGoalMoveDropped", f"thread={thread_id[:8]} reason=not-paused")
             return
-        client.goal(agent, "resume")
+        try:
+            client.goal(agent, "resume")
+        except Exception as exc:  # noqa: BLE001 - the record stays: the next pass retries
+            log_exception("codexGoalMoveResumeFail", exc, detail=thread_id[:8])
+            return
+        _move_forget(thread_id)       # only once the goal is active again
         log("codexGoalMoveRestored", f"thread={thread_id[:8]} to={client.generation}")
 
 
