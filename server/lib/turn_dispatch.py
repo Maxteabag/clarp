@@ -2260,13 +2260,21 @@ class TurnDispatchService:
         return False, True
 
     def _running_processes(self, spec: _TurnSpec) -> list:
-        """The agent's turn processes that are positively still running."""
+        """The agent's turn processes that are positively still running, and
+        any process that still holds its session outside a turn (a detached,
+        stuck Codex turn: the send waits instead of failing, BACKENDS-07b)."""
         try:
-            handles = self.backends.active_handles(spec.backend, spec.agent_id)
+            handles = list(self.backends.active_handles(spec.backend, spec.agent_id) or ())
         except Exception:  # noqa: BLE001
-            return []
+            handles = []
+        holders = getattr(self.backends, "turn_holders", None)
+        if holders is not None:
+            try:
+                handles += list(holders(spec.backend, spec.agent_id) or ())
+            except Exception:  # noqa: BLE001
+                pass
         running = []
-        for handle in handles or ():
+        for handle in handles:
             try:
                 if getattr(handle, "is_alive", lambda: False)():
                     running.append(handle)
