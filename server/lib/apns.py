@@ -374,9 +374,14 @@ def _close_quietly(client) -> None:
         pass
 
 
-def _reset_pooled_client() -> None:
+def _reset_pooled_client(expected=None) -> None:
+    """Drop the shared client. With ``expected``, only if it is still that
+    client: a batch that held an older one must not close the replacement
+    every other batch is using (AUT-19)."""
     global _CLIENT, _CLIENT_CTOR
     with _CLIENT_LOCK:
+        if expected is not None and _CLIENT is not expected:
+            return
         client, _CLIENT, _CLIENT_CTOR = _CLIENT, None, None
     _close_quietly(client)
 
@@ -567,13 +572,23 @@ class _DirectTransport:
     def send(self, token: str, environment: str, payload: dict, *,
              push_type: str = "alert", priority: str = "10",
              collapse_id: str | None = None) -> tuple[int, str, str]:
-        return _send_one(self._client, _host(environment), self._auth,
-                         self._cfg.apns_bundle_id, token, payload,
-                         push_type=push_type, priority=priority,
-                         collapse_id=collapse_id)
+        def once():
+            return _send_one(self._client, _host(environment), self._auth,
+                             self._cfg.apns_bundle_id, token, payload,
+                             push_type=push_type, priority=priority,
+                             collapse_id=collapse_id)
+        try:
+            return once()
+        except RuntimeError as e:
+            if "client has been closed" not in str(e):
+                raise
+            # Another batch replaced the shared client before this request
+            # went out: nothing reached Apple, so send once on the live one.
+            self._client = _pooled_client()
+            return once()
 
     def reset(self) -> None:
-        _reset_pooled_client()
+        _reset_pooled_client(self._client)
         self._client = _pooled_client()
 
 
