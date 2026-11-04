@@ -2,10 +2,14 @@
 section 1): today's transitions of queued_turns.status, written against the old
 code before any conversion.
 
-Every writer in lib/turn_queue.py is called on a row in each status, next to an
-untouched neighbour row of the same agent, at a fixed clock. The matrix records
-what it returned, the rows afterwards (order, status, text, started_at,
-claimed_at, allow_paused) and whether the agent's queue revision moved. The
+Every writer in lib/turn_queue.py is called on a target row q1 (agent a-1,
+trace t-1) in each status, at a fixed clock, next to three rows that pin its
+scope: q2 (same agent, other trace, same status), q3 (other agent, same trace,
+same status) and q4 (same agent, other trace, queued: the order neighbour);
+q2 and q3 carry allow_paused = 1. The matrix records what it returned, every
+row afterwards (order, agent, trace, status, text, started_at, claimed_at,
+allow_paused), and per agent the queue revision, the paused flag and both
+stop generations. The
 sweeps (stale claims, ended and idle receipts, settlement) have their own
 cases. The conversion must reproduce the matrix byte for byte; a change is a
 registered intended difference. Regenerate only for such a change, with
@@ -25,9 +29,23 @@ GOLDEN = pathlib.Path(__file__).resolve().parents[1] / "fixtures" / "lifecycles"
 NOW = 50_000_000
 STATUSES = ("queued", "claimed", "parked", "started", "done", "failed", "interrupted",
             "ended", "unknown", "cancelled", "withdrawn")
-AGENT, TRACE = "a-1", "t-1"
+AGENT, TRACE, OTHER_AGENT, OTHER_TRACE = "a-1", "t-1", "a-2", "t-2"
+NEW = dict(agent_id=AGENT, session="s", text="new", trace_id="t-9", client_msg_id="c-9",
+           synthesize_audio=True, origin="user", sender_agent_id="")
 
 WRITERS = {
+    "enqueue[new]": lambda: turn_queue.enqueue(queue_id="q9", **NEW),
+    "enqueue[same id]": lambda: turn_queue.enqueue(queue_id="q1", **NEW),
+    "park[new]": lambda: turn_queue.park(queue_id="q9", **NEW),
+    "park[same id]": lambda: turn_queue.park(queue_id="q1", **NEW),
+    "park_at_head[new]": lambda: turn_queue.park_at_head(queue_id="q9", **NEW),
+    "park_at_head[same id]": lambda: turn_queue.park_at_head(queue_id="q1", **NEW),
+    "allow_paused": lambda: turn_queue.allow_paused("q1"),
+    "set_paused[stop]": lambda: turn_queue.set_paused(AGENT, True),
+    "set_paused[user stop]": lambda: turn_queue.set_paused(AGENT, True, user_stop=True),
+    "set_paused[resume]": (lambda: turn_queue.set_paused(AGENT, True),
+                           lambda: turn_queue.set_paused(AGENT, False)),
+    "set_paused[resume when running]": lambda: turn_queue.set_paused(AGENT, False),
     "take_over_at_head": lambda: turn_queue.take_over_at_head(
         "q1", agent_id=AGENT, trace_id=TRACE, prompt_admission_id=""),
     "remove_taken_over": lambda: turn_queue.remove_taken_over("q1"),
@@ -69,19 +87,26 @@ def _in_transaction(fn):
         raise
 
 
-def _insert(queue_id: str, status: str, *, at: int, trace: str = TRACE) -> None:
+def _insert(queue_id: str, status: str, *, at: int, trace: str = TRACE, agent: str = AGENT,
+            allow_paused: int = 0) -> None:
     db.conn().execute(
         "INSERT INTO queued_turns (queue_id, agent_id, session, text, trace_id, client_msg_id,"
-        " status, enqueued_at, started_at, claimed_at) VALUES (?, ?, 's', 'hello', ?, ?, ?, ?, ?, ?)",
-        (queue_id, AGENT, trace, queue_id, status, at,
+        " status, enqueued_at, started_at, claimed_at, allow_paused)"
+        " VALUES (?, ?, 's', 'hello', ?, ?, ?, ?, ?, ?, ?)",
+        (queue_id, agent, trace, queue_id, status, at,
          at if status not in ("queued", "parked", "claimed") else None,
-         at if status == "claimed" else None))
+         at if status == "claimed" else None, allow_paused))
 
 
 def _rows() -> list[list]:
     return [list(r) for r in db.conn().execute(
-        "SELECT queue_id, status, text, started_at, claimed_at, allow_paused"
+        "SELECT queue_id, agent_id, trace_id, status, text, started_at, claimed_at, allow_paused"
         " FROM queued_turns ORDER BY queue_seq")]
+
+
+def _queue_state(agent: str) -> list:
+    return [turn_queue.revision(agent), turn_queue.is_paused(agent),
+            turn_queue.stop_generation(agent), turn_queue.user_stop_generation(agent)]
 
 
 def _value(result):
@@ -97,16 +122,27 @@ def clock(monkeypatch):
 
 
 def run(name: str, status: str) -> dict:
-    db.conn().execute("DELETE FROM queued_turns")
+    """Each cell starts from a fresh store (the isolated database is per test,
+    so rows, revisions and generations are cleared by hand)."""
+    con = db.conn()
+    for table in ("queued_turns", "queue_state_revisions"):
+        con.execute(f"DELETE FROM {table}")
+    con.execute("DELETE FROM settings WHERE key LIKE 'turn_queue.%'")
     _insert("q1", status, at=NOW - 60_000)       # a minute old: past the 30 s claim age
-    _insert("q2", "queued", at=NOW - 30_000)     # the agent's untouched neighbour
-    before = turn_queue.revision(AGENT)
+    _insert("q2", status, at=NOW - 50_000, trace=OTHER_TRACE, allow_paused=1)
+    _insert("q3", status, at=NOW - 40_000, agent=OTHER_AGENT, allow_paused=1)
+    _insert("q4", "queued", at=NOW - 30_000, trace=OTHER_TRACE)
+    writer = WRITERS[name]
+    if isinstance(writer, tuple):
+        setup, writer = writer
+        setup()
+    before = {agent: _queue_state(agent) for agent in (AGENT, OTHER_AGENT)}
     try:
-        returned, error = _value(WRITERS[name]()), None
+        returned, error = _value(writer()), None
     except Exception as exc:  # recorded, not swallowed: the refusal is part of the matrix
         returned, error = None, type(exc).__name__
     return {"returned": returned, "error": error, "rows": _rows(),
-            "revision_bumped": turn_queue.revision(AGENT) != before}
+            "queue_state": {agent: [before[agent], _queue_state(agent)] for agent in (AGENT, OTHER_AGENT)}}
 
 
 def matrix() -> dict:
@@ -128,13 +164,22 @@ def test_queue_writers_match_the_matrix(clock):
 
 def test_the_matrix_shows_the_known_rules(clock):
     """Spot checks that read as the plan's facts, so the golden cannot hide them."""
-    assert run("claim", "queued")["rows"][0][1] == "claimed"
-    assert run("claim", "started")["rows"][0][1] == "started"
-    assert run("reset_stale_claims", "claimed")["rows"][0][1] == "queued"
-    assert run("reset_stale_claims[exclude]", "claimed")["rows"][0][1] == "claimed"
+    assert run("claim", "queued")["rows"][0][3] == "claimed"
+    assert run("claim", "started")["rows"][0][3] == "started"
+    assert run("reset_stale_claims", "claimed")["rows"][0][3] == "queued"
+    assert run("reset_stale_claims[exclude]", "claimed")["rows"][0][3] == "claimed"
     # The newest settlement wins: a failed receipt of the same trace becomes done.
-    assert run("settle_receipt[completed]", "failed")["rows"][0][1] == "done"
-    assert run("settle_receipt[completed]", "cancelled")["rows"][0][1] == "cancelled"
+    assert run("settle_receipt[completed]", "failed")["rows"][0][3] == "done"
+    assert run("settle_receipt[completed]", "cancelled")["rows"][0][3] == "cancelled"
+    # Scope: only this agent's rows of this trace; a Stop clears only this agent's rights.
+    cancelled = run("cancel_for_traces", "queued")["rows"]
+    assert [r[3] for r in cancelled] == ["cancelled", "queued", "queued", "queued"]
+    settled = run("settle_receipt[completed]", "started")["rows"]
+    assert [r[3] for r in settled] == ["done", "started", "started", "queued"]
+    stopped = run("set_paused[stop]", "queued")["rows"]
+    assert [r[7] for r in stopped] == [0, 0, 1, 0]
+    assert run("allow_paused", "queued")["returned"] is True
+    assert run("allow_paused", "started")["returned"] is False
 
 
 # --- the idle sweep: every gate and both timing branches (plan, section 1) ----
