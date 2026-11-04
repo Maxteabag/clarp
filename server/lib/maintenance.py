@@ -165,6 +165,18 @@ def prune_database(*, now_ms: int | None = None,
         "DELETE FROM judgment_decisions WHERE created_at < ?",
         (now_ms - policy.judgment_decisions_max_age_ms,),
     ).rowcount)
+    # VP-04: audio bookkeeping observations and their janitor runs, with the
+    # clip retention, in short transactions. Logged, never fatal.
+    try:
+        from . import audio_bookkeeper
+        pruned = _timed(phases, "db.audio_bookkeeping", lambda: audio_bookkeeper.prune(
+            now_ms, max_age_ms=policy.clip_row_max_age_ms))
+        counts["audio_bookkeeping_events"] = pruned["events"]
+        counts["audio_bookkeeping_runs"] = pruned["runs"]
+    except Exception as e:  # noqa: BLE001
+        from .log import log_exception
+        log_exception("audioBookkeepingPruneFail", e)
+        counts["audio_bookkeeping_events"] = counts["audio_bookkeeping_runs"] = 0
     from . import tool_explanation_learning, tool_explanation_templates
     from .tool_explanations import PROMPT_VERSION
     counts.update(_timed(phases, "db.tool_explanation_learning", lambda: tool_explanation_learning.prune(
