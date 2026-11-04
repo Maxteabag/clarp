@@ -151,6 +151,9 @@ continue as before.
   except the quarantined tests (read the result, not a wrapper's exit code);
   move-only commits pass the AST-identity check once it exists; the layer test
   once it exists.
+  Keep the full pytest output of every G1: tee it to a log file before any grep,
+  and cite the log path in packets and flake reports (a bare FAILED line cannot
+  tell a deadline miss from a real weakness).
 - **G2 harness** (binding since go/no-go 1): replay of head against its own base
   on main with a harness commit that has reviewer B's SOURCE YES: zero
   unexplained differences. On the laptop `python3 tests/replay/run.py prepare
@@ -184,6 +187,7 @@ continue as before.
 | Fix-lane owner | `rf-fix-c4ab` | Claude | one fix per commit, in the files the lead names per fix |
 | Fix-lane author 2 | `rf-fix2-56f3` | Claude | one fix per commit (voice, Oracle, autonomy findings), in the files the lead names |
 | Fix-lane author 3 | `rf-fix3-9875` | Claude | one fix per commit, pulled from `registers/backlog.md` (B and C areas) |
+| Slice owner S9 (module splits) | `rf-fix3-9875` | Claude | the module-split tool (recipe + generator + facade + ast_identity) and the move-only splits of unowned oversized modules on `refactor/integration` |
 | Slice owner S3 | `rf-routes-0f54` | Claude | route goldens now; the route seam and route modules after go/no-go 1 |
 | Slice owner S5 | `rf-readmodel-12f8` | Claude | read-model goldens now; the read model after go/no-go 1 |
 | Compute owner | `rf-compute-aa87` | Claude | `/var/tmp/clarp-refactor-program/bin/heavy-remote`, the buildbox ledger |
@@ -203,6 +207,10 @@ commits land.
 
 | Since | Slice (owner) | Claimed | Until |
 |---|---|---|---|
+| 4 Nov 10:0x | S9 (`rf-fix3-9875`) | on `refactor/integration` only: `server/lib/agent_live_tools.py` (pilot), then `agent_rings.py`, `dreaming.py`, `background_jobs.py`, `orchestrator.py`, each claimed when its cut starts; main's fixes keep flowing because the splits are regenerated from main's text at every merge | the big release |
+| 4 Nov 10:4x | S7 (`rf-fix2-56f3`) | on `refactor/integration` only: `server/lib/tts_providers.py` (the `_wav_to_mp3` definition, which stays as a facade re-export), new `server/lib/audio_codec.py`, and the one lazy import of it in `server/lib/custom_tts_adapters.py`; regenerated from main's text at every merge with S9's split tool | the big release |
+| 4 Nov 10:5x | S7 (`rf-fix2-56f3`) | on `refactor/integration` only: `server/lib/clip_delivery/raw_pcm.py` (RawPcmSession), `server/lib/clip_delivery/chunked_file.py` (ChunkedFileSession), new `server/lib/clip_delivery/file_session.py`; behaviour-preserving refactor (G0 table plus G2 at zero), not regenerated; no pending main fix touches these files (lead checked VP-01, VP-06 and the voice batch) | the big release |
+| 4 Nov 11:3x | S7 (`rf-fix2-56f3`) | on `refactor/integration` only: `server/lib/voice_markup.py` (new `extract_speak_blocks`), `server/lib/transcript_streamer.py` (its `<speak>` regex and the loop at `_on_text`), `server/lib/message_audio.py` (its `<speak>` regex); behaviour-preserving, each reader keeps its mode; no pending main fix touches these files (lead checked VP-01, VP-06, AUT-07, RTO-07) | the big release |
 | 3 Nov 12:17 | S5 (`rf-readmodel-12f8`) | `server/lib/message_writes.py` import section (`store_transcript_turns`, `_ImportWriter`, `_store_transcript_turns_txn` and its helpers, `_attach_authority_tools`, `stamp_turn`); `server/lib/message_store.py` facade re-exports; `tests/readmodel/` | the S5 extraction commits land; `rf-fix-c4ab`'s RM-N1 commit may edit the upsert and twin path |
 
 ## 7. How to work

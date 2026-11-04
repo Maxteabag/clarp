@@ -582,12 +582,10 @@ impl Engine {
         self.post_agent_setting(session, "/agent-mcp", json!({"session": session, "mcp_servers": servers}));
     }
 
-    /// Sends a failed message again, taking it out of the transcript first.
+    /// Sends a failed message again under its own id, in place, so the Host
+    /// launches it once (or answers a started one without a second turn).
     pub fn retry_failed_message(&mut self, session: &str, message_id: &str) {
-        let text = self.with_conversation(session, |c| c.take_failed_message_for_retry(message_id)).flatten();
-        if let Some(text) = text.filter(|t| !t.is_empty()) {
-            self.send_to(session, &text, false);
-        }
+        self.resend_failed(session, message_id);
     }
 
     /// The selected chat's newest failed message, sent again.

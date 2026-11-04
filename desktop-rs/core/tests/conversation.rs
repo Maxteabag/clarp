@@ -199,10 +199,10 @@ fn optimistic_delivery_stays_visible_until_confirmed() {
     h.clear();
     h.log(logs[1].0.clone(), LoadKind::Delta);
     assert_eq!(h.ids(), ["m0", "u-a", "u-b"]);
-    let confirmed: Vec<&Op> =
-        h.ops.iter().filter(|op| matches!(op, Op::Signal(Signal::DeliveryConfirmed(_)))).collect();
-    assert_eq!(confirmed, [&Op::Signal(Signal::DeliveryConfirmed("a".into()))]);
-    assert!(h.model.rows()[2].pending);
+    // The synced u-a row does not confirm the send: the Host saves the row
+    // before the turn starts, so only the /send answer does (CLIENT-SEND-500).
+    assert_eq!(h.count(|op| matches!(op, Op::Signal(Signal::DeliveryConfirmed(_)))), 0);
+    assert!(h.model.rows()[1].pending && h.model.rows()[2].pending);
 
     let mut cached = Harness::new("cached");
     cached.log(json!({"conversation_id": "conversation", "latest_revision": 1,
@@ -497,4 +497,58 @@ fn a_tail_load_restores_the_host_order_of_a_cached_chat() {
     h.clear();
     h.log(host, LoadKind::Tail);
     assert_eq!(h.count(|op| matches!(op, Op::Reset(_))), 0, "an order that already is the Host's is left alone");
+}
+
+
+// CLIENT-SEND-500: a /send that failed after the Host saved the row must not
+// look delivered when the next sync carries that row.
+
+#[test]
+fn a_sync_carrying_the_row_does_not_confirm_this_clients_send() {
+    let mut h = Harness::new("cipher");
+    h.optimistic("a", "deploy it");
+    h.clear();
+    h.log(json!({"conversation_id": "c", "latest_revision": 1, "turns": [
+        {"id": "u-a", "role": "user", "text": "deploy it", "revision": 1}]}), LoadKind::Delta);
+    assert_eq!(h.ids(), ["u-a"]);
+    assert!(h.model.rows()[0].pending, "still waiting for the /send answer");
+    assert_eq!(h.count(|op| matches!(op, Op::Signal(Signal::DeliveryConfirmed(_)))), 0);
+}
+
+#[test]
+fn a_failed_send_stays_failed_when_a_sync_carries_its_row() {
+    let mut h = Harness::new("cipher");
+    h.log(json!({"conversation_id": "c", "turns": [turn("m1", 1)]}), LoadKind::Tail);
+    h.optimistic("a", "deploy it");
+    h.model.mark_delivery_failed("a");
+    h.sync();
+    h.log(json!({"conversation_id": "c", "latest_revision": 2, "turns": [
+        {"id": "u-a", "role": "user", "text": "deploy it", "revision": 2}]}), LoadKind::Delta);
+    let row = h.model.rows().iter().find(|m| m.id == "u-a").expect("the row");
+    assert!(row.delivery_failed && !row.pending, "a delta keeps it failed");
+    h.log(json!({"conversation_id": "c2", "turns": [
+        turn("m1", 1), {"id": "u-a", "role": "user", "text": "deploy it", "revision": 2}]}), LoadKind::Tail);
+    let failed: Vec<&Message> = h.model.rows().iter().filter(|m| m.id == "u-a").collect();
+    assert_eq!(failed.len(), 1);
+    assert!(failed[0].delivery_failed, "a replacement keeps it failed");
+}
+
+
+#[test]
+fn a_failed_send_keeps_the_hosts_reason_until_it_is_resent() {
+    // The Host's one-line refusal (e.g. BACKENDS-08's 413) shows on the failed
+    // bubble, so Resend is not pressed into the same refusal blindly.
+    let mut h = Harness::new("cipher");
+    h.optimistic("a", "a very long prompt");
+    h.model.mark_delivery_failed_because("a", "too long for this agent: shorten or split");
+    h.sync();
+    h.log(json!({"conversation_id": "c", "latest_revision": 1, "turns": [
+        {"id": "u-a", "role": "user", "text": "a very long prompt", "revision": 1}]}), LoadKind::Delta);
+    let row = h.model.rows().iter().find(|m| m.id == "u-a").expect("the row");
+    assert!(row.delivery_failed);
+    assert_eq!(row.delivery_error, "too long for this agent: shorten or split", "a sync keeps the reason");
+    assert_eq!(h.model.resend_failed("u-a"), Some(("a".to_owned(), "a very long prompt".to_owned())));
+    h.sync();
+    let row = h.model.rows().iter().find(|m| m.id == "u-a").expect("the row");
+    assert!(row.pending && !row.delivery_failed && row.delivery_error.is_empty(), "a resend clears it");
 }

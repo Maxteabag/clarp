@@ -302,3 +302,73 @@ members = [
     "_handle_persona_avatar",
     "_handle_update_persona",
 ]
+
+[[group]]
+name = "calls"
+module = "lib/routes/calls.py"
+class = "CallRoutes"
+members = [
+    "_apply_group_call",
+    "_calls_by",
+    "_calls_principal",
+    "_calls_ring_run",
+    "_handle_calls_action",
+    "_handle_calls_add",
+    "_handle_calls_end",
+    "_handle_calls_get",
+    "_handle_calls_hold",
+    "_handle_calls_live",
+    "_handle_calls_remove",
+    "_handle_calls_resume",
+    "_handle_calls_ring",
+    "_handle_calls_ring_answer",
+    "_handle_calls_ring_cancel",
+    "_handle_calls_ring_decline",
+    "_handle_calls_ring_device",
+    "_handle_calls_ring_device_get",
+    "_handle_calls_ring_get",
+    "_handle_calls_ring_live_close",
+    "_handle_calls_ring_live_fallback",
+    "_handle_calls_ring_opening",
+    "_handle_calls_ring_settings_get",
+    "_handle_calls_ring_settings_post",
+    "_handle_calls_ring_voip_token",
+    "_handle_calls_start",
+    "_handle_calls_switch",
+    "_handle_calls_transfer",
+]
+
+[[group]]
+name = "oracle"
+module = "lib/routes/oracle.py"
+class = "OracleRoutes"
+members = [
+    "_handle_oracle_call_close",
+    "_handle_oracle_call_create",
+    "_handle_oracle_call_status",
+    "_handle_oracle_connect",
+    "_handle_oracle_contact_get",
+    "_handle_oracle_contact_post",
+    "_handle_oracle_context_image",
+    "_handle_oracle_delegation_ack",
+    "_handle_oracle_delegation_cancel",
+    "_handle_oracle_delegation_create",
+    "_handle_oracle_delegations_get",
+    "_handle_oracle_handoff_ack",
+    "_handle_oracle_handoff_get",
+    "_handle_oracle_live_call_close",
+    "_handle_oracle_live_call_control",
+    "_handle_oracle_live_call_create",
+    "_handle_oracle_live_call_status",
+    "_handle_oracle_status",
+    "_handle_oracle_voice_provider_get",
+    "_handle_oracle_voice_provider_post",
+    "_oracle_auth_missing",
+    "_oracle_handoff_principal",
+]
+acknowledged_patches = [
+    {path = "tests/unit/test_startup_runtime_wait.py", name = "log_exception", reason = "patches server.log_exception to observe _recover_after_start, which stays in server.py; no oracle route is exercised", evidence = "4 Nov 10:05, on the applied tree d2ba0159 (s3_merge of this recipe into integration 8d614a18, one commit per group), heavy-remote with a call tracer on lib/routes/oracle.py (tests/s3_ack_trace.py plugin, all threads, setup included): the whole file tests/unit/test_startup_runtime_wait.py made 0 calls into lib/routes/oracle.py; control in the same run (exit 0): tests/integration/test_calls_oracle_http_characterization.py, test_calls_oracle_g0_http_characterization.py and test_media_oracle_calls_http_characterization.py made 222 calls in 32 tests"},
+    {path = "tests/unit/test_server_helpers_characterization.py", name = "log_exception", reason = "patches server.log_exception to observe _spawn_voice_metrics, which stays in server.py; no oracle route is exercised", evidence = "4 Nov 10:05, on the applied tree d2ba0159 (s3_merge of this recipe into integration 8d614a18, one commit per group), heavy-remote with a call tracer on lib/routes/oracle.py (tests/s3_ack_trace.py plugin, all threads, setup included): the whole file tests/unit/test_server_helpers_characterization.py made 0 calls into lib/routes/oracle.py; control in the same run (exit 0): tests/integration/test_calls_oracle_http_characterization.py, test_calls_oracle_g0_http_characterization.py and test_media_oracle_calls_http_characterization.py made 222 calls in 32 tests"},
+    {path = "tests/integration/test_media_range.py", name = "log", reason = "patches server.log to observe fileShortRead from the /media/ range stream, which stays in server.py; no oracle route is exercised", evidence = "4 Nov 10:05, on the applied tree d2ba0159 (s3_merge of this recipe into integration 8d614a18, one commit per group), heavy-remote with a call tracer on lib/routes/oracle.py (tests/s3_ack_trace.py plugin, all threads, setup included): its only calls into lib/routes/oracle.py are _oracle_auth_missing, one per test (41 tests), the /oracle path check the gate prelude runs on every request; it reads neither log nor log_exception, so the patched server.log is never read through moved code; the patched test asserts only fileShortRead from the /media/ stream, which stays in server.py; control in the same run (exit 0): tests/integration/test_calls_oracle_http_characterization.py, test_calls_oracle_g0_http_characterization.py and test_media_oracle_calls_http_characterization.py made 222 calls in 32 tests"},
+    {path = "tests/unit/test_delivery_admission_v1.py", name = "log", reason = "patches server.log to observe the delivery observation bracket, which stays in server.py; no oracle route is exercised", evidence = "4 Nov 10:05, on the applied tree d2ba0159 (s3_merge of this recipe into integration 8d614a18, one commit per group), heavy-remote with a call tracer on lib/routes/oracle.py (tests/s3_ack_trace.py plugin, all threads, setup included): the whole file tests/unit/test_delivery_admission_v1.py made 0 calls into lib/routes/oracle.py; control in the same run (exit 0): tests/integration/test_calls_oracle_http_characterization.py, test_calls_oracle_g0_http_characterization.py and test_media_oracle_calls_http_characterization.py made 222 calls in 32 tests"},
+]

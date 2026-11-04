@@ -30,6 +30,9 @@ python3 tests/replay/run.py prepare <base-sha> <head-sha> --prune
   python tests/replay/run.py --jobs 8 self-check --ref <sha>
 # Remove cached worktree builds (laptop or CI).
 python3 tests/replay/run.py clean
+# The retention rule (the nightly on the buildbox): keep the runs a finding cites
+# (<scratch>/keep.txt), remove the other released runs once 2 days old.
+python3 tests/replay/run.py clean --older-than-days 2
 ```
 
 heavy-remote copies the worktree without `.git`, so builds come from
@@ -57,7 +60,11 @@ on the cache for its whole life. A clean run removes its directory; a failed
 run, or one with `--keep`, keeps it and prints its path. `clean` removes cached
 builds only while holding that lease exclusively (so never while any run is
 live) and the creation lock, removes run directories no job holds, and
-refuses anything it did not make. Nothing is
+refuses anything it did not make. It never removes a run that a line of
+`<scratch>/keep.txt` cites (`<run id> <finding id>`, `#` comments; or
+`--keep-file`), and with `--older-than-days N` only a run whose claim is at
+least that old: an open finding or review packet that cites a run adds it to
+the keep list, and the line goes when the finding closes. Nothing is
 written to `~/.local/share/clarp` or `~/.config/clarp`.
 
 ## What runs
@@ -352,6 +359,7 @@ Synthetic turns only, all text invented here (`scenarios.py`). Target about
 | `goal-turn` | `POST /agent-goal`: the provider runs an unrequested goal turn and completes the goal | done |
 | `cli-prompt-and-sessions` | the build's own `clarp-admin sessions` and `prompt` against the replay Host (exit code, stdout, stderr in the `cli` channel) | done |
 | `push-notifications` | a registered iPhone (a device token and a Live Activity token) with push through the real `apns` module (routing, relay registration, payloads, collapse ids, priorities) to a recording relay: `host.py` replaces only the relay's HTTP client and writes every request (method, path, JSON body, never headers) to `provider/push-relay.jsonl`; a turn's Live Activity updates (the first at once, the rest after the pusher's 15 s minimum interval) and its alert (APNS-N1 baseline); own config | done |
+| `stop-holds-then-edit-queue` | a Stop holds three queued sends; the held queue is edited (`PUT /turn-queue/<id>`), one is cancelled (`DELETE`), one is sent at once while still paused (`POST /turn-queue/<id>/send`), then `/turn-queue/resume` runs the edited one: the queue after each step, which turns run and with which text (QUEUE-N1, TP-N1/N2, RM-N1, S3 group 9) | done |
 | `stop-at-admission` | Stop between a turn's two thinking rows; **known bug TP-N1**, reported, not counted | done |
 | `codex-pool-stop-during-start` | two codex agents on the one app-server: rachel's `turn/start` is held in the fake (`[replay-hold-start]`), mike sends, the user stops rachel, then the start is released; the sends and the stop are `background` requests joined after the release; `provider/codex-procs.jsonl` records app-server starts and the hold, `provider/host-events.jsonl` that the Stop was waiting (Codex pool stage 1/2 baseline); **known bug TP-N3**, reported, not counted | done |
 | group call, helper spawn, failover to another account, delete and restore, more CLI commands | | next |

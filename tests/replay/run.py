@@ -32,6 +32,7 @@ import fcntl
 import concurrent.futures as futures
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import shutil
@@ -505,8 +506,24 @@ def cmd_clean(args) -> int:
     """Remove cached builds this harness made (registered, clean worktrees under
     scratch/builds) and finished run directories. Builds are removed only while
     holding the build lease exclusively, which no live run allows, and the
-    creation lock; run directories only when no job holds their claim."""
+    creation lock; run directories only when no job holds their claim, no line of
+    the keep list (scratch/keep.txt) cites them and, with --older-than-days, only
+    once their claim is that old (the retention rule: cited runs stay, the rest
+    go after 2 days)."""
     scratch = Path(args.scratch)
+    # Both inputs are checked before anything is removed (review s0-retention-0d99750e):
+    # a keep list that was named but cannot be read, or an age that is not a finite
+    # non-negative number, would otherwise turn into permission to delete.
+    named_keep = getattr(args, 'keep_file', None)
+    keep_file = Path(named_keep) if named_keep else scratch / 'keep.txt'
+    if named_keep and not keep_file.is_file():
+        print('refused: the keep list', keep_file, 'does not exist (nothing removed)')
+        return 2
+    older_than_days = getattr(args, 'older_than_days', 0.0)
+    if not (math.isfinite(older_than_days) and older_than_days >= 0):
+        print('refused: --older-than-days must be a finite number of days >= 0 (nothing removed)')
+        return 2
+    keep = keep_list(keep_file)
     (scratch / 'builds').mkdir(parents=True, exist_ok=True)
     with open(scratch / 'builds' / LEASE, 'w') as lease, open(scratch / 'builds' / '.lock', 'w') as lock:
         try:
@@ -517,7 +534,7 @@ def cmd_clean(args) -> int:
         else:
             fcntl.flock(lock, fcntl.LOCK_EX)  # and no build is being created
             status = _clean_builds(scratch)
-    return _clean_runs(scratch, status)
+    return _clean_runs(scratch, status, keep, older_than_days * 86400)
 
 
 def _clean_builds(scratch: Path) -> int:
@@ -546,13 +563,32 @@ def _clean_builds(scratch: Path) -> int:
     return status
 
 
-def _clean_runs(scratch: Path, status: int) -> int:
+def keep_list(path: Path) -> dict[str, str]:
+    """Run ids an open finding or review packet cites: '<run id> <finding id>' per
+    line, '#' starts a comment. Such a run is never removed by clean."""
+    kept: dict[str, str] = {}
+    if path.is_file():
+        for line in path.read_text().splitlines():
+            parts = line.split('#', 1)[0].split(None, 1)
+            if parts:
+                kept[parts[0]] = parts[1].strip() if len(parts) > 1 else '(no finding named)'
+    return kept
+
+
+def _clean_runs(scratch: Path, status: int, keep: dict[str, str] | None = None,
+                older_than_s: float = 0.0) -> int:
+    keep = keep or {}
+    now = time.time()
     for path in sorted((scratch / 'r').glob('*')):
         if path.is_symlink() or not (path / '.claim').is_file():
             print('refused (not a run directory):', path.name)
             status = 1
+        elif path.name in keep:
+            print(f'kept (cited by {keep[path.name]}):', path.name)
         elif live(path):
             print('kept (a job is still running in it):', path.name)
+        elif now - (path / '.claim').stat().st_mtime < older_than_s:
+            print('kept (younger than the retention age):', path.name)
         else:
             _set_writable(path, True)
             shutil.rmtree(path)
@@ -583,7 +619,10 @@ def main(argv=None) -> int:
     p = sub.add_parser('prepare')
     p.add_argument('refs', nargs='+')
     p.add_argument('--prune', action='store_true', help='remove prepared builds not named here')
-    sub.add_parser('clean')
+    p = sub.add_parser('clean')
+    p.add_argument('--older-than-days', type=float, default=0.0,
+                   help='remove a released run only once its claim is this old (the nightly uses 2)')
+    p.add_argument('--keep-file', help='run ids that findings cite (default: SCRATCH/keep.txt)')
     args = parser.parse_args(argv)
     try:
         return {'compare': cmd_compare, 'self-check': cmd_self_check, 'prepare': cmd_prepare,
