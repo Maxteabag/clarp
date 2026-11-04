@@ -309,16 +309,23 @@ SCENARIOS = [
                    '[cartesia]\napi_key = "replay-synthetic-key"\n'
                    '[cartesia.voices]\nRachel = "replay-voice-rachel"\n'),
         'steps': [
+            # Each adapter read waits 0.5 s, so the live stream can be joined mid-production.
+            {'op': 'provider_file', 'name': 'cartesia-pace', 'text': '0.5'},
             {'op': 'post', 'path': '/send', 'name': 'send xray (spoken)',
              # The fake provider echoes the prompt, so its reply carries this <speak> block,
              # which is what the Host enqueues for synthesis.
              'body': {'session': 'rachel', 'text': 'synthetic question <speak>synthetic spoken answer xray</speak>',
                       'client_msg_id': 'xray', 'synthesize_audio': True}},
+            # Join the clip's live stream while it is produced: it carries every chunk the
+            # adapter hands the delivery through on_chunk(index, bytes), via the clip broker.
+            {'op': 'wait_sql', 'sql': "SELECT count(*) FROM clips WHERE producer_status = 'streaming'"},
+            {'op': 'save_sql', 'var': 'clip', 'sql': 'SELECT clip_id FROM clips ORDER BY clip_id LIMIT 1'},
+            {'op': 'get', 'path': '/clips/{clip}/stream', 'name': 'clip live stream'},
             {'op': 'wait_settled', 'message_id': 'u-xray'},
             {'op': 'wait_sql', 'sql': "SELECT count(*) FROM clips WHERE producer_status IN ('complete', 'failed')"},
             {'op': 'quiesce'},
-            {'op': 'save_sql', 'var': 'clip', 'sql': 'SELECT clip_id FROM clips ORDER BY clip_id LIMIT 1'},
-            {'op': 'get', 'path': '/clips/{clip}/stream', 'name': 'clip stream'},
+            # And the finished clip, served from its file.
+            {'op': 'get', 'path': '/clips/{clip}/stream', 'name': 'clip file stream'},
             {'op': 'get', 'path': '/log?session=rachel'},
         ],
     },

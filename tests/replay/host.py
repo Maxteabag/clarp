@@ -22,6 +22,7 @@ import shlex
 import signal
 import sys
 import threading
+import time
 
 HARNESS = Path(__file__).resolve().parents[2]
 # tests/qa/fake_codex.py behind the harness's tool-item proxy (fake_provider.py).
@@ -120,8 +121,18 @@ def synthetic_cartesia() -> None:
     from lib import cartesia_tts
     real = urllib.request.urlopen
 
+    pace_file = Path(os.environ['CLARP_QA_PROVIDER_ROOT']) / 'cartesia-pace'
+
     class Response(io.BytesIO):
+        """The synthetic body. With provider/cartesia-pace (seconds), every read
+        waits that long first, so a client can subscribe to the clip's live
+        stream while it is still being produced."""
         status = 200
+
+        def read(self, size=-1):
+            if pace_file.is_file():
+                time.sleep(float(pace_file.read_text().strip() or 0))
+            return super().read(size)
 
         def __enter__(self):
             return self
