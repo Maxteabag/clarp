@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 from lib import agents as agents_db
 from lib import prompt_admissions, settings_store
+from lib.db import conn
 from lib.orchestrator import OrchestratorService
 from lib.tts_engine import FakeTTSEngine
 from lib.turn_dispatch import DispatchError
@@ -113,3 +114,17 @@ def test_a_4xx_dispatch_failure_stays_terminal_with_its_own_status(tmp_path):
     assert (retry.ok, retry.status) == (False, 413)
     assert len(dispatch.attempts) == 1 and dispatch.delivered == []
     assert len(models) == asked
+
+
+def test_routing_context_gets_the_retried_message_once(tmp_path):
+    """Lead's amendment: every later same-id retry re-dispatches (turn_dispatch
+    dedups it), but routing context never sees the message twice."""
+    _agents()
+    service = OrchestratorService(_ctx(tmp_path), model_call=_model([]))
+    dispatch = _Dispatcher(DispatchError(503, "could not durably queue message"))
+    admission = _admission()
+    for _ in range(4):
+        _send(service, dispatch, admission)
+    rows = conn().execute(
+        "SELECT text FROM agent_routing_messages WHERE session='antoni' AND role='user'").fetchall()
+    assert [r["text"] for r in rows] == ["please ship the settings screen"]
