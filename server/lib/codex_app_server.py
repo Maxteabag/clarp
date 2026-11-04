@@ -116,6 +116,7 @@ class AppTurnHandle:
         # slot during the handoff) must not reach the agent's next turn (TP-N1).
         if self._done.is_set():
             return
+        self.stop_requested = True
         timer = threading.Timer(STOP_DETACH_SEC, self._detach_if_running)
         timer.daemon = True
         timer.start()
@@ -382,6 +383,9 @@ class _Client:
             if getattr(self, "draining", False):
                 log("codexThreadMoveDone", f"thread={thread_id[:8]} from={self.generation}")
                 _drain_later(self)
+                if (_move_get(thread_id) or {}).get("phase") == "moving":
+                    threading.Thread(target=_continue_move, args=(thread_id,), daemon=True,
+                                     name="codex-goal-move").start()
             return
         if active is None and method == "turn/started" and self._detached_execution(params):
             # The detached turn (or a continuation on its stuck thread) must
@@ -485,6 +489,14 @@ class _Client:
                     self._callback(active.on_error, CodexTurnFailure(
                         message, self, active.produced_output))
             elif status == "interrupted":
+                if not getattr(active.handle, "stop_requested", False):
+                    # No Stop asked for it. A move must never cause this
+                    # (pausing an active goal leaves its turn running); the
+                    # post-release check counts these lines (BACKENDS-06b).
+                    log("codexTurnInterruptedUnasked",
+                        f"agent={active.agent_id} thread={str(active.thread_id)[:8]} "
+                        f"moving={bool(getattr(self, 'draining', False))} "
+                        f"goal_paused_for_move={_move_get(active.thread_id) is not None}")
                 if active.on_error:
                     self._callback(active.on_error, "codex turn interrupted")
             elif active.on_result:
@@ -609,7 +621,12 @@ class _Client:
             self._exit_if_drained()
             return
         for thread_id in sorted(self._loaded_threads - self.releasing):
-            if self._thread_running(thread_id) or self.proc.poll() is not None:
+            if self.proc.poll() is not None:
+                continue
+            self._pause_for_move(thread_id)
+            if self._thread_running(thread_id):
+                continue
+            if not self._capture_move(thread_id):
                 continue
             self.releasing.add(thread_id)
             try:
@@ -634,6 +651,53 @@ class _Client:
                 self._loaded_threads.discard(thread_id)
                 self.releasing.discard(thread_id)
         self._exit_if_drained()
+
+    def _pause_for_move(self, thread_id: str) -> None:
+        """An active goal is paused before its thread moves, so neither this
+        process nor the new one starts a continuation during the move. The
+        intent is recorded first (decide, then act); pausing never interrupts
+        the running turn (ext/goal runtime.rs:248-253)."""
+        agent = agents_db.get_by_backend_session(thread_id)
+        row = agent_goals.get(agent["agent_id"]) if agent else None
+        if not row or row.get("status") != agent_goals.ACTIVE or _move_get(thread_id):
+            return
+        record = {"agent_id": agent["agent_id"], "thread": thread_id, "phase": "pausing",
+                  "generation": f"{os.getpid()}:{self.generation}"}
+        _move_put(thread_id, record)
+        self._goal_answer_begin(thread_id)
+        try:
+            result = self.request("thread/goal/set", {"threadId": thread_id, "status": "paused"},
+                                  timeout=10)
+            goal = result.get("goal") if isinstance(result, dict) else None
+            self._mirror_goal(thread_id, goal if isinstance(goal, dict) else None)
+        except Exception as exc:  # noqa: BLE001 - left 'pausing': recovery only clears it
+            log_exception("codexGoalMovePauseFail", exc, detail=thread_id[:8])
+            return
+        finally:
+            self._goal_answer_end(thread_id)
+        _move_put(thread_id, {**record, "phase": "paused"})
+        log("codexThreadMoveStart", f"thread={thread_id[:8]} from={self.generation} goal_paused=True")
+
+    def _capture_move(self, thread_id: str) -> bool:
+        """At the boundary (no turn runs on the thread), record the paused
+        goal's updatedAt for the compare-and-set: codex accounts a turn's usage
+        on a paused goal too and bumps it (state/runtime/goals.rs), so the
+        pause answer's value is stale once the turn has ended. False: try
+        again at the next boundary."""
+        record = _move_get(thread_id)
+        if not record or record.get("phase") not in ("paused",):
+            return record is None or record.get("phase") == "moving"
+        try:
+            result = self.request("thread/goal/get", {"threadId": thread_id}, timeout=10)
+        except Exception as exc:  # noqa: BLE001
+            log_exception("codexGoalMoveCaptureFail", exc, detail=thread_id[:8])
+            return False
+        goal = result.get("goal") if isinstance(result, dict) else None
+        if not isinstance(goal, dict) or goal.get("status") != "paused":
+            _move_forget(thread_id)          # completed, cleared or changed: nothing to restore
+            return True
+        _move_put(thread_id, {**record, "phase": "moving", "updated_at": goal.get("updatedAt")})
+        return True
 
     def _exit_if_drained(self, *, backstop: bool = False) -> None:
         with _LOCK:
@@ -972,6 +1036,7 @@ class _Client:
         is the one the handle was returned for."""
         active = self._actives.get(agent_id) if agent_id else self.active
         if active and (handle is None or active.handle is handle):
+            active.handle.stop_requested = True
             self._pause_goal_for_stop(active)
             if not active.turn_id:
                 if len(getattr(self, "_actives", {})) <= 1:
@@ -1364,6 +1429,94 @@ def _client(agent_id: str, session: str, stream=None) -> _Client:
         return client
 
 
+_MOVE_PREFIX = "codex.goal_move."
+# Serialises a move's compare-and-set with users' goal actions.
+_GOAL_MOVE_LOCK = threading.RLock()
+
+
+def _move_get(thread_id: str) -> dict | None:
+    """The durable record of a goal paused for a thread move (BACKENDS-06b),
+    in the settings table: an older release ignores it, and a goal left
+    paused by a rollback stays visibly paused for the user to resume."""
+    if not thread_id:
+        return None
+    row = agents_db.conn().execute("SELECT value FROM settings WHERE key = ?",
+                                   (_MOVE_PREFIX + thread_id,)).fetchone()
+    try:
+        return json.loads(row["value"]) if row else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _move_put(thread_id: str, record: dict) -> None:
+    agents_db.conn().execute(
+        "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)"
+        " ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+        (_MOVE_PREFIX + thread_id, json.dumps(record), int(time.time() * 1000)))
+
+
+def _move_forget(thread_id: str) -> None:
+    agents_db.conn().execute("DELETE FROM settings WHERE key = ?", (_MOVE_PREFIX + thread_id,))
+
+
+def _continue_move(thread_id: str) -> None:
+    """After the move: resume the thread on the current generation and set
+    its goal active again, only if it is still paused exactly as the move
+    left it (compare-and-set on updatedAt). The record is cleared either
+    way; a thread that no longer exists just loses its record."""
+    with _GOAL_MOVE_LOCK:
+        record = _move_get(thread_id)
+        if not record or record.get("phase") != "moving":
+            return
+        agent = agents_db.get_by_backend_session(thread_id)
+        if not agent:
+            _move_forget(thread_id)
+            log("codexGoalMoveDropped", f"thread={thread_id[:8]} reason=no-agent")
+            return
+        try:
+            with _LOCK:
+                client = _client(agent["agent_id"], agent["session"])
+            client._ensure_loaded(agent, thread_id)
+            result = client.request("thread/goal/get", {"threadId": thread_id})
+        except RuntimeError as exc:
+            if "no rollout" in str(exc).lower() or "not found" in str(exc).lower():
+                _move_forget(thread_id)
+                log("codexGoalMoveDropped", f"thread={thread_id[:8]} reason=gone")
+                return
+            log_exception("codexGoalMoveResumeFail", exc, detail=thread_id[:8])
+            return
+        goal = result.get("goal") if isinstance(result, dict) else None
+        unchanged = (isinstance(goal, dict) and goal.get("status") == "paused"
+                     and goal.get("updatedAt") == record.get("updated_at"))
+        _move_forget(thread_id)
+        if not unchanged:
+            log("codexGoalMoveRefused", f"thread={thread_id[:8]} status={(goal or {}).get('status')}")
+            return
+        client.goal(agent, "resume")
+        log("codexGoalMoveResumed", f"thread={thread_id[:8]} to={client.generation}")
+
+
+def recover_goal_moves() -> int:
+    """Runtime start: finish or clear every move record a crash or a rollback
+    left. A 'moving' record is continued (compare-and-set); one still
+    'pausing' or 'paused' is only cleared, so its goal stays as it is
+    (visibly paused if the pause landed) and is never overridden."""
+    rows = agents_db.conn().execute(
+        "SELECT key FROM settings WHERE key LIKE ?", (_MOVE_PREFIX + "%",)).fetchall()
+    for row in rows:
+        thread_id = row["key"][len(_MOVE_PREFIX):]
+        record = _move_get(thread_id) or {}
+        if record.get("phase") == "moving":
+            try:
+                _continue_move(thread_id)
+            except Exception as exc:  # noqa: BLE001 - one record never stops the others
+                log_exception("codexGoalMoveRecoverFail", exc, detail=thread_id[:8])
+            continue
+        _move_forget(thread_id)
+        log("codexGoalMoveDropped", f"thread={thread_id[:8]} reason={record.get('phase') or 'invalid'}")
+    return len(rows)
+
+
 def _begin_drain(client: _Client) -> None:
     """Called under _LOCK: the client becomes a draining generation."""
     client.draining = True
@@ -1476,12 +1629,18 @@ def goal(agent_id: str, action: str, *, objective: str = "", stream=None) -> dic
     agent = agents_db.get_by_agent_id(agent_id)
     if not agent:
         raise ValueError("no such agent")
-    with _LOCK:
-        client = _client(agent_id, agent["session"], stream=stream)
-    if action != "get":
-        # The user's own word on the goal replaces a pending Stop-pause.
-        _stop_pause_forget(agents_db.live_backend_session(agent_id))
-    return client.goal(agent, action, objective)
+    thread_id = agents_db.live_backend_session(agent_id)
+    with _GOAL_MOVE_LOCK:
+        with _LOCK:
+            # During a move the thread is still open in the draining
+            # generation: act there, never open it twice (BACKENDS-06b).
+            client = _moving_owner(thread_id) or _client(agent_id, agent["session"], stream=stream)
+        if action != "get" and thread_id:
+            # The user's own word on the goal ends a move's claim and
+            # replaces a pending Stop-pause.
+            _move_forget(thread_id)
+            _stop_pause_forget(thread_id)
+        return client.goal(agent, action, objective)
 
 
 def _shared_client() -> _Client | None:
