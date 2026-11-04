@@ -65,6 +65,11 @@ the hot spots; every high finding fixed or explicitly accepted.
    checks, and do not remove PWA routes or assets without a separate decision. A
    behaviour change's client check covers iOS and the Rust desktop (its code compiles
    only in GitHub Actions: never run cargo on Peter's machines).
+   **Advance GO (lead, 4 Nov):** routine steps are settled by the agents under the standing
+   rules R1-R7 in /var/tmp/clarp-refactor-program/registers/advance-go.md (re-pin carry-over,
+   landing on SOURCE YES, G1 dispositions by rf-merge and rf-harness, flake register owned by
+   rf-harness, backlog pull from registers/backlog.md, peer settlement). The lead decides
+   behaviour changes, frozen surfaces, scope and claims, release GO and questions for Peter.
 5. **No test suites, coverage, browsers or test servers on laptopstudio** (Peter's
    standing order of 2026-10-12; this machine runs his live Host). Locally, run at
    most one test file or node id with `-n 0` through
