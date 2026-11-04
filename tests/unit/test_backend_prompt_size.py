@@ -3,6 +3,7 @@ long prompt reaches an argv CLI through stdin or a prompt file; a backend
 that has neither refuses it before admission, so nothing is stored."""
 from __future__ import annotations
 
+import errno
 import json
 import os
 import pathlib
@@ -15,6 +16,7 @@ from types import SimpleNamespace
 import pytest
 
 from lib import agents as agents_db, backends, turn_dispatch as td
+from lib.backend import long_prompt
 from lib.backend.registry import by_id
 
 BIG = "long log line\n" * 15_000          # about 210 KB, well past 128 KiB
@@ -142,3 +144,62 @@ def test_a_message_within_agys_limit_is_not_refused(tmp_path, monkeypatch):
         service.dispatch(text="y" * 50_000, requested_session="anna", trace_id="t-ok",
                          client_msg_id="cm-ok", synthesize_audio=False)
     assert error.value.status != 413
+
+
+# Reviewer A's probes on 74c467ec (7b8792fa), unchanged.
+def test_prompt_file_permissions_and_normal_disposal(tmp_path, monkeypatch):
+    real_mkdtemp = long_prompt.tempfile.mkdtemp
+    monkeypatch.setattr(long_prompt.tempfile, 'mkdtemp',
+                        lambda **kw: real_mkdtemp(dir=tmp_path, **kw))
+    prompt = long_prompt.PromptFile('synthetic prompt')
+    assert stat.S_IMODE(__import__('os').stat(prompt.dir).st_mode) == 0o700
+    assert stat.S_IMODE(__import__('os').stat(prompt.path).st_mode) == 0o600
+    with prompt.open() as source:
+        assert source.read() == 'synthetic prompt'
+    prompt.remove()
+    assert not list(tmp_path.iterdir())
+
+
+def test_a_failed_prompt_write_leaves_no_partial_conversation_file(tmp_path, monkeypatch):
+    real_mkdtemp, real_fdopen = long_prompt.tempfile.mkdtemp, long_prompt.os.fdopen
+    def mkdtemp(**kw):
+        return real_mkdtemp(dir=tmp_path, **kw)
+    class FullDisk:
+        def __init__(self, fd, *a, **kw):
+            self.file = real_fdopen(fd, *a, **kw)
+        def __enter__(self):
+            self.file.__enter__()
+            return self
+        def write(self, text):
+            self.file.write(text[:4])
+            self.file.flush()
+            raise OSError(errno.ENOSPC, 'synthetic full disk after a partial write')
+        def __exit__(self, *exc):
+            return self.file.__exit__(*exc)
+    with monkeypatch.context() as patch:
+        patch.setattr(long_prompt.tempfile, 'mkdtemp', mkdtemp)
+        patch.setattr(long_prompt.os, 'fdopen', FullDisk)
+        with pytest.raises(OSError) as error:
+            long_prompt.PromptFile('synthetic private prompt')
+        assert error.value.errno == errno.ENOSPC
+    assert not list(tmp_path.iterdir()), 'failed construction left a private prompt artifact without a cleanup owner'
+
+
+def test_a_failed_stdin_open_leaves_no_prompt_file(tmp_path, monkeypatch):
+    _recorder(tmp_path, monkeypatch, "codex")
+    temp = tmp_path / "prompts"
+    temp.mkdir()
+    real_mkdtemp = long_prompt.tempfile.mkdtemp
+    monkeypatch.setattr(long_prompt.tempfile, "mkdtemp",
+                        lambda **kw: real_mkdtemp(dir=temp, **kw))
+
+    def refuse(self):
+        raise OSError(errno.EMFILE, "synthetic: no file descriptors left")
+    monkeypatch.setattr(long_prompt.PromptFile, "open", refuse)
+    agent_id = agents_db.create_agent(persona="Codex", voice_id="v", cwd=str(tmp_path),
+                                      session="s-codex", backend="codex")
+    with pytest.raises(OSError):
+        by_id("codex").start_turn(text=BIG, cwd=tmp_path, session="s-codex", agent_id=agent_id,
+                                  on_result=lambda *_a, **_k: None,
+                                  on_error=lambda *_a, **_k: None, trace_id="t-codex")
+    assert not list(temp.iterdir()), "a failed stdin open left the prompt file behind"
