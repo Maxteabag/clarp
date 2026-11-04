@@ -171,3 +171,26 @@ def test_a_late_stale_recovery_cannot_reset_a_fresh_claim(monkeypatch):
     assert not errors
     assert sends == ['first'], sends
     assert late_result == [0]
+
+
+def test_a_late_failed_sender_cannot_release_a_successful_replacement_claim(monkeypatch):
+    """Reviewer C on 681be926: a send that stalls past the recovery deadline and
+    then fails may release only its own claim, never the claim another
+    scheduler took and sent with meanwhile."""
+    _, run = _run()
+    clock = [dreaming.db.now_ms()]
+    monkeypatch.setattr(dreaming.db, 'now_ms', lambda: clock[0])
+    accepted = []
+    replacement = dreaming.DreamingScheduler(send_dream=lambda s,p: accepted.append(s) or True)
+    def old_send(session, prompt):
+        # A send attempt stalls before admission; another Host recovers its
+        # expired claim and successfully admits the same round.
+        clock[0] += (dreaming.DREAM_SENT_RECOVERY_SEC + 1) * 1000
+        assert replacement._advance_run(run) == 1
+        return False  # the old attempt finally reports it never admitted
+    assert dreaming.DreamingScheduler(send_dream=old_send)._advance_run(run) == 0
+    assert accepted == ['domi']
+    state = _round(run['run_id'])['status']
+    replacement._advance_run(run)
+    assert accepted == ['domi'], (state, accepted)
+    assert state == 'sent'
