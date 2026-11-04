@@ -3377,17 +3377,29 @@ def test_immediate_stop_event_and_the_durable_state_agree_on_ts_and_provenance(r
     # provenance. The Stop's own agent-state must carry the persisted row's
     # ts and detail, exactly as the watcher replays it and the snapshot shows.
     from lib import agents as agents_db, db
-    from lib.state_watcher import StateLogWatcher
-    base, ctx, _srv = running_server
+    base, ctx, srv = running_server
     agent_id = agents_db.get_by_session("claude")["agent_id"]
+    # The Host's own watcher must be watching before the Stop: it starts from the
+    # newest state row it finds, so one started after the Stop never replays it
+    # (review flake-stop-c0549fb0). The agents' rows make that tail non-zero.
+    watcher = srv.workers.get("state-log-watcher")
+    tail = db.conn().execute("SELECT COALESCE(MAX(state_id), 0) AS m FROM state_log").fetchone()["m"]
+    assert tail > 0, "no state row to tell the watcher's start by"
+    deadline = time.monotonic() + 15
+    while watcher._last_id < tail and time.monotonic() < deadline:
+        time.sleep(0.02)
+    assert watcher._last_id >= tail, "the Host's state watcher never started watching"
     _post(base + "/stop", {"session": "claude", "actor": "agent:theo-97e5",
                            "reason": "busy with no process"})
     row = db.conn().execute(
         "SELECT state_id, ts FROM state_log WHERE agent_id = ? AND kind = 'interrupted'"
         " ORDER BY state_id DESC LIMIT 1", (agent_id,)).fetchone()
-    watcher = StateLogWatcher(ctx.stream)
-    watcher._last_id = int(row["state_id"]) - 1
-    watcher._poll_once()
+    # The Host's own watcher replays the row (a second, simulated watcher raced it
+    # under load and made three: G1 flake). Wait until it has gone past the row.
+    deadline = time.monotonic() + 15
+    while watcher._last_id < int(row["state_id"]) and time.monotonic() < deadline:
+        time.sleep(0.02)
+    assert watcher._last_id >= int(row["state_id"]), "the Host's state watcher never replayed the Stop"
 
     payloads = [json.loads(r["payload"]) for r in db.conn().execute(
         "SELECT payload FROM sse_events WHERE agent_id = ? AND type IN"
