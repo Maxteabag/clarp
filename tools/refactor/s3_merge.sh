@@ -9,7 +9,8 @@
 # then groups), committing each stage so ast_identity can verify it:
 #   A  merge commit: main's server.py + replayed diffs, generated files removed
 #   B  s3_apply --helpers      verified: ast_identity A B server.py=server.py,lib/routes/helpers.py
-#   C  s3_apply --all          verified: ast_identity B C server.py::Handler=<every group mixin>
+#   C  s3_apply --group <name>, one commit per group in recipe order ("s3_apply: group <name>"),
+#      each verified: ast_identity <previous> <this> server.py::Handler=<that group's mixin>
 # then the local gates. It prints the G1 and G2 commands for the merge captain;
 # G2 compares main against C and must show zero differences.
 #
@@ -60,13 +61,14 @@ print("\n".join(paths))
 PYEOF
 ) || die 2 "cannot read tools/refactor/s3_moves.toml"
 helpers_paths=$(printf '%s\n' "$generated" | grep -x 'server/lib/routes/helpers.py' || true)
-group_paths=$(printf '%s\n' "$generated" | grep -vx 'server/lib/routes/helpers.py' || true)
-mixins=$("$PY" - "$root/tools/refactor/s3_moves.toml" <<'PYEOF'
+# One line per group in recipe order: name, server/<module>, <module>::<class>.
+group_specs=$("$PY" - "$root/tools/refactor/s3_moves.toml" <<'PYEOF'
 import sys, tomllib
 data = tomllib.loads(open(sys.argv[1]).read())
-print(",".join(f"{g['module']}::{g['class']}" for g in data.get("group", [])))
+for g in data.get("group", []):
+    print(g["name"], "server/" + g["module"], f"{g['module']}::{g['class']}")
 PYEOF
-)
+) || die 2 "cannot read the groups of tools/refactor/s3_moves.toml"
 replay=$(grep -v '^\s*#' tools/refactor/s3_replay.txt | awk 'NF {print $1}')
 
 for path in $conflicts; do
@@ -100,17 +102,21 @@ if [ -n "$stage_status" ]; then
     || die 6 "ast_identity (top-level) failed for the helpers step"
 fi
 
-# C: every group.
-"$PY" tools/refactor/s3_apply.py --root "$root" --all || die 5 "s3_apply --all refused"
+# C: one commit per group, in recipe order, so each move-only commit stays the
+# size of its group and is verified on its own.
 C=$B
-stage_status=$(git status --porcelain --untracked-files=all -- server/server.py $group_paths) || die 5 "git status failed"
-if [ -n "$stage_status" ]; then
-  git add -A -- server/server.py $group_paths && git -c core.hooksPath=/dev/null commit -q -m "s3_apply: group moves" \
-    || die 5 "cannot commit the group moves"
+while read -r name path mixin; do
+  [ -n "$name" ] || continue
+  "$PY" tools/refactor/s3_apply.py --root "$root" --group "$name" </dev/null || die 5 "s3_apply --group $name refused"
+  stage_status=$(git status --porcelain --untracked-files=all -- server/server.py "$path") || die 5 "git status failed"
+  [ -n "$stage_status" ] || continue
+  git add -A -- server/server.py "$path" && git -c core.hooksPath=/dev/null commit -q -m "s3_apply: group $name" \
+    || die 5 "cannot commit group $name"
+  prev=$C
   C=$(git rev-parse HEAD)
-  [ -n "$mixins" ] && { "$PY" scripts/refactor/ast_identity.py "$B" "$C" "server.py::Handler=$mixins" \
-    || die 6 "ast_identity (method mode) failed for the group moves"; }
-fi
+  "$PY" scripts/refactor/ast_identity.py "$prev" "$C" "server.py::Handler=$mixin" </dev/null \
+    || die 6 "ast_identity (method mode) failed for group $name"
+done <<< "$group_specs"
 
 stray=$(git status --porcelain --untracked-files=all -- server tools scripts) || die 5 "git status failed"
 stray=$(printf '%s\n' "$stray" | grep -v -e ' server/server.py$' || true)

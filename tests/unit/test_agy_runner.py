@@ -932,6 +932,11 @@ def test_identical_active_text_deltas_remain_ordered(fake_agy, tmp_path, monkeyp
         return original(**kwargs)
 
     monkeypatch.setattr(agents_db, "upsert_live_assistant_message", record)
+    # Live writes are throttled to one per live_text_interval (0.25 s). Under load
+    # the second delta can arrive after that, which writes 'haha' live as well
+    # (G1 flake). The throttle is not what this test is about: a long interval
+    # makes the single throttled live write deterministic.
+    monkeypatch.setattr(AGY, "live_text_interval", 3600.0)
     results = []
     handle = AGY.start_turn(
         text="hi", cwd=tmp_path, agent_id=agent_id, session="repeat",
