@@ -318,6 +318,7 @@ def test_corrections_cover_only_the_declared_pairs(con):
     (Edge("fix", frozenset({"failed"}), "queued", correction=True), "must run between final states, not ['queued']"),
     (Edge("fix", frozenset({"failed", "done"}), "done", correction=True), "lists its own target 'done'"),
     (Edge("reopen", frozenset({"done"}), "queued"), "edge 'reopen' leaves final state 'done'"),
+    (Edge("settle_done", frozenset({"running"}), "done"), "event 'settle_done' is both a correction and an ordinary edge"),
 ])
 def test_malformed_corrections_are_refused(edge, problem):
     with pytest.raises(lk.LifecycleError, match=re.escape(problem)):
@@ -411,3 +412,19 @@ def test_reap_tick_stops_at_its_time_budget(con):
     clock = lambda: next(ticks) / 1000.0
     moved, cursor = lk.reap_tick(con, lc, now=MIN, batch=1, max_rows=500, max_ms=200, clock=clock)
     assert len(moved) == 4 and cursor == ("claimed", 3, "k003")  # 60+60+60 < 200, the 4th reaches 240
+
+
+
+def test_an_ordinary_self_loop_is_written_not_skipped(con):
+    """Review A2 (60a93ae3, F1): only an already-applied correction is a no-op;
+    a lease renewal that stays in its state still writes entered_at and its
+    values, so the reaper counts the deadline from the renewal."""
+    lc = _receipt(edges=_receipt().edges + (Edge("renew", frozenset({"running"}), "running"),))
+    _at(con, lc, "r1", "claim", "start", now=10)
+    with lk.transaction(con):
+        assert lk.transition(con, lc, "r1", "renew", now=900, values={"note": "renewed"}) == \
+            lk.Transition("r1", "renew", "running", "running", 900)
+    assert con.execute("SELECT status, status_at, note FROM jobs WHERE job_id = 'r1'").fetchone() == \
+        ("running", 900, "renewed")
+    with lk.transaction(con):
+        assert lk.reap(con, lc, now=10 + 30 * MIN).moved == []     # counted from the renewal at 900
