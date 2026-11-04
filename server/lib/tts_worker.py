@@ -295,7 +295,8 @@ def _synthesize(*, cfg, row: dict, agent: dict,
 
     On a Cartesia failure (or a persona with no Cartesia voice / no key)
     we transparently fall back to ElevenLabs. The exception only escapes
-    when the fallback also fails, so the caller surfaces a real outage.
+    when the fallback also fails, so the caller surfaces a real outage, or
+    when the primary already sent audio to the live stream.
     """
     raw_voice = row["voice_id"]
     persona = (agent or {}).get("persona", "")
@@ -336,6 +337,16 @@ def _synthesize(*, cfg, row: dict, agent: dict,
             encoding=getattr(cfg, "raw_pcm_encoding", "pcm_f32le"),
             sample_rate=getattr(cfg, "raw_pcm_sample_rate", 44100),
         )
+
+    # A fallback restarts the reply from the top, so it may only run while the
+    # live stream is still empty; after that it would play a second clip (VP-01).
+    fed: list[bool] = []
+    if on_chunk is not None:
+        live_feed = on_chunk
+
+        def on_chunk(index, chunk):
+            fed[:] = [True]
+            live_feed(index, chunk)
 
     spoke: dict[str, str | None] = {}   # the voice the provider that ran actually used
 
@@ -407,6 +418,12 @@ def _synthesize(*, cfg, row: dict, agent: dict,
     except Exception as primary_error:
         fallback = clip_route.fallback
         if fallback in {"", "none", provider}:
+            raise
+        if fed:
+            _emit("tts_worker", "providerFallbackSkipped",
+                  context=_event_context(row, agent), level="warn",
+                  detail={"provider": provider, "error": str(primary_error)[:200],
+                          "fallback": fallback, "reason": "audio_streamed"})
             raise
         _emit("tts_worker", "providerFallback",
               context=_event_context(row, agent), level="warn",
