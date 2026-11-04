@@ -78,8 +78,15 @@ def test_a_failed_restore_can_be_recovered_on_the_next_pass(fake, tmp_path, monk
     cas.recover_goal_moves()
     assert refused, 'control: the first activation was actually refused'
     assert cas.goal(agent, 'get')['status'] == 'paused'
+    assert cas._move_get(thread) is not None, 'failed activation deleted durable recovery intent'
+    turns_before = len(_goal_turns(fake, thread))
     cas.recover_goal_moves()          # provider is healthy; remaining intent must recover
-    assert cas.goal(agent, 'get')['status'] == 'active', 'failed activation deleted durable recovery intent and left the goal paused'
+    status = cas.goal(agent, 'get')['status']
+    assert cas._move_get(thread) is None, 'the record outlived a successful restore'
+    # The fake completes an active goal with exactly one continuation turn ~50 ms later
+    # (CLARP_QA_GOAL_TURN_HOLD=0); a later read sees that, never 'paused'.
+    assert status == 'active' or (status == 'complete' and len(_goal_turns(fake, thread)) == turns_before + 1), \
+        'failed activation deleted durable recovery intent and left the goal paused'
 
 
 def test_a_drain_backstop_does_not_kill_a_continuation_before_its_notification_is_delivered(fake, tmp_path, monkeypatch):
