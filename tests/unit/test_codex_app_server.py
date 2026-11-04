@@ -389,12 +389,18 @@ def test_credentials_change_and_recycle_preserve_active_turn(tmp_path, monkeypat
     client = handle.client
     auth.write_text('new')
     assert codex_app_server.recycle_clients() == 0
-    assert codex_app_server._client(agent, 'busy') is client
-    assert client.proc.poll() is None
-    handle.wait(8)
+    # BACKENDS-06b: the next turn gets a new generation on the new
+    # credentials; the busy turn keeps its process until it ends.
     fresh = codex_app_server._client(agent, 'busy')
     assert fresh is not client
-    assert client.proc.poll() is not None
+    assert client.proc.poll() is None
+    handle.wait(8)
+    for _ in range(200):
+        if client.proc.poll() is not None:
+            break
+        threading.Event().wait(0.05)
+    assert client.proc.poll() is not None, 'the drained generation did not exit'
+    assert codex_app_server._client(agent, 'busy') is fresh
     codex_app_server.recycle_clients()
 
 
