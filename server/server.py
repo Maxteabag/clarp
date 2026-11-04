@@ -35,7 +35,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).parent))
 
 from lib.agent_store import (  # noqa: E402
     load_agents,
-    save_agents,
+    save_agent,
 )
 from lib.agent_lifecycle import AgentLifecycleError, AgentLifecycleService  # noqa: E402
 from lib.config import persona_personality  # noqa: E402
@@ -3850,7 +3850,8 @@ class Handler(BaseHTTPRequestHandler):
         agents[session]["voice_id"] = (
             merge_voice(agents[session].get("voice_id"), provider, voice_id)
             if provider else voice_id)
-        save_agents(agents, self.ctx.agents_path)
+        # This agent only: the roster read above may be stale for others (TP-03).
+        save_agent(session, agents[session])
         return self._json_ok({"ok": True})
 
     def _handle_agent_llm(self):
