@@ -12,6 +12,7 @@ import hashlib
 import os
 import pathlib
 import shutil
+import signal
 import subprocess
 import sys
 import threading
@@ -70,6 +71,17 @@ class _ActiveTurn:
     steer_ready: threading.Event = field(default_factory=threading.Event)
 
 
+# A stopped Codex turn the app-server has not ended this long after its
+# turn/interrupt is detached (BACKENDS-07b); the same 10 s as a CLI turn's
+# stop deadline (process_registry.STOP_KILL_DEADLINE_SEC, BACKENDS-07).
+STOP_DETACH_SEC = 10.0
+
+
+class CodexSessionStuck(RuntimeError):
+    """The agent's thread is held by a stuck app-server process that is
+    recycled once no other live turn runs on it."""
+
+
 class AppTurnHandle:
     """ProcessRegistry-compatible logical handle for one app-server turn."""
     def __init__(self, client: "_Client", agent_id: str = ""):
@@ -98,7 +110,31 @@ class AppTurnHandle:
         # slot during the handoff) must not reach the agent's next turn (TP-N1).
         if self._done.is_set():
             return
+        timer = threading.Timer(STOP_DETACH_SEC, self._detach_if_running)
+        timer.daemon = True
+        timer.start()
         self.client.interrupt_active(self.agent_id, handle=self)
+
+    def _detach_if_running(self) -> None:
+        """The server never ended this stopped turn: detach it (BACKENDS-07b).
+        It no longer counts as busy; the shared process is recycled once no
+        live turn runs on it, and until then this agent gets no new turn."""
+        client = self.client
+        with client._lock:
+            if self._done.is_set():
+                return
+            actives = getattr(client, "_actives", {})
+            if actives.get(self.agent_id) is not None and actives[self.agent_id].handle is self:
+                actives.pop(self.agent_id, None)
+            if client.active is not None and client.active.handle is self:
+                client.active = None
+            detached = getattr(client, "detached_agents", None)
+            if detached is None:
+                detached = client.detached_agents = set()
+            detached.add(self.agent_id)
+            self._done.set()
+        log("codexTurnDetached", f"agent={self.agent_id} after={STOP_DETACH_SEC:g}s")
+        client.recycle_if_quiet()
 
 
 class _Client:
@@ -107,6 +143,8 @@ class _Client:
         self.agent_id = agent_id
         self.auth_fingerprint = _auth_fingerprint()
         self.refresh_requested = False
+        # Agents whose stopped turn was detached here (BACKENDS-07b).
+        self.detached_agents: set[str] = set()
         self.rate_limits = {}
         # One shared server serves every Codex agent: it has no turn identity
         # and no agent identity. Naming the agent that started it would let a
@@ -115,11 +153,16 @@ class _Client:
         env = dict(os.environ)
         env.pop("CLARP_PROVIDER_TURN", None)
         env.pop("CLAUDE_PWA_SESSION", None)
+        # Its own process group, so a recycle (BACKENDS-07b) kills the server
+        # and the helpers in its group. Codex starts each shell tool command
+        # in its own session with SIGTERM as its parent-death signal, so those
+        # get SIGTERM when the server dies and what they started can survive.
+        self.process_group = os.name == "posix"
         self.proc = subprocess.Popen(
             argv,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, text=True, errors="replace", bufsize=1,
-            env=env,
+            env=env, start_new_session=self.process_group,
         )
         self._write_lock = threading.Lock()
         self._lock = threading.Lock()
@@ -383,6 +426,8 @@ class _Client:
             if self.active is active:
                 self.active = None
             active.handle._done.set()
+            if getattr(self, "detached_agents", None):
+                self.recycle_if_quiet()
             if status == "failed":
                 message = str(error.get("message") or "codex turn failed")
                 if active.on_error:
@@ -653,6 +698,29 @@ class _Client:
         except Exception as exc:  # noqa: BLE001 - the interrupt itself must still go out
             log_exception("codexGoalPauseFail", exc, detail=active.agent_id)
 
+    def recycle_if_quiet(self) -> None:
+        """A process holding a detached (stuck) turn is killed once no live turn
+        runs on it: the kill releases the stuck thread's writer lock, and a new
+        process serves the next turns (BACKENDS-07b). Never while another
+        agent's turn still runs here."""
+        if not getattr(self, "detached_agents", None) or _busy(self):
+            return
+        with _LOCK:
+            if _CLIENTS.get(_SHARED_KEY) is self:
+                _CLIENTS.clear()
+        log("codexStuckProcessRecycled",
+            f"detached={len(self.detached_agents)}")
+        try:
+            if getattr(self, "process_group", False):
+                os.killpg(self.proc.pid, signal.SIGKILL)
+            else:
+                self.proc.kill()
+        except (OSError, ValueError):
+            try:
+                self.proc.kill()
+            except (OSError, ValueError):
+                pass
+
     def shutdown(self) -> None:
         """EOF stdin so the stdio app-server exits and drops its writer lock."""
         try:
@@ -727,6 +795,25 @@ def _busy(client) -> bool:
     if active is not None:
         turns.append(active)
     return any(not turn.handle._done.is_set() for turn in turns)
+
+
+def credential_switch_pending(message) -> bool:
+    """A Codex failure from a client still running credentials older than
+    auth.json: the account was switched, but the shared process is busy and
+    keeps the old ones until it is idle (BACKENDS-06 (c))."""
+    if not isinstance(message, CodexTurnFailure):
+        return False
+    held = getattr(message.client, "auth_fingerprint", None)
+    return held is not None and held != _auth_fingerprint()
+
+
+def admit_turn(client, agent_id: str) -> None:
+    """Refuse a turn for an agent whose stopped turn is detached on this
+    (stuck) process: its thread is still held there until it is recycled."""
+    if agent_id and agent_id in (getattr(client, "detached_agents", None) or ()):
+        raise CodexSessionStuck(
+            "Waiting for a stuck Codex session to end; it restarts as soon as "
+            "the other Codex agents finish their turns")
 
 
 class CodexTurnFailure(str):
@@ -851,6 +938,7 @@ def spawn_turn(*, text: str, cwd: pathlib.Path, backend_session_id: str = "",
         )
     with _LOCK:
         client = _client(agent_id, session, stream=stream)
+        admit_turn(client, agent_id)   # before turn/start: nothing is sent
         handle = AppTurnHandle(client, agent_id=agent_id)
         agent = agents_db.get_by_agent_id(agent_id) if agent_id else None
         persona = (agent or {}).get("persona") or ""
