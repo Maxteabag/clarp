@@ -415,3 +415,23 @@ acknowledged_patches = [
     {path = "tests/unit/test_startup_runtime_wait.py", name = "log_exception", reason = "patches server.log_exception to observe _recover_after_start, which stays in server.py; no voice_timeline route is exercised", evidence = "4 Nov 10:35, on the applied tree 3006c04b (s3_merge of this recipe into integration 1991556e, one commit per group), heavy-remote with a call tracer on lib/routes/voice_timeline.py (tests/s3_ack_trace.py plugin, all threads, setup included): the whole file tests/unit/test_startup_runtime_wait.py made 0 calls into lib/routes/voice_timeline.py, as did the other acknowledged files in the run; control in the same run (exit 0): tests/integration/test_voice_out_g0_http_characterization.py, test_voice_agents_http_characterization.py and test_send_select_log_http_characterization.py made 12 calls in 2 tests"},
     {path = "tests/unit/test_server_helpers_characterization.py", name = "log_exception", reason = "patches server.log_exception to observe _spawn_voice_metrics, which stays in server.py; no voice_timeline route is exercised", evidence = "4 Nov 10:35, on the applied tree 3006c04b (s3_merge of this recipe into integration 1991556e, one commit per group), heavy-remote with a call tracer on lib/routes/voice_timeline.py (tests/s3_ack_trace.py plugin, all threads, setup included): the whole file tests/unit/test_server_helpers_characterization.py made 0 calls into lib/routes/voice_timeline.py, as did the other acknowledged files in the run; control in the same run (exit 0): tests/integration/test_voice_out_g0_http_characterization.py, test_voice_agents_http_characterization.py and test_send_select_log_http_characterization.py made 12 calls in 2 tests"},
 ]
+
+[[group]]
+name = "send"
+module = "lib/routes/send.py"
+class = "SendRoutes"
+members = [
+    "_apply_call_opening",
+    "_handle_compact",
+    "_handle_orchestrator_addressing",
+    "_handle_orchestrator_decisions",
+    "_handle_orchestrator_route_delegation",
+    "_handle_orchestrator_settings_get",
+    "_handle_select",
+    "_handle_send",
+    "_send_request_error",
+]
+acknowledged_patches = [
+    {path = "tests/unit/test_startup_runtime_wait.py", name = "log_exception", reason = "patches server.log_exception to observe _recover_after_start, which stays in server.py; no send route is exercised", evidence = "4 Nov 12:35, on the applied tree 8f2fb699 (s3_merge of this recipe into integration 809d6e18, one commit per group), heavy-remote with a call tracer on lib/routes/send.py (tests/s3_ack_trace.py plugin, all threads, setup included): the whole file tests/unit/test_startup_runtime_wait.py made 0 calls into lib/routes/send.py, as did the other acknowledged files in the run; control in the same run (exit 0): tests/integration/test_send_select_log_http_characterization.py and test_settings_ops_http_characterization.py made 67 calls in 9 tests"},
+    {path = "tests/unit/test_server_helpers_characterization.py", name = "log_exception", reason = "patches server.log_exception to observe _spawn_voice_metrics, which stays in server.py; no send route is exercised", evidence = "4 Nov 12:35, on the applied tree 8f2fb699 (s3_merge of this recipe into integration 809d6e18, one commit per group), heavy-remote with a call tracer on lib/routes/send.py (tests/s3_ack_trace.py plugin, all threads, setup included): the whole file tests/unit/test_server_helpers_characterization.py made 0 calls into lib/routes/send.py, as did the other acknowledged files in the run; control in the same run (exit 0): tests/integration/test_send_select_log_http_characterization.py and test_settings_ops_http_characterization.py made 67 calls in 9 tests"},
+]
