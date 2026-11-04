@@ -313,3 +313,16 @@ def test_closing_while_the_reader_waits_still_delivers_session_closed(monkeypatc
     upstream = oracle_gemini_live.GeminiUpstream("k", model="m", voice="v")
     assert json.loads(upstream.recv())["type"] == "session.closed"
     assert upstream.recv() == ""
+
+
+def test_gemini_system_instruction_carries_the_age_of_saved_history():
+    now = 1_792_152_000_000
+    store = oracle_memory.open_thread("phone", "primary", connection_id="aged")
+    store.save({"revision": 1, "fragments": [
+        {"role": "assistant", "text": "Jeg gir deg beskjed fra Jax.", "at": now - 14 * 86_400_000}]})
+    history = store.startup_history(roster={"agents": []}, now_ms=now)
+    upstream = oracle_gemini_live.GeminiUpstream.__new__(oracle_gemini_live.GeminiUpstream)
+    upstream.model, upstream.voice, upstream.languages = "gemini-3.8-live", "Kore", ()
+    setup = upstream.setup_message(oracle_live_stable.live_config(history=history))
+    text = setup["systemInstruction"]["parts"][0]["text"]
+    assert '"age":"14 days ago"' in text and '"now":"' in text
