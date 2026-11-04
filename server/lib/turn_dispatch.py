@@ -2448,6 +2448,15 @@ class TurnDispatchService:
         gone)."""
         return self._agent_has_live_turn(spec.agent_id, spec.backend)
 
+    def _session_held(self, agent_id: str, backend: str) -> bool:
+        holders = getattr(self.backends, "turn_holders", None)
+        if holders is None:
+            return False
+        try:
+            return bool(_alive(holders(backend, agent_id) or ()))
+        except Exception:  # noqa: BLE001
+            return True  # can't tell → assume held (don't start a refused send)
+
     def _agent_has_live_turn(self, agent_id: str, backend: str) -> bool:
         if _terminal_live(agent_id):
             return True  # interactive terminal holds the session
@@ -3677,6 +3686,11 @@ class TurnDispatchService:
                         agent_id, trace_id, backend, min_age_s=orphan_grace_s):
                     continue
                 if self._agent_has_live_turn(agent_id, backend):
+                    continue
+                if self._session_held(agent_id, backend):
+                    # A stuck process still holds the session: the send
+                    # waiting under 'process:<trace>' is not leaked, and
+                    # starting it now would only be refused (BACKENDS-07b).
                     continue
                 external = getattr(self.backends, "external_live_work", None)
                 if external is not None and external(backend, agent_id):
