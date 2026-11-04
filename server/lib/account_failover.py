@@ -144,6 +144,9 @@ class AccountFailover:
         # have not registered here yet, and until when to wait for them.
         self.awaiting: set[str] = set()
         self.awaiting_until = 0.0
+        # Work released when its park reached MAX_PARK_SECONDS: (agent, trace).
+        # It runs and fails visibly; it is never parked again (BACKENDS-05).
+        self.park_expired: set[tuple[str, str]] = set()
 
     @staticmethod
     def _schedule(delay, callback):
@@ -154,6 +157,9 @@ class AccountFailover:
     def register(self, attempt: Attempt) -> bool:
         """Return true if the new attempt must wait for account recovery."""
         with self.lock:
+            # A new trace for the agent ends the old one's expired mark.
+            self.park_expired = {key for key in self.park_expired
+                                 if key[0] != attempt.agent_id or key[1] == attempt.trace_id}
             self.attempts[attempt.agent_id] = attempt
             self.awaiting.discard(attempt.agent_id)
             if self.recovering:
@@ -165,6 +171,7 @@ class AccountFailover:
 
     def discard(self, agent_id, trace_id):
         with self.lock:
+            self.park_expired.discard((agent_id, trace_id))
             attempt = self.attempts.get(agent_id)
             if attempt and attempt.trace_id == trace_id:
                 self.attempts.pop(agent_id, None)
@@ -183,6 +190,8 @@ class AccountFailover:
             trigger = self.attempts.get(agent_id)
             if not command or not trigger or trigger.trace_id != trace_id:
                 return False
+            if (agent_id, trace_id) in self.park_expired:
+                return False   # its park already expired: fail visibly now
             if self.recovering:
                 return True
             self.recovering = True
@@ -293,6 +302,8 @@ class AccountFailover:
             elif isinstance(decision, Release):
                 self.recovering = False
                 if decision.reason == PARK_EXPIRED:
+                    self.park_expired.update(
+                        (attempt.agent_id, attempt.trace_id) for attempt in pending)
                     self.attempts.clear()
         if isinstance(decision, Resume):
             log("claudeAccountRecovered", f"turns={len(pending)}")
