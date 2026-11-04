@@ -352,6 +352,16 @@ import threading as _threading
 import time as _time
 
 
+def _fence(cache):
+    """(owner, drain) of a reset in progress, read under _guard as reset_for_tests
+    writes them (one _guard section sets _reset_owner, _resetting, then _drain);
+    None until that section is complete. An unguarded read can land inside it."""
+    with cache._guard:
+        if cache._resetting and cache._drain is not None:
+            return cache._reset_owner, cache._drain
+    return None
+
+
 def _wait_until(predicate, timeout=3.0):
     deadline = _time.monotonic() + timeout
     while _time.monotonic() < deadline:
@@ -643,8 +653,8 @@ def test_a_concurrent_reset_is_refused_without_touching_the_owner_or_drain(tmp_p
     first = _threading.Thread(target=lambda: result.setdefault("ok", cache.reset_for_tests()))
     first.start()
     try:
-        assert _wait_until(lambda: cache._reset_owner is not None)
-        owner_token, drain = cache._reset_owner, cache._drain
+        assert _wait_until(lambda: _fence(cache) is not None)
+        owner_token, drain = _fence(cache)
         assert cache.reset_for_tests() is False                 # R2 refused
         assert cache._reset_owner is owner_token and cache._drain is drain
         assert cache.reset_for_tests() is False                 # R3 refused too, R1 still owns
@@ -718,8 +728,9 @@ def test_reset_waits_for_a_worker_still_closing_its_connection(tmp_path, monkeyp
         worker = cache._worker
         assert worker is not None                     # not cleared before the close returns
         resetter.start()
-        assert _wait_until(lambda: cache._resetting)
-        assert resetter.is_alive() and worker in cache._drain.threads
+        assert _wait_until(lambda: _fence(cache) is not None)
+        _, drain = _fence(cache)
+        assert resetter.is_alive() and worker in drain.threads
     finally:
         release.set()                                 # never leave the worker held
         if resetter.ident is not None:
