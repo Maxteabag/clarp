@@ -722,16 +722,27 @@ class _Client:
                 return
             if self._loaded_threads and not (backstop or self.unsubscribe_unsupported):
                 return
+            # The exit mark shares self._lock with goal admission (goal()
+            # refuses on it), as stage 1's recycle mark does: a goal request
+            # is admitted before the mark (its answer is outstanding: no
+            # exit) or refused after it.
+            with self._lock:
+                with self._goal_state_lock:
+                    answering = bool(self._goal_activations())
+                if answering:
+                    return
+                self.exiting = True
             if self._loaded_threads and self._goal_may_continue():
                 # A thread still loaded here may have a native turn running
                 # whose turn/started is not delivered yet: the backstop and
                 # the fallback never end a process while any loaded thread's
                 # goal could continue or any goal answer is outstanding
                 # (stage 1's coarse rule). They try again later.
+                with self._lock:
+                    self.exiting = False
                 return
             # It stays in _DRAINING until the process has exited: its threads'
             # holds (and their writer locks) end only then.
-            self.exiting = True
         log("codexGenerationExited", f"gen={self.generation} backstop={backstop} "
                                      f"loaded={len(self._loaded_threads)}")
         try:
@@ -823,6 +834,10 @@ class _Client:
         with self._lock:
             if getattr(self, "recycled", False):
                 raise RuntimeError("Codex is restarting a stuck session; try again in a moment")
+            if getattr(self, "exiting", False):
+                # A drained generation being shut down (BACKENDS-06b).
+                raise RuntimeError("Codex is moving this conversation to a new session; "
+                                   "try again in a moment")
             self._goal_answer_begin(thread_id)
         try:
             try:
