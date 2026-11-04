@@ -112,3 +112,62 @@ def test_the_nightly_loop_skips_an_agent_whose_manual_run_started_meanwhile(monk
     dreaming.DreamingScheduler(send_dream=lambda s, p: sends.append(s) or True).run_once()
     assert _active_runs(aid) == 1
     assert sends == []
+
+
+def test_a_late_stale_recovery_cannot_reset_a_fresh_claim(monkeypatch):
+    """Reviewer C on eef718f6: two schedulers read the same expired sent claim;
+    the first recovers, claims and sends; the second's delayed recovery must
+    not reset that fresh claim and send it again."""
+    _, run = _run()
+    rid = _round(run['run_id'])['round_id']
+    dreaming.mark_round_sent(rid)
+    old = dreaming.db.now_ms() - (dreaming.DREAM_SENT_RECOVERY_SEC + 1) * 1000
+    dreaming.db.conn().execute('UPDATE dream_rounds SET sent_at=? WHERE round_id=?', (old, rid))
+    selected, sending = threading.Event(), threading.Event()
+    sends, errors, late_result = [], [], []
+    real_conn = dreaming.db.conn
+
+    class Cursor:
+        def __init__(self, cursor):
+            self.cursor = cursor
+        def fetchone(self):
+            row = self.cursor.fetchone()
+            selected.set()
+            assert sending.wait(5)
+            return row
+
+    class Connection:
+        def __init__(self, connection):
+            self.connection = connection
+        def execute(self, sql, *args, **kwargs):
+            cursor = self.connection.execute(sql, *args, **kwargs)
+            if 'SELECT round_id, round_index, stage, sent_at' in sql:
+                return Cursor(cursor)
+            return cursor
+
+    def conn():
+        connection = real_conn()
+        return Connection(connection) if threading.current_thread().name == 'late-reaper' else connection
+    monkeypatch.setattr(dreaming.db, 'conn', conn)
+    def late():
+        try:
+            late_result.append(dreaming.DreamingScheduler(send_dream=lambda s, p: sends.append('late') or True)._advance_run(run))
+        except BaseException as exc:
+            errors.append(exc)
+    worker = threading.Thread(target=late, name='late-reaper', daemon=True)
+    worker.start()
+    try:
+        assert selected.wait(5)
+        def first_send(session, prompt):
+            sends.append('first')
+            sending.set()
+            worker.join(5)
+            return True
+        assert dreaming.DreamingScheduler(send_dream=first_send)._advance_run(run) == 1
+    finally:
+        sending.set()
+        worker.join(5)
+    assert not worker.is_alive()
+    assert not errors
+    assert sends == ['first'], sends
+    assert late_result == [0]
