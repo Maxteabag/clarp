@@ -171,6 +171,9 @@ def test_attention_changes_push_and_raise_priority():
     assert sent[-1][0]["aps"]["content-state"]["needs_you"] == 3 and sent[-1][1] == "10"
     clock.advance(3)
     pusher.set_attention({"count": 0, "agent_ids": set()})
+    # A drop is structural, not urgent: it waits for the 10 s floor (APNS-N1).
+    assert sent[-1][0]["aps"]["content-state"]["needs_you"] == 3
+    clock.advance(7)
     assert sent[-1][0]["aps"]["content-state"]["needs_you"] == 0
 
 
