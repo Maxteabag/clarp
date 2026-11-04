@@ -11,9 +11,10 @@ from lib import (
 )
 
 
-def make_goal(tmp_path, **options):
+def make_goal(tmp_path, backend=None, **options):
     agent = agents.create_agent(
-        persona="Goal", voice_id="v", cwd=str(tmp_path), session="goal-owner"
+        persona="Goal", voice_id="v", cwd=str(tmp_path), session="goal-owner",
+        **({"backend": backend} if backend else {}),
     )
     agent = agents.get_by_session("goal-owner")
     agents.start_runtime(agent["agent_id"], agent["session"])
@@ -240,7 +241,7 @@ def test_wrong_native_owner_suppresses_wake(tmp_path):
 def test_native_provider_loop_never_competes(tmp_path):
     from lib import agent_goals
 
-    p = make_goal(tmp_path)
+    p = make_goal(tmp_path, backend="codex")
     agent_goals.upsert(
         p["agent_id"],
         session=p["session"],
@@ -253,6 +254,44 @@ def test_native_provider_loop_never_competes(tmp_path):
         )
         == 0
     )
+    assert (
+        task_plans.get(p["plan_id"])["goal"]["continuation"]["observed_state"]
+        == "native_owned"
+    )
+
+
+def test_a_native_goal_of_a_backend_the_agent_left_does_not_park_host_goals(tmp_path):
+    """AUT-20: the native row is cleared only by a Codex notification; after a
+    switch to Claude it must not park the Host goals for ever."""
+    from lib import agent_goals
+
+    p = make_goal(tmp_path, backend="claude")
+    agent_goals.upsert(
+        p["agent_id"],
+        session=p["session"],
+        backend="codex",
+        goal={"objective": "Native objective", "status": "paused"},
+    )
+    recovery.tick(lambda *args: {"queued": False}, now=db.now_ms() + 999999)
+    assert (
+        task_plans.get(p["plan_id"])["goal"]["continuation"]["observed_state"]
+        != "native_owned"
+    )
+
+
+def test_an_active_native_goal_of_a_left_backend_still_parks_host_goals(tmp_path):
+    """The shared Codex app-server may still continue an active native goal
+    after the switch: never run the Host goal beside it."""
+    from lib import agent_goals
+
+    p = make_goal(tmp_path, backend="claude")
+    agent_goals.upsert(
+        p["agent_id"],
+        session=p["session"],
+        backend="codex",
+        goal={"objective": "Native objective", "status": "active"},
+    )
+    recovery.tick(lambda *args: pytest.fail("a second driver"), now=db.now_ms() + 999999)
     assert (
         task_plans.get(p["plan_id"])["goal"]["continuation"]["observed_state"]
         == "native_owned"
