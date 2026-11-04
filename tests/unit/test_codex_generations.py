@@ -191,3 +191,50 @@ def test_a_turn_interrupted_without_a_stop_is_logged(fake, tmp_path, capsys):
     done, outcome, _ = _turn(tmp_path, agent, "unasked", "[qa-self-interrupt]")
     assert done.wait(8)
     assert "codexTurnInterruptedUnasked" in capsys.readouterr().err
+
+
+def _held_mover(fake, tmp_path, busy_text="[qa-slow] keeps the old process busy", ready=None):
+    """An idle mover thread on gen1, a busy agent keeping gen1 draining, and
+    gen2 started by another agent after the switch."""
+    mover, busy, other = (_agent(tmp_path, name) for name in ("mover", "busy", "other"))
+    done, _, thread = _turn(tmp_path, mover, "mover", "hello")
+    assert done.wait(8)
+    busy_done, _, _ = _turn(tmp_path, busy, "busy", busy_text)
+    if ready is not None:
+        assert _wait(ready)
+    (fake / "auth.json").write_text("account-two")
+    _turn(tmp_path, other, "other", "starts the new generation")
+    return mover, thread[0], busy_done
+
+
+def test_a_live_subagent_turn_holds_every_move_off_its_process(fake, tmp_path, monkeypatch):
+    monkeypatch.setenv("CLARP_QA_SUBAGENT_HOLD", "2.5")
+    mover, thread, busy_done = _held_mover(
+        fake, tmp_path, "[qa-subagent] delegates",
+        ready=lambda: getattr(cas._CLIENTS.get(cas._SHARED_KEY), "foreign_turns", None))
+    time.sleep(1.2)
+    assert cas.turn_holders(mover), "a thread moved while a codex subagent turn was running"
+    assert _wait(lambda: not cas.turn_holders(mover), 15)
+    assert busy_done.wait(8)
+
+
+def test_without_thread_unsubscribe_the_old_process_drains_until_quiet(fake, tmp_path, monkeypatch):
+    monkeypatch.setenv("CLARP_QA_UNSUBSCRIBE", "unsupported")
+    mover, thread, busy_done = _held_mover(fake, tmp_path)
+    assert cas.turn_holders(mover)
+    assert busy_done.wait(8)
+    assert _wait(lambda: not cas.turn_holders(mover), 10), "the fallback never released the thread"
+    done, outcome, _ = _turn(tmp_path, mover, "mover", "after the fallback", thread=thread)
+    assert done.wait(8) and outcome == ["completed"]
+    assert _auth_of(fake, thread) == "account-two"
+
+
+def test_a_thread_that_never_closes_is_released_by_the_backstop(fake, tmp_path, monkeypatch):
+    monkeypatch.setenv("CLARP_QA_UNLOAD_DELAY", "never")
+    monkeypatch.setattr(cas, "DRAIN_BACKSTOP_SEC", 1.0)
+    mover, thread, busy_done = _held_mover(fake, tmp_path)
+    assert busy_done.wait(8)
+    assert cas.turn_holders(mover)
+    assert _wait(lambda: not cas.turn_holders(mover), 10), "the backstop never ended the old process"
+    done, outcome, _ = _turn(tmp_path, mover, "mover", "after the backstop", thread=thread)
+    assert done.wait(8) and outcome == ["completed"]
