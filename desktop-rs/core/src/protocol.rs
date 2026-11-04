@@ -285,6 +285,9 @@ pub struct Message {
     pub activity_count: i32,
     pub pending: bool,
     pub delivery_failed: bool,
+    /// The Host's one-line reason for a failed send of this client, shown on
+    /// its bubble; local only (CLIENT-SEND-500).
+    pub delivery_error: String,
     pub activity: bool,
     pub automated: bool,
     pub tool_details_available: bool,
