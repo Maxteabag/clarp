@@ -290,20 +290,31 @@ def listing(limit=50):
 
 def prune(connection, now, prompt_version, templates_version):
     """Retention: old or excess decisions, dead-version and excess exact-only rows."""
+    # In bounded batches found by reads outside the write lock (RM-N8). A
+    # boundary is read first and re-checked by every batch, so a row that is
+    # hit meanwhile is kept, as the single statement would have kept it.
+    from . import batched_delete
     counts = {}
-    counts["tool_explanation_decisions"] = connection.execute(
-        "DELETE FROM tool_explanation_decisions WHERE at < ?", (now - DECISION_MAX_AGE_MS,)).rowcount
-    counts["tool_explanation_decisions"] += connection.execute(
-        "DELETE FROM tool_explanation_decisions WHERE id <= (SELECT id FROM tool_explanation_decisions "
-        "ORDER BY id DESC LIMIT 1 OFFSET ?)", (DECISION_MAX_ROWS,)).rowcount
-    counts["tool_explanation_learned"] = connection.execute(
-        "DELETE FROM tool_explanation_learned WHERE (prompt_version<>? OR templates_version<>?) "
+    counts["tool_explanation_decisions"] = batched_delete.prune(
+        connection, "DELETE FROM tool_explanation_decisions WHERE at < ?", (now - DECISION_MAX_AGE_MS,))
+    boundary = connection.execute(
+        "SELECT id FROM tool_explanation_decisions ORDER BY id DESC LIMIT 1 OFFSET ?",
+        (DECISION_MAX_ROWS,)).fetchone()
+    if boundary is not None:
+        counts["tool_explanation_decisions"] += batched_delete.prune(
+            connection, "DELETE FROM tool_explanation_decisions WHERE id <= ?", (boundary[0],))
+    counts["tool_explanation_learned"] = batched_delete.prune(
+        connection, "DELETE FROM tool_explanation_learned WHERE (prompt_version<>? OR templates_version<>?) "
         "AND COALESCE(last_hit_at, created_at) < ?",
-        (prompt_version, templates_version, now - STALE_VERSION_GRACE_MS)).rowcount
-    counts["tool_explanation_learned"] += connection.execute(
-        "DELETE FROM tool_explanation_learned WHERE parameterised=0 AND rowid IN (SELECT rowid FROM "
-        "tool_explanation_learned WHERE parameterised=0 ORDER BY COALESCE(last_hit_at, created_at) DESC "
-        "LIMIT -1 OFFSET ?)", (EXACT_MAX_ROWS,)).rowcount
+        (prompt_version, templates_version, now - STALE_VERSION_GRACE_MS))
+    excess = connection.execute(
+        "SELECT rowid, COALESCE(last_hit_at, created_at) FROM tool_explanation_learned "
+        "WHERE parameterised=0 ORDER BY COALESCE(last_hit_at, created_at) DESC LIMIT -1 OFFSET ?",
+        (EXACT_MAX_ROWS,)).fetchall()
+    counts["tool_explanation_learned"] += batched_delete.prune(
+        connection, "DELETE FROM tool_explanation_learned WHERE parameterised=0 "
+        "AND COALESCE(last_hit_at, created_at) <= ?",
+        (excess[0][1] if excess else 0,), rowids=sorted(row[0] for row in excess))
     return counts
 
 
