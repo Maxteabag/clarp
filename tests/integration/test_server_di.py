@@ -4477,6 +4477,29 @@ def _post_status(url, body):
         return error.code, error.read()
 
 
+def test_a_voice_change_writes_only_that_agent(running_server, monkeypatch):
+    """TP-03: the voice handler loaded the whole roster and wrote it all back.
+    An agent created between its read and its write was deleted again."""
+    from lib import agents as agents_db
+    base, _ctx, _srv = running_server
+    real_load = server_module.load_agents
+    created = []
+
+    def stale_roster(path):
+        roster = real_load(path)
+        if not created:
+            created.append(agents_db.create_agent(
+                persona="Latecomer", voice_id="late-voice", cwd=str(pathlib.Path.home()),
+                session="latecomer"))
+        return roster
+
+    monkeypatch.setattr(server_module, "load_agents", stale_roster)
+    status, body = _post_status(base + "/agent-voice", {"session": "claude", "voice_id": "fresh-voice"})
+    assert status == 200, body
+    assert agents_db.get_by_session("latecomer") is not None
+    assert agents_db.get_by_session("claude")["voice_id"] == "fresh-voice"
+
+
 def test_choosing_a_google_voice_accepts_only_the_allowlist_and_keeps_other_providers(
         running_server):
     base, _ctx, _srv = running_server
