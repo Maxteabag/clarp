@@ -316,3 +316,20 @@ def test_an_integration_only_edit_to_a_split_module_stops_with_8(repo_with_split
     code, out = _merge(repo_with_split)
     assert code == 8, out
     assert "integration-only edit in server/lib/big.py (split big)" in out
+
+
+def test_an_integration_only_edit_before_the_first_split_stops_with_8(repo_with_split):
+    # Review B F3: with no part on integration yet, stage A would still take
+    # main's text of the old module and drop integration's edit.
+    _git(repo_with_split, "switch", "-q", "integration")
+    _git(repo_with_split, "reset", "-q", "--hard", "integration~1")
+    big = repo_with_split / "server" / "lib" / "big.py"
+    assert not (repo_with_split / "server" / "lib" / "big_helpers.py").exists()
+    big.write_text(big.read_text().replace("return helper()", "return helper() + '!'"))
+    _commit(repo_with_split, "integration edit before the first split")
+    _git(repo_with_split, "switch", "-q", "main")
+    (repo_with_split / "README").write_text("main moved\n")
+    _commit(repo_with_split, "main moves")
+    code, out = _merge(repo_with_split)
+    assert code == 8, out
+    assert "integration-only edit in server/lib/big.py (split big, not yet applied)" in out
