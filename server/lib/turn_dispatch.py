@@ -133,6 +133,9 @@ def runtime_status() -> dict[str, Any]:
         "unpersisted": unpersisted_held(),
         "provider_turns": provider_turns(),
         "compactions": compaction.active_sessions(),
+        # Sends being admitted: a reconciler must leave their sessions bound
+        # (TP-05b); the release drain does not read it.
+        "admitting": _SLOTS.admitting_agents(),
         # The status line per agent (docs/live-items.md §1.3), for the
         # HTTP process's /agents/snapshot.
         "live_activities": hub.activities() if hub is not None else {},
@@ -267,6 +270,11 @@ def refresh_hold_headlines() -> None:
         hub.set_update_holds(set(_SLOTS.held()), UPDATE_HOLD_HEADLINE)
 
 
+# The admission in progress on this thread (TurnDispatchService.submit), so
+# the agent can be marked as admitting once it is known (TP-05b).
+_ADMISSION = threading.local()
+
+
 def live_work(agent_id: str, *, session: str = "") -> turn_slots.LiveWork:
     """Every busy fact for one agent: slot, queue, terminal, compaction."""
     return _SLOTS.live_work(agent_id, session=session)
@@ -287,6 +295,13 @@ def _slot_is_spawning(agent_id: str) -> bool:
         return agent_id in set(
             _RUNTIME_CLIENT.status().get("spawning") or ())
     return _SLOTS.is_spawning(agent_id)
+
+
+def _send_admitting(agent_id: str) -> bool:
+    """A send for the agent is being admitted where turns are owned (TP-05b)."""
+    if _RUNTIME_CLIENT is not None:
+        return agent_id in set(_RUNTIME_CLIENT.status().get("admitting") or ())
+    return _SLOTS.is_admitting(agent_id)
 
 
 def free_stale_slot(agent_id: str) -> str | None:
@@ -1409,7 +1424,7 @@ class TurnDispatchService:
         runtime RPC, or admit and launch it here."""
         runtime = getattr(self.ctx, "runtime_client", None)
         if runtime is None:
-            return _with_delivery(command, self._dispatch_owned(command))
+            return _with_delivery(command, self._dispatch_owned_marked(command))
         try:
             send = getattr(runtime, "dispatch_command", None)
             result = (send(command) if send is not None
@@ -1427,6 +1442,19 @@ class TurnDispatchService:
         return result
 
     @_serialize_client_retry
+    def _dispatch_owned_marked(self, command: DispatchCommand) -> DispatchResult:
+        """``_dispatch_owned``, whose agent is marked as admitting a send from
+        its session binding until this call returns: the session is bound
+        before the slot is claimed, and a snapshot's reconciler must see that
+        as live work (TP-05b)."""
+        outer = getattr(_ADMISSION, "stack", None)
+        with contextlib.ExitStack() as stack:
+            _ADMISSION.stack = stack
+            try:
+                return self._dispatch_owned(command)
+            finally:
+                _ADMISSION.stack = outer
+
     def _dispatch_owned(self, command: DispatchCommand) -> DispatchResult:
         text = command.text
         requested_session = command.requested_session
@@ -1553,6 +1581,9 @@ class TurnDispatchService:
             backend_session_id = ""
         is_new_session = not backend_session_id
 
+        admission = getattr(_ADMISSION, "stack", None)
+        if admission is not None:
+            admission.enter_context(_SLOTS.admitting_send(agent_id))
         if is_new_session:
             backend_session_id = self._bind_new_session(backend, agent_id, session)
 

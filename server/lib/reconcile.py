@@ -86,8 +86,13 @@ def _slot_is_spawning(agent_id: str) -> bool:
     """
     if getattr(backends, "_RUNTIME_CLIENT", None) is None:
         from . import turn_dispatch
-        return turn_dispatch._slot_is_spawning(agent_id)
-    return agent_id in (backends.runtime_status().get("spawning") or ())
+        return (turn_dispatch._slot_is_spawning(agent_id)
+                or turn_dispatch._send_admitting(agent_id))
+    status = backends.runtime_status()
+    # A send being admitted (its session bound, its slot not claimed yet) is
+    # live work too (TP-05b); an older runtime reports no "admitting".
+    return (agent_id in (status.get("spawning") or ())
+            or agent_id in (status.get("admitting") or ()))
 
 
 def _runtime_slot_may_have_leaked(agent_id: str) -> bool:

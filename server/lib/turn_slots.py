@@ -166,6 +166,10 @@ class TurnSlots:
         self.inflight: dict[str, str] = {}
         self.queued: dict[str, list] = {}
         self.claimed_at: dict[str, float] = {}
+        # agent_id -> sends being admitted here right now (bound to a session,
+        # slot maybe not claimed yet). A reconciler must not unbind the session
+        # a send is launching (TP-05b); the dispatcher itself ignores it.
+        self.admitting: dict[str, int] = {}
         # agent_id -> trace of a launch running on some thread right now. A
         # spawning slot whose launch is here is owned, however old its claim.
         self.launches: dict[str, str] = {}
@@ -200,6 +204,31 @@ class TurnSlots:
     def is_spawning(self, agent_id: str) -> bool:
         with self.lock:
             return agent_id in self.claimed_at
+
+    def admitting_agents(self) -> list[str]:
+        with self.lock:
+            return sorted(self.admitting)
+
+    def is_admitting(self, agent_id: str) -> bool:
+        """A send for the agent is being admitted here (TP-05b): for observers
+        such as the reconciler, never for the dispatcher's own decisions."""
+        with self.lock:
+            return agent_id in self.admitting
+
+    @contextlib.contextmanager
+    def admitting_send(self, agent_id: str):
+        """While a send for ``agent_id`` is admitted (bound, claimed or queued)."""
+        with self.lock:
+            self.admitting[agent_id] = self.admitting.get(agent_id, 0) + 1
+        try:
+            yield
+        finally:
+            with self.lock:
+                left = self.admitting.get(agent_id, 1) - 1
+                if left > 0:
+                    self.admitting[agent_id] = left
+                else:
+                    self.admitting.pop(agent_id, None)
 
     def queue_depth(self, agent_id: str) -> int:
         with self.lock:
@@ -522,6 +551,7 @@ class TurnSlots:
             self.inflight.clear()
             self.queued.clear()
             self.claimed_at.clear()
+            self.admitting.clear()
             self._rehydrated = False
             self.fenced = False
         with self._launch_lock:
