@@ -38,6 +38,19 @@ def notice(state='completed', at=None, task=TASK, tool=TOOL):
         f'<status>{state}</status><summary>private provider command text</summary></task-notification>'))
 
 
+@pytest.fixture(autouse=True)
+def _no_time_budgets(monkeypatch):
+    """The observer's two time budgets (PARSE_BUDGET_SEC per observe call,
+    BUDGET_SEC per poll) end a pass after 20 or 50 ms of wall time. On a loaded
+    machine a pass then stops before the record a test asserts on, while these
+    tests assert the byte and action bounds and fairness, which never depend on
+    the clock. Without the budgets each pass is bounded by MAX_BYTES and
+    MAX_ACTIONS alone, so it is deterministic. (G1 flakes: bounded_poll twice,
+    already_recorded_stale_receipt once.)"""
+    monkeypatch.setattr(provider, 'PARSE_BUDGET_SEC', 60)
+    monkeypatch.setattr(provider.ProviderJobObserver, 'BUDGET_SEC', 60)
+
+
 @pytest.fixture
 def case(tmp_path):
     aid = agents.create_agent(persona='Bella fixture', voice_id='', cwd=str(tmp_path), session='bella-fixture')
