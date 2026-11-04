@@ -16,6 +16,7 @@ import pytest
 
 from lib import agents as agents_db
 from lib import db, turn_lifecycle
+from lib.protocol import SSEType
 from lib.turn_lifecycle import TransitionNotWritten, TurnEvent
 
 
@@ -186,6 +187,11 @@ def test_the_spawn_side_thinking_of_a_resumed_queued_turn_never_lands_after_its_
     rows = db.conn().execute(
         "SELECT kind, detail FROM state_log WHERE agent_id = ? ORDER BY state_id", (agent,)).fetchall()
     assert rows[-1]["kind"] == "done", "the spawn-side 'thinking' landed after the turn's 'done'"
-    frames = [e for e in stream.events if e.get("type") == "agent_state" and e.get("trace_id") == "t-2"]
+    frames = [e for e in stream.events
+              if e.get("type") == SSEType.AGENT_STATE and e.get("trace_id") == "t-2"]
     assert not any(e.get("kind") == "thinking" for e in frames), \
         "a 'thinking' frame was broadcast for a turn that had already ended"
+    # Positive control: the filter does see the dispatcher's frames (t-1's).
+    assert any(e.get("type") == SSEType.AGENT_STATE and e.get("trace_id") == "t-1"
+               and e.get("kind") == "thinking" for e in stream.events), \
+        "control: the capture and filter must see a real agent-state frame"
