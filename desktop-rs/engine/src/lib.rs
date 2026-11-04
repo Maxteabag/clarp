@@ -1338,6 +1338,19 @@ impl Engine {
         self.mutate_roster(|r| r.record_outgoing_activity(session));
         let client_id = uuid::Uuid::new_v4().to_string();
         self.with_conversation(session, |c| c.add_optimistic(&client_id, trimmed));
+        self.post_send(session, &client_id, trimmed, queue_if_busy, trace, transcription, hands_free);
+    }
+
+    /// Sends a failed message again under its own id (CLIENT-SEND-500).
+    pub(crate) fn resend_failed(&mut self, session: &str, message_id: &str) {
+        let Some((client_id, text)) = self.with_conversation(session, |c| c.resend_failed(message_id)).flatten() else { return };
+        self.post_send(session, &client_id, &text, false, "", "", false);
+    }
+
+    /// POST /send for a row already shown, and wait for its answer.
+    fn post_send(&mut self, session: &str, client_id: &str, text: &str, queue_if_busy: bool, trace: &str, transcription: &str, hands_free: bool) {
+        let trimmed = text;
+        let client_id = client_id.to_owned();
         self.set_sending(true);
         let mut body = json!({
             // "client" tells the Host the desktop sent it, so the reply is
@@ -1477,6 +1490,8 @@ impl Engine {
             self.apply_log(session, object, LoadKind::Older);
         } else if let Some(client_id) = tag.strip_prefix("send:") {
             let session = self.deliveries.get(client_id).map(|(s, _)| s.clone()).unwrap_or_else(|| self.selected.clone());
+            // The 2xx is what makes this send delivered (CLIENT-SEND-500).
+            self.with_conversation(&session, |c| c.confirm_delivery(client_id));
             self.request_delta(&session);
         }
         // select: and other acknowledgements need no action.
