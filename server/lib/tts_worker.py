@@ -14,8 +14,9 @@ from __future__ import annotations
 
 import pathlib
 import threading
+import time
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 from . import agents as agents_db
 from . import clip_pacing
@@ -71,15 +72,17 @@ def synth_one(*,
               stream: Any | None = None,
               herald: Any | None = None,
               broker: Any | None = None,
-              delivery: ClipDelivery | None = None) -> bool:
+              delivery: ClipDelivery | None = None,
+              claim: Callable[[], dict[str, Any] | None] | None = None) -> bool:
     """Claim and process one queued row. Returns True if work was done,
-    False if the queue was empty.
+    False if the queue was empty. The pool passes `claim`, which skips
+    agents it already has in flight.
 
     Idempotent at the row level: synthesis happens under SYNTHESIZING
     status, success advances to DONE, failure to FAILED. Either way the
     row is no longer reclaimable.
     """
-    row = tts_queue.claim_next()
+    row = (claim or tts_queue.claim_next)()
     if row is None:
         return False
 
@@ -656,8 +659,13 @@ class TTSWorker:
     enqueue→synthesize handoff IS the user-perceptible audio latency.
     The worker spends most of its time sleeping; when work arrives it
     runs flat-out (back-to-back synth_one calls) until the queue drains.
+
+    A pool of POOL_SIZE threads (VP-06) so one slow provider call delays
+    only its own agent. An agent has at most one row in flight, which keeps
+    its chunks in order; `_busy` (under `_busy_lock`) is that set.
     """
     DEFAULT_INTERVAL_SEC = 0.1
+    POOL_SIZE = 3
 
     def __init__(self, *,
                  audio_dir: pathlib.Path,
@@ -677,10 +685,12 @@ class TTSWorker:
         # config knob actually controls anything.
         self.delivery = delivery or ChunkedFileDelivery(broker=broker)
         self._stop = threading.Event()
-        self._thread: threading.Thread | None = None
+        self._threads: list[threading.Thread] = []
+        self._busy: set[str] = set()
+        self._busy_lock = threading.Lock()
 
     def start(self) -> None:
-        if self._thread and self._thread.is_alive():
+        if any(t.is_alive() for t in self._threads):
             return
         # Reset any rows stuck in 'synthesizing' from a previous run that
         # died mid-claim. Idempotent + cheap.
@@ -695,31 +705,49 @@ class TTSWorker:
                               "clips": recovered["clips_failed"]})
         except Exception as e:  # noqa: BLE001
             log_exception("ttsWorkerResetFail", e)
-        self._thread = threading.Thread(target=self._loop, daemon=True,
-                                         name="tts-worker")
-        self._thread.start()
+        # Once, before any lane runs: a lane's own claim is never reset.
+        self._threads = [
+            threading.Thread(target=self._loop, daemon=True, name=f"tts-worker-{n}")
+            for n in range(self.POOL_SIZE)]
+        for thread in self._threads:
+            thread.start()
 
     def stop(self, timeout: float = 2.0) -> None:
         self._stop.set()
-        if self._thread and self._thread.is_alive():
-            self._thread.join(timeout=timeout)
+        deadline = time.monotonic() + timeout
+        for thread in self._threads:
+            if thread.is_alive():
+                thread.join(timeout=max(0.0, deadline - time.monotonic()))
+
+    def _claim(self, claimed: list[str]) -> dict[str, Any] | None:
+        with self._busy_lock:
+            row = tts_queue.claim_next(frozenset(self._busy))
+            if row is not None:
+                self._busy.add(row["agent_id"])
+                claimed.append(row["agent_id"])
+            return row
 
     def _loop(self) -> None:
         # Tight inner loop while there's work, sleep when empty. Beats a
         # fixed-rate poll when there's a burst of clips (a long Claude
         # turn that emits 4 chunks).
         while not self._stop.is_set():
+            claimed: list[str] = []
             try:
                 worked = synth_one(audio_dir=self.audio_dir,
                                    stream=self.stream,
                                    herald=self.herald,
                                    broker=self.broker,
-                                   delivery=self.delivery)
+                                   delivery=self.delivery,
+                                   claim=lambda: self._claim(claimed))
                 health.mark_success("tts_worker")
             except Exception as e:  # noqa: BLE001
                 health.mark_error("tts_worker", e)
                 log_exception("ttsWorkerLoopFail", e)
                 worked = False
+            finally:
+                with self._busy_lock:
+                    self._busy.difference_update(claimed)
             if worked:
                 continue       # drain back-to-back
             # Sleep with stop-event short-circuit.

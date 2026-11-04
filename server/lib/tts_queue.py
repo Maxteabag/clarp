@@ -9,8 +9,13 @@ Status flow:
                                 ╰─error──►  failed
 
 `claim_next` is an atomic SELECT-then-UPDATE-WHERE-status='queued' pair so
-two workers can't pick the same row. Today there's only one worker, but
-the discipline is cheap and protects against a future split.
+two workers can't pick the same row. The worker runs a small pool (VP-06)
+and passes the agents it already has in flight, so each agent's rows are
+synthesized one at a time and in order.
+
+`cancel` drops an agent's queued rows (a user Stop, a preempted turn): they
+become `failed` with an error starting `cancelled: `, which readers that count
+failures leave out. A row already synthesizing finishes.
 """
 from __future__ import annotations
 
@@ -58,17 +63,19 @@ def enqueue(*,
     return int(cur.lastrowid or 0)
 
 
-def claim_next() -> dict[str, Any] | None:
-    """Atomically claim the oldest queued row. Returns the row dict, or
-    None if there's nothing queued."""
+def claim_next(busy_agents: frozenset[str] | set[str] = frozenset()) -> dict[str, Any] | None:
+    """Atomically claim the oldest queued row of an agent not in
+    `busy_agents`. Returns the row dict, or None if there's nothing queued."""
     c = conn()
+    busy = sorted(busy_agents)
     row = c.execute(
-        """SELECT queue_id, agent_id, text, voice_id, session,
+        f"""SELECT queue_id, agent_id, text, voice_id, session,
                   source, trace_id, enqueued_at
              FROM tts_queue
             WHERE status = ?
-            ORDER BY enqueued_at LIMIT 1""",
-        (QUEUED,),
+              AND agent_id NOT IN ({",".join("?" * len(busy))})
+            ORDER BY enqueued_at, queue_id LIMIT 1""",
+        (QUEUED, *busy),
     ).fetchone()
     if row is None:
         return None
@@ -97,6 +104,21 @@ def mark_failed(queue_id: int, error: str) -> None:
             WHERE queue_id = ?""",
         (FAILED, now_ms(), error[:500] if error else None, queue_id),
     )
+
+
+CANCELLED_PREFIX = "cancelled: "
+
+
+def cancel(agent_id: str, trace_id: str | None = None, *, reason: str) -> int:
+    """Drop an agent's queued rows (only that trace's when given) so they are
+    never synthesized. Returns how many were dropped."""
+    sql = """UPDATE tts_queue SET status = ?, completed_at = ?, error = ?
+              WHERE agent_id = ? AND status = ?"""
+    params: list[Any] = [FAILED, now_ms(), (CANCELLED_PREFIX + reason)[:500], agent_id, QUEUED]
+    if trace_id is not None:
+        sql += " AND trace_id = ?"
+        params.append(trace_id)
+    return int(conn().execute(sql, params).rowcount or 0)
 
 
 # ---- observability helpers ---------------------------------------------
