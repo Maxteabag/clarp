@@ -10,6 +10,7 @@ import secrets
 import shlex
 from contextlib import contextmanager
 from . import agents, db, task_goal_state
+from .log import log, log_exception
 
 PREFIX = "task-goal-"
 
@@ -155,6 +156,43 @@ def _prompt(plan, goal):
     )
 
 
+# (key..., error type) -> when it was last logged, ms. A failure that repeats
+# every tick is logged with its traceback once, then at most hourly (AUT-09).
+_FAILURE_LOGGED: dict[tuple, int] = {}
+_FAILURE_LOG_INTERVAL_MS = 3_600_000
+_FAILURE_LOG_KEYS = 1024
+_OVERFLOW = ("<overflow>",)
+
+
+def log_failure_throttled(event: str, key: tuple, exc: BaseException, now: int,
+                          detail: str = "") -> None:
+    """Log a repeating failure: the first per key and error type with its
+    traceback, then one line an hour while it keeps happening."""
+    slot = (*key, type(exc).__name__)
+    last = _FAILURE_LOGGED.get(slot)
+    # One of the _FAILURE_LOG_KEYS slots is kept for the overflow marker.
+    if last is None and len(_FAILURE_LOGGED) >= _FAILURE_LOG_KEYS - 1:
+        # A failure still repeating refreshes its entry at least hourly; only
+        # entries quiet for two intervals are dropped, so a live one is never
+        # forgotten and traced again. Still full: one aggregate line an hour.
+        for stale in [k for k, at in _FAILURE_LOGGED.items()
+                      if k != _OVERFLOW and now - at >= 2 * _FAILURE_LOG_INTERVAL_MS]:
+            del _FAILURE_LOGGED[stale]
+        if len(_FAILURE_LOGGED) >= _FAILURE_LOG_KEYS - 1:
+            if now - _FAILURE_LOGGED.get(_OVERFLOW, -_FAILURE_LOG_INTERVAL_MS) >= _FAILURE_LOG_INTERVAL_MS:
+                _FAILURE_LOGGED[_OVERFLOW] = now
+                log(event, f"{detail} failing ({type(exc).__name__}: {str(exc)[:200]}); "
+                           f"more failures than the {_FAILURE_LOG_KEYS - 1} tracked are not tracked")
+            return
+    if last is None:
+        log_exception(event, exc, detail)
+    elif now - last >= _FAILURE_LOG_INTERVAL_MS:
+        log(event, f"{detail} still failing: {type(exc).__name__}: {str(exc)[:200]}")
+    else:
+        return
+    _FAILURE_LOGGED[slot] = now
+
+
 def tick(dispatch, *, now=None, cursor=None):
     now = db.now_ms() if now is None else now
     count = 0
@@ -171,7 +209,11 @@ def tick(dispatch, *, now=None, cursor=None):
     if cursor is not None:
         cursor[:] = [ids[-1] if ids else ""]
     for plan_id in ids:
-        claim = _claim(plan_id, now)
+        try:
+            claim = _claim(plan_id, now)
+        except Exception as exc:  # noqa: BLE001 - one plan never stops the others (AUT-09)
+            log_failure_throttled("goalRecoveryClaimFail", (plan_id,), exc, now, detail=plan_id)
+            continue
         if not claim:
             continue
         plan, goal = claim
