@@ -686,39 +686,58 @@ def next_round_for_run(run: dict[str, Any]) -> dict[str, Any] | None:
     return dict(queued) if queued else None
 
 
-def claim_round(round_id: str) -> bool:
+def claim_round(round_id: str) -> int:
     """Take a queued round for sending (AUT-11): only one caller, in any
-    process, moves it from queued, so only that one sends it. A crash after
-    the claim is recovered like any stale sent round."""
+    process, moves it from queued, so only that one sends it. Returns the
+    claim's stamp (its sent_at), which identifies it to release and finish;
+    0 when another caller holds the round. A crash after the claim is
+    recovered like any stale sent round."""
     now = db.now_ms()
-    return bool(db.conn().execute(
+    claimed = db.conn().execute(
         """UPDATE dream_rounds
               SET status = 'sent', sent_at = ?, updated_at = ?
             WHERE round_id = ? AND status = 'queued'""",
         (now, now, round_id),
-    ).rowcount)
+    ).rowcount
+    return now if claimed else 0
 
 
-def release_round(round_id: str) -> None:
-    """A claimed round whose send failed goes back to queued for a later tick."""
+def release_round(round_id: str, claimed_at: int) -> None:
+    """A claimed round whose send failed goes back to queued for a later tick,
+    only while it still holds this claim: after a stall past the recovery
+    deadline another scheduler may have recovered and sent it (reviewer C)."""
     db.conn().execute(
         """UPDATE dream_rounds
               SET status = 'queued', sent_at = NULL, updated_at = ?
-            WHERE round_id = ? AND status = 'sent'""",
-        (db.now_ms(), round_id),
+            WHERE round_id = ? AND status = 'sent' AND sent_at = ?""",
+        (db.now_ms(), round_id, claimed_at),
     )
 
 
-def mark_round_sent(round_id: str) -> None:
+def mark_round_sent(round_id: str, claimed_at: int | None = None) -> None:
+    """The round's send was accepted. With `claimed_at`, only this claim
+    finishes: a round recovered to queued meanwhile is taken back (it was
+    sent; leaving it queued would send it again), and a round another
+    scheduler has claimed since is left to that one. A round that was
+    abandoned or completed meanwhile is never touched."""
     now = db.now_ms()
-    # A round that was abandoned or completed meanwhile is left as it is.
-    db.conn().execute(
-        """UPDATE dream_rounds
-              SET status = 'sent', sent_at = COALESCE(sent_at, ?),
-                  updated_at = ?
-            WHERE round_id = ? AND status IN ('queued', 'sent')""",
-        (now, now, round_id),
-    )
+    if claimed_at is None:
+        db.conn().execute(
+            """UPDATE dream_rounds
+                  SET status = 'sent', sent_at = COALESCE(sent_at, ?),
+                      updated_at = ?
+                WHERE round_id = ? AND status IN ('queued', 'sent')""",
+            (now, now, round_id),
+        )
+    else:
+        db.conn().execute(
+            """UPDATE dream_rounds
+                  SET status = 'sent', sent_at = COALESCE(sent_at, ?),
+                      updated_at = ?
+                WHERE round_id = ?
+                  AND (status = 'queued' OR (status = 'sent' AND sent_at = ?))""",
+            (now, now, round_id, claimed_at),
+        )
     row = db.conn().execute(
         "SELECT run_id, stage FROM dream_rounds WHERE round_id = ?",
         (round_id,),
@@ -2244,24 +2263,25 @@ class DreamingScheduler:
             return 0
         # Claimed before the send, so a second advance (the wake thread, the
         # loop, another Host process) cannot send it too (AUT-11).
-        if not claim_round(dream_round["round_id"]):
+        claimed_at = claim_round(dream_round["round_id"])
+        if not claimed_at:
             log("dreamingSkip",
                 f"agent={run['agent_id']} session={run['session']} reason=claimed")
             return 0
         try:
             dispatched = self._send_dream(run["session"], dream_round["prompt"])
         except Exception as e:  # noqa: BLE001
-            release_round(dream_round["round_id"])
+            release_round(dream_round["round_id"], claimed_at)
             log_exception("dreamingTickFail", e, detail=run.get("session") or "")
             return 0
         if dispatched is False:
-            release_round(dream_round["round_id"])
+            release_round(dream_round["round_id"], claimed_at)
             log("dreamingSkip",
                 f"agent={run['agent_id']} session={run['session']} "
                 "reason=dispatch-busy")
             return 0
         try:
-            mark_round_sent(dream_round["round_id"])
+            mark_round_sent(dream_round["round_id"], claimed_at)
             if dream_round["round_index"] == 1:
                 mark_dream_started(run["agent_id"], run["local_date"])
             log(
