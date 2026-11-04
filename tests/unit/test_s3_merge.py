@@ -221,7 +221,7 @@ def test_a_merge_with_helpers_and_groups_commits_both_stages(repo_with_helpers):
     assert code == 0, out
     assert out.count("0 problems") == 2
     log = _git(repo, "log", "--format=%s", "-3", "work")
-    assert log.splitlines()[:2] == ["s3_apply: group moves", "s3_apply: helpers step"]
+    assert log.splitlines()[:2] == ["s3_apply: group feat", "s3_apply: helpers step"]
     feat = (repo / "server" / "lib" / "routes" / "feat.py").read_text()
     assert '{"a": _helper() + 1}' in feat and "from lib.routes.helpers import _helper" in feat
 
@@ -246,3 +246,21 @@ def test_a_failing_status_query_is_never_read_as_clean(repo, tmp_path):
     assert result.returncode == 2, result.stdout + result.stderr
     assert "git status failed" in result.stderr
     assert _git(repo, "branch", "--list", "work") == ""
+
+
+def test_each_group_is_its_own_verified_commit(repo):
+    """A recipe with two groups gives two move-only commits in recipe order,
+    each touching server.py and its own mixin only, each checked by ast_identity."""
+    (repo / "tools" / "refactor" / "s3_moves.toml").write_text(
+        RECIPE + '\n[[group]]\nname = "more"\nmodule = "lib/routes/more.py"\n'
+                 'class = "MoreRoutes"\nmembers = ["stays"]\n')
+    _commit(repo, "recipe: second group")
+    code, out = _merge(repo)
+    assert code == 0, out
+    assert out.count("0 problems") == 2
+    subjects = _git(repo, "log", "--format=%s", "-2", "work").splitlines()
+    assert subjects == ["s3_apply: group more", "s3_apply: group feat"]
+    touched = [sorted(_git(repo, "show", "--name-only", "--format=", f"work~{n}").splitlines())
+               for n in (1, 0)]
+    assert touched == [["server/lib/routes/feat.py", "server/server.py"],
+                       ["server/lib/routes/more.py", "server/server.py"]]

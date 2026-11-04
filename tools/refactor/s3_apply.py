@@ -733,14 +733,17 @@ def apply(root: pathlib.Path, groups: list[dict], scan_root: pathlib.Path | None
     if not new_groups:
         return out
     # server.py: cut members (with one following blank line), import the mixins
-    # above Handler, put every applied mixin first in Handler's bases.
+    # above Handler, put the new mixins first in Handler's bases (recipe order),
+    # ahead of the mixins already applied: the order ast_identity's method mode
+    # checks for each stage, so a group applied alone is verifiable on its own.
+    # Mixins share no member, so their order in the MRO changes no lookup.
     drop = set()
     for start, end in cut:
         drop.update(range(start, end))
         if end < len(lines) and not lines[end].strip():
             drop.add(end)
     header_index = cls.lineno - 1
-    mixins = [g["class"] for g in groups if g["class"] in applied or g in new_groups]
+    mixins = [g["class"] for g in new_groups] + [b for b in current_bases if b in applied]
     new_lines = []
     for i, line in enumerate(lines):
         if i in drop:
@@ -779,8 +782,8 @@ def main(argv: list[str]) -> int:
             unknown = sorted(set(args.group) - {g["name"] for g in groups})
             if unknown:
                 raise Refusal(f"recipe has no group {unknown}")
-            # A group is applied with every group before it in recipe order, so
-            # Handler's bases always list the mixins in recipe order.
+            # A group is applied with every group before it in recipe order
+            # (those already applied are left as they are).
             last = max(i for i, g in enumerate(groups) if g["name"] in args.group)
             groups = groups[:last + 1]
         changes = apply_helpers(root, helpers, helpers_ack)
