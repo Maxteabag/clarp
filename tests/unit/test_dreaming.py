@@ -1116,3 +1116,49 @@ def test_digest_survives_a_transcript_rebuild():
     surviving = dream_rows()
     assert len(surviving) == 1, "the rebuild deleted a row it cannot re-derive"
     assert digest in surviving[0]["text"]
+
+
+def test_google_timezone_is_cached_per_location_and_a_failure_retries_later(monkeypatch):
+    # AUT-12: resolve_tz runs for every agent on every 300 s poll; with a Maps
+    # key each one was a billed, synchronous Google call. The zone id does not
+    # depend on the timestamp, so one lookup per location serves 6 h.
+    import json as _json
+    monkeypatch.setenv("GOOGLE_MAPS_API_KEY", "test-key")
+    calls, fail = [], [False]
+
+    class _Reply:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self):
+            return _json.dumps({"status": "OK", "timeZoneId": "Europe/Oslo"}).encode()
+
+    def urlopen(url, timeout=None):
+        calls.append(url)
+        if fail[0]:
+            raise urllib.error.URLError("offline")
+        return _Reply()
+
+    monkeypatch.setattr(dreaming.urllib.request, "urlopen", urlopen)
+    loc = {"lat": 61.1153, "lng": 10.4662, "session": "rachel"}
+    t = 1_800_000_000
+    for later in (0, 300, 3 * 3600):
+        assert dreaming._google_timezone(loc, t + later).name == "Europe/Oslo"
+    assert len(calls) == 1
+    nearby = {**loc, "lat": 61.1180}                 # same 2-decimal cell (61.12)
+    assert dreaming._google_timezone(nearby, t + 600).name == "Europe/Oslo"
+    assert len(calls) == 1
+    assert dreaming._google_timezone(loc, t + 6 * 3600).name == "Europe/Oslo"
+    assert len(calls) == 2
+
+    other = {"lat": 62.4722, "lng": 6.1495, "session": "rachel"}
+    fail[0] = True
+    assert dreaming._google_timezone(other, t) is None
+    assert dreaming._google_timezone(other, t + 300) is None
+    assert len(calls) == 3                          # a failure is not retried at once
+    fail[0] = False
+    assert dreaming._google_timezone(other, t + 600).name == "Europe/Oslo"
+    assert len(calls) == 4
