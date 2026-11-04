@@ -118,7 +118,7 @@ class Host:
             self.log = None
 
     def request(self, method: str, path: str, body=None, raw: dict | None = None, headers: dict | None = None,
-                token: str | None = None):
+                token: str | None = None, timeout: float = 10):
         sent = {'Authorization': f'Bearer {token or TOKEN}', 'Content-Type': 'application/json', **(headers or {})}
         if raw is not None:
             data = raw['bytes'].encode()
@@ -129,7 +129,7 @@ class Host:
             return self._upgrade_request(method, path, sent)
         req = urllib.request.Request(self.url + path, data=data, method=method, headers=sent)
         try:
-            with urllib.request.urlopen(req, timeout=10) as resp:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
                 status, raw, headers = resp.status, resp.read(), resp.headers
         except urllib.error.HTTPError as err:
             status, raw, headers = err.code, err.read(), err.headers
@@ -329,6 +329,19 @@ def save(step: dict, source, variables: dict) -> None:
         variables[name] = value
 
 
+def _record(step: dict, response, http: list, variables: dict) -> None:
+    status, headers, payload = response
+    op = step['op']
+    http.append({'step': step.get('name') or f"{op} {step['path']}", 'method': op.upper(),
+                 'path': step['path'].split('?')[0], 'status': status, 'headers': headers,
+                 'body': payload})
+    if status < 400:
+        save(step, payload, variables)
+    expect = step.get('expect_status')
+    if expect is not None and status != expect:
+        raise StepFailed(f'unexpected status {status}')
+
+
 def run_step(host: Host, sse, step: dict, http: list, cli: list, variables: dict):
     op = step['op']
     if op in ('get', 'post', 'put', 'delete', 'patch'):
@@ -352,16 +365,32 @@ def run_step(host: Host, sse, step: dict, http: list, cli: list, variables: dict
         if step.get('auth') and step['auth'] not in variables:
             raise StepFailed(f"nothing saved as {step['auth']} (an earlier step did not produce it)")
         token = variables[step['auth']] if step.get('auth') else None
-        status, headers, payload = host.request(op.upper(), path, body, step.get('raw'),
-                                                step.get('headers'), token=token)
-        http.append({'step': step.get('name') or f"{op} {step['path']}", 'method': op.upper(),
-                     'path': step['path'].split('?')[0], 'status': status, 'headers': headers,
-                     'body': payload})
-        if status < 400:
-            save(step, payload, variables)
-        expect = step.get('expect_status')
-        if expect is not None and status != expect:
-            raise StepFailed(f'unexpected status {status}')
+        args = (op.upper(), path, body, step.get('raw'), step.get('headers'))
+        if step.get('background'):
+            # Sent now on its own thread, like a phone whose request is still open;
+            # recorded at its 'join' step, so the exchange keeps a fixed position.
+            result: dict = {}
+
+            def send():
+                try:
+                    result['response'] = host.request(*args, token=token, timeout=WAIT_TIMEOUT_S)
+                except Exception as exc:  # noqa: BLE001 - reported by class at the join
+                    result['error'] = type(exc).__name__
+            thread = threading.Thread(target=send, daemon=True)
+            thread.start()
+            variables.setdefault('<background>', {})[step['background']] = (step, thread, result)
+            return
+        _record(step, host.request(*args, token=token), http, variables)
+    elif op == 'join':
+        pending = variables.get('<background>', {}).pop(step['name'], None)
+        if pending is None:
+            raise StepFailed(f"no background request named {step['name']}")
+        sent, thread, result = pending
+        thread.join(WAIT_TIMEOUT_S)
+        if thread.is_alive() or 'error' in result:
+            raise StepFailed(f"background request {step['name']} did not complete "
+                             f"({result.get('error', 'still open')})")
+        _record(sent, result['response'], http, variables)
     elif op == 'wait_settled':
         _poll('turn settled', lambda: _turns_settled(host.root, step['message_id'], True))
     elif op == 'wait_open':
@@ -589,6 +618,8 @@ def capture(build: Path, scenario: dict, root: Path, python: str = sys.executabl
                 run_step(host, sse, step, http, cli, variables)
             except StepFailed as exc:
                 raise StepFailed(f'step {index} ({step["op"]}): {exc}') from exc
+        if variables.get('<background>'):
+            raise StepFailed('a background request was never joined')
         timings['steps'] = round(time.monotonic() - started, 2)
         _quiesce(host, sse, sessions)
         timings['quiet'] = round(time.monotonic() - started, 2)

@@ -113,9 +113,14 @@ planted.py ─── deliberate behaviour changes for the proof
   with no key.
 - **Waits poll state, never the clock**: a turn settled in `turns`, a provider
   `turn/start` in the fake's request log, state rows in `state_log`, `/status`
-  busy, and quiescence (every listed session idle, SSE quiet for 1 s), which
-  every scenario reaches before its final reads so they never race the Host's
-  background import.
+  busy, a line a fake wrote (`wait_file`; with `all_exited`, every fake CLI
+  process has logged its exit), and quiescence (every listed session idle, SSE
+  quiet for 1 s), which every scenario reaches before its final reads so they
+  never race the Host's background import.
+- **Requests that stay open.** An HTTP step with `background` is sent on its
+  own thread, like a phone whose request is still waiting, and recorded at its
+  `join` step, so the exchange keeps a fixed position in the capture; a
+  background request never joined fails the scenario.
 - **compare runs the base twice.** If the base differs from itself, the run
   fails as `base is not reproducible` (exit 2): a comparison with head would
   prove nothing.
@@ -347,6 +352,7 @@ Synthetic turns only, all text invented here (`scenarios.py`). Target about
 | `goal-turn` | `POST /agent-goal`: the provider runs an unrequested goal turn and completes the goal | done |
 | `cli-prompt-and-sessions` | the build's own `clarp-admin sessions` and `prompt` against the replay Host (exit code, stdout, stderr in the `cli` channel) | done |
 | `stop-at-admission` | Stop between a turn's two thinking rows; **known bug TP-N1**, reported, not counted | done |
+| `codex-pool-stop-during-start` | two codex agents on the one app-server: rachel's `turn/start` is held in the fake (`[replay-hold-start]`), mike sends, the user stops rachel, then the start is released; the sends and the stop are `background` requests joined after the release; `provider/codex-procs.jsonl` records app-server starts and the hold, `provider/host-events.jsonl` that the Stop was waiting (Codex pool stage 1/2 baseline); **known bug TP-N3**, reported, not counted | done |
 | group call, helper spawn, failover to another account, delete and restore, more CLI commands | | next |
 | text-dependent paths (voice routing, command parsing, TTS segmentation) | synthetic-text scenarios, since scrubbed text cannot exercise them | next |
 

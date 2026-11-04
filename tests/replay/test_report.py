@@ -694,3 +694,28 @@ def test_a_frame_completed_after_the_cut_is_not_captured():
     reader.freeze()
     reader._thread.start()
     assert reader.close() == [] and not reader.errors
+
+
+def test_a_background_request_is_recorded_at_its_join():
+    import threading
+    import capture
+    release = threading.Event()
+
+    class StubHost:
+        def request(self, method, path, body=None, raw=None, headers=None, token=None, timeout=10):
+            assert release.wait(5)
+            return 200, {}, {'ok': True, 'path': path}
+    http, variables = [], {}
+    step = {'op': 'post', 'path': '/send', 'name': 'send held', 'body': {}, 'background': 'held'}
+    capture.run_step(StubHost(), None, step, http, [], variables)
+    assert http == [] and 'held' in variables['<background>']   # still open, not recorded
+    release.set()
+    capture.run_step(StubHost(), None, {'op': 'join', 'name': 'held'}, http, [], variables)
+    assert [(h['step'], h['status']) for h in http] == [('send held', 200)]
+    assert not variables['<background>']
+
+
+def test_joining_a_request_that_was_never_sent_fails():
+    import capture
+    with pytest.raises(capture.StepFailed):
+        capture.run_step(None, None, {'op': 'join', 'name': 'missing'}, [], [], {})
