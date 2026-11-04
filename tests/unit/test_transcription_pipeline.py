@@ -323,3 +323,36 @@ def test_a_call_fallback_engine_runs_when_the_first_is_busy_loading_or_missing(f
         stt, steps, call_stt, focus="", audio_bytes=b"audio", ctype="audio/webm", prompt="")
     assert (text, engine) == ("from b", "b")
     assert [a["outcome"] for a in call_stt["report"]["attempts"]] == ["error", "ok"]
+
+
+class SelectionWaitSTT(PerModelSTT):
+    """Records the selection-lock bound each engine attempt ran under."""
+
+    def __init__(self, errors):
+        super().__init__(errors)
+        self.bounds = []
+
+    def transcribe_model_bytes(self, model, audio, ctype, prompt, *, wait=0.0):
+        from lib import stt as stt_module
+        self.bounds.append((model, stt_module.current_selection_wait()))
+        return super().transcribe_model_bytes(model, audio, ctype, prompt, wait=wait)
+
+
+def test_only_an_engine_with_a_fallback_after_it_bounds_its_selection_wait(monkeypatch):
+    # VP-08: a fallback exists, so waiting minutes for another variant is
+    # worse than trying it; the last engine keeps today's unbounded wait.
+    from lib import stt_language
+    monkeypatch.setattr(stt_language, "engines_for",
+                        lambda _focus: ["faster-whisper:medium", "faster-whisper:large-v3"])
+    stt = SelectionWaitSTT({"faster-whisper:medium": STTBusyError()})
+    out = _run(_ctx(stt), Recorder(), focus="rachel")
+    assert out.status == 200
+    assert stt.bounds == [("faster-whisper:medium", 10.0), ("faster-whisper:large-v3", None)]
+
+    calls = SelectionWaitSTT({"a": STTBusyError()})
+    steps = [{"engine": "a", "model": "a", "language": None, "adapted": False},
+             {"engine": "b", "model": "b", "language": None, "adapted": False}]
+    call_stt = {"language": {"value": None}, "engines": ["a", "b"], "requested_model": ""}
+    tp._run_call_steps(calls, steps, call_stt, focus="", audio_bytes=b"audio",
+                       ctype="audio/webm", prompt="")
+    assert calls.bounds == [("a", 10.0), ("b", None)]

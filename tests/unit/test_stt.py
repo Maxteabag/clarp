@@ -399,3 +399,39 @@ def test_explicit_custom_model_does_not_hold_whisper_selection_lock(monkeypatch)
         )[0] == "custom"
     finally:
         manager._selection_lock.release()
+
+
+def test_a_bounded_variant_request_is_busy_while_another_variant_holds_selection():
+    # VP-08: selection, load and inference stay serialized, but a request that
+    # has a fallback engine must not queue behind another variant for minutes.
+    from lib import stt as stt_module
+
+    class Variant:
+        load_done = threading.Event()
+        load_error = None
+        def transcribe_bytes(self, *_args, **_kwargs):
+            return "variant", True, 0.01
+
+    Variant.load_done.set()
+    selected = "openai-whisper:medium"
+    manager = WhisperSTT("small.en")
+    manager._variants[selected] = Variant()
+    manager._selection_lock.acquire()
+    try:
+        started = time.monotonic()
+        with stt_module.bounded_selection_wait(0.05):
+            with pytest.raises(stt_module.STTBusyError):
+                manager.transcribe_model_bytes(selected, b"audio", "audio/wav", "", wait=10.0)
+        assert time.monotonic() - started < 5.0
+
+        # Unbounded (no fallback follows): it waits as today, then answers.
+        result = []
+        waiter = threading.Thread(target=lambda: result.append(
+            manager.transcribe_model_bytes(selected, b"audio", "audio/wav", "", wait=10.0)))
+        waiter.start()
+        time.sleep(0.1)
+        assert waiter.is_alive()
+    finally:
+        manager._selection_lock.release()
+    waiter.join(timeout=5)
+    assert result and result[0][0] == "variant"
