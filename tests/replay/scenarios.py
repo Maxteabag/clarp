@@ -356,6 +356,31 @@ SCENARIOS = [
         ],
     },
     {
+        'id': 'push-notifications',
+        'what': 'a registered iPhone (device token and a Live Activity token) through the real apns '
+                'module to a recording relay (host.py): which pushes a turn sends, with their type, '
+                'priority, collapse id and payload (APNS-N1 baseline)',
+        'config': ('[tts]\nprovider = "none"\n[network]\nadvertise_lan = false\n'
+                   '[apns]\nmode = "relay"\n'
+                   '[audio_central]\nurl = "https://relay.replay.invalid"\n'
+                   'credential = "cav1.replay.synthetic.credential"\n'),
+        'steps': [
+            {'op': 'post', 'path': '/devices', 'body': {
+                'token': 'a1' * 32, 'session': 'rachel', 'environment': 'sandbox', 'platform': 'ios'}},
+            {'op': 'post', 'path': '/devices/live-activity', 'body': {
+                'token': 'b2' * 32, 'activity_id': 'replay-activity', 'kind': 'agents-working',
+                'environment': 'sandbox'}},
+            _send('rachel', 'synthetic question with a push', 'push1'),
+            {'op': 'wait_settled', 'message_id': 'u-push1'},
+            # The Live Activity pusher sends the first change at once and the rest of the
+            # turn in one push after its 15 s minimum interval: wait for that one too.
+            {'op': 'wait_file', 'name': 'push-relay.jsonl', 'contains': '"liveactivity"', 'count': 2,
+             'timeout': 30},
+            {'op': 'quiesce'},
+            {'op': 'get', 'path': '/log?session=rachel'},
+        ],
+    },
+    {
         'id': 'voice-streamed-clip',
         'what': 'a spoken reply streamed through the real Cartesia adapter (synthetic offline response, '
                 'host.py) with chunked-file delivery: the clip file, its stream bytes and its chunks',

@@ -428,7 +428,10 @@ def run_step(host: Host, sse, step: dict, http: list, cli: list, variables: dict
                 return bool(started) and started <= {r.get('proc_id') for r in rows if r.get('event') == 'exit'}
             _poll('provider processes exited', exited)
         else:
-            _poll('provider file', lambda: path.is_file() and step['contains'] in path.read_text())
+            # With count: at least that many lines contain the text.
+            _poll('provider file', lambda: path.is_file() and sum(
+                step['contains'] in line for line in path.read_text().splitlines()) >= step.get('count', 1),
+                  timeout=step.get('timeout', WAIT_TIMEOUT_S))
     elif op == 'provider_file':
         # Control files the fake provider reads (tests/qa/fake_codex.py), e.g. quota-mode.
         (host.root / 'provider' / step['name']).write_text(step['text'])

@@ -65,7 +65,9 @@ CLOCK_KEYS = frozenset({
     'last_run_at', 'last_seen_at', 'used_at', 'done_ts', 'ended_at_ms', 'enqueued_at', 'last_activity',
     'last_lap_ms', 'last_turn_end', 'latest_state_ts', 'latest_ts', 'observed_at', 'opened_at',
     'received_at', 'server_now_ms', 'settled_at', 'since_ms', 'started_at', 'started_at_ms',
-    'timestamp', 'ts', 'turn_started_ms', 'updated_at'})
+    'timestamp', 'ts', 'turn_started_ms', 'updated_at',
+    # Push notifications (push-notifications): device rows, Live Activity rows and payloads.
+    'last_push_at', 'registered_at', 'updated_at_ms', 'stale-date'})
 # Text that holds serialized JSON, by storage location only where it was seen.
 # Parsed values are compared as JSON plus their serialization form and key order.
 JSON_COLUMNS = frozenset({

@@ -163,6 +163,40 @@ def observe_stop(root: Path) -> None:
     turn_dispatch.snapshot_stop_state = observed
 
 
+def recording_push_relay(root: Path) -> None:
+    """Push notifications go through the real apns module (routing, relay
+    registration, payloads, collapse ids, priorities); only the relay's HTTP
+    client is replaced, by a recorder that answers like Audio Central and
+    appends every request (method, path, JSON body; never headers) to
+    provider/push-relay.jsonl. Nothing leaves the machine."""
+    from lib import apns
+    log_path = root / 'provider' / 'push-relay.jsonl'
+    lock = threading.Lock()
+
+    class Response:
+        def __init__(self, body):
+            self.status_code, self._body = 200, body
+            self.text = json.dumps(body)
+
+        def json(self):
+            return self._body
+
+    class Recorder:
+        def request(self, method, url, headers=None, json=None, **_kwargs):
+            path = '/' + url.split('://', 1)[-1].split('/', 1)[-1]
+            with lock, log_path.open('a') as handle:
+                handle.write(globals()['json'].dumps({'method': method, 'path': path, 'body': json}) + '\n')
+            if path.endswith('/push/send'):
+                count = len((json or {}).get('notifications') or [])
+                return Response({'results': [{'status': 200, 'apnsId': 'replay-apns-id'}] * count})
+            return Response({'ok': True})
+
+        def close(self):
+            pass
+    recorder = Recorder()
+    apns._relay_client = lambda: recorder
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--build', type=Path, required=True)
@@ -238,6 +272,7 @@ def main():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     synthetic_cartesia()
+    recording_push_relay(root)
     # Never a real interactive CLI: a scenario only sends plain GETs to /terminal/
     # (answered before any spawn), and this makes an accidental upgrade fail loudly.
     from lib import terminal_ws
