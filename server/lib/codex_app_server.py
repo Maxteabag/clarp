@@ -1506,24 +1506,66 @@ def _continue_move(thread_id: str) -> None:
         log("codexGoalMoveResumed", f"thread={thread_id[:8]} to={client.generation}")
 
 
+# A 'pausing' or 'paused' leftover younger than this is restored at recovery:
+# the surviving record proves no user goal action through Clarp since. An
+# older one (a rollback and re-upgrade, a long outage) is only cleared.
+MOVE_RESTORE_WINDOW_MS = 30 * 60 * 1000
+
+
+def _restore_paused(thread_id: str) -> None:
+    """Recovery of a recent 'pausing'/'paused' leftover: re-activate the goal
+    if codex still shows it paused, then clear the record."""
+    with _GOAL_MOVE_LOCK:
+        if not _move_get(thread_id):
+            return
+        agent = agents_db.get_by_backend_session(thread_id)
+        if not agent:
+            _move_forget(thread_id)
+            log("codexGoalMoveDropped", f"thread={thread_id[:8]} reason=no-agent")
+            return
+        try:
+            with _LOCK:
+                client = _client(agent["agent_id"], agent["session"])
+            client._ensure_loaded(agent, thread_id)
+            result = client.request("thread/goal/get", {"threadId": thread_id})
+        except RuntimeError as exc:
+            if "no rollout" in str(exc).lower() or "not found" in str(exc).lower():
+                _move_forget(thread_id)
+                log("codexGoalMoveDropped", f"thread={thread_id[:8]} reason=gone")
+                return
+            raise
+        goal = result.get("goal") if isinstance(result, dict) else None
+        _move_forget(thread_id)
+        if not isinstance(goal, dict) or goal.get("status") != "paused":
+            log("codexGoalMoveDropped", f"thread={thread_id[:8]} reason=not-paused")
+            return
+        client.goal(agent, "resume")
+        log("codexGoalMoveRestored", f"thread={thread_id[:8]} to={client.generation}")
+
+
 def recover_goal_moves() -> int:
     """Runtime start: finish or clear every move record a crash or a rollback
-    left. A 'moving' record is continued (compare-and-set); one still
-    'pausing' or 'paused' is only cleared, so its goal stays as it is
-    (visibly paused if the pause landed) and is never overridden."""
+    left. A 'moving' record is continued (compare-and-set). A 'pausing' or
+    'paused' one written within MOVE_RESTORE_WINDOW_MS is restored if codex
+    still shows the goal paused; an older one is only cleared, and its goal
+    stays visibly paused (lead, 4 Nov)."""
     rows = agents_db.conn().execute(
-        "SELECT key FROM settings WHERE key LIKE ?", (_MOVE_PREFIX + "%",)).fetchall()
+        "SELECT key, updated_at FROM settings WHERE key LIKE ?", (_MOVE_PREFIX + "%",)).fetchall()
+    now_ms = int(time.time() * 1000)
     for row in rows:
         thread_id = row["key"][len(_MOVE_PREFIX):]
         record = _move_get(thread_id) or {}
-        if record.get("phase") == "moving":
-            try:
+        phase = record.get("phase")
+        try:
+            if phase == "moving":
                 _continue_move(thread_id)
-            except Exception as exc:  # noqa: BLE001 - one record never stops the others
-                log_exception("codexGoalMoveRecoverFail", exc, detail=thread_id[:8])
-            continue
-        _move_forget(thread_id)
-        log("codexGoalMoveDropped", f"thread={thread_id[:8]} reason={record.get('phase') or 'invalid'}")
+            elif phase in ("pausing", "paused") and now_ms - int(row["updated_at"] or 0) <= MOVE_RESTORE_WINDOW_MS:
+                _restore_paused(thread_id)
+            else:
+                _move_forget(thread_id)
+                log("codexGoalMoveDropped", f"thread={thread_id[:8]} reason=stale phase={phase or 'invalid'}")
+        except Exception as exc:  # noqa: BLE001 - one record never stops the others
+            log_exception("codexGoalMoveRecoverFail", exc, detail=thread_id[:8])
     return len(rows)
 
 
