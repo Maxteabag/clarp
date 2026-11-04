@@ -715,6 +715,25 @@ class _Client:
             log("codexGoalMoveYielded", f"thread={thread_id[:8]} at=moving")
         return True
 
+    def _mark_retiring_if_quiet(self) -> bool:
+        """Before any direct shutdown of this process (credential refresh,
+        recycle_clients, usage recovery): the exit mark goal() refuses on is
+        set under self._lock, only while no goal answer is outstanding, and
+        kept only if nothing may still run here (busy, a subagent turn, or a
+        goal that may continue: the coarse rule). So a goal request is
+        admitted before the mark (and blocks the shutdown) or refused after
+        it. True: the caller may shut it down."""
+        with self._lock:
+            with self._goal_state_lock:
+                if self._goal_activations():
+                    return False
+            self.exiting = True
+        if _busy(self) or getattr(self, "foreign_turns", None) or self._goal_may_continue():
+            with self._lock:
+                self.exiting = False
+            return False
+        return True
+
     def _exit_if_drained(self, *, backstop: bool = False) -> None:
         with _LOCK:
             if (_DRAINING.get(id(self)) is not self or getattr(self, "exiting", False)
@@ -1410,7 +1429,7 @@ def recover_usage_failure(message: str) -> bool:
         if _CLIENTS.get(_SHARED_KEY) is not client:
             return False
         client.refresh_requested = True
-        if _busy(client) or message.produced_output or client._goal_may_continue():
+        if message.produced_output or not client._mark_retiring_if_quiet():
             return False
         # Close the old writer before allowing a new process to resume its
         # threads. Admission and retirement share this lock.
@@ -1455,8 +1474,7 @@ def _client(agent_id: str, session: str, stream=None) -> _Client:
                 # No direct shutdown while a goal could be running natively
                 # with its turn/started not delivered yet (the coarse rule):
                 # such a process drains as a generation instead.
-                if (not _busy(client) and not getattr(client, "foreign_turns", None)
-                        and not client._goal_may_continue()):
+                if client._mark_retiring_if_quiet():
                     client.shutdown()
                     _CLIENTS.clear()
                     client = None
@@ -1832,7 +1850,7 @@ def recycle_clients() -> int:
         closed = 0
         for client in clients:
             client.refresh_requested = True
-            if _busy(client) or client._goal_may_continue():
+            if not client._mark_retiring_if_quiet():
                 continue
             client.shutdown()
             for key, value in list(_CLIENTS.items()):
