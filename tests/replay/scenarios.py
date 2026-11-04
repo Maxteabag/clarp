@@ -310,7 +310,9 @@ SCENARIOS = [
                    '[cartesia.voices]\nRachel = "replay-voice-rachel"\n'),
         'steps': [
             {'op': 'post', 'path': '/send', 'name': 'send xray (spoken)',
-             'body': {'session': 'rachel', 'text': 'synthetic spoken question xray',
+             # The fake provider echoes the prompt, so its reply carries this <speak> block,
+             # which is what the Host enqueues for synthesis.
+             'body': {'session': 'rachel', 'text': 'synthetic question <speak>synthetic spoken answer xray</speak>',
                       'client_msg_id': 'xray', 'synthesize_audio': True}},
             {'op': 'wait_settled', 'message_id': 'u-xray'},
             {'op': 'wait_sql', 'sql': "SELECT count(*) FROM clips WHERE producer_status IN ('complete', 'failed')"},
