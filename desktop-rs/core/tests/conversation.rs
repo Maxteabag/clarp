@@ -533,3 +533,22 @@ fn a_failed_send_stays_failed_when_a_sync_carries_its_row() {
     assert!(failed[0].delivery_failed, "a replacement keeps it failed");
 }
 
+
+#[test]
+fn a_failed_send_keeps_the_hosts_reason_until_it_is_resent() {
+    // The Host's one-line refusal (e.g. BACKENDS-08's 413) shows on the failed
+    // bubble, so Resend is not pressed into the same refusal blindly.
+    let mut h = Harness::new("cipher");
+    h.optimistic("a", "a very long prompt");
+    h.model.mark_delivery_failed_because("a", "too long for this agent: shorten or split");
+    h.sync();
+    h.log(json!({"conversation_id": "c", "latest_revision": 1, "turns": [
+        {"id": "u-a", "role": "user", "text": "a very long prompt", "revision": 1}]}), LoadKind::Delta);
+    let row = h.model.rows().iter().find(|m| m.id == "u-a").expect("the row");
+    assert!(row.delivery_failed);
+    assert_eq!(row.delivery_error, "too long for this agent: shorten or split", "a sync keeps the reason");
+    assert_eq!(h.model.resend_failed("u-a"), Some(("a".to_owned(), "a very long prompt".to_owned())));
+    h.sync();
+    let row = h.model.rows().iter().find(|m| m.id == "u-a").expect("the row");
+    assert!(row.pending && !row.delivery_failed && row.delivery_error.is_empty(), "a resend clears it");
+}
