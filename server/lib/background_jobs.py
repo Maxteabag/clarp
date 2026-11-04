@@ -1086,7 +1086,8 @@ def reconcile_stale(
 ) -> list[str]:
     """Fail active jobs nobody is running any more.
 
-    Three independent reasons end a running job: its heartbeat is older than
+    Three independent reasons end a running job: its last sign of life (the
+    newer of its heartbeat and its progress line) is older than
     `heartbeat_timeout_ms` (whether or not a worker PID is recorded, since a
     live but wedged worker is no better than a dead one), its recorded
     worker PID no longer matches the start token it registered with, or its
@@ -1112,12 +1113,11 @@ def reconcile_stale(
     rows = db.conn().execute(
         f"""SELECT * FROM background_jobs
              WHERE status IN ('queued','running')
-               AND ((? - COALESCE(heartbeat_at, updated_at)) > heartbeat_timeout_ms
+               AND ((? - {_LAST_SIGN_SQL}) > heartbeat_timeout_ms
                     OR (status='running' AND COALESCE(worker_pid, 0) > 0
                         AND worker_start_token != '')
                     OR (status='running' AND owner_kind='agent' AND ? > 0
-                        AND (? - MAX(COALESCE(heartbeat_at, updated_at),
-                                     COALESCE(progress_at, 0))) > ?))
+                        AND (? - {_LAST_SIGN_SQL}) > ?))
                {job_clause}""",
         tuple(params),
     ).fetchall()
@@ -1125,8 +1125,8 @@ def reconcile_stale(
     for row in rows:
         if row["heartbeat_source"] == "provider_event":
             continue  # Provider silence is unknown, never a fabricated heartbeat failure.
-        expired = now - int(row["heartbeat_at"] or row["updated_at"]) > int(
-            row["heartbeat_timeout_ms"])
+        last_sign = _last_sign(row)
+        expired = now - last_sign > int(row["heartbeat_timeout_ms"])
         if row["status"] == "queued":
             try:
                 metadata = json.loads(row["metadata_json"] or "{}")
@@ -1150,8 +1150,6 @@ def reconcile_stale(
                 continue
             # Nothing to probe: only the stale-work rule can see it is gone.
             # Computer-owned jobs (updates, installs) keep their own timeout.
-            last_sign = max(int(row["heartbeat_at"] or row["updated_at"]),
-                            int(row["progress_at"] or 0))
             verdict = stale_work_policy.job_heartbeat(
                 heartbeat_age_ms=now - last_sign, worker_verified=False,
                 thresholds=thresholds)
@@ -1174,14 +1172,24 @@ def reconcile_stale(
     return changed
 
 
+# A job's last sign of life: its heartbeat or its latest progress line,
+# whichever is newer. Every liveness rule in reconcile_stale reads this.
+_LAST_SIGN_SQL = "MAX(COALESCE(heartbeat_at, updated_at), COALESCE(progress_at, 0))"
+
+
+def _last_sign(row: Any) -> int:
+    return max(int(row["heartbeat_at"] or row["updated_at"]), int(row["progress_at"] or 0))
+
+
 def _fail_stale_observation(
     row: Any, *, now: int, reason: str, require_expired: bool = True,
     note: str = "",
 ) -> bool:
     """Fail `row` only if nothing touched it since it was read."""
     observed_heartbeat = int(row["heartbeat_at"] or row["updated_at"])
+    observed_progress = int(row["progress_at"] or 0)
     expiry_clause = (
-        "AND (? - COALESCE(heartbeat_at,updated_at)) > heartbeat_timeout_ms"
+        f"AND (? - {_LAST_SIGN_SQL}) > heartbeat_timeout_ms"
         if require_expired else "AND ? > 0")
     c = db.conn()
     c.execute("BEGIN IMMEDIATE")
@@ -1191,11 +1199,12 @@ def _fail_stale_observation(
                   SET status='failed', terminal_at=?, terminal_reason=?, updated_at=?
                 WHERE job_id=? AND status=? AND revision=?
                   AND COALESCE(heartbeat_at,updated_at)=?
+                  AND COALESCE(progress_at,0)=?
                   {expiry_clause}""",
             (
                 now, reason, now, row["job_id"], row["status"],
                 int(row["revision"]),
-                observed_heartbeat, now,
+                observed_heartbeat, observed_progress, now,
             ),
         ).rowcount
         if changed:
@@ -1341,14 +1350,17 @@ def _public(row: Any, *, observed_at: int | None = None) -> dict:
     heartbeat_at = out.get("heartbeat_at")
     age = max(0, now - int(heartbeat_at)) if heartbeat_at is not None else None
     out["heartbeat_age_ms"] = age
+    # Freshness reads the same sign of life as reconcile_stale's fail rule.
+    signs = [int(t) for t in (heartbeat_at, out.get("progress_at")) if t is not None]
+    sign_age = max(0, now - max(signs)) if signs else None
     monitor_lost = out.get("terminal_reason") in {
         "heartbeat_expired", "worker_vanished", stale_work_policy.HEARTBEAT_LOST,
     }
     if monitor_lost:
         freshness = "stale"
-    elif heartbeat_at is None:
+    elif sign_age is None:
         freshness = "unknown"
-    elif age is not None and age <= int(out.get("heartbeat_timeout_ms") or 0):
+    elif sign_age <= int(out.get("heartbeat_timeout_ms") or 0):
         freshness = "fresh"
     else:
         freshness = "stale"
