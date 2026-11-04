@@ -25,6 +25,7 @@ import pathlib
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -453,6 +454,7 @@ class _LoginSession:
         self.serve = serve
         self.mode = ""
         self.done = threading.Event()
+        self.finishing = False
         self.finish: Callable[..., None] = lambda *_args: None
 
 
@@ -532,18 +534,39 @@ def start_oauth(harness: str | None, provider: str, method: Any,
 
     def finish(state: str, error: str = "") -> None:
         with _lock:
-            if session.done.is_set():
+            if session.done.is_set() or session.finishing:
                 return
-            if _sessions.get(provider) is session:
-                _sessions.pop(provider, None)
-            _tasks[provider] = _task_value(
-                provider, state, started_at=started_at, method_label=label,
-                authorization=authorization, error=error)
-            session.done.set()
-        session.serve.close()
+            session.finishing = True
+        # Close and refresh before publishing: whoever sees 'complete' reads a
+        # model catalogue that already has the new provider's models (HP-01).
+        # Publishing is in the finally, so nothing here can strand the claim.
+        try:
+            try:
+                session.serve.close()
+            except Exception as exc:  # noqa: BLE001 - the sign-in still ends and refreshes
+                try:
+                    log_exception("harnessProviderServeCloseFail", exc)
+                except Exception as log_exc:  # noqa: BLE001 - the logger failed: stderr, then carry on
+                    print(f"harnessProviderServeCloseFail: {exc!r} (log failed: {log_exc!r})",
+                          file=sys.stderr)
+            finally:
+                # Even when the diagnostics above fail, the refresh is attempted
+                # before anything is published; their error still propagates.
+                if state == "complete":
+                    _credentials_changed()
+        finally:
+            with _lock:
+                owned = _sessions.get(provider) is session
+                if owned:
+                    _sessions.pop(provider, None)
+                # Only this attempt's own task: a key save or sign-out during the
+                # close cleared it, or a new sign-in replaced it.
+                if owned and (_tasks.get(provider) or {}).get("started_at") == started_at:
+                    _tasks[provider] = _task_value(
+                        provider, state, started_at=started_at, method_label=label,
+                        authorization=authorization, error=error)
+                session.done.set()
         log("harnessProviderSignInFinished", f"provider={provider} status={state}")
-        if state == "complete":
-            _credentials_changed()
 
     session.finish = finish
     with _lock:
