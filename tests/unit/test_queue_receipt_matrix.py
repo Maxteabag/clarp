@@ -183,58 +183,65 @@ def test_the_matrix_shows_the_known_rules(clock):
 
 
 # --- the idle sweep: every gate and both timing branches (plan, section 1) ----
+# States and liveness are per agent; a-2's rows pin that the sweep reads a-1's own.
 
-def _state(kind: str, ts: int) -> None:
-    db.conn().execute("INSERT INTO state_log (agent_id, kind, ts) VALUES (?, ?, ?)", (AGENT, kind, ts))
+def _state(agent: str, kind: str, ts: int) -> None:
+    db.conn().execute("INSERT INTO state_log (agent_id, kind, ts) VALUES (?, ?, ?)", (agent, kind, ts))
 
 
-@pytest.mark.parametrize("case, newest, receipt_age, live, ended", [
-    ("terminal newer and 60 s old", ("idle", NOW - 60_000), 120_000, False, True),
-    ("terminal newer but only 59 s old", ("idle", NOW - 59_000), 120_000, False, False),
-    ("terminal older than the receipt", ("idle", NOW - 180_000), 120_000, False, False),
-    ("busy newest state", ("thinking", NOW - 60_000), 25 * 3_600_000, False, False),
-    ("no state, receipt 24 h old", None, 24 * 3_600_000, False, True),
-    ("no state, receipt under 24 h", None, 24 * 3_600_000 - 1, False, False),
-    ("terminal newer but the agent is live", ("idle", NOW - 60_000), 120_000, True, False),
-    ("liveness check raises", ("idle", NOW - 60_000), 120_000, "raise", False),
+@pytest.mark.parametrize("case, states, receipt_age, live, ended", [
+    ("terminal newer and 60 s old", [(AGENT, "idle", NOW - 60_000)], 120_000, set(), True),
+    ("terminal newer but only 59 s old", [(AGENT, "idle", NOW - 59_000)], 120_000, set(), False),
+    ("terminal older than the receipt", [(AGENT, "idle", NOW - 180_000)], 120_000, set(), False),
+    ("busy newest state", [(AGENT, "thinking", NOW - 60_000)], 25 * 3_600_000, set(), False),
+    ("no state, receipt 24 h old", [], 24 * 3_600_000, set(), True),
+    ("no state, receipt under 24 h", [], 24 * 3_600_000 - 1, set(), False),
+    ("terminal newer but the agent is live", [(AGENT, "idle", NOW - 60_000)], 120_000, {AGENT}, False),
+    ("liveness check raises", [(AGENT, "idle", NOW - 60_000)], 120_000, "raise", False),
+    ("busy, while another agent has a newer terminal state",
+     [(AGENT, "thinking", NOW - 100_000), (OTHER_AGENT, "idle", NOW - 60_000)], 120_000, set(), False),
+    ("another agent is live, this one is not", [(AGENT, "idle", NOW - 60_000)], 120_000, {OTHER_AGENT}, True),
+    ("no own state under 24 h, another agent's terminal state is newer",
+     [(OTHER_AGENT, "idle", NOW - 60_000)], 120_000, set(), False),
 ])
-def test_the_idle_sweep_keeps_its_gates(clock, case, newest, receipt_age, live, ended):
+def test_the_idle_sweep_keeps_its_gates(clock, case, states, receipt_age, live, ended):
     db.conn().execute("DELETE FROM queued_turns")
     _insert("q1", "started", at=NOW - receipt_age)
-    if newest:
-        _state(*newest)
+    for state in states:
+        _state(*state)
 
     def is_live(agent_id):
         if live == "raise":
             raise RuntimeError("inspection failed")
-        return live
+        return agent_id in live
     result = turn_queue.terminalize_idle_agent_receipts(is_live, now_ms=NOW)
     assert (turn_queue.status("q1") == "ended") is ended, (case, result)
 
 
-
 # --- the startup sweep of ended receipts ------------------------------------
 
-def _turn(trace: str, *, started: int, outcome: str | None) -> None:
+def _turn(agent: str, trace: str, *, started: int, outcome: str | None) -> None:
     db.conn().execute(
         "INSERT INTO turns (agent_id, source, trace_id, started_at, settled_at, outcome) VALUES (?, 'user', ?, ?, ?, ?)",
-        (AGENT, trace, started, started + 1 if outcome else None, outcome))
+        (agent, trace, started, started + 1 if outcome else None, outcome))
 
 
 @pytest.mark.parametrize("case, turns, live, expected", [
-    ("its turn completed", [(TRACE, 0, "completed")], set(), "done"),
-    ("its turn failed", [(TRACE, 0, "failed")], set(), "failed"),
-    ("its turn was interrupted", [(TRACE, 0, "interrupted")], set(), "interrupted"),
-    ("its turn settled with another outcome", [(TRACE, 0, "odd")], set(), "ended"),
-    ("a later turn of the agent began", [("t-later", NOW, None)], set(), "ended"),
-    ("an earlier turn of the agent only", [("t-earlier", 0, "completed")], set(), "started"),
+    ("its turn completed", [(AGENT, TRACE, 0, "completed")], set(), "done"),
+    ("its turn failed", [(AGENT, TRACE, 0, "failed")], set(), "failed"),
+    ("its turn was interrupted", [(AGENT, TRACE, 0, "interrupted")], set(), "interrupted"),
+    ("its turn settled with another outcome", [(AGENT, TRACE, 0, "odd")], set(), "ended"),
+    ("a later turn of the agent began", [(AGENT, "t-later", NOW, None)], set(), "ended"),
+    ("an earlier turn of the agent only", [(AGENT, "t-earlier", 0, "completed")], set(), "started"),
     ("no signal", [], set(), "started"),
-    ("its trace holds a slot", [(TRACE, 0, "completed")], {TRACE}, "started"),
+    ("its trace holds a slot", [(AGENT, TRACE, 0, "completed")], {TRACE}, "started"),
+    ("another agent's turn of the same trace settled", [(OTHER_AGENT, TRACE, 0, "completed")], set(), "started"),
+    ("another agent's later turn began", [(OTHER_AGENT, "t-later", NOW, None)], set(), "started"),
 ])
 def test_the_ended_receipt_sweep(clock, case, turns, live, expected):
     db.conn().execute("DELETE FROM queued_turns")
     _insert("q1", "started", at=NOW - 60_000)
-    for trace, started, outcome in turns:
-        _turn(trace, started=started, outcome=outcome)
+    for agent, trace, started, outcome in turns:
+        _turn(agent, trace, started=started, outcome=outcome)
     turn_queue.terminalize_ended_receipts(live)
     assert turn_queue.status("q1") == expected, case
