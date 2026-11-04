@@ -92,6 +92,18 @@ CHANGES = [
         'expect': {'channel': 'sse', 'locator': r'\]\.id$', 'kinds': {'changed'}},
     },
     {
+        'id': 'live-activity-unthrottled',
+        'what': 'the Live Activity pusher drops its 15 s minimum interval between pushes',
+        'file': 'server/lib/live_activity.py',
+        'find': '                 min_interval: float = 15.0,\n',
+        'replace': '                 min_interval: float = 0.0,\n',
+        # The witness is the push sequence the recording relay wrote: provider/push-relay.jsonl
+        # (its locator is the hash of that path, diff._hash).
+        'expect': {'scenario': 'push-notifications', 'channel': 'files',
+                   'locator': r'^files\[1c67a382\]', 'kinds': {'changed', 'field-added', 'field-removed',
+                                                       'sequence-insert', 'sequence-delete', 'sequence-replace'}},
+    },
+    {
         'id': 'on-chunk-signature',
         'what': "the TTS worker hands adapters a one-argument chunk callback, as VP-01's candidate daaad27c did "
                 '(adapters call on_chunk(index, bytes) and swallow the TypeError)',

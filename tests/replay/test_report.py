@@ -783,3 +783,17 @@ def test_a_failed_capture_settles_its_background_requests(tmp_path, monkeypatch)
     result = capture.capture(tmp_path / 'build', scenario, tmp_path / 'run')
     assert 'never joined' in result['error']
     assert workers and not workers[0].is_alive()
+
+
+def test_wait_file_count_waits_for_that_many_matching_lines(tmp_path):
+    import capture
+
+    class StubHost:
+        root = tmp_path
+    (tmp_path / 'provider').mkdir()
+    log = tmp_path / 'provider' / 'push-relay.jsonl'
+    log.write_text('{"pushType": "liveactivity"}\n{"pushType": "alert"}\n{"pushType": "liveactivity"}\n')
+    step = {'op': 'wait_file', 'name': 'push-relay.jsonl', 'contains': '"liveactivity"'}
+    capture.run_step(StubHost(), None, {**step, 'count': 2}, [], [], {})
+    with pytest.raises(capture.StepFailed):
+        capture.run_step(StubHost(), None, {**step, 'count': 3, 'timeout': 0.2}, [], [], {})
