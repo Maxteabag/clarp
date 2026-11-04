@@ -1,7 +1,6 @@
 # S9 module splits (rf-fix3): agent_live_tools.py, cut 1a.
 # Applied by tools/refactor/split_apply.py; see its docstring. Parts in dependency
-# order: each reads only earlier parts and the old module's imports (regi reads
-# the ledger's states, so the ledger comes first).
+# order: each reads only earlier parts and the old module's imports .
 
 [[split]]
 name = "agent-live-tools"
@@ -21,9 +20,10 @@ names = [
 module = "lib/agent_live_effects.py"
 names = [
     "DELEGATE_HTTP_TIMEOUT_S", "CALLBACK_HTTP_TIMEOUT_S", "CLARP_ADMIN_REFUSED",
-    "Unreachable", "Unconfirmed", "Refused", "_NoRedirect", "_post", "_get", "_clarp_admin",
-    "_openai_router", "_find_agent", "Effects",
+    "Unreachable", "Unconfirmed", "Refused", "_NoRedirect", "_post", "_get",
+    "_openai_router", "_find_agent",
 ]
+# _clarp_admin reads __file__ and Effects reads _clarp_admin: both stay.
 
 [[split.part]]
 # The durable ledger and transcript of a call's tool use.
@@ -31,10 +31,7 @@ module = "lib/agent_live_ledger.py"
 names = [
     "LEDGER_KEEP_S", "MAX_ROUTES_PER_CALL", "MAX_ACTIONS_PER_ROUTE", "MAX_DELEGATIONS_PER_CALL",
     "_CALL_ID", "Transcript", "_iso", "prune_transcripts", "Ledger", "_digest",
-    "CLAIMED", "DONE", "NOT_DONE", "UNCONFIRMED", "CANCELLED",
 ]
+# The state names (CLAIMED, DONE, ... in one tuple assignment, which ast_identity
+# cannot prove) stay, and so does the regi section that reads them.
 
-[[split.part]]
-# What regi said (COORD-216-REGI-HOST-SCHEMA-v3.1).
-module = "lib/agent_live_regi.py"
-names = ["REGI_SCHEMA", "RECEIPT_FIELDS", "RECONCILE_AFTER_S", "_RESULTS", "_NOT_FORWARDED_NOTE", "regi_outcome"]

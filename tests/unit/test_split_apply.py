@@ -24,7 +24,10 @@ OLD = textwrap.dedent('''\
     from .log import log
 
     LIMIT = 3
-    A, B = "a", "b"
+    A = "a"
+    B = "b"
+    C, D = 1, 2
+    HERE = __file__
 
 
     def helper(x):
@@ -70,7 +73,7 @@ def test_a_split_moves_definitions_verbatim_and_leaves_a_facade(tmp_path):
     changes = split_apply.apply_split(root, split)
     base, store, old = (changes["server/lib/old_base.py"], changes["server/lib/old_store.py"],
                         changes["server/lib/old.py"])
-    assert 'A, B = "a", "b"' in base and "def helper(x):" in base and "import json" in base
+    assert 'A = "a"\nB = "b"\n' in base and "def helper(x):" in base and "import json" in base
     assert "import time" not in base and "from __future__ import annotations" in base
     assert "# A comment that travels with its class." in store
     assert "from .old_base import A, helper" in store
@@ -91,7 +94,8 @@ def test_partly_applied_is_refused(tmp_path):
 @pytest.mark.parametrize("parts,message", [
     ([("lib/old_store.py", ["Store"])], "which stays in lib/old.py"),
     ([("lib/old_store.py", ["Store"]), ("lib/old_base.py", ["helper", "LIMIT", "A", "B"])], "later part"),
-    ([("lib/old_base.py", ["A"])], "assigned together"),
+    ([("lib/old_base.py", ["C"])], "assigned together"),
+    ([("lib/old_base.py", ["HERE"])], "reads __file__"),
     ([("lib/old_base.py", ["missing"])], "not a single plain top-level definition"),
 ])
 def test_unprovable_moves_are_refused(tmp_path, parts, message):

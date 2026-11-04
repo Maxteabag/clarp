@@ -73,6 +73,8 @@ from s3_apply import (  # noqa: E402  - shared S3 machinery, unchanged
 )
 
 RECIPES = "tools/refactor/splits"
+# Module attributes whose value depends on the module a definition lives in.
+_MODULE_IDENTITY = frozenset({"__file__", "__name__", "__spec__", "__package__", "__loader__", "__path__"})
 HEADER = ('"""Moved out of {old} by tools/refactor/split_apply.py (split {split!r}, recipe {recipe}).\n'
           '{old_name} imports these names back. Generated: change the recipe, not this file."""\n')
 
@@ -284,14 +286,17 @@ def apply_split(root: pathlib.Path, split: dict) -> dict[str, str]:
                           f"of {old} (bindings: {binding_map.get(name, [])})")
         stmt = stmts[0]
         if isinstance(stmt, (ast.Assign, ast.AnnAssign)):
-            # A multi-name assignment (`A, B = 1, 2`) moves whole: every name it
-            # binds must be listed, in the same part.
+            # ast_identity matches one name per assignment; a multi-name
+            # assignment (`A, B = 1, 2`) cannot be proved, so it stays.
             targets = stmt.targets if isinstance(stmt, ast.Assign) else [stmt.target]
             bound = {n.id for t in targets for n in ast.walk(t) if isinstance(n, ast.Name)}
-            stray = sorted(n for n in bound if part_of.get(n) != part_of[name])
-            if stray:
-                raise Refusal(f"split {split['name']!r}: {name} is assigned together with {stray}; "
-                              "list them in the same part")
+            if bound != {name}:
+                raise Refusal(f"split {split['name']!r}: {name} is assigned together with "
+                              f"{sorted(bound - {name})}; ast_identity cannot prove a multi-name assignment")
+        identity = sorted({n.id for n in ast.walk(stmt) if isinstance(n, ast.Name)} & _MODULE_IDENTITY)
+        if identity:
+            raise Refusal(f"split {split['name']!r}: {name} reads {', '.join(identity)}, which differ in its "
+                          "new module; keep it in the old module")
         nodes[name] = stmt
     rebound = rebound_imports(tree, tool)
     needed: list[set[str]] = [set() for _ in split["part"]]
@@ -317,7 +322,7 @@ def apply_split(root: pathlib.Path, split: dict) -> dict[str, str]:
             elif read in defs:
                 raise Refusal(f"split {split['name']!r}: {name} reads {read}, which stays in {old}; "
                               f"move {read} too (into this or an earlier part) or keep {name}")
-            elif not hasattr(builtins, read) and read not in ("__name__", "__file__", "__doc__"):
+            elif not hasattr(builtins, read):
                 raise Refusal(f"split {split['name']!r}: {name} reads {read}, which {old} does not bind "
                               f"with a plain top-level import")
     skip = {f"server/{p['module']}" for p in split["part"]}
@@ -339,8 +344,7 @@ def apply_split(root: pathlib.Path, split: dict) -> dict[str, str]:
     first_line: dict[int, int] = {}
     for index, part in enumerate(split["part"]):
         members = sorted(((name, nodes[name]) for name in part["names"]), key=lambda item: item[1].lineno)
-        unique = list({id(stmt): stmt for _, stmt in members}.values())   # a multi-name assignment once
-        spans = [_span(lines, stmt) for stmt in unique]
+        spans = [_span(lines, stmt) for _, stmt in members]
         # Definitions that were neighbours (only blank lines between) keep their
         # original spacing; others are separated by two blank lines.
         blocks: list[list[int]] = []
