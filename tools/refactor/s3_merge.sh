@@ -41,6 +41,7 @@ tracked_status=$(git status --porcelain --untracked-files=no) || die 2 "git stat
 [ -z "$tracked_status" ] || die 2 "the working tree has uncommitted changes:
 $tracked_status"
 PY=${S3_PYTHON:-$root/.venv/bin/python}
+export PYTHONDONTWRITEBYTECODE=1   # the stages' Python must leave no untracked files
 [ -x "$PY" ] || die 2 "no project python at $PY (uv sync, or set S3_PYTHON)"
 
 git switch -q -c "$work" "$integration" || die 2 "cannot create $work"
@@ -188,6 +189,10 @@ while read -r kind name move; do
   parts=$(printf '%s' "${move#*=}" | tr ',' ' ')
   "$PY" tools/refactor/split_apply.py --root "$root" "--$kind" "$name" </dev/null || die 8 "split_apply refused $kind $name"
   paths=$(for p in $parts; do printf 'server/%s ' "$p"; done)
+  outside=$(git status --porcelain --untracked-files=all -- server tools scripts) || die 8 "git status failed"
+  for p in $paths; do outside=$(printf '%s\n' "$outside" | grep -v " $p$" || true); done
+  [ -z "$(printf '%s' "$outside" | tr -d '[:space:]')" ] || die 8 "split_apply $kind $name changed files outside its spec:
+$outside"
   stage_status=$(git status --porcelain --untracked-files=all -- $paths) || die 8 "git status failed"
   [ -n "$stage_status" ] || continue
   label=$([ "$kind" = split ] && echo "$name" || echo "repoint $name")
