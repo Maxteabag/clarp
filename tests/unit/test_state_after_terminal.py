@@ -8,6 +8,7 @@ The race is made deterministic here: the late write is paused where it waits
 for the writer lock, and another connection (another thread, as another
 process would) commits the trace's 'done' meanwhile."""
 import contextlib
+from types import SimpleNamespace
 import threading
 import time
 
@@ -111,3 +112,80 @@ def test_another_traces_terminal_row_does_not_fence(tmp_path, monkeypatch):
         agent, "done", {"trace_id": "trace-other"}))
     turn_lifecycle.transition(agent, TurnEvent.TOOL_STARTED, {"trace_id": "trace-1", "tool": "Bash"})
     assert _kinds(agent)[-1] == "tool"
+
+
+# --- the exact writer of the harness run (lead condition 1) -------------------
+
+class _Stream:
+    def __init__(self):
+        self.events = []
+
+    def broadcast(self, event):
+        self.events.append(event)
+
+
+class _Backends:
+    CLAUDE = "claude"
+
+    def __init__(self):
+        self.spawned = []
+        self.live = True
+
+    def normalize(self, backend):
+        return backend or self.CLAUDE
+
+    def interrupt(self, backend, agent_id):
+        return 0
+
+    def active_handles(self, backend, agent_id):
+        return ["handle"] if self.live else []
+
+    def spawn_turn(self, backend, **kwargs):
+        self.spawned.append(kwargs)
+
+
+def test_the_spawn_side_thinking_of_a_resumed_queued_turn_never_lands_after_its_done(tmp_path, monkeypatch):
+    """The dispatcher's spawn-side 'thinking' (source/backend_session_id) of a
+    resumed queued turn, through TurnDispatchService's real write path. The
+    provider (another process: here another thread and connection) writes its
+    own start and the turn's 'done' after the dispatcher's fast-completion
+    check read the state, and before the dispatcher's write."""
+    from lib.turn_dispatch import TurnDispatchService, reset_for_tests
+    reset_for_tests()
+    agent = _agent(tmp_path, "mike")
+    stream = _Stream()
+    backends = _Backends()
+    service = TurnDispatchService(SimpleNamespace(default_session="mike", stream=stream,
+                                                  agents_path=tmp_path / "unused.json"),
+                                  backend_registry=backends, home=tmp_path,
+                                  uuid_factory=lambda: "native-1", now=lambda: 12.5)
+    service.dispatch(text="first", requested_session="mike", trace_id="t-1", synthesize_audio=False)
+    queued = service.dispatch(text="queued", requested_session="mike", trace_id="t-2",
+                              client_msg_id="q-2", synthesize_audio=False, queue_if_busy=True)
+    assert queued.queued
+
+    real_latest, fired = agents_db.latest_state, []
+
+    def provider_finishes_meanwhile(agent_id):
+        result = real_latest(agent_id)
+        if agent_id == agent and not fired and agents_db.get_trace(agent_id) == "t-2":
+            fired.append(True)
+
+            def provider():
+                turn_lifecycle.transition(agent, TurnEvent.SPAWN_STARTED, {"trace_id": "t-2"})
+                turn_lifecycle.transition(agent, TurnEvent.PROCESS_EXITED_OK, {"trace_id": "t-2"})
+            other = threading.Thread(target=provider)
+            other.start()
+            other.join(10)
+        return result
+
+    monkeypatch.setattr(agents_db, "latest_state", provider_finishes_meanwhile)
+    backends.live = False
+    backends.spawned[0]["on_result"]({"duration_ms": 5})     # t-1 ends; t-2 is resumed from the queue
+    assert fired, "control: the resumed queued turn reached its spawn-side write"
+    rows = db.conn().execute(
+        "SELECT kind, detail FROM state_log WHERE agent_id = ? ORDER BY state_id", (agent,)).fetchall()
+    assert rows[-1]["kind"] == "done", "the spawn-side 'thinking' landed after the turn's 'done'"
+    frames = [e for e in stream.events if e.get("type") == "agent_state" and e.get("trace_id") == "t-2"]
+    assert not any(e.get("kind") == "thinking" for e in frames), \
+        "a 'thinking' frame was broadcast for a turn that had already ended"
