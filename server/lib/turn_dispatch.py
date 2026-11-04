@@ -2175,7 +2175,10 @@ class TurnDispatchService:
             # killed mid-flight by a restart), the slot is stale. Free it
             # and take it over now instead of queuing behind a phantom
             # forever. Checked here, on every send — no timer/interval.
-            if not self._has_live_turn(spec):
+            # A process owner whose session is still held by a stuck process
+            # (BACKENDS-07b) is not stale, though the agent has no live turn.
+            if not self._has_live_turn(spec) and not (
+                    current.startswith(_PROCESS_OWNER_PREFIX) and self._session_holds(spec)):
                 if _SLOTS.fenced:
                     return self._hold_for_drain(spec, "behind a stale slot")
                 defer_on(_TURN_LOCK, lambda: (

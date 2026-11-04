@@ -143,6 +143,10 @@ class AppTurnHandle:
 
 
 class _Client:
+    # Guards each client's goal_state_unknown set. Taken after self._lock,
+    # never before it; the goal mirror takes only this one.
+    _goal_state_lock = threading.Lock()
+
     def __init__(self, agent_id: str, session: str, stream=None):
         argv = _codex_argv()
         self.agent_id = agent_id
@@ -464,6 +468,7 @@ class _Client:
         """Keep Clarp's goal table and clients in step with the app-server."""
         if not thread_id:
             return
+        recorded = False
         try:
             agent = agents_db.get_by_backend_session(thread_id)
             if not agent:
@@ -476,11 +481,27 @@ class _Client:
             else:
                 agent_goals.clear(agent["agent_id"])
                 row = None
+            recorded = True
+            with self._goal_state_lock:
+                self._goal_unknown().discard(thread_id)
             stream = getattr(self, "stream", None)
             if stream is not None:
                 events.broadcast(stream, events.as_event(agent_goals.event(agent, row)))
         except Exception as exc:  # noqa: BLE001 - a mirror failure must not stop the reader
+            if not recorded:
+                # The mirror may now be stale: the recycle treats this
+                # goal as possibly active until a later write records it.
+                with self._goal_state_lock:
+                    self._goal_unknown().add(thread_id)
             log_exception("codexGoalMirrorFail", exc, detail=thread_id)
+
+    def _goal_unknown(self) -> set[str]:
+        """Threads whose goal state the mirror has not recorded (call under
+        _goal_state_lock)."""
+        unknown = getattr(self, "goal_state_unknown", None)
+        if unknown is None:
+            unknown = self.goal_state_unknown = set()
+        return unknown
 
     def _detached_execution(self, params: dict) -> bool:
         detached = getattr(self, "detached_executions", None)
@@ -556,20 +577,17 @@ class _Client:
             raise ValueError("objective required")
         if action not in ("start", "pause", "resume", "clear", "get"):
             raise ValueError(f"unknown goal action: {action}")
-        activating = action in ("start", "resume")
-        if activating:
+        if action in ("start", "resume"):
             # A recycle never kills while an activation could start a turn,
             # and none starts on a process being recycled (BACKENDS-07b).
+            # The goal's state stays unknown until the mirror has recorded
+            # the answer: codex replies before it reports the update.
             with self._lock:
                 if getattr(self, "recycled", False):
                     raise RuntimeError("Codex is restarting a stuck session; try again in a moment")
-                self._goal_activations = getattr(self, "_goal_activations", 0) + 1
-        try:
-            result = self._goal_request(agent, action, thread_id, objective)
-        finally:
-            if activating:
-                with self._lock:
-                    self._goal_activations -= 1
+                with self._goal_state_lock:
+                    self._goal_unknown().add(thread_id)
+        result = self._goal_request(agent, action, thread_id, objective)
         goal = result.get("goal") if isinstance(result, dict) else None
         self._mirror_goal(thread_id, goal if isinstance(goal, dict) else None)
         return agent_goals.public(agent_goals.get(agent_id))
@@ -749,9 +767,10 @@ class _Client:
         between them."""
         with _LOCK:
             with self._lock:
+                with self._goal_state_lock:
+                    unknown = self._goal_unknown() - set(getattr(self, "detached_executions", ()))
                 if (not getattr(self, "detached_agents", None)
-                        or getattr(self, "recycled", False) or _busy(self)
-                        or getattr(self, "_goal_activations", 0)):
+                        or getattr(self, "recycled", False) or _busy(self) or unknown):
                     return
                 self.recycled = True
             # After the mark no goal activation starts here (goal() refuses).
@@ -789,9 +808,14 @@ class _Client:
     def _goal_may_continue(self) -> bool:
         """Could codex start a turn here by itself? Only for an active goal on
         a thread loaded in this process (not a detached one, which dies with
-        it). Clarp's mirror is current: codex reports thread/goal/updated
-        before the turn/completed that ends a turn. Unknown means yes."""
+        it), or for a goal whose state the mirror has not recorded (an
+        activation in flight, or a failed mirror write). Otherwise Clarp's
+        mirror is current: codex reports thread/goal/updated before the
+        turn/completed that ends a turn. Unknown means yes."""
         detached = getattr(self, "detached_executions", set())
+        with self._goal_state_lock:
+            if self._goal_unknown() - set(detached):
+                return True
         try:
             for thread_id in set(getattr(self, "_loaded_threads", ())) - set(detached):
                 agent = agents_db.get_by_backend_session(thread_id)
