@@ -12,7 +12,7 @@ from lib import db
 from lib import maintenance
 
 PRUNE_PHASES = ["db.sse_events", "db.tts_queue", "db.state_log", "db.background_job_events", "db.clips",
-                "db.turn_usage", "db.judgment_decisions", "db.tool_explanation_learning",
+                "db.turn_usage", "db.judgment_decisions", "db.audio_bookkeeping", "db.tool_explanation_learning",
                 "db.tool_explanation_programs", "db.launch_receipts", "db.launch_receipt_pointers"]
 
 

@@ -391,6 +391,24 @@ def demand_result_json(run_id: str, c=None) -> str | None:
     return row[0] if row else None
 
 
+def prune_completed_runs(c, *, run_glob: str, finished_before: int, limit: int) -> int:
+    """Delete at most `limit` completed runs whose id matches `run_glob` and
+    that finished before `finished_before`, with their demand rows. A run
+    with effects or label ownership is kept. Returns how many went (VP-04)."""
+    ids = [r[0] for r in c.execute(
+        """SELECT run_id FROM janitor_runs r
+            WHERE run_id GLOB ? AND status = 'completed' AND finished_at < ?
+              AND NOT EXISTS (SELECT 1 FROM janitor_effects e WHERE e.run_id = r.run_id)
+              AND NOT EXISTS (SELECT 1 FROM janitor_label_ownership o WHERE o.run_id = r.run_id)
+            ORDER BY finished_at LIMIT ?""", (run_glob, finished_before, limit))]
+    if not ids:
+        return 0
+    marks = ",".join("?" * len(ids))
+    c.execute(f"DELETE FROM janitor_demand_results WHERE run_id IN ({marks})", ids)
+    c.execute(f"DELETE FROM janitor_demand_claims WHERE run_id IN ({marks})", ids)
+    return int(c.execute(f"DELETE FROM janitor_runs WHERE run_id IN ({marks})", ids).rowcount or 0)
+
+
 def insert_demand_result(c, run_id: str, result, now: int, *, ignore_existing: bool = False) -> None:
     c.execute(f"INSERT {'OR IGNORE ' if ignore_existing else ''}INTO janitor_demand_results(run_id,result_json,created_at) VALUES (?,?,?)",
               (run_id, encode(result), now))
