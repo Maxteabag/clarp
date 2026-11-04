@@ -295,6 +295,8 @@ SCENARIOS = [
             {'op': 'wait_file', 'name': 'claude-procs.jsonl', 'contains': '"start"'},
             _send('claire', 'synthetic preempting whiskey', 'whiskey'),
             {'op': 'wait_settled', 'message_id': 'u-whiskey'},
+            # The preempted CLI lingers 1.5 s after SIGTERM before it logs its exit.
+            {'op': 'wait_file', 'name': 'claude-procs.jsonl', 'all_exited': True},
             {'op': 'quiesce', 'sessions': ('claire',)},
             {'op': 'get', 'path': '/log?session=claire'},
             {'op': 'get', 'path': '/status?session=claire'},

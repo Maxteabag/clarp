@@ -211,6 +211,11 @@ class SSE:
             for raw in self._resp:
                 line = raw.decode('utf-8').rstrip('\r\n')
                 if not line:
+                    # The cut is decided when a frame is complete on the wire: one
+                    # complete before freeze() is kept even if its parse ends later,
+                    # one completed after it is not part of the capture.
+                    if self._stop.is_set():
+                        break
                     self._frame(event, wire_id, data)
                     event, wire_id, data = None, None, []
                 elif line.startswith(':'):
@@ -230,8 +235,16 @@ class SSE:
             if not self._stop.is_set():
                 self.errors.append(f'stream error {type(exc).__name__}')
 
-    def close(self) -> list[dict]:
+    def freeze(self) -> None:
+        """Cut the stream (it is quiet): no frame completed after this point is
+        recorded. The reader ends when its socket closes: when the Host is stopped,
+        or close()."""
         self._stop.set()
+
+    def close(self) -> list[dict]:
+        """Cut (if not yet), end and join the reader, then return the frames: every
+        frame complete before the cut, including one still being parsed at the cut."""
+        self.freeze()
         with contextlib.suppress(Exception):
             self._resp.close()
         self._thread.join(timeout=5)
@@ -356,9 +369,21 @@ def run_step(host: Host, sse, step: dict, http: list, cli: list, variables: dict
     elif op == 'wait_provider_started':
         _poll('provider turn start', lambda: _provider_started(host.root, step['marker']))
     elif op == 'wait_file':
-        # A provider-root file (written by a fake) contains the given text.
+        # A provider-root file (written by a fake) contains the given text, or, with
+        # all_exited, its lifecycle log (fake_claude.py) has an exit for every start:
+        # a process lingering after SIGTERM is done writing before the capture.
         path = host.root / 'provider' / step['name']
-        _poll('provider file', lambda: path.is_file() and step['contains'] in path.read_text())
+        if step.get('all_exited'):
+            def exited():
+                try:
+                    rows = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+                except (OSError, ValueError):
+                    return False
+                started = {r.get('proc_id') for r in rows if r.get('event') == 'start'}
+                return bool(started) and started <= {r.get('proc_id') for r in rows if r.get('event') == 'exit'}
+            _poll('provider processes exited', exited)
+        else:
+            _poll('provider file', lambda: path.is_file() and step['contains'] in path.read_text())
     elif op == 'provider_file':
         # Control files the fake provider reads (tests/qa/fake_codex.py), e.g. quota-mode.
         (host.root / 'provider' / step['name']).write_text(step['text'])
@@ -570,11 +595,21 @@ def capture(build: Path, scenario: dict, root: Path, python: str = sys.executabl
     except StepFailed as exc:
         error = str(exc)
     finally:
+        # Cut the stream first, then stop the Host: its process group dies, the
+        # server side of the SSE socket closes and the reader ends at once
+        # (closing the response from this thread does not interrupt its read).
+        # The frames are taken once the reader is joined (review s0-speed-3dc58a34).
+        if sse is not None:
+            sse.freeze()
+        timings['frozen'] = round(time.monotonic() - started, 2)
+        host.stop()
+        timings['stopped'] = round(time.monotonic() - started, 2)
         if sse is not None:
             frames = sse.close()
-        host.stop()
+        timings['reader_joined'] = round(time.monotonic() - started, 2)
     # Dumped on a failed run too: the frozen state is the diagnostic (structure only in reports).
     db = dump_db(root / 'state.sqlite')
+    timings['db_dumped'] = round(time.monotonic() - started, 2)
     files = list_files(root)
     health = {'errors': sse.errors if sse else ['not connected'], 'ended_early': bool(sse and sse.ended)}
     if error is None and (health['errors'] or health['ended_early']):

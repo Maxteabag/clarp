@@ -190,8 +190,12 @@ def main():
     claude_shim.chmod(0o755)
     os.environ['PATH'] = f"{shims}{os.pathsep}{os.environ.get('PATH', '')}" 
     from lib import provider_capabilities
+    # Only codex resolves for the capability probes: the cache warm-up runs every
+    # resolvable CLI for the model catalogue, and a claude fake started by it lands
+    # in the capture or not depending on teardown timing. claire's turns run the
+    # `claude` shim through PATH, which does not depend on this probe.
     provider_capabilities._resolve_executable = (
-        lambda provider_id: {'codex': str(fake), 'claude': str(claude_shim)}.get(provider_id))
+        lambda provider_id: str(fake) if provider_id == 'codex' else None)
     provider_spawn = backends.spawn_turn
 
     def deterministic_spawn(backend, **kwargs):

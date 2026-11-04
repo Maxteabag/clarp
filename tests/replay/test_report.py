@@ -641,3 +641,56 @@ def test_the_chunk_callback_plant_needs_its_stream_witness():
     assert not planted.caught(change, diff_at('clips[1].producer_status', 'changed', channel='table'))
     assert not planted.caught(change, diff_at(f'[{live}:{live + 1}]->[{live}:{live + 1}]', 'sequence-replace',
                                               scenario='voice-clip-turn'))
+
+
+def _reader(wire: bytes, on_close=None):
+    import io
+    import threading
+    import time
+    import capture
+
+    class Response(io.BytesIO):
+        def close(self):
+            if on_close:
+                on_close()
+            super().close()
+    reader = capture.SSE.__new__(capture.SSE)
+    reader.frames, reader.errors, reader.ended = [], [], False
+    reader.last_at = time.monotonic()
+    reader._lock, reader._stop = threading.Lock(), threading.Event()
+    reader._resp = Response(wire)
+    reader._thread = threading.Thread(target=reader._read, daemon=True)
+    return reader
+
+
+def test_a_frame_complete_before_the_cut_survives_its_slow_parse(monkeypatch):
+    # Reviewer B s0-speed-3dc58a34: the cut must not drop a frame already being parsed.
+    import threading
+    import capture
+    entered, release = threading.Event(), threading.Event()
+    text = '{"type":"agent-state","tag":"complete-before-cut"}'
+    original = capture.json.loads
+
+    def delayed(value, *args, **kwargs):
+        if value == text:
+            entered.set()
+            assert release.wait(5)
+        return original(value, *args, **kwargs)
+    monkeypatch.setattr(capture.json, 'loads', delayed)
+    reader = _reader(('data: ' + text + '\n\n').encode(), on_close=release.set)
+    reader._thread.start()
+    try:
+        assert entered.wait(2)
+        frames = reader.close()
+        assert not reader._thread.is_alive() and not reader.errors
+        assert [f['data']['tag'] for f in frames] == ['complete-before-cut']
+    finally:
+        release.set()
+        reader._thread.join(2)
+
+
+def test_a_frame_completed_after_the_cut_is_not_captured():
+    reader = _reader(b'data: {"type":"agent-state","n":1}\n\n')
+    reader.freeze()
+    reader._thread.start()
+    assert reader.close() == [] and not reader.errors
