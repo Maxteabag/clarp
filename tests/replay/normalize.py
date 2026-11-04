@@ -121,9 +121,27 @@ def is_watcher_state(data: dict) -> bool:
     return data.get('type') == 'agent-state' and 'status_text' in data and 'client_msg_id' not in data
 
 
-def lane_key(frame: dict) -> str:
-    """The producer lane of an SSE frame (or an sse_events row's payload)."""
+def is_explainer_patch(data: dict) -> bool:
+    """A live frame from the tool explainer (live_explain.py), not from the turn:
+    every op patches only a tool item's explanation. The explainer runs on its own
+    thread, so where its patches fall among the turn's frames is timing (G2, 5 Nov:
+    'failed' landed before the reply's done in one run, after the turn in the next)."""
+    ops = data.get('ops')
+    return (data.get('type') == 'live' and isinstance(ops, list) and bool(ops)
+            and all(isinstance(op, dict) and op.get('op') == 'upsert' and op.get('kind') == 'tool'
+                    and isinstance(op.get('item'), dict) and set(op['item']) == {'tool'}
+                    and isinstance(op['item']['tool'], dict) and set(op['item']['tool']) == {'explain'}
+                    for op in ops))
+
+
+def lane_key(frame: dict, turn_segment: int = 0) -> str:
+    """The producer lane of an SSE frame (or an sse_events row's payload).
+    ``turn_segment`` anchors an explainer patch to the turn it arrived in: past
+    the turn's own done/completed frames is timing, into the next turn is not (a
+    client's live view resets there, and a late patch brings the old tool back)."""
     data = frame.get('data') if isinstance(frame.get('data'), dict) else {}
+    if is_explainer_patch(data):
+        return f"live-explainer|{data.get('session') or ''}|turn{turn_segment}"
     producer = PRODUCERS.get(str(data.get('type')))
     if producer and (data.get('type') == 'agent-activity' or is_watcher_state(data)):
         return f"{producer}|{data.get('session') or ''}"
@@ -131,14 +149,28 @@ def lane_key(frame: dict) -> str:
                      ','.join(sorted(data)), str(data.get('session') or '')])
 
 
+def _turn_ids(data: dict) -> list[str]:
+    """The turn identities a live frame's turn ops name, in order."""
+    if data.get('type') != 'live':
+        return []
+    return [str((op.get('turn') or {}).get('turn_id') or '') for op in data.get('ops') or ()
+            if isinstance(op, dict) and op.get('op') == 'turn' and isinstance(op.get('turn'), dict)]
+
+
 def lane_names(frames: list[dict]) -> list[str]:
     """Stable per-frame names: type, position in its lane, lane hash."""
     seen: dict[str, int] = {}
+    turn: dict[str, tuple[str, int]] = {}  # session -> (current turn id, segment)
     names = []
     for frame in frames:
-        lane = lane_key(frame)
-        seen[lane] = seen.get(lane, 0) + 1
         data = frame.get('data') if isinstance(frame.get('data'), dict) else {}
+        session = str(data.get('session') or '')
+        for turn_id in _turn_ids(data):
+            current, segment = turn.get(session, ('', 0))
+            if turn_id != current:
+                turn[session] = (turn_id, segment + 1)
+        lane = lane_key(frame, turn.get(session, ('', 0))[1])
+        seen[lane] = seen.get(lane, 0) + 1
         names.append(f"{data.get('type') or frame.get('event') or '?'}#{seen[lane]}@"
                      f"{hashlib.sha1(lane.encode()).hexdigest()[:6]}")
     return names
