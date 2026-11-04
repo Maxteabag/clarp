@@ -61,3 +61,28 @@ def test_an_unreadable_runtime_keeps_the_binding(monkeypatch, tmp_path):
     repaired = reconcile.reconcile_agent(agent, backend='claude', home=tmp_path)
     assert 'ghost_session' not in repaired
     assert agents.live_backend_session(agent) == 'no-transcript-session'
+
+
+def test_a_ghost_decision_never_closes_a_binding_made_after_it(monkeypatch, tmp_path):
+    """Reviewer A on 6c7ea274: a send can end the ghost and bind a new
+    session after the fresh idle read; the old decision closes only the
+    binding it inspected."""
+    agent = agents.create_agent(persona='Rebind', voice_id='v', cwd=str(tmp_path),
+                                session='rebind', backend='claude')
+    agents.start_runtime(agent, 'rebind')
+    agents.bind_backend_session(agent, 'old-ghost')
+    monkeypatch.setattr(backends, '_RUNTIME_CLIENT', SimpleNamespace(status=lambda: {}))
+    monkeypatch.setattr(backends, 'runtime_status', lambda *, max_age=None: {})
+    monkeypatch.setattr(reconcile, '_runtime_slot_may_have_leaked', lambda agent_id: False)
+    owns = reconcile._runtime_owns_now
+
+    def a_send_rebinds_after_the_fresh_read(agent_id):
+        result = owns(agent_id)
+        agents.end_current_runtime(agent_id)          # the send's own ghost reset
+        agents.bind_backend_session(agent_id, 'native-one')
+        return result
+
+    monkeypatch.setattr(reconcile, '_runtime_owns_now', a_send_rebinds_after_the_fresh_read)
+    repaired = reconcile.reconcile_agent(agent, backend='claude', home=tmp_path)
+    assert agents.live_backend_session(agent) == 'native-one'
+    assert 'ghost_session' not in repaired
