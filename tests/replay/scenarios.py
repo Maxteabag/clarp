@@ -301,6 +301,26 @@ SCENARIOS = [
         ],
     },
     {
+        'id': 'voice-streamed-clip',
+        'what': 'a spoken reply streamed through the real Cartesia adapter (synthetic offline response, '
+                'host.py) with chunked-file delivery: the clip file, its stream bytes and its chunks',
+        'config': ('[tts]\nprovider = "cartesia"\nfallback = "none"\n'
+                   '[audio]\ndelivery = "chunked-file"\n[network]\nadvertise_lan = false\n'
+                   '[cartesia]\napi_key = "replay-synthetic-key"\n'
+                   '[cartesia.voices]\nRachel = "replay-voice-rachel"\n'),
+        'steps': [
+            {'op': 'post', 'path': '/send', 'name': 'send xray (spoken)',
+             'body': {'session': 'rachel', 'text': 'synthetic spoken question xray',
+                      'client_msg_id': 'xray', 'synthesize_audio': True}},
+            {'op': 'wait_settled', 'message_id': 'u-xray'},
+            {'op': 'wait_sql', 'sql': "SELECT count(*) FROM clips WHERE producer_status IN ('complete', 'failed')"},
+            {'op': 'quiesce'},
+            {'op': 'save_sql', 'var': 'clip', 'sql': 'SELECT clip_id FROM clips ORDER BY clip_id LIMIT 1'},
+            {'op': 'get', 'path': '/clips/{clip}/stream', 'name': 'clip stream'},
+            {'op': 'get', 'path': '/log?session=rachel'},
+        ],
+    },
+    {
         'id': 'goal-turn',
         'what': 'a goal is set on an agent; the provider runs an unrequested goal turn and completes it',
         'steps': [
