@@ -25,13 +25,7 @@ names = [
 ]
 # _clarp_admin reads __file__ and Effects reads _clarp_admin: both stay.
 
-[[split.part]]
-# The durable ledger and transcript of a call's tool use.
-module = "lib/agent_live_ledger.py"
-names = [
-    "LEDGER_KEEP_S", "MAX_ROUTES_PER_CALL", "MAX_ACTIONS_PER_ROUTE", "MAX_DELEGATIONS_PER_CALL",
-    "_CALL_ID", "Transcript", "_iso", "prune_transcripts", "Ledger", "_digest",
-]
-# The state names (CLAIMED, DONE, ... in one tuple assignment, which ast_identity
-# cannot prove) stay, and so does the regi section that reads them.
+# Stay for now: the state names (CLAIMED, DONE, ... are one tuple assignment, which
+# ast_identity cannot prove) and everything that reads them, the ledger and regi.
+# Splitting that tuple into single assignments on main would free both.
 
