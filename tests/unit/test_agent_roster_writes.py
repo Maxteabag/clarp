@@ -42,3 +42,25 @@ def test_a_create_does_not_revert_another_agents_change_during_its_io(tmp_path, 
                            lambda: agents.update_agent(bob, backend="codex", cwd=str(tmp_path / "work")))
     after = agents.get_by_agent_id(bob)
     assert (after["backend"], after["cwd"]) == ("codex", str(tmp_path / "work"))
+
+
+def test_a_create_whose_insert_fails_is_the_same_500_as_before(tmp_path, monkeypatch):
+    """Reviewer A: the write of the new agent failing (a locked database) must
+    still end as the lifecycle's own 500, not an exception past the HTTP
+    error translation."""
+    import sqlite3
+
+    import pytest
+
+    from lib.agent_lifecycle import AgentLifecycleError
+
+    def locked(**_kwargs):
+        raise sqlite3.OperationalError("database is locked")
+
+    service = _service(tmp_path)
+    monkeypatch.setattr(service, "_fork_or_resume", lambda _spec: "")
+    monkeypatch.setattr(agents, "create_agent", locked)
+    with pytest.raises(AgentLifecycleError) as raised:
+        service.create({"name": "Newcomer", "session": "newcomer", "voice_id": "new-voice",
+                        "cwd": str(tmp_path), "backend": "codex"})
+    assert raised.value.status == 500
