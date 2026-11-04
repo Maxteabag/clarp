@@ -238,6 +238,9 @@ class WhisperSTT:
             self._selection_lock.acquire()
         elif not (self._selection_lock.acquire(timeout=limit) if limit > 0
                   else self._selection_lock.acquire(blocking=False)):
+            # A wait that ran out after a swap closed this engine is the swap's
+            # doing: the request runs on the new engine (VP-07), not on a fallback.
+            self._raise_if_replaced()
             raise STTBusyError("transcription model busy")
         try:
             with self._variants_lock:
@@ -278,6 +281,10 @@ class WhisperSTT:
                 audio_bytes, content_type, vocab_prompt, wait=wait)
         finally:
             self._selection_lock.release()
+
+    def _raise_if_replaced(self) -> None:
+        """An in-process engine is never closed by a swap; SubprocessWhisperSTT
+        raises STTEngineReplacedError once it is."""
 
     def start_loading(self) -> None:
         threading.Thread(target=self._load, daemon=True).start()
