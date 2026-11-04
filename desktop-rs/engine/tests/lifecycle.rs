@@ -305,3 +305,25 @@ fn a_late_answer_after_the_delivery_timer_and_a_chat_switch_confirms_the_chat_th
         e.conversation("rachel").unwrap().rows().iter().any(|r| r.text == "Slow one" && !r.delivery_failed && !r.pending)
     });
 }
+
+#[test]
+fn a_late_error_after_the_delivery_timer_shows_the_hosts_reason_in_the_chat_that_sent_it() {
+    // Reviewer B on dddfc512: the timer has marked the send failed when the
+    // Host's late non-2xx arrives; its reason must still reach that chat's
+    // bubble, whichever chat is selected by then (CLIENT-SEND-500).
+    let host = Host::start("late-error");
+    let mut d = Driver::new(&host.base);
+    d.connect();
+    d.until("rachel open", |e| e.conversation("rachel").is_some_and(|c| c.rows().len() == 2));
+    host.control("/__control/send-delay", json!({"seconds": 23}));
+    host.control("/__control/fail", json!({"path": "/send", "status": 500, "count": 1}));
+    d.engine.send("Slow and refused");
+    d.until_within("the delivery timer marks it failed", Duration::from_secs(30), |e, _| {
+        e.conversation("rachel").unwrap().rows().iter().any(|r| r.text == "Slow and refused" && r.delivery_failed)
+    });
+    d.engine.select("mike");
+    d.until_within("the late error's reason on rachel's failed send", Duration::from_secs(15), |e, _| {
+        e.conversation("rachel").unwrap().rows().iter()
+            .any(|r| r.text == "Slow and refused" && r.delivery_failed && !r.delivery_error.is_empty())
+    });
+}
