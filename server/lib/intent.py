@@ -33,6 +33,16 @@ DECLINES = (
     r"be\s*quiet", r"quiet", r"stop\s*talking",
 )
 
+# The vocative openers that grant ("rachel what's up", "rachel go").
+VOCATIVES = (
+    r"what(?:'s| is)?\s*(?:up|it|going\s*on)", r"go", r"talk", r"shoot",
+    r"tell\s*me",
+)
+# A grant or decline is a command that /transcribe swallows, so an utterance
+# counts as one only when it says at most this many words besides the names
+# and the signal phrases; anything longer is a message to send (RTO-02).
+MAX_RESIDUAL_WORDS = 2
+
 
 @dataclass
 class IntentResult:
@@ -61,6 +71,17 @@ def _name_pattern(name: str) -> str:
     return rf"\b{re.escape(name.lower())}\b"
 
 
+def _residual_words(norm: str, candidates: list[str]) -> list[str]:
+    """The words of a normalized utterance besides names and signal phrases."""
+    phrases = re.compile(
+        r"(?:^|\s)(?:" + "|".join((*AFFIRMATIVES, *DECLINES, *VOCATIVES))
+        + r")(?=\s|$)")
+    rest = phrases.sub(" ", norm)
+    for cand in candidates:
+        rest = re.sub(_name_pattern(cand), " ", rest)
+    return rest.split()
+
+
 def classify_intent(text: str, candidates: list[str]) -> IntentResult:
     """Return per-candidate intent based on the transcribed utterance.
 
@@ -77,6 +98,9 @@ def classify_intent(text: str, candidates: list[str]) -> IntentResult:
     Decline signals: candidate name within 4 words of a decline phrase, OR a
     bare decline phrase when only one candidate is pending (covers "not now").
 
+    Neither counts when the utterance carries more than MAX_RESIDUAL_WORDS
+    other words: that is an instruction, and a grant would swallow it.
+
     Everything else: classified as a mention; no grant, no decline.
     """
     result = IntentResult()
@@ -90,6 +114,9 @@ def classify_intent(text: str, candidates: list[str]) -> IntentResult:
     decline_re = re.compile(
         r"(?:^|\s)(?:" + "|".join(DECLINES) + r")(?:\s|$)"
     )
+
+    if len(_residual_words(norm, candidates)) > MAX_RESIDUAL_WORDS:
+        return result
 
     bare_decline = bool(decline_re.search(norm))
 
