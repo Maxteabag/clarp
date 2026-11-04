@@ -594,12 +594,36 @@ def test_a_clip_like_number_in_free_text_remains_content():
     assert _report(left, right).items
 
 
-def test_a_clip_name_path_and_url_lose_only_their_creation_time():
+def _clip_files(name):
+    return [{'path': f'cache/audio/{name}', 'kind': 'bytes', 'bytes': 3, 'digest': 'd'},
+            {'path': f'cache/audio/{name}.json', 'kind': 'bytes', 'bytes': 3, 'digest': 'e'}]
+
+
+def test_a_generated_clip_name_path_and_url_lose_only_their_creation_time():
     def clip(ms, session='rachel'):
-        return _capture(http=[_http({'name': f'{ms}__{session}.mp3', 'url': f'/audio/{ms}__{session}.mp3',
-                                     'path': f'cache/audio/{ms}__{session}.mp3.json'})])
+        name = f'{ms}__{session}.mp3'
+        return _capture(http=[_http({'name': name, 'url': f'/audio/{name}',
+                                     'path': f'/scratch/s/cache/audio/{name}.json'})],
+                        files=_clip_files(name))
     assert not _report(clip(1793692941182), clip(1793692941999)).items
     assert _report(clip(1793692941182), clip(1793692941182, 'bella')).items
+
+
+def test_filename_shaped_http_text_is_still_content():
+    # Reviewer B s0-voice-36b17ca5: a value shaped like a clip name, with no such clip, is content.
+    left = _capture(http=[_http({'text': '1793692941182__rachel.mp3'})])
+    right = _capture(http=[_http({'text': '1793692941999__rachel.mp3'})])
+    assert _report(left, right).items
+
+
+def test_only_the_runs_own_clips_are_rewritten():
+    # A clip-shaped value that names no clip of this run stays content even when the run has a clip.
+    def run(ms, other):
+        name = f'{ms}__rachel.mp3'
+        return _capture(http=[_http({'url': f'/audio/{name}', 'text': f'{other}__rachel.mp3'})],
+                        files=_clip_files(name))
+    assert not _report(run(1793692941182, 1700000000000), run(1793692941999, 1700000000000)).items
+    assert _report(run(1793692941182, 1700000000000), run(1793692941999, 1700000000001)).items
 
 
 def test_the_chunk_callback_plant_needs_its_stream_witness():
