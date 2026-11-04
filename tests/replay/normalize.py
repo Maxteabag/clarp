@@ -41,8 +41,10 @@ ISO = re.compile(r'^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2
 # Pairing codes and device tokens (device_pairing): random secrets in a fixed format.
 SECRET = re.compile(r'(?<![0-9A-Za-z])(clp|cld)_[A-Za-z0-9_-]{30,}')
 EPOCH_TEXT = re.compile(r'(?<![\d.])1[5-9]\d{8}(\.\d+)?(?![\d.])|(?<!\d)1[5-9]\d{11}(?!\d)')
-# A clip's file name starts with its creation time in ms: '<epoch ms>__<session>.mp3'.
-CLIP_NAME = re.compile(r'(?<![0-9])1[5-9][0-9]{11}(?=__)')
+# A clip's file name starts with its creation time in ms: '<epoch ms>__<session>.mp3'
+# (and its '.mp3.json' sidecar). Only a whole value that is such a name, or a path
+# or URL ending in one, is rewritten; the same digits in other text are content.
+CLIP_NAME = re.compile(r'^(.*/)?1[5-9][0-9]{11}(__[A-Za-z0-9._-]+\.mp3(?:\.json)?)$')
 LOOPBACK = re.compile(r'127\.0\.0\.1(:|%3A)\d+')
 # A short generated tail after a word prefix, e.g. the goal turn's trace id 'goal-1c4f4f95';
 # applied only where ids are expected (id keys, paths, ID_COLUMNS), never to free text.
@@ -203,7 +205,7 @@ class Normalizer:
     def paths_in(self, value: str) -> str:
         for path, name in self.paths:
             value = value.replace(path, name)
-        value = CLIP_NAME.sub('<clip-time>', value)
+        value = CLIP_NAME.sub(lambda m: (m.group(1) or '') + '<clip-time>' + m.group(2), value)
         return LOOPBACK.sub(lambda m: f'127.0.0.1{m.group(1)}<port>', value)
 
     def ids_in(self, value: str) -> str:

@@ -98,11 +98,24 @@ CHANGES = [
         'file': 'server/lib/tts_worker.py',
         'find': '            on_chunk=paced_feed,\n',
         'replace': '            on_chunk=lambda chunk: paced_feed(0, chunk),\n',
-        'expect': {'scenario': 'voice-streamed-clip', 'channel': None, 'locator': r'', 'kinds': None},
+        # The witness is the live stream itself, the 'clip live stream' exchange:
+        # either that exchange alone is replaced (the stream is refused, 404 when the
+        # producer fails) or its body changes (the clip's bytes are lost).
+        # {i} and {j} are that step's index and the next one among the HTTP exchanges.
+        'expect': {'scenario': 'voice-streamed-clip', 'channel': 'http', 'http_step': 'clip live stream',
+                   'locator': r'^(\[{i}\]\.body(\.|$)|\[{i}:{j}\]->\[[0-9]+:[0-9]+\]$)',
+                   'kinds': {'changed', 'field-added', 'field-removed', 'sequence-replace'}},
     },
 ]
 
 BY_ID = {c['id']: c for c in CHANGES}
+
+
+def _http_index(scenario_id: str, step_name: str) -> int:
+    """The position of a named HTTP step among a scenario's HTTP exchanges."""
+    import scenarios
+    steps = [s for s in scenarios.BY_ID[scenario_id]['steps'] if s['op'] in ('get', 'post', 'put', 'delete', 'patch')]
+    return next(i for i, s in enumerate(steps) if s.get('name') == step_name)
 
 
 def apply(change: dict, root: Path) -> None:
@@ -122,7 +135,11 @@ def apply(change: dict, root: Path) -> None:
 def caught(change: dict, differences: list[dict]) -> list[dict]:
     """The differences that show this specific planted change."""
     want = change['expect']
-    pattern = re.compile(want['locator'])
+    locator = want['locator']
+    if want.get('http_step'):
+        i = _http_index(want['scenario'], want['http_step'])
+        locator = locator.replace('{i}', str(i)).replace('{j}', str(i + 1))
+    pattern = re.compile(locator)
     return [d for d in differences
             if (want.get('scenario') is None or d['scenario'] == want['scenario'])
             and (want['channel'] is None or d['channel'] == want['channel'])

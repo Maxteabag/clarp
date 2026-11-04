@@ -585,3 +585,35 @@ def test_the_stored_event_log_gets_the_same_canonical_rules_as_the_stream():
         return _capture(db={'schema': [], 'pk': {'sse_events': ['event_id']}, 'tables': {'sse_events': rows}})
     assert not _report(log(spawn, start), log(start, spawn)).items
     assert _report(log(spawn, start), log(start, {**spawn, 'source': 'x'})).items
+
+
+def test_a_clip_like_number_in_free_text_remains_content():
+    # Reviewer B s0-voice-853f9037 F1: only a clip name, or a path or URL ending in one, is rewritten.
+    left = _capture(http=[_http({'text': 'retain token 1800000000000__payload'})])
+    right = _capture(http=[_http({'text': 'retain token 1800000000001__payload'})])
+    assert _report(left, right).items
+
+
+def test_a_clip_name_path_and_url_lose_only_their_creation_time():
+    def clip(ms, session='rachel'):
+        return _capture(http=[_http({'name': f'{ms}__{session}.mp3', 'url': f'/audio/{ms}__{session}.mp3',
+                                     'path': f'cache/audio/{ms}__{session}.mp3.json'})])
+    assert not _report(clip(1793692941182), clip(1793692941999)).items
+    assert _report(clip(1793692941182), clip(1793692941182, 'bella')).items
+
+
+def test_the_chunk_callback_plant_needs_its_stream_witness():
+    # Reviewer B s0-voice-853f9037 F2: only the 'clip live stream' exchange counts.
+    change = planted.BY_ID['on-chunk-signature']
+    live = planted._http_index('voice-streamed-clip', 'clip live stream')
+
+    def diff_at(locator, kind, scenario='voice-streamed-clip', channel='http'):
+        return [{'scenario': scenario, 'channel': channel, 'kind': kind, 'locator': locator}]
+    assert planted.caught(change, diff_at(f'[{live}:{live + 1}]->[{live}:{live + 1}]', 'sequence-replace'))
+    assert planted.caught(change, diff_at(f'[{live}].body.<bytes>', 'changed'))
+    assert not planted.caught(change, diff_at('[0].status', 'changed'))
+    assert not planted.caught(change, diff_at(f'[0:{live + 1}]->[0:{live + 1}]', 'sequence-replace'))
+    assert not planted.caught(change, diff_at(f'[{live + 1}].body.<bytes>', 'changed'))
+    assert not planted.caught(change, diff_at('clips[1].producer_status', 'changed', channel='table'))
+    assert not planted.caught(change, diff_at(f'[{live}:{live + 1}]->[{live}:{live + 1}]', 'sequence-replace',
+                                              scenario='voice-clip-turn'))
