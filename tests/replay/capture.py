@@ -369,9 +369,21 @@ def run_step(host: Host, sse, step: dict, http: list, cli: list, variables: dict
     elif op == 'wait_provider_started':
         _poll('provider turn start', lambda: _provider_started(host.root, step['marker']))
     elif op == 'wait_file':
-        # A provider-root file (written by a fake) contains the given text.
+        # A provider-root file (written by a fake) contains the given text, or, with
+        # all_exited, its lifecycle log (fake_claude.py) has an exit for every start:
+        # a process lingering after SIGTERM is done writing before the capture.
         path = host.root / 'provider' / step['name']
-        _poll('provider file', lambda: path.is_file() and step['contains'] in path.read_text())
+        if step.get('all_exited'):
+            def exited():
+                try:
+                    rows = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+                except (OSError, ValueError):
+                    return False
+                started = {r.get('proc_id') for r in rows if r.get('event') == 'start'}
+                return bool(started) and started <= {r.get('proc_id') for r in rows if r.get('event') == 'exit'}
+            _poll('provider processes exited', exited)
+        else:
+            _poll('provider file', lambda: path.is_file() and step['contains'] in path.read_text())
     elif op == 'provider_file':
         # Control files the fake provider reads (tests/qa/fake_codex.py), e.g. quota-mode.
         (host.root / 'provider' / step['name']).write_text(step['text'])
