@@ -170,3 +170,26 @@ def test_a_repoint_of_server_py_or_an_s3_mixin_is_a_bad_recipe(tmp_path):
             f'[[repoint]]\nname = "r"\nfile = "{target}"\nfrom_module = ".a"\nto_module = ".b"\nnames = ["x"]\n')
         with pytest.raises(Refusal, match="S3 stages"):
             split_apply.load_recipes(tmp_path)
+
+
+def test_another_spelling_of_a_protected_repoint_target_is_refused(tmp_path):
+    # Review B F1: "./server.py" named server.py and passed the literal check.
+    (tmp_path / "server").mkdir()
+    (tmp_path / "server" / "server.py").write_text("from lib.old import f\n")
+    for target in ("./server.py", "lib/../server.py", "lib//routes/x.py", "/abs.py"):
+        recipes = tmp_path / "recipes"
+        recipes.mkdir(exist_ok=True)
+        (recipes / "t.toml").write_text(
+            f'[[repoint]]\nname = "r"\nfile = "{target}"\nfrom_module = "lib.old"\nto_module = "lib.new"\nnames = ["f"]\n')
+        assert split_apply.main(["--root", str(tmp_path), "--recipes", str(recipes), "--all"]) == 2
+    assert (tmp_path / "server" / "server.py").read_text() == "from lib.old import f\n"
+
+
+def test_a_patch_of_a_recursive_function_through_the_old_module_is_refused(tmp_path):
+    # Review B F2: f's call to itself is a global lookup; after the move a patch
+    # of old.f would no longer reach it.
+    old = "def f(n):\n    return 0 if n == 0 else f(n - 1) + 1\n"
+    patch = "from lib import old\n\ndef test_x(monkeypatch):\n    monkeypatch.setattr(old, 'f', lambda n: 100)\n"
+    root = _tree(tmp_path, old=old, extra={"tests/test_old.py": patch})
+    with pytest.raises(Refusal, match="test_old.py:4"):
+        split_apply.apply_split(root, _split([("lib/old_part.py", ["f"])]))

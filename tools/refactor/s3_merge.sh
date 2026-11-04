@@ -114,7 +114,11 @@ with tempfile.TemporaryDirectory() as tmp:
     for entry in splits:
         rels = ["server/" + entry["module"]] + ["server/" + p["module"] for p in entry["part"]]
         if show(integration, rels[1]) is None:
-            continue   # not applied on integration yet: nothing to lose
+            # Not applied on integration yet: stage A still takes main's text of
+            # the old module, so integration's copy must be the merge base's.
+            if show(integration, rels[0]) != show(base, rels[0]):
+                bad.append(f"{rels[0]} (split {entry['name']}, not yet applied)")
+            continue
         work = pathlib.Path(tmp, entry["name"])
         (work / "server" / entry["module"]).parent.mkdir(parents=True, exist_ok=True)
         (work / "server" / entry["module"]).write_text(show(base, rels[0]) or "")
