@@ -853,23 +853,29 @@ def _goal_mutate(plan_id, *, revision, action, data=None):
                 keys.add(key)
                 existing = next((r for r in old if r["item_id"] == key), None)
                 if existing:
-                    if (
-                        existing["status"] == "completed"
-                        and str(raw.get("title") or "").strip() != existing["title"]
-                    ):
+                    title = str(raw.get("title") or "").strip()[:500]
+                    if existing["status"] == "completed" and title != existing["title"]:
                         raise ValueError(
                             "completed step meaning is immutable; use a new step id for different work"
                         )
-                    if not str(raw.get("title") or "").strip():
+                    if not title:
                         raise ValueError("step title required")
                     con.execute(
                         "UPDATE task_items SET title=?,position=?,parent_id=NULL WHERE item_id=?",
-                        (raw["title"], position, key),
+                        (title, position, key),
                     )
+                    if existing["status"] == "removed":
+                        # Proposing a retired step again puts it back in the
+                        # plan; left removed it would count as resolved.
+                        con.execute(
+                            "UPDATE task_items SET status='pending',detail=?,started_at=NULL,"
+                            "completed_at=NULL WHERE item_id=?",
+                            (str(raw.get("detail") or "")[:2000], key),
+                        )
                 else:
                     task_plans._insert_item(con, plan_id, key, None, position, raw, now)
             for item in old:
-                if item["item_id"] not in keys and item["status"] != "completed":
+                if item["item_id"] not in keys and item["status"] not in {"completed", "removed"}:
                     elapsed = item["active_ms"] + (
                         max(0, now - item["started_at"]) if item["started_at"] else 0
                     )
