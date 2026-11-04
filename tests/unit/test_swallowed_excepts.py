@@ -80,7 +80,7 @@ BASELINE: dict[str, int] = {
     'lib/stt.py': 2,
     'lib/stt_stream.py': 5,
     'lib/transcript_streamer.py': 1,
-    'lib/transcript_watcher.py': 3,
+    'lib/transcript_watcher.py': 2,
     'lib/tts_engine.py': 3,
     'lib/tts_worker.py': 2,
     'lib/turn_dispatch.py': 7,
