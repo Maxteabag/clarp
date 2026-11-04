@@ -91,6 +91,15 @@ CHANGES = [
         'replace': '                        self.wfile.write(f"id: {int(event_id) + 1}\\n".encode())\n',
         'expect': {'channel': 'sse', 'locator': r'\]\.id$', 'kinds': {'changed'}},
     },
+    {
+        'id': 'on-chunk-signature',
+        'what': "the TTS worker hands adapters a one-argument chunk callback, as VP-01's candidate daaad27c did "
+                '(adapters call on_chunk(index, bytes) and swallow the TypeError)',
+        'file': 'server/lib/tts_worker.py',
+        'find': '            on_chunk=paced_feed,\n',
+        'replace': '            on_chunk=lambda chunk: paced_feed(0, chunk),\n',
+        'expect': {'scenario': 'voice-streamed-clip', 'channel': None, 'locator': r'', 'kinds': None},
+    },
 ]
 
 BY_ID = {c['id']: c for c in CHANGES}
@@ -114,5 +123,8 @@ def caught(change: dict, differences: list[dict]) -> list[dict]:
     """The differences that show this specific planted change."""
     want = change['expect']
     pattern = re.compile(want['locator'])
-    return [d for d in differences if d['channel'] == want['channel'] and d['kind'] in want['kinds']
+    return [d for d in differences
+            if (want.get('scenario') is None or d['scenario'] == want['scenario'])
+            and (want['channel'] is None or d['channel'] == want['channel'])
+            and (want['kinds'] is None or d['kind'] in want['kinds'])
             and pattern.search(d['locator'])]
