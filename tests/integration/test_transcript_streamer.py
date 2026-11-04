@@ -215,10 +215,16 @@ def test_streamer_broadcasts_transcript_updated_for_text_blocks(tmp_path,
                                                 backend_session_id="cs-sse")
     streamer.start()
     try:
-        _wait_for(lambda: streamer.pool.has(agent_id), timeout=2.0)
+        # Both waits poll the asserted condition and return as soon as it holds;
+        # the deadline only has to outlast a loaded machine's scheduling of the
+        # watcher and its 50 ms reconcile loop (G1 flake with 2 s). The first one
+        # is asserted: appending before the watch is armed would turn a slow
+        # start into a missing event further down.
+        assert _wait_for(lambda: streamer.pool.has(agent_id), timeout=15.0), \
+            "the streamer never picked the agent up"
         _append(tx, _assistant_text("first block"))
         _wait_for(lambda: any(e.get("type") == SSEType.TRANSCRIPT_UPDATED
-                                for e in fake_stream.events), timeout=2.0)
+                                for e in fake_stream.events), timeout=15.0)
         evs = [e for e in fake_stream.events
                 if e.get("type") == SSEType.TRANSCRIPT_UPDATED]
         assert evs, "no TRANSCRIPT_UPDATED event broadcast"
