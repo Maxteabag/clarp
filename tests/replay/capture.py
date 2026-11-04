@@ -258,6 +258,27 @@ def _ro(root: Path):
     return contextlib.closing(sqlite3.connect(f"file:{root / 'state.sqlite'}?mode=ro", uri=True, timeout=1))
 
 
+def live_tools_explained(frames) -> bool:
+    """True once the live stream has announced a tool item and every announced tool
+    item has since been patched with an explanation in a settled status."""
+    tools, settled = set(), set()
+    for frame in frames:
+        data = frame.get('data')
+        if not isinstance(data, dict) or data.get('type') != 'live':
+            continue
+        for item_op in data.get('ops') or ():
+            item = item_op.get('item') if isinstance(item_op, dict) else None
+            if not isinstance(item, dict) or not item_op.get('id'):
+                continue
+            key = (data.get('agent_id'), item_op['id'])
+            if item_op.get('kind') == 'tool' or item.get('kind') == 'tool':
+                tools.add(key)
+            explain = (item.get('tool') or {}).get('explain')
+            if isinstance(explain, dict) and explain.get('status') in ('ready', 'failed'):
+                settled.add(key)
+    return bool(tools) and tools <= settled
+
+
 def _poll(what: str, check, timeout=WAIT_TIMEOUT_S):
     deadline = time.monotonic() + timeout
     while True:
@@ -460,6 +481,15 @@ def run_step(host: Host, sse, step: dict, http: list, cli: list, variables: dict
                     and all(f['data'].get(k) == v for k, v in step['match'].items())]
             return len(hits) >= step.get('count', 1)
         _poll('SSE frames', seen)
+    elif op == 'wait_explained':
+        # Every tool item the live stream announced carries a settled explanation
+        # (ready or failed). The job table settles first and the live patch follows
+        # it, so a read between the two races it (G2 noise, 4 Nov: one live frame).
+        def explained():
+            with sse._lock:
+                frames = list(sse.frames)
+            return live_tools_explained(frames)
+        _poll('settled tool explanations', explained)
     elif op == 'wait_sql':
         # A harness-authored read-only query whose first column reaches `min`.
         def counted():
