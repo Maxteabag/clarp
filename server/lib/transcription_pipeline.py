@@ -20,7 +20,7 @@ from . import eventlog, health
 from . import trace as _trace
 from .log import log, log_exception
 from .paths import RuntimePaths
-from .stt import STTBusyError, STTModelLoadingError, STTUnknownModelError
+from .stt import STTBusyError, STTModelLoadingError, STTUnknownModelError, bounded_selection_wait
 from .focus import current_focus_session
 
 RecordVoice = Callable[..., None]
@@ -202,9 +202,13 @@ def transcribe(ctx, *, audio_bytes: bytes, ctype: str, hands_free: bool,
                 # first engine fails, so one provider outage does not lose
                 # the user's recording.
                 for index, engine in enumerate([requested_model, *agent_fallbacks]):
+                    # Only an engine with a fallback after it gives up on a
+                    # variant another request is warming (VP-08).
+                    selection_wait = 10.0 if index < len(agent_fallbacks) else None
                     try:
-                        text, ends_terminal, _dur = model_transcribe(
-                            engine, audio_bytes, ctype, prompt, wait=10.0)
+                        with bounded_selection_wait(selection_wait):
+                            text, ends_terminal, _dur = model_transcribe(
+                                engine, audio_bytes, ctype, prompt, wait=10.0)
                         break
                     except Exception as e:  # noqa: BLE001 - busy, loading or missing too (VP-09)
                         if index == len(agent_fallbacks):
@@ -362,7 +366,9 @@ def _run_call_steps(stt, steps: list[dict], call_stt: dict, *, focus: str, audio
         # (null when it was unobserved); nothing carries over to a fallback.
         handed: dict = {}
         try:
-            with bound_session(focus), bound_language(step["language"]), capturing_handed() as handed:
+            selection_wait = None if step is runnable[-1] else 10.0  # VP-08, as above
+            with bound_session(focus), bound_language(step["language"]), capturing_handed() as handed, \
+                    bounded_selection_wait(selection_wait):
                 if step.get("local_default"):
                     if not stt.ready.is_set():
                         raise STTModelLoadingError("whisper model loading")
