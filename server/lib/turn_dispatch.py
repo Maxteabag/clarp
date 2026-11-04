@@ -703,6 +703,10 @@ def _janitor_spawn_lock(agent_id: str):
         return lock
 
 
+# Background ticks their schedulers regenerate: never readmitted by recovery.
+_REGENERATED_ORIGINS = frozenset({"heartbeat", "leader_tick"})
+
+
 def _remove_queued_run(queue_id: str) -> None:
     # Use the queue API to preserve revisions and unmaterialized admissions.
     turn_queue.release_claim(queue_id)
@@ -1285,6 +1289,16 @@ class TurnDispatchService:
                 row["agent_id"],
                 lambda spec, queue_id=row["queue_id"]: spec.queue_id == queue_id)
             if already_memory_queued:
+                continue
+            if row["origin"] in _REGENERATED_ORIGINS:
+                # A background tick queued behind a turn this process no longer
+                # remembers decided about a state that has moved on, and its
+                # janitor check refuses readmission. Its scheduler decides
+                # again; kept, the row would hold off every later tick (AUT-05).
+                _remove_queued_run(str(row["queue_id"]))
+                log("backgroundTickDropped",
+                    f"agent={row['agent_id']} origin={row['origin']} "
+                    f"queue={row['queue_id']}")
                 continue
             backoff = _RECOVERY_BACKOFF.hold(
                 row["agent_id"], str(row["queue_id"]), self.now())
