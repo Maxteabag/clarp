@@ -617,7 +617,8 @@ class OrchestratorService:
         from .turn_dispatch import DispatchError
         recipient = identity.lookup(receipt.get("target_agent_id")) or {}
         row = conn().execute(
-            "SELECT utterance, raw_response_json FROM orchestrator_decisions WHERE decision_id = ?",
+            "SELECT utterance, raw_response_json, trace_id FROM orchestrator_decisions"
+            " WHERE decision_id = ?",
             (receipt.get("decision_id"),),
         ).fetchone()
         if not recipient.get("session") or row is None:
@@ -651,8 +652,16 @@ class OrchestratorService:
             return OrchestratorOutcome(
                 handled=True, ok=False, session=recipient["session"], trace_id=trace_id,
                 action=FINAL_ERROR, error=str(e), status=e.status)
-        record_routing_message(session=recipient["session"], role="user",
-                               text=text_to_send, trace_id=trace_id)
+        # Routing context gets the message once, under the routed request's
+        # trace: a later same-id retry is answered by turn_dispatch's dedup
+        # and must not add it again (lead, RTO-07 amendment).
+        routed_trace = row["trace_id"] or trace_id
+        if not conn().execute(
+                "SELECT 1 FROM agent_routing_messages WHERE session = ? AND role = 'user'"
+                " AND trace_id = ? LIMIT 1",
+                (recipient["session"], routed_trace)).fetchone():
+            record_routing_message(session=recipient["session"], role="user",
+                                   text=text_to_send, trace_id=routed_trace)
         return OrchestratorOutcome(
             handled=True, ok=True, session=result.session, dispatch=result.backend,
             trace_id=trace_id, action=FINAL_ROUTE, decision_id=receipt.get("decision_id"))
