@@ -29,6 +29,7 @@ from . import settings_store
 from . import trace as _trace
 from .log import log, log_exception
 from .protocol import AgentState
+from .revisioned_cache import RevisionedCache
 
 
 DREAMING_OK = "DREAMING_OK"
@@ -1032,6 +1033,16 @@ def resolve_user_timezone(session: str, now: float | None = None) -> ResolvedTim
     return fallback
 
 
+# A zone id does not depend on the timestamp (ZoneInfo applies DST), so one
+# Google lookup serves a location cell (2 decimals, about 1 km) for hours; a
+# failure is retried after a pause instead of on every 300 s poll (AUT-12).
+_TZ_CACHE_OK_S = 6 * 3600
+_TZ_CACHE_FAIL_S = 600
+# cell -> (until, zone id or ""); the revision is unused (always 0).
+_TZ_CACHE: RevisionedCache[tuple[float, float], tuple[float, str]] = RevisionedCache(
+    "dreaming-google-timezone", max_entries=256)
+
+
 def _google_timezone(loc: dict, now: float) -> ResolvedTimeZone | None:
     key = (
         os.environ.get("GOOGLE_MAPS_API_KEY")
@@ -1043,6 +1054,20 @@ def _google_timezone(loc: dict, now: float) -> ResolvedTimeZone | None:
         return None
     lat = float(loc["lat"])
     lng = float(loc["lng"])
+    cell = (round(lat, 2), round(lng, 2))
+    entry = _TZ_CACHE.peek(cell)
+    cached = entry[1] if entry is not None else None
+    if cached is not None and now < cached[0]:
+        return (ResolvedTimeZone(tz=ZoneInfo(cached[1]), name=cached[1], source="google-timezone",
+                                 location=loc) if cached[1] else None)
+    resolved = _google_timezone_lookup(loc, lat, lng, now, key)
+    _TZ_CACHE.put(cell, 0, (now + _TZ_CACHE_OK_S, resolved.name) if resolved
+                  else (now + _TZ_CACHE_FAIL_S, ""))
+    return resolved
+
+
+def _google_timezone_lookup(loc: dict, lat: float, lng: float, now: float,
+                            key: str) -> ResolvedTimeZone | None:
     query = urllib.parse.urlencode({
         "location": f"{lat},{lng}",
         "timestamp": str(int(now)),
