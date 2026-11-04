@@ -16,6 +16,7 @@ import os
 import pathlib
 import uuid
 
+from tests.patching import patch_shared
 from lib import agent_rings, apns, db, group_calls
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
@@ -40,7 +41,7 @@ class _TTS:
 
 def _scenario(monkeypatch) -> dict:
     clock = {"now": START}
-    monkeypatch.setattr(agent_rings, "now_ms", lambda: clock["now"])
+    patch_shared(monkeypatch, agent_rings, "now_ms", lambda: clock["now"])
     monkeypatch.setattr(group_calls, "now_ms", lambda: clock["now"])
     ids = itertools.count(1)
     fixed = lambda: uuid.UUID(int=next(ids))  # noqa: E731
