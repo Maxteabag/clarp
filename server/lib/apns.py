@@ -691,6 +691,9 @@ class _RelayTransport:
                 return 401, "RelayRegistrationRejected", ""
             resp = self._post("POST", "/v1/push/send", {"notifications": [notification]})
             if resp.status_code != 200:
+                if resp.status_code == 429:
+                    # The shared relay budget is spent: Live Activity waits (APNS-N1).
+                    _LA_GATE.rate_limited(_retry_after(resp))
                 if resp.status_code == 401:
                     # A revoked credential: registrations it made are gone too.
                     self._forget(token)
@@ -798,6 +801,9 @@ class _GrantTransport:
             # The phone revoked this server's grant: stop pushing to it.
             return 410, "GrantRevoked", ""
         if resp.status_code != 200:
+            if resp.status_code == 429:
+                # The shared relay budget is spent: Live Activity waits (APNS-N1).
+                _LA_GATE.rate_limited(_retry_after(resp))
             return resp.status_code, _relay_error(resp) or f"Relay{resp.status_code}", ""
         try:
             result = (resp.json().get("results") or [{}])[0]
@@ -1268,18 +1274,156 @@ def on_decision_created(artifact: dict) -> None:
     ).start()
 
 
+class _LiveActivityGate:
+    """Live Activity's share of the relay budget (APNS-N1).
+
+    The relay counts Live Activity and alerts against this Computer's one
+    window (30/min, 2000/UTC day) for every device and activity token. Live
+    Activity gets one Host-wide budget counted in sends (one per activity
+    token per state): a burst of 10 and 300 a day refilled evenly, so alerts
+    always keep at least 20/min and 1700/day. Any 429 from the relay (an
+    alert's too) backs Live Activity off for max(retryAfter, a floor from
+    60 s doubling to 30 min); a delivered push resets the floor. A held
+    update is kept per token, latest wins, and goes out on a timer when the
+    budget allows."""
+
+    BURST, REFILL_SEC = 10.0, 86_400 / 300
+    FLOOR_MIN_SEC, FLOOR_MAX_SEC = 60.0, 1800.0
+
+    def __init__(self, clock: Callable[[], float] = time.monotonic, schedule=None):
+        self._clock = clock
+        self._schedule = schedule
+        self._lock = threading.Lock()
+        self._level: tuple[float, float] | None = None
+        self._pending: dict[str, tuple[dict, dict, str]] = {}
+        self._paused_until = 0.0
+        self.floor = 0.0
+        self._timer = None
+
+    @staticmethod
+    def _refilled(level, now, burst, refill):
+        if level is None:
+            return burst
+        value, at = level
+        return min(burst, value + (now - at) / refill)
+
+    def rate_limited(self, retry_after: float) -> None:
+        with self._lock:
+            self.floor = (self.FLOOR_MIN_SEC if not self.floor
+                          else min(self.floor * 2, self.FLOOR_MAX_SEC))
+            self._paused_until = max(self._paused_until,
+                                     self._clock() + max(float(retry_after or 0), self.floor))
+
+    def delivered(self) -> None:
+        with self._lock:
+            self.floor = 0.0
+
+    def offer(self, rows: list[dict], payload: dict, priority: str) -> None:
+        """The latest state for every token. Tokens still waiting keep their
+        places in the queue; a token that was just sent joins at the back,
+        so none starves. Unregistered tokens drop out."""
+        with self._lock:
+            by_token = {row["token"]: row for row in rows}
+            queue = {token: (by_token[token], payload, priority)
+                     for token in self._pending if token in by_token}
+            for token, row in by_token.items():
+                queue.setdefault(token, (row, payload, priority))
+            self._pending = queue
+
+    def paused(self) -> bool:
+        with self._lock:
+            return self._clock() < self._paused_until
+
+    def requeue(self, items: list[tuple[dict, dict, str]], flush: Callable[[], None]) -> None:
+        """Put back what was taken but not delivered (a newer state for the
+        token wins), give its budget back, and wake up when sending is
+        allowed again, without waiting for another state."""
+        with self._lock:
+            for row, payload, priority in items:
+                self._pending.setdefault(row["token"], (row, payload, priority))
+            if self._level is not None:
+                value, at = self._level
+                self._level = (min(self.BURST, value + len(items)), at)
+            self._arm_locked(self._clock(), flush)
+
+    def _arm_locked(self, now: float, flush: Callable[[], None]) -> None:
+        if not self._pending or self._timer is not None:
+            return
+        level = self._refilled(self._level, now, self.BURST, self.REFILL_SEC)
+        wait = max(self._paused_until - now, (1 - level) * self.REFILL_SEC, 0.0)
+
+        def fire():
+            with self._lock:
+                self._timer = None
+            flush()
+        schedule = self._schedule
+        if schedule is None:
+            from .live_pacing import _thread_timer as schedule
+        self._timer = schedule(wait, fire)
+
+    def due(self, flush: Callable[[], None]) -> list[tuple[dict, dict, str]]:
+        """Take what may go now; arm one timer for the rest."""
+        with self._lock:
+            now = self._clock()
+            ready = []
+            for token in list(self._pending):
+                level = self._refilled(self._level, now, self.BURST, self.REFILL_SEC)
+                if now < self._paused_until or level < 1:
+                    break
+                self._level = (level - 1, now)
+                ready.append(self._pending.pop(token))
+            self._arm_locked(now, flush)
+            return ready
+
+
+_LA_GATE = _LiveActivityGate()
+# One ordered sender: a timer's retry and an ordinary update never send at the
+# same time, so an older state cannot land after a newer one. The gate's own
+# lock still never covers network I/O.
+_LA_SEND_LOCK = threading.Lock()
+
+
+def _retry_after(resp) -> float:
+    try:
+        return float((resp.json() or {}).get("retryAfter") or 0)
+    except (ValueError, TypeError, AttributeError):  # no usable body: the floor applies
+        return 0.0
+
+
 def send_live_activity(payload: dict, priority: str = "5") -> dict:
     """Push one Live Activity content state to every registered activity
-    token (docs/live-items.md §8). Best effort; never raises."""
+    token (docs/live-items.md §8), within Live Activity's share of the relay
+    budget (APNS-N1); a held state goes out later, the latest one. Best
+    effort; never raises."""
     from . import config, live_activity
     cfg = config.load()
     rows = live_activity.tokens()
     if not rows or not cfg.apns_enabled():
         return {"enabled": cfg.apns_enabled(), "sent": 0, "failed": 0, "disabled": 0}
+    _LA_GATE.offer(rows, payload, priority)
+    return _flush_live_activity()
+
+
+def _flush_live_activity() -> dict:
+    with _LA_SEND_LOCK:
+        return _flush_live_activity_locked()
+
+
+def _flush_live_activity_locked() -> dict:
+    from . import config, live_activity
+    cfg = config.load()
     sent = failed = disabled = 0
     try:
+        ready = _LA_GATE.due(_flush_live_activity)
+        if not ready:
+            return {"enabled": True, "sent": 0, "failed": 0, "disabled": 0}
         transport = _transport(cfg)
-        for row in rows:
+        held: list[tuple[dict, dict, str]] = []
+        for index, (row, payload, priority) in enumerate(ready):
+            if _LA_GATE.paused():
+                # A 429 in this batch paused Live Activity: the rest wait it out.
+                held.extend(ready[index:])
+                break
             token = row["token"]
             try:
                 status, reason, _apns_id = transport.send(
@@ -1292,6 +1436,7 @@ def send_live_activity(payload: dict, priority: str = "5") -> dict:
                 failed += 1
                 continue
             if status == 200:
+                _LA_GATE.delivered()
                 sent += 1
             elif status == 410 or reason in _DEAD_REASONS:
                 live_activity.unregister(token=token)
@@ -1299,6 +1444,14 @@ def send_live_activity(payload: dict, priority: str = "5") -> dict:
             else:
                 log("apnsLiveActivityRejected", f"status={status} reason={reason}")
                 failed += 1
+                if status == 429:
+                    # The relay's 429 already backed off (its transport); Apple's
+                    # own TooManyRequests does too. The state is kept, not lost.
+                    if reason != "push_rate_limited":
+                        _LA_GATE.rate_limited(0)
+                    held.append((row, payload, priority))
+        if held:
+            _LA_GATE.requeue(held, _flush_live_activity)
     except Exception as e:  # noqa: BLE001
         log_exception("apnsLiveActivityFail", e)
     return {"enabled": True, "sent": sent, "failed": failed, "disabled": disabled}
