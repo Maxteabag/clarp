@@ -9,6 +9,7 @@
 names = [
     "_runtime_paths",
     "_truthy_header",
+    "_safe_upload_name",
 ]
 
 [[group]]
@@ -133,4 +134,44 @@ acknowledged_patches = [
     {path = "tests/unit/test_server_helpers_characterization.py", name = "log_exception", reason = "patches server.log_exception to observe _spawn_voice_metrics, which stays in server.py; no ops route is exercised", evidence = "4 Nov 03:35, on the applied tree 2186b723 (s3_merge of this recipe into integration 32b11246, one commit per group), heavy-remote with a call tracer on lib/routes/ops.py (tests/s3_ack_trace.py plugin, all threads): the whole file tests/unit/test_server_helpers_characterization.py made 0 calls into lib/routes/ops.py, as did every other acknowledged file in the run; control in the same run (exit 0): tests/integration/test_ops_g0_http_characterization.py and test_clog_http_characterization.py made 13 calls in 12 tests"},
     {path = "tests/integration/test_media_range.py", name = "log", reason = "patches server.log to observe fileShortRead from the /media/ range stream, which stays in server.py; no ops route is exercised", evidence = "4 Nov 03:35, on the applied tree 2186b723 (s3_merge of this recipe into integration 32b11246, one commit per group), heavy-remote with a call tracer on lib/routes/ops.py (tests/s3_ack_trace.py plugin, all threads): the whole file tests/integration/test_media_range.py made 0 calls into lib/routes/ops.py, as did every other acknowledged file in the run; control in the same run (exit 0): tests/integration/test_ops_g0_http_characterization.py and test_clog_http_characterization.py made 13 calls in 12 tests"},
     {path = "tests/unit/test_delivery_admission_v1.py", name = "log", reason = "patches server.log to observe the delivery observation bracket, which stays in server.py; no ops route is exercised", evidence = "4 Nov 03:35, on the applied tree 2186b723 (s3_merge of this recipe into integration 32b11246, one commit per group), heavy-remote with a call tracer on lib/routes/ops.py (tests/s3_ack_trace.py plugin, all threads): the whole file tests/unit/test_delivery_admission_v1.py made 0 calls into lib/routes/ops.py, as did every other acknowledged file in the run; control in the same run (exit 0): tests/integration/test_ops_g0_http_characterization.py and test_clog_http_characterization.py made 13 calls in 12 tests"},
+]
+
+[[group]]
+name = "artifacts"
+module = "lib/routes/artifacts.py"
+class = "ArtifactRoutes"
+members = [
+    "_broadcast_artifact",
+    "_handle_artifact_archive",
+    "_handle_artifact_create",
+    "_handle_artifact_discard",
+    "_handle_artifact_events_config",
+    "_handle_artifact_get",
+    "_handle_artifact_html",
+    "_handle_artifact_inbox_action",
+    "_handle_artifact_pin",
+    "_handle_artifact_submit",
+    "_handle_artifact_update",
+    "_handle_artifacts_list",
+    "_handle_attention",
+    "_handle_attention_inbox",
+    "_handle_decision_create",
+    "_handle_decision_dismiss",
+    "_handle_decision_resolve",
+    "_handle_decision_withdraw",
+    "_handle_pinned_artifacts",
+]
+
+[[group]]
+name = "media"
+module = "lib/routes/media.py"
+class = "MediaRoutes"
+members = [
+    "_handle_media_list",
+    "_handle_media_publish",
+    "_handle_upload",
+]
+acknowledged_patches = [
+    {path = "tests/unit/test_startup_runtime_wait.py", name = "log_exception", reason = "patches server.log_exception to observe _recover_after_start, which stays in server.py; no media route is exercised", evidence = "4 Nov 05:10, on the applied tree 92dbfb43 (s3_merge of this recipe into integration 8d85ab28, one commit per group), heavy-remote with a call tracer on lib/routes/media.py (tests/s3_ack_trace.py plugin, all threads): the whole file tests/unit/test_startup_runtime_wait.py made 0 calls into lib/routes/media.py, as did the other acknowledged file in the run; control in the same run (exit 0): tests/integration/test_artifacts_media_g0_http_characterization.py and test_upload_endpoint.py made 14 calls in 12 tests"},
+    {path = "tests/unit/test_server_helpers_characterization.py", name = "log_exception", reason = "patches server.log_exception to observe _spawn_voice_metrics, which stays in server.py; no media route is exercised", evidence = "4 Nov 05:10, on the applied tree 92dbfb43 (s3_merge of this recipe into integration 8d85ab28, one commit per group), heavy-remote with a call tracer on lib/routes/media.py (tests/s3_ack_trace.py plugin, all threads): the whole file tests/unit/test_server_helpers_characterization.py made 0 calls into lib/routes/media.py, as did the other acknowledged file in the run; control in the same run (exit 0): tests/integration/test_artifacts_media_g0_http_characterization.py and test_upload_endpoint.py made 14 calls in 12 tests"},
 ]
