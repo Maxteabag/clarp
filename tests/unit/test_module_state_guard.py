@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import ast
 import pathlib
+import sys
 
 SERVER = pathlib.Path(__file__).resolve().parents[2] / "server"
 _MUTATORS = frozenset({
@@ -230,11 +231,22 @@ def module_state(path: pathlib.Path) -> set[str]:
 
 
 def found() -> set[tuple[str, str]]:
-    # State in an S9 split part is reported under its old module (the facade's
-    # path), so ALLOWED names one place on main and on integration alike.
+    # State an S9 split recipe moved into a part is reported under its old
+    # module (the facade's path), so ALLOWED names one place on main and on
+    # integration alike. Only declared state maps; anything else in a part
+    # keeps its own path, and two physical owners of one name both stay
+    # visible (each under its own path), so neither inherits an allowance.
     from tests.patching import split_origin
     paths = sorted((SERVER / "lib").rglob("*.py")) + [SERVER / "server.py"]
-    return {(split_origin(p.relative_to(SERVER).as_posix()), name) for p in paths for name in module_state(p)}
+    owners: dict[tuple[str, str], list[str]] = {}
+    for p in paths:
+        rel = p.relative_to(SERVER).as_posix()
+        for name in module_state(p):
+            owners.setdefault((split_origin(rel, name), name), []).append(rel)
+    out = set()
+    for key, physical in owners.items():
+        out |= {key} if len(physical) == 1 else {(rel, key[1]) for rel in physical} | {key}
+    return out
 
 
 def test_no_new_module_state():
@@ -254,3 +266,27 @@ def test_the_scanner_sees_both_kinds_of_state(tmp_path):
     sample.write_text("CONST = {'a': 1}\n_SEEN = set()\n_N = 0\n"
                       "def f(x):\n    global _N\n    _N += 1\n    _SEEN.add(x)\n")
     assert module_state(sample) == {"_SEEN", "_N"}
+
+
+def test_split_state_maps_only_declared_names_and_keeps_duplicate_owners(tmp_path, monkeypatch):
+    # Review B (S9 cut 1b): a new dict in a part with an old allowed name must
+    # not inherit the old module's allowance; nor may a second physical owner.
+    from tests import patching
+    recipes = tmp_path / "splits"
+    recipes.mkdir()
+    (recipes / "s9.toml").write_text(
+        '[[split]]\nname = "x"\nmodule = "lib/old.py"\n'
+        '[[split.part]]\nmodule = "lib/old_base.py"\nnames = ["_cache"]\n')
+    monkeypatch.setattr(patching, "_RECIPES", recipes)
+    root = tmp_path / "server"
+    (root / "lib").mkdir(parents=True)
+    mutated = "{name} = {{}}\ndef f():\n    {name}['k'] = 1\n"
+    (root / "server.py").write_text("")
+    (root / "lib" / "old_base.py").write_text(mutated.format(name="_cache"))
+    (root / "lib" / "old_other.py").write_text(mutated.format(name="_cache"))
+    monkeypatch.setattr(sys.modules[__name__], "SERVER", root)
+    assert ("lib/old.py", "_cache") in found()                     # declared: the old module's
+    assert ("lib/old_other.py", "_cache") in found()               # not in any recipe: its own
+    (root / "lib" / "old.py").write_text(mutated.format(name="_cache"))
+    owners = found()
+    assert ("lib/old.py", "_cache") in owners and ("lib/old_base.py", "_cache") in owners

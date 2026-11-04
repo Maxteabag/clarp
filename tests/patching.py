@@ -21,9 +21,10 @@ _RECIPES = _REPO / "tools" / "refactor" / "splits"
 _MISSING = object()
 
 
-def split_family(module: types.ModuleType, recipes: pathlib.Path = _RECIPES) -> list[types.ModuleType]:
+def split_family(module: types.ModuleType, recipes: pathlib.Path | None = None) -> list[types.ModuleType]:
     """The parts the split recipes say came from `module`, as imported modules;
     parts whose file does not exist (the split is not applied) are left out."""
+    recipes = recipes or _RECIPES
     name = module.__name__
     if not name.startswith("lib."):
         return []
@@ -41,21 +42,25 @@ def split_family(module: types.ModuleType, recipes: pathlib.Path = _RECIPES) -> 
     return parts
 
 
-def split_origin(path: str, recipes: pathlib.Path = _RECIPES) -> str:
+def split_origin(path: str, name: str | None = None, recipes: pathlib.Path | None = None) -> str:
     """The old module a split part came from, in the same spelling as `path`
     ("server/lib/x.py" or "lib/x.py"); `path` itself when no recipe lists it.
+    With `name`, only when the recipe moved exactly that name into this part:
+    anything else defined in the part keeps its own path (new state is new).
     Lets path-based guards keep naming the old module on integration."""
+    recipes = recipes or _RECIPES
     prefix = "server/" if path.startswith("server/") else ""
     rel = path[len(prefix):]
     for recipe in sorted(recipes.glob("*.toml")) if recipes.is_dir() else ():
         for split in tomllib.loads(recipe.read_text()).get("split", []):
-            if any(part.get("module") == rel for part in split.get("part", [])):
-                return prefix + str(split["module"])
+            for part in split.get("part", []):
+                if part.get("module") == rel and (name is None or name in part.get("names", [])):
+                    return prefix + str(split["module"])
     return path
 
 
 def patch_shared(monkeypatch, module: types.ModuleType, name: str, value,
-                 recipes: pathlib.Path = _RECIPES, *, raising: bool = True) -> None:
+                 recipes: pathlib.Path | None = None, *, raising: bool = True) -> None:
     """monkeypatch.setattr(module, name, value, raising=raising), and the same on
     each part of the module's split family that holds the object the module holds."""
     original = getattr(module, name, _MISSING)
