@@ -51,6 +51,7 @@ ALLOWED: dict[tuple[str, str], str] = {
     ("lib/backend_auth.py", "_processes"): JOBS,
     ("lib/backend_auth.py", "_tasks"): JOBS,
     ("lib/backend_auth.py", "_validation_cache"): CACHE,
+    ("lib/cartesia_preview_locks.py", "_CARTESIA_PREVIEW_LOCKS"): LOCKS,
     ("lib/harness_providers.py", "_methods_refresh"): JOBS,
     ("lib/harness_providers.py", "_sessions"): JOBS,
     ("lib/harness_providers.py", "_tasks"): JOBS,
@@ -192,7 +193,6 @@ ALLOWED: dict[tuple[str, str], str] = {
     ("lib/viz_owner_avatar.py", "_retry"): THROTTLE,
     ("lib/vocab_compile.py", "_MODEL_BUDGETS"): CACHE,
     ("lib/workspace_vocab.py", "_CACHE"): CACHE,
-    ("server.py", "_CARTESIA_PREVIEW_LOCKS"): LOCKS,
     ("server.py", "_OUTDATED_CLIENTS_NOTED"): THROTTLE,
 }
 
