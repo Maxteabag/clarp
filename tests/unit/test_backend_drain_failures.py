@@ -85,3 +85,30 @@ def test_a_claude_drain_that_fails_reading_ends_its_turn():
                           agent_id="synthetic", handle=handle, session="synthetic")
     assert result.call_count + error.call_count == 1
     assert proc.terminate.called, "the CLI was left running on the session"
+
+
+import pytest
+
+
+@pytest.mark.parametrize("backend_name", ["grok", "muse", "opencode"])
+def test_the_other_runners_end_their_turn_and_stop_the_cli_when_reading_fails(backend_name):
+    """BACKENDS-04, the remaining runners: each reported an error but left the
+    CLI running on the session after unregistering its handle."""
+    import importlib
+    module = importlib.import_module(f"lib.backend.{backend_name}")
+    backend_cls = next(value for name, value in vars(module).items()
+                       if name.endswith("Backend") and isinstance(value, type)
+                       and value.__module__ == module.__name__)
+    backend = backend_cls()
+    proc = _proc()
+    handle = TurnHandle(proc, None)
+    backend.register_handle("synthetic", handle)
+    result, error = Mock(), Mock()
+    kwargs = dict(proc=proc, agent_id="synthetic", session="synthetic", trace_id="synthetic-trace",
+                  handle=handle, backend_session_id="", on_session_init=None,
+                  on_result=result, on_error=error, stream=None, enqueue=lambda **kw: 0)
+    if backend_name != "opencode":
+        kwargs["minted"] = False
+    backend._drain_stdout(**kwargs)
+    assert result.call_count + error.call_count == 1
+    assert proc.terminate.called, "the CLI was left running on the session"
