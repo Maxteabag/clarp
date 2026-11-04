@@ -149,6 +149,54 @@ def synthetic_cartesia() -> None:
     cartesia_tts.urllib.request.urlopen = urlopen
 
 
+def observe_stop(root: Path) -> None:
+    """Record, before it takes the turn lock, that a Stop is under way: a scenario
+    can then release a held provider start knowing the Stop is already waiting
+    (codex-pool-stop-during-start). Observation only; the Stop itself is unchanged."""
+    from lib import turn_dispatch
+    snapshot = turn_dispatch.snapshot_stop_state
+
+    def observed(agent_id):
+        with (root / 'provider' / 'host-events.jsonl').open('a') as handle:
+            handle.write(json.dumps({'event': 'stop-waiting'}) + '\n')
+        return snapshot(agent_id)
+    turn_dispatch.snapshot_stop_state = observed
+
+
+def recording_push_relay(root: Path) -> None:
+    """Push notifications go through the real apns module (routing, relay
+    registration, payloads, collapse ids, priorities); only the relay's HTTP
+    client is replaced, by a recorder that answers like Audio Central and
+    appends every request (method, path, JSON body; never headers) to
+    provider/push-relay.jsonl. Nothing leaves the machine."""
+    from lib import apns
+    log_path = root / 'provider' / 'push-relay.jsonl'
+    lock = threading.Lock()
+
+    class Response:
+        def __init__(self, body):
+            self.status_code, self._body = 200, body
+            self.text = json.dumps(body)
+
+        def json(self):
+            return self._body
+
+    class Recorder:
+        def request(self, method, url, headers=None, json=None, **_kwargs):
+            path = '/' + url.split('://', 1)[-1].split('/', 1)[-1]
+            with lock, log_path.open('a') as handle:
+                handle.write(globals()['json'].dumps({'method': method, 'path': path, 'body': json}) + '\n')
+            if path.endswith('/push/send'):
+                count = len((json or {}).get('notifications') or [])
+                return Response({'results': [{'status': 200, 'apnsId': 'replay-apns-id'}] * count})
+            return Response({'ok': True})
+
+        def close(self):
+            pass
+    recorder = Recorder()
+    apns._relay_client = lambda: recorder
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--build', type=Path, required=True)
@@ -205,6 +253,7 @@ def main():
             raise RuntimeError('replay provider workspace escaped the state dir')
         return provider_spawn(backend, **kwargs)
     backends.spawn_turn = deterministic_spawn
+    observe_stop(root)
     workspace = root / 'workspace'
     workspace.mkdir(exist_ok=True)
     for session, backend in [*((s, 'codex') for s in SESSIONS), *((s, 'claude') for s in CLAUDE_SESSIONS)]:
@@ -223,6 +272,7 @@ def main():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     synthetic_cartesia()
+    recording_push_relay(root)
     # Never a real interactive CLI: a scenario only sends plain GETs to /terminal/
     # (answered before any spawn), and this makes an accidental upgrade fail loudly.
     from lib import terminal_ws

@@ -9,7 +9,9 @@ contract is in docs/architecture/lifecycles.md; in short:
    ``UPDATE t SET state=? WHERE key=? AND state=?`` inside one transaction;
    zero rows is a ``Conflict``, never a silent overwrite.
 3. Deadlines. Every non-final state declares a ``Deadline`` (the reaper moves
-   it to a final state) or a ``WaitForever`` with the reason.
+   it on, to a final state or back to an earlier one) or a ``WaitForever``
+   with the reason. ``reap`` works in bounded batches; ``reap_tick`` keeps a
+   host's tick within a row and time budget.
 4. Decide-then-act. ``Lifecycle.decide`` is pure; side effects go into the
    ``Outbox`` of ``transaction`` and run only after COMMIT.
 
@@ -21,6 +23,7 @@ from __future__ import annotations
 
 import re
 import sqlite3
+import time
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -50,7 +53,9 @@ class Conflict(LifecycleError):
 @dataclass(frozen=True)
 class Deadline:
     after_ms: int
-    expire_to: str  # a final state
+    # Usually a final state. A non-final target (a stale claim back to queued)
+    # is allowed when it has its own wait; deadlines alone may not cycle.
+    expire_to: str
 
 
 @dataclass(frozen=True)
@@ -63,6 +68,11 @@ class Edge:
     event: str
     sources: frozenset[str]
     target: str
+    # A correction rewrites one final state to another (a newer settlement
+    # wins). Only final sources and a final target; the declaration lists
+    # every allowed pair. Re-applying it to a row already in its target is a
+    # no-op, not a Conflict.
+    correction: bool = False
 
 
 @dataclass(frozen=True)
@@ -89,6 +99,7 @@ class Lifecycle:
     state_column: str = ""
     entered_column: str = ""  # epoch ms of the last transition; the reaper reads it
     _table: dict[tuple[str, str], str] = field(init=False, repr=False, compare=False)
+    _settled: frozenset[tuple[str, str]] = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         problems = self.problems()
@@ -96,6 +107,8 @@ class Lifecycle:
             raise LifecycleError(f"{self.name}: " + "; ".join(problems))
         table = {(e.event, s): e.target for e in self.edges for s in e.sources}
         object.__setattr__(self, "_table", table)
+        # (event, state): a correction re-applied to a row already in its target.
+        object.__setattr__(self, "_settled", frozenset((e.event, e.target) for e in self.edges if e.correction))
 
     @property
     def states(self) -> frozenset[str]:
@@ -111,12 +124,21 @@ class Lifecycle:
             out.append("no final state")
         if self.initial in self.final:
             out.append(f"initial state {self.initial!r} is final")
+        corrections = {e.event for e in self.edges if e.correction}
+        mixed = sorted(corrections & {e.event for e in self.edges if not e.correction})
+        out += [f"event {event!r} is both a correction and an ordinary edge" for event in mixed]
         seen: set[tuple[str, str]] = set()
         for edge in self.edges:
             if edge.event == EXPIRED:
                 out.append(f"{EXPIRED!r} is reserved for the reaper")
+            if edge.correction:
+                outside = sorted((edge.sources | {edge.target}) - self.final)
+                if outside:
+                    out.append(f"correction {edge.event!r} must run between final states, not {outside}")
+                if edge.target in edge.sources:
+                    out.append(f"correction {edge.event!r} lists its own target {edge.target!r} as a source")
             for source in sorted(edge.sources):
-                if source in self.final:
+                if source in self.final and not edge.correction:
                     out.append(f"edge {edge.event!r} leaves final state {source!r}")
                 if (edge.event, source) in seen:
                     out.append(f"event {edge.event!r} has two targets from {source!r}")
@@ -125,14 +147,23 @@ class Lifecycle:
             wait = self.waits.get(state)
             if wait is None:
                 out.append(f"non-final state {state!r} has no deadline or WaitForever")
-            elif isinstance(wait, Deadline) and (wait.after_ms <= 0 or wait.expire_to not in self.final):
-                out.append(f"deadline of {state!r} must be positive and end in a final state")
+            elif isinstance(wait, Deadline) and (wait.after_ms <= 0 or wait.expire_to not in self.states
+                                                 or wait.expire_to == state):
+                out.append(f"deadline of {state!r} must be positive and end in another declared state")
             elif not isinstance(wait, (Deadline, WaitForever)):
                 out.append(f"wait of {state!r} must be a Deadline or a WaitForever, not {type(wait).__name__}")
             elif isinstance(wait, WaitForever) and not wait.reason.strip():
                 out.append(f"WaitForever of {state!r} needs a reason")
         out += [f"final or unknown state {s!r} has a wait" for s in sorted(set(self.waits) - (self.states - self.final))]
         expiries = {(s, w.expire_to) for s, w in self.waits.items() if isinstance(w, Deadline)}
+        expire = dict(expiries)
+        for start in sorted(expire):
+            seen, here = [start], expire[start]
+            while here in expire and here not in seen:
+                seen.append(here)
+                here = expire[here]
+            if here == start:
+                out.append(f"deadlines alone cycle: {' -> '.join(seen + [start])}")
         forward = {(s, e.target) for e in self.edges for s in e.sources} | expiries
         reachable = _closure({self.initial}, forward)
         out += [f"state {s!r} is unreachable from {self.initial!r}" for s in sorted(self.states - reachable)]
@@ -143,9 +174,17 @@ class Lifecycle:
     def decide(self, state: str | None, event: str) -> str:
         """Pure: the target of ``event`` from ``state``, or IllegalTransition."""
         target = self._table.get((event, state)) if state is not None else None
+        if target is None and self.already_corrected(state, event):
+            return state
         if target is None:
             raise IllegalTransition(self.name, state, event)
         return target
+
+    def already_corrected(self, state: str | None, event: str) -> bool:
+        """``event`` is a correction whose target ``state`` already is: a no-op.
+        Only corrections: an ordinary self-loop edge (a lease renewal) is a real
+        transition and is written."""
+        return (event, state) in self._settled and (event, state) not in self._table
 
     def deadline(self, state: str, entered_at: int) -> int | None:
         wait = self.waits.get(state)
@@ -253,20 +292,87 @@ def transition(con: sqlite3.Connection, lc: Lifecycle, key: object, event: str, 
     row = con.execute(f"SELECT {lc.state_column} FROM {lc.table} WHERE {lc.key} = ?", (key,)).fetchone()
     source = row[0] if row else None
     target = lc.decide(source, event)
+    if lc.already_corrected(source, event):  # nothing to write
+        return Transition(key, event, source, target, now)
     return compare_and_set(con, lc, key, event=event, source=source, target=target, now=now, values=values)
 
 
-def reap(con: sqlite3.Connection, lc: Lifecycle, *, now: int) -> list[Transition]:
-    """Move every row past its state's deadline to that deadline's final state."""
+@dataclass(frozen=True)
+class ReapBatch:
+    moved: list[Transition]
+    examined: int  # rows looked at, moved or skipped by ``eligible``
+    cursor: tuple[str, int, object] | None  # resume after (state, entered_at, key); None: all done
+
+
+def reap(con: sqlite3.Connection, lc: Lifecycle, *, now: int, limit: int = 100,
+         after: tuple[str, int, object] | None = None,
+         eligible: Callable[[dict], str | None] | None = None) -> ReapBatch:
+    """One bounded batch, in the caller's transaction: at most ``limit`` overdue
+    rows, in keyset order (state, entered_at, key) from ``after``.
+
+    ``eligible(row)`` (the full row as a dict) decides per row, inside the
+    transaction: None skips it (it still counts toward ``limit``, and the next
+    pass from the start sees it again), ``EXPIRED`` moves it to its deadline's
+    target, any other event goes through ``decide`` (for example ``abandon``
+    once a persisted attempt count reaches its cap). It must be pure or read
+    only SQLite: no process, runtime or network calls under the writer lock.
+    Default: every overdue row expires."""
     _require_txn(con, lc)
-    moved = []
-    for state, wait in sorted(lc.waits.items()):
-        if not isinstance(wait, Deadline):
+    if limit <= 0:
+        raise LifecycleError(f"{lc.name}: reap limit must be positive")
+    deadlines = sorted((s, w) for s, w in lc.waits.items() if isinstance(w, Deadline))
+    moved: list[Transition] = []
+    examined = 0
+    for state, wait in deadlines:
+        if after is not None and state < after[0]:
             continue
-        rows = con.execute(
-            f"SELECT {lc.key} FROM {lc.table} WHERE {lc.state_column} = ? AND {lc.entered_column} <= ?"
-            f" ORDER BY {lc.entered_column}, {lc.key}", (state, now - wait.after_ms)).fetchall()
-        for (key,) in rows:
-            moved.append(compare_and_set(con, lc, key, event=EXPIRED, source=state,
-                                         target=wait.expire_to, now=now))
-    return moved
+        keyset, args = "", []
+        if after is not None and state == after[0]:
+            keyset, args = f" AND ({lc.entered_column}, {lc.key}) > (?, ?)", [after[1], after[2]]
+        cursor = con.execute(
+            f"SELECT * FROM {lc.table} WHERE {lc.state_column} = ? AND {lc.entered_column} <= ?{keyset}"
+            f" ORDER BY {lc.entered_column}, {lc.key} LIMIT ?",
+            (state, now - wait.after_ms, *args, limit - examined))
+        names = [d[0] for d in cursor.description]
+        rows = [dict(zip(names, r)) for r in cursor.fetchall()]
+        for row in rows:
+            examined += 1
+            event = eligible(row) if eligible is not None else EXPIRED
+            if event is not None:
+                target = wait.expire_to if event == EXPIRED else lc.decide(state, event)
+                moved.append(compare_and_set(con, lc, row[lc.key], event=event, source=state,
+                                             target=target, now=now))
+            if examined == limit:
+                return ReapBatch(moved, examined, (state, row[lc.entered_column], row[lc.key]))
+    return ReapBatch(moved, examined, None)
+
+
+def reap_tick(con: sqlite3.Connection, lc: Lifecycle, *, now: int,
+              cursor: tuple[str, int, object] | None = None, batch: int = 100,
+              max_rows: int = 500, max_ms: float = 200.0,
+              eligible: Callable[[dict], str | None] | None = None,
+              effects: Callable[[Outbox, list[Transition]], None] | None = None,
+              clock: Callable[[], float] = time.perf_counter
+              ) -> tuple[list[Transition], tuple[str, int, object] | None]:
+    """A host's tick: ``reap`` batches, each in its own ``transaction`` (so the
+    writer lock is released between them), until ``max_rows`` rows were
+    examined, ``max_ms`` of time inside the batches was spent, or every
+    overdue row was seen. ``effects(outbox, moved)`` queues each batch's
+    after-commit effects. Returns everything moved and the cursor for the next
+    tick (None: start from the beginning)."""
+    moved: list[Transition] = []
+    examined, spent = 0, 0.0
+    while examined < max_rows and spent < max_ms:
+        started = clock()
+        with transaction(con) as outbox:
+            result = reap(con, lc, now=now, limit=min(batch, max_rows - examined),
+                          after=cursor, eligible=eligible)
+            if effects is not None:
+                effects(outbox, result.moved)
+            spent += (clock() - started) * 1000.0  # inside the batch, before COMMIT and effects
+        moved += result.moved
+        examined += result.examined
+        cursor = result.cursor
+        if cursor is None:
+            break
+    return moved, cursor

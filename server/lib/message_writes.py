@@ -19,7 +19,7 @@ import time
 from typing import Any
 
 from .clock import iso_from_ms as _iso_from_ms, now_ms
-from .db import conn
+from .db import conn, note_import_holds_lock
 from . import dreaming, heartbeat, origins, team_leader, team_store
 from .voice_markup import strip_hidden_blocks
 from .message_context import CALL_OPENING_OPEN, _strip_voice_markup, strip_injected_context
@@ -573,6 +573,11 @@ def carry_conversation(*, agent_id: str, from_session_id: str,
 IMPORT_COMMIT_EVERY = 200
 IMPORT_WRITE_BUDGET_SECONDS = 0.025
 IMPORT_WRITER_YIELD_SECONDS = 0.010
+# RM-N7: at least once per second of held lock, yield longer than SQLite's
+# busy handler's longest sleep (100 ms), so a writer waiting in it, in any
+# process and on any connection, wakes inside a gap.
+IMPORT_FAIR_YIELD_EVERY_SECONDS = 1.0
+IMPORT_FAIR_YIELD_SECONDS = 0.110
 
 _WRITE_VERBS = frozenset({"INSERT", "UPDATE", "DELETE", "REPLACE"})
 
@@ -602,6 +607,7 @@ class _ImportWriter:
         self.began_at: float | None = None
         self.began_seq = 0
         self.seq = 0
+        self.held_since_fair_yield = 0.0
 
     def execute(self, sql, parameters=()):
         if not self.locked:
@@ -613,7 +619,15 @@ class _ImportWriter:
                 # conclude there is nothing to write.
                 self._database.execute("BEGIN")
         elif self.began_at is None:
-            self._database.execute("BEGIN IMMEDIATE")
+            # The marker lives only as long as this BEGIN: lib.db records the
+            # transaction it opens as an import's, and that record ends with the
+            # transaction on every exit. Nothing is left on the thread after a
+            # failed BEGIN, a rollback or an error (RM-N7).
+            note_import_holds_lock(True)
+            try:
+                self._database.execute("BEGIN IMMEDIATE")
+            finally:
+                note_import_holds_lock(False)
             self.began_at = time.monotonic()
             self.began_seq = self.seq
         return self._database.execute(sql, parameters)
@@ -630,7 +644,17 @@ class _ImportWriter:
         """End the batch; the next statement opens the following one."""
         if self.began_at is not None:
             self._database.execute("COMMIT")
+            self.held_since_fair_yield += time.monotonic() - self.began_at
             self.began_at = None
+
+    def yield_writer(self) -> None:
+        """Between batches: the short yield, or once per second of held lock
+        the long one (RM-N7)."""
+        if self.held_since_fair_yield >= _facade().IMPORT_FAIR_YIELD_EVERY_SECONDS:
+            time.sleep(_facade().IMPORT_FAIR_YIELD_SECONDS)
+            self.held_since_fair_yield = 0.0
+        else:
+            time.sleep(_facade().IMPORT_WRITER_YIELD_SECONDS)
 
     def __getattr__(self, name):
         return getattr(self._database, name)
@@ -1179,7 +1203,7 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
         database.commit()
         # SQLite does not promise fair immediate writer reacquisition.
         # Yield outside the transaction so admissions can take the writer.
-        time.sleep(_facade().IMPORT_WRITER_YIELD_SECONDS)
+        database.yield_writer()
         final_rows.invalidate()
 
     # Each assistant reply of this batch with the turn it answers, for the

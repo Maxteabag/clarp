@@ -694,3 +694,129 @@ def test_a_frame_completed_after_the_cut_is_not_captured():
     reader.freeze()
     reader._thread.start()
     assert reader.close() == [] and not reader.errors
+
+
+def test_a_background_request_is_recorded_at_its_join():
+    import threading
+    import capture
+    release = threading.Event()
+
+    class StubHost:
+        def request(self, method, path, body=None, raw=None, headers=None, token=None, timeout=10):
+            assert release.wait(5)
+            return 200, {}, {'ok': True, 'path': path}
+    http, variables = [], {}
+    step = {'op': 'post', 'path': '/send', 'name': 'send held', 'body': {}, 'background': 'held'}
+    capture.run_step(StubHost(), None, step, http, [], variables)
+    assert http == [] and 'held' in variables['<background>']   # still open, not recorded
+    release.set()
+    capture.run_step(StubHost(), None, {'op': 'join', 'name': 'held'}, http, [], variables)
+    assert [(h['step'], h['status']) for h in http] == [('send held', 200)]
+    assert not variables['<background>']
+
+
+def test_joining_a_request_that_was_never_sent_fails():
+    import capture
+    with pytest.raises(capture.StepFailed):
+        capture.run_step(None, None, {'op': 'join', 'name': 'missing'}, [], [], {})
+
+
+def test_a_background_name_still_open_is_refused():
+    # Reviewer B s0-codexpool-996077f8 F1.
+    import threading
+    import capture
+    release = threading.Event()
+
+    class StubHost:
+        def request(self, *args, **kwargs):
+            assert release.wait(5)
+            return 200, {}, {'ok': True}
+    variables = {}
+    capture.run_step(StubHost(), None, {'op': 'get', 'path': '/a', 'background': 'same'}, [], [], variables)
+    first = variables['<background>']['same'][1]
+    try:
+        with pytest.raises(capture.StepFailed):
+            capture.run_step(StubHost(), None, {'op': 'get', 'path': '/b', 'background': 'same'}, [], [], variables)
+        assert variables['<background>']['same'][1] is first
+    finally:
+        release.set()
+        first.join(3)
+
+
+def test_a_failed_capture_settles_its_background_requests(tmp_path, monkeypatch):
+    # Reviewer B s0-codexpool-996077f8 F2: an unjoined request ends before capture returns.
+    import threading
+    import capture
+    stopped, workers = threading.Event(), []
+
+    class StubHost:
+        def __init__(self, build, root, python):
+            self.root, self.url = root, 'http://127.0.0.1:1'
+
+        def start(self, config):
+            pass
+
+        def request(self, *args, **kwargs):
+            workers.append(threading.current_thread())
+            assert stopped.wait(5)
+            return 200, {}, {'ok': True}
+
+        def stop(self):
+            stopped.set()
+
+    class StubSSE:
+        frames, errors, ended = [{'event': None, 'id': None, 'data': {}}], [], False
+
+        def __init__(self, *args):
+            pass
+
+        def freeze(self):
+            pass
+
+        def close(self):
+            return self.frames
+    monkeypatch.setattr(capture, 'Host', StubHost)
+    monkeypatch.setattr(capture, 'SSE', StubSSE)
+    monkeypatch.setattr(capture, 'dump_db', lambda p: {'schema': [], 'pk': {}, 'tables': {}})
+    monkeypatch.setattr(capture, 'list_files', lambda p: [])
+    scenario = {'id': 'unjoined', 'steps': [{'op': 'get', 'path': '/held', 'background': 'held'}]}
+    result = capture.capture(tmp_path / 'build', scenario, tmp_path / 'run')
+    assert 'never joined' in result['error']
+    assert workers and not workers[0].is_alive()
+
+
+def test_wait_file_count_waits_for_that_many_matching_lines(tmp_path):
+    import capture
+
+    class StubHost:
+        root = tmp_path
+    (tmp_path / 'provider').mkdir()
+    log = tmp_path / 'provider' / 'push-relay.jsonl'
+    log.write_text('{"pushType": "liveactivity"}\n{"pushType": "alert"}\n{"pushType": "liveactivity"}\n')
+    step = {'op': 'wait_file', 'name': 'push-relay.jsonl', 'contains': '"liveactivity"'}
+    capture.run_step(StubHost(), None, {**step, 'count': 2}, [], [], {})
+    with pytest.raises(capture.StepFailed):
+        capture.run_step(StubHost(), None, {**step, 'count': 3, 'timeout': 0.2}, [], [], {})
+
+
+def _relay(now=1793700000, stale_after=900, priority='5', count=1):
+    request = {'method': 'POST', 'path': '/v1/push/send', 'body': {'notifications': [{
+        'deviceToken': 'aa', 'pushType': 'liveactivity', 'priority': priority,
+        'payload': {'aps': {'timestamp': now, 'event': 'update',
+                            'stale-date': now + stale_after, 'content-state': {'working': 1}}}}]}}
+    return _capture(scenario='push-notifications', files=[{
+        'path': 'provider/push-relay.jsonl', 'kind': 'json', 'json': [request] * count, 'bytes': 0}])
+
+
+def test_a_live_activity_staleness_window_is_behaviour_not_clock():
+    # Reviewer B s0-apns-2046f3f6 F1: the stale-date's offset from the timestamp is compared.
+    assert not _report(_relay(), _relay(now=1793700010)).items
+    assert _report(_relay(stale_after=900), _relay(stale_after=60)).items
+
+
+def test_the_throttle_plant_needs_more_pushes_not_a_changed_push():
+    # Reviewer B s0-apns-2046f3f6 F2: a priority-only change is not the witness; more requests are.
+    change = planted.BY_ID['live-activity-unthrottled']
+    priority_only = _report(_relay(priority='5'), _relay(priority='10')).items
+    assert priority_only and not planted.caught(change, priority_only)
+    assert planted.caught(change, _report(_relay(count=2), _relay(count=3)).items)

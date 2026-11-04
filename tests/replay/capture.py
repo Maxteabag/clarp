@@ -118,7 +118,7 @@ class Host:
             self.log = None
 
     def request(self, method: str, path: str, body=None, raw: dict | None = None, headers: dict | None = None,
-                token: str | None = None):
+                token: str | None = None, timeout: float = 10):
         sent = {'Authorization': f'Bearer {token or TOKEN}', 'Content-Type': 'application/json', **(headers or {})}
         if raw is not None:
             data = raw['bytes'].encode()
@@ -129,7 +129,7 @@ class Host:
             return self._upgrade_request(method, path, sent)
         req = urllib.request.Request(self.url + path, data=data, method=method, headers=sent)
         try:
-            with urllib.request.urlopen(req, timeout=10) as resp:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
                 status, raw, headers = resp.status, resp.read(), resp.headers
         except urllib.error.HTTPError as err:
             status, raw, headers = err.code, err.read(), err.headers
@@ -329,6 +329,30 @@ def save(step: dict, source, variables: dict) -> None:
         variables[name] = value
 
 
+def _record(step: dict, response, http: list, variables: dict) -> None:
+    status, headers, payload = response
+    op = step['op']
+    http.append({'step': step.get('name') or f"{op} {step['path']}", 'method': op.upper(),
+                 'path': step['path'].split('?')[0], 'status': status, 'headers': headers,
+                 'body': payload})
+    if status < 400:
+        save(step, payload, variables)
+    expect = step.get('expect_status')
+    if expect is not None and status != expect:
+        raise StepFailed(f'unexpected status {status}')
+
+
+def settle_background(variables: dict) -> list[str]:
+    """Wait for every background request still registered (after the Host has
+    stopped, an open request fails at once); names any that did not finish."""
+    unsettled = []
+    for name, (_, thread, _) in list(variables.get('<background>', {}).items()):
+        thread.join(WAIT_TIMEOUT_S)
+        if thread.is_alive():
+            unsettled.append(name)
+    return unsettled
+
+
 def run_step(host: Host, sse, step: dict, http: list, cli: list, variables: dict):
     op = step['op']
     if op in ('get', 'post', 'put', 'delete', 'patch'):
@@ -352,16 +376,37 @@ def run_step(host: Host, sse, step: dict, http: list, cli: list, variables: dict
         if step.get('auth') and step['auth'] not in variables:
             raise StepFailed(f"nothing saved as {step['auth']} (an earlier step did not produce it)")
         token = variables[step['auth']] if step.get('auth') else None
-        status, headers, payload = host.request(op.upper(), path, body, step.get('raw'),
-                                                step.get('headers'), token=token)
-        http.append({'step': step.get('name') or f"{op} {step['path']}", 'method': op.upper(),
-                     'path': step['path'].split('?')[0], 'status': status, 'headers': headers,
-                     'body': payload})
-        if status < 400:
-            save(step, payload, variables)
-        expect = step.get('expect_status')
-        if expect is not None and status != expect:
-            raise StepFailed(f'unexpected status {status}')
+        args = (op.upper(), path, body, step.get('raw'), step.get('headers'))
+        if step.get('background'):
+            # Sent now on its own thread, like a phone whose request is still open;
+            # recorded at its 'join' step, so the exchange keeps a fixed position.
+            if step['background'] in variables.get('<background>', {}):
+                raise StepFailed(f"background request {step['background']} is already open")
+            result: dict = {}
+
+            def send():
+                try:
+                    result['response'] = host.request(*args, token=token, timeout=WAIT_TIMEOUT_S)
+                except Exception as exc:  # noqa: BLE001 - reported by class at the join
+                    result['error'] = type(exc).__name__
+            thread = threading.Thread(target=send, daemon=True)
+            thread.start()
+            variables.setdefault('<background>', {})[step['background']] = (step, thread, result)
+            return
+        _record(step, host.request(*args, token=token), http, variables)
+    elif op == 'join':
+        pending = variables.get('<background>', {}).get(step['name'])
+        if pending is None:
+            raise StepFailed(f"no background request named {step['name']}")
+        sent, thread, result = pending
+        thread.join(WAIT_TIMEOUT_S)
+        if thread.is_alive():
+            # Still registered: the capture's teardown settles it after the Host stops.
+            raise StepFailed(f"background request {step['name']} did not complete (still open)")
+        del variables['<background>'][step['name']]
+        if 'error' in result:
+            raise StepFailed(f"background request {step['name']} did not complete ({result['error']})")
+        _record(sent, result['response'], http, variables)
     elif op == 'wait_settled':
         _poll('turn settled', lambda: _turns_settled(host.root, step['message_id'], True))
     elif op == 'wait_open':
@@ -383,7 +428,10 @@ def run_step(host: Host, sse, step: dict, http: list, cli: list, variables: dict
                 return bool(started) and started <= {r.get('proc_id') for r in rows if r.get('event') == 'exit'}
             _poll('provider processes exited', exited)
         else:
-            _poll('provider file', lambda: path.is_file() and step['contains'] in path.read_text())
+            # With count: at least that many lines contain the text.
+            _poll('provider file', lambda: path.is_file() and sum(
+                step['contains'] in line for line in path.read_text().splitlines()) >= step.get('count', 1),
+                  timeout=step.get('timeout', WAIT_TIMEOUT_S))
     elif op == 'provider_file':
         # Control files the fake provider reads (tests/qa/fake_codex.py), e.g. quota-mode.
         (host.root / 'provider' / step['name']).write_text(step['text'])
@@ -573,6 +621,7 @@ def capture(build: Path, scenario: dict, root: Path, python: str = sys.executabl
     http: list = []
     cli: list = []
     error = None
+    variables: dict = {}
     sessions = scenario.get('sessions', ('rachel',))
     db, files = {'schema': [], 'pk': {}, 'tables': {}}, []
     try:
@@ -581,7 +630,7 @@ def capture(build: Path, scenario: dict, root: Path, python: str = sys.executabl
             raise StepFailed('the build has no bin/clarp-admin.py (prepared by an older harness?)')
         host.start(scenario.get('config'))
         timings['start'] = round(time.monotonic() - started, 2)
-        variables = {'port': host.url.rsplit(':', 1)[1], 'root': str(root)}
+        variables.update({'port': host.url.rsplit(':', 1)[1], 'root': str(root)})
         sse = SSE(host, sessions)
         _poll('SSE connected', lambda: sse.frames)
         for index, step in enumerate(scenario['steps']):
@@ -589,6 +638,8 @@ def capture(build: Path, scenario: dict, root: Path, python: str = sys.executabl
                 run_step(host, sse, step, http, cli, variables)
             except StepFailed as exc:
                 raise StepFailed(f'step {index} ({step["op"]}): {exc}') from exc
+        if variables.get('<background>'):
+            raise StepFailed('a background request was never joined')
         timings['steps'] = round(time.monotonic() - started, 2)
         _quiesce(host, sse, sessions)
         timings['quiet'] = round(time.monotonic() - started, 2)
@@ -607,6 +658,10 @@ def capture(build: Path, scenario: dict, root: Path, python: str = sys.executabl
         if sse is not None:
             frames = sse.close()
         timings['reader_joined'] = round(time.monotonic() - started, 2)
+        # No request of the scenario outlives its capture (review s0-codexpool-996077f8).
+        unsettled = settle_background(variables)
+        if unsettled and error is None:
+            error = f"background request {', '.join(unsettled)} did not settle after the Host stopped"
     # Dumped on a failed run too: the frozen state is the diagnostic (structure only in reports).
     db = dump_db(root / 'state.sqlite')
     timings['db_dumped'] = round(time.monotonic() - started, 2)

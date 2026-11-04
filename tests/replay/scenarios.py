@@ -303,6 +303,84 @@ SCENARIOS = [
         ],
     },
     {
+        'id': 'codex-pool-stop-during-start',
+        'what': 'two codex agents on the one shared app-server: one is stopped while its turn/start is '
+                'still in flight (fake_provider holds the request), the other completes (Codex pool '
+                'stage 1/2 baseline; provider/codex-procs.jsonl records app-server starts and the hold)',
+        'sessions': ('rachel', 'mike'),
+        # Known bug TP-N3: (i) after the stop the agent still reads busy (on main the
+        # provider's late turn start writes 'thinking' after 'interrupted'), so quiesce
+        # times out; (ii) the in-flight start holds up both sends and the stop. Runs and
+        # is reported, never counted, until the fix lands; its plant comes with it then.
+        'known_bug': 'TP-N3',
+        'steps': [
+            # /send answers once the provider has started the turn, so both sends
+            # are open requests (joined below) while rachel's start is held.
+            {**_send('rachel', '[qa-slow][replay-hold-start] synthetic pool turn to stop', 'pool-a'),
+             'background': 'send pool-a'},
+            {'op': 'wait_file', 'name': 'codex-procs.jsonl', 'contains': '"held"'},
+            # rachel's own follow-up while her start is held: her launching send above
+            # waits for its start by design; a follow-up answers at once (queued).
+            {**_send('rachel', 'synthetic follow-up while the start is held', 'pool-a2'),
+             'background': 'send pool-a2'},
+            {'op': 'wait_sql', 'sql': "SELECT count(*) >= 2 FROM prompt_admissions p JOIN agents a "
+                                      "ON a.agent_id = p.agent_id WHERE a.session = 'rachel'"},
+            {**_send('mike', 'synthetic pool turn for mike', 'pool-b'), 'background': 'send pool-b'},
+            # mike's send is admitted (its admission row is written) and then waits
+            # behind rachel's start; it gets no turn while the start is held.
+            {'op': 'wait_sql', 'sql': "SELECT count(*) FROM prompt_admissions p JOIN agents a "
+                                      "ON a.agent_id = p.agent_id WHERE a.session = 'mike'"},
+            # The stop waits for the turn lock that rachel's start holds: an open request
+            # (host.py records that it is waiting before it takes the lock).
+            {'op': 'post', 'path': '/stop', 'body': {'session': 'rachel'}, 'background': 'stop rachel'},
+            {'op': 'wait_file', 'name': 'host-events.jsonl', 'contains': '"stop-waiting"'},
+            # Released after the stop: the slow turn then starts and the pending stop
+            # interrupts it, whichever of the stop and mike's start takes the pool first.
+            {'op': 'provider_file', 'name': 'release-start', 'text': '1'},
+            {'op': 'join', 'name': 'stop rachel'},
+            {'op': 'join', 'name': 'send pool-a'},
+            {'op': 'join', 'name': 'send pool-a2'},
+            {'op': 'join', 'name': 'send pool-b'},
+            {'op': 'wait_settled', 'message_id': 'u-pool-a'},
+            {'op': 'wait_settled', 'message_id': 'u-pool-b'},
+            # A follow-up acknowledged as queued survives the Stop in the paused queue
+            # (lead's decision on TP-N3 (iii)): resumed, it runs exactly once.
+            {'op': 'get', 'path': '/turn-queue?session=rachel'},
+            {'op': 'post', 'path': '/turn-queue/resume', 'body': {'session': 'rachel'}},
+            {'op': 'wait_settled', 'message_id': 'u-pool-a2'},
+            {'op': 'quiesce', 'sessions': ('rachel', 'mike')},
+            {'op': 'get', 'path': '/turn-queue?session=rachel'},
+            {'op': 'get', 'path': '/log?session=rachel'},
+            {'op': 'get', 'path': '/log?session=mike'},
+            {'op': 'get', 'path': '/agents/snapshot'},
+        ],
+    },
+    {
+        'id': 'push-notifications',
+        'what': 'a registered iPhone (device token and a Live Activity token) through the real apns '
+                'module to a recording relay (host.py): which pushes a turn sends, with their type, '
+                'priority, collapse id and payload (APNS-N1 baseline)',
+        'config': ('[tts]\nprovider = "none"\n[network]\nadvertise_lan = false\n'
+                   '[apns]\nmode = "relay"\n'
+                   '[audio_central]\nurl = "https://relay.replay.invalid"\n'
+                   'credential = "cav1.replay.synthetic.credential"\n'),
+        'steps': [
+            {'op': 'post', 'path': '/devices', 'body': {
+                'token': 'a1' * 32, 'session': 'rachel', 'environment': 'sandbox', 'platform': 'ios'}},
+            {'op': 'post', 'path': '/devices/live-activity', 'body': {
+                'token': 'b2' * 32, 'activity_id': 'replay-activity', 'kind': 'agents-working',
+                'environment': 'sandbox'}},
+            _send('rachel', 'synthetic question with a push', 'push1'),
+            {'op': 'wait_settled', 'message_id': 'u-push1'},
+            # The Live Activity pusher sends the first change at once and the rest of the
+            # turn in one push after its 15 s minimum interval: wait for that one too.
+            {'op': 'wait_file', 'name': 'push-relay.jsonl', 'contains': '"liveactivity"', 'count': 2,
+             'timeout': 30},
+            {'op': 'quiesce'},
+            {'op': 'get', 'path': '/log?session=rachel'},
+        ],
+    },
+    {
         'id': 'voice-streamed-clip',
         'what': 'a spoken reply streamed through the real Cartesia adapter (synthetic offline response, '
                 'host.py) with chunked-file delivery: the clip file, its stream bytes and its chunks',
