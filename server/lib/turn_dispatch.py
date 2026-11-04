@@ -940,6 +940,18 @@ def _serialize_client_retry(method):
     return dispatch
 
 
+def _alive(handles) -> list:
+    """The handles that positively report a running process."""
+    running = []
+    for handle in handles:
+        try:
+            if getattr(handle, "is_alive", lambda: False)():
+                running.append(handle)
+        except Exception:  # noqa: BLE001
+            continue
+    return running
+
+
 class TurnDispatchService:
     def __init__(self, ctx, *, backend_registry=backends,
                  home: pathlib.Path | None = None,
@@ -2227,6 +2239,12 @@ class TurnDispatchService:
             _SLOTS.claim(agent_id, owner)
             _SLOTS.mark_spawned(agent_id, owner)
             depth = _SLOTS.enqueue(agent_id, spec)
+            if self._session_holds(spec):
+                # Counts the sends that wait for a stuck Codex session to be
+                # recycled (BACKENDS-07b), apart from the ordinary wait.
+                defer_on(_TURN_LOCK, lambda: log(
+                    "turnQueuedBehindStuckSession",
+                    f"agent={agent_id} depth={depth} trace={spec.trace_id or '∅'}"))
             defer_on(_TURN_LOCK, lambda: self._wait_for_process_exit(spec, owner, depth))
             return parked, True
         if _SLOTS.fenced:
@@ -2267,20 +2285,17 @@ class TurnDispatchService:
             handles = list(self.backends.active_handles(spec.backend, spec.agent_id) or ())
         except Exception:  # noqa: BLE001
             handles = []
+        return _alive(handles) + self._session_holds(spec)
+
+    def _session_holds(self, spec: _TurnSpec) -> list:
+        """Processes that hold the agent's session outside any turn."""
         holders = getattr(self.backends, "turn_holders", None)
-        if holders is not None:
-            try:
-                handles += list(holders(spec.backend, spec.agent_id) or ())
-            except Exception:  # noqa: BLE001
-                pass
-        running = []
-        for handle in handles:
-            try:
-                if getattr(handle, "is_alive", lambda: False)():
-                    running.append(handle)
-            except Exception:  # noqa: BLE001
-                continue
-        return running
+        if holders is None:
+            return []
+        try:
+            return _alive(holders(spec.backend, spec.agent_id) or ())
+        except Exception:  # noqa: BLE001
+            return []
 
     def _wait_for_process_exit(self, spec: _TurnSpec, owner: str, depth: int) -> None:
         eventlog.emit("server", "turnQueuedBehindProcess", context=spec.context,
