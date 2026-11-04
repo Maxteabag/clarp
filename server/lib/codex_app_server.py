@@ -649,7 +649,12 @@ class _Client:
                 continue
             status = str((result or {}).get("status") or "")
             log("codexThreadMoveStart", f"thread={thread_id[:8]} from={self.generation} status={status}")
-            if status in ("notLoaded", "notSubscribed"):
+            # Only notLoaded means released. notSubscribed means this
+            # connection was already unsubscribed (an earlier reply lost) and
+            # the thread is still loaded with its writer lock (pinned
+            # thread_processor.rs:1028-1045): keep holding it until
+            # thread/closed or the process exits.
+            if status == "notLoaded":
                 self._loaded_threads.discard(thread_id)
                 self.releasing.discard(thread_id)
         self._exit_if_drained()
