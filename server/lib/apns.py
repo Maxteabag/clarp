@@ -41,7 +41,7 @@ _HOST_SANDBOX = "https://api.sandbox.push.apple.com"
 _TOKEN_TTL_SEC = 50 * 60
 
 _jwt_lock = threading.Lock()
-_jwt_cache: tuple[str, int] | None = None  # (token, minted_at_epoch)
+_jwt_cache: tuple[str, int, tuple] | None = None  # (token, minted_at_epoch, identity)
 
 # APNs requests are synchronous but notification classification is dispatched
 # from independent daemon threads.  Serialize each conversation so an older,
@@ -311,11 +311,18 @@ def _auth_jwt(cfg) -> str:
     global _jwt_cache
     import os
     import jwt  # PyJWT
+    key_path = os.path.expanduser(cfg.apns_key_file())
+    try:
+        key_mtime = os.stat(key_path).st_mtime_ns
+    except OSError:
+        key_mtime = 0    # the open below reports a missing key
+    # A token belongs to the team, key id and key file it was minted for: a
+    # fixed team id or a rotated key mints a new one at once (AUT-10).
+    identity = (cfg.apns_team_id, cfg.apns_key_id, os.path.realpath(key_path), key_mtime)
     with _jwt_lock:
         now = int(time.time())
-        if _jwt_cache and now - _jwt_cache[1] < _TOKEN_TTL_SEC:
+        if _jwt_cache and _jwt_cache[2] == identity and now - _jwt_cache[1] < _TOKEN_TTL_SEC:
             return _jwt_cache[0]
-        key_path = os.path.expanduser(cfg.apns_key_file())
         with open(key_path) as fh:
             private_key = fh.read()
         token = jwt.encode(
@@ -324,7 +331,7 @@ def _auth_jwt(cfg) -> str:
             algorithm="ES256",
             headers={"kid": cfg.apns_key_id},
         )
-        _jwt_cache = (token, now)
+        _jwt_cache = (token, now, identity)
         return token
 
 
@@ -555,6 +562,7 @@ def _send_one(client, base: str, auth: str, bundle_id: str,
 
 # APNs reasons that mean "this token is permanently dead — stop sending".
 _DEAD_REASONS = {"BadDeviceToken", "Unregistered", "DeviceTokenNotForTopic"}
+_PROVIDER_TOKEN_REJECTED = {"InvalidProviderToken", "ExpiredProviderToken"}
 
 
 # --------------------------------------------------------------------------
@@ -571,21 +579,30 @@ class _DirectTransport:
 
     def send(self, token: str, environment: str, payload: dict, *,
              push_type: str = "alert", priority: str = "10",
-             collapse_id: str | None = None) -> tuple[int, str, str]:
-        def once():
-            return _send_one(self._client, _host(environment), self._auth,
-                             self._cfg.apns_bundle_id, token, payload,
-                             push_type=push_type, priority=priority,
-                             collapse_id=collapse_id)
-        try:
-            return once()
-        except RuntimeError as e:
-            if "client has been closed" not in str(e):
-                raise
-            # Another batch replaced the shared client before this request
-            # went out: nothing reached Apple, so send once on the live one.
-            self._client = _pooled_client()
-            return once()
+             collapse_id: str | None = None,
+             expiration: int | None = None) -> tuple[int, str, str]:
+        # Two retries, each at most once and in either order, and only where
+        # nothing reached Apple: a client another batch closed before this
+        # request went out (AUT-19), and a refused provider token (AUT-10).
+        client_retry = token_retry = True
+        while True:
+            try:
+                result = _send_one(self._client, _host(environment), self._auth,
+                                   self._cfg.apns_bundle_id, token, payload,
+                                   push_type=push_type, priority=priority,
+                                   collapse_id=collapse_id, expiration=expiration)
+            except RuntimeError as e:
+                if not client_retry or "client has been closed" not in str(e):
+                    raise
+                client_retry = False
+                self._client = _pooled_client()
+                continue
+            if token_retry and result[0] == 403 and result[1] in _PROVIDER_TOKEN_REJECTED:
+                token_retry = False
+                reset_jwt_cache()
+                self._auth = _auth_jwt(self._cfg)
+                continue
+            return result
 
     def reset(self) -> None:
         _reset_pooled_client(self._client)
@@ -1643,9 +1660,9 @@ def send_agent_ring_voip(ring: dict, tokens: list[dict]) -> dict:
         transport = _DirectTransport(cfg)
         for row in tokens:
             try:
-                status, reason, _apns_id = _send_one(
-                    transport._client, _host(row.get("environment") or cfg.apns_environment), transport._auth,
-                    cfg.apns_bundle_id, row["token"], payload, push_type="voip", priority="10",
+                status, reason, _apns_id = transport.send(
+                    row["token"], row.get("environment") or cfg.apns_environment, payload,
+                    push_type="voip", priority="10",
                     collapse_id=agent_ring_collapse_id(ring), expiration=expiration)
             except Exception as e:  # noqa: BLE001
                 log_exception("apnsRingVoipSendFail", e, detail=f"ring={ring.get('ring_id')}")
