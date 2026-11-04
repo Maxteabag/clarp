@@ -88,6 +88,8 @@ ALLOWED: dict[tuple[str, str], str] = {
     # Recycled app-server clients whose process has not been seen to exit;
     # their threads stay held until it has (BACKENDS-07b).
     ("lib/codex_app_server.py", "_RETIRING"): JOBS,
+    # Draining app-server generations after a credential change (BACKENDS-06b).
+    ("lib/codex_app_server.py", "_DRAINING"): JOBS,
     ("lib/compaction.py", "_active"): JOBS,
     ("lib/compaction.py", "_runtime_client"): CLIENT,
     ("lib/config.py", "PERSONA_PERSONALITIES"): IMPORT,
