@@ -664,29 +664,30 @@ class _Client:
             return
         record = {"agent_id": agent["agent_id"], "thread": thread_id, "phase": "pausing",
                   "generation": f"{os.getpid()}:{self.generation}"}
+        # The whole decision, the pause's effect at codex and the record are
+        # under the lock users' goal actions take: a user's pause or resume is
+        # ordered entirely before or after the move's pause, so the user's
+        # word is the last effect codex sees (a record-only fence does not
+        # order the requests themselves). Bounded by the request's timeout.
         with _GOAL_MOVE_LOCK:
-            # Under the lock users' goal actions take: decided on the state
-            # they leave, never on one they are changing.
             row = agent_goals.get(agent["agent_id"])
             if not row or row.get("status") != agent_goals.ACTIVE or _move_get(thread_id):
                 return
             _move_put(thread_id, record)
-        self._goal_answer_begin(thread_id)
-        try:
-            result = self.request("thread/goal/set", {"threadId": thread_id, "status": "paused"},
-                                  timeout=10)
-            goal = result.get("goal") if isinstance(result, dict) else None
-            self._mirror_goal(thread_id, goal if isinstance(goal, dict) else None)
-        except Exception as exc:  # noqa: BLE001 - left 'pausing': recovery only clears it
-            log_exception("codexGoalMovePauseFail", exc, detail=thread_id[:8])
-            return
-        finally:
-            self._goal_answer_end(thread_id)
-        if not _move_advance(thread_id, "pausing", {**record, "phase": "paused"}):
-            # A user's goal action ended the claim while the pause was out:
-            # the user's word stands, nothing of the move is restored.
-            log("codexGoalMoveYielded", f"thread={thread_id[:8]} at=paused")
-            return
+            self._goal_answer_begin(thread_id)
+            try:
+                result = self.request("thread/goal/set", {"threadId": thread_id, "status": "paused"},
+                                      timeout=10)
+                goal = result.get("goal") if isinstance(result, dict) else None
+                self._mirror_goal(thread_id, goal if isinstance(goal, dict) else None)
+            except Exception as exc:  # noqa: BLE001 - left 'pausing': recovery decides
+                log_exception("codexGoalMovePauseFail", exc, detail=thread_id[:8])
+                return
+            finally:
+                self._goal_answer_end(thread_id)
+            if not _move_advance(thread_id, "pausing", {**record, "phase": "paused"}):
+                log("codexGoalMoveYielded", f"thread={thread_id[:8]} at=paused")
+                return
         log("codexThreadMoveStart", f"thread={thread_id[:8]} from={self.generation} goal_paused=True")
 
     def _capture_move(self, thread_id: str) -> bool:
@@ -720,6 +721,13 @@ class _Client:
                     or _busy(self) or self.foreign_turns):
                 return
             if self._loaded_threads and not (backstop or self.unsubscribe_unsupported):
+                return
+            if self._loaded_threads and self._goal_may_continue():
+                # A thread still loaded here may have a native turn running
+                # whose turn/started is not delivered yet: the backstop and
+                # the fallback never end a process while any loaded thread's
+                # goal could continue or any goal answer is outstanding
+                # (stage 1's coarse rule). They try again later.
                 return
             # It stays in _DRAINING until the process has exited: its threads'
             # holds (and their writer locks) end only then.
