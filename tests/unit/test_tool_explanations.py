@@ -206,3 +206,29 @@ def test_provider_failure_retries_on_the_next_global_chain_model_and_caches_only
         assert wait_ready(service)["text"]=="List the files."
         assert wait_ready(service)["status"]=="ready"
     assert calls==["gpt-primary","gpt-fallback"]
+
+
+def test_one_bad_payload_fails_its_job_and_the_drain_keeps_serving(monkeypatch):
+    # RM-06: _work caught only sqlite3.Error, so any other exception before
+    # the model call (a legacy payload's KeyError) ended the only drain thread
+    # and every later request stayed pending.
+    from lib import tool_explanations
+    original = tool_explanations._Item.from_payload.__func__
+    calls = []
+
+    def flaky(cls, payload, level, sources):
+        calls.append(1)
+        if len(calls) == 1:
+            raise KeyError("legacy payload")
+        return original(cls, payload, level, sources)
+
+    monkeypatch.setattr(tool_explanations._Item, "from_payload", classmethod(flaky))
+    from lib import tool_explanation_cache as cache
+    clock = [cache.now_ms()]
+    monkeypatch.setattr(cache, "now_ms", lambda: clock[0])
+    with ToolExplanations(translate=lambda level, items: {i["id"]: "List the files." for i in items},
+                          debounce=0, failure_ttl=60) as service:
+        assert wait_ready(service) == {"id": "phone", "status": "failed", "reason": "translator_failed"}
+        assert service._thread.is_alive()
+        clock[0] += 60_000
+        assert wait_ready(service)["status"] == "ready"
