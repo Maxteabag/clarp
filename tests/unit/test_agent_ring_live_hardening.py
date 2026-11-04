@@ -9,6 +9,8 @@ Ordering is asserted on what was actually written or called, not on flags or lar
 """
 from __future__ import annotations
 
+import time
+
 import pytest
 
 from lib import agent_ring_live as live
@@ -409,10 +411,14 @@ def test_without_client_ready_no_silence_goes_upstream_and_the_readiness_deadlin
 
 
 def test_pings_do_not_extend_the_readiness_deadline(call, monkeypatch):
-    monkeypatch.setattr(sock, "READY_S", 0.5)
+    # The provider becomes ready under the normal window; only then is the window
+    # shortened. Shortened before the join, a loaded machine could run it out before the
+    # provider was ready, and provider_ready never came (G1 flake: 'condition not met').
     h, thread = _provider_ready(call)
     session = _session(call)
-    while not session.closed.is_set() and thread.is_alive():
+    monkeypatch.setattr(sock, "READY_S", 0.5)                       # read on every tick
+    deadline = time.monotonic() + 15                                # pings that extend it fail, not hang
+    while not session.closed.is_set() and thread.is_alive() and time.monotonic() < deadline:
         h.rfile.feed(_masked(0x9, b"p"))                            # ping traffic only
         thread.join(0.05)
     thread.join(15)
