@@ -105,13 +105,16 @@ def save_agent(session: str, info: dict[str, Any]) -> None:
     current = _agents.session_dict().get(session)
     info = info or {}
     if current is None:
-        _agents.create_agent(
-            persona=str(info.get("name") or session),
-            voice_id=str(info.get("voice_id") or ""),
-            cwd=str(info.get("cwd") or str(pathlib.Path.home())),
-            session=session,
-            backend=str(info.get("backend") or AgentBackend.CLAUDE),
-        )
+        try:
+            _agents.create_agent(
+                persona=str(info.get("name") or session),
+                voice_id=str(info.get("voice_id") or ""),
+                cwd=str(info.get("cwd") or str(pathlib.Path.home())),
+                session=session,
+                backend=str(info.get("backend") or AgentBackend.CLAUDE),
+            )
+        except Exception as e:  # noqa: BLE001 — as save_agents: log; the caller sees no agent
+            log("agentCreateSyncFail", f"{session} :: {e}")
         return
     new_persona = str(info.get("name") or current["name"])
     new_voice = str(info.get("voice_id") or current["voice_id"])
