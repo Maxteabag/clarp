@@ -68,6 +68,8 @@ CLOCK_KEYS = frozenset({
     'timestamp', 'ts', 'turn_started_ms', 'updated_at',
     # Push notifications (push-notifications): device rows, Live Activity rows and payloads.
     'last_push_at', 'registered_at', 'updated_at_ms', 'stale-date'})
+# (deadline key, base key) in one object: the deadline is kept as its offset from the base.
+RELATIVE_CLOCKS = (('stale-date', 'timestamp'),)
 # Text that holds serialized JSON, by storage location only where it was seen.
 # Parsed values are compared as JSON plus their serialization form and key order.
 JSON_COLUMNS = frozenset({
@@ -247,7 +249,13 @@ class Normalizer:
 
     def value(self, value, key: str = ''):
         if isinstance(value, dict):
-            return {k: self.value(v, k) for k, v in value.items()}
+            out = {k: self.value(v, k) for k, v in value.items()}
+            for later, base in RELATIVE_CLOCKS:
+                # A deadline set relative to another clock in the same object (a Live
+                # Activity's stale-date from its timestamp): the interval is behaviour.
+                if is_epoch(value.get(later)) and is_epoch(value.get(base)):
+                    out[later] = f'<{base}>{value[later] - value[base]:+}'
+            return out
         if isinstance(value, list):
             items = [self.value(v, key) for v in value]
             if key in SORTED_LISTS:

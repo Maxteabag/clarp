@@ -97,11 +97,11 @@ CHANGES = [
         'file': 'server/lib/live_activity.py',
         'find': '                 min_interval: float = 15.0,\n',
         'replace': '                 min_interval: float = 0.0,\n',
-        # The witness is the push sequence the recording relay wrote: provider/push-relay.jsonl
-        # (its locator is the hash of that path, diff._hash).
+        # The witness is how many requests the recording relay received (more pushes
+        # without the throttle): the length of provider/push-relay.jsonl, whose locator
+        # is the hash of that path (diff._hash). A change inside one push is not it.
         'expect': {'scenario': 'push-notifications', 'channel': 'files',
-                   'locator': r'^files\[1c67a382\]', 'kinds': {'changed', 'field-added', 'field-removed',
-                                                       'sequence-insert', 'sequence-delete', 'sequence-replace'}},
+                   'locator': r'^files\[1c67a382\]\.json#len$', 'kinds': {'changed'}},
     },
     {
         'id': 'on-chunk-signature',

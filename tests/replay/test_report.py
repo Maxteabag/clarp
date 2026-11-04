@@ -797,3 +797,26 @@ def test_wait_file_count_waits_for_that_many_matching_lines(tmp_path):
     capture.run_step(StubHost(), None, {**step, 'count': 2}, [], [], {})
     with pytest.raises(capture.StepFailed):
         capture.run_step(StubHost(), None, {**step, 'count': 3, 'timeout': 0.2}, [], [], {})
+
+
+def _relay(now=1793700000, stale_after=900, priority='5', count=1):
+    request = {'method': 'POST', 'path': '/v1/push/send', 'body': {'notifications': [{
+        'deviceToken': 'aa', 'pushType': 'liveactivity', 'priority': priority,
+        'payload': {'aps': {'timestamp': now, 'event': 'update',
+                            'stale-date': now + stale_after, 'content-state': {'working': 1}}}}]}}
+    return _capture(scenario='push-notifications', files=[{
+        'path': 'provider/push-relay.jsonl', 'kind': 'json', 'json': [request] * count, 'bytes': 0}])
+
+
+def test_a_live_activity_staleness_window_is_behaviour_not_clock():
+    # Reviewer B s0-apns-2046f3f6 F1: the stale-date's offset from the timestamp is compared.
+    assert not _report(_relay(), _relay(now=1793700010)).items
+    assert _report(_relay(stale_after=900), _relay(stale_after=60)).items
+
+
+def test_the_throttle_plant_needs_more_pushes_not_a_changed_push():
+    # Reviewer B s0-apns-2046f3f6 F2: a priority-only change is not the witness; more requests are.
+    change = planted.BY_ID['live-activity-unthrottled']
+    priority_only = _report(_relay(priority='5'), _relay(priority='10')).items
+    assert priority_only and not planted.caught(change, priority_only)
+    assert planted.caught(change, _report(_relay(count=2), _relay(count=3)).items)
