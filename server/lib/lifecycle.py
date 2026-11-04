@@ -124,6 +124,9 @@ class Lifecycle:
             out.append("no final state")
         if self.initial in self.final:
             out.append(f"initial state {self.initial!r} is final")
+        corrections = {e.event for e in self.edges if e.correction}
+        mixed = sorted(corrections & {e.event for e in self.edges if not e.correction})
+        out += [f"event {event!r} is both a correction and an ordinary edge" for event in mixed]
         seen: set[tuple[str, str]] = set()
         for edge in self.edges:
             if edge.event == EXPIRED:
@@ -171,11 +174,17 @@ class Lifecycle:
     def decide(self, state: str | None, event: str) -> str:
         """Pure: the target of ``event`` from ``state``, or IllegalTransition."""
         target = self._table.get((event, state)) if state is not None else None
-        if target is None and (event, state) in self._settled:
-            return state  # the correction already holds: a no-op
+        if target is None and self.already_corrected(state, event):
+            return state
         if target is None:
             raise IllegalTransition(self.name, state, event)
         return target
+
+    def already_corrected(self, state: str | None, event: str) -> bool:
+        """``event`` is a correction whose target ``state`` already is: a no-op.
+        Only corrections: an ordinary self-loop edge (a lease renewal) is a real
+        transition and is written."""
+        return (event, state) in self._settled and (event, state) not in self._table
 
     def deadline(self, state: str, entered_at: int) -> int | None:
         wait = self.waits.get(state)
@@ -283,7 +292,7 @@ def transition(con: sqlite3.Connection, lc: Lifecycle, key: object, event: str, 
     row = con.execute(f"SELECT {lc.state_column} FROM {lc.table} WHERE {lc.key} = ?", (key,)).fetchone()
     source = row[0] if row else None
     target = lc.decide(source, event)
-    if target == source:  # a correction that already holds: nothing to write
+    if lc.already_corrected(source, event):  # nothing to write
         return Transition(key, event, source, target, now)
     return compare_and_set(con, lc, key, event=event, source=source, target=target, now=now, values=values)
 
