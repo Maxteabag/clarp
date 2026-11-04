@@ -26,6 +26,7 @@ from ..turn_lifecycle import TurnEvent
 from ..voice_preamble import apply_voice_preamble
 from .base import BackendBrand, CompactionStrategy
 from .stream_json import StreamJsonBackend, make_handle, popen_turn
+from .long_prompt import ARGV_TEXT_LIMIT
 
 _CLEAN_STATUSES = {"SUCCESS"}
 _SECRET_VALUE = re.compile(
@@ -603,6 +604,12 @@ class AgyBackend(StreamJsonBackend):
     # send — so pin the cap out of the way instead of letting it truncate long
     # turns.
     print_timeout = "24h"
+
+    def prompt_limit_bytes(self) -> int | None:
+        """agy takes the prompt only as ``--print=<prompt>`` (its stdin form
+        is stream-json, a protocol of its own); the restore block's
+        RESTORE_MAX_BYTES comes on top (BACKENDS-08)."""
+        return ARGV_TEXT_LIMIT
 
     def build_cmd(self, conversation_id: str = "", *,
                   is_new_session: bool = False, model: str = "",

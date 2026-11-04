@@ -27,6 +27,7 @@ from .base import BackendBrand
 from . import opencode_serve
 from .opencode_serve import OpenCodeTurnHandle, ServeClient, ServeError
 from .stream_json import StreamJsonBackend, iter_json_dicts, popen_turn, stop_after_drain_failure
+from .long_prompt import ARGV_TEXT_LIMIT
 
 
 @dataclass
@@ -234,6 +235,13 @@ class OpenCodeBackend(StreamJsonBackend):
     #: Follow turns live through ``opencode serve``. ``CLARP_OPENCODE_LIVE=0``
     #: in the runtime's environment forces the ``opencode run`` path.
     live = True
+
+    def prompt_limit_bytes(self) -> int | None:
+        """``opencode run`` takes the prompt only in argv; a live turn sends it
+        in an HTTP body (BACKENDS-08)."""
+        if self.live and os.environ.get("CLARP_OPENCODE_LIVE", "1") != "0":
+            return None
+        return ARGV_TEXT_LIMIT
 
     @staticmethod
     def turn_env() -> dict[str, str]:

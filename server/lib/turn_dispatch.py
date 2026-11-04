@@ -514,6 +514,19 @@ class DispatchError(RuntimeError):
         super().__init__(message)
 
 
+def _refuse_oversized(registry, backend: str, text: str) -> None:
+    """Before admission, so nothing is stored: a message longer than the
+    backend's CLI can take is refused with 413 (BACKENDS-08)."""
+    limit_of = getattr(registry, "prompt_limit_bytes", None)
+    limit = limit_of(backend) if limit_of is not None else None
+    size = len((text or "").encode())
+    if limit is not None and size > limit:
+        raise DispatchError(
+            413, f"This message is {size // 1024} KiB, more than the {limit // 1024} KiB "
+                 "this agent can take in one message. Shorten it or split it into "
+                 "several messages.")
+
+
 class JanitorDispatchError(DispatchError):
     """A maintenance run lost authorization; retrying cannot restore it."""
 
@@ -1566,6 +1579,7 @@ class TurnDispatchService:
             except Exception as e:
                 log_exception("stickyFocusSetFail", e, detail=session)
         backend = self.backends.normalize(agent.get("backend"))
+        _refuse_oversized(self.backends, backend, text)
         # The Claude pwa-voice marker is (re)written per attempt in
         # _spawn_attempt — not here — so a retry or a redispatch always re-arms
         # a fresh marker. Writing it once was a single-use race: the first
