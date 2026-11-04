@@ -1,0 +1,31 @@
+# S9 module splits (rf-fix3): agent_live_tools.py, cut 1a.
+# Applied by tools/refactor/split_apply.py; see its docstring. Parts in dependency
+# order: each reads only earlier parts and the old module's imports .
+
+[[split]]
+name = "agent-live-tools"
+module = "lib/agent_live_tools.py"
+
+[[split.part]]
+# The module's constants and its frozen per-call config.
+module = "lib/agent_live_settings.py"
+names = [
+    "PROFILE_KEY", "SNAPSHOT_KEY", "MAX_AGENTS", "SETTLE_S", "REQUEST_CHARS", "FRAGMENTS_KEPT",
+    "ROUTER_TIMEOUT_S", "COMMAND_TIMEOUT_S", "_SESSION", "OVERLAY", "ROUTING",
+    "_LOOPBACK_LITERALS", "_loopback_url", "_minutes", "frozen_config", "team_text", "overlay", "tools_schema",
+]
+
+[[split.part]]
+# Side effects (replaceable in tests): HTTP to the Host, clarp-admin, the router model.
+module = "lib/agent_live_effects.py"
+names = [
+    "DELEGATE_HTTP_TIMEOUT_S", "CALLBACK_HTTP_TIMEOUT_S", "CLARP_ADMIN_REFUSED",
+    "Unreachable", "Unconfirmed", "Refused", "_NoRedirect", "_post", "_get",
+    "_openai_router", "_find_agent",
+]
+# _clarp_admin reads __file__ and Effects reads _clarp_admin: both stay.
+
+# Stay for now: the state names (CLAIMED, DONE, ... are one tuple assignment, which
+# ast_identity cannot prove) and everything that reads them, the ledger and regi.
+# Splitting that tuple into single assignments on main would free both.
+

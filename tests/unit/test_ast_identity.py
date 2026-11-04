@@ -230,3 +230,22 @@ def test_a_global_import_in_a_function_is_a_rebinding(tmp_path, capsys):
     assert tool.main(["--root", str(tmp_path), base, head, "lib/old.py=lib/old.py,lib/moved.py"]) == 1
     assert "read reads dep, which lib/old.py imports and rebinds (written through `global` in rebind)" \
         in capsys.readouterr().out
+
+
+def test_a_retained_reader_of_a_module_attribute_passes_and_a_moved_one_fails(tmp_path, capsys):
+    # S9: a definition that stays in the split's old module reads the same
+    # __file__ as before; one that moves would read its new module's.
+    _git(tmp_path, "init", "-q")
+    old = "def where():\n    return __file__\n\n\ndef helper():\n    return 1\n"
+    base = _commit(tmp_path, {"lib/__init__.py": "", "lib/old.py": old})
+    head = _commit(tmp_path, {
+        "lib/old_part.py": "def helper():\n    return 1\n",
+        "lib/old.py": "def where():\n    return __file__\n\n\nfrom .old_part import helper  # noqa: E402,F401\n",
+    })
+    assert tool.main(["--root", str(tmp_path), base, head, "lib/old.py=lib/old.py,lib/old_part.py"]) == 0
+    moved = _commit(tmp_path, {
+        "lib/old_part.py": "def helper():\n    return 1\n\n\ndef where():\n    return __file__\n",
+        "lib/old.py": "from .old_part import helper, where  # noqa: F401\n",
+    })
+    assert tool.main(["--root", str(tmp_path), base, moved, "lib/old.py=lib/old.py,lib/old_part.py"]) == 1
+    assert "where reads __file__, which differs in lib/old_part.py" in capsys.readouterr().out

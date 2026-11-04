@@ -126,7 +126,9 @@ def test_client_factory_attaches_stream_before_initialization(monkeypatch):
             created.append(self)
 
     monkeypatch.setattr(codex_app_server, "_Client", FakeClient)
-    codex_app_server._CLIENTS.clear()
+    # Its own registry, restored after the test: a FakeClient left in the shared one
+    # (it has no `active`) broke later tests' active_handles() in the same worker.
+    monkeypatch.setattr(codex_app_server, "_CLIENTS", {})
     client = codex_app_server._client("agent-1", "codex", stream=stream)
     assert created == [client]
     assert client.stream is stream

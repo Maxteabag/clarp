@@ -466,6 +466,11 @@ def rebound_imports(tree: ast.Module, path: str) -> dict[str, str]:
     return found
 
 
+# Implicit module attributes: bound by the import system, never by a statement.
+MODULE_IDENTITY = frozenset({"__file__", "__name__", "__spec__", "__package__", "__loader__",
+                             "__path__", "__cached__", "__builtins__"})
+
+
 def check_reads(old: str, name: str, stmt: ast.stmt, base_tree: ast.Module, old_path: str,
                 tree: ast.Module, path: str, homes: dict[str, str]) -> tuple[list[str], list[tuple]]:
     """The module-level names a moved definition reads, resolved in its new
@@ -483,7 +488,12 @@ def check_reads(old: str, name: str, stmt: ast.stmt, base_tree: ast.Module, old_
                                 f"({rebound[read]}): the moved reader may see another object")
         was = module_binding(base_tree, old_path, read)
         now = module_binding(tree, path, read)
-        if was is None and hasattr(builtins, read):
+        if read in MODULE_IDENTITY and was is None and now is None:
+            # An implicit module attribute (__file__, __name__, ...): the same
+            # value only while the definition stays in its own module (S9).
+            if path != old_path:
+                problems.append(f"{old}: {name} reads {read}, which differs in {path}")
+        elif was is None and hasattr(builtins, read):
             if now is not None:
                 problems.append(f"{old}: {path} binds builtin {read} that {name} reads")
         elif now is None:

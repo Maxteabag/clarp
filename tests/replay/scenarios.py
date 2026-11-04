@@ -194,8 +194,11 @@ SCENARIOS = [
             # The tool-explanation worker settles each explanation on its own schedule
             # (queued/running -> failed here, no provider): wait for it before the final
             # reads, or they race it (rf-routes, 3 Nov: pending vs failed, one live frame).
+            # The job row settles before the live patch goes out, so wait for the patch
+            # too (rf-routes G2, 4 Nov: the same frame, missing under load).
             {'op': 'wait_sql', 'sql': "SELECT (SELECT count(*) FROM tool_explanation_jobs) > 0 AND "
                                       "(SELECT count(*) FROM tool_explanation_jobs WHERE status IN ('queued', 'running')) = 0"},
+            {'op': 'wait_explained'},
             {'op': 'quiesce'},
             {'op': 'get', 'path': '/log?session=rachel'},
             {'op': 'get', 'path': '/live?session=rachel'},
@@ -210,8 +213,11 @@ SCENARIOS = [
             # The tool-explanation worker settles each explanation on its own schedule
             # (queued/running -> failed here, no provider): wait for it before the final
             # reads, or they race it (rf-routes, 3 Nov: pending vs failed, one live frame).
+            # The job row settles before the live patch goes out, so wait for the patch
+            # too (rf-routes G2, 4 Nov: the same frame, missing under load).
             {'op': 'wait_sql', 'sql': "SELECT (SELECT count(*) FROM tool_explanation_jobs) > 0 AND "
                                       "(SELECT count(*) FROM tool_explanation_jobs WHERE status IN ('queued', 'running')) = 0"},
+            {'op': 'wait_explained'},
             {'op': 'quiesce'},
             {'op': 'get', 'path': '/log?session=rachel'},
             {'op': 'get', 'path': '/live?session=rachel'},

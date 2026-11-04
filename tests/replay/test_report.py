@@ -859,3 +859,30 @@ def test_clean_refuses_a_missing_named_keep_list_and_a_bad_age_before_removing_a
     (tmp_path / 'keep.txt').unlink()
     assert run_module.main(['--scratch', str(tmp_path), 'clean', '--older-than-days', '2']) == 0
     assert run_dir.exists()                          # young: kept by age
+
+
+def _explain_frame(agent, *ops):
+    return {'data': {'type': 'live', 'agent_id': agent, 'ops': list(ops)}}
+
+
+def _announced_tool(item_id, explain=None):
+    return {'op': 'upsert', 'id': item_id, 'kind': 'tool',
+            'item': {'id': item_id, 'kind': 'tool', 'tool': {'name': 'x', 'explain': explain}}}
+
+
+def _explain_patch(item_id, status):
+    return {'op': 'upsert', 'id': item_id, 'kind': 'tool', 'item': {'tool': {'explain': {'status': status}}}}
+
+
+def test_wait_explained_holds_until_every_announced_tool_is_settled():
+    import capture
+    announced = [_explain_frame('a1', _announced_tool('t1')), _explain_frame('a1', _announced_tool('t2')), _explain_frame('a1', _explain_patch('t1', 'pending'))]
+    assert not capture.live_tools_explained([])                       # nothing announced yet
+    assert not capture.live_tools_explained(announced)                # pending is not settled
+    assert not capture.live_tools_explained(announced + [_explain_frame('a1', _explain_patch('t1', 'failed'))])
+    assert capture.live_tools_explained(announced + [_explain_frame('a1', _explain_patch('t1', 'failed')),
+                                                     _explain_frame('a1', _explain_patch('t2', 'ready'))])
+    # Ids are per agent: another agent's settled item does not settle this one.
+    assert not capture.live_tools_explained([_explain_frame('a1', _announced_tool('t1')), _explain_frame('a2', _explain_patch('t1', 'failed'))])
+    # Non-live frames are ignored.
+    assert not capture.live_tools_explained([{'data': {'type': 'agent-state', 'ops': [_announced_tool('t1')]}}])
