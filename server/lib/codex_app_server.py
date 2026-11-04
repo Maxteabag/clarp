@@ -1410,7 +1410,7 @@ def recover_usage_failure(message: str) -> bool:
         if _CLIENTS.get(_SHARED_KEY) is not client:
             return False
         client.refresh_requested = True
-        if _busy(client) or message.produced_output:
+        if _busy(client) or message.produced_output or client._goal_may_continue():
             return False
         # Close the old writer before allowing a new process to resume its
         # threads. Admission and retirement share this lock.
@@ -1452,7 +1452,11 @@ def _client(agent_id: str, session: str, stream=None) -> _Client:
             changed = getattr(client, "auth_fingerprint", fingerprint) != fingerprint
             if changed or getattr(client, "refresh_requested", False):
                 client.refresh_requested = True
-                if not _busy(client) and not getattr(client, "foreign_turns", None):
+                # No direct shutdown while a goal could be running natively
+                # with its turn/started not delivered yet (the coarse rule):
+                # such a process drains as a generation instead.
+                if (not _busy(client) and not getattr(client, "foreign_turns", None)
+                        and not client._goal_may_continue()):
                     client.shutdown()
                     _CLIENTS.clear()
                     client = None
@@ -1828,7 +1832,7 @@ def recycle_clients() -> int:
         closed = 0
         for client in clients:
             client.refresh_requested = True
-            if _busy(client):
+            if _busy(client) or client._goal_may_continue():
                 continue
             client.shutdown()
             for key, value in list(_CLIENTS.items()):
