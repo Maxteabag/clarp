@@ -23,16 +23,9 @@ when a client reconnects after the broker has aged out the buffer.
 """
 from __future__ import annotations
 
-from .. import clip_store
-
 import pathlib
 
-from .. import agents as agents_db
-from .. import clips as clips_lib
-from ..clock import now_ms
-from ..log import log_exception
-from ..protocol import ClipProducerStatus
-from . import FinalizeResult
+from .file_session import FileBrokerSession, begin_file_clip
 
 
 class ChunkedFileDelivery:
@@ -56,92 +49,16 @@ class ChunkedFileDelivery:
               source: str,
               text_len: int,
               trace_id: str | None) -> "ChunkedFileSession":
-        audio_dir.mkdir(parents=True, exist_ok=True)
-        target = audio_dir / f"{now_ms()}__{session}.mp3"
-
-        # 1. Allocate the durable clip identity BEFORE the first byte. The
-        #    live URL is keyed by clip_id; the file is just a replay artifact.
-        clip_id = agents_db.record_clip(
-            agent_id=agent["agent_id"],
-            path=str(target),
-            voice_id=voice_id,
+        return begin_file_clip(
+            ChunkedFileSession, broker=self._broker, suffix=".mp3",
+            audio_dir=audio_dir, agent=agent, voice_id=voice_id,
+            session=session, source=source, text_len=text_len,
             trace_id=trace_id,
-            producer_status=ClipProducerStatus.STREAMING,
-        )
-        if not clip_id:
-            raise RuntimeError("record_clip returned no clip_id")
-
-        # 2. Open the broker entry so late subscribers see the buffered
-        #    chunks. Failure to open is non-fatal — the file fallback path
-        #    still works when the live broker is absent.
-        if self._broker is not None:
-            try:
-                self._broker.open(clip_id)
-            except Exception as e:  # noqa: BLE001
-                log_exception("clipBrokerOpenFail", e, detail=str(clip_id))
-
-        # 3. Pre-synth sidecar. The audio_stream watcher / herald look at
-        #    this when they discover the mp3; without it they'd broadcast a
-        #    bare clip and the client would fall back to the static URL.
-        clips_lib.write_sidecar(
-            target,
-            clip_id=clip_id,
-            agent_id=agent["agent_id"],
-            persona=agent.get("persona"),
-            voice_id=voice_id,
-            session=session,
-            source=source,
-            text_len=text_len,
-            trace_id=trace_id,
-            extra={"streamable": True,
-                   "stream_url": f"/clips/{clip_id}/stream",
-                   "complete_url": f"/clips/{clip_id}/complete.mp3"},
-        )
-
-        return ChunkedFileSession(
-            broker=self._broker,
-            target=target, clip_id=clip_id, agent=agent,
-            voice_id=voice_id, session=session,
-            source=source, text_len=text_len, trace_id=trace_id,
         )
 
 
-class ChunkedFileSession:
-    """Per-clip session for ChunkedFileDelivery.
-
-    `feed` fans bytes into the broker. `synthesize_streaming` is what
-    writes them to the file (via target_path). Two sinks, one source."""
-
-    def __init__(self, *,
-                 broker,
-                 target: pathlib.Path,
-                 clip_id: int,
-                 agent: dict,
-                 voice_id: str,
-                 session: str,
-                 source: str,
-                 text_len: int,
-                 trace_id: str | None):
-        self._broker = broker
-        self._target = target
-        self._clip_id = int(clip_id)
-        self._agent = agent
-        self._voice_id = voice_id
-        self._session = session
-        self._source = source
-        self._text_len = text_len
-        self._trace_id = trace_id
-
-    publish_after_finalize = False   # broker streams bytes live
-
-    @property
-    def clip_id(self) -> int:
-        return self._clip_id
-
-    @property
-    def target_path(self) -> pathlib.Path:
-        # synthesize_streaming writes the mp3 here directly.
-        return self._target
+class ChunkedFileSession(FileBrokerSession):
+    """Per-clip session for ChunkedFileDelivery: an MP3 on disk."""
 
     @property
     def sse_fields(self) -> dict:
@@ -151,84 +68,5 @@ class ChunkedFileSession:
             "complete_url": f"/clips/{self._clip_id}/complete.mp3",
         }
 
-    def feed(self, chunk_idx: int, chunk: bytes) -> None:
-        if self._broker is None:
-            return
-        try:
-            self._broker.append(self._clip_id, chunk)
-        except Exception as e:  # noqa: BLE001
-            log_exception("clipBrokerAppendFail", e, detail=str(self._clip_id))
-
-    def finalize(self, *, total_bytes: int) -> FinalizeResult:
-        size = (self._target.stat().st_size if self._target.exists()
-                else total_bytes)
-
-        # 1. Producer-side state: synthesis is done.
-        try:
-            clip_store.mark_clip_producer_status(
-                clip_id=self._clip_id,
-                producer_status=ClipProducerStatus.COMPLETE,
-                byte_count=size,
-            )
-        except Exception as e:  # noqa: BLE001
-            log_exception("clipMarkCompleteFail", e, detail=str(self._clip_id))
-
-        # 2. Final sidecar — includes `bytes` so `audio_growing.is_in_progress`
-        #    now returns False and any /audio/<file> fetches use the static
-        #    path. Pinned by tests/integration/test_audio_pipeline_seams.py.
-        clips_lib.write_sidecar(
-            self._target,
-            clip_id=self._clip_id,
-            agent_id=self._agent["agent_id"],
-            persona=self._agent.get("persona"),
-            voice_id=self._voice_id,
-            session=self._session,
-            source=self._source,
-            bytes_=size,
-            text_len=self._text_len,
-            trace_id=self._trace_id,
-            extra={"streamable": True,
-                   "stream_url": f"/clips/{self._clip_id}/stream",
-                   "complete_url": f"/clips/{self._clip_id}/complete.mp3"},
-        )
-
-        # 3. Close the live broker stream — late subscribers get the
-        #    buffered bytes + EOF, then fall back to the file path.
-        if self._broker is not None:
-            try:
-                self._broker.finish(self._clip_id)
-            except Exception as e:  # noqa: BLE001
-                log_exception("clipBrokerFinishFail", e,
-                              detail=str(self._clip_id))
-
-        return FinalizeResult(
-            path=self._target,
-            clip_id=self._clip_id,
-            sse_url=f"/audio/{self._target.name}",
-            ok=True,
-        )
-
-    def fail(self, error: str) -> None:
-        # Tear down partial artifacts so the watcher / herald can't
-        # broadcast a half-written clip. Pinned by
-        # test_failure_path_leaves_no_partial_mp3.
-        try: self._target.unlink()
-        except OSError: pass
-        try: clips_lib.sidecar_path(self._target).unlink()
-        except OSError: pass
-
-        try:
-            clip_store.mark_clip_producer_status(
-                clip_id=self._clip_id,
-                producer_status=ClipProducerStatus.FAILED,
-                error=error,
-            )
-        except Exception as e:  # noqa: BLE001
-            log_exception("clipMarkFailedFail", e, detail=str(self._clip_id))
-
-        if self._broker is not None:
-            try:
-                self._broker.fail(self._clip_id, error)
-            except Exception as e:  # noqa: BLE001
-                log_exception("clipBrokerFailCleanup", e,
-                              detail=str(self._clip_id))
+    def _finalized_url(self) -> str:
+        return f"/audio/{self._target.name}"
