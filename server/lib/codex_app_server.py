@@ -672,13 +672,45 @@ class _Client:
         if turn_id and turn_id in dropped:
             return True
         thread_id = str(params.get("threadId") or turn.get("threadId") or "")
-        if method != "turn/started" or thread_id not in getattr(self, "pausing_stopped", set()):
+        if method != "turn/started" or not thread_id:
+            return False
+        # The fence lasts as long as the durable marker: until the goal's
+        # pause is established, even after a refused launch (round 11).
+        if (thread_id not in getattr(self, "pausing_stopped", set())
+                and _stop_pause_get(thread_id) is None):
             return False
         self.suppressed_turns = dropped | {turn_id}
         log("codexStoppedGoalContinuationInterrupted", f"thread={thread_id[:8]} turn={turn_id[:8]}")
-        threading.Thread(target=self._interrupt_quietly, args=(thread_id, turn_id),
+        threading.Thread(target=self._interrupt_and_repause, args=(thread_id, turn_id),
                          daemon=True, name="codex-stop-continuation").start()
         return True
+
+    def _interrupt_and_repause(self, thread_id: str, turn_id: str) -> None:
+        """Interrupt the continuation, then try the pause again (one try at a
+        time per thread): codex restarts an active goal after an interrupt, so
+        only the pause ends the fence. Success clears the marker."""
+        self._interrupt_quietly(thread_id, turn_id)
+        with self._goal_state_lock:
+            trying = getattr(self, "repausing", set())
+            if thread_id in trying or thread_id in getattr(self, "pausing_stopped", set()):
+                return
+            self.repausing = trying | {thread_id}
+        try:
+            self._goal_answer_begin(thread_id)
+            try:
+                answer = self.request("thread/goal/set", {"threadId": thread_id, "status": "paused"},
+                                      timeout=10)
+                goal = answer.get("goal") if isinstance(answer, dict) else None
+                self._mirror_goal(thread_id, goal if isinstance(goal, dict) else None)
+                _stop_pause_forget(thread_id)
+                log("codexStoppedGoalPausedOnResume", f"thread={thread_id[:8]} retry=True")
+            except Exception as exc:  # noqa: BLE001 - the fence stays; the next start tries again
+                log_exception("codexStoppedGoalPauseFail", exc, detail=thread_id[:8])
+            finally:
+                self._goal_answer_end(thread_id)
+        finally:
+            with self._goal_state_lock:
+                self.repausing = getattr(self, "repausing", set()) - {thread_id}
 
     def _interrupt_quietly(self, thread_id: str, turn_id: str) -> None:
         try:
