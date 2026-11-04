@@ -63,13 +63,15 @@ def test_service_is_built_per_call_from_the_factory(adapters):
     assert adapters.factories == [adapters.ctx, adapters.ctx]
 
 
-def test_leader_tick_is_silent_and_never_checks_busy(adapters):
+def test_leader_tick_is_silent_and_waits_behind_a_busy_leader(adapters):
+    # AUT-05: a tick that loses the race with the user's turn queues behind
+    # it; it never steers into or preempts that turn.
     adapters.leader_tick("nobody", "review the team")
     (kwargs,) = adapters.journal
     _silent_forced(kwargs, "nobody")
     assert kwargs["origin"] == "leader_tick"
     assert kwargs["trace_id"] == "fresh-trace"
-    assert kwargs["queue_if_busy"] is False
+    assert kwargs["queue_if_busy"] is True
 
 
 def test_heartbeat_only_reaches_idle_existing_agents(adapters):
@@ -84,6 +86,7 @@ def test_heartbeat_only_reaches_idle_existing_agents(adapters):
     (kwargs,) = adapters.journal
     _silent_forced(kwargs, "mike")
     assert kwargs["origin"] == "heartbeat"
+    assert kwargs["queue_if_busy"] is True  # AUT-05: never steers or preempts
 
 
 def test_decided_heartbeat_keys_by_request_and_never_queues(adapters):
@@ -232,3 +235,23 @@ def test_janitor_after_tick_throttles_attention_reconcile(monkeypatch):
 
     assert len(drained) == 3
     assert [event["kind"] for event in events] == ["janitor-attention", "janitor-attention"]
+
+
+
+@pytest.mark.parametrize("tick", ["heartbeat", "leader_tick"])
+def test_ticks_skip_a_stopped_or_queued_agent(adapters, tick):
+    """AUT-05: ticks queue behind a busy agent, so they stay away from a queue
+    a Stop paused or that already holds work (the janitor's rule); otherwise
+    every tick would park a row and all of them would run on resume."""
+    from lib import turn_queue
+    agent = _agent()
+    turn_queue.set_paused(agent["agent_id"], True)
+    getattr(adapters, tick)("mike", "tick")
+    assert adapters.journal == []
+    turn_queue.set_paused(agent["agent_id"], False)
+    turn_queue.enqueue(
+        queue_id="q-1", agent_id=agent["agent_id"], session="mike", text="next",
+        trace_id="t-1", client_msg_id="c-1", synthesize_audio=False,
+        origin="user", sender_agent_id="")
+    getattr(adapters, tick)("mike", "tick")
+    assert adapters.journal == []
