@@ -132,14 +132,7 @@ PORT = int(os.environ.get("CLAUDE_PWA_PORT", str(_CFG.port)))
 BIND_ADDR = os.environ.get("CLAUDE_PWA_BIND", _CFG.bind_addr)
 
 
-def _runtime_paths() -> RuntimePaths:
-    return RuntimePaths.from_home(pathlib.Path.home())
-
-
-def _truthy_header(value: str | None) -> bool:
-    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
-
-
+from lib.routes.helpers import _runtime_paths, _truthy_header, _raw_query_value, _safe_upload_name  # noqa: E402  (s3_apply)
 # Serializes read-decide-swap of ctx.stt in _activate_transcription_if_default.
 # Request threads never take it: the transcription pipeline reads ctx.stt once
 # per request, so a swap mid-request cannot hand one utterance two engines.
@@ -258,19 +251,6 @@ _CARTESIA_PREVIEW_LOCKS_GUARD = threading.Lock()
 def _cartesia_preview_lock(voice_id: str) -> threading.Lock:
     with _CARTESIA_PREVIEW_LOCKS_GUARD:
         return _CARTESIA_PREVIEW_LOCKS.setdefault(voice_id, threading.Lock())
-
-
-def _raw_query_value(path: str, key: str) -> str:
-    """Decode one query value without form-style `+` to space rewriting.
-
-    Filesystem paths legitimately contain plus signs. Native URLQueryItem may
-    leave them literal, whereas parse_qs assumes HTML form encoding.
-    """
-    for field in urlparse(path).query.split("&"):
-        raw_key, separator, raw_value = field.partition("=")
-        if separator and unquote(raw_key) == key:
-            return unquote(raw_value)
-    return ""
 
 
 def _header_int(raw: str | None) -> int | None:
@@ -6652,23 +6632,6 @@ class Handler(BaseHTTPRequestHandler):
         if not row or not path.is_file():
             return self._send(404, b"not found")
         return self._send_file(path)
-
-
-def _safe_upload_name(raw: str, content_type: str = "") -> str:
-    """Reduce a client-supplied filename to a safe basename, preserving the
-    extension so the agent's Read tool recognises images. Blocks path
-    traversal (no separators / leading dots survive); falls back to a
-    type-derived name when nothing usable is sent."""
-    base = os.path.basename((raw or "").replace("\\", "/")).strip()
-    cleaned = "".join(c for c in base if c.isalnum() or c in "._- ()")
-    cleaned = cleaned.strip().replace(" ", "_").lstrip(".")
-    primary_type = content_type.split(";", 1)[0].strip()
-    if not cleaned:
-        ext = mimetypes.guess_extension(primary_type) or ".bin"
-        cleaned = "upload" + ext
-    elif "." not in cleaned:
-        cleaned += mimetypes.guess_extension(primary_type) or ""
-    return cleaned[:128]
 
 
 def _dispatch_service(ctx: ServerContext):
