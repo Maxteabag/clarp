@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import datetime
 import itertools
-import re
 import threading
 import time
 from dataclasses import dataclass, replace
@@ -34,13 +33,12 @@ from .protocol import TurnSource
 from .transcript_watcher import (
     InotifyDispatcher, TranscriptWatcher, WatcherPool,
 )
-from .voice_markup import spoken_chunks_for_tts
+from .voice_markup import extract_speak_blocks, spoken_chunks_for_tts
 
 # Tag the agent wraps voice-bound content in. Everything outside the
 # tag is silent (still visible in the history pane, just not spoken).
 # Non-greedy + DOTALL so a multi-line block is captured wholesale, and
 # multiple blocks in one text payload each fire their own enqueue.
-_SPEAK_RE = re.compile(r"<speak>(.*?)</speak>", re.DOTALL | re.IGNORECASE)
 
 
 def _emit(*a, **kw):
@@ -356,11 +354,11 @@ class TranscriptStreamer:
             return
 
         spoken: list[tuple[str, bool]] = []
-        for match in _SPEAK_RE.finditer(text):
+        for block in extract_speak_blocks(text, attributes=False):
             spoken.extend(
                 (chunk, index == 0)
                 for index, chunk in enumerate(
-                    spoken_chunks_for_tts(match.group(1).strip()))
+                    spoken_chunks_for_tts(block.strip()))
             )
         if not spoken:
             return

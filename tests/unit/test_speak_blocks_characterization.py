@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-from lib import message_audio, transcript_streamer
+from lib.voice_markup import extract_speak_blocks
 
 CASES = {
     "plain": "Hello <speak>one</speak> bye",
@@ -41,12 +41,13 @@ MESSAGE_AUDIO = {
 }
 
 
+# The mode each reader passes (transcript_streamer._on_text, message_audio).
 def streamer_blocks(text):
-    return [m.group(1) for m in transcript_streamer._SPEAK_RE.finditer(text)]
+    return extract_speak_blocks(text, attributes=False)
 
 
 def message_audio_blocks(text):
-    return message_audio._SPEAK.findall(text)
+    return extract_speak_blocks(text, attributes=True)
 
 
 @pytest.mark.parametrize("name", sorted(CASES))

@@ -9,9 +9,8 @@ from urllib.parse import quote
 
 from . import events, identity
 from .db import conn, now_ms
-from .voice_markup import spoken_chunks_for_tts, spoken_for_tts
+from .voice_markup import extract_speak_blocks, spoken_chunks_for_tts, spoken_for_tts
 
-_SPEAK = re.compile(r"<speak\b[^>]*>(.*?)</speak>", re.I | re.S)
 
 
 def retained_mp3_paths(*, audio_dir: pathlib.Path, max_age_ms: int, max_bytes: int) -> set[str]:
@@ -60,7 +59,7 @@ def retained_events(*, session: str, message_id: str,
     ).fetchone()
     if not message or message["kind"] == "live":
         return []
-    chunks = [chunk for block in _SPEAK.findall(message["text"])
+    chunks = [chunk for block in extract_speak_blocks(message["text"], attributes=True)
               for chunk in spoken_chunks_for_tts(block)]
     if not chunks or len(chunks) > 128:
         return []
