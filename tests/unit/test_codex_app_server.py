@@ -162,9 +162,11 @@ def test_recycle_clients_closes_stdio_and_drops_writer_slots():
     first = object.__new__(codex_app_server._Client)
     first.active = None
     first.proc = _FakeProc()
+    first._lock = threading.Lock()      # as _Client.__init__ sets it
     second = object.__new__(codex_app_server._Client)
     second.active = None
     second.proc = _FakeProc()
+    second._lock = threading.Lock()
     codex_app_server._CLIENTS.clear()
     codex_app_server._CLIENTS["a"] = first
     codex_app_server._CLIENTS["b"] = second
@@ -179,6 +181,7 @@ def test_recycle_clients_closes_a_shared_client_once():
     only.active = None
     only.proc = _FakeProc()
     only._actives = {}
+    only._lock = threading.Lock()       # as _Client.__init__ sets it
     codex_app_server._CLIENTS.clear()
     codex_app_server._CLIENTS[codex_app_server._SHARED_KEY] = only
     codex_app_server._CLIENTS["stale-agent"] = only

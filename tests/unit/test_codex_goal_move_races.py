@@ -1,4 +1,4 @@
-# Reviewer A's probes on c1763727 (WIP a0e6a4b0, extends be7b998b), unchanged, as the stage-2 round-5 regression.
+# Reviewer A's probes on be8baff4 (WIP c711135b, extends a0e6a4b0), unchanged, as the stage-2 round-6 regression.
 """Moving a goal must preserve user pause intent and recover failed activation."""
 import threading
 import pytest
@@ -187,3 +187,58 @@ def test_a_credential_switch_does_not_kill_an_unadopted_native_continuation(fake
         assert client.proc.poll() is None, 'credential refresh called an executing native goal idle and killed its process'
     finally:
         release.set()
+
+
+@pytest.mark.parametrize('shutdown_path', ['credential', 'recycle', 'usage'])
+def test_a_current_client_goal_admitted_after_the_quiet_snapshot_is_not_killed(fake, tmp_path, monkeypatch, shutdown_path):
+    monkeypatch.setenv('CLARP_QA_GOAL_TURN_HOLD', '3')
+    agent, thread, _ = _leftover(fake, tmp_path, monkeypatch, 'current-admission')
+    assert _wait(lambda: not cas.active_handles(agent))
+    client = cas._client(agent, 'current-admission')
+    looked_up, begin, native_running, answer_release = (threading.Event() for _ in range(4))
+    errors = []
+    real_goal, real_request, real_quiet = client.goal, client.request, client._goal_may_continue
+    before = len(_goal_turns(fake, thread))
+    def after_pool_lookup(*args, **kwargs):
+        looked_up.set()
+        assert begin.wait(5)
+        return real_goal(*args, **kwargs)
+    monkeypatch.setattr(client, 'goal', after_pool_lookup)
+    def request(method, params, timeout=30):
+        result = real_request(method, params, timeout=timeout)
+        if method == 'thread/goal/set' and params.get('status') == 'active':
+            assert _wait(lambda: len(_goal_turns(fake, thread)) == before + 1)
+            native_running.set()
+            assert answer_release.wait(5)
+        return result
+    monkeypatch.setattr(client, 'request', request)
+    def quiet_snapshot():
+        result = real_quiet()
+        begin.set()
+        native_running.wait(.5) # a correct exit fence may block or refuse admission
+        return result
+    monkeypatch.setattr(client, '_goal_may_continue', quiet_snapshot)
+    def user_resume():
+        try:
+            cas.goal(agent, 'resume')
+        except Exception as exc:
+            errors.append(exc)
+    worker = threading.Thread(target=user_resume)
+    worker.start()
+    try:
+        assert looked_up.wait(5)
+        if shutdown_path == 'credential':
+            (fake / 'auth.json').write_text('account-two')
+            cas._client(agent, 'current-admission')
+        elif shutdown_path == 'recycle':
+            cas.recycle_clients()
+        else:
+            cas.recover_usage_failure(cas.CodexTurnFailure('synthetic usage limit', client, False))
+        cut_running = native_running.is_set() and client.proc.poll() is not None
+    finally:
+        begin.set()
+        answer_release.set()
+        worker.join(5)
+    assert not worker.is_alive()
+    assert all(isinstance(error, RuntimeError) for error in errors), errors
+    assert not cut_running, f'{shutdown_path} shutdown killed a goal admitted after its quiet snapshot'
