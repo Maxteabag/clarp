@@ -189,8 +189,8 @@ def reconcile_agent(agent_id: str, backend: str | None = None, *,
             if (backends.by_id(backend).resume_target(bsid, "", home) is None
                     and agents_db.live_backend_session(agent_id) == bsid
                     and not has_live_work(agent_id, backend)
-                    and not _runtime_owns_now(agent_id)):
-                agents_db.end_current_runtime(agent_id)
+                    and not _runtime_owns_now(agent_id)
+                    and agents_db.end_runtime_bound_to(agent_id, bsid)):
                 log("reconcileGhostSession",
                     f"agent={agent_id} bsid={bsid} has no transcript; unbound")
                 repaired["ghost_session"] = bsid
