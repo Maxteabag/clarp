@@ -25,6 +25,7 @@ KINDS = frozenset({"agents-working", "agents"})
 WORKING = frozenset({"thinking", "responding", "tool", "compacting", "limited"})
 NEEDS_YOU = frozenset({"waiting"})
 MAX_ROWS = 5
+STRUCTURAL_FLOOR_SEC = 10.0
 STALE_AFTER_SEC = 15 * 60
 
 
@@ -317,6 +318,7 @@ class LiveActivityPusher:
         self._sent_needs = 0
         self._last_sent = 0.0
         self._timer = None
+        self._timer_due = 0.0
         self._attention_source = attention
         self._attention: dict[str, Any] | None = None
         self._attention_at = 0.0
@@ -448,13 +450,26 @@ class LiveActivityPusher:
         urgent = state["needs_you"] > self._sent_needs
         structural = self._sent_key is None or shape != self._sent_key[:3]
         now = self._clock()
-        if urgent or (structural and now - self._last_sent >= 2.0) \
-                or now - self._last_sent >= self._min_interval:
+        # A structural change waits at least STRUCTURAL_FLOOR_SEC after the
+        # last push, routine churn min_interval (APNS-N1: 2 s used the relay
+        # budget up); either way the latest state goes out when the timer fires.
+        floor = min(STRUCTURAL_FLOOR_SEC, self._min_interval) if structural else self._min_interval
+        if urgent or now - self._last_sent >= floor:
             self._push(state, detail, "10" if urgent else "5")
             return
+        due = self._last_sent + floor
+        if self._timer is not None and due < self._timer_due:
+            self._cancel_timer()
         if self._timer is None:
-            wait = max(0.0, self._min_interval - (now - self._last_sent))
-            self._timer = self._schedule(wait, self._fire)
+            self._timer_due = due
+            self._timer = self._schedule(max(0.0, due - now), self._fire)
+
+    def _cancel_timer(self) -> None:
+        try:
+            self._timer.cancel()
+        except Exception:  # noqa: BLE001 - a timer that already ran
+            pass
+        self._timer = None
 
     def _fire(self) -> None:
         with self._lock:
@@ -463,11 +478,7 @@ class LiveActivityPusher:
 
     def _push(self, state: dict[str, Any], detail: tuple, priority: str) -> None:
         if self._timer is not None:
-            try:
-                self._timer.cancel()
-            except Exception:  # noqa: BLE001
-                pass
-            self._timer = None
+            self._cancel_timer()
         self._sent_key = detail
         self._sent_needs = state["needs_you"]
         self._last_sent = self._clock()
