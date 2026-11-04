@@ -1,0 +1,37 @@
+# S9 module splits (rf-fix3): agent_rings.py, cut 1b.
+# Applied by tools/refactor/split_apply.py; see its docstring. Prepared on main by
+# splitting the SAY/LISTEN_FIRST tuple and by tests patching these names through
+# tests/patching.py:patch_shared (it reaches the split family).
+
+[[split]]
+name = "agent-rings"
+module = "lib/agent_rings.py"
+
+[[split.part]]
+# The module's constants, clock, context and persistence primitives.
+module = "lib/agent_rings_base.py"
+names = [
+    "KEY", "AUDIT_KEY", "ENABLED_KEY", "VOIP_KEY", "DEVICE_KEY", "RING_TIMEOUT_MS",
+    "AGENT_INTERVAL_MS", "HOUR_MS", "HOURLY_LIMIT", "KEEP_RECORDS", "KEEP_AUDIT", "REASON_CHARS",
+    "OPENING_CHARS", "LIVE_JOIN_MS", "FINAL", "_lock", "_context", "_ABSENT",
+    "now_ms", "bind", "_load", "_save", "_audit", "audit",
+]
+
+[[split.part]]
+# Listen-first openings, host identity (C2-S2b), opening audio and the public view.
+module = "lib/agent_ring_openings.py"
+names = [
+    "SAY", "LISTEN_FIRST", "OPENING_MODES", "OPENING_KEY", "CALL_OPEN", "SILENCE_MS",
+    "OPEN_STATES", "COMMITTED", "SILENCE_CLAIMS", "CLAIMS", "ABANDON_REASONS", "KEEP_REQUESTS",
+    "_opening_lock", "_server_id", "_kick_queue", "_int", "_RECEIPT_ROWS", "_generation",
+    "_gen_pair", "_breach", "_identity_breach", "_terminal_history", "_settle_unknown", "_identity_gate",
+    "_opening_txn", "opening_state", "_openings", "_ring_for_token", "_public_intent", "_public_opening",
+    "_open_record", "_auth_proof", "_fence_breach", "_enforce_fence", "_refuse", "_retire",
+    "_STARTED_ROWS", "_WAITING_ROWS", "_DROPPED_ROWS", "is_initiative", "is_foreign_message", "_row_admission",
+    "_row", "_resolve_unknown", "_withdraw_row", "_supersede", "_check_live", "_header",
+    "_intend", "_fingerprint", "_validate", "opening_claim", "_apply_claim", "greeting",
+    "greeting_routed", "greeting_admitted", "admit_initiative", "_admit_after_resolve", "claim_initiative", "release_unsent",
+    "authorize_parked_launch", "resolve_launch_failure", "resolve_stale_claims", "_recover_one", "recover_openings", "_retire_where",
+    "retire_for_call", "retire_for_principal", "_announce_opening", "_opening_for_trace", "opening_audio", "skip_opening_synthesis",
+    "public",
+]
