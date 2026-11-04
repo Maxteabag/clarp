@@ -1585,8 +1585,10 @@ impl Engine {
                 c.set_error(&detail);
             });
         } else if let Some(client_id) = tag.strip_prefix("send:") {
-            self.send_answered(client_id);
-            if let Some((session, _)) = self.deliveries.remove(client_id) {
+            // The chat that sent it, also after its timer marked it failed.
+            let owner = self.send_answered(client_id);
+            let timed = self.deliveries.remove(client_id).map(|(session, _)| session);
+            if let Some(session) = timed.or(owner) {
                 // The Host answered with a reason (e.g. 413 'too long for this
                 // agent'): the bubble says it, so Resend is not pressed blindly.
                 let reason = if status > 0 { message } else { "" };

@@ -334,9 +334,12 @@ impl Conversation {
 
     /// A failed send with the Host's reason, its first line, shown on the
     /// bubble (empty: none, as for a lost connection).
+    /// A row the delivery timer already failed takes the Host's late reason;
+    /// a confirmed row is never failed again.
     pub fn mark_delivery_failed_because(&mut self, client_message_id: &str, reason: &str) {
         let Some(row) = self.index_of(&format!("u-{client_message_id}")) else { return };
-        if !self.messages[row].pending {
+        let late_reason = self.messages[row].delivery_failed && !reason.trim().is_empty();
+        if !self.messages[row].pending && !late_reason {
             return;
         }
         let mut message = self.messages[row].clone();
