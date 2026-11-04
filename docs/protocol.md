@@ -53,7 +53,7 @@ device credential from `POST /pairing/exchange`. A paired device may have
 (`/send`, `/transcribe`, `/upload`, `/select`, `/focus`, `/clips/ack`, `/clog`,
 `/location`, `/calendar/response`, `/remote-action`). Administrative routes and
 Oracle require full scope. Host filesystem browsing (`/agent-file`,
-`/agent-files`, `/dirs` and `/past-sessions?scope=all`) also requires full
+`/agent-files`, `/dirs` and `/past-sessions` with any scope) also requires full
 scope: a caller-selected root can contain configuration credentials, even
 though the operation is read-only. So do an agent's interactive terminal
 (`/terminal/<session>`) and `PATCH /schedules/<id>`.
@@ -569,7 +569,7 @@ apply the broadcast, not re-post `/select`, or two clients loop.
 - `DELETE /agents/<session>` — release the agent (soft delete).
 - `POST /agent-mute`, `/agent-archive`, `/agent-heartbeat`, `/agent-dreaming`,
   `/agent-voice` — per-agent toggles: `{"session", "<flag>": bool}`.
-- `GET /past-sessions?backend=&cwd=` — resumable backend conversations for
+- `GET /past-sessions?backend=&cwd=` (full scope) — resumable backend conversations for
   the start dialog.
 - `GET /agent-model-options` — the backend catalogue. `providers.<id>` is
   everything a chooser needs for one CLI: `label`, `detail`, `badge` (a

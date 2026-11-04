@@ -1134,7 +1134,9 @@ class Handler(BaseHTTPRequestHandler):
         ):
             return True
         # Exactly the routes, so unmatched paths keep their 404 (HTTP-01/03).
-        if path == "/dirs" or (path.startswith("/terminal/") and method == "GET"):
+        # /past-sessions with any scope: a caller-chosen cwd lists that
+        # directory's sessions and their first messages (HTTP-03b).
+        if path in ("/dirs", "/past-sessions") or (path.startswith("/terminal/") and method == "GET"):
             return True
         if method == "GET":
             return False
@@ -1826,9 +1828,6 @@ class Handler(BaseHTTPRequestHandler):
         raw = str(recover_user_path(raw))
         backend = backends.normalize(qs.get("backend", [""])[0])
         all_projects = (qs.get("scope", [""])[0] or "").strip().lower() == "all"
-        if all_projects and getattr(self, "_request_device_scope", "") == "limited":
-            # Every project's sessions is host browsing: full scope only.
-            return self._json_error(403, "full device access required")
         limit = 100 if all_projects else 20
         sessions = backends.list_sessions(
             backend, raw, limit=limit, all_projects=all_projects)
