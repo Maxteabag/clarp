@@ -343,11 +343,11 @@ SCENARIOS = [
             {'op': 'join', 'name': 'send pool-b'},
             {'op': 'wait_settled', 'message_id': 'u-pool-a'},
             {'op': 'wait_settled', 'message_id': 'u-pool-b'},
-            # A user Stop withdraws the agent's admitted-but-unlaunched sends (existing
-            # semantics): the follow-up's launch receipt is fenced, its park row gone.
-            {'op': 'wait_sql', 'sql': "SELECT count(*) FROM settings WHERE key LIKE 'launch-receipt:%' "
-                                      "AND json_extract(value, '$.client_msg_id') = 'pool-a2' "
-                                      "AND json_extract(value, '$.state') = 'fenced'"},
+            # A follow-up acknowledged as queued survives the Stop in the paused queue
+            # (lead's decision on TP-N3 (iii)): resumed, it runs exactly once.
+            {'op': 'get', 'path': '/turn-queue?session=rachel'},
+            {'op': 'post', 'path': '/turn-queue/resume', 'body': {'session': 'rachel'}},
+            {'op': 'wait_settled', 'message_id': 'u-pool-a2'},
             {'op': 'quiesce', 'sessions': ('rachel', 'mike')},
             {'op': 'get', 'path': '/turn-queue?session=rachel'},
             {'op': 'get', 'path': '/log?session=rachel'},
