@@ -151,6 +151,9 @@ continue as before.
   except the quarantined tests (read the result, not a wrapper's exit code);
   move-only commits pass the AST-identity check once it exists; the layer test
   once it exists.
+  Keep the full pytest output of every G1: tee it to a log file before any grep,
+  and cite the log path in packets and flake reports (a bare FAILED line cannot
+  tell a deadline miss from a real weakness).
 - **G2 harness** (binding since go/no-go 1): replay of head against its own base
   on main with a harness commit that has reviewer B's SOURCE YES: zero
   unexplained differences. On the laptop `python3 tests/replay/run.py prepare
