@@ -585,3 +585,59 @@ def test_the_stored_event_log_gets_the_same_canonical_rules_as_the_stream():
         return _capture(db={'schema': [], 'pk': {'sse_events': ['event_id']}, 'tables': {'sse_events': rows}})
     assert not _report(log(spawn, start), log(start, spawn)).items
     assert _report(log(spawn, start), log(start, {**spawn, 'source': 'x'})).items
+
+
+def test_a_clip_like_number_in_free_text_remains_content():
+    # Reviewer B s0-voice-853f9037 F1: only a clip name, or a path or URL ending in one, is rewritten.
+    left = _capture(http=[_http({'text': 'retain token 1800000000000__payload'})])
+    right = _capture(http=[_http({'text': 'retain token 1800000000001__payload'})])
+    assert _report(left, right).items
+
+
+def _clip_files(name):
+    return [{'path': f'cache/audio/{name}', 'kind': 'bytes', 'bytes': 3, 'digest': 'd'},
+            {'path': f'cache/audio/{name}.json', 'kind': 'bytes', 'bytes': 3, 'digest': 'e'}]
+
+
+def test_a_generated_clip_name_path_and_url_lose_only_their_creation_time():
+    def clip(ms, session='rachel'):
+        name = f'{ms}__{session}.mp3'
+        return _capture(http=[_http({'name': name, 'url': f'/audio/{name}',
+                                     'path': f'/scratch/s/cache/audio/{name}.json'})],
+                        files=_clip_files(name))
+    assert not _report(clip(1793692941182), clip(1793692941999)).items
+    assert _report(clip(1793692941182), clip(1793692941182, 'bella')).items
+
+
+def test_filename_shaped_http_text_is_still_content():
+    # Reviewer B s0-voice-36b17ca5: a value shaped like a clip name, with no such clip, is content.
+    left = _capture(http=[_http({'text': '1793692941182__rachel.mp3'})])
+    right = _capture(http=[_http({'text': '1793692941999__rachel.mp3'})])
+    assert _report(left, right).items
+
+
+def test_only_the_runs_own_clips_are_rewritten():
+    # A clip-shaped value that names no clip of this run stays content even when the run has a clip.
+    def run(ms, other):
+        name = f'{ms}__rachel.mp3'
+        return _capture(http=[_http({'url': f'/audio/{name}', 'text': f'{other}__rachel.mp3'})],
+                        files=_clip_files(name))
+    assert not _report(run(1793692941182, 1700000000000), run(1793692941999, 1700000000000)).items
+    assert _report(run(1793692941182, 1700000000000), run(1793692941999, 1700000000001)).items
+
+
+def test_the_chunk_callback_plant_needs_its_stream_witness():
+    # Reviewer B s0-voice-853f9037 F2: only the 'clip live stream' exchange counts.
+    change = planted.BY_ID['on-chunk-signature']
+    live = planted._http_index('voice-streamed-clip', 'clip live stream')
+
+    def diff_at(locator, kind, scenario='voice-streamed-clip', channel='http'):
+        return [{'scenario': scenario, 'channel': channel, 'kind': kind, 'locator': locator}]
+    assert planted.caught(change, diff_at(f'[{live}:{live + 1}]->[{live}:{live + 1}]', 'sequence-replace'))
+    assert planted.caught(change, diff_at(f'[{live}].body.<bytes>', 'changed'))
+    assert not planted.caught(change, diff_at('[0].status', 'changed'))
+    assert not planted.caught(change, diff_at(f'[0:{live + 1}]->[0:{live + 1}]', 'sequence-replace'))
+    assert not planted.caught(change, diff_at(f'[{live + 1}].body.<bytes>', 'changed'))
+    assert not planted.caught(change, diff_at('clips[1].producer_status', 'changed', channel='table'))
+    assert not planted.caught(change, diff_at(f'[{live}:{live + 1}]->[{live}:{live + 1}]', 'sequence-replace',
+                                              scenario='voice-clip-turn'))

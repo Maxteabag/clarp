@@ -22,6 +22,7 @@ import shlex
 import signal
 import sys
 import threading
+import time
 
 HARNESS = Path(__file__).resolve().parents[2]
 # tests/qa/fake_codex.py behind the harness's tool-item proxy (fake_provider.py).
@@ -105,6 +106,49 @@ def loopback_only() -> None:
     socket.getaddrinfo = getaddrinfo
 
 
+# 100 silent MPEG-1 Layer III frames (128 kbit/s, 44.1 kHz, 417 bytes each): a
+# synthetic stream that splits into three of the adapter's 16 KiB reads.
+SYNTHETIC_MP3 = (b'\xff\xfb\x90\x00' + bytes(413)) * 100
+
+
+def synthetic_cartesia() -> None:
+    """The real Cartesia adapter (lib.cartesia_tts.synthesize) streams a fixed
+    synthetic response instead of calling the vendor: only its transport is
+    replaced, and only for its own URL. Anything else still meets the loopback
+    guard. Used by the scenarios that route TTS to Cartesia in their config."""
+    import io
+    import urllib.request
+    from lib import cartesia_tts
+    real = urllib.request.urlopen
+
+    pace_file = Path(os.environ['CLARP_QA_PROVIDER_ROOT']) / 'cartesia-pace'
+
+    class Response(io.BytesIO):
+        """The synthetic body. With provider/cartesia-pace (seconds), every read
+        waits that long first, so a client can subscribe to the clip's live
+        stream while it is still being produced."""
+        status = 200
+
+        def read(self, size=-1):
+            if pace_file.is_file():
+                time.sleep(float(pace_file.read_text().strip() or 0))
+            return super().read(size)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            self.close()
+            return False
+
+    def urlopen(request, *args, **kwargs):
+        url = getattr(request, 'full_url', request)
+        if url == cartesia_tts._URL:
+            return Response(SYNTHETIC_MP3)
+        return real(request, *args, **kwargs)
+    cartesia_tts.urllib.request.urlopen = urlopen
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--build', type=Path, required=True)
@@ -174,6 +218,7 @@ def main():
     spec = importlib.util.spec_from_file_location('replay_server', build / 'server/server.py')
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    synthetic_cartesia()
     # Never a real interactive CLI: a scenario only sends plain GETs to /terminal/
     # (answered before any spawn), and this makes an accidental upgrade fail loudly.
     from lib import terminal_ws

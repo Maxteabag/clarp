@@ -63,7 +63,8 @@ def test_harness_provider_login_and_code(running_server, monkeypatch):
                         lambda *args: seen.append(("oauth", args)) or {"pending": True})
     monkeypatch.setattr(harness_providers, "submit_code",
                         lambda *args: seen.append(("code", args)) or {"ok": True})
-    for path in ("/harness-providers/login", "/harness-providers/login-code"):
+    for path in ("/harness-providers/login", "/harness-providers/login-code",
+                 "/harness-providers/logout"):
         assert _call(base, "POST", path, raw=b"[]") == (400, {"error": "bad json"})
     assert _call(base, "POST", "/harness-providers/login", {
         "harness": "opencode", "provider": "p", "method": 0, "inputs": {"a": 1}}) == (

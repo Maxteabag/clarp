@@ -132,7 +132,14 @@ PORT = int(os.environ.get("CLAUDE_PWA_PORT", str(_CFG.port)))
 BIND_ADDR = os.environ.get("CLAUDE_PWA_BIND", _CFG.bind_addr)
 
 
-from lib.routes.helpers import _runtime_paths, _truthy_header  # noqa: E402  (s3_apply)
+def _runtime_paths() -> RuntimePaths:
+    return RuntimePaths.from_home(pathlib.Path.home())
+
+
+def _truthy_header(value: str | None) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 # Serializes read-decide-swap of ctx.stt in _activate_transcription_if_default.
 # Request threads never take it: the transcription pipeline reads ctx.stt once
 # per request, so a swap mid-request cannot hand one utterance two engines.
@@ -375,13 +382,7 @@ def _byte_range(header: str, total: int) -> tuple[str, int, int]:
     return ("partial", lo, min(total - 1 if hi is None else hi, total - 1))
 
 
-from lib.routes.vocab import VocabRoutes  # noqa: E402  (s3_apply)
-
-
-from lib.routes.settings import SettingsRoutes  # noqa: E402  (s3_apply)
-
-
-class Handler(SettingsRoutes, VocabRoutes, BaseHTTPRequestHandler):
+class Handler(BaseHTTPRequestHandler):
     server_version = "ClaudePWA/1.0"
     # HTTP/1.1 so the tailscale-serve reverse proxy (and any direct client)
     # can keep connections alive: at the 1.0 default every request paid a
@@ -1480,9 +1481,97 @@ class Handler(SettingsRoutes, VocabRoutes, BaseHTTPRequestHandler):
         }).encode()
         self._send(200, body, "application/json")
 
+    def _handle_judgments_settings_get(self):
+        from lib import judgments
+        body = json.dumps({
+            "settings": judgments.status(),
+            "sites": list(judgments.SITES),
+            "defaults": {"enabled": False, "timeout_ms": judgments.DEFAULT_TIMEOUT_MS},
+            "limits": {"timeout_ms": [100, judgments.MAX_TIMEOUT_MS]},
+        }).encode()
+        self._send(200, body, "application/json")
+
+    def _handle_judgments_settings_post(self):
+        from lib import judgments
+        data = self._read_json()
+        if not isinstance(data, dict):
+            return self._json_error(400, "bad json")
+        try:
+            settings = judgments.update_settings(data)
+        except ValueError as exc:
+            return self._json_error(400, str(exc))
+        return self._json_ok({"ok": True, "settings": settings})
+
+    def _handle_judgments_decisions_get(self):
+        from lib import judgments
+        query = self._query()
+        site = (query.get("site") or [""])[0]
+        try:
+            limit = int((query.get("limit") or ["50"])[0])
+        except (TypeError, ValueError):
+            limit = 50
+        if site and site not in judgments.SITES:
+            return self._json_error(400, "unknown site")
+        body = json.dumps({"decisions": judgments.recent(limit=limit, site=site)}).encode()
+        self._send(200, body, "application/json")
+
+    def _handle_herald_settings_get(self):
+        body = json.dumps({
+            "settings": get_herald_settings().as_dict(),
+            "defaults": {
+                "speak_if_short_chars": DEFAULT_SPEAK_IF_SHORT_CHARS,
+                "short_reply_bypass_enabled": True,
+            },
+            "limits": {
+                "speak_if_short_chars": [0, MAX_SPEAK_IF_SHORT_CHARS],
+            },
+        }).encode()
+        self._send(200, body, "application/json")
+
+    def _handle_personalities_settings_get(self):
+        body = json.dumps({
+            "settings": get_personality_settings().as_dict(),
+        }).encode()
+        self._send(200, body, "application/json")
+
     def _handle_agent_model_options(self):
         from lib import provider_capabilities
         self._json_ok(provider_capabilities.endpoint_response())
+
+    def _handle_automation_settings_get(self):
+        from lib.automation_settings import get
+        self._json_ok(get())
+
+    def _handle_automation_settings_post(self):
+        from lib.automation_settings import update
+        data = self._read_json()
+        if data is None or not isinstance(data.get("special_treatment"), bool):
+            return self._json_error(400, "special_treatment required")
+        self._json_ok(update(data["special_treatment"]))
+
+    def _handle_avatar_settings_get(self):
+        from lib.avatar_settings import get
+        self._json_ok(get())
+
+    def _handle_avatar_settings_post(self):
+        from lib.avatar_settings import update
+        data = self._read_json()
+        if data is None or not isinstance(data.get("model_avatars"), bool):
+            return self._json_error(400, "model_avatars required")
+        self._json_ok(update(data["model_avatars"]))
+
+    def _handle_launch_directories(self):
+        from lib.launch_directories import lookup
+        query = self._query().get("q", [""])[0]
+        return self._json_ok(lookup(query))
+
+    def _handle_favorite_paths(self):
+        qs = self._query()
+        try:
+            limit = int(qs.get("limit", ["5"])[0])
+        except ValueError:
+            limit = 5
+        self._json_ok({"paths": agents_db.favorite_paths(limit)})
 
     def _handle_orchestrator_decisions(self):
         qs = self._query()
@@ -1545,6 +1634,11 @@ class Handler(SettingsRoutes, VocabRoutes, BaseHTTPRequestHandler):
         """The fleet map itself; a static page that reads /viz/events."""
         return self._send_file(self.ctx.static / "viz.html")
 
+    def _handle_relay_status(self):
+        relay = self.server.relay
+        status = relay.status() if relay else {"enabled": False, "state": "disabled"}
+        self._json_ok(status)
+
     def _handle_snapshot(self):
         """Unified per-agent read model for the dashboard."""
         from lib import snapshot
@@ -1582,6 +1676,50 @@ class Handler(SettingsRoutes, VocabRoutes, BaseHTTPRequestHandler):
             json.dumps(history, ensure_ascii=False).encode(),
             "application/json",
         )
+
+    def _handle_dirs(self):
+        from lib.launch_paths import recover_user_path
+        qs = self._query()
+        raw = (qs.get("path", [""])[0] or "").strip()
+        raw = str(recover_user_path(raw))
+        if raw.endswith("/"):
+            base, frag = raw[:-1] or "/", ""
+        else:
+            base = os.path.dirname(raw) or "/"
+            frag = os.path.basename(raw).lower()
+        matches: list[str] = []
+        try:
+            for entry in sorted(os.listdir(base)):
+                if entry.startswith("."):
+                    continue
+                full = os.path.join(base, entry)
+                if not os.path.isdir(full):
+                    continue
+                if frag and not entry.lower().startswith(frag):
+                    continue
+                matches.append(full)
+                if len(matches) >= 20:
+                    break
+        except OSError as e:
+            log_exception("dirsListFail", e, detail=base)
+        body = json.dumps({"base": base, "matches": matches}).encode()
+        self._send(200, body, "application/json")
+
+    def _handle_past_sessions(self):
+        from lib.launch_paths import recover_user_path
+        qs = self._query()
+        raw = (qs.get("cwd", [""])[0] or "").strip()
+        raw = str(recover_user_path(raw))
+        backend = backends.normalize(qs.get("backend", [""])[0])
+        all_projects = (qs.get("scope", [""])[0] or "").strip().lower() == "all"
+        limit = 100 if all_projects else 20
+        sessions = backends.list_sessions(
+            backend, raw, limit=limit, all_projects=all_projects)
+        body = json.dumps({
+            "cwd": raw, "scope": "all" if all_projects else "workspace",
+            "sessions": sessions,
+        }).encode()
+        self._send(200, body, "application/json")
 
     @staticmethod
     def _first_user_message(jsonl: pathlib.Path) -> str:
@@ -1641,6 +1779,25 @@ class Handler(SettingsRoutes, VocabRoutes, BaseHTTPRequestHandler):
             "deployed_version": self.ctx.deployed_version(),
             "release_id": getattr(
                 self.ctx, "deployed_release_id", lambda: "development")(),
+        }).encode()
+        self._send(200, body, "application/json")
+
+    def _handle_diagnostics_health(self):
+        from lib import tts_queue
+        stt_ready = bool(self.ctx.stt.ready.is_set())
+        ffmpeg_ready = self.server.boot_config.delivery != "hls" or shutil.which("ffmpeg") is not None
+        body = json.dumps({
+            "ready": stt_ready and ffmpeg_ready,
+            "checks": {
+                "stt_ready": stt_ready,
+                "ffmpeg_ready": ffmpeg_ready,
+            },
+            "subsystems": health.snapshot(),
+            "tts_queue": {
+                "pending": tts_queue.pending_count(),
+                "in_flight": tts_queue.in_flight_count(),
+            },
+            "deployed_version": self.ctx.deployed_version(),
         }).encode()
         self._send(200, body, "application/json")
 
@@ -1763,6 +1920,316 @@ class Handler(SettingsRoutes, VocabRoutes, BaseHTTPRequestHandler):
     def _query_first(self) -> dict[str, str]:
         return {k: (v[0] if v else "") for k, v in self._query().items()}
 
+    def _vocab_body(self) -> dict | None:
+        data = self._read_json()
+        if not isinstance(data, dict):
+            self._json_error(400, "bad json")
+            return None
+        return data
+
+    def _handle_vocab_packs_get(self):
+        from lib import vocab_store
+        counts = vocab_store.pack_term_counts()
+        packs = vocab_store.list_packs()
+        for pack in packs:
+            pack["terms"] = counts.get(pack["pack_id"], 0)
+        self._json_ok({"packs": packs})
+
+    def _handle_vocab_packs_post(self):
+        from lib import vocab_store
+        data = self._vocab_body()
+        if data is None:
+            return
+        name = str(data.get("name") or "").strip()
+        if not name:
+            return self._json_error(400, "name is required")
+        kind = str(data.get("kind") or "static")
+        if kind not in ("static", "dynamic"):
+            return self._json_error(400, "kind must be static or dynamic")
+        try:
+            pack_id = vocab_store.create_pack(
+                name, kind=kind, generator=str(data.get("generator") or ""),
+                priority=float(data.get("priority", 1.0)),
+                floor=int(data.get("floor", 0)),
+                enabled=bool(data.get("enabled", True)))
+        except sqlite3.IntegrityError:
+            return self._json_error(409, "a pack with that name exists")
+        except (TypeError, ValueError) as exc:
+            return self._json_error(400, str(exc))
+        for term in data.get("terms") or []:
+            if isinstance(term, str):
+                vocab_store.add_term(pack_id, term)
+            elif isinstance(term, dict):
+                vocab_store.add_term(
+                    pack_id, str(term.get("text") or ""),
+                    rarity=float(term.get("rarity", 0.5)),
+                    say_as=str(term.get("say_as") or ""),
+                    often_heard_as=str(term.get("often_heard_as") or ""))
+        self._json_ok({"ok": True, "pack_id": pack_id})
+
+    def _handle_vocab_packs_update(self):
+        from lib import vocab_store
+        data = self._vocab_body()
+        if data is None:
+            return
+        pack_id = str(data.get("pack_id") or "")
+        if not pack_id:
+            return self._json_error(400, "pack_id is required")
+        try:
+            if "enabled" in data:
+                vocab_store.set_pack_enabled(pack_id, bool(data["enabled"]))
+            vocab_store.update_pack(
+                pack_id, name=data.get("name"),
+                priority=data.get("priority"), floor=data.get("floor"))
+        except sqlite3.IntegrityError:
+            return self._json_error(409, "a pack with that name exists")
+        except (TypeError, ValueError) as exc:
+            return self._json_error(400, str(exc))
+        self._json_ok({"ok": True})
+
+    def _handle_vocab_packs_delete(self):
+        from lib import vocab_store
+        data = self._vocab_body()
+        if data is None:
+            return
+        pack_id = str(data.get("pack_id") or "")
+        if not pack_id:
+            return self._json_error(400, "pack_id is required")
+        vocab_store.delete_pack(pack_id)
+        self._json_ok({"ok": True})
+
+    def _handle_vocab_terms_get(self):
+        from lib import vocab_store
+        pack_id = self._query_first().get("pack_id", "")
+        if not pack_id:
+            return self._json_error(400, "pack_id is required")
+        self._json_ok({"pack_id": pack_id, "terms": vocab_store.list_terms(pack_id)})
+
+    def _handle_vocab_terms_post(self):
+        from lib import vocab_store
+        from lib.vocab_generators import estimate_rarity
+        data = self._vocab_body()
+        if data is None:
+            return
+        pack_id = str(data.get("pack_id") or "")
+        text = str(data.get("text") or "").strip()
+        if not pack_id or not text:
+            return self._json_error(400, "pack_id and text are required")
+        rarity = data.get("rarity")
+        try:
+            added = vocab_store.add_term(
+                pack_id, text,
+                rarity=float(rarity) if rarity is not None else estimate_rarity(text),
+                say_as=str(data.get("say_as") or ""),
+                often_heard_as=str(data.get("often_heard_as") or ""),
+                source=str(data.get("source") or "manual"))
+        except sqlite3.IntegrityError:
+            return self._json_error(404, "no such pack")
+        except (TypeError, ValueError) as exc:
+            return self._json_error(400, str(exc))
+        self._json_ok({"ok": True, "added": added})
+
+    def _handle_vocab_terms_update(self):
+        from lib import vocab_store
+        data = self._vocab_body()
+        if data is None:
+            return
+        try:
+            term_id = int(data.get("term_id"))
+        except (TypeError, ValueError):
+            return self._json_error(400, "term_id is required")
+        try:
+            updated = vocab_store.update_term(
+                term_id, text=data.get("text"), say_as=data.get("say_as"),
+                often_heard_as=data.get("often_heard_as"), rarity=data.get("rarity"))
+        except sqlite3.IntegrityError:
+            return self._json_error(409, "that term already exists in the pack")
+        except (TypeError, ValueError) as exc:
+            return self._json_error(400, str(exc))
+        self._json_ok({"ok": True, "updated": updated})
+
+    def _handle_vocab_terms_delete(self):
+        from lib import vocab_store
+        data = self._vocab_body()
+        if data is None:
+            return
+        try:
+            term_id = int(data.get("term_id"))
+        except (TypeError, ValueError):
+            return self._json_error(400, "term_id is required")
+        vocab_store.delete_term(term_id)
+        self._json_ok({"ok": True})
+
+    def _handle_vocab_profiles_get(self):
+        from lib import vocab_store
+        self._json_ok({"profiles": vocab_store.list_profiles()})
+
+    def _handle_vocab_profile_get(self):
+        from lib import vocab_store
+        profile_id = self._query_first().get("profile_id", "")
+        detail = vocab_store.profile_detail(profile_id) if profile_id else None
+        if detail is None:
+            return self._json_error(404, "no such profile")
+        self._json_ok(detail)
+
+    def _handle_vocab_profiles_post(self):
+        from lib import vocab_store
+        data = self._vocab_body()
+        if data is None:
+            return
+        name = str(data.get("name") or "").strip()
+        if not name:
+            return self._json_error(400, "name is required")
+        try:
+            profile_id = vocab_store.create_profile(name)
+        except sqlite3.IntegrityError:
+            return self._json_error(409, "a profile with that name exists")
+        for position, pack_id in enumerate(data.get("pack_ids") or []):
+            vocab_store.add_pack_to_profile(profile_id, str(pack_id), position)
+        self._json_ok({"ok": True, "profile_id": profile_id})
+
+    def _handle_vocab_profile_workspace(self):
+        """Turn workspace harvesting on or off for one profile.
+
+        Off is the default and the safe answer: reading an agent's folders is
+        a choice, and the absence of one is what let a package tree write most
+        of a biasing payload.
+        """
+        from lib import vocab_store
+        data = self._vocab_body()
+        if data is None:
+            return
+        profile_id = str(data.get("profile_id") or "").strip()
+        if not profile_id:
+            return self._json_error(400, "profile_id is required")
+        if not isinstance(data.get("enabled"), bool):
+            return self._json_error(400, "enabled must be a boolean")
+        if vocab_store.profile_detail(profile_id) is None:
+            return self._json_error(404, "no such profile")
+        vocab_store.set_profile_harvests_workspace(profile_id, data["enabled"])
+        self._json_ok({
+            "ok": True, "profile_id": profile_id,
+            "harvests_workspace": vocab_store.profile_harvests_workspace(profile_id),
+        })
+
+    def _handle_vocab_profiles_delete(self):
+        from lib import vocab_store
+        data = self._vocab_body()
+        if data is None:
+            return
+        profile_id = str(data.get("profile_id") or "")
+        if not profile_id:
+            return self._json_error(400, "profile_id is required")
+        vocab_store.delete_profile(profile_id)
+        self._json_ok({"ok": True})
+
+    def _handle_vocab_profile_packs_post(self):
+        from lib import vocab_store
+        data = self._vocab_body()
+        if data is None:
+            return
+        profile_id = str(data.get("profile_id") or "")
+        pack_id = str(data.get("pack_id") or "")
+        if not profile_id or not pack_id:
+            return self._json_error(400, "profile_id and pack_id are required")
+        try:
+            vocab_store.add_pack_to_profile(
+                profile_id, pack_id, int(data.get("position", 0)))
+        except sqlite3.IntegrityError:
+            return self._json_error(404, "no such profile or pack")
+        except (TypeError, ValueError) as exc:
+            return self._json_error(400, str(exc))
+        self._json_ok({"ok": True})
+
+    def _handle_vocab_profile_packs_remove(self):
+        from lib import vocab_store
+        data = self._vocab_body()
+        if data is None:
+            return
+        profile_id = str(data.get("profile_id") or "")
+        pack_id = str(data.get("pack_id") or "")
+        if not profile_id or not pack_id:
+            return self._json_error(400, "profile_id and pack_id are required")
+        vocab_store.remove_pack_from_profile(profile_id, pack_id)
+        self._json_ok({"ok": True})
+
+    def _handle_vocab_assignments_get(self):
+        from lib import vocab_store
+        self._json_ok({"assignments": vocab_store.assignments()})
+
+    def _handle_vocab_assign_post(self):
+        from lib import vocab_store
+        data = self._vocab_body()
+        if data is None:
+            return
+        profile_id = str(data.get("profile_id") or "")
+        if not profile_id:
+            return self._json_error(400, "profile_id is required")
+        try:
+            vocab_store.assign_profile(
+                profile_id, agent_id=str(data.get("agent_id") or ""),
+                team_id=str(data.get("team_id") or ""))
+        except ValueError as exc:
+            return self._json_error(400, str(exc))
+        except sqlite3.IntegrityError:
+            return self._json_error(404, "no such profile")
+        self._json_ok({"ok": True})
+
+    def _handle_vocab_unassign_post(self):
+        from lib import vocab_store
+        data = self._vocab_body()
+        if data is None:
+            return
+        agent_id = str(data.get("agent_id") or "")
+        team_id = str(data.get("team_id") or "")
+        if not agent_id and not team_id:
+            return self._json_error(400, "agent_id or team_id is required")
+        vocab_store.unassign(agent_id=agent_id, team_id=team_id)
+        self._json_ok({"ok": True})
+
+    def _handle_vocab_budgets_get(self):
+        from lib import stt_providers
+        from lib.vocab_compile import describe_budgets
+        self._json_ok({"budgets": describe_budgets(),
+                       "engine": stt_providers.selected_engine(),
+                       "models": stt_providers.cloud_models()})
+
+    def _handle_vocab_preview_get(self):
+        query = self._query_first()
+        preview = getattr(self.ctx, "vocab_preview", None)
+        if not callable(preview):
+            return self._json_error(503, "vocabulary preview unavailable")
+        try:
+            payload = preview(
+                session=query.get("session", ""),
+                requested_model=query.get("model", ""),
+                delegated=_truthy_header(query.get("delegated", "")))
+        except Exception as exc:  # noqa: BLE001
+            log_exception("vocabPreviewFail", exc)
+            return self._json_error(500, "vocabulary preview failed")
+        self._json_ok(payload)
+
+    def _handle_vocab_runs_get(self):
+        from lib import vocab_store
+        query = self._query_first()
+        try:
+            limit = max(1, min(200, int(query.get("limit") or 20)))
+        except ValueError:
+            limit = 20
+        self._json_ok({"runs": vocab_store.recent_runs(
+            limit, session=query.get("session", ""))})
+
+    def _handle_vocab_run_get(self):
+        from lib import heard_audio, vocab_store
+        trace_id = self._query_first().get("trace_id", "")
+        run = vocab_store.run_for_trace(trace_id) if trace_id else None
+        if run is None:
+            return self._json_error(404, "no run for that trace")
+        kept = heard_audio.lookup(
+            _runtime_paths().cache_dir, trace_id)
+        run["audio_url"] = f"/transcription-audio?trace_id={trace_id}" if kept else None
+        self._json_ok(run)
+
     def _handle_transcription_audio_get(self):
         """The clip the transcriber was given for one trace, if retained."""
         from lib import heard_audio
@@ -1810,6 +2277,161 @@ class Handler(SettingsRoutes, VocabRoutes, BaseHTTPRequestHandler):
         body = json.dumps(payload).encode()
         self._send(200, body, "application/json")
 
+    def _handle_backend_auth(self):
+        from lib.backend_auth import status, task
+        every = (self._query().get("harnesses") or [""])[0] == "all"
+        rows = status(every_harness=every)
+        listed = {row["id"] for row in rows}
+        body = {"backends": rows, "tasks": {
+            adapter.id: task(adapter.id) for adapter in backends.auth_adapters()
+            if adapter.id in listed}}
+        self._json_ok(body)
+
+    def _handle_backend_auth_login(self):
+        from lib.backend_auth import start_login
+        data = self._read_json()
+        if data is None:
+            return self._json_error(400, "bad json")
+        backend = str(data.get("backend") or "").strip().lower()
+        try:
+            result = start_login(backend)
+        except ValueError as exc:
+            return self._json_error(400, str(exc))
+        self._json(202, result)
+
+    def _handle_backend_auth_login_code(self):
+        from lib.backend_auth import submit_login_code
+        data = self._read_json()
+        if data is None:
+            return self._json_error(400, "bad json")
+        backend = str(data.get("backend") or "").strip().lower()
+        try:
+            result = submit_login_code(backend, str(data.get("code") or ""))
+        except ValueError as exc:
+            return self._json_error(400, str(exc))
+        except RuntimeError as exc:
+            return self._json_error(409, str(exc))
+        self._json_ok(result)
+
+    def _handle_backend_auth_logout(self):
+        from lib.backend_auth import logout
+        data = self._read_json()
+        if data is None:
+            return self._json_error(400, "bad json")
+        backend = str(data.get("backend") or "").strip().lower()
+        try:
+            result = logout(backend)
+        except ValueError as exc:
+            return self._json_error(400, str(exc))
+        except RuntimeError as exc:
+            return self._json_error(409, str(exc))
+        self._json_ok(result)
+
+    # Model providers inside a harness (OpenCode). Keys travel only in POST
+    # bodies, are written to OpenCode's own store and are never returned.
+    def _harness_provider_call(self, action):
+        from lib import harness_providers
+        try:
+            return action(harness_providers)
+        except harness_providers.ProviderError as exc:
+            self._json_error(400, str(exc))
+        except harness_providers.ProviderConflict as exc:
+            self._json_error(409, str(exc))
+        except OSError as exc:
+            log_exception("harnessProviderStoreFail", exc)
+            self._json_error(500, "OpenCode's credential store could not be written")
+        return None
+
+    def _handle_harness_providers(self):
+        harness = (self._query().get("harness") or [""])[0]
+        result = self._harness_provider_call(lambda hp: hp.providers(harness))
+        if result is not None:
+            self._json_ok(result)
+
+    def _handle_harness_provider_models(self):
+        qs = self._query()
+        harness = (qs.get("harness") or [""])[0]
+        provider = (qs.get("provider") or [""])[0]
+        result = self._harness_provider_call(lambda hp: hp.models(harness, provider))
+        if result is not None:
+            self._json_ok(result)
+
+    def _handle_harness_provider_login(self):
+        data = self._read_json()
+        if data is None:
+            return self._json_error(400, "bad json")
+        harness, provider = data.get("harness"), data.get("provider")
+        if "key" in data:
+            result = self._harness_provider_call(
+                lambda hp: hp.save_api_key(harness, provider, data.get("key")))
+            if result is not None:
+                self._json_ok({"ok": True, "provider": result})
+            return
+        result = self._harness_provider_call(
+            lambda hp: hp.start_oauth(harness, provider, data.get("method"),
+                                      data.get("inputs")))
+        if result is not None:
+            self._json(202, result)
+
+    def _handle_harness_provider_login_code(self):
+        data = self._read_json()
+        if data is None:
+            return self._json_error(400, "bad json")
+        result = self._harness_provider_call(
+            lambda hp: hp.submit_code(data.get("harness"), data.get("provider"),
+                                      data.get("code")))
+        if result is not None:
+            self._json_ok(result)
+
+    def _handle_harness_provider_logout(self):
+        data = self._read_json()
+        if data is None:
+            return self._json_error(400, "bad json")
+        result = self._harness_provider_call(
+            lambda hp: hp.logout(data.get("harness"), data.get("provider")))
+        if result is not None:
+            self._json_ok({"ok": True, "provider": result})
+
+    def _handle_managed_skills(self):
+        from lib.managed_skills import status
+        try:
+            skills = status()
+            if os.environ.get("CLARP_DEPLOYMENT_MODE") == "container":
+                from lib.personal_skills import status as personal_status
+                skills += personal_status()
+            body = {"skills": skills}
+        except (RuntimeError, OSError) as exc:
+            log_exception("managedSkillsStatusFail", exc)
+            return self._json_error(503, str(exc))
+        self._json_ok(body)
+
+    def _handle_managed_skills_update(self):
+        from lib.managed_skills import set_enabled
+        data = self._read_json()
+        if data is None:
+            return self._json_error(400, "bad json")
+        skill_id = str(data.get("skill_id") or "").strip()
+        enabled = data.get("enabled")
+        if not skill_id or not isinstance(enabled, bool):
+            return self._json_error(400, "skill_id and boolean enabled are required")
+        try:
+            skill = set_enabled(skill_id, enabled)
+        except ValueError as exc:
+            return self._json_error(409, str(exc))
+        except OSError as exc:
+            log_exception("managedSkillsUpdateFail", exc, detail=skill_id)
+            return self._json_error(500, str(exc))
+        self._json_ok({"ok": True, "skill": skill})
+
+    def _connection_server_info(self):
+        from lib.server_identity import get_server_info
+        info = get_server_info()
+        transport = self.server.local_transport
+        info["local_connection"] = transport.description() if transport else {"enabled": False}
+        if self.server.local_transport_error:
+            info["local_connection"]["error"] = self.server.local_transport_error
+        return info
+
     def _handle_server_info(self):
         from lib.server_identity import CLIENT_HEADER, evaluate_client
         info = self._connection_server_info()
@@ -1819,8 +2441,190 @@ class Handler(SettingsRoutes, VocabRoutes, BaseHTTPRequestHandler):
             _note_outdated_client(client)
         self._json_ok(info)
 
+    def _handle_desktop_presence(self):
+        if not getattr(self, "_request_auth_validated", False):
+            return self._json_error(401, "authenticated desktop required")
+        if getattr(self, "_request_device_scope", "") != "full":
+            return self._json_error(403, "full device access required")
+        from lib import desktop_presence
+        data = self._read_json()
+        if not isinstance(data, dict):
+            return self._json_error(400, "object required")
+        try:
+            result = desktop_presence.update(principal=self._request_principal,
+                instance_id=data.get("instance_id"), sequence=data.get("sequence"), active=data.get("active"),
+                sent_at_ms=data.get("sent_at_ms"))
+        except ValueError as error:
+            return self._json_error(400, str(error))
+        self._json_ok(result)
+
+    def _handle_application_activity(self):
+        if not getattr(self, "_request_auth_validated", False):
+            return self._json_error(401, "authentication required")
+        if getattr(self, "_request_device_scope", "") != "full":
+            return self._json_error(403, "full device access required")
+        from lib import application_activity
+        data = self._read_json()
+        if not isinstance(data, dict):
+            return self._json_error(400, "object required")
+        try:
+            result = application_activity.report(self._request_principal,
+                data.get("instance_id"), data.get("sequence"), data.get("foreground"),
+                data.get("input_age_ms"), data.get("sent_at_ms"))
+        except ValueError as error:
+            return self._json_error(400, str(error))
+        self._json_ok(result)
+
+    def _handle_tool_explanations_stats(self):
+        from lib import tool_explanation_learning, tool_explanation_templates
+        from lib.tool_explanations import PROMPT_VERSION
+        query = self._query()
+        try:
+            result = tool_explanation_learning.stats(
+                (query.get("window") or ["24h"])[0], (query.get("bucket") or ["hour"])[0],
+                prompt_version=PROMPT_VERSION, templates_version=tool_explanation_templates.VERSION)
+        except ValueError as error:
+            return self._json_error(400, str(error))
+        self._json_ok(result)
+
+    def _handle_tool_explanation_settings_get(self):
+        from lib import tool_explanation_settings
+        self._json_ok(tool_explanation_settings.get())
+
+    def _handle_tool_explanation_settings_post(self):
+        from lib import tool_explanation_settings
+        data = self._read_json()
+        try:
+            result = tool_explanation_settings.update(data)
+        except ValueError as error:
+            return self._json_error(400, str(error))
+        self._json_ok(result)
+
+    def _handle_tool_explanations(self):
+        data = self._read_json()
+        if not isinstance(data, dict):
+            return self._json_error(400, "object required")
+        session = data.get("session")
+        if not isinstance(session, str) or not (agent := identity.lookup(session)):
+            return self._json_error(404, "agent not found")
+        from lib import tool_explanation_settings
+        if not tool_explanation_settings.enabled():
+            # Turned off on this Host: the explainer is not asked at all.
+            items = data.get("items") if isinstance(data.get("items"), list) else []
+            return self._json_ok({
+                "detail_level": data.get("detail_level"), "model": "",
+                "items": [{"id": item.get("id"), "status": "disabled"}
+                          for item in items[:8] if isinstance(item, dict)]})
+        try:
+            result = self.ctx.tool_explanations.request(
+                data.get("detail_level"), data.get("items"), cwd=agent.get("cwd"),
+                release=data.get("release"), target_agent_id=agent["agent_id"],
+                include_provenance=data.get("include_provenance") is True)
+        except ValueError as error:
+            return self._json_error(400, str(error))
+        self._json_ok(result)
+
+    def _handle_pairing_exchange(self):
+        from lib.device_pairing import PairingError, exchange
+        from lib.server_identity import get_server_info
+        data = self._read_json()
+        if data is None:
+            return self._json_error(400, "bad json")
+        try:
+            device = exchange(
+                str(data.get("code") or ""),
+                device_name=str(data.get("device_name") or ""),
+            )
+        except PairingError as exc:
+            retry = self._auth_failure_retry()
+            if retry:
+                return self._send(429, b'{"error":"too many pairing failures"}',
+                                  "application/json", extra_headers={"Retry-After": str(retry)})
+            return self._json_error(409, str(exc))
+        payload = {"device": device, "server": self._connection_server_info()}
+        self._json(201, payload)
+
+    def _handle_paired_devices(self):
+        from lib.device_pairing import list_devices
+        self._json_ok({"devices": list_devices()})
+
+    def _handle_paired_device_revoke(self):
+        from lib.device_pairing import revoke
+        data = self._read_json()
+        if data is None:
+            return self._json_error(400, "bad json")
+        device_id = str(data.get("device_id") or "").strip()
+        if not device_id:
+            return self._json_error(400, "device_id required")
+        if not revoke(device_id):
+            return self._json_error(404, "device not found")
+        self._json_ok({"ok": True})
+        self.server.disconnect_device(device_id)
+
+    def _handle_tts_providers_get(self):
+        from lib.tts_providers import status
+        self._json_ok(status())
+
+    def _handle_tts_providers_post(self):
+        from lib import config as config_module
+        from lib.config_writer import set_toml_value
+        from lib.tts_providers import status, valid_ids
+        data = self._read_json()
+        if data is None:
+            return self._json_error(400, "bad json")
+        provider = str(data.get("provider") or "").strip().lower()
+        fallback = str(data.get("fallback") or "none").strip().lower()
+        voice = str(data.get("voice") or "").strip()
+        if "google" in (provider, fallback):
+            from lib.google_tts import collision_code
+            code = collision_code()
+            if code:
+                return self._json_error(409, code)
+        allowed = valid_ids()
+        rows = {row["id"]: row for row in status()["providers"]}
+        if (provider not in allowed or fallback not in allowed
+                or (fallback != "none" and not rows.get(
+                    fallback, {}).get("can_fallback", False))):
+            return self._json_error(400, "unsupported TTS provider or fallback")
+        current = status()
+        rows = {row["id"]: row for row in current["providers"]}
+        for selected in {provider, fallback} - {"none"}:
+            if rows[selected]["kind"] == "local" and not rows[selected]["installed"]:
+                return self._json_error(409, f"local TTS provider is not installed: {selected}")
+            if rows[selected].get("custom") and not rows[selected]["available"]:
+                return self._json_error(409, f"custom TTS adapter is unavailable: {selected}")
+        config_path = pathlib.Path(os.environ.get(
+            "CLAUDE_PWA_CONFIG", str(config_module.CONFIG_PATH)))
+        set_toml_value(config_path, "tts", "provider", provider)
+        set_toml_value(config_path, "tts", "fallback", fallback)
+        if voice:
+            set_toml_value(config_path, "local_tts", "voice", voice)
+        restart_required = provider != "cartesia"
+        if restart_required:
+            set_toml_value(config_path, "audio", "delivery", "chunked-file")
+        config_module.reset_cache()
+        payload = status() | {"restart_scheduled": restart_required}
+        self._json_ok(payload)
+        if restart_required:
+            from lib import service_manager
+            timer = threading.Timer(
+                0.5, lambda: service_manager.restart(check=False))
+            timer.daemon = True
+            timer.start()
 
 
+
+
+    def _handle_server_update_status(self):
+        from lib.server_update import get_update_status
+        query = self._query()
+        force = query.get("force", ["0"])[0] in {"1", "true", "yes"}
+        self._json_ok(get_update_status(force=force))
+
+    def _handle_server_update(self):
+        from lib.server_update import request_update
+        status, payload = request_update(self.ctx.default_session)
+        self._json(status, payload)
 
     def _session_cwd(self, session: str) -> pathlib.Path:
         """cwd for an agent is whatever its DB row says — there's no
@@ -3252,6 +4056,26 @@ class Handler(SettingsRoutes, VocabRoutes, BaseHTTPRequestHandler):
             "heartbeat_prompt": heartbeat.HEARTBEAT_PROMPT,
         })
 
+    def _handle_diagnostics_settings_get(self):
+        """Return opt-in developer diagnostics owned by this Computer."""
+        from lib import diagnostics_settings
+        return self._json_ok({
+            "ok": True, "settings": diagnostics_settings.get().public(),
+        })
+
+    def _handle_diagnostics_settings_post(self):
+        from lib import diagnostics_settings
+        data = self._read_json()
+        if not isinstance(data, dict):
+            return self._json_error(400, "bad json")
+        try:
+            settings = diagnostics_settings.update(data)
+        except ValueError as exc:
+            return self._json_error(400, str(exc))
+        return self._json_ok({
+            "ok": True, "settings": settings.public(),
+        })
+
     def _handle_agent_dreaming(self):
         """Enable/disable nightly creative dreaming for a single live agent."""
         from lib import dreaming
@@ -3605,6 +4429,23 @@ class Handler(SettingsRoutes, VocabRoutes, BaseHTTPRequestHandler):
         except ValueError as exc:
             return self._json_error(400, str(exc))
         return self._json_ok({"ok": True, "settings": settings.__dict__})
+
+    def _handle_herald_settings_post(self):
+        data = self._read_json()
+        if not isinstance(data, dict):
+            return self._json_error(400, "bad json")
+        try:
+            settings = update_herald_settings(data)
+        except ValueError as exc:
+            return self._json_error(400, str(exc))
+        return self._json_ok({"ok": True, "settings": settings.as_dict()})
+
+    def _handle_personalities_settings_post(self):
+        data = self._read_json()
+        if data is None:
+            return self._json_error(400, "bad json")
+        settings = update_personality_settings(data)
+        return self._json_ok({"ok": True, "settings": settings.as_dict()})
 
     def _handle_preview(self):
         data = self._read_json()
