@@ -626,9 +626,10 @@ class _Client:
         activating = action in ("start", "resume")
         # Every goal request is an outstanding answer until its own answer is
         # mirrored; no recycle while one is (BACKENDS-07b, the lead's coarse
-        # rule). No activation starts on a process being recycled.
+        # rule). No goal request of any kind starts on a process the recycle
+        # has marked: this check and the mark share self._lock.
         with self._lock:
-            if activating and getattr(self, "recycled", False):
+            if getattr(self, "recycled", False):
                 raise RuntimeError("Codex is restarting a stuck session; try again in a moment")
             self._goal_answer_begin(thread_id)
         try:
