@@ -9,7 +9,15 @@ database without a real provider:
 
 - ``[replay-tool]``: a reasoning item with a summary, then a command that
   streams two output lines and completes with exit code 0;
-- ``[replay-tool-fail]``: the same, but the command exits 2.
+- ``[replay-tool-fail]``: the same, but the command exits 2;
+- ``[replay-hold-start]``: that ``turn/start`` request is held back from the
+  fake until the scenario writes ``$CLARP_QA_PROVIDER_ROOT/release-start``, so
+  the Host's start is in flight with no turn yet (the Codex pool's
+  stop-during-start path). Other traffic keeps flowing while it is held.
+
+Every app-server process (``codex app-server``) appends ``start``, and a held start ``held`` and
+``released``, to ``$CLARP_QA_PROVIDER_ROOT/codex-procs.jsonl``, so the capture
+shows how many app-servers the Host ran and what happened to a held start.
 
 Item ids derive from the turn id, so they are stable within a run and
 normalize like any generated id.
@@ -22,9 +30,38 @@ from pathlib import Path
 import subprocess
 import sys
 import threading
+import time
+import uuid
 
 FAKE = Path(__file__).resolve().parents[1] / 'qa' / 'fake_codex.py'
 MARKERS = ('[replay-tool-fail]', '[replay-tool]')
+HOLD = '[replay-hold-start]'
+PROC = uuid.uuid4().hex[:12]
+
+
+def log(event: str) -> None:
+    root = os.environ.get('CLARP_QA_PROVIDER_ROOT')
+    if root:
+        with (Path(root) / 'codex-procs.jsonl').open('a') as handle:
+            handle.write(json.dumps({'event': event, 'proc_id': PROC}) + '\n')
+
+
+_in = threading.Lock()
+
+
+def to_child(child, line: str) -> None:
+    with _in:
+        child.stdin.write(line)
+        child.stdin.flush()
+
+
+def release_later(child, line: str) -> None:
+    """Pass a held turn/start request on once the scenario releases it."""
+    root = Path(os.environ.get('CLARP_QA_PROVIDER_ROOT') or '.')
+    while not (root / 'release-start').exists():
+        time.sleep(0.02)
+    log('released')
+    to_child(child, line)
 
 _out = threading.Lock()
 
@@ -60,6 +97,8 @@ def main() -> int:
     marked_requests: dict = {}   # request id -> marker
     marked_turns: dict = {}      # turn id -> marker
     lock = threading.Lock()
+    if 'app-server' in sys.argv[1:]:
+        log('start')
 
     def forward_stdin():
         for line in sys.stdin:
@@ -73,9 +112,13 @@ def main() -> int:
                 if marker and 'id' in request:
                     with lock:
                         marked_requests[request['id']] = marker
-            child.stdin.write(line)
-            child.stdin.flush()
-        child.stdin.close()
+                if HOLD in text:
+                    log('held')
+                    threading.Thread(target=release_later, args=(child, line), daemon=True).start()
+                    continue
+            to_child(child, line)
+        with _in:
+            child.stdin.close()
 
     threading.Thread(target=forward_stdin, daemon=True).start()
     for line in child.stdout:

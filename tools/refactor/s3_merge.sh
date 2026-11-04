@@ -129,7 +129,8 @@ git merge-base --is-ancestor "$main" HEAD || die 3 "the result does not contain 
 # on the laptop; test_s3_apply.py runs git, so it is a buildbox gate below).
 heavy=/var/tmp/clarp-refactor-program/bin/heavy
 for test in tests/integration/test_route_goldens.py tests/unit/test_import_layers.py \
-            tests/unit/test_handler_boundary.py tests/integration/test_s3_helpers_identity.py; do
+            tests/unit/test_handler_boundary.py tests/integration/test_s3_helpers_identity.py \
+            tests/unit/test_swallowed_excepts.py; do
   [ -f "$test" ] || continue
   "$heavy" "$PY" -m pytest -n 0 -q -p no:cacheprovider "$test" >/dev/null 2>&1 || die 7 "local gate failed: $test"
   echo "s3_merge: gate ok: $test"

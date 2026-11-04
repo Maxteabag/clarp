@@ -74,12 +74,20 @@ def test_streamer_advances_cursor_so_hook_sees_no_new_text(env):
     projects = tmp_path / ".claude" / "projects" / "p"
     projects.mkdir(parents=True)
     tx = projects / f"{backend_session_id}.jsonl"
-    tx.touch()
+    # The prompt this reply answers. Without it a fresh cursor's first run voices
+    # nothing whatever the streamer saved, and the assertion below could not fail
+    # (review flake-hook-b43e60ef): with it, a lost offset is heard twice.
+    tx.write_text(json.dumps({"type": "user", "message": {
+        "role": "user", "content": "synthetic prompt"}}) + "\n")
 
     streamer = TranscriptStreamer(reconcile_interval_sec=0.05)
     streamer.start()
     try:
-        _wait_for(lambda: streamer.pool.has(agent_id), timeout=2.0)
+        # As in test_transcript_streamer: the pick-up wait is asserted, and both
+        # waits poll their condition with a deadline that outlasts a loaded
+        # machine's scheduling (G1 flake with 2 s and 3 s).
+        assert _wait_for(lambda: streamer.pool.has(agent_id), timeout=15.0), \
+            "the streamer never picked the agent up"
 
         # Now write a text block. Streamer should consume it + enqueue it +
         # advance cursor_positions.position.
@@ -88,7 +96,7 @@ def test_streamer_advances_cursor_so_hook_sees_no_new_text(env):
 
         _wait_for(lambda: bool([r for r in tts_queue.recent()
                                   if r["agent_id"] == agent_id]),
-                  timeout=3.0)
+                  timeout=15.0)
 
         # Snapshot how many rows the streamer enqueued.
         streamer_rows = [r for r in tts_queue.recent()

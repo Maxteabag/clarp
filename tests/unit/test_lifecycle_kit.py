@@ -2,6 +2,7 @@
 decision table, compare-and-set, the reaper and the after-commit outbox."""
 from __future__ import annotations
 
+import re
 import sqlite3
 
 import pytest
@@ -67,7 +68,7 @@ def test_decide_refuses_undeclared_edges(state, event):
 @pytest.mark.parametrize("overrides,problem", [
     ({"waits": {"queued": Deadline(MIN, "failed"), "running": Deadline(MIN, "failed")}},
      "'parked' has no deadline or WaitForever"),
-    ({"waits": {"queued": Deadline(MIN, "running"), "running": Deadline(MIN, "failed"),
+    ({"waits": {"queued": Deadline(MIN, "lost"), "running": Deadline(MIN, "failed"),
                 "parked": WaitForever("user")}}, "deadline of 'queued'"),
     ({"waits": {"queued": Deadline(0, "failed"), "running": Deadline(MIN, "failed"),
                 "parked": WaitForever("user")}}, "deadline of 'queued'"),
@@ -110,7 +111,7 @@ def test_states_reached_only_by_a_deadline_are_reachable(con):
     with lk.transaction(con):
         lk.create(con, lease, "l1", now=0)
     with lk.transaction(con):
-        assert lk.reap(con, lease, now=100) == [lk.Transition("l1", lk.EXPIRED, "held", "expired", 100)]
+        assert lk.reap(con, lease, now=100).moved == [lk.Transition("l1", lk.EXPIRED, "held", "expired", 100)]
 
 
 def test_the_documented_example_constructs():
@@ -193,7 +194,7 @@ def test_reaper_moves_only_expired_rows_with_a_deadline(con):
         lk.transition(con, job, "done", "start", now=0)
         lk.transition(con, job, "done", "finish", now=0)
     with lk.transaction(con):
-        moved = lk.reap(con, job, now=30 * MIN)
+        moved = lk.reap(con, job, now=30 * MIN).moved
     assert moved == [lk.Transition("old", lk.EXPIRED, "running", "failed", 30 * MIN)]
     assert {k: _state(con, k)[0] for k in ("old", "fresh", "parked", "done")} == {
         "old": "failed", "fresh": "running", "parked": "parked", "done": "done"}
@@ -251,3 +252,179 @@ def test_transactions_do_not_nest(con):
     with pytest.raises(lk.LifecycleError, match="cannot nest"), lk.transaction(con):
         pass
     con.execute("ROLLBACK")
+
+
+
+# Kit changes for Phase 3 (docs/architecture/lifecycle-conversion-plan.md,
+# "Kit changes this plan needs"): corrections, non-final expiry, bounded reaping.
+
+def _receipt(**overrides) -> Lifecycle:
+    """The queue receipt's shape: a claim that goes stale returns to queued,
+    and a newer settlement may correct an older one."""
+    spec = dict(
+        name="receipt", owner="lib/receipts.py", table="jobs", key="job_id",
+        state_column="status", entered_column="status_at", initial="queued",
+        final=frozenset({"done", "failed", "cancelled"}),
+        edges=(
+            Edge("claim", frozenset({"queued"}), "claimed"),
+            Edge("start", frozenset({"claimed"}), "running"),
+            Edge("finish", frozenset({"running"}), "done"),
+            Edge("fail", frozenset({"running"}), "failed"),
+            Edge("cancel", frozenset({"queued", "claimed"}), "cancelled"),
+            Edge("settle_done", frozenset({"failed"}), "done", correction=True),
+        ),
+        waits={"queued": WaitForever("dispatch or cancel ends it"),
+               "claimed": Deadline(30_000, "queued"),
+               "running": Deadline(30 * MIN, "failed")},
+    )
+    spec.update(overrides)
+    return Lifecycle(**spec)
+
+
+def _at(con, lc, key, *events, now=0):
+    with lk.transaction(con):
+        lk.create(con, lc, key, now=now)
+        for event in events:
+            lk.transition(con, lc, key, event, now=now)
+
+
+def test_a_declared_correction_rewrites_one_final_state_to_another(con):
+    lc = _receipt()
+    _at(con, lc, "r1", "claim", "start", "fail", now=5)
+    with lk.transaction(con):
+        assert lk.transition(con, lc, "r1", "settle_done", now=9) == lk.Transition("r1", "settle_done", "failed", "done", 9)
+    assert _state(con, "r1") == ("done", 9)
+
+
+def test_a_correction_that_already_holds_is_a_no_op(con):
+    lc = _receipt()
+    _at(con, lc, "r1", "claim", "start", "finish", now=5)
+    with lk.transaction(con):
+        assert lk.transition(con, lc, "r1", "settle_done", now=9) == lk.Transition("r1", "settle_done", "done", "done", 9)
+    assert _state(con, "r1") == ("done", 5)  # nothing written, entered_at unchanged
+
+
+def test_corrections_cover_only_the_declared_pairs(con):
+    lc = _receipt()
+    _at(con, lc, "r1", "cancel")
+    with pytest.raises(lk.IllegalTransition), lk.transaction(con):
+        lk.transition(con, lc, "r1", "settle_done", now=9)   # cancelled -> done is not declared
+    with pytest.raises(lk.IllegalTransition):
+        lc.decide("running", "settle_done")                  # nor from a non-final state
+
+
+@pytest.mark.parametrize("edge, problem", [
+    (Edge("fix", frozenset({"running"}), "done", correction=True), "must run between final states, not ['running']"),
+    (Edge("fix", frozenset({"failed"}), "queued", correction=True), "must run between final states, not ['queued']"),
+    (Edge("fix", frozenset({"failed", "done"}), "done", correction=True), "lists its own target 'done'"),
+    (Edge("reopen", frozenset({"done"}), "queued"), "edge 'reopen' leaves final state 'done'"),
+    (Edge("settle_done", frozenset({"running"}), "done"), "event 'settle_done' is both a correction and an ordinary edge"),
+])
+def test_malformed_corrections_are_refused(edge, problem):
+    with pytest.raises(lk.LifecycleError, match=re.escape(problem)):
+        _receipt(edges=_receipt().edges + (edge,))
+
+
+def test_a_deadline_may_return_to_a_non_final_state(con):
+    lc = _receipt()
+    _at(con, lc, "r1", "claim", now=0)
+    with lk.transaction(con):
+        assert lk.reap(con, lc, now=30_000).moved == [lk.Transition("r1", lk.EXPIRED, "claimed", "queued", 30_000)]
+    assert _state(con, "r1") == ("queued", 30_000)
+
+
+@pytest.mark.parametrize("waits, problem", [
+    ({"claimed": Deadline(30_000, "claimed")}, "deadline of 'claimed' must be positive and end in another declared state"),
+    ({"claimed": Deadline(30_000, "nowhere")}, "deadline of 'claimed' must be positive and end in another declared state"),
+    ({"queued": Deadline(1, "claimed"), "claimed": Deadline(1, "queued")}, "deadlines alone cycle: claimed -> queued -> claimed"),
+])
+def test_bad_non_final_expiries_are_refused(waits, problem):
+    with pytest.raises(lk.LifecycleError, match=re.escape(problem)):
+        _receipt(waits={**_receipt().waits, **waits})
+
+
+def _many(con, lc, count, *, state_events=("claim",), now=0):
+    with lk.transaction(con):
+        for i in range(count):
+            lk.create(con, lc, f"k{i:03d}", now=now)
+            for event in state_events:
+                lk.transition(con, lc, f"k{i:03d}", event, now=now + i)
+
+
+def test_reap_is_bounded_and_resumes_from_its_cursor(con):
+    lc = _receipt()
+    _many(con, lc, 5)
+    with lk.transaction(con):
+        first = lk.reap(con, lc, now=MIN, limit=2)
+    assert [t.key for t in first.moved] == ["k000", "k001"] and first.cursor == ("claimed", 1, "k001")
+    with lk.transaction(con):
+        second = lk.reap(con, lc, now=MIN, limit=2, after=first.cursor)
+    assert [t.key for t in second.moved] == ["k002", "k003"]
+    with lk.transaction(con):
+        last = lk.reap(con, lc, now=MIN, limit=2, after=second.cursor)
+    assert [t.key for t in last.moved] == ["k004"] and last.cursor is None
+
+
+def test_eligible_skips_count_and_are_seen_again_after_the_wrap(con):
+    lc = _receipt()
+    _many(con, lc, 3)
+    held = {"k001"}
+    with lk.transaction(con):
+        batch = lk.reap(con, lc, now=MIN, limit=10, eligible=lambda row: None if row["job_id"] in held else lk.EXPIRED)
+    assert batch.examined == 3 and [t.key for t in batch.moved] == ["k000", "k002"] and batch.cursor is None
+    held.clear()
+    with lk.transaction(con):
+        again = lk.reap(con, lc, now=MIN, limit=10, eligible=lambda row: lk.EXPIRED)
+    assert [t.key for t in again.moved] == ["k001"]
+
+
+def test_eligible_can_choose_another_legal_event(con):
+    lc = _receipt()
+    _many(con, lc, 2)
+    with lk.transaction(con):
+        batch = lk.reap(con, lc, now=MIN, eligible=lambda row: "cancel" if row["job_id"] == "k000" else lk.EXPIRED)
+    assert [(t.key, t.target) for t in batch.moved] == [("k000", "cancelled"), ("k001", "queued")]
+    _at(con, lc, "x", "claim", now=0)
+    with pytest.raises(lk.IllegalTransition), lk.transaction(con):
+        lk.reap(con, lc, now=2 * MIN, eligible=lambda row: "finish")   # finish is not legal from claimed
+    assert _state(con, "x") == ("claimed", 0)                          # and the batch rolled back
+
+
+def test_reap_tick_keeps_to_its_row_budget_one_transaction_per_batch(con):
+    lc = _receipt()
+    _many(con, lc, 7)
+    begins = []
+    con.set_trace_callback(lambda sql: begins.append(sql) if sql.startswith("BEGIN") else None)
+    queued = []
+    moved, cursor = lk.reap_tick(con, lc, now=MIN, batch=2, max_rows=5,
+                                 effects=lambda outbox, batch: outbox.add(lambda: queued.append(len(batch))))
+    con.set_trace_callback(None)
+    assert len(moved) == 5 and cursor == ("claimed", 4, "k004")
+    assert len(begins) == 3 and queued == [2, 2, 1]          # batches of 2, 2 and the remaining 1
+    rest, cursor = lk.reap_tick(con, lc, now=MIN, cursor=cursor, batch=2, max_rows=5)
+    assert [t.key for t in rest] == ["k005", "k006"] and cursor is None
+
+
+def test_reap_tick_stops_at_its_time_budget(con):
+    lc = _receipt()
+    _many(con, lc, 6)
+    ticks = iter(range(0, 1000, 60))                         # each batch "takes" 60 ms
+    clock = lambda: next(ticks) / 1000.0
+    moved, cursor = lk.reap_tick(con, lc, now=MIN, batch=1, max_rows=500, max_ms=200, clock=clock)
+    assert len(moved) == 4 and cursor == ("claimed", 3, "k003")  # 60+60+60 < 200, the 4th reaches 240
+
+
+
+def test_an_ordinary_self_loop_is_written_not_skipped(con):
+    """Review A2 (60a93ae3, F1): only an already-applied correction is a no-op;
+    a lease renewal that stays in its state still writes entered_at and its
+    values, so the reaper counts the deadline from the renewal."""
+    lc = _receipt(edges=_receipt().edges + (Edge("renew", frozenset({"running"}), "running"),))
+    _at(con, lc, "r1", "claim", "start", now=10)
+    with lk.transaction(con):
+        assert lk.transition(con, lc, "r1", "renew", now=900, values={"note": "renewed"}) == \
+            lk.Transition("r1", "renew", "running", "running", 900)
+    assert con.execute("SELECT status, status_at, note FROM jobs WHERE job_id = 'r1'").fetchone() == \
+        ("running", 900, "renewed")
+    with lk.transaction(con):
+        assert lk.reap(con, lc, now=10 + 30 * MIN).moved == []     # counted from the renewal at 900
