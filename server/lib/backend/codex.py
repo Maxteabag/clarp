@@ -829,6 +829,9 @@ class CodexBackend(StreamJsonBackend):
     def credential_switch_pending(self, message) -> bool:
         return bool(resolve("codex_app_server", "credential_switch_pending")(message))
 
+    def turn_holders(self, agent_id: str) -> list:
+        return list(resolve("codex_app_server", "turn_holders")(agent_id) or [])
+
     def account_pool(self) -> str:
         """The pool is named after the CLI; turn_dispatch keys its failover
         coordinator by it and reads ``config_account_switch_field``."""

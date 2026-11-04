@@ -369,6 +369,11 @@ class Backend:
         """
         return False
 
+    def turn_holders(self, agent_id: str) -> list:
+        """Processes outside any turn that still hold the agent's native
+        session; its next turn waits for them (BACKENDS-07b). Most have none."""
+        return []
+
     def credential_switch_pending(self, message) -> bool:
         """The failure came from a process still on credentials older than the
         ones now selected; the switch waits for it (BACKENDS-06 (c))."""

@@ -124,14 +124,19 @@ class AppTurnHandle:
             if self._done.is_set():
                 return
             actives = getattr(client, "_actives", {})
-            if actives.get(self.agent_id) is not None and actives[self.agent_id].handle is self:
-                actives.pop(self.agent_id, None)
-            if client.active is not None and client.active.handle is self:
-                client.active = None
+            mine = [turn for turn in (actives.get(self.agent_id), client.active)
+                    if turn is not None and turn.handle is self]
             detached = getattr(client, "detached_agents", None)
             if detached is None:
                 detached = client.detached_agents = set()
             detached.add(self.agent_id)
+            # Its execution may still announce itself: never adopt it again.
+            client.detached_executions = getattr(client, "detached_executions", set()) | {
+                value for turn in mine for value in (turn.thread_id, turn.turn_id) if value}
+            if actives.get(self.agent_id) is not None and actives[self.agent_id].handle is self:
+                actives.pop(self.agent_id, None)
+            if client.active is not None and client.active.handle is self:
+                client.active = None
             self._done.set()
         log("codexTurnDetached", f"agent={self.agent_id} after={STOP_DETACH_SEC:g}s")
         client.recycle_if_quiet()
@@ -143,8 +148,11 @@ class _Client:
         self.agent_id = agent_id
         self.auth_fingerprint = _auth_fingerprint()
         self.refresh_requested = False
-        # Agents whose stopped turn was detached here (BACKENDS-07b).
+        # Agents whose stopped turn was detached here, and that turn's thread
+        # and turn ids (BACKENDS-07b); set once this process is being killed.
         self.detached_agents: set[str] = set()
+        self.detached_executions: set[str] = set()
+        self.recycled = False
         self.rate_limits = {}
         # One shared server serves every Codex agent: it has no turn identity
         # and no agent identity. Naming the agent that started it would let a
@@ -346,6 +354,11 @@ class _Client:
             self._mirror_goal(str(params.get("threadId") or ""),
                               params.get("goal") if method.endswith("updated") else None)
             return
+        if active is None and method == "turn/started" and self._detached_execution(params):
+            # The detached turn (or a continuation on its stuck thread) must
+            # not count as busy again: that would keep the stuck process alive.
+            log("codexDetachedTurnIgnored", "a turn on a detached thread started late")
+            return
         if active is None and method == "turn/started":
             # Codex starts continuation turns for an active goal on its own.
             # Nobody in Clarp asked for this turn, so nothing is listening yet;
@@ -427,7 +440,10 @@ class _Client:
                 self.active = None
             active.handle._done.set()
             if getattr(self, "detached_agents", None):
-                self.recycle_if_quiet()
+                # Not on the reader: a send may hold the pool lock while it
+                # waits for this reader to deliver its turn/start reply.
+                threading.Thread(target=self.recycle_if_quiet, daemon=True,
+                                 name="codex-recycle").start()
             if status == "failed":
                 message = str(error.get("message") or "codex turn failed")
                 if active.on_error:
@@ -465,6 +481,15 @@ class _Client:
                 events.broadcast(stream, events.as_event(agent_goals.event(agent, row)))
         except Exception as exc:  # noqa: BLE001 - a mirror failure must not stop the reader
             log_exception("codexGoalMirrorFail", exc, detail=thread_id)
+
+    def _detached_execution(self, params: dict) -> bool:
+        detached = getattr(self, "detached_executions", None)
+        if not detached:
+            return False
+        turn = params.get("turn") if isinstance(params.get("turn"), dict) else {}
+        thread_id = str(params.get("threadId") or turn.get("threadId") or "")
+        turn_id = str(turn.get("id") or params.get("turnId") or "")
+        return bool({thread_id, turn_id} & detached)
 
     def _adopt_server_turn(self, params: dict) -> _ActiveTurn | None:
         turn = params.get("turn") if isinstance(params.get("turn"), dict) else {}
@@ -702,23 +727,33 @@ class _Client:
         """A process holding a detached (stuck) turn is killed once no live turn
         runs on it: the kill releases the stuck thread's writer lock, and a new
         process serves the next turns (BACKENDS-07b). Never while another
-        agent's turn still runs here."""
-        if not getattr(self, "detached_agents", None) or _busy(self):
-            return
+        agent's turn still runs here. The quiet check and the retirement share
+        the pool lock with admission (spawn_turn), so no turn is admitted
+        between them."""
         with _LOCK:
+            with self._lock:
+                if (not getattr(self, "detached_agents", None)
+                        or getattr(self, "recycled", False) or _busy(self)):
+                    return
+                self.recycled = True
             if _CLIENTS.get(_SHARED_KEY) is self:
                 _CLIENTS.clear()
-        log("codexStuckProcessRecycled",
-            f"detached={len(self.detached_agents)}")
-        try:
-            if getattr(self, "process_group", False):
-                os.killpg(self.proc.pid, signal.SIGKILL)
-            else:
-                self.proc.kill()
-        except (OSError, ValueError):
+            log("codexStuckProcessRecycled",
+                f"detached={len(self.detached_agents)}")
             try:
-                self.proc.kill()
+                if getattr(self, "process_group", False):
+                    os.killpg(self.proc.pid, signal.SIGKILL)
+                else:
+                    self.proc.kill()
             except (OSError, ValueError):
+                try:
+                    self.proc.kill()
+                except (OSError, ValueError):
+                    pass
+            try:
+                # Dead before the next process resumes the stuck thread.
+                self.proc.wait(timeout=5)
+            except (OSError, ValueError, subprocess.TimeoutExpired):
                 pass
 
     def shutdown(self) -> None:
@@ -814,6 +849,29 @@ def admit_turn(client, agent_id: str) -> None:
         raise CodexSessionStuck(
             "Waiting for a stuck Codex session to end; it restarts as soon as "
             "the other Codex agents finish their turns")
+
+
+class _StuckSessionHold:
+    """The agent's stopped turn is detached on a process that still runs and
+    holds its thread; its next send waits until that process is gone."""
+
+    def __init__(self, client: "_Client", agent_id: str):
+        self.client, self.agent_id = client, agent_id
+
+    def is_alive(self) -> bool:
+        client = self.client
+        return (self.agent_id in (getattr(client, "detached_agents", None) or ())
+                and not getattr(client, "recycled", False)
+                and client.proc.poll() is None)
+
+
+def turn_holders(agent_id: str) -> list[_StuckSessionHold]:
+    """Processes that still hold ``agent_id``'s thread outside any turn
+    (BACKENDS-07b): a send waits behind them instead of failing."""
+    with _LOCK:
+        clients = list({id(client): client for client in _CLIENTS.values()}.values())
+    holds = [_StuckSessionHold(client, agent_id) for client in clients]
+    return [hold for hold in holds if hold.is_alive()]
 
 
 class CodexTurnFailure(str):
