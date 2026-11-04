@@ -104,6 +104,16 @@ CHANGES = [
                    'locator': r'^files\[1c67a382\]\.json#len$', 'kinds': {'changed'}},
     },
     {
+        'id': 'queue-edit-lost',
+        'what': 'editing a held queued send answers ok but keeps its old text',
+        'file': 'server/lib/turn_queue.py',
+        'find': '            (value, queue_id),\n        )\n        if cursor.rowcount:\n',
+        'replace': '            (row["text"], queue_id),\n        )\n        if cursor.rowcount:\n',
+        # The witness is the held queue read back after the edit (stop-holds-then-edit-queue).
+        'expect': {'scenario': 'stop-holds-then-edit-queue', 'channel': 'http',
+                   'locator': r'\.body\.items\[0\]\.text$', 'kinds': {'changed'}},
+    },
+    {
         'id': 'on-chunk-signature',
         'what': "the TTS worker hands adapters a one-argument chunk callback, as VP-01's candidate daaad27c did "
                 '(adapters call on_chunk(index, bytes) and swallow the TypeError)',
