@@ -132,14 +132,7 @@ PORT = int(os.environ.get("CLAUDE_PWA_PORT", str(_CFG.port)))
 BIND_ADDR = os.environ.get("CLAUDE_PWA_BIND", _CFG.bind_addr)
 
 
-def _runtime_paths() -> RuntimePaths:
-    return RuntimePaths.from_home(pathlib.Path.home())
-
-
-def _truthy_header(value: str | None) -> bool:
-    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
-
-
+from lib.routes.helpers import _runtime_paths, _truthy_header, _raw_query_value, _PLAY_EVENTS, _clip_session_and_trace, _safe_upload_name  # noqa: E402  (s3_apply)
 # Serializes read-decide-swap of ctx.stt in _activate_transcription_if_default.
 # Request threads never take it: the transcription pipeline reads ctx.stt once
 # per request, so a swap mid-request cannot hand one utterance two engines.
@@ -260,44 +253,11 @@ def _cartesia_preview_lock(voice_id: str) -> threading.Lock:
         return _CARTESIA_PREVIEW_LOCKS.setdefault(voice_id, threading.Lock())
 
 
-def _raw_query_value(path: str, key: str) -> str:
-    """Decode one query value without form-style `+` to space rewriting.
-
-    Filesystem paths legitimately contain plus signs. Native URLQueryItem may
-    leave them literal, whereas parse_qs assumes HTML form encoding.
-    """
-    for field in urlparse(path).query.split("&"):
-        raw_key, separator, raw_value = field.partition("=")
-        if separator and unquote(raw_key) == key:
-            return unquote(raw_value)
-    return ""
-
-
 def _header_int(raw: str | None) -> int | None:
     try:
         return int(float(raw)) if raw not in (None, "") else None
     except (TypeError, ValueError):
         return None
-
-
-# /clips/ack statuses that are moments on the voice timeline.
-_PLAY_EVENTS = {"play-start": "play_start", "play-ok": "play_end",
-                "play-fail": "play_fail"}
-
-
-def _clip_session_and_trace(clip_id: int | None) -> tuple[str | None, str | None]:
-    if clip_id is None:
-        return None, None
-    try:
-        row = db.conn().execute(
-            """SELECT a.session AS session, c.trace_id AS trace_id
-                 FROM clips c LEFT JOIN agents a ON a.agent_id = c.agent_id
-                WHERE c.clip_id = ?""", (clip_id,)).fetchone()
-    except Exception:  # noqa: BLE001
-        return None, None
-    if row is None:
-        return None, None
-    return (row["session"] or None), (row["trace_id"] or None)
 
 
 def _spawn_voice_metrics(audio_bytes: bytes, ctype: str, *, session, trace_id,
@@ -6652,23 +6612,6 @@ class Handler(BaseHTTPRequestHandler):
         if not row or not path.is_file():
             return self._send(404, b"not found")
         return self._send_file(path)
-
-
-def _safe_upload_name(raw: str, content_type: str = "") -> str:
-    """Reduce a client-supplied filename to a safe basename, preserving the
-    extension so the agent's Read tool recognises images. Blocks path
-    traversal (no separators / leading dots survive); falls back to a
-    type-derived name when nothing usable is sent."""
-    base = os.path.basename((raw or "").replace("\\", "/")).strip()
-    cleaned = "".join(c for c in base if c.isalnum() or c in "._- ()")
-    cleaned = cleaned.strip().replace(" ", "_").lstrip(".")
-    primary_type = content_type.split(";", 1)[0].strip()
-    if not cleaned:
-        ext = mimetypes.guess_extension(primary_type) or ".bin"
-        cleaned = "upload" + ext
-    elif "." not in cleaned:
-        cleaned += mimetypes.guess_extension(primary_type) or ""
-    return cleaned[:128]
 
 
 def _dispatch_service(ctx: ServerContext):
