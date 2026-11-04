@@ -441,6 +441,10 @@ SCENARIOS = [
             # Join the clip's live stream while it is produced: it carries every chunk the
             # adapter hands the delivery through on_chunk(index, bytes), via the clip broker.
             {'op': 'wait_sql', 'sql': "SELECT count(*) FROM clips WHERE producer_status = 'streaming'"},
+            # The row is committed before the broker opens the clip's stream, so a GET in
+            # between finds neither stream nor file (404; G2 noise, 5 Nov). Clients learn
+            # the stream URL from the audio event, sent after the broker opens: wait for it.
+            {'op': 'wait_sse', 'match': {'type': 'audio', 'streamable': True}},
             {'op': 'save_sql', 'var': 'clip', 'sql': 'SELECT clip_id FROM clips ORDER BY clip_id LIMIT 1'},
             {'op': 'get', 'path': '/clips/{clip}/stream', 'name': 'clip live stream'},
             {'op': 'wait_settled', 'message_id': 'u-xray'},
