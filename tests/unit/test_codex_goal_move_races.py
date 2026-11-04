@@ -1,4 +1,4 @@
-# Reviewer A's probes on 5903e5c7 (WIP 8f3638fa, extends 89abae55), unchanged, as the stage-2 round-3 regression.
+# Reviewer A's probes on 9cb75a05 (WIP be7b998b, extends 8f3638fa), unchanged, as the stage-2 round-4 regression.
 """Moving a goal must preserve user pause intent and recover failed activation."""
 import threading
 import pytest
@@ -15,12 +15,16 @@ def test_a_user_pause_while_the_moves_pause_is_outstanding_stays_paused(fake, tm
     original = client.request
     waiting, release = threading.Event(), threading.Event()
     held, errors = [], []
+    pause_answered, user_entered, user_done = threading.Event(), threading.Event(), threading.Event()
     def request(method, params, timeout=30):
         if method == 'thread/goal/set' and params.get('status') == 'paused' and not held:
             held.append(True)
             waiting.set()
             assert release.wait(5)
-        return original(method, params, timeout=timeout)
+        result = original(method, params, timeout=timeout)
+        if method == 'thread/goal/set' and params.get('status') == 'paused':
+            pause_answered.set()
+        return result
     monkeypatch.setattr(client, 'request', request)
     def moving_pause():
         try:
@@ -29,13 +33,27 @@ def test_a_user_pause_while_the_moves_pause_is_outstanding_stays_paused(fake, tm
             errors.append(exc)
     worker = threading.Thread(target=moving_pause)
     worker.start()
+    def user_action_call():
+        user_entered.set()
+        try:
+            cas.goal(agent, user_action)
+        except Exception as exc:
+            errors.append(exc)
+        finally:
+            user_done.set()
+    user = threading.Thread(target=user_action_call)
     try:
         assert waiting.wait(5)
-        cas.goal(agent, user_action) # real public user action clears the move claim
+        user.start()
+        assert user_entered.wait(5)
+        user_done.wait(.5)  # old code lets it overtake; ordered code may block it
     finally:
         release.set()
         worker.join(5)
-    assert not worker.is_alive() and not errors, errors
+        if user.ident is not None:
+            user.join(5)
+    assert not worker.is_alive() and not user.is_alive() and not errors, errors
+    assert pause_answered.is_set(), 'control: the move pause must complete, not escape by timing out'
     assert _wait(lambda: not cas.active_handles(agent))
     assert client._capture_move(thread)
     cas._continue_move(thread)
@@ -89,3 +107,54 @@ def test_a_drain_backstop_does_not_kill_a_continuation_before_its_notification_i
         assert client.proc.poll() is None, 'drain backstop killed a running native continuation before its start notification was adopted'
     finally:
         release.set()
+
+
+def test_a_goal_admitted_after_the_last_drain_snapshot_is_not_killed(fake, tmp_path, monkeypatch):
+    monkeypatch.setenv('CLARP_QA_GOAL_TURN_HOLD', '3')
+    agent, thread, _ = _leftover(fake, tmp_path, monkeypatch, 'drain-admission')
+    assert _wait(lambda: not cas.active_handles(agent))
+    client = cas._client(agent, 'drain-admission')
+    client.draining = True
+    monkeypatch.setattr(cas, '_DRAINING', {id(client): client})
+    monkeypatch.setattr(cas, '_CLIENTS', {})
+    looked_up, begin, native_running, answer_release = (threading.Event() for _ in range(4))
+    errors = []
+    real_goal, real_request, real_quiet = client.goal, client.request, client._goal_may_continue
+    before = len(_goal_turns(fake, thread))
+    def after_pool_lookup(*args, **kwargs):
+        looked_up.set()
+        assert begin.wait(5)
+        return real_goal(*args, **kwargs)
+    monkeypatch.setattr(client, 'goal', after_pool_lookup)
+    def request(method, params, timeout=30):
+        result = real_request(method, params, timeout=timeout)
+        if method == 'thread/goal/set' and params.get('status') == 'active':
+            assert _wait(lambda: len(_goal_turns(fake, thread)) == before + 1)
+            native_running.set()
+            assert answer_release.wait(5)
+        return result
+    monkeypatch.setattr(client, 'request', request)
+    def quiet_snapshot():
+        result = real_quiet()
+        begin.set()
+        native_running.wait(.5) # a correct fence may block/refuse the caller
+        return result
+    monkeypatch.setattr(client, '_goal_may_continue', quiet_snapshot)
+    def user_resume():
+        try:
+            cas.goal(agent, 'resume') # actual public lookup of the draining owner
+        except Exception as exc:
+            errors.append(exc)
+    worker = threading.Thread(target=user_resume)
+    worker.start()
+    try:
+        assert looked_up.wait(5)
+        client._exit_if_drained(backstop=True)
+        cut_running = native_running.is_set() and client.proc.poll() is not None
+    finally:
+        begin.set()
+        answer_release.set()
+        worker.join(5)
+    assert not worker.is_alive()
+    assert all(isinstance(error, RuntimeError) for error in errors), errors
+    assert not cut_running, 'a goal admitted after the quiet snapshot was interrupted by drain shutdown'
