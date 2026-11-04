@@ -132,14 +132,7 @@ PORT = int(os.environ.get("CLAUDE_PWA_PORT", str(_CFG.port)))
 BIND_ADDR = os.environ.get("CLAUDE_PWA_BIND", _CFG.bind_addr)
 
 
-def _runtime_paths() -> RuntimePaths:
-    return RuntimePaths.from_home(pathlib.Path.home())
-
-
-def _truthy_header(value: str | None) -> bool:
-    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
-
-
+from lib.routes.helpers import _runtime_paths, _truthy_header  # noqa: E402  (s3_apply)
 # Serializes read-decide-swap of ctx.stt in _activate_transcription_if_default.
 # Request threads never take it: the transcription pipeline reads ctx.stt once
 # per request, so a swap mid-request cannot hand one utterance two engines.
