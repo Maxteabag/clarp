@@ -1,0 +1,40 @@
+# S9 module splits (rf-fix3): agent_live_tools.py, cut 1a.
+# Applied by tools/refactor/split_apply.py; see its docstring. Parts in dependency
+# order: each reads only earlier parts and the old module's imports (regi reads
+# the ledger's states, so the ledger comes first).
+
+[[split]]
+name = "agent-live-tools"
+module = "lib/agent_live_tools.py"
+
+[[split.part]]
+# The module's constants and its frozen per-call config.
+module = "lib/agent_live_settings.py"
+names = [
+    "PROFILE_KEY", "SNAPSHOT_KEY", "MAX_AGENTS", "SETTLE_S", "REQUEST_CHARS", "FRAGMENTS_KEPT",
+    "ROUTER_TIMEOUT_S", "COMMAND_TIMEOUT_S", "_SESSION", "OVERLAY", "ROUTING",
+    "_LOOPBACK_LITERALS", "_loopback_url", "_minutes", "frozen_config", "team_text", "overlay", "tools_schema",
+]
+
+[[split.part]]
+# Side effects (replaceable in tests): HTTP to the Host, clarp-admin, the router model.
+module = "lib/agent_live_effects.py"
+names = [
+    "DELEGATE_HTTP_TIMEOUT_S", "CALLBACK_HTTP_TIMEOUT_S", "CLARP_ADMIN_REFUSED",
+    "Unreachable", "Unconfirmed", "Refused", "_NoRedirect", "_post", "_get", "_clarp_admin",
+    "_openai_router", "_find_agent", "Effects",
+]
+
+[[split.part]]
+# The durable ledger and transcript of a call's tool use.
+module = "lib/agent_live_ledger.py"
+names = [
+    "LEDGER_KEEP_S", "MAX_ROUTES_PER_CALL", "MAX_ACTIONS_PER_ROUTE", "MAX_DELEGATIONS_PER_CALL",
+    "_CALL_ID", "Transcript", "_iso", "prune_transcripts", "Ledger", "_digest",
+    "CLAIMED", "DONE", "NOT_DONE", "UNCONFIRMED", "CANCELLED",
+]
+
+[[split.part]]
+# What regi said (COORD-216-REGI-HOST-SCHEMA-v3.1).
+module = "lib/agent_live_regi.py"
+names = ["REGI_SCHEMA", "RECEIPT_FIELDS", "RECONCILE_AFTER_S", "_RESULTS", "_NOT_FORWARDED_NOTE", "regi_outcome"]
