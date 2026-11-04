@@ -3840,3 +3840,23 @@ def test_a_send_waits_behind_a_process_that_still_holds_the_session(tmp_path):
     held.alive = False
     assert _wait_until(lambda: len(backends.spawned) == 2)
     assert backends.spawned[1][1]["text"] == "after the stop"
+
+
+def test_a_wait_behind_a_stuck_session_has_its_own_log_line(tmp_path, capsys):
+    """Lead (stage 1): one log line counts the sends that wait behind a
+    stuck Codex session, apart from the ordinary wait behind a process."""
+    service, _, agent_id = _make_service(tmp_path)
+    backends = _HeldSessionBackends()
+    service.backends = backends
+    service.dispatch(text="first", requested_session="mike", trace_id="t1",
+                     synthesize_audio=False)
+    held = _Process()
+    backends.holders.append(held)
+    backends.processes[0].alive = False
+    backends.spawned[0][1]["on_result"]({"duration_ms": 9})
+    capsys.readouterr()
+    service.dispatch(text="after the stop", requested_session="mike",
+                     trace_id="t2", synthesize_audio=False)
+    assert "turnQueuedBehindStuckSession" in capsys.readouterr().err
+    held.alive = False
+    assert _wait_until(lambda: len(backends.spawned) == 2)
