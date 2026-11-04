@@ -206,9 +206,7 @@ def transcribe(ctx, *, audio_bytes: bytes, ctype: str, hands_free: bool,
                         text, ends_terminal, _dur = model_transcribe(
                             engine, audio_bytes, ctype, prompt, wait=10.0)
                         break
-                    except (STTUnknownModelError, STTModelLoadingError, STTBusyError):
-                        raise
-                    except Exception as e:  # noqa: BLE001
+                    except Exception as e:  # noqa: BLE001 - busy, loading or missing too (VP-09)
                         if index == len(agent_fallbacks):
                             raise
                         log_exception("sttAgentEngineFallback", e, detail=engine)
@@ -377,11 +375,7 @@ def _run_call_steps(stt, steps: list[dict], call_stt: dict, *, focus: str, audio
                 else:
                     raise STTUnknownModelError(
                         f"transcription model not installed: {step.get('model', step['engine'])}")
-        except (STTUnknownModelError, STTModelLoadingError, STTBusyError) as e:
-            attempts.append({"engine": step["engine"], "outcome": "error", "language": handed.get("language"),
-                             "ms": int((time.monotonic() - started) * 1000), "reason": str(e)[:200]})
-            raise
-        except Exception as e:  # noqa: BLE001 - the next engine, or the caller's error
+        except Exception as e:  # noqa: BLE001 - the next engine, or the caller's error (VP-09)
             attempts.append({"engine": step["engine"], "outcome": "error", "language": handed.get("language"),
                              "ms": int((time.monotonic() - started) * 1000), "reason": str(e)[:200]})
             if step is runnable[-1]:
