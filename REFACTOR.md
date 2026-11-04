@@ -79,7 +79,12 @@ the hot spots; every high finding fixed or explicitly accepted.
    fixture) or a Host runs on heavy-remote, even a single file (3 Nov evening).
    Full suites, coverage and replay runs go to the buildbox through
    `/var/tmp/clarp-refactor-program/bin/heavy-remote` (announced 3 Nov; four job
-   slots of `-n 8`; `--status`, `--forget`). The landing gate is the merge captain's
+   slots of `-n 8`; `--status`, `--forget`). It holds the last 5 NOK of Peter's
+   100 NOK daily cap for releases: other jobs stop at `CLARP_REMOTE_RESERVE_NOK`
+   (95), while jobs from `release-src/` worktrees or with `HEAVY_RELEASE=1` may use
+   all 100. Only the release owner and the merge captain set `HEAVY_RELEASE=1`, for
+   release canaries and release-candidate gates; nobody raises
+   `CLARP_REMOTE_RESERVE_NOK` (4 Nov). The landing gate is the merge captain's
    GitHub Actions run on the exact commit. Never run `cargo` (repo rule).
 6. **Data.** The replay corpus is scrubbed with stable surrogates and read only
    through the harness. Tools print structure, counts and codes, never message
@@ -208,6 +213,7 @@ commits land.
 | Since | Slice (owner) | Claimed | Until |
 |---|---|---|---|
 | 4 Nov 10:0x | S9 (`rf-fix3-9875`) | on `refactor/integration` only: `server/lib/agent_live_tools.py` (pilot), then `agent_rings.py`, `dreaming.py`, `background_jobs.py`, `orchestrator.py`, each claimed when its cut starts; main's fixes keep flowing because the splits are regenerated from main's text at every merge | the big release |
+| 4 Nov 11:5x | S9 (`rf-fix3-9875`) | cut 1b on `refactor/integration` only: `server/lib/agent_rings.py` split along its section headers into `agent_rings/` modules (store, voip, openings, host identity) with `agent_rings.py` as the facade; regenerated from main's text at every merge (RTO-04 (a) on main flows through) | the big release |
 | 4 Nov 10:4x | S7 (`rf-fix2-56f3`) | on `refactor/integration` only: `server/lib/tts_providers.py` (the `_wav_to_mp3` definition, which stays as a facade re-export), new `server/lib/audio_codec.py`, and the one lazy import of it in `server/lib/custom_tts_adapters.py`; regenerated from main's text at every merge with S9's split tool | the big release |
 | 4 Nov 10:5x | S7 (`rf-fix2-56f3`) | on `refactor/integration` only: `server/lib/clip_delivery/raw_pcm.py` (RawPcmSession), `server/lib/clip_delivery/chunked_file.py` (ChunkedFileSession), new `server/lib/clip_delivery/file_session.py`; behaviour-preserving refactor (G0 table plus G2 at zero), not regenerated; no pending main fix touches these files (lead checked VP-01, VP-06 and the voice batch) | the big release |
 | 4 Nov 11:3x | S7 (`rf-fix2-56f3`) | on `refactor/integration` only: `server/lib/voice_markup.py` (new `extract_speak_blocks`), `server/lib/transcript_streamer.py` (its `<speak>` regex and the loop at `_on_text`), `server/lib/message_audio.py` (its `<speak>` regex); behaviour-preserving, each reader keeps its mode; no pending main fix touches these files (lead checked VP-01, VP-06, AUT-07, RTO-07) | the big release |
