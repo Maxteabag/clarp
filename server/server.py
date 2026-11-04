@@ -1927,7 +1927,7 @@ class Handler(BaseHTTPRequestHandler):
         # module-level load_config alias would bypass the patch.
         from lib.config import load as load_config
         from lib.stt import (DisabledSTT, UnavailableSTT, WhisperSTT,
-                             WhisperCppSTT,
+                             WhisperCppSTT, close_engine,
                              _installed_model_records)
         cfg = load_config()
         provider = getattr(cfg, "whisper_provider", "faster-whisper")
@@ -1965,15 +1965,18 @@ class Handler(BaseHTTPRequestHandler):
             replacement = stt_cls(
                 cfg.whisper_model, cfg.whisper_compute,
                 model_source=record["_local_path"])
-        # Publish loader ownership before starting it. A timed-out recovery
-        # retry must wait on this exact loader rather than create a duplicate.
-        self.ctx.replace_stt(replacement)
+        # Load before publishing: the old engine serves meanwhile, and only a
+        # loaded replacement takes over; the old engine's worker is then
+        # stopped (VP-07). A load past the timeout is still published, so a
+        # recovery retry waits on this exact loader rather than a duplicate.
         replacement.start_loading()
         if not replacement.load_done.wait(timeout=330.0):
+            close_engine(self.ctx.replace_stt(replacement))
             raise RuntimeError(f"installed model did not load: {installed_id}")
         if replacement.load_error is not None:
-            replacement._clarp_activation_failure_reported = True
+            close_engine(replacement)
             raise RuntimeError(str(replacement.load_error))
+        close_engine(self.ctx.replace_stt(replacement))
 
     def _handle_transcription_capabilities(self):
         from lib.transcription_models import recover_completed_installs
