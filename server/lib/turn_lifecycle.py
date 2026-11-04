@@ -64,6 +64,17 @@ ALL: frozenset[str] = frozenset(AgentState.valid()) | {NONE}
 _FOREIGN_ROW_SQL = (
     "(? = '' OR COALESCE(json_extract(detail, '$.trace_id'), '') <> ?"
     " OR kind IN (" + ", ".join(f"'{kind}'" for kind in sorted(TERMINAL)) + "))")
+# A terminal row of trace (?) committed after a baseline state_id (?): one
+# naming the trace, or an untraced Stop that settled that trace's turn.
+# Binds (agent_id, baseline, trace, trace) (TP-N2).
+_TERMINAL_AFTER_SQL = (
+    "SELECT 1 FROM state_log s WHERE s.agent_id = ? AND s.state_id > ?"
+    " AND s.kind IN (" + ", ".join(f"'{kind}'" for kind in sorted(TERMINAL)) + ")"
+    " AND (COALESCE(json_extract(s.detail, '$.trace_id'), '') = ?"
+    "      OR (COALESCE(json_extract(s.detail, '$.trace_id'), '') = ''"
+    "          AND EXISTS (SELECT 1 FROM turns u WHERE u.agent_id = s.agent_id"
+    "                       AND u.trace_id = ? AND u.settled_at = s.ts)))"
+    " LIMIT 1")
 # Any agent that has at least one row.
 STARTED: frozenset[str] = ALL - {NONE}
 # States in which in-turn activity (tools, compaction) is legitimate. IDLE is
@@ -333,6 +344,16 @@ class TurnStateMachine:
             return self._conditional_transition(agent_id, event, detail, expect_trace=expect_trace,
                                                 anchor=anchor, s_open=s_open)
         fence = None
+        trace = str((detail or {}).get("trace_id") or "")
+        late_fence = None
+        if (trace and not force and ts is None and not conn().in_transaction
+                and not self._may_end_turn(event, kind)):
+            # A non-terminal row of this trace must never commit after the
+            # trace's terminal row (TP-N2): the baseline is read here, before
+            # this write waits for anything, and checked in its transaction.
+            late_fence = int(conn().execute(
+                "SELECT COALESCE(MAX(state_id), 0) FROM state_log WHERE agent_id = ?",
+                (agent_id,)).fetchone()[0])
         if self._may_end_turn(event, kind) and not conn().in_transaction:
             # A terminal write's causal baseline, read before anything else of
             # this write (its state, stamp, runtime): a row after it is newer
@@ -356,13 +377,13 @@ class TurnStateMachine:
         if not force and not self.is_legal(from_state, event):
             self._refuse(agent_id, event, from_state, target)
             raise IllegalTransition(agent_id, event, from_state, target)
-        trace = str((detail or {}).get("trace_id") or "")
         if (event == TurnEvent.SPAWN_STARTED and not force and ts is None and trace
                 and not conn().in_transaction):
             # A turn writes 'thinking' twice: the dispatcher's spawn and the
             # provider's own turn start. A Stop between them ended the turn;
             # the late write must not make the agent busy for good (TP-N1).
-            return self._start_unless_stopped(agent_id, event, target, detail, trace)
+            return self._start_unless_stopped(agent_id, event, target, detail, trace,
+                                              late_fence=late_fence)
         stamp = now_ms() if ts is None else int(ts)
         if event == TurnEvent.TEXT_STREAMED and self._same_phase(agent_id, target, detail):
             # A backend reports every delta; the state only changes when the
@@ -397,6 +418,12 @@ class TurnStateMachine:
                         own_since=fence if ts is None else None)
                 cursor, trace, stamp = db.retry_locked(write)
                 _after_settle(agent_id, event, target, trace)
+            elif late_fence is not None and target not in TERMINAL:
+                cursor = self._write_unless_ended(agent_id, event, target, detail, runtime_id,
+                                                  stamp, trace, late_fence)
+                if cursor is None:
+                    return Transition(agent_id=agent_id, event=event, from_state=from_state,
+                                      to_state=target, ts=stamp, detail=detail, forced=force)
             else:
                 cursor = conn().execute(
                     """INSERT INTO state_log (agent_id, runtime_id, ts, kind, detail)
@@ -411,6 +438,38 @@ class TurnStateMachine:
             agent_id=agent_id, event=event, from_state=from_state,
             to_state=target, ts=stamp, detail=detail, forced=force,
             state_id=int(cursor.lastrowid or 0))
+
+    def _write_unless_ended(self, agent_id: str, event: str, target: str,
+                            detail: dict[str, Any] | None, runtime_id, stamp: int,
+                            trace: str, late_fence: int):
+        """A non-terminal row of ``trace`` in ONE write transaction that
+        refuses it if the trace's terminal row committed after
+        ``late_fence`` (TP-N2): its turn ended while this write waited, so
+        writing it would show the agent busy after the turn. Dropped, not
+        raised: backend reader threads write these. None when dropped."""
+        database = conn()
+        database.execute("BEGIN IMMEDIATE")
+        try:
+            if database.execute(_TERMINAL_AFTER_SQL,
+                                (agent_id, late_fence, trace, trace)).fetchone() is not None:
+                database.execute("COMMIT")
+                log("stateAfterTerminalDropped", f"agent={agent_id} event={event} trace={trace}")
+                return None
+            cursor = database.execute(
+                """INSERT INTO state_log (agent_id, runtime_id, ts, kind, detail)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (agent_id, runtime_id, stamp, target, json.dumps(detail) if detail else None))
+            _settle_turn(agent_id, event, target, detail, stamp)
+            if not database.in_transaction:
+                # An inner error rolled it back and _settle_turn swallowed it.
+                log("stateWriteLost", f"agent={agent_id} event={event} trace={trace}")
+                return None
+            database.execute("COMMIT")
+            return cursor
+        except BaseException:
+            if database.in_transaction:
+                database.execute("ROLLBACK")
+            raise
 
     def _write_terminal(self, agent_id: str, event: str, target: str,
                         detail: dict[str, Any] | None, runtime_id, stamp: int, *,
@@ -554,7 +613,8 @@ class TurnStateMachine:
             ts=stamp, detail=detail, state_id=int(cursor.lastrowid or 0))
 
     def _start_unless_stopped(self, agent_id: str, event: str, target: str,
-                              detail: dict[str, Any] | None, trace: str) -> Transition:
+                              detail: dict[str, Any] | None, trace: str, *,
+                              late_fence: int | None = None) -> Transition:
         """Write a turn's start unless that turn was stopped, in ONE write
         transaction: a Stop cannot land between the check and the write.
         Evidence is durable and per turn: an 'interrupted' or 'stopped' row
@@ -604,6 +664,13 @@ class TurnStateMachine:
                     # Nothing of ours was written; a Stop that landed meanwhile stays.
                     database.execute("COMMIT")
                     raise TransitionNotWritten(agent_id, event, "turn_stopped")
+                if late_fence is not None and database.execute(
+                        _TERMINAL_AFTER_SQL, (agent_id, late_fence, trace, trace)).fetchone():
+                    # The trace ended (done, failed, Stop) while this start
+                    # waited: it must not show the agent busy after (TP-N2).
+                    database.execute("COMMIT")
+                    log("stateAfterTerminalDropped", f"agent={agent_id} event={event} trace={trace}")
+                    raise TransitionNotWritten(agent_id, event, "turn_ended")
                 stamp = now_ms()
                 detail = _detail_with_origin(agent_id, target, detail, stamp)
                 from . import agents as agents_db
