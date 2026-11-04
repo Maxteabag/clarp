@@ -961,3 +961,42 @@ def test_a_goal_changed_after_the_snapshot_is_not_overwritten_by_a_claim(tmp_pat
     goal = task_plans.get(p["plan_id"])["goal"]
     assert goal["continuation"]["state"] != "dispatching"
     assert goal["history"][-1]["kind"] == "checkpoint"
+
+
+def _replan(p, reason, steps):
+    return act(p, "replan", {"reason": reason, "steps": steps})
+
+
+def _item(p, stable_id):
+    return next(i for i in p["items"] if i["item_id"].endswith(stable_id))
+
+
+def test_replan_restores_a_retired_step_it_proposes_again(tmp_path):
+    # AUT-14 (a): a removed step counts as resolved, so a restored required
+    # step that stayed removed would let the goal finish without it.
+    p = make_goal(tmp_path)
+    p = _replan(p, "Probe says the method is not needed", [])
+    assert _item(p, "method")["status"] == "removed"
+    p = _replan(p, "Second probe says it is needed after all",
+                [{"id": "method", "title": "Initial method"}])
+    restored = _item(p, "method")
+    assert restored["status"] == "pending"
+    assert p["counts"].get("removed", 0) == 0
+
+
+def test_replan_keeps_the_reason_and_time_of_already_retired_steps(tmp_path):
+    # AUT-14 (b): later replans must not re-stamp a retired step.
+    p = make_goal(tmp_path)
+    p = _replan(p, "First reason", [{"id": "other", "title": "Other method"}])
+    first = _item(p, "method")
+    p = _replan(p, "Second reason", [{"id": "third", "title": "Third method"}])
+    again = _item(p, "method")
+    assert again["status"] == "removed"
+    assert again["detail"] == "First reason" == first["detail"]
+    assert again["completed_at"] == first["completed_at"]
+
+
+def test_replan_caps_a_kept_step_title_like_a_new_one(tmp_path):
+    p = make_goal(tmp_path)
+    p = _replan(p, "Longer title", [{"id": "method", "title": "x" * 600}])
+    assert len(_item(p, "method")["title"]) == 500
