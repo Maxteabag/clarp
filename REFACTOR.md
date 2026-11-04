@@ -205,6 +205,7 @@ commits land.
 | Since | Slice (owner) | Claimed | Until |
 |---|---|---|---|
 | 4 Nov 10:0x | S9 (`rf-fix3-9875`) | on `refactor/integration` only: `server/lib/agent_live_tools.py` (pilot), then `agent_rings.py`, `dreaming.py`, `background_jobs.py`, `orchestrator.py`, each claimed when its cut starts; main's fixes keep flowing because the splits are regenerated from main's text at every merge | the big release |
+| 4 Nov 10:4x | S7 (`rf-fix2-56f3`) | on `refactor/integration` only: `server/lib/tts_providers.py` (the `_wav_to_mp3` definition, which stays as a facade re-export), new `server/lib/audio_codec.py`, and the one lazy import of it in `server/lib/custom_tts_adapters.py`; regenerated from main's text at every merge with S9's split tool | the big release |
 | 3 Nov 12:17 | S5 (`rf-readmodel-12f8`) | `server/lib/message_writes.py` import section (`store_transcript_turns`, `_ImportWriter`, `_store_transcript_turns_txn` and its helpers, `_attach_authority_tools`, `stamp_turn`); `server/lib/message_store.py` facade re-exports; `tests/readmodel/` | the S5 extraction commits land; `rf-fix-c4ab`'s RM-N1 commit may edit the upsert and twin path |
 
 ## 7. How to work
