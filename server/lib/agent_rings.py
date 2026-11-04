@@ -1064,7 +1064,8 @@ def _expire_quietly() -> None:
 # and a greeting can never both win. TTS, events, pushes and the queue kick
 # run after commit.
 
-SAY, LISTEN_FIRST = "say", "listen_first"
+SAY = "say"
+LISTEN_FIRST = "listen_first"
 OPENING_MODES = (SAY, LISTEN_FIRST)
 OPENING_KEY = "agent_ring.opening."
 CALL_OPEN = "call-open:"
