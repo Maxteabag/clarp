@@ -443,7 +443,10 @@ def test_focus_change_during_first_herald_cannot_miss_buffer_flush():
     class BlockingTTS(FakeTTS):
         def synthesize(self, text, voice_id, session=None):
             synth_started.set()
-            assert allow_synth.wait(timeout=1)
+            # Held for longer than the focus deadline below, so a focus
+            # change that waits for synthesis fails instead of slipping
+            # through once synthesis gives up.
+            assert allow_synth.wait(timeout=60)
             return super().synthesize(text, voice_id, session)
 
     stream = FakeStream()
@@ -470,12 +473,14 @@ def test_focus_change_during_first_herald_cannot_miss_buffer_flush():
 
     focus = threading.Thread(target=change_focus)
     ingest.start()
-    assert synth_started.wait(timeout=1)
-    focus.start()
-    focus.join(timeout=0.5)
-    assert not focus.is_alive(), "focus must not wait for provider TTS"
-    allow_synth.set()
-    ingest.join(timeout=1)
+    try:
+        assert synth_started.wait(timeout=15)
+        focus.start()
+        focus.join(timeout=15)
+        assert not focus.is_alive(), "focus must not wait for provider TTS"
+    finally:
+        allow_synth.set()
+    ingest.join(timeout=15)
 
     assert not ingest.is_alive()
     assert hm.held_clips("rachel") == []
