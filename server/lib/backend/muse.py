@@ -23,7 +23,7 @@ from ..process_registry import TurnHandle
 from ..turn_lifecycle import TurnEvent
 from ..voice_preamble import apply_voice_preamble
 from .base import BackendBrand
-from .stream_json import StreamJsonBackend, iter_json_dicts
+from .stream_json import StreamJsonBackend, iter_json_dicts, stop_after_drain_failure
 
 # Terminal states that end a run without an answer. A stop (Clarp's own, or
 # the user's) is not a failure: like Codex and Claude it leaves no error row.
@@ -187,6 +187,7 @@ class MuseBackend(StreamJsonBackend):
         on_session_init, on_result, on_error, stream, enqueue,
     ) -> None:
         st = _TurnState(session_id=backend_session_id)
+        reported = False        # a terminal outcome reached on_result/on_error
         try:
             # The id is Clarp's own, so the agent is bound to it before Muse
             # writes a line: a crash mid-run still resumes the same session.
@@ -213,6 +214,7 @@ class MuseBackend(StreamJsonBackend):
                 err = stderr_text(proc) or f"muse exited rc={rc}"
                 log("museExitErr", f"rc={rc} trace={trace_id or '∅'} stderr={(err or '')[:500]!r}")
                 if on_error is not None:
+                    reported = True
                     on_error(err)
             elif on_result is not None and not st.failed_error:
                 self._persist_live_text(st, agent_id=agent_id, session=session,
@@ -220,11 +222,14 @@ class MuseBackend(StreamJsonBackend):
                 self._broadcast(stream, agent_id, session)
                 usage = ({"input_tokens": st.tokens_in, "output_tokens": st.tokens_out}
                          if (st.tokens_in or st.tokens_out) else {})
+                reported = True
                 on_result({"last_agent_message": st.last_agent_message or st.turn_text,
                            "usage": usage})
         except Exception as error:  # noqa: BLE001
             log_exception("museDrainFail", error, detail=trace_id)
-            if on_error is not None and not st.failed_error:
+            # Nothing reads this CLI any more: stop it, and end the turn once.
+            stop_after_drain_failure(proc, handle)
+            if on_error is not None and not st.failed_error and not reported:
                 try:
                     on_error(str(error)[:300])
                 except Exception:  # noqa: BLE001
