@@ -39,10 +39,15 @@ def test_an_outstanding_goal_read_keeps_even_a_user_paused_process(tmp_path, mon
         return {'goal': {'objective': 'synthetic', 'status': 'paused'}}
 
     client.request = paused_reply
-    client.goal(agent, 'pause')  # explicit successful user pause is the control
+    # Round 8 adaptation (disclosed): the user-paused state is set in the
+    # mirror directly. A goal() pause would now end its own answer and
+    # re-trigger the recycle, which may legitimately release a user-paused
+    # process before this read starts.
+    agent_goals.upsert(agent['agent_id'], session=agent['session'], backend='codex',
+        goal=agent_goals.from_codex({'objective': 'synthetic', 'status': 'paused'}))
     assert not client.proc.kill.called
     client.goal(agent, 'get')
-    assert requests == ['thread/goal/set', 'thread/goal/get']
+    assert requests == ['thread/goal/get']
     assert not client.proc.kill.called, 'recycled while another agents goal answer was outstanding'
 
 
