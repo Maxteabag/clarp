@@ -231,3 +231,116 @@ def test_catalogue_names_each_opencode_models_provider(stores, monkeypatch):
         {"id": "opencode", "name": "opencode", "signed_in": True},
         {"id": "deepseek", "name": "DeepSeek", "signed_in": True},
     ]
+
+
+# HP-01: finish() closes the serve and refreshes the catalogue before it
+# publishes; these keep that window safe (reviewer B's controls on c62ced7c).
+
+
+def test_a_close_error_still_refreshes_before_complete(stores, monkeypatch):
+    _, changed = stores
+    logged = []
+    class Serve(_FakeServe):
+        def close(self):
+            raise OSError("synthetic close failure")
+    monkeypatch.setattr(hp, "log_exception", lambda event, *args, **kwargs: logged.append(event))
+    hp.start_oauth("opencode", "anthropic", 0, serve_factory=lambda _: Serve(_FakeClient("code")))
+    result = hp.submit_code("opencode", "anthropic", "synthetic-code")
+    assert result["status"] == "complete" and changed == [True]
+    assert "harnessProviderServeCloseFail" in logged
+
+
+def test_completion_is_not_stranded_when_close_and_logging_both_fail(stores, monkeypatch):
+    class Serve(_FakeServe):
+        def close(self):
+            raise OSError("synthetic close failure")
+    def broken_log(*args, **kwargs):
+        raise OSError("synthetic unavailable stderr")
+    monkeypatch.setattr(hp, "log_exception", broken_log)
+    hp.start_oauth("opencode", "anthropic", 0, serve_factory=lambda _: Serve(_FakeClient("code")))
+    session = hp._sessions["anthropic"]
+    hp.submit_code("opencode", "anthropic", "synthetic-code")
+    session.finish("failed", "retry")
+    assert session.done.is_set(), "the claimed finish must still publish terminal state"
+    assert hp.task("anthropic")["status"] in ("complete", "failed")
+
+
+def test_second_submission_while_finishing_cannot_publish_complete_early(stores):
+    _, changed = stores
+    entered, release = threading.Event(), threading.Event()
+    class Serve(_FakeServe):
+        def close(self):
+            entered.set()
+            assert release.wait(5)
+            super().close()
+    hp.start_oauth("opencode", "anthropic", 0, serve_factory=lambda _: Serve(_FakeClient("code")))
+    session = hp._sessions["anthropic"]
+    result = []
+    worker = threading.Thread(target=lambda: result.append(hp.submit_code("opencode", "anthropic", "first")))
+    worker.start()
+    try:
+        assert entered.wait(3)
+        second = hp.submit_code("opencode", "anthropic", "second")
+        assert second["status"] == "running" and not session.done.is_set()
+        assert changed == []
+    finally:
+        release.set()
+        worker.join(3)
+    assert not worker.is_alive()
+    assert result[0]["status"] == "complete" and session.done.is_set() and changed == [True]
+
+
+def test_a_replaced_session_keeps_its_own_running_task(stores):
+    entered, release = threading.Event(), threading.Event()
+    class Closing(_FakeServe):
+        def close(self):
+            entered.set()
+            assert release.wait(5)
+            super().close()
+    hp.start_oauth("opencode", "anthropic", 0, serve_factory=lambda _: Closing(_FakeClient("code")))
+    old = hp._sessions["anthropic"]
+    worker = threading.Thread(target=lambda: hp.submit_code("opencode", "anthropic", "old-code"))
+    worker.start()
+    try:
+        assert entered.wait(3)
+        # A public credential action clears the task; a new OAuth attempt is
+        # then admitted while the old attempt"s serve is still closing.
+        hp.save_api_key("opencode", "anthropic", "synthetic-api-key")
+        started = hp.start_oauth("opencode", "anthropic", 0,
+                                serve_factory=lambda _: _FakeServe(_FakeClient("code")))
+        current = hp._sessions["anthropic"]
+        assert started["status"] == "running" and current is not old
+    finally:
+        release.set()
+        worker.join(3)
+    assert not worker.is_alive()
+    assert hp._sessions["anthropic"] is current and not current.done.is_set()
+    assert hp.task("anthropic")["status"] == "running", "an obsolete finish must not publish over the new attempt"
+    assert hp.submit_code("opencode", "anthropic", "new-code")["status"] == "complete"
+
+
+def test_close_diagnostics_cannot_skip_the_refresh_attempt(stores, monkeypatch):
+    """Close fails and stderr is gone too: the refresh still runs before the
+    completion is published (reviewer B's control on ad077505)."""
+    import sys
+    _, changed = stores
+
+    class Serve(_FakeServe):
+        def close(self):
+            raise OSError("synthetic close error")
+
+    class UnavailableStderr:
+        def write(self, _text):
+            raise OSError("synthetic closed stderr")
+
+        def flush(self):
+            raise OSError("synthetic closed stderr")
+    hp.start_oauth("opencode", "anthropic", 0, serve_factory=lambda _: Serve(_FakeClient("code")))
+    session = hp._sessions["anthropic"]
+    with monkeypatch.context() as no_stderr:
+        sink = UnavailableStderr()
+        no_stderr.setattr(sys, "stderr", sink)
+        no_stderr.setattr(sys, "__stderr__", sink)
+        result = hp.submit_code("opencode", "anthropic", "synthetic-code")
+    assert session.done.is_set() and result["status"] == "complete"
+    assert changed == [True]
