@@ -89,8 +89,8 @@ def stop_after_drain_failure(proc: subprocess.Popen,
                 handle.kill()
             else:
                 proc.kill()
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as exc:  # noqa: BLE001
+            log_exception("drainFailureStopFail", exc, detail=str(proc.pid))
 
 
 def make_handle(proc: subprocess.Popen) -> TurnHandle:
