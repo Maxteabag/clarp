@@ -162,12 +162,6 @@ class MuseBackend(StreamJsonBackend):
         prompt = apply_voice_preamble(text, voice=voice_preamble, persona=persona, session=session)
         cmd = self.build_cmd(backend_session_id, model=model, effort=effort)
         prompt_file = None
-        if fits_argv(prompt):
-            cmd += ["--", prompt]
-        else:
-            # Past one argv string (BACKENDS-08); removed when the turn ends.
-            prompt_file = PromptFile(prompt)
-            cmd += ["--prompt-file", prompt_file.path]
         flag = "new" if minted else "resume"
         log("museSpawn", f"cwd={cwd} {flag}={backend_session_id} text_len={len(text)} "
                          f"trace={trace_id or '∅'} agent={agent_id or '∅'}")
@@ -175,23 +169,30 @@ class MuseBackend(StreamJsonBackend):
         from .. import provider_background_jobs as provider_jobs
         turn_token, identity = provider_jobs.identity_env(runtime_agent_id)
         try:
+            if fits_argv(prompt):
+                cmd += ["--", prompt]
+            else:
+                # Past one argv string (BACKENDS-08); removed when the turn ends.
+                prompt_file = PromptFile(prompt)
+                cmd += ["--prompt-file", prompt_file.path]
             proc, handle = self.launch(cmd, cwd=cwd, session=session, env_extra=identity)
+            provider_jobs.record_identity(turn_token, agent_id=runtime_agent_id,
+                                          provider=self.id, pid=proc.pid)
+            self.register_handle(runtime_agent_id, handle)
+            self.start_drain(
+                handle, removing(self._drain_stdout, prompt_file),
+                proc=proc, agent_id=runtime_agent_id, session=session,
+                trace_id=trace_id, handle=handle,
+                backend_session_id=backend_session_id, minted=bool(minted),
+                on_session_init=on_session_init, on_result=on_result,
+                on_error=on_error, stream=stream,
+                enqueue=enqueue or tts_queue.enqueue,
+            )
         except BaseException:
+            # Until the drain owns it, nothing else removes the prompt file.
             if prompt_file is not None:
                 prompt_file.remove()
             raise
-        provider_jobs.record_identity(turn_token, agent_id=runtime_agent_id,
-                                      provider=self.id, pid=proc.pid)
-        self.register_handle(runtime_agent_id, handle)
-        self.start_drain(
-            handle, removing(self._drain_stdout, prompt_file),
-            proc=proc, agent_id=runtime_agent_id, session=session,
-            trace_id=trace_id, handle=handle,
-            backend_session_id=backend_session_id, minted=bool(minted),
-            on_session_init=on_session_init, on_result=on_result,
-            on_error=on_error, stream=stream,
-            enqueue=enqueue or tts_queue.enqueue,
-        )
         return handle
 
     def _drain_stdout(
