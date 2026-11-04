@@ -56,7 +56,9 @@ _VERSION_SOURCES = {
             "claude_transcript.py", "backend/agy.py"),
 }
 _COMMON_SOURCES = ("transcript_incremental.py", "message_writes.py",
-                   "message_context.py", "message_turns.py", "voice_markup.py")
+                   "message_context.py", "message_turns.py", "voice_markup.py",
+                   # The store's ack-token decisions (AUT-07).
+                   "origins.py", "heartbeat.py", "dreaming.py", "team_leader.py")
 
 _HEAD_BYTES = 4096
 _WINDOW_BYTES = 64 * 1024
