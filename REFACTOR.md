@@ -184,6 +184,7 @@ continue as before.
 | Fix-lane owner | `rf-fix-c4ab` | Claude | one fix per commit, in the files the lead names per fix |
 | Fix-lane author 2 | `rf-fix2-56f3` | Claude | one fix per commit (voice, Oracle, autonomy findings), in the files the lead names |
 | Fix-lane author 3 | `rf-fix3-9875` | Claude | one fix per commit, pulled from `registers/backlog.md` (B and C areas) |
+| Slice owner S9 (module splits) | `rf-fix3-9875` | Claude | the module-split tool (recipe + generator + facade + ast_identity) and the move-only splits of unowned oversized modules on `refactor/integration` |
 | Slice owner S3 | `rf-routes-0f54` | Claude | route goldens now; the route seam and route modules after go/no-go 1 |
 | Slice owner S5 | `rf-readmodel-12f8` | Claude | read-model goldens now; the read model after go/no-go 1 |
 | Compute owner | `rf-compute-aa87` | Claude | `/var/tmp/clarp-refactor-program/bin/heavy-remote`, the buildbox ledger |
@@ -203,6 +204,7 @@ commits land.
 
 | Since | Slice (owner) | Claimed | Until |
 |---|---|---|---|
+| 4 Nov 10:0x | S9 (`rf-fix3-9875`) | on `refactor/integration` only: `server/lib/agent_live_tools.py` (pilot), then `agent_rings.py`, `dreaming.py`, `background_jobs.py`, `orchestrator.py`, each claimed when its cut starts; main's fixes keep flowing because the splits are regenerated from main's text at every merge | the big release |
 | 3 Nov 12:17 | S5 (`rf-readmodel-12f8`) | `server/lib/message_writes.py` import section (`store_transcript_turns`, `_ImportWriter`, `_store_transcript_turns_txn` and its helpers, `_attach_authority_tools`, `stamp_turn`); `server/lib/message_store.py` facade re-exports; `tests/readmodel/` | the S5 extraction commits land; `rf-fix-c4ab`'s RM-N1 commit may edit the upsert and twin path |
 
 ## 7. How to work
