@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import itertools
 import os
 import pathlib
 import shutil
@@ -44,14 +45,18 @@ def _codex_argv() -> list[str]:
     A ``.py`` path is launched with the current interpreter.
     """
     binary = str(_backend().required_binary)
+    # A thread Clarp releases (a move off a draining generation, BACKENDS-06b)
+    # closes 2 s after its last subscriber left instead of codex's 60 s; Clarp
+    # unsubscribes nothing else, so normal operation is unchanged.
+    unload = ["-c", "thread_unload_delay_secs=2"]
     if os.path.isfile(binary) and binary.endswith(".py"):
-        return [sys.executable, binary, "app-server", "--stdio"]
+        return [sys.executable, binary, "app-server", "--stdio", *unload]
     found = shutil.which(binary)
     if found is None and os.path.isfile(binary) and os.access(binary, os.X_OK):
         found = binary
     if found is None:
         raise FileNotFoundError(f"`{binary}` not on PATH")
-    return [found, "app-server", "--stdio"]
+    return [found, "app-server", "--stdio", *unload]
 
 
 @dataclass
@@ -158,6 +163,15 @@ class _Client:
         self.detached_agents: set[str] = set()
         self.detached_executions: set[str] = set()
         self.recycled = False
+        # BACKENDS-06b: a generation is one app-server process. A draining
+        # one takes no new turns and releases its threads at turn boundaries.
+        self.generation = next(_GENERATIONS)
+        self.draining = False
+        self.unsubscribe_unsupported = False
+        # Turns running on threads no Clarp agent owns (codex subagents):
+        # until they end no thread moves off this process.
+        self.foreign_turns: set[str] = set()
+        self.releasing: set[str] = set()
         self.rate_limits = {}
         # One shared server serves every Codex agent: it has no turn identity
         # and no agent identity. Naming the agent that started it would let a
@@ -361,6 +375,14 @@ class _Client:
             self._mirror_goal(str(params.get("threadId") or ""),
                               params.get("goal") if method.endswith("updated") else None)
             return
+        if method == "thread/closed":
+            thread_id = str(params.get("threadId") or "")
+            self._loaded_threads.discard(thread_id)
+            getattr(self, "releasing", set()).discard(thread_id)
+            if getattr(self, "draining", False):
+                log("codexThreadMoveDone", f"thread={thread_id[:8]} from={self.generation}")
+                _drain_later(self)
+            return
         if active is None and method == "turn/started" and self._detached_execution(params):
             # The detached turn (or a continuation on its stuck thread) must
             # not count as busy again: that would keep the stuck process alive.
@@ -372,7 +394,11 @@ class _Client:
             # adopt it so it streams, records state and marks the agent busy
             # like any other turn instead of being dropped on the floor.
             active = self._adopt_server_turn(params)
+            if active is None:
+                self._note_foreign_turn(params, started=True)
         if active is None:
+            if method == "turn/completed":
+                self._note_foreign_turn(params, started=False)
             return
         notified_turn = params.get("turn") if isinstance(params.get("turn"), dict) else {}
         event_turn_id = str(params.get("turnId") or notified_turn.get("id") or "")
@@ -451,6 +477,8 @@ class _Client:
                 # waits for this reader to deliver its turn/start reply.
                 threading.Thread(target=self.recycle_if_quiet, daemon=True,
                                  name="codex-recycle").start()
+            if getattr(self, "draining", False):
+                _drain_later(self)
             if status == "failed":
                 message = str(error.get("message") or "codex turn failed")
                 if active.on_error:
@@ -548,6 +576,75 @@ class _Client:
     def _goal_unknown(self) -> set[str]:
         """Threads whose goal state is unknown (call under _goal_state_lock)."""
         return set(self._goal_marks())
+
+    def _note_foreign_turn(self, params: dict, *, started: bool) -> None:
+        turn = params.get("turn") if isinstance(params.get("turn"), dict) else {}
+        thread_id = str(params.get("threadId") or turn.get("threadId") or "")
+        if not thread_id or agents_db.get_by_backend_session(thread_id):
+            return
+        key = str(turn.get("id") or params.get("turnId") or thread_id)
+        foreign = getattr(self, "foreign_turns", None)
+        if foreign is None:
+            foreign = self.foreign_turns = set()
+        if started:
+            foreign.add(key)
+        elif key in foreign:
+            foreign.discard(key)
+            if getattr(self, "draining", False):
+                _drain_later(self)
+
+    def _thread_running(self, thread_id: str) -> bool:
+        turns = list(getattr(self, "_actives", {}).values())
+        if self.active is not None:
+            turns.append(self.active)
+        return any(turn.thread_id == thread_id and not turn.handle._done.is_set()
+                   for turn in turns)
+
+    def drain_step(self) -> None:
+        """Release what a draining generation can release now (BACKENDS-06b):
+        each idle thread is unsubscribed, a running turn is never interrupted
+        and its thread follows at turn/completed. While a codex subagent turn
+        runs here, nothing moves. Exits once nothing is left."""
+        if self.foreign_turns or self.unsubscribe_unsupported:
+            self._exit_if_drained()
+            return
+        for thread_id in sorted(self._loaded_threads - self.releasing):
+            if self._thread_running(thread_id) or self.proc.poll() is not None:
+                continue
+            self.releasing.add(thread_id)
+            try:
+                result = self.request("thread/unsubscribe", {"threadId": thread_id}, timeout=10)
+            except RuntimeError as exc:
+                self.releasing.discard(thread_id)
+                if "-32601" in str(exc) or "not found" in str(exc).lower():
+                    # An app-server without the method: drain like stage 1,
+                    # until quiet, then shut down.
+                    self.unsubscribe_unsupported = True
+                    log("codexMoveFallback", f"gen={self.generation}")
+                    break
+                log_exception("codexThreadReleaseFail", exc, detail=thread_id[:8])
+                continue
+            except Exception as exc:  # noqa: BLE001 - try again at the next boundary
+                self.releasing.discard(thread_id)
+                log_exception("codexThreadReleaseFail", exc, detail=thread_id[:8])
+                continue
+            status = str((result or {}).get("status") or "")
+            log("codexThreadMoveStart", f"thread={thread_id[:8]} from={self.generation} status={status}")
+            if status in ("notLoaded", "notSubscribed"):
+                self._loaded_threads.discard(thread_id)
+                self.releasing.discard(thread_id)
+        self._exit_if_drained()
+
+    def _exit_if_drained(self, *, backstop: bool = False) -> None:
+        with _LOCK:
+            if _DRAINING.get(id(self)) is not self or _busy(self) or self.foreign_turns:
+                return
+            if self._loaded_threads and not (backstop or self.unsubscribe_unsupported):
+                return
+            del _DRAINING[id(self)]
+        log("codexGenerationExited", f"gen={self.generation} backstop={backstop} "
+                                     f"loaded={len(self._loaded_threads)}")
+        self.shutdown()
 
     def _detached_execution(self, params: dict) -> bool:
         detached = getattr(self, "detached_executions", None)
@@ -1041,6 +1138,13 @@ def _normalize_item(item: dict) -> dict:
 
 
 _CLIENTS: dict[str, _Client] = {}
+# Generations still releasing their threads after a credential change
+# (BACKENDS-06b); each exits once nothing runs or is loaded on it.
+_DRAINING: dict[int, _Client] = {}
+_GENERATIONS = itertools.count(1)
+# A draining generation that still has an idle thread loaded this long after
+# its last turn ended is shut down: the thread has no writer left to protect.
+DRAIN_BACKSTOP_SEC = 60.0
 # Recycled clients whose process has not been seen to exit (BACKENDS-07b).
 _RETIRING: dict[int, _Client] = {}
 _LOCK = threading.RLock()
@@ -1121,16 +1225,32 @@ class _StuckSessionHold:
                 and client.proc.poll() is None)
 
 
-def turn_holders(agent_id: str) -> list[_StuckSessionHold]:
-    """Processes that still hold ``agent_id``'s thread outside any turn
-    (BACKENDS-07b): a send waits behind them instead of failing."""
+class _MovingThreadHold:
+    """The agent's thread is still open in a draining generation; its next
+    turn waits until that process released it (BACKENDS-06b)."""
+
+    def __init__(self, client: "_Client", thread_id: str):
+        self.client, self.thread_id = client, thread_id
+
+    def is_alive(self) -> bool:
+        return (self.thread_id in self.client._loaded_threads
+                and self.client.proc.poll() is None)
+
+
+def turn_holders(agent_id: str) -> list:
+    """Processes that still hold ``agent_id``'s thread outside any turn: a
+    stuck one (BACKENDS-07b) or a draining generation (BACKENDS-06b). A send
+    waits behind them instead of failing."""
     with _LOCK:
         for key, client in list(_RETIRING.items()):
             if client.proc.poll() is not None:
                 del _RETIRING[key]
         clients = list({id(client): client for client in
                         [*_CLIENTS.values(), *_RETIRING.values()]}.values())
-    holds = [_StuckSessionHold(client, agent_id) for client in clients]
+        draining = list(_DRAINING.values())
+    holds: list = [_StuckSessionHold(client, agent_id) for client in clients]
+    thread_id = agents_db.live_backend_session(agent_id) if draining else ""
+    holds += [_MovingThreadHold(client, thread_id) for client in draining if thread_id]
     return [hold for hold in holds if hold.is_alive()]
 
 
@@ -1221,8 +1341,14 @@ def _client(agent_id: str, session: str, stream=None) -> _Client:
             changed = getattr(client, "auth_fingerprint", fingerprint) != fingerprint
             if changed or getattr(client, "refresh_requested", False):
                 client.refresh_requested = True
-                if not _busy(client):
+                if not _busy(client) and not getattr(client, "foreign_turns", None):
                     client.shutdown()
+                    _CLIENTS.clear()
+                    client = None
+                elif changed:
+                    # A busy process keeps its turns; the new credentials
+                    # start a new generation for the next ones (BACKENDS-06b).
+                    _begin_drain(client)
                     _CLIENTS.clear()
                     client = None
         if client is not None and getattr(client, "reader_dead", False):
@@ -1236,6 +1362,51 @@ def _client(agent_id: str, session: str, stream=None) -> _Client:
         elif stream is not None:
             client.stream = stream
         return client
+
+
+def _begin_drain(client: _Client) -> None:
+    """Called under _LOCK: the client becomes a draining generation."""
+    client.draining = True
+    _DRAINING[id(client)] = client
+    log("codexGenerationDraining", f"gen={client.generation} loaded={len(client._loaded_threads)} "
+                                   f"running={int(_busy(client))}")
+    _drain_later(client)
+
+    def backstop() -> None:
+        # Repeated until it exits: never while a turn runs on it.
+        if _DRAINING.get(id(client)) is not client:
+            return
+        client._exit_if_drained(backstop=True)
+        if _DRAINING.get(id(client)) is client:
+            _schedule_backstop()
+
+    def _schedule_backstop() -> None:
+        timer = threading.Timer(DRAIN_BACKSTOP_SEC, backstop)
+        timer.daemon = True
+        timer.start()
+
+    _schedule_backstop()
+
+
+def _drain_later(client: _Client) -> None:
+    """Off the reader thread: a release waits for its own reply."""
+    threading.Thread(target=client.drain_step, daemon=True, name="codex-drain").start()
+
+
+def _moving_owner(thread_id: str) -> _Client | None:
+    """The draining generation that still has ``thread_id`` open."""
+    if not thread_id:
+        return None
+    for client in list(_DRAINING.values()):
+        if thread_id in client._loaded_threads and client.proc.poll() is None:
+            return client
+    return None
+
+
+def _all_clients() -> list[_Client]:
+    with _LOCK:
+        return list({id(client): client for client in
+                     [*_CLIENTS.values(), *_DRAINING.values()]}.values())
 
 
 def spawn_turn(*, text: str, cwd: pathlib.Path, backend_session_id: str = "",
@@ -1257,6 +1428,11 @@ def spawn_turn(*, text: str, cwd: pathlib.Path, backend_session_id: str = "",
     with _LOCK:
         client = _client(agent_id, session, stream=stream)
         admit_turn(client, agent_id)   # before turn/start: nothing is sent
+        if not is_new_session and _moving_owner(backend_session_id) is not None:
+            # Never open one thread in two processes (codex's writer lock
+            # would refuse it anyway): the dispatcher waits for the release.
+            raise CodexSessionStuck(
+                "Waiting for the previous Codex session to release this conversation")
         handle = AppTurnHandle(client, agent_id=agent_id)
         agent = agents_db.get_by_agent_id(agent_id) if agent_id else None
         persona = (agent or {}).get("persona") or ""
@@ -1317,28 +1493,39 @@ def _shared_client() -> _Client | None:
         return client
 
 
+def _client_running(agent_id: str) -> _Client | None:
+    """The generation where ``agent_id`` has a live turn: the current one or
+    a draining one (BACKENDS-06b), so Stop and steering reach it there."""
+    for client in _all_clients():
+        active = getattr(client, "_actives", {}).get(agent_id) or (
+            client.active if getattr(client.active, "agent_id", None) == agent_id
+            else None)
+        if active and active.handle.is_alive():
+            return client
+    return None
+
+
 def steer(agent_id: str, text: str, *, client_msg_id: str = "",
           synthesize_audio: bool = False) -> bool:
-    client = _shared_client()
+    client = _client_running(agent_id) or _shared_client()
     return bool(client and client.steer(
         text, client_msg_id, synthesize_audio, agent_id=agent_id))
 
 
 def active_handles(agent_id: str) -> list[AppTurnHandle]:
-    client = _shared_client()
-    if client is None:
-        return []
-    active = getattr(client, "_actives", {}).get(agent_id) or (
-        client.active if getattr(client.active, "agent_id", None) == agent_id
-        else None)
-    return [active.handle] if active and active.handle.is_alive() else []
+    for client in _all_clients():
+        active = getattr(client, "_actives", {}).get(agent_id) or (
+            client.active if getattr(client.active, "agent_id", None) == agent_id
+            else None)
+        if active and active.handle.is_alive():
+            return [active.handle]
+    return []
 
 
 def busy_agents() -> set[str]:
     """Agents with a live turn on any app-server connection, including goal
     continuations the server started itself (adopted, without a Clarp slot)."""
-    with _LOCK:
-        clients = list({id(client): client for client in _CLIENTS.values()}.values())
+    clients = _all_clients()
     busy: set[str] = set()
     for client in clients:
         turns = list(getattr(client, "_actives", {}).values())
@@ -1355,7 +1542,7 @@ def interrupt(agent_id: str) -> int:
         for handle in handles:
             handle.terminate()
         return len(handles)
-    client = _shared_client()
+    client = _client_running(agent_id) or _shared_client()
     if client is None:
         return 0
     client.interrupt_active(agent_id)
