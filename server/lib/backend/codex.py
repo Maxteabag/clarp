@@ -826,6 +826,9 @@ class CodexBackend(StreamJsonBackend):
         reconnect past; True means the turn may be retried as is."""
         return bool(resolve("codex_app_server", "recover_usage_failure")(message))
 
+    def credential_switch_pending(self, message) -> bool:
+        return bool(resolve("codex_app_server", "credential_switch_pending")(message))
+
     def account_pool(self) -> str:
         """The pool is named after the CLI; turn_dispatch keys its failover
         coordinator by it and reads ``config_account_switch_field``."""

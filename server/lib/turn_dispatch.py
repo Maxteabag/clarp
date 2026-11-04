@@ -3325,9 +3325,16 @@ class TurnDispatchService:
                     self._schedule_retry(
                         replace(spec, recovery_attempted=True), attempt, state, msg)
                     return
+        switch_pending = False
+        if category == error_classify.USAGE_LIMIT:
+            try:
+                switch_pending = bool(backend.credential_switch_pending(message))
+            except Exception as exc:  # noqa: BLE001 - unknown: failover decides as before
+                log_exception("credentialSwitchCheckFail", exc, detail=spec.trace_id)
         if (category in (error_classify.USAGE_LIMIT, error_classify.AUTH,
                          error_classify.ACCOUNT_PLAN)
                 and backend.account_pool()
+                and not switch_pending   # switched already; no loop (BACKENDS-06 (c))
                 and account_failover(spec.backend).request(
                     spec.agent_id, spec.trace_id, account_selector(spec.backend))):
             eventlog.emit("server", "claudeAccountRecovery", context=spec.context,
@@ -3358,7 +3365,8 @@ class TurnDispatchService:
         # that had lost its plan failed each turn at compaction, and the chat
         # showed "Worked for 1s" with the provider's refusal nowhere in sight.
         self._mark_interrupted(spec, category, message, attempts=attempt,
-                               quota_confirmed=getattr(message, "quota_confirmed", None))
+                               quota_confirmed=getattr(message, "quota_confirmed", None),
+                               switch_pending=switch_pending)
         if spec.origin == "heartbeat":
             try:
                 from . import heartbeat
@@ -3420,7 +3428,8 @@ class TurnDispatchService:
     def _mark_interrupted(self, spec: _TurnSpec, category: str,
                           message: str | None, *, attempts: int,
                           quota_confirmed: bool | None = None,
-                          call_opening: bool = False) -> None:
+                          call_opening: bool = False,
+                          switch_pending: bool = False) -> None:
         human = {
             error_classify.CONNECTION: "Connection lost — retries exhausted",
             error_classify.TRANSIENT: "API unavailable (overloaded / rate limited)",
@@ -3437,6 +3446,9 @@ class TurnDispatchService:
         limit_event = None
         if category == error_classify.USAGE_LIMIT and quota_confirmed is False:
             human = "Codex could not complete this request. Try again"
+        if switch_pending:
+            human = (f"{human} — the account switch waits until no Codex agent is "
+                     "busy; send again once they finish")
         if category == error_classify.USAGE_LIMIT:
             try:
                 limit_event = backends.by_id(spec.backend).classify_usage_limit(

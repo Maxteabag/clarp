@@ -369,6 +369,11 @@ class Backend:
         """
         return False
 
+    def credential_switch_pending(self, message) -> bool:
+        """The failure came from a process still on credentials older than the
+        ones now selected; the switch waits for it (BACKENDS-06 (c))."""
+        return False
+
     def account_pool(self) -> str:
         """Name of the account pool the failover coordinator manages for this
         CLI, or "" when it has no account switching.
