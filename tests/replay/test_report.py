@@ -719,3 +719,67 @@ def test_joining_a_request_that_was_never_sent_fails():
     import capture
     with pytest.raises(capture.StepFailed):
         capture.run_step(None, None, {'op': 'join', 'name': 'missing'}, [], [], {})
+
+
+def test_a_background_name_still_open_is_refused():
+    # Reviewer B s0-codexpool-996077f8 F1.
+    import threading
+    import capture
+    release = threading.Event()
+
+    class StubHost:
+        def request(self, *args, **kwargs):
+            assert release.wait(5)
+            return 200, {}, {'ok': True}
+    variables = {}
+    capture.run_step(StubHost(), None, {'op': 'get', 'path': '/a', 'background': 'same'}, [], [], variables)
+    first = variables['<background>']['same'][1]
+    try:
+        with pytest.raises(capture.StepFailed):
+            capture.run_step(StubHost(), None, {'op': 'get', 'path': '/b', 'background': 'same'}, [], [], variables)
+        assert variables['<background>']['same'][1] is first
+    finally:
+        release.set()
+        first.join(3)
+
+
+def test_a_failed_capture_settles_its_background_requests(tmp_path, monkeypatch):
+    # Reviewer B s0-codexpool-996077f8 F2: an unjoined request ends before capture returns.
+    import threading
+    import capture
+    stopped, workers = threading.Event(), []
+
+    class StubHost:
+        def __init__(self, build, root, python):
+            self.root, self.url = root, 'http://127.0.0.1:1'
+
+        def start(self, config):
+            pass
+
+        def request(self, *args, **kwargs):
+            workers.append(threading.current_thread())
+            assert stopped.wait(5)
+            return 200, {}, {'ok': True}
+
+        def stop(self):
+            stopped.set()
+
+    class StubSSE:
+        frames, errors, ended = [{'event': None, 'id': None, 'data': {}}], [], False
+
+        def __init__(self, *args):
+            pass
+
+        def freeze(self):
+            pass
+
+        def close(self):
+            return self.frames
+    monkeypatch.setattr(capture, 'Host', StubHost)
+    monkeypatch.setattr(capture, 'SSE', StubSSE)
+    monkeypatch.setattr(capture, 'dump_db', lambda p: {'schema': [], 'pk': {}, 'tables': {}})
+    monkeypatch.setattr(capture, 'list_files', lambda p: [])
+    scenario = {'id': 'unjoined', 'steps': [{'op': 'get', 'path': '/held', 'background': 'held'}]}
+    result = capture.capture(tmp_path / 'build', scenario, tmp_path / 'run')
+    assert 'never joined' in result['error']
+    assert workers and not workers[0].is_alive()

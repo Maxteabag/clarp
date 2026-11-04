@@ -342,6 +342,17 @@ def _record(step: dict, response, http: list, variables: dict) -> None:
         raise StepFailed(f'unexpected status {status}')
 
 
+def settle_background(variables: dict) -> list[str]:
+    """Wait for every background request still registered (after the Host has
+    stopped, an open request fails at once); names any that did not finish."""
+    unsettled = []
+    for name, (_, thread, _) in list(variables.get('<background>', {}).items()):
+        thread.join(WAIT_TIMEOUT_S)
+        if thread.is_alive():
+            unsettled.append(name)
+    return unsettled
+
+
 def run_step(host: Host, sse, step: dict, http: list, cli: list, variables: dict):
     op = step['op']
     if op in ('get', 'post', 'put', 'delete', 'patch'):
@@ -369,6 +380,8 @@ def run_step(host: Host, sse, step: dict, http: list, cli: list, variables: dict
         if step.get('background'):
             # Sent now on its own thread, like a phone whose request is still open;
             # recorded at its 'join' step, so the exchange keeps a fixed position.
+            if step['background'] in variables.get('<background>', {}):
+                raise StepFailed(f"background request {step['background']} is already open")
             result: dict = {}
 
             def send():
@@ -382,14 +395,17 @@ def run_step(host: Host, sse, step: dict, http: list, cli: list, variables: dict
             return
         _record(step, host.request(*args, token=token), http, variables)
     elif op == 'join':
-        pending = variables.get('<background>', {}).pop(step['name'], None)
+        pending = variables.get('<background>', {}).get(step['name'])
         if pending is None:
             raise StepFailed(f"no background request named {step['name']}")
         sent, thread, result = pending
         thread.join(WAIT_TIMEOUT_S)
-        if thread.is_alive() or 'error' in result:
-            raise StepFailed(f"background request {step['name']} did not complete "
-                             f"({result.get('error', 'still open')})")
+        if thread.is_alive():
+            # Still registered: the capture's teardown settles it after the Host stops.
+            raise StepFailed(f"background request {step['name']} did not complete (still open)")
+        del variables['<background>'][step['name']]
+        if 'error' in result:
+            raise StepFailed(f"background request {step['name']} did not complete ({result['error']})")
         _record(sent, result['response'], http, variables)
     elif op == 'wait_settled':
         _poll('turn settled', lambda: _turns_settled(host.root, step['message_id'], True))
@@ -602,6 +618,7 @@ def capture(build: Path, scenario: dict, root: Path, python: str = sys.executabl
     http: list = []
     cli: list = []
     error = None
+    variables: dict = {}
     sessions = scenario.get('sessions', ('rachel',))
     db, files = {'schema': [], 'pk': {}, 'tables': {}}, []
     try:
@@ -610,7 +627,7 @@ def capture(build: Path, scenario: dict, root: Path, python: str = sys.executabl
             raise StepFailed('the build has no bin/clarp-admin.py (prepared by an older harness?)')
         host.start(scenario.get('config'))
         timings['start'] = round(time.monotonic() - started, 2)
-        variables = {'port': host.url.rsplit(':', 1)[1], 'root': str(root)}
+        variables.update({'port': host.url.rsplit(':', 1)[1], 'root': str(root)})
         sse = SSE(host, sessions)
         _poll('SSE connected', lambda: sse.frames)
         for index, step in enumerate(scenario['steps']):
@@ -638,6 +655,10 @@ def capture(build: Path, scenario: dict, root: Path, python: str = sys.executabl
         if sse is not None:
             frames = sse.close()
         timings['reader_joined'] = round(time.monotonic() - started, 2)
+        # No request of the scenario outlives its capture (review s0-codexpool-996077f8).
+        unsettled = settle_background(variables)
+        if unsettled and error is None:
+            error = f"background request {', '.join(unsettled)} did not settle after the Host stopped"
     # Dumped on a failed run too: the frozen state is the diagnostic (structure only in reports).
     db = dump_db(root / 'state.sqlite')
     timings['db_dumped'] = round(time.monotonic() - started, 2)
