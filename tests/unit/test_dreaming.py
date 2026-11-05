@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import time
+import threading
 import pathlib
 import urllib.error
 from datetime import datetime, timezone
@@ -331,7 +332,8 @@ def test_custom_dream_settings_shape_new_runs_without_mutating_defaults():
     assert dreaming.DREAM_TARGET_TOKEN_BUDGET == 70_000
 
 
-def test_completed_round_kicks_next_round_without_scheduler_poll():
+@pytest.mark.parametrize("interruption", ["none", "scheduler_stop", "user_stop", "user_stop_resume", "user_stop_resume_new_wake", "run_end", "retry_error"])
+def test_completed_round_kicks_next_round_without_scheduler_poll(monkeypatch, interruption):
     aid = _agent("domi")
     location.set_location("domi", 0, 0, ts=1)
     sent: list[tuple[str, str]] = []
@@ -347,6 +349,36 @@ def test_completed_round_kicks_next_round_without_scheduler_poll():
         # the roleplay arm opens with a different first stage.
         recipe_chooser=lambda: ("control", "full"),
     )
+
+    advance_sent = threading.Event()
+    release_advance = threading.Event()
+    wake_threads = []
+    real_advance = scheduler._advance_run
+    real_start = threading.Thread.start
+
+    def record_start(thread):
+        if thread.name.startswith("dreaming-advance-"):
+            wake_threads.append(thread)  # child registered before its parent can exit
+        return real_start(thread)
+
+    monkeypatch.setattr(threading.Thread, "start", record_start)
+    failures, errors = [], []
+    patch_shared(monkeypatch, dreaming, "log_exception",
+                 lambda event, error, **kw: errors.append((event, str(error))))
+
+    def hold_successful_advance(run):
+        if interruption == "retry_error" and advance_sent.is_set() and not failures:
+            failures.append(True)
+            raise RuntimeError("synthetic retry failure")
+        result = real_advance(run)
+        if result and len(sent) == 2:
+            # The round is durably sent, but its wake worker still owns the
+            # pending slot. Completing it now used to lose the next wake.
+            advance_sent.set()
+            assert release_advance.wait(5), "test releases the pending advance"
+        return result
+
+    monkeypatch.setattr(scheduler, "_advance_run", hold_successful_advance)
 
     def complete_current_round() -> None:
         run = dreaming.list_dream_runs(session="domi")[0]
@@ -383,14 +415,53 @@ def test_completed_round_kicks_next_round_without_scheduler_poll():
         assert "stage=SEED" in sent[-1][1]
 
         complete_current_round()
-        assert _wait_for(lambda: len(sent) == 2)
+        assert advance_sent.wait(5), "hold the successful advance before pending cleanup"
+        assert len(sent) == 2
         assert "stage=FANOUT" in sent[-1][1]
 
         complete_current_round()
-        assert _wait_for(lambda: len(sent) == 3)
-        assert "stage=FANOUT" in sent[-1][1]
+        run_id = dreaming.list_dream_runs(session="domi")[0]["run_id"]
+        for _ in range(5):
+            scheduler.request_advance(run_id)
+        if interruption == "scheduler_stop":
+            scheduler.stop()
+        elif interruption in {"user_stop", "user_stop_resume", "user_stop_resume_new_wake"}:
+            from lib import turn_queue
+            turn_queue.set_paused(aid, True, user_stop=True)
+            if interruption != "user_stop":
+                turn_queue.set_paused(aid, False)  # Resume is not a fresh completion wake
+        elif interruption == "run_end":
+            dreaming.abandon_run(run_id, harvest=False)
+        release_advance.set()
+        if interruption == "retry_error":
+            assert _wait_for(lambda: bool(errors), timeout=5)
+            for thread in wake_threads:
+                thread.join(timeout=5)
+                assert not thread.is_alive()
+            assert errors == [("dreamingAdvanceFail", "synthetic retry failure")]
+            assert len(sent) == 2, "a failed retry does not re-arm itself"
+            scheduler.request_advance(run_id)  # only a new wake retries that failure
+        if interruption in {"none", "retry_error"}:
+            assert _wait_for(lambda: len(sent) == 3, timeout=5)
+            assert "stage=FANOUT" in sent[-1][1]
+        # Drain every worker before teardown Stop: Stop must not hide an old
+        # completion token reviving after the user has paused and resumed.
+        for thread in wake_threads:
+            thread.join(timeout=5)
+            assert not thread.is_alive()
+        expected = 3 if interruption in {"none", "retry_error"} else 2
+        assert len(sent) == expected, "a pre-Stop token cannot revive after Resume"
+        if interruption == "user_stop_resume_new_wake":
+            scheduler.request_advance(run_id)
+            assert _wait_for(lambda: len(sent) == 3, timeout=5)
     finally:
+        release_advance.set()
         scheduler.stop()
+        for thread in wake_threads:
+            thread.join(timeout=5)
+            assert not thread.is_alive(), "advance workers finish before test teardown"
+    expected = 3 if interruption in {"none", "retry_error", "user_stop_resume_new_wake"} else 2
+    assert len(sent) == expected, "coalesced wakes respect Stop and cannot double-dispatch"
 
 
 def test_later_round_prompts_include_bounded_prior_ledger_context():
@@ -1410,3 +1481,63 @@ def test_a_run_whose_workers_all_exited_is_gone():
     live = dreaming._claim_worker("synthetic-live")
     dreaming._fill_worker(live, os.getpid())
     assert not dreaming._workers_gone("synthetic-live")
+
+
+@pytest.mark.parametrize('delayed_old_request',[False,True],ids=['fresh-only','old-read-after-fresh-write'])
+def test_an_older_snapshot_cannot_replace_a_new_generation_wake(monkeypatch,delayed_old_request):
+    from lib import turn_queue
+    aid=_agent('domi')
+    run=dreaming.create_dream_run(agents_db.get_by_agent_id(aid),local_date='2026-06-24',timezone_name='UTC',timezone_source='test',seed_strategy='control',context_dose='full')
+    scheduler=dreaming.DreamingScheduler(send_dream=lambda *a:None,chain_delay_sec=0,chain_retry_sec=0,chain_attempts=1)
+    first_entered=threading.Event();release_first=threading.Event()
+    old_read=threading.Event();release_old=threading.Event();calls=[];workers=[];errors=[]
+    start=threading.Thread.start
+    def register(thread):
+        if thread.name.startswith('dreaming-advance-'):workers.append(thread)
+        return start(thread)
+    monkeypatch.setattr(threading.Thread,'start',register)
+    def advance(run):
+        calls.append(1)
+        if len(calls)==1:
+            first_entered.set()
+            assert release_first.wait(5)
+        return 1
+    monkeypatch.setattr(scheduler,'_advance_run',advance)
+    wake_lock = scheduler._wake_lock
+    class HeldRequestLock:
+        def __enter__(self):
+            # At this point a generation-aware request has already read its
+            # token. The same gate works on original main, which has no token.
+            if threading.current_thread().name == 'old-completion-request':
+                old_read.set()
+                assert release_old.wait(5)
+            return wake_lock.__enter__()
+        def __exit__(self, *args):
+            return wake_lock.__exit__(*args)
+    scheduler._wake_lock = HeldRequestLock()
+    def older():
+        try:scheduler.request_advance(run['run_id'])
+        except BaseException as error:errors.append(type(error).__name__)
+    old_thread=None
+    try:
+        scheduler.request_advance(run['run_id'])
+        assert first_entered.wait(5)
+        if delayed_old_request:
+            old_thread=threading.Thread(target=older,name='old-completion-request')
+            old_thread.start();assert old_read.wait(5)
+        turn_queue.set_paused(aid,True,user_stop=True)
+        turn_queue.set_paused(aid,False)
+        scheduler.request_advance(run['run_id'])  # explicit fresh generation wake
+        release_old.set()
+        if old_thread:
+            old_thread.join(5);assert not old_thread.is_alive()
+        assert errors==[]
+        release_first.set()
+        for thread in workers:
+            thread.join(5);assert not thread.is_alive()
+        assert len(calls)==2, 'fresh post-Stop completion must cause one follow-up despite a delayed old request'
+    finally:
+        release_old.set();release_first.set()
+        if old_thread:old_thread.join(5)
+        for thread in workers:thread.join(5)
+        scheduler.stop()
