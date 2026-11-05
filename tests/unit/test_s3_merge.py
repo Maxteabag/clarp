@@ -571,3 +571,32 @@ def test_failed_method_recipe_cleanup_stops_before_discovery(repo, monkeypatch, 
     assert 'synthetic method cleanup refusal' in out
     assert 'TOMLDecodeError' not in out
     assert (repo / 'tools/refactor/methods/injected.toml').exists()
+
+
+def test_an_unrelated_existing_base_is_not_an_applied_method_output(repo):
+    folder=repo/'tools/refactor/methods'
+    folder.mkdir()
+    (repo/'server/lib/base_class.py').write_text('class ExistingMixin:\n    pass\n')
+    (repo/'server/lib/engine.py').write_text(
+        'from .base_class import ExistingMixin\n\n'
+        'class Engine(ExistingMixin):\n'
+        '    def __init__(self):\n        self.active = True\n\n'
+        '    def read(self):\n        return 5\n')
+    (folder/'engine.toml').write_text(
+        'source_module="lib/engine.py"\nsource_class="Engine"\n'
+        '[[group]]\nname="read"\nmodule="lib/read.py"\n'
+        'class="ExistingMixin"\nmembers=["read"]\n')
+    baseline=_commit(repo,'method recipe whose proposed class matches an unrelated base')
+    _git(repo,'switch','-q','integration')
+    _git(repo,'merge','--no-edit',baseline)
+    _git(repo,'switch','-q','main')
+    (repo/'README').write_text('main advances after the common method baseline\n')
+    _commit(repo,'main advances')
+    code,out=_merge(repo)
+    output=(repo/'server/lib/read.py').exists()
+    source=(repo/'server/lib/engine.py').read_text()
+    print('MERGE_EXIT',code,'OUTPUT_EXISTS',output,'READ_STILL_IN_SOURCE','def read(self)' in source)
+    assert code == 11, out
+    assert 'not a genuine applied group' in out
+    assert not output
+    assert 'def read(self)' in source
