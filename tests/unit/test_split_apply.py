@@ -223,3 +223,16 @@ def test_a_moved_reader_of_a_staying_helper_named_like_a_synthetic_symbol_is_ref
     root = _tree(tmp_path, old=old)
     with pytest.raises(Refusal, match="which stays in lib/old.py"):
         split_apply.apply_split(root, _split([("lib/old_part.py", ["run"])]))
+
+
+def test_a_moved_definition_that_rebinds_a_staying_global_is_refused(tmp_path):
+    # Cut 1c trial G1: set_advance_request_callback moved and its `global`
+    # write split the state from the readers left in the old module.
+    old = ("_CALLBACK = None\n\n\ndef set_callback(cb):\n    global _CALLBACK\n    _CALLBACK = cb\n\n\n"
+           "def call():\n    return _CALLBACK and _CALLBACK()\n")
+    root = _tree(tmp_path, old=old)
+    with pytest.raises(Refusal, match="rebinds module global"):
+        split_apply.apply_split(root, _split([("lib/old_part.py", ["set_callback"])]))
+    # The global itself cannot move either: its `global` write is a second binding.
+    with pytest.raises(Refusal, match="not a single plain top-level definition"):
+        split_apply.apply_split(root, _split([("lib/old_part.py", ["_CALLBACK", "set_callback", "call"])]))
