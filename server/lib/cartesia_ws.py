@@ -32,6 +32,8 @@ _WS_URL = "wss://api.cartesia.ai/tts/websocket"
 _VERSION = "2026-03-01"
 _SAMPLE_RATE = 44100
 _ENCODING = "pcm_f32le"
+# Leave the live broker's unchanged 30 s empty wait room for fallback.
+RAW_FIRST_BYTE_BUDGET_SEC = 10.0
 
 
 def _open_ws(url: str, **kw) -> websocket.WebSocket:
@@ -65,7 +67,7 @@ def synthesize_raw_pcm(*,
     url = f"{_WS_URL}?{urlencode({'cartesia_version': _VERSION})}"
     t_start = time.perf_counter()
     try:
-        ws = _open_ws(url, timeout=timeout, header=[f"X-API-Key: {api_key}"])
+        ws = _open_ws(url, timeout=min(timeout, RAW_FIRST_BYTE_BUDGET_SEC), header=[f"X-API-Key: {api_key}"])
     except Exception as e:  # noqa: BLE001
         _emit("cartesia_ws", "connectFail", level="error", trace_id=trace_id,
               detail={"voice_id": voice_id, "error": str(e),
@@ -101,8 +103,19 @@ def synthesize_raw_pcm(*,
             saw_done = False
             while not saw_done:
                 try:
+                    if t_first_chunk is None:
+                        remaining = RAW_FIRST_BYTE_BUDGET_SEC - (time.perf_counter() - t_start)
+                        if remaining <= 0:
+                            raise CartesiaError("cartesia_raw_first_byte_timeout")
+                        ws.settimeout(min(timeout, remaining))
                     raw = ws.recv()
-                except (websocket.WebSocketConnectionClosedException,
+                    # A transport may return a late frame despite its timeout.
+                    # Fence it before parsing or feeding any bytes to the broker.
+                    if (t_first_chunk is None
+                            and time.perf_counter() - t_start >= RAW_FIRST_BYTE_BUDGET_SEC):
+                        raise CartesiaError("cartesia_raw_first_byte_timeout")
+                except (websocket.WebSocketTimeoutException,
+                        websocket.WebSocketConnectionClosedException,
                         ConnectionResetError, OSError) as e:
                     raise CartesiaError(f"WS closed before done: {e}") from e
                 if not raw:
@@ -132,7 +145,10 @@ def synthesize_raw_pcm(*,
                         decoded = base64.b64decode(audio_b64)
                     except (ValueError, binascii.Error) as e:
                         raise CartesiaError(f"bad base64 from server: {e}") from e
+                    if not decoded:
+                        continue
                     if t_first_chunk is None:
+                        ws.settimeout(timeout)
                         t_first_chunk = time.perf_counter()
                         _emit("cartesia_ws", "firstChunk", trace_id=trace_id,
                               detail={"voice_id": voice_id,

@@ -13,6 +13,8 @@ audio latency from the user's critical path.
 from __future__ import annotations
 
 import pathlib
+import subprocess
+import tempfile
 import threading
 import time
 from dataclasses import dataclass
@@ -163,6 +165,8 @@ def synth_one(*,
 
     if not result.ok:
         tts_queue.mark_failed(queue_id, result.error)
+        if result.cancelled:
+            return True
         health.mark_error("tts_worker", result.error)
         _emit("tts_worker", "synthFail",
               context=_event_context(row, agent),
@@ -209,6 +213,48 @@ class _PwaStreamResult:
     target: pathlib.Path | None = None
     error: str = ""
     clip_id: int | None = None
+    cancelled: bool = False
+
+
+class _RawCancelled(Exception):
+    """An announced raw clip lost its existing turn authority."""
+
+
+def _decode_raw_fallback(source, target, audio_format, feed, check_active) -> int:
+    """Convert one encoded fallback to the already advertised raw format.
+
+    Decode completely before feeding: malformed or timed-out decodes never
+    leak an encoded header or partial decoder output into a live PCM session.
+    """
+    encoding = audio_format["encoding"]
+    formats = {"pcm_f32le": "f32le", "pcm_s16le": "s16le"}
+    if encoding not in formats or audio_format["container"] != "raw":
+        raise RuntimeError("raw fallback decode: unsupported format")
+    decoded = source.with_suffix(".pcm")
+    check_active()
+    try:
+        subprocess.run(
+            ["ffmpeg", "-nostdin", "-v", "error", "-y", "-i", str(source),
+             "-vn", "-ac", str(audio_format["channels"]),
+             "-ar", str(audio_format["sample_rate"]), "-c:a", encoding,
+             "-f", formats[encoding], str(decoded)],
+            check=True, timeout=15.0, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    except (OSError, subprocess.SubprocessError) as error:
+        raise RuntimeError("raw fallback decode failed") from error
+    check_active()
+    frame_bytes = audio_format["channels"] * (4 if encoding == "pcm_f32le" else 2)
+    size = decoded.stat().st_size
+    if not size or size % frame_bytes:
+        raise RuntimeError("raw fallback decode: empty or unaligned PCM")
+    with decoded.open("rb") as src, pathlib.Path(target).open("wb") as dst:
+        index = 0
+        while chunk := src.read(16384 * frame_bytes):
+            check_active()
+            feed(index, chunk)
+            check_active()
+            dst.write(chunk)
+            index += 1
+    return size
 
 
 def _gemini_voice(cfg, raw_voice, persona: str, agent: dict | None,
@@ -285,7 +331,8 @@ def _route_has_voice(cfg, row: dict, agent: dict | None, clip_route) -> bool:
 def _synthesize(*, cfg, row: dict, agent: dict,
                 out_path, on_chunk, trace_id,
                 delivery_fields: dict | None = None,
-                clip_route: "tts_mode.Route | None" = None) -> int:
+                clip_route: "tts_mode.Route | None" = None,
+                check_active: Callable[[], None] | None = None) -> int:
     """Provider dispatch for one clip.
 
     Cartesia (Sonic) is primary; ElevenLabs is the backup. The agent's
@@ -321,23 +368,6 @@ def _synthesize(*, cfg, row: dict, agent: dict,
     want_cartesia = (provider == CARTESIA
                      and cartesia_voice and cfg.cartesia_key())
     wants_raw_pcm = (delivery_fields or {}).get("delivery") == "raw-pcm"
-    if wants_raw_pcm:
-        if not want_cartesia:
-            raise CartesiaError(
-                "raw-pcm delivery requires Cartesia provider, key, and voice"
-            )
-        return cartesia_synthesize_raw_pcm(
-            text=plain,
-            voice_id=cartesia_voice,
-            out_path=out_path,
-            api_key=cfg.cartesia_key(),
-            model=cfg.cartesia_model,
-            on_chunk=on_chunk,
-            trace_id=trace_id,
-            encoding=getattr(cfg, "raw_pcm_encoding", "pcm_f32le"),
-            sample_rate=getattr(cfg, "raw_pcm_sample_rate", 44100),
-        )
-
     # A fallback restarts the reply from the top, so it may only run while the
     # live stream is still empty; after that it would play a second clip (VP-01).
     fed: list[bool] = []
@@ -413,24 +443,60 @@ def _synthesize(*, cfg, row: dict, agent: dict,
                 out_path=out_path, on_chunk=on_chunk)
         raise RuntimeError(f"unsupported server TTS provider: {selected}")
 
+    def ensure_active():
+        if check_active is not None:
+            check_active()
+
     try:
+        if wants_raw_pcm:
+            ensure_active()
+            if not want_cartesia:
+                raise CartesiaError("raw-pcm delivery requires Cartesia provider, key, and voice")
+            written = cartesia_synthesize_raw_pcm(
+                text=plain, voice_id=cartesia_voice, out_path=out_path,
+                api_key=cfg.cartesia_key(), model=cfg.cartesia_model,
+                on_chunk=on_chunk, trace_id=trace_id,
+                encoding=delivery_fields["audio_format"]["encoding"],
+                sample_rate=delivery_fields["audio_format"]["sample_rate"])
+            ensure_active()
+            return written
         written = run(provider)
     except Exception as primary_error:
+        if wants_raw_pcm:
+            ensure_active()
         fallback = clip_route.fallback
         if fallback in {"", "none", provider}:
             raise
         if fed:
             _emit("tts_worker", "providerFallbackSkipped",
                   context=_event_context(row, agent), level="warn",
-                  detail={"provider": provider, "error": str(primary_error)[:200],
+                  detail={"provider": provider,
+                          **({"error_code": "cartesia_raw_after_audio"} if wants_raw_pcm else
+                             {"error": str(primary_error)[:200]}),
                           "fallback": fallback, "reason": "audio_streamed"})
             raise
         _emit("tts_worker", "providerFallback",
               context=_event_context(row, agent), level="warn",
-              detail={"provider": provider, "error": str(primary_error)[:200],
-                      "fallback": fallback})
+              detail=({"provider": provider, "fallback": fallback,
+                       "error_code": "cartesia_raw_before_audio"} if wants_raw_pcm else
+                      {"provider": provider, "error": str(primary_error)[:200],
+                       "fallback": fallback}))
         spoke.clear()
-        written = run(fallback)
+        if wants_raw_pcm:
+            ensure_active()
+            target, raw_feed = out_path, on_chunk
+            with tempfile.TemporaryDirectory(prefix="clarp-raw-fallback-") as directory:
+                encoded = pathlib.Path(directory) / "fallback.audio"
+                try:
+                    out_path, on_chunk = encoded, None
+                    run(fallback)
+                finally:
+                    out_path, on_chunk = target, raw_feed
+                ensure_active()
+                written = _decode_raw_fallback(
+                    encoded, target, delivery_fields["audio_format"], raw_feed, ensure_active)
+        else:
+            written = run(fallback)
         # Provenance: the provider and voice that actually spoke, not the route's.
         _emit("tts_worker", "spoke", context=_event_context(row, agent),
               detail={"provider": fallback, "voice": spoke.get("voice"), "fallback_for": provider})
@@ -458,6 +524,10 @@ def _synth_pwa_via_delivery(row: dict, agent: dict,
     """
     cfg = load_config()
     trace_id = row.get("trace_id")
+    raw = delivery.name == "raw-pcm"
+    if raw:
+        from . import turn_queue
+        stop_generation = turn_queue.user_stop_generation(row["agent_id"])
 
     try:
         session = delivery.begin(
@@ -473,11 +543,22 @@ def _synth_pwa_via_delivery(row: dict, agent: dict,
         log_exception("clipDeliveryBeginFail", e, detail=delivery.name)
         return _PwaStreamResult(False, error=f"delivery begin failed: {e}")
 
+    def check_active():
+        if raw and (turn_queue.user_stop_generation(row["agent_id"]) != stop_generation
+                    or (trace_id and agents_db.get_trace(row["agent_id"], max_age_ms=None) != trace_id)):
+            raise _RawCancelled(tts_queue.CANCELLED_PREFIX + "raw clip authority changed")
+
     # Some deliveries broadcast at begin (ChunkedFile — client subscribes
     # to a live stream that grows). Others must wait until finalize (HLS —
     # the playlist must have #EXT-X-ENDLIST before iOS Safari can play it
     # reliably). Sessions advertise their preference via publish_after_finalize.
     publish_late = getattr(session, "publish_after_finalize", False)
+    if raw:
+        try:
+            check_active()
+        except _RawCancelled as error:
+            session.fail(str(error))
+            return _PwaStreamResult(False, error=str(error), cancelled=True)
     if not publish_late:
         _publish_clip_event(
             stream=stream, herald=herald,
@@ -486,8 +567,12 @@ def _synth_pwa_via_delivery(row: dict, agent: dict,
 
     # Chunk pacing: a pause between provider chunks is the server-side
     # twin of a client stall, and the only way to tell the two apart later.
+    def feed(index, chunk):
+        check_active()
+        session.feed(index, chunk)
+
     paced_feed, finish_pacing = clip_pacing.track(
-        session.feed,
+        feed if raw else session.feed,
         clip_id=getattr(session, "clip_id", None),
         delivery=getattr(delivery, "name", ""),
         emit=_emit,
@@ -503,11 +588,13 @@ def _synth_pwa_via_delivery(row: dict, agent: dict,
             trace_id=trace_id,
             delivery_fields=session.sse_fields,
             clip_route=clip_route,
+            **({"check_active": check_active} if raw else {}),
         )
+        check_active()
     except Exception as e:  # provider adapters normalize failures to queue state
         session.fail(str(e))
         finish_pacing("failed")
-        return _PwaStreamResult(False, error=str(e))
+        return _PwaStreamResult(False, error=str(e), cancelled=isinstance(e, _RawCancelled))
 
     final = session.finalize(total_bytes=bytes_written)
     finish_pacing("complete")
