@@ -2,7 +2,7 @@
 
 Lead 544 closes the five preconditions deferred in the first survey. This single source packet, main landing and generated round includes RecoveryMixin, ClaimMixin, HandoffMixin, LauncherMixin and AdmissionMixin. DrainMixin is already on integration; RetryMixin is approved and queued ahead of this round. No product changes are in the prep.
 
-Pending main base: `4656d33862d90a37e8fc055fc645a85e39167a6f` (captain Retry/S9 stack). It must land first. Source turn_dispatch.py remains blob `19438ac1b34935f4efb0ae43fef49b140bf63d1d`, identical to measured e3b94c6e. The source importer and method patch inventory remains in s4-remaining-round.md; every proposed method remains AST-identical.
+Original prep base: `4656d33862d90a37e8fc055fc645a85e39167a6f` (the captain's first Retry/S9 stack). The captain re-pins that stack as main advances; this round lands only after its Retry/S9 prerequisites. The review packet records the exact current base. Source turn_dispatch.py remains blob `19438ac1b34935f4efb0ae43fef49b140bf63d1d`, identical to measured e3b94c6e. The source importer and method patch inventory remains in s4-remaining-round.md; every proposed method remains AST-identical.
 
 ## Shared test prep
 
