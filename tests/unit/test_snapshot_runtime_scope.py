@@ -77,6 +77,9 @@ class Runtime:
         self.offline = offline
         self.timeouts = []
 
+    def status_within(self, total_s):
+        return self.status(timeout=total_s)
+
     def status(self, *, timeout=None):
         self.timeouts.append(timeout)
         if self.offline:
@@ -115,13 +118,21 @@ def test_snapshot_one_bounded_status_attempt_per_build(fleet, offline):
     assert runtime.timeouts == [2.0, 2.0]
 
 
-def test_non_snapshot_status_keeps_ttl_and_default_timeout(fleet, monkeypatch):
+@pytest.mark.parametrize("build_fails", [False, True])
+def test_non_snapshot_status_keeps_ttl_and_default_timeout(fleet, monkeypatch, build_fails):
     ctx, status = fleet
     clock = [1000.0]
     monkeypatch.setattr(backends, "_clock", lambda: clock[0])
     runtime = Runtime(status)
     backends.configure_runtime_client(runtime)
-    snapshot.build_agent_snapshot(ctx)
+    if build_fails:
+        def fail_roster():
+            raise ValueError("synthetic projection failure")
+        monkeypatch.setattr(agents, "list_agents", fail_roster)
+        with pytest.raises(ValueError, match="synthetic projection failure"):
+            snapshot.build_agent_snapshot(ctx)
+    else:
+        snapshot.build_agent_snapshot(ctx)
     runtime.timeouts.clear()
     backends.invalidate_runtime_status()
     assert backends.runtime_status() == status

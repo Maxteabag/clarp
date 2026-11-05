@@ -104,6 +104,7 @@ class SharedSnapshot:
 SHARED = SharedSnapshot()
 
 
+@backends.runtime_status_scope(timeout=2.0)
 def build_agent_snapshot(ctx) -> dict[str, Any]:
     """Reconcile liveness and project the dashboard from batched database reads."""
     rows = []
