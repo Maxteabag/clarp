@@ -213,6 +213,8 @@ Files a slice has claimed. Agents outside the program must not edit them; ask
 the lead (`hobbles-18b0`). A claim is short-lived and ends when its slice
 commits land.
 
+Order rule (5 Nov): on a file that a regenerated split owns (S3, S4, S6, S9), the move-only split lands first. Hand-written edits to that file on `refactor/integration` (Phase 3 conversions, S7 steps) come after it and travel as replay patches stored in main's tree, so regeneration never drops them. A file nobody regenerates may be converted at any time under a claim, with its functions in the forward-port watch.
+
 | Since | Slice (owner) | Claimed | Until |
 |---|---|---|---|
 | 4 Nov 10:0x | S9 (`rf-fix3-9875`) | on `refactor/integration` only: `server/lib/agent_live_tools.py` (pilot), then `agent_rings.py`, `dreaming.py`, `background_jobs.py`, `orchestrator.py`, each claimed when its cut starts; main's fixes keep flowing because the splits are regenerated from main's text at every merge | the big release |
@@ -223,6 +225,7 @@ commits land.
 | 4 Nov 11:3x | S7 (`rf-fix2-56f3`) | on `refactor/integration` only: `server/lib/voice_markup.py` (new `extract_speak_blocks`), `server/lib/transcript_streamer.py` (its `<speak>` regex and the loop at `_on_text`), `server/lib/message_audio.py` (its `<speak>` regex); behaviour-preserving, each reader keeps its mode; no pending main fix touches these files (lead checked VP-01, VP-06, AUT-07, RTO-07) | the big release |
 | 5 Nov 06:5x | S7 (`rf-fix2-56f3`) | step 6 on `refactor/integration` only: `server/lib/transcription_pipeline.py` (`transcribe` and `_run_call_steps`) and new `server/lib/stt_router.py`; behaviour-preserving refactor (720-row engine-plan golden table and G2 at zero), NOT regenerated: rf-fix2 forward-ports every later main change to these functions, and rf-merge's main->integration merge stops when main changed them without the forward-port | the big release |
 | 5 Nov 07:1x | S7 (`rf-fix2-56f3`) | step 1e on `refactor/integration` only: `server/lib/tts_queue.py` (delete `recent_synth_count`, zero callers; VP-18 dead code); rf-merge's forward-port watch stops a merge if main touches or calls it | the big release |
+| 5 Nov 07:1x | Phase 3 (`rf-contract-80af`) | the goals lifecycle conversion on `refactor/integration` only: `server/lib/task_plans.py`; hand-written, so its converted functions join rf-merge's forward-port watch | the big release |
 | 3 Nov 12:17 | S5 (`rf-readmodel-12f8`) | `server/lib/message_writes.py` import section (`store_transcript_turns`, `_ImportWriter`, `_store_transcript_turns_txn` and its helpers, `_attach_authority_tools`, `stamp_turn`); `server/lib/message_store.py` facade re-exports; `tests/readmodel/` | the S5 extraction commits land; `rf-fix-c4ab`'s RM-N1 commit may edit the upsert and twin path |
 
 ## 7. How to work
