@@ -288,6 +288,12 @@ def _import_holds_lock() -> bool:
         return any(o.is_import and o.thread_id != me for o in _TRANSACTION_OWNERS.values())
 
 
+def _process_name() -> str:
+    """The program, never its arguments: the basename of argv[0]."""
+    argv = getattr(sys, "argv", None) or [""]
+    return os.path.basename(str(argv[0]))[:40] or "?"
+
+
 def _is_lock_contention(exc: BaseException) -> bool:
     """Plain SQLITE_BUSY only: another connection holds the write lock, so a
     later attempt can succeed. Extended codes are not contention a poll can
@@ -316,7 +322,8 @@ class _TrackedConnection(sqlite3.Connection):
         until the connection's own busy deadline; then fail exactly as SQLite
         would. A wait over 250 ms logs one sqliteWriteWait line, admitted or
         not; whether this process's import held the lock is sampled while
-        waiting."""
+        waiting. The line names the process by the basename of argv[0] only:
+        arguments can carry message text."""
         deadline_ms = int(super().execute("PRAGMA busy_timeout").fetchone()[0])
         if deadline_ms <= 0:
             return super().execute(sql, parameters)
@@ -344,7 +351,8 @@ class _TrackedConnection(sqlite3.Connection):
                     f"waited_ms={round(waited * 1000)} "
                     f"outcome={'admitted' if admitted else 'gave_up'} "
                     f"import_in_process={saw_import} "
-                    f"thread={threading.current_thread().name!r} sql={template[:60]!r}")
+                    f"thread={threading.current_thread().name!r} sql={template[:60]!r} "
+                    f"process={_process_name()!r}")
 
     def execute(self, sql, parameters=(), /):  # type: ignore[override]
         template = _sql_template(sql)

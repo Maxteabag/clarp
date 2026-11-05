@@ -328,17 +328,29 @@ def get(plan_id: str) -> dict | None:
 
 
 def get_with_goal_text(plan_id: str) -> tuple[dict | None, str | None]:
+    plan, goal_text, _bound = get_with_goal_text_and_bound(plan_id)
+    return plan, goal_text
+
+
+def _utf8_bound(text: str) -> int:
+    return len(text) if text.isascii() else 4 * len(text)
+
+
+def get_with_goal_text_and_bound(plan_id: str) -> tuple[dict | None, str | None, int]:
     """The plan as ``get`` returns it, and the exact ``goal_json`` text its goal
-    was decoded from. The artifact list's summary-v1 projection keys its plan
-    history digest on that text: ``_goal_save`` rewrites it without a revision
-    bump, so only the text itself proves the history unchanged."""
+    was decoded from, and an upper bound on the UTF-8 size of the goal's
+    history as read. The artifact list's summary-v1 projection keys its plan
+    history digest on that text (``_goal_save`` rewrites it without a revision
+    bump, so only the text itself proves the history unchanged) and checks the
+    bound before it serializes the history: with ledger references the stored
+    text is small while the expanded history is not."""
     plan = (
         db.conn()
         .execute("SELECT * FROM task_plans WHERE plan_id=?", (plan_id,))
         .fetchone()
     )
     if not plan:
-        return None, None
+        return None, None, 0
     now = db.now_ms()
     items = []
     for row in db.conn().execute(
@@ -365,6 +377,9 @@ def get_with_goal_text(plan_id: str) -> tuple[dict | None, str | None]:
     data = dict(plan)
     goal_text = data.pop("goal_json")
     data["goal"] = json.loads(goal_text or "{}") or None
+    bound = _utf8_bound(goal_text or "")
+    if data["goal"] is not None:
+        bound += _goal_expand(db.conn(), plan_id, data["goal"])
     data["history"] = json.loads(data.pop("history_json") or "[]")
     if data["goal"] is not None:
         from . import goal_ledger
@@ -383,7 +398,7 @@ def get_with_goal_text(plan_id: str) -> tuple[dict | None, str | None]:
         "completed_count": completed,
         "total_count": len(items),
         "server_now": now,
-    }, goal_text
+    }, goal_text, bound
 
 
 def list_for_session(session: str) -> list[dict]:
@@ -435,6 +450,52 @@ def _goal_adopt_bound(goal):
     if bounded is not goal:
         goal["history"] = bounded["history"]
         goal["history_offset"] = bounded["history_offset"]
+
+
+# A goal history entry's large detail may be stored as a reference to the
+# append-only goal ledger, which mirrors every entry under "history:<index>":
+# {"ledger": key, "shape": key order}. The ledger keeps keys sorted, so the
+# shape records the original order wherever it differs. Reading expands every
+# reference back, byte for byte (AUT-N1b-reader). This build writes none;
+# the writer ships one release later, so a rollback to this build reads them.
+_LEDGER_REF = "ledger"
+_SHAPE = "shape"
+
+
+def _reshape(value, shape):
+    if shape is None:
+        return value
+    if "k" in shape and isinstance(value, dict):
+        kids = shape.get("c") or {}
+        ordered = {key: value[key] for key in shape["k"] if key in value}
+        ordered.update((key, item) for key, item in value.items() if key not in ordered)
+        return {key: _reshape(item, kids.get(key)) for key, item in ordered.items()}
+    if "a" in shape and isinstance(value, list):
+        return [_reshape(item, shape["a"]) for item in value]
+    if "l" in shape and isinstance(value, list):
+        return [_reshape(item, sub) for item, sub in zip(value, shape["l"])] + value[len(shape["l"]):]
+    return value
+
+
+def _goal_expand(con, plan_id, goal):
+    """The goal as clients read it: each spilled detail back from the ledger,
+    in its original key order. Returns an upper bound on the UTF-8 bytes the
+    expansion added."""
+    added = 0
+    for position, entry in enumerate(goal.get("history") or []):
+        detail = entry.get("detail")
+        if not isinstance(detail, dict) or not (set(detail) <= {_LEDGER_REF, _SHAPE}) \
+                or _LEDGER_REF not in detail:
+            continue
+        row = con.execute(
+            "SELECT new_json FROM goal_events WHERE plan_id=? AND idempotency_key=?",
+            (plan_id, detail[_LEDGER_REF])).fetchone()
+        recorded = (json.loads(row[0] or "{}").get("detail") or {}) if row else {}
+        goal["history"][position] = {**entry, "detail": _reshape(recorded, detail.get(_SHAPE))}
+        # The ledger row's text (spaced separators) is longer than the
+        # detail's compact form, so it bounds what this entry adds.
+        added += _utf8_bound(row[0] or "") if row else 0
+    return added
 
 
 def _goal_save(con, plan_id, goal):
@@ -853,23 +914,29 @@ def _goal_mutate(plan_id, *, revision, action, data=None):
                 keys.add(key)
                 existing = next((r for r in old if r["item_id"] == key), None)
                 if existing:
-                    if (
-                        existing["status"] == "completed"
-                        and str(raw.get("title") or "").strip() != existing["title"]
-                    ):
+                    title = str(raw.get("title") or "").strip()[:500]
+                    if existing["status"] == "completed" and title != existing["title"]:
                         raise ValueError(
                             "completed step meaning is immutable; use a new step id for different work"
                         )
-                    if not str(raw.get("title") or "").strip():
+                    if not title:
                         raise ValueError("step title required")
                     con.execute(
                         "UPDATE task_items SET title=?,position=?,parent_id=NULL WHERE item_id=?",
-                        (raw["title"], position, key),
+                        (title, position, key),
                     )
+                    if existing["status"] == "removed":
+                        # Proposing a retired step again puts it back in the
+                        # plan; left removed it would count as resolved.
+                        con.execute(
+                            "UPDATE task_items SET status='pending',detail=?,started_at=NULL,"
+                            "completed_at=NULL WHERE item_id=?",
+                            (str(raw.get("detail") or "")[:2000], key),
+                        )
                 else:
                     task_plans._insert_item(con, plan_id, key, None, position, raw, now)
             for item in old:
-                if item["item_id"] not in keys and item["status"] != "completed":
+                if item["item_id"] not in keys and item["status"] not in {"completed", "removed"}:
                     elapsed = item["active_ms"] + (
                         max(0, now - item["started_at"]) if item["started_at"] else 0
                     )

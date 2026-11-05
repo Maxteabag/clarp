@@ -235,6 +235,11 @@ class Backend:
         """
         return self.start_turn(**spec)
 
+    def prompt_limit_bytes(self) -> int | None:
+        """The largest user message this backend's CLI can take, when it has
+        no way past one argv string (BACKENDS-08); None means no limit."""
+        return None
+
     def start_turn(self, **kwargs: Any):
         """The runner body: spawn the CLI for one turn with explicit keywords."""
         raise NotImplementedError(f"{self.id}: start_turn")

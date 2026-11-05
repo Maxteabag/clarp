@@ -26,6 +26,7 @@ import pytest
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "server"))
+from tests.patching import split_origin
 from lib import host_generation as hg  # noqa: E402
 
 OLD = "5d2f8a3e-1c4b-4e7a-8f60-3b9d7c2e4a10"
@@ -321,7 +322,7 @@ def _callers(name: str) -> set[str]:
             except UnicodeDecodeError:
                 continue
             if re.search(rf"\b{name}\(", text):
-                found.add(str(path.relative_to(REPO)))
+                found.add(split_origin(str(path.relative_to(REPO))))   # an S9 part counts as its module
     return found
 
 

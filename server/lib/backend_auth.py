@@ -455,7 +455,7 @@ def start_login(backend: str) -> dict[str, Any]:
     def worker() -> None:
         try:
             process = subprocess.Popen(
-                argv, text=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                argv, text=True, errors="replace", stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT, bufsize=0,
             )
             with _lock:

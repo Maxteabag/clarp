@@ -8,12 +8,16 @@ import threading
 import time
 from dataclasses import dataclass
 
-from . import db
+from . import batched_delete, db
 from .log import log, log_exception
 from .protocol import ClipProducerStatus
 from .timing import MAINTENANCE_STARTUP_DELAY_SEC
 
 HOUR_MS = 60 * 60 * 1000
+# state_log retention deletes at most this many rows per statement and pauses
+# between statements, so other writers get the lock in between (PT-01).
+STATE_LOG_DELETE_BATCH = 500
+STATE_LOG_BATCH_PAUSE_S = 0.05
 DAY_MS = 24 * HOUR_MS
 
 
@@ -89,6 +93,35 @@ def _row_count(result) -> int | None:
     return None
 
 
+def _prune_keeping_newest(c, statement: str, params, *, key: str, group: str,
+                          batch: int, pause_s: float) -> int:
+    """Delete expired rows, keeping each group's newest, one bounded batch per
+    autocommit statement. The newest rows are read once per sweep, not once
+    per batch, in one statement with the highest key; a row written during the
+    sweep is above it and left alone, even back-dated. The expired rows are
+    found by short reads outside the write lock (RM-N8)."""
+    table, where = batched_delete.split(statement)
+    high, keep = c.execute(
+        f"""SELECT (SELECT MAX({key}) FROM {table}),
+                   (SELECT json_group_array(newest) FROM (
+                        SELECT MAX({key}) AS newest FROM {table} GROUP BY {group}))"""
+    ).fetchone()
+    if high is None:
+        return 0
+    # Every read and every delete carries the whole condition, so a row read
+    # outside the lock is deleted only if it still qualifies when written.
+    return batched_delete.prune(
+        c, f"{statement} AND {key} <= ? AND {key} NOT IN (SELECT value FROM json_each(?))",
+        (*params, high, keep), batch=batch, pause_s=pause_s)
+
+
+def _prune_state_log(c, cutoff_ms: int) -> int:
+    """Expired state rows, keeping each agent's newest (PT-01, RM-N8)."""
+    return _prune_keeping_newest(
+        c, "DELETE FROM state_log WHERE ts < ?", (cutoff_ms,), key="state_id", group="agent_id",
+        batch=STATE_LOG_DELETE_BATCH, pause_s=STATE_LOG_BATCH_PAUSE_S)
+
+
 def _timed(phases: _Phases | None, name: str, fn):
     return fn() if phases is None else phases.run(name, fn)
 
@@ -98,47 +131,47 @@ def prune_database(*, now_ms: int | None = None,
     now_ms = db.now_ms() if now_ms is None else int(now_ms)
     c = db.conn()
     counts: dict[str, int] = {}
-    counts["sse_events"] = _timed(phases, "db.sse_events", lambda: c.execute(
-        "DELETE FROM sse_events WHERE ts < ?",
-        (now_ms - policy.sse_max_age_ms,),
-    ).rowcount)
-    counts["tts_queue"] = _timed(phases, "db.tts_queue", lambda: c.execute(
-        """DELETE FROM tts_queue
+    # Every retention delete runs in bounded batches found by reads outside
+    # the write lock (RM-N8): one statement over an unindexed column held the
+    # lock for its whole table scan.
+    counts["sse_events"] = _timed(phases, "db.sse_events", lambda: batched_delete.prune(
+        c, "DELETE FROM sse_events WHERE ts < ?",
+        (now_ms - policy.sse_max_age_ms,)))
+    counts["tts_queue"] = _timed(phases, "db.tts_queue", lambda: batched_delete.prune(
+        c, """DELETE FROM tts_queue
             WHERE status IN ('done', 'failed')
               AND completed_at < ?""",
-        (now_ms - policy.tts_max_age_ms,),
-    ).rowcount)
-    counts["state_log"] = _timed(phases, "db.state_log", lambda: c.execute(
-        """DELETE FROM state_log
-            WHERE ts < ?
-              AND state_id NOT IN (
-                  SELECT MAX(state_id) FROM state_log GROUP BY agent_id
-              )""",
-        (now_ms - policy.state_max_age_ms,),
-    ).rowcount)
-    counts["background_job_events"] = _timed(phases, "db.background_job_events", lambda: c.execute(
-        """DELETE FROM background_job_events
-            WHERE observed_at < ?
-              AND event_id NOT IN (
-                  SELECT MAX(event_id) FROM background_job_events GROUP BY job_id
-              )""",
-        (now_ms - policy.background_job_events_max_age_ms,),
-    ).rowcount)
-    counts["clips"] = _timed(phases, "db.clips", lambda: c.execute(
-        """DELETE FROM clips
+        (now_ms - policy.tts_max_age_ms,)))
+    counts["state_log"] = _timed(phases, "db.state_log", lambda: _prune_state_log(
+        c, now_ms - policy.state_max_age_ms))
+    counts["background_job_events"] = _timed(phases, "db.background_job_events", lambda: _prune_keeping_newest(
+        c, "DELETE FROM background_job_events WHERE observed_at < ?",
+        (now_ms - policy.background_job_events_max_age_ms,), key="event_id", group="job_id",
+        batch=batched_delete.DELETE_BATCH, pause_s=batched_delete.PAUSE_S))
+    counts["clips"] = _timed(phases, "db.clips", lambda: batched_delete.prune(
+        c, """DELETE FROM clips
             WHERE created_at < ?
               AND producer_status IN (?, ?)""",
         (now_ms - policy.clip_row_max_age_ms,
-         ClipProducerStatus.COMPLETE, ClipProducerStatus.FAILED),
-    ).rowcount)
-    counts["turn_usage"] = _timed(phases, "db.turn_usage", lambda: c.execute(
-        "DELETE FROM turn_usage WHERE at < ?",
-        (now_ms - policy.turn_usage_max_age_ms,),
-    ).rowcount)
-    counts["judgment_decisions"] = _timed(phases, "db.judgment_decisions", lambda: c.execute(
-        "DELETE FROM judgment_decisions WHERE created_at < ?",
-        (now_ms - policy.judgment_decisions_max_age_ms,),
-    ).rowcount)
+         ClipProducerStatus.COMPLETE, ClipProducerStatus.FAILED)))
+    counts["turn_usage"] = _timed(phases, "db.turn_usage", lambda: batched_delete.prune(
+        c, "DELETE FROM turn_usage WHERE at < ?",
+        (now_ms - policy.turn_usage_max_age_ms,)))
+    counts["judgment_decisions"] = _timed(phases, "db.judgment_decisions", lambda: batched_delete.prune(
+        c, "DELETE FROM judgment_decisions WHERE created_at < ?",
+        (now_ms - policy.judgment_decisions_max_age_ms,)))
+    # VP-04: audio bookkeeping observations and their janitor runs, with the
+    # clip retention, in short transactions. Logged, never fatal.
+    try:
+        from . import audio_bookkeeper
+        pruned = _timed(phases, "db.audio_bookkeeping", lambda: audio_bookkeeper.prune(
+            now_ms, max_age_ms=policy.clip_row_max_age_ms))
+        counts["audio_bookkeeping_events"] = pruned["events"]
+        counts["audio_bookkeeping_runs"] = pruned["runs"]
+    except Exception as e:  # noqa: BLE001
+        from .log import log_exception
+        log_exception("audioBookkeepingPruneFail", e)
+        counts["audio_bookkeeping_events"] = counts["audio_bookkeeping_runs"] = 0
     from . import tool_explanation_learning, tool_explanation_templates
     from .tool_explanations import PROMPT_VERSION
     counts.update(_timed(phases, "db.tool_explanation_learning", lambda: tool_explanation_learning.prune(

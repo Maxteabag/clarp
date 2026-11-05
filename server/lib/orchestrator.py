@@ -28,6 +28,7 @@ from . import backends, config, eventlog, janitor_builtins, janitors, settings_s
 from .db import conn, now_ms
 from .log import log_exception
 from .prompt_admissions import PromptAdmission
+from .turn_dispatch import DispatchError
 from . import prompt_admissions
 
 
@@ -135,6 +136,13 @@ class OrchestratorOutcome:
     decision: dict[str, Any] | None = None
     error: str = ""
     status: int = 200
+    # Internal, never in a payload: the routed dispatch failed in a way the
+    # client's same-id retry may resend (RTO-07).
+    retry_dispatch: bool = False
+
+
+# A routing receipt whose dispatch a same-id retry sends again (RTO-07).
+DISPATCH_RETRYABLE = "dispatch_retryable"
 
 
 class _StaleJanitorRun(RuntimeError):
@@ -368,14 +376,21 @@ def _should_scan_broader(
 
 
 def record_routing_message(*, session: str, role: str, text: str,
-                           trace_id: str = "", source: str = "orchestrator") -> None:
+                           trace_id: str = "", source: str = "orchestrator",
+                           once: bool = False) -> None:
+    """``once``: only if the session has no row of this role under this
+    trace yet, decided by the INSERT itself so concurrent callers add one
+    (RTO-07, a retried routed dispatch)."""
     agent = identity.lookup(session)
     if not agent or not text.strip():
         return
     conn().execute(
         """INSERT INTO agent_routing_messages
               (agent_id, session, role, text, trace_id, source, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+           SELECT ?, ?, ?, ?, ?, ?, ?
+            WHERE NOT ? OR NOT EXISTS (
+                SELECT 1 FROM agent_routing_messages
+                 WHERE session = ? AND role = ? AND trace_id = ?)""",
         (
             agent["agent_id"],
             session,
@@ -384,6 +399,10 @@ def record_routing_message(*, session: str, role: str, text: str,
             trace_id,
             source,
             now_ms(),
+            once,
+            session,
+            role,
+            trace_id,
         ),
     )
 
@@ -473,6 +492,12 @@ class OrchestratorService:
                     trace_id=trace_id, action=FINAL_ERROR, status=409,
                     error="Request identity already refers to different work",
                 )
+            receipt = prior.get("demand_result") or {}
+            if receipt.get("reason") == DISPATCH_RETRYABLE:
+                return self._retry_routed_dispatch(
+                    receipt, requested_session=requested_session, trace_id=trace_id,
+                    prompt_admission=prompt_admission, synthesize_audio=synthesize_audio,
+                    unheard_audio_sessions=unheard_audio_sessions, dispatch=dispatch)
             return self._replayed_run(prior["run_id"], requested_session, trace_id)
         owner = janitor_builtins.resolve(JANITOR_ROLE, target_agent_id=target_agent_id)
         if owner is None:
@@ -577,14 +602,76 @@ class OrchestratorService:
         )
         recipient = identity.lookup(result.session)
         failed = decision.kind == DECISION_ERROR or result.action == FINAL_ERROR
+        receipt = {"summary": f"Message routing finished: {result.action}",
+                   "status": result.action,
+                   "target_agent_id": (recipient or {}).get("agent_id", "")}
+        if result.action == FINAL_ERROR and result.status != 500:
+            receipt["http_status"] = result.status
+        if result.retry_dispatch:
+            # The decision stands; a same-id retry sends it again (RTO-07).
+            receipt.update(reason=DISPATCH_RETRYABLE, decision_id=result.decision_id)
         janitor_builtins.complete_run(
             run_id, outcome="failed" if failed else "completed",
-            result={"summary": f"Message routing finished: {result.action}",
-                    "status": result.action,
-                    "target_agent_id": (recipient or {}).get("agent_id", "")},
+            result=receipt,
             error="Message routing failed" if failed else "",
         )
         return result
+
+    def _retry_routed_dispatch(self, receipt, *, requested_session, trace_id,
+                               prompt_admission, synthesize_audio,
+                               unheard_audio_sessions, dispatch) -> OrchestratorOutcome:
+        """Send a routed message again whose dispatch failed transiently
+        (RTO-07): the recorded decision, recipient and text under the same
+        client message id, with no second model call. turn_dispatch launches
+        a saved message that never started once and answers a started one
+        without a second turn, so every later retry is safe."""
+        from .turn_dispatch import DispatchError
+        recipient = identity.lookup(receipt.get("target_agent_id")) or {}
+        row = conn().execute(
+            "SELECT utterance, raw_response_json, trace_id FROM orchestrator_decisions"
+            " WHERE decision_id = ?",
+            (receipt.get("decision_id"),),
+        ).fetchone()
+        if not recipient.get("session") or row is None:
+            return OrchestratorOutcome(
+                handled=True, ok=False, session=requested_session, trace_id=trace_id,
+                action=FINAL_ERROR, error="Message routing failed", status=500)
+        raw = json.loads(row["raw_response_json"] or "{}")
+        held = self._held_utterance(str(raw.get("pending_id") or ""))
+        routed_admission = prompt_admission
+        if held is not None:
+            routed_admission = PromptAdmission.from_json(str(held.get("prompt_admission_json") or ""))
+        text_to_send = ((held or {}).get("utterance")
+                        or str(raw.get("text_to_send") or "").strip()
+                        or row["utterance"])
+        try:
+            result = dispatch(
+                text=text_to_send,
+                requested_session=requested_session,
+                trace_id=trace_id,
+                client_msg_id=routed_admission.client_admission_id if routed_admission else "",
+                origin=routed_admission.origin if routed_admission else "user",
+                sender_agent_id=routed_admission.sender_agent_id if routed_admission else "",
+                prompt_admission=routed_admission,
+                synthesize_audio=synthesize_audio,
+                unheard_audio_sessions=unheard_audio_sessions,
+                forced_session=recipient["session"],
+                routed_by_orchestrator=True,
+            )
+        except DispatchError as e:
+            log_exception("orchestratorRetryDispatchFail", e, detail=trace_id)
+            return OrchestratorOutcome(
+                handled=True, ok=False, session=recipient["session"], trace_id=trace_id,
+                action=FINAL_ERROR, error=str(e), status=e.status)
+        # Routing context gets the message once, under the routed request's
+        # trace: a later same-id retry is answered by turn_dispatch's dedup
+        # and must not add it again (lead, RTO-07 amendment).
+        routed_trace = row["trace_id"] or trace_id
+        record_routing_message(session=recipient["session"], role="user",
+                               text=text_to_send, trace_id=routed_trace, once=True)
+        return OrchestratorOutcome(
+            handled=True, ok=True, session=result.session, dispatch=result.backend,
+            trace_id=trace_id, action=FINAL_ROUTE, decision_id=receipt.get("decision_id"))
 
     def _call_with_fallback(self, packet, settings, run_id, phase):
         from dataclasses import replace
@@ -647,7 +734,9 @@ class OrchestratorService:
             dispatch=recipient.get("backend", "") if action == FINAL_ROUTE else "",
             trace_id=trace_id, action=action,
             error="Message routing failed" if action == FINAL_ERROR else "",
-            status=202 if pending else 500 if action == FINAL_ERROR else 200,
+            status=(202 if pending
+                    else int(receipt.get("http_status") or 500) if action == FINAL_ERROR
+                    else 200),
         )
 
     def transcribe_should_skip_herald(self, *, hands_free: bool) -> bool:
@@ -677,6 +766,7 @@ class OrchestratorService:
         target = decision.target_session or requested_session
         error = decision.error
         dispatch_result = None
+        dispatch_status = 0
 
         try:
             self._require_current(janitor_run_id)
@@ -685,6 +775,21 @@ class OrchestratorService:
                     and control_target is not None
                     and not agents_db.interaction_capabilities(control_target)["can_voice_target"]):
                 decision = self._as_clarify(decision, "That agent does not accept voice commands.")
+            # The agent the action will act on, the requested session when the
+            # model names none; create acts on no existing agent.
+            action = (decision.control_action or "").strip().lower()
+            acted_on = (None if decision.kind == DECISION_AGENT_CONTROL and action == "create"
+                        else identity.lookup(decision.target_session or requested_session))
+            if (decision.kind in {DECISION_CONTROL, DECISION_AGENT_CONTROL}
+                    and (not self._route_confidently(decision, settings)
+                         or (acted_on is not None and acted_on["session"] not in sessions))):
+                # A command clears the bar a message does and acts only on the
+                # agents of this packet, a group call's participants (RTO-03).
+                decision = self._as_clarify(decision, "I am not sure what you wanted me to do.")
+            elif (decision.kind == DECISION_AGENT_CONTROL
+                    and action == "fork"):
+                # No fork source is trusted from the router (RTO-03).
+                decision = self._as_clarify(decision, "Please fork agents from the app.")
             if fallback_request and decision.kind not in {
                 DECISION_AGENT_MESSAGE,
                 DECISION_CORRECTION,
@@ -802,6 +907,14 @@ class OrchestratorService:
             target = requested_session
             fallback_used = True
             final_action = FINAL_FALLBACK
+        except DispatchError as e:
+            # The dispatcher's own answer (RTO-07): a 5xx is transient and the
+            # client's same-id retry sends the routed message again; a 4xx
+            # stands.
+            log_exception("orchestratorDispatchFail", e, detail=trace_id)
+            error = str(e)
+            final_action = FINAL_ERROR
+            dispatch_status = e.status
         except Exception as e:  # noqa: BLE001
             log_exception("orchestratorApplyFail", e, detail=trace_id)
             error = str(e)
@@ -844,7 +957,8 @@ class OrchestratorService:
             decision_id=decision_id,
             decision=_public_decision(decision),
             error=error,
-            status=500 if final_action == FINAL_ERROR else 200,
+            status=(dispatch_status or 500) if final_action == FINAL_ERROR else 200,
+            retry_dispatch=dispatch_status >= 500,
         )
 
     def _route_confidently(
@@ -914,6 +1028,18 @@ class OrchestratorService:
                 spoken = "I am not sure who that was for."
         self._speak_as_session(spoken, requested_session, phrase_key=decision.phrase_key)
 
+    @staticmethod
+    def _held_utterance(pending_id: str) -> dict[str, Any] | None:
+        """A held utterance a route already claimed, read again for its retry."""
+        if not pending_id:
+            return None
+        row = conn().execute(
+            """SELECT utterance, prompt_admission_json FROM orchestrator_pending_utterances
+                WHERE pending_id = ?""",
+            (pending_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
     def _claim_pending(self, pending_id: str) -> dict[str, Any] | None:
         if not pending_id:
             return None
@@ -975,28 +1101,33 @@ class OrchestratorService:
             if agent:
                 backends.interrupt_any(agent["agent_id"])
             return target
-        if action in {"relaunch", "restart", "resume", "fork", "create"}:
+        if action in {"relaunch", "restart", "resume", "create"}:
             return self._lifecycle_action(decision, target)
         self._speak_as_session("I am not sure how to do that yet.", requested_session)
         return target
 
     def _lifecycle_action(self, decision: OrchestratorDecision, target: str) -> str:
-        payload = dict(decision.control_payload or {})
         from .agent_lifecycle import AgentLifecycleService
 
+        # The model read other agents' transcript text, so its payload is
+        # untrusted: only a name crosses. Identity, directory, backend, tools
+        # and any fork or resume source come from the agent's own record.
+        name = (decision.control_payload or {}).get("name")
+        payload: dict[str, Any] = {"name": name.strip()} if isinstance(name, str) and name.strip() else {}
         existing = identity.lookup(target) if target else None
         if existing and (decision.control_action or "").lower() in {
             "relaunch",
             "restart",
             "resume",
         }:
-            payload.setdefault("name", existing["persona"])
-            payload.setdefault("session", existing["session"])
-            payload.setdefault("replace_sid", existing["session"])
-            payload.setdefault("cwd", existing["cwd"])
-            payload.setdefault("backend", existing["backend"])
-        if "synthesize_audio" not in payload:
-            payload["synthesize_audio"] = True
+            payload.update(
+                name=existing["persona"],
+                session=existing["session"],
+                replace_sid=existing["session"],
+                cwd=existing["cwd"],
+                backend=existing["backend"],
+            )
+        payload["synthesize_audio"] = True
         result = AgentLifecycleService(self.ctx).create(payload)
         return result.session
 

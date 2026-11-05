@@ -86,8 +86,31 @@ def _slot_is_spawning(agent_id: str) -> bool:
     """
     if getattr(backends, "_RUNTIME_CLIENT", None) is None:
         from . import turn_dispatch
-        return turn_dispatch._slot_is_spawning(agent_id)
-    return agent_id in (backends.runtime_status().get("spawning") or ())
+        return (turn_dispatch._slot_is_spawning(agent_id)
+                or turn_dispatch._send_admitting(agent_id))
+    status = backends.runtime_status()
+    # A send being admitted (its session bound, its slot not claimed yet) is
+    # live work too (TP-05b); an older runtime reports no "admitting".
+    return (agent_id in (status.get("spawning") or ())
+            or agent_id in (status.get("admitting") or ()))
+
+
+def _runtime_owns_now(agent_id: str) -> bool:
+    """A fresh read of an external runtime's ownership, for a destructive
+    repair only: the shared status may be up to RUNTIME_STATUS_TTL old and
+    predate a send the runtime has started admitting (TP-05b). Read after the
+    binding was seen, so an admission that bound it shows here. Unreadable
+    means owned: never unbind on an unknown."""
+    if getattr(backends, "_RUNTIME_CLIENT", None) is None:
+        return False   # in process, has_live_work read the slot table itself
+    try:
+        status = backends.runtime_status(max_age=0)
+    except Exception:  # noqa: BLE001 - runtime_status logs the outage
+        return True
+    return (agent_id in (status.get("active") or {})
+            or agent_id in (status.get("spawning") or ())
+            or agent_id in (status.get("admitting") or ())
+            or agent_id in (status.get("terminals") or ()))
 
 
 def _runtime_slot_may_have_leaked(agent_id: str) -> bool:
@@ -165,8 +188,9 @@ def reconcile_agent(agent_id: str, backend: str | None = None, *,
         if bsid:
             if (backends.by_id(backend).resume_target(bsid, "", home) is None
                     and agents_db.live_backend_session(agent_id) == bsid
-                    and not has_live_work(agent_id, backend)):
-                agents_db.end_current_runtime(agent_id)
+                    and not has_live_work(agent_id, backend)
+                    and not _runtime_owns_now(agent_id)
+                    and agents_db.end_runtime_bound_to(agent_id, bsid)):
                 log("reconcileGhostSession",
                     f"agent={agent_id} bsid={bsid} has no transcript; unbound")
                 repaired["ghost_session"] = bsid

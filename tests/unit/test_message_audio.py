@@ -102,3 +102,28 @@ def test_reply_retention_is_bounded_and_leaves_preview_expiry_intact(tmp_path):
     conn().execute('UPDATE tts_queue SET enqueued_at=?', (now_ms() - 8 * 86400000,))
     stream._prune_audio()
     assert not new.exists()
+
+
+def test_raw_pcm_replies_and_their_sidecars_expire_like_mp3(tmp_path):
+    """VP-03: raw-pcm clips (about 10 MB a spoken minute) were never deleted."""
+    import os
+    import time
+    from lib.audio_stream import AudioStream
+    ada = agents.create_agent(persona='Ada', voice_id='voice', cwd=str(tmp_path), session='ada')
+    _, old = saved(ada, tmp_path, 'Old reply.', 'old.pcm')
+    _, new = saved(ada, tmp_path, 'New reply.', 'new.pcm')
+    old.write_bytes(b'o' * 10)
+    new.write_bytes(b'n' * 10)
+    sidecars = [path.with_suffix('.pcm.json') for path in (old, new)]
+    for sidecar in sidecars:
+        sidecar.write_text('{}')
+    for path in [old, new, *sidecars]:
+        os.utime(path, (time.time() - 1200, time.time() - 1200))
+    stream = AudioStream(tmp_path)
+    stream.REPLAY_RETAIN_MAX_BYTES = 10
+    stream._prune_audio()
+    assert new.exists() and sidecars[1].exists(), 'the recent reply stays replayable'
+    assert not old.exists() and not sidecars[0].exists()
+    conn().execute('UPDATE tts_queue SET enqueued_at=?', (now_ms() - 8 * 86400000,))
+    stream._prune_audio()
+    assert not new.exists() and not sidecars[1].exists()

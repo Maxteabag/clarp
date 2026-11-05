@@ -169,13 +169,14 @@ def _pinned_host_generation(monkeypatch):
     returns the real seam, which must still refuse (the guard above)."""
     try:
         from lib import agent_rings, host_generation
+        from tests.patching import patch_shared
     except ImportError:
         yield None
         return
     original = getattr(agent_rings, "_generation", None)
-    monkeypatch.setattr(agent_rings, "_generation",
-                        lambda: host_generation.GenerationRead(PINNED_HOST_GENERATION),
-                        raising=False)
+    patch_shared(monkeypatch, agent_rings, "_generation",
+                 lambda: host_generation.GenerationRead(PINNED_HOST_GENERATION),
+                 raising=False)
     yield original
 
 

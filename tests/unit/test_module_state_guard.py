@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import ast
 import pathlib
+import sys
 
 SERVER = pathlib.Path(__file__).resolve().parents[2] / "server"
 _MUTATORS = frozenset({
@@ -51,16 +52,22 @@ ALLOWED: dict[tuple[str, str], str] = {
     ("lib/backend_auth.py", "_processes"): JOBS,
     ("lib/backend_auth.py", "_tasks"): JOBS,
     ("lib/backend_auth.py", "_validation_cache"): CACHE,
+    ("lib/cartesia_preview_locks.py", "_CARTESIA_PREVIEW_LOCKS"): LOCKS,
     ("lib/harness_providers.py", "_methods_refresh"): JOBS,
     ("lib/harness_providers.py", "_sessions"): JOBS,
     ("lib/harness_providers.py", "_tasks"): JOBS,
     ("lib/backends.py", "_RUNTIME_CLIENT"): CLIENT,
+    # This process's view of its own wall and monotonic clocks (its start and
+    # the last suspend or clock jump it saw); meaningless in any other process.
+    ("lib/background_jobs.py", "_clock"): THROTTLE,
+    ("lib/task_goal_recovery.py", "_FAILURE_LOGGED"): THROTTLE,
     # Stop's in-process epoch backs up a durable fence write that failed; the
     # durable fence stays the authority, so losing it on restart is intended.
     ("lib/launch_receipts.py", "_STOP_EPOCH"): THROTTLE,
     # F4 delivery admission: health-only, process-local counters (never an
     # admission input), reset on restart and by reset_*_for_tests.
     ("lib/launch_receipts.py", "_RECONCILE_HEALTH"): THROTTLE,
+    ("lib/outdated_clients.py", "_OUTDATED_CLIENTS_NOTED"): THROTTLE,
     ("lib/runtime_attestation.py", "_HEALTH"): THROTTLE,
     # The one manager-probe slot and start-rate bucket of this Host process: a
     # rate limit by design; it only withholds work and never proves anything.
@@ -188,8 +195,6 @@ ALLOWED: dict[tuple[str, str], str] = {
     ("lib/viz_owner_avatar.py", "_retry"): THROTTLE,
     ("lib/vocab_compile.py", "_MODEL_BUDGETS"): CACHE,
     ("lib/workspace_vocab.py", "_CACHE"): CACHE,
-    ("server.py", "_CARTESIA_PREVIEW_LOCKS"): LOCKS,
-    ("server.py", "_OUTDATED_CLIENTS_NOTED"): THROTTLE,
 }
 
 
@@ -226,8 +231,22 @@ def module_state(path: pathlib.Path) -> set[str]:
 
 
 def found() -> set[tuple[str, str]]:
+    # State an S9 split recipe moved into a part is reported under its old
+    # module (the facade's path), so ALLOWED names one place on main and on
+    # integration alike. Only declared state maps; anything else in a part
+    # keeps its own path, and two physical owners of one name both stay
+    # visible (each under its own path), so neither inherits an allowance.
+    from tests.patching import split_origin
     paths = sorted((SERVER / "lib").rglob("*.py")) + [SERVER / "server.py"]
-    return {(p.relative_to(SERVER).as_posix(), name) for p in paths for name in module_state(p)}
+    owners: dict[tuple[str, str], list[str]] = {}
+    for p in paths:
+        rel = p.relative_to(SERVER).as_posix()
+        for name in module_state(p):
+            owners.setdefault((split_origin(rel, name), name), []).append(rel)
+    out = set()
+    for key, physical in owners.items():
+        out |= {key} if len(physical) == 1 else {(rel, key[1]) for rel in physical} | {key}
+    return out
 
 
 def test_no_new_module_state():
@@ -247,3 +266,27 @@ def test_the_scanner_sees_both_kinds_of_state(tmp_path):
     sample.write_text("CONST = {'a': 1}\n_SEEN = set()\n_N = 0\n"
                       "def f(x):\n    global _N\n    _N += 1\n    _SEEN.add(x)\n")
     assert module_state(sample) == {"_SEEN", "_N"}
+
+
+def test_split_state_maps_only_declared_names_and_keeps_duplicate_owners(tmp_path, monkeypatch):
+    # Review B (S9 cut 1b): a new dict in a part with an old allowed name must
+    # not inherit the old module's allowance; nor may a second physical owner.
+    from tests import patching
+    recipes = tmp_path / "splits"
+    recipes.mkdir()
+    (recipes / "s9.toml").write_text(
+        '[[split]]\nname = "x"\nmodule = "lib/old.py"\n'
+        '[[split.part]]\nmodule = "lib/old_base.py"\nnames = ["_cache"]\n')
+    monkeypatch.setattr(patching, "_RECIPES", recipes)
+    root = tmp_path / "server"
+    (root / "lib").mkdir(parents=True)
+    mutated = "{name} = {{}}\ndef f():\n    {name}['k'] = 1\n"
+    (root / "server.py").write_text("")
+    (root / "lib" / "old_base.py").write_text(mutated.format(name="_cache"))
+    (root / "lib" / "old_other.py").write_text(mutated.format(name="_cache"))
+    monkeypatch.setattr(sys.modules[__name__], "SERVER", root)
+    assert ("lib/old.py", "_cache") in found()                     # declared: the old module's
+    assert ("lib/old_other.py", "_cache") in found()               # not in any recipe: its own
+    (root / "lib" / "old.py").write_text(mutated.format(name="_cache"))
+    owners = found()
+    assert ("lib/old.py", "_cache") in owners and ("lib/old_base.py", "_cache") in owners

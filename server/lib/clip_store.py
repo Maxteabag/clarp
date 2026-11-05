@@ -67,6 +67,18 @@ def mark_clip_producer_status(*, clip_id: int, producer_status: str,
     return bool(cur.rowcount)
 
 
+def fail_streaming_clips(error: str) -> int:
+    """Fail every clip still marked streaming: its producer died with the
+    process that started it (VP-05)."""
+    cur = conn().execute(
+        """UPDATE clips SET producer_status = ?, error = ?,
+                  completed_at = COALESCE(completed_at, ?)
+            WHERE producer_status = ?""",
+        (ClipProducerStatus.FAILED, error[:500], now_ms(), ClipProducerStatus.STREAMING),
+    )
+    return int(cur.rowcount or 0)
+
+
 def mark_clip_status(*, clip_id: int | None = None, url: str | None = None,
                      status: str, error: str | None = None) -> bool:
     if status not in ClipStatus.valid():

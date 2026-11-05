@@ -526,6 +526,17 @@ def end_current_runtime(agent_id: str) -> None:
     """, (now_ms(), agent_id))
 
 
+def end_runtime_bound_to(agent_id: str, backend_session_id: str) -> bool:
+    """End the agent's live runtime only while it is still bound to
+    ``backend_session_id``: a repair decided about that binding must not
+    close one a newer send made since (TP-05b). True when a row ended."""
+    cur = conn().execute("""
+        UPDATE runtimes SET ended_at = ?
+         WHERE agent_id = ? AND ended_at IS NULL AND backend_session_id = ?
+    """, (now_ms(), agent_id, backend_session_id))
+    return cur.rowcount > 0
+
+
 class SessionAlreadyBound(Exception):
     """Another live runtime already owns this backend_session_id UUID.
 

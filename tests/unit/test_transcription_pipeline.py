@@ -270,3 +270,89 @@ def test_engine_is_read_once_per_request():
     out = _run(ctx, Recorder())
     assert out.status == 200 and out.payload["text"] == "first"
     assert replacement.calls == []
+
+
+class PerModelSTT(StubSTT):
+    """Each model raises its own error, or answers with its own name."""
+
+    def __init__(self, errors):
+        super().__init__()
+        self.errors = errors
+
+    def transcribe_model_bytes(self, model, audio, ctype, prompt, *, wait=0.0):
+        self.calls.append(("model", model))
+        if self.errors.get(model):
+            raise self.errors[model]
+        return f"from {model}", True, 1.0
+
+
+@pytest.mark.parametrize("first_error", [
+    STTBusyError(), STTModelLoadingError("whisper model loading"),
+    STTUnknownModelError("transcription model not installed: faster-whisper:medium")])
+def test_an_agent_fallback_engine_runs_when_the_first_is_busy_loading_or_missing(
+        monkeypatch, first_error):
+    """VP-09: a busy, loading or missing first engine must not lose the
+    recording when the agent has a fallback engine configured."""
+    from lib import stt_language
+    monkeypatch.setattr(stt_language, "engines_for",
+                        lambda _focus: ["faster-whisper:medium", "deepgram:nova-3"])
+    stt = PerModelSTT({"faster-whisper:medium": first_error})
+    out = _run(_ctx(stt), Recorder(), focus="rachel")
+    assert out.status == 200 and out.payload["text"] == "from deepgram:nova-3"
+    assert [c[1] for c in stt.calls] == ["faster-whisper:medium", "deepgram:nova-3"]
+
+
+def test_the_last_agent_engines_own_error_still_decides_the_status(monkeypatch):
+    from lib import stt_language
+    monkeypatch.setattr(stt_language, "engines_for",
+                        lambda _focus: ["faster-whisper:medium", "deepgram:nova-3"])
+    stt = PerModelSTT({"faster-whisper:medium": STTBusyError(),
+                       "deepgram:nova-3": STTModelLoadingError("loading")})
+    assert _run(_ctx(stt), Recorder(), focus="rachel").status == 503
+
+
+@pytest.mark.parametrize("first_error", [
+    STTBusyError(), STTModelLoadingError("whisper model loading"),
+    STTUnknownModelError("transcription model not installed: a")])
+def test_a_call_fallback_engine_runs_when_the_first_is_busy_loading_or_missing(first_error):
+    stt = PerModelSTT({"a": first_error})
+    steps = [{"engine": "a", "model": "a", "language": None, "adapted": False},
+             {"engine": "b", "model": "b", "language": None, "adapted": False}]
+    call_stt = {"language": {"value": None}, "engines": ["a", "b"], "requested_model": ""}
+    text, _terminal, _dur, engine = tp._run_call_steps(
+        stt, steps, call_stt, focus="", audio_bytes=b"audio", ctype="audio/webm", prompt="")
+    assert (text, engine) == ("from b", "b")
+    assert [a["outcome"] for a in call_stt["report"]["attempts"]] == ["error", "ok"]
+
+
+class SelectionWaitSTT(PerModelSTT):
+    """Records the selection-lock bound each engine attempt ran under."""
+
+    def __init__(self, errors):
+        super().__init__(errors)
+        self.bounds = []
+
+    def transcribe_model_bytes(self, model, audio, ctype, prompt, *, wait=0.0):
+        from lib import stt as stt_module
+        self.bounds.append((model, stt_module.current_selection_wait()))
+        return super().transcribe_model_bytes(model, audio, ctype, prompt, wait=wait)
+
+
+def test_only_an_engine_with_a_fallback_after_it_bounds_its_selection_wait(monkeypatch):
+    # VP-08: a fallback exists, so waiting minutes for another variant is
+    # worse than trying it; the last engine keeps today's unbounded wait.
+    from lib import stt_language
+    monkeypatch.setattr(stt_language, "engines_for",
+                        lambda _focus: ["faster-whisper:medium", "faster-whisper:large-v3"])
+    stt = SelectionWaitSTT({"faster-whisper:medium": STTBusyError()})
+    out = _run(_ctx(stt), Recorder(), focus="rachel")
+    assert out.status == 200
+    assert stt.bounds == [("faster-whisper:medium", 10.0), ("faster-whisper:large-v3", None)]
+
+    calls = SelectionWaitSTT({"a": STTBusyError()})
+    steps = [{"engine": "a", "model": "a", "language": None, "adapted": False},
+             {"engine": "b", "model": "b", "language": None, "adapted": False}]
+    call_stt = {"language": {"value": None}, "engines": ["a", "b"], "requested_model": ""}
+    tp._run_call_steps(calls, steps, call_stt, focus="", audio_bytes=b"audio",
+                       ctype="audio/webm", prompt="")
+    assert calls.bounds == [("a", 10.0), ("b", None)]

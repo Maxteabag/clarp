@@ -452,9 +452,18 @@ def context_tokens_from_jsonl(path: pathlib.Path, tail_bytes: int = 1_000_000) -
         stat = path.stat()
     except OSError:
         return None
-    return _context_tokens_cached(str(path.resolve()), stat.st_dev, stat.st_ino,
-                                  stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns,
-                                  tail_bytes)
+    key = (str(path.resolve()), stat.st_dev, stat.st_ino, stat.st_size,
+           stat.st_mtime_ns, stat.st_ctime_ns, tail_bytes)
+    if time.time_ns() - stat.st_mtime_ns < _RACY_NS:
+        return _context_tokens_cached.__wrapped__(*key)
+    return _context_tokens_cached(*key)
+
+
+# Filesystems take timestamps from a coarse clock (ext4: the kernel tick), so
+# a same-size rewrite inside one tick keeps every stat field the cache keys
+# on. A transcript written this recently is read instead of cached, git's
+# "racy" rule (RM-N4); once it settles its count is cached as before.
+_RACY_NS = 2_000_000_000
 
 
 # Every snapshot asks once per bound Claude agent. The fleet passed 256 such

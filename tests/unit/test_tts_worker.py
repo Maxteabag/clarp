@@ -165,3 +165,118 @@ def test_cartesia_fallback_is_used_only_when_explicit(env, monkeypatch):
         voice_id="eleven-voice", session="claude", source=TurnSource.PWA)
     assert tts_worker.synth_one(audio_dir=env["audio_dir"]) is True
     assert tts_queue.recent(limit=1)[0]["status"] == tts_queue.DONE
+
+
+def test_a_restart_fails_stale_in_flight_speech_instead_of_speaking_it_again(env, patch_eleven):
+    """VP-05: a restart during synthesis re-spoke the reply, however old, and
+    left its clip row streaming for ever."""
+    from lib import db, tts_worker
+    from lib.protocol import ClipProducerStatus
+
+    stale = tts_queue.enqueue(agent_id=env["agent_id"], text="old answer", voice_id="V_MIKE",
+                              session="claude", source=TurnSource.PWA)
+    fresh = tts_queue.enqueue(agent_id=env["agent_id"], text="new answer", voice_id="V_MIKE",
+                              session="claude", source=TurnSource.PWA)
+    assert tts_queue.claim_next()["queue_id"] == stale
+    assert tts_queue.claim_next()["queue_id"] == fresh
+    now = db.now_ms()
+    db.conn().execute("UPDATE tts_queue SET claimed_at = ? WHERE queue_id = ?",
+                      (now - 2 * 60 * 60 * 1000, stale))
+    clip = agents_db.record_clip(agent_id=env["agent_id"], path=str(env["audio_dir"] / "dead.pcm"),
+                       voice_id="V_MIKE", trace_id="t-dead",
+                       producer_status=ClipProducerStatus.STREAMING)
+
+    tts_worker.recover_in_flight(now_ms=now)
+
+    rows = {r["queue_id"]: r["status"] for r in db.conn().execute(
+        "SELECT queue_id, status FROM tts_queue")}
+    assert rows == {stale: tts_queue.FAILED, fresh: tts_queue.QUEUED}
+    status = db.conn().execute(
+        "SELECT producer_status FROM clips WHERE clip_id = ?", (clip,)).fetchone()[0]
+    assert status == ClipProducerStatus.FAILED
+
+
+def _fallback_clip(env, monkeypatch, *, primary_reads):
+    """One Cartesia->ElevenLabs clip through _synthesize, with the real
+    Cartesia adapter reading `primary_reads` from an in-memory response
+    (an exception in it is the upstream drop) and providers calling the
+    live sink as on_chunk(index, bytes)."""
+    from lib import cartesia_tts, config, tts_worker
+    cfg = config.Config(
+        tts_provider="cartesia", tts_fallback="elevenlabs",
+        cartesia_api_key="cartesia-key", eleven_api_key="eleven-key",
+        cartesia_voices={"Mike": "cartesia-voice"})
+
+    class Response:
+        reads = iter(primary_reads)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return False
+
+        def read(self, _size):
+            step = next(self.reads, b"")
+            if isinstance(step, Exception):
+                raise step
+            return step
+
+    monkeypatch.setattr(cartesia_tts.urllib.request, "urlopen",
+                        lambda *_a, **_kw: Response())
+    fallback_ran = []
+
+    def eleven(*, on_chunk, out_path, **_kw):
+        fallback_ran.append(True)
+        for index, chunk in enumerate((b"ELEVEN-FULL-1", b"ELEVEN-FULL-2")):
+            try:  # eleven_ws isolates callback errors the same way
+                on_chunk(index, chunk)
+            except Exception:  # noqa: BLE001
+                pass
+        pathlib.Path(out_path).write_bytes(b"ELEVEN-FULL-1ELEVEN-FULL-2")
+        return 26
+
+    monkeypatch.setattr(tts_worker, "synthesize_streaming", eleven)
+    live: list[tuple[int, bytes]] = []
+    row = {"voice_id": "eleven-voice", "text": "Sure, I'll check the logs",
+           "agent_id": env["agent_id"], "session": "claude"}
+    run = lambda: tts_worker._synthesize(  # noqa: E731
+        cfg=cfg, row=row, agent={"persona": "Mike"},
+        out_path=env["audio_dir"] / "clip.mp3",
+        on_chunk=lambda index, chunk: live.append((index, chunk)),
+        trace_id=None)
+    return run, live, fallback_ran
+
+
+def test_fallback_after_audio_reached_the_stream_fails_the_clip(env, monkeypatch):
+    """VP-01: once the primary fed the live stream, a fallback would play a
+    second full clip after the partial one; the clip fails instead."""
+    from lib import tts_worker
+    run, live, fallback_ran = _fallback_clip(
+        env, monkeypatch, primary_reads=[b"CARTESIA-PART-1", OSError("dropped")])
+    emitted = []
+    monkeypatch.setattr(tts_worker, "_emit",
+                        lambda _src, name, **kw: emitted.append((name, kw)))
+    with pytest.raises(tts_worker.CartesiaError):
+        run()
+    assert live == [(0, b"CARTESIA-PART-1")]
+    assert not fallback_ran
+    skipped = [kw for name, kw in emitted if name == "providerFallbackSkipped"]
+    assert len(skipped) == 1 and skipped[0]["level"] == "warn"
+    assert skipped[0]["detail"]["fallback"] == "elevenlabs"
+
+
+def test_fallback_before_any_audio_still_speaks(env, monkeypatch):
+    run, live, fallback_ran = _fallback_clip(
+        env, monkeypatch, primary_reads=[OSError("refused")])
+    assert run() == 26
+    assert live == [(0, b"ELEVEN-FULL-1"), (1, b"ELEVEN-FULL-2")]
+    assert fallback_ran
+
+
+def test_primary_streams_its_indexed_chunks_to_the_live_sink(env, monkeypatch):
+    run, live, fallback_ran = _fallback_clip(
+        env, monkeypatch, primary_reads=[b"CARTESIA-1", b"CARTESIA-2"])
+    assert run() == 20
+    assert live == [(0, b"CARTESIA-1"), (1, b"CARTESIA-2")]
+    assert not fallback_ran

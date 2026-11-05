@@ -15,7 +15,7 @@ from dataclasses import dataclass, replace
 
 from . import agents as agents_db
 from . import backends, events, identity
-from .agent_store import AGENT_ROSTER, load_agents, save_agents
+from .agent_store import AGENT_ROSTER, load_agents, save_agent
 from .log import log, log_exception
 from .mcp_selection import encode as encode_mcp_selection
 from .policies.agent_spec import AgentSpec, RosterView, SpecError
@@ -159,7 +159,9 @@ class AgentLifecycleService:
                 **({"creation_request_id": spec.creation_request_id}
                    if spec.creation_request_id else {}))
         else:
-            save_agents(agents, self.ctx.agents_path)
+            # This agent only: the roster read before the I/O above is stale
+            # for every other agent (TP-03).
+            save_agent(session, agents[session])
         agent = agents_db.get_by_session(session)
         if not agent:
             raise AgentLifecycleError(500, "agent persistence failed")

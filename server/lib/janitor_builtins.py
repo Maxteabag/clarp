@@ -27,7 +27,8 @@ DEMAND_ROLES = ROLES + OPTIONAL_ROLES
 SEED_VERSION = 1
 DEMAND_RUN_TTL_MS = 180_000  # Two bounded 60-second routing probes plus overhead.
 _METADATA_KEYS = frozenset({"input_hash", "request_hash", "candidate_count", "item_count",
-    "detail_level", "target_count", "target_agent_id", "policy_revision", "summary", "status", "reason"})
+    "detail_level", "target_count", "target_agent_id", "policy_revision", "summary", "status", "reason",
+    "decision_id", "http_status"})
 
 
 def _role(role: str) -> str:
@@ -120,14 +121,17 @@ def resolve(role: str, *, target_agent_id: str | None = None) -> dict | None:
     target = agents.get_by_agent_id(target_agent_id) if target_agent_id else None
     if target_agent_id and not target:
         return None
+    return select(eligible(role), target)
+
+
+def eligible(role: str) -> list[dict]:
+    """The enabled, runnable subscribers of ``role``, whatever their scope. Read
+    once and pass to ``select`` to resolve many targets (heartbeat pass)."""
+    _role(role)
     selected = []
-    for config in janitors.list_janitors(include_runtime=False):
+    for agent_id in store.janitor_agent_ids(template_id=role, enabled_only=True):
+        config = janitors.get(agent_id, include_runtime=False)
         if config["template_id"] != role or not config["enabled"]:
-            continue
-        scope = config["scope"]
-        if target is None and (scope.get("agent_ids") or scope.get("exclude_agent_ids")):
-            continue
-        if target is not None and not janitors._in_scope(scope, target):
             continue
         matching = [v for v in config["attachments"] if v["enabled"] and v["trigger_version"] == 1
                     and v["trigger_id"] == janitors.template(role)["default_trigger_id"]]
@@ -139,7 +143,16 @@ def resolve(role: str, *, target_agent_id: str | None = None) -> dict | None:
         except janitors.JanitorError:
             continue
         selected.append(config)
-    return selected[0] if len(selected) == 1 else None
+    return selected
+
+
+def select(configs: list[dict], target: dict | None) -> dict | None:
+    """``resolve`` over configs from ``eligible``: the one config serving
+    ``target`` (an agent row), or with no target the one unrestricted config."""
+    chosen = [config for config in configs
+              if (janitors._in_scope(config["scope"], target) if target is not None
+                  else not (config["scope"].get("agent_ids") or config["scope"].get("exclude_agent_ids")))]
+    return chosen[0] if len(chosen) == 1 else None
 
 
 def _request_run_id(role: str, request_id: str) -> str:

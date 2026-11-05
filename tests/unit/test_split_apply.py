@@ -193,3 +193,14 @@ def test_a_patch_of_a_recursive_function_through_the_old_module_is_refused(tmp_p
     root = _tree(tmp_path, old=old, extra={"tests/test_old.py": patch})
     with pytest.raises(Refusal, match="test_old.py:4"):
         split_apply.apply_split(root, _split([("lib/old_part.py", ["f"])]))
+
+
+def test_a_patch_through_the_old_module_with_a_computed_name_is_refused(tmp_path):
+    # Review of cut 1b: `for name, value in ...: monkeypatch.setattr(old, name, value)`
+    # cannot be checked name by name, so it fails closed.
+    patch = ("from lib import old\n\ndef test_x(monkeypatch):\n"
+             "    for name in ('helper',):\n        monkeypatch.setattr(old, name, None)\n")
+    root = _tree(tmp_path, extra={"tests/test_old.py": patch})
+    split = _split([("lib/old_base.py", ["LIMIT", "A", "B", "helper"]), ("lib/old_store.py", ["Store"])])
+    with pytest.raises(Refusal, match="computed name"):
+        split_apply.apply_split(root, split)

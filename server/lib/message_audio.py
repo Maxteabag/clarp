@@ -20,7 +20,7 @@ def retained_mp3_paths(*, audio_dir: pathlib.Path, max_age_ms: int, max_bytes: i
         "SELECT c.path,MAX(q.enqueued_at) AS latest FROM clips c "
         "JOIN tts_queue q ON q.clip_id=c.clip_id AND q.agent_id=c.agent_id "
         "JOIN agents a ON a.agent_id=c.agent_id AND a.deleted_at IS NULL "
-        "WHERE q.status='done' AND q.enqueued_at>=? AND c.path LIKE '%.mp3' "
+        "WHERE q.status='done' AND q.enqueued_at>=? AND (c.path LIKE '%.mp3' OR c.path LIKE '%.pcm') "
         "AND COALESCE(c.producer_status,'complete')='complete' "
         "GROUP BY c.clip_id ORDER BY latest DESC,c.clip_id DESC LIMIT 10000",
         (now_ms() - max(0, max_age_ms),),

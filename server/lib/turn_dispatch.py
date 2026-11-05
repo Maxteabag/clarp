@@ -133,6 +133,9 @@ def runtime_status() -> dict[str, Any]:
         "unpersisted": unpersisted_held(),
         "provider_turns": provider_turns(),
         "compactions": compaction.active_sessions(),
+        # Sends being admitted: a reconciler must leave their sessions bound
+        # (TP-05b); the release drain does not read it.
+        "admitting": _SLOTS.admitting_agents(),
         # The status line per agent (docs/live-items.md §1.3), for the
         # HTTP process's /agents/snapshot.
         "live_activities": hub.activities() if hub is not None else {},
@@ -267,6 +270,11 @@ def refresh_hold_headlines() -> None:
         hub.set_update_holds(set(_SLOTS.held()), UPDATE_HOLD_HEADLINE)
 
 
+# The admission in progress on this thread (TurnDispatchService.submit), so
+# the agent can be marked as admitting once it is known (TP-05b).
+_ADMISSION = threading.local()
+
+
 def live_work(agent_id: str, *, session: str = "") -> turn_slots.LiveWork:
     """Every busy fact for one agent: slot, queue, terminal, compaction."""
     return _SLOTS.live_work(agent_id, session=session)
@@ -287,6 +295,13 @@ def _slot_is_spawning(agent_id: str) -> bool:
         return agent_id in set(
             _RUNTIME_CLIENT.status().get("spawning") or ())
     return _SLOTS.is_spawning(agent_id)
+
+
+def _send_admitting(agent_id: str) -> bool:
+    """A send for the agent is being admitted where turns are owned (TP-05b)."""
+    if _RUNTIME_CLIENT is not None:
+        return agent_id in set(_RUNTIME_CLIENT.status().get("admitting") or ())
+    return _SLOTS.is_admitting(agent_id)
 
 
 def free_stale_slot(agent_id: str) -> str | None:
@@ -457,10 +472,38 @@ def _park(spec: _TurnSpec, *, prefix: str = "stop-park") -> str:
             synthesize_audio=spec.synthesize_audio, origin=spec.origin,
             sender_agent_id=spec.sender_agent_id,
             prompt_admission_id=spec.prompt_admission_id,
-            allow_paused=prefix == "drain-park" and spec.bypass_pause)
+            allow_paused=(prefix in {"drain-park", "preempt-park"}
+                          and spec.bypass_pause))
     except Exception as exc:  # noqa: BLE001 - memory still holds the send
-        log_exception(f"{'drain' if prefix == 'drain-park' else 'stop'}ParkPersistFail",
+        log_exception(f"{prefix.split('-')[0]}ParkPersistFail",
                       exc, detail=spec.agent_id)
+        return ""
+    return park_id
+
+
+def _park_at_head(spec: _TurnSpec) -> str:
+    """Persist a preempting send ahead of everything its agent has open, as
+    it runs before the work already queued (TP-01)."""
+    park_id = f"preempt-park-{spec.trace_id}"
+    con = db.conn()
+    try:
+        con.execute("BEGIN IMMEDIATE")
+        try:
+            turn_queue.park_at_head(
+                queue_id=park_id, agent_id=spec.agent_id, session=spec.session,
+                text=spec.text, trace_id=spec.trace_id,
+                client_msg_id=spec.client_msg_id,
+                synthesize_audio=spec.synthesize_audio, origin=spec.origin,
+                sender_agent_id=spec.sender_agent_id,
+                prompt_admission_id=spec.prompt_admission_id)
+            if spec.bypass_pause:
+                turn_queue.allow_paused_for(park_id)
+            con.execute("COMMIT")
+        except BaseException:
+            con.execute("ROLLBACK")
+            raise
+    except Exception as exc:  # noqa: BLE001 - the caller refuses the send
+        log_exception("preemptParkPersistFail", exc, detail=spec.agent_id)
         return ""
     return park_id
 
@@ -469,6 +512,19 @@ class DispatchError(RuntimeError):
     def __init__(self, status: int, message: str):
         self.status = status
         super().__init__(message)
+
+
+def _refuse_oversized(registry, backend: str, text: str) -> None:
+    """Before admission, so nothing is stored: a message longer than the
+    backend's CLI can take is refused with 413 (BACKENDS-08)."""
+    limit_of = getattr(registry, "prompt_limit_bytes", None)
+    limit = limit_of(backend) if limit_of is not None else None
+    size = len((text or "").encode())
+    if limit is not None and size > limit:
+        raise DispatchError(
+            413, f"This message is {size // 1024} KiB, more than the {limit // 1024} KiB "
+                 "this agent can take in one message. Shorten it or split it into "
+                 "several messages.")
 
 
 class JanitorDispatchError(DispatchError):
@@ -658,6 +714,21 @@ def _janitor_spawn_lock(agent_id: str):
             lock = threading.RLock()
             _JANITOR_SPAWN_LOCKS[agent_id] = lock
         return lock
+
+
+# Background ticks their schedulers regenerate: never readmitted by recovery.
+_REGENERATED_ORIGINS = frozenset({"heartbeat", "leader_tick"})
+
+# Background retries of an unlaunched spawn's marker: waits before each.
+_UNLAUNCHED_MARKER_RETRY_SEC = (1.0, 5.0)
+
+
+def _unlaunched_marked(agent_id: str, trace_id: str) -> bool:
+    return db.conn().execute(
+        """SELECT 1 FROM state_log WHERE agent_id = ?
+              AND json_extract(detail, '$.trace_id') = ?
+              AND json_extract(detail, '$.dispatch_not_started')
+            LIMIT 1""", (agent_id, trace_id)).fetchone() is not None
 
 
 def _remove_queued_run(queue_id: str) -> None:
@@ -1243,6 +1314,16 @@ class TurnDispatchService:
                 lambda spec, queue_id=row["queue_id"]: spec.queue_id == queue_id)
             if already_memory_queued:
                 continue
+            if row["origin"] in _REGENERATED_ORIGINS:
+                # A background tick queued behind a turn this process no longer
+                # remembers decided about a state that has moved on, and its
+                # janitor check refuses readmission. Its scheduler decides
+                # again; kept, the row would hold off every later tick (AUT-05).
+                _remove_queued_run(str(row["queue_id"]))
+                log("backgroundTickDropped",
+                    f"agent={row['agent_id']} origin={row['origin']} "
+                    f"queue={row['queue_id']}")
+                continue
             backoff = _RECOVERY_BACKOFF.hold(
                 row["agent_id"], str(row["queue_id"]), self.now())
             if backoff is not None:
@@ -1381,7 +1462,7 @@ class TurnDispatchService:
         runtime RPC, or admit and launch it here."""
         runtime = getattr(self.ctx, "runtime_client", None)
         if runtime is None:
-            return _with_delivery(command, self._dispatch_owned(command))
+            return _with_delivery(command, self._dispatch_owned_marked(command))
         try:
             send = getattr(runtime, "dispatch_command", None)
             result = (send(command) if send is not None
@@ -1399,6 +1480,19 @@ class TurnDispatchService:
         return result
 
     @_serialize_client_retry
+    def _dispatch_owned_marked(self, command: DispatchCommand) -> DispatchResult:
+        """``_dispatch_owned``, whose agent is marked as admitting a send from
+        its session binding until this call returns: the session is bound
+        before the slot is claimed, and a snapshot's reconciler must see that
+        as live work (TP-05b)."""
+        outer = getattr(_ADMISSION, "stack", None)
+        with contextlib.ExitStack() as stack:
+            _ADMISSION.stack = stack
+            try:
+                return self._dispatch_owned(command)
+            finally:
+                _ADMISSION.stack = outer
+
     def _dispatch_owned(self, command: DispatchCommand) -> DispatchResult:
         text = command.text
         requested_session = command.requested_session
@@ -1496,6 +1590,7 @@ class TurnDispatchService:
             except Exception as e:
                 log_exception("stickyFocusSetFail", e, detail=session)
         backend = self.backends.normalize(agent.get("backend"))
+        _refuse_oversized(self.backends, backend, text)
         # The Claude pwa-voice marker is (re)written per attempt in
         # _spawn_attempt — not here — so a retry or a redispatch always re-arms
         # a fresh marker. Writing it once was a single-use race: the first
@@ -1510,8 +1605,12 @@ class TurnDispatchService:
         # resume target for the binding, drop it and start fresh. (A CLI that
         # resumes by session id always has one; only a transcript-file CLI
         # checks the disk.)
-        if (backend_session_id and backends.by_id(backend).resume_target(
-                backend_session_id, str(cwd), self.home) is None):
+        # Only a binding nothing is using: a turn that is starting or running
+        # writes its transcript only once its CLI has begun, so a disk miss
+        # then is not a ghost (TP-05).
+        if (backend_session_id and not self._turn_in_flight(agent_id)
+                and backends.by_id(backend).resume_target(
+                    backend_session_id, str(cwd), self.home) is None):
             log("ghostSessionReset",
                 f"agent={agent_id} bsid={backend_session_id} — resume target "
                 f"has no transcript on disk; starting a fresh session")
@@ -1521,6 +1620,9 @@ class TurnDispatchService:
             backend_session_id = ""
         is_new_session = not backend_session_id
 
+        admission = getattr(_ADMISSION, "stack", None)
+        if admission is not None:
+            admission.enter_context(_SLOTS.admitting_send(agent_id))
         if is_new_session:
             backend_session_id = self._bind_new_session(backend, agent_id, session)
 
@@ -1823,12 +1925,42 @@ class TurnDispatchService:
         log_exception("spawnAbandonedUnlaunched", error, detail=spec.session)
         eventlog.emit("server", "spawnAbandonedUnlaunched", context=spec.context,
                       detail={"error": str(error)[:200]})
+        marked = False
         try:
             turn_lifecycle.record_unlaunched(spec.agent_id, spec.trace_id)
+            marked = True
             if turn_id:
                 turn_lifecycle.close_turn(turn_id)
         except Exception as close_error:  # noqa: BLE001
             log_exception("spawnAbandonedCloseFail", close_error, detail=spec.session)
+            if not marked:
+                # As before, a failed marker skips the close: no second write
+                # waits before the 500. The marker is retried in the background.
+                self._retry_unlaunched_marker(spec, len(_UNLAUNCHED_MARKER_RETRY_SEC))
+
+    def _retry_unlaunched_marker(self, spec: _TurnSpec, attempts_left: int) -> None:
+        """The 'never started' marker is what lets the client's same-id resend
+        launch this message once; without it the resend is refused for ever
+        (CLIENT-SEND-500). Write it again in the background, never delaying
+        the 500, and only if it is not already there: its INSERT may have
+        committed before the error (CLIENT-SEND-500, reviewer B)."""
+        if attempts_left <= 0:
+            return
+        delay = _UNLAUNCHED_MARKER_RETRY_SEC[-attempts_left]
+
+        def retry() -> None:
+            try:
+                if not _unlaunched_marked(spec.agent_id, spec.trace_id):
+                    turn_lifecycle.record_unlaunched(spec.agent_id, spec.trace_id)
+            except Exception as error:  # noqa: BLE001 - logged; one more try if left
+                log_exception("spawnAbandonedMarkerFail", error, detail=spec.session)
+                self._retry_unlaunched_marker(spec, attempts_left - 1)
+        try:
+            self.retry_scheduler(delay, retry)
+        except Exception as error:  # noqa: BLE001 - never a second abandonment
+            # No timer thread (the same exhaustion that failed the write):
+            # the dispatch failure stands, the marker stays as it is.
+            log_exception("spawnAbandonedMarkerRetryFail", error, detail=spec.session)
 
     def _slot_snapshot(self, spec: _TurnSpec) -> tuple[str, bool]:
         """(in-flight trace, whether that slot is spawning or has a live
@@ -1969,21 +2101,30 @@ class TurnDispatchService:
         park_id = ""
         if not spec.queue_id and _SLOTS.get(spec.agent_id) == _STOPPING_SENTINEL:
             park_id = _park(spec)
+        elif (not spec.queue_id
+              and str(_SLOTS.get(spec.agent_id) or "").startswith(_PROCESS_OWNER_PREFIX)):
+            # It will wait behind a turn process: durably, like the send
+            # that preempted that process (TP-01).
+            park_id = _park(spec, prefix="preempt-park")
         parked = False
+        preempt: list = []
         try:
             with _TURN_LOCK:
                 parked, decision = self._claim_or_queue(
-                    spec, queue_if_busy=queue_if_busy, park_id=park_id)
+                    spec, queue_if_busy=queue_if_busy, park_id=park_id,
+                    preempt=preempt)
         finally:
             if park_id and not parked:
                 turn_queue.unpark(park_id)
+        if preempt and self._preempt_for(spec, preempt[0]):
+            decision = True     # it waits for the old process to exit
         if decision and _SLOTS.fenced:
             # Held behind the release drain: durable before anything else.
             self.persist_held(spec.agent_id)
         return decision
 
     def _claim_or_queue(self, spec: _TurnSpec, *, queue_if_busy: bool,
-                        park_id: str) -> tuple[bool, bool]:
+                        park_id: str, preempt: list | None = None) -> tuple[bool, bool]:
         """The decision half of _enqueue_if_busy; the caller holds _TURN_LOCK.
         Returns (parked behind Stop, send waits)."""
         agent_id = spec.agent_id
@@ -2037,6 +2178,12 @@ class TurnDispatchService:
                 _SLOTS.claim(agent_id, spec.trace_id)
                 return False, False
             if queue_if_busy or current.startswith(_PROCESS_OWNER_PREFIX):
+                parked = False
+                if not spec.queue_id and current.startswith(_PROCESS_OWNER_PREFIX):
+                    if not park_id:
+                        raise DispatchError(503, "could not durably queue message")
+                    spec = replace(spec, park_id=park_id)
+                    parked = True
                 depth = _SLOTS.enqueue(agent_id, spec)
                 defer_on(_TURN_LOCK, lambda: (
                     eventlog.emit("server", "turnQueued", context=spec.context,
@@ -2044,26 +2191,44 @@ class TurnDispatchService:
                     log("turnQueued",
                         f"agent={agent_id} depth={depth} "
                         f"trace={spec.trace_id or '∅'}")))
-                return False, True
+                return parked, True
             if _SLOTS.fenced:
                 # The release drain waits for this turn; never preempt it.
                 return self._hold_for_drain(spec, "behind a live turn")
             # Take the slot first so the preempted turn's dying callback is
-            # already superseded, then interrupt once the lock is released.
+            # already superseded, then interrupt once the lock is released
+            # (the caller does, see ``preempt``).
             _SLOTS.claim(agent_id, spec.trace_id)
-            defer_on(_TURN_LOCK, lambda: self._preempt_for(spec, current))
+            if preempt is not None:
+                preempt.append(current)
+            else:
+                defer_on(_TURN_LOCK, lambda: self._preempt_for(spec, current))
             return False, False
         if self._running_processes(spec):
             # The slot is free but a turn process of this agent still runs
             # (the Host took its turn for finished too early). Two processes
             # on one native session interleave and corrupt it, so the slot
-            # goes to that process until it exits and this send waits.
+            # goes to that process until it exits and this send waits,
+            # durably like a send behind a preempted process (TP-01b).
+            parked = False
+            if not spec.queue_id and not spec.park_id:
+                # A Stop that finished after this send parked behind its
+                # barrier left that row: it stays the send's one durable row.
+                waiting_park = park_id or _park(spec, prefix="preempt-park")
+                if not waiting_park:
+                    raise DispatchError(503, "could not durably queue message")
+                if park_id and spec.bypass_pause:
+                    # As a preempt-park row would: the send's right to run
+                    # past a pause survives a restart.
+                    turn_queue.allow_paused_for(park_id)
+                spec = replace(spec, park_id=waiting_park)
+                parked = True
             owner = f"{_PROCESS_OWNER_PREFIX}{spec.trace_id}"
             _SLOTS.claim(agent_id, owner)
             _SLOTS.mark_spawned(agent_id, owner)
             depth = _SLOTS.enqueue(agent_id, spec)
             defer_on(_TURN_LOCK, lambda: self._wait_for_process_exit(spec, owner, depth))
-            return False, True
+            return parked, True
         if _SLOTS.fenced:
             return self._hold_for_drain(spec, "free slot")
         if _SLOTS.queue_depth(agent_id):
@@ -2125,16 +2290,48 @@ class TurnDispatchService:
         threading.Thread(target=wait, daemon=True,
                          name=f"turn-wait-{spec.agent_id}").start()
 
-    def _preempt_for(self, spec: _TurnSpec, killed: str) -> None:
+    def _preempt_for(self, spec: _TurnSpec, killed: str) -> bool:
+        """Interrupt the running turn for ``spec``. Two processes on one native
+        session interleave and corrupt it, so when the old process is still
+        running ``spec`` waits behind it, durably (a park row a restart
+        recovers), and starts when it exits. Returns whether it waits; a send
+        that cannot wait durably is refused."""
         try:
             self.backends.interrupt(spec.backend, spec.agent_id)
         except Exception as e:  # noqa: BLE001
             log_exception("preemptInterruptFail", e, detail=spec.agent_id)
+        if killed and killed != spec.trace_id:
+            # The preempted turn's speech not yet synthesized is dropped, not
+            # spoken late over the new turn (VP-06).
+            try:
+                tts_queue.cancel(spec.agent_id, killed, reason="turn preempted")
+            except Exception as e:  # noqa: BLE001
+                log_exception("preemptSpeechCancelFail", e, detail=spec.agent_id)
         eventlog.emit("server", "turnPreempted", context=spec.context,
                       detail={"killed_trace": killed})
         log("turnPreempted",
             f"agent={spec.agent_id} killed={killed or '∅'} "
             f"new={spec.trace_id or '∅'} — busy, preempting and resuming")
+        if not self._running_processes(spec):
+            return False
+        park_id = "" if spec.park_id else _park_at_head(spec)
+        owner = f"{_PROCESS_OWNER_PREFIX}{spec.trace_id}"
+        with _TURN_LOCK:
+            if _SLOTS.get(spec.agent_id) != spec.trace_id:
+                # A Stop or another send took the slot meanwhile.
+                if park_id:
+                    defer_on(_TURN_LOCK, lambda: turn_queue.unpark(park_id))
+                return False
+            if not (park_id or spec.park_id):
+                _SLOTS.release(spec.agent_id, spec.trace_id)
+                raise DispatchError(503, "could not durably queue message")
+            _SLOTS.claim(spec.agent_id, owner)
+            _SLOTS.mark_spawned(spec.agent_id, owner)
+            _SLOTS.requeue_front(spec.agent_id, replace(
+                spec, park_id=park_id or spec.park_id))
+            depth = _SLOTS.queue_depth(spec.agent_id)
+        self._wait_for_process_exit(spec, owner, depth)
+        return True
 
     def _call_opening_claimed(self, spec: _TurnSpec) -> bool:
         """The dispatcher's claim of a listen-first initiative before it runs
@@ -2531,6 +2728,10 @@ class TurnDispatchService:
         if spec.queue_id:
             self._broadcast_queue_state(spec, started=True)
         try:
+            # The causal baseline of this write, read before the check below:
+            # a terminal row of this trace committed after it (the provider
+            # finished meanwhile, in another process) refuses the write (TP-N2).
+            begun_at = turn_lifecycle.causal_baseline(spec.agent_id)
             # A very fast backend may complete before spawn_turn returns. Do
             # not overwrite its terminal state with a late THINKING record.
             latest = agents_db.latest_state(spec.agent_id)
@@ -2539,17 +2740,25 @@ class TurnDispatchService:
                 if (detail.get("trace_id") == spec.trace_id
                         or agents_db.get_trace(spec.agent_id) != spec.trace_id):
                     return
-            turn_lifecycle.try_transition(
-                spec.agent_id,
-                TurnEvent.SPAWN_STARTED,
-                {
-                    "source": "pwa",
-                    "dispatch": spec.backend,
-                    "origin": spec.origin,
-                    "trace_id": spec.trace_id,
-                    "backend_session_id": spec.backend_session_id,
-                },
-            )
+            try:
+                turn_lifecycle.transition(
+                    spec.agent_id,
+                    TurnEvent.SPAWN_STARTED,
+                    {
+                        "source": "pwa",
+                        "dispatch": spec.backend,
+                        "origin": spec.origin,
+                        "trace_id": spec.trace_id,
+                        "backend_session_id": spec.backend_session_id,
+                    },
+                    begun_at=begun_at,
+                )
+            except turn_lifecycle.TransitionNotWritten:
+                # The turn already ended (or was stopped): no 'thinking'
+                # frame for it either, or clients would show it busy.
+                return
+            except turn_lifecycle.IllegalTransition:
+                pass                    # as try_transition: logged and counted
             if getattr(self.ctx, "stream", None) is not None:
                 events.broadcast(self.ctx.stream, events.agent_state(
                     session=spec.session,
@@ -2627,6 +2836,16 @@ class TurnDispatchService:
         except Exception as e:
             log_exception("heraldSetAwaitingFail", e, detail=session)
 
+    @staticmethod
+    def _turn_in_flight(agent_id: str) -> bool:
+        """A turn of this agent holds its slot here (claimed, spawning or
+        running), or its state says it is busy (a turn owned elsewhere)."""
+        try:
+            return bool(_SLOTS.get(agent_id)) or agents_db.is_busy(agent_id)
+        except Exception as exc:  # noqa: BLE001 - unknown is not 'nothing uses it'
+            log_exception("ghostGuardLiveCheckFail", exc, detail=agent_id)
+            return True
+
     def _bind_new_session(self, backend: str, agent_id: str, session: str) -> str:
         """The backend session id pre-minted for a new session, or "" when
         the CLI binds the id it reports. A binding failure is a 500."""
@@ -2660,7 +2879,24 @@ class TurnDispatchService:
                 outcome = self._spawn_attempt_claimed(spec, attempt=attempt)
         else:
             outcome = self._spawn_attempt_claimed(spec, attempt=attempt)
+        if outcome is False:
+            return False
         return _ADMISSION_REFUSED if outcome is _ADMISSION_REFUSED else True
+
+    @staticmethod
+    def _still_owns(spec: _TurnSpec) -> bool:
+        with _TURN_LOCK:
+            return _INFLIGHT.get(spec.agent_id) == spec.trace_id
+
+    @staticmethod
+    def _interrupt_unowned(spec: _TurnSpec, handle) -> None:
+        log("spawnUnowned",
+            f"agent={spec.agent_id} trace={spec.trace_id or '∅'} — "
+            "Stop took the slot during the handoff; interrupting the started turn")
+        try:
+            handle.terminate()
+        except Exception as exc:  # noqa: BLE001 - the launch already happened
+            log_exception("spawnUnownedInterruptFail", exc, detail=spec.agent_id)
 
     def _resume_after_account_switch(self, spec, attempt, state):
         if (_INFLIGHT.get(spec.agent_id) != spec.trace_id
@@ -2751,11 +2987,12 @@ class TurnDispatchService:
                  "account_recovery": "waiting",
                  "message": f"Waiting for a {spec.backend} account with available usage"}))
 
-    def _spawn_attempt_claimed(self, spec: _TurnSpec, *, attempt: int) -> "_AdmissionRefused | None":
+    def _spawn_attempt_claimed(self, spec: _TurnSpec, *, attempt: int) -> "_AdmissionRefused | bool | None":
         """Spawn one attempt of a turn. Attempt 1 surfaces spawn failures as
         a DispatchError (so /send returns 500); later attempts run from a
         timer thread and just mark the agent INTERRUPTED on failure.
-        _ADMISSION_REFUSED only when the final call-open check refused it."""
+        _ADMISSION_REFUSED only when the final call-open check refused it; False
+        when a retry lost its slot before its handoff."""
         from . import task_goal_recovery, task_plans
         if spec.origin == "heartbeat" and task_plans.recovery_owns_agent(spec.agent_id):
             raise DispatchError(409, "Durable goal owns continuation")
@@ -2851,6 +3088,13 @@ class TurnDispatchService:
                 if attempt == 1:
                     # Later attempts follow a handoff already recorded here.
                     _record_launch_attempt(spec)
+                elif not self._still_owns(spec):
+                    # A retry runs outside the runtime's admission mutex: a Stop
+                    # may have taken the slot while it was prepared (TP-N1).
+                    log("spawnAbandoned",
+                        f"agent={spec.agent_id} trace={spec.trace_id or '∅'} — "
+                        "ownership lost before the retry's handoff")
+                    return False
                 state["spawn_started"] = True
                 handle = self.backends.spawn_turn(
                     spec.backend,
@@ -2872,6 +3116,10 @@ class TurnDispatchService:
                     run_if_owned=run_if_owned,
                 )
                 state["handle"] = handle
+                if handle is not None and not self._still_owns(spec):
+                    # A Stop during the handoff found no handle to interrupt yet;
+                    # one after this check finds it (TP-N1).
+                    self._interrupt_unowned(spec, handle)
                 team_store.mark_injected(spec.agent_id, spec.team_inbox_ids)
                 if account_attempt is not None:
                     account_attempt.handle = handle
@@ -3562,7 +3810,7 @@ def _record_dreaming_result(agent_id: str, event: dict) -> None:
         return
     try:
         from . import dreaming
-        dreaming.process_assistant_text(agent_id, text, live=False)
+        dreaming.process_assistant_text(agent_id, text, live=False, origin="dreaming")
     except Exception as e:  # noqa: BLE001
         log_exception("dreamingResultParseFail", e, detail=agent_id)
 
@@ -3724,17 +3972,26 @@ def begin_stop(agent_id: str, *, user_stop: bool = False) -> tuple[dict, int, bo
     stop generation in the same transaction. A maintenance cancel uses the same
     barrier without it and never withdraws the user's own sends (see also
     fence_user_stop)."""
-    with _TURN_LOCK:
-        value = _SLOTS.get(agent_id) or None
-        recovery_parked = _recovery_parked(agent_id, value)
-        queue_was_paused = bool(turn_queue.state(agent_id)["paused"])
-        # As in clear_for_agent: the barrier keeps Stop atomic with
-        # _finish_turn(); the pause flag lands right after the release.
-        stop, dropped = _SLOTS.begin_stop(agent_id)
-        if user_stop:
-            _TURN_LOCK.defer(lambda: turn_queue.set_paused(agent_id, True, user_stop=True))
-        else:
-            _TURN_LOCK.defer(lambda: turn_queue.set_paused(agent_id, True))
+    stop = None
+    try:
+        with _TURN_LOCK:
+            value = _SLOTS.get(agent_id) or None
+            recovery_parked = _recovery_parked(agent_id, value)
+            queue_was_paused = bool(turn_queue.state(agent_id)["paused"])
+            # As in clear_for_agent: the barrier keeps Stop atomic with
+            # _finish_turn(); the pause flag lands right after the release.
+            stop, dropped = _SLOTS.begin_stop(agent_id)
+            if user_stop:
+                _TURN_LOCK.defer(lambda: turn_queue.set_paused(agent_id, True, user_stop=True))
+            else:
+                _TURN_LOCK.defer(lambda: turn_queue.set_paused(agent_id, True))
+    except Exception:
+        # The pause could not be written ('database is locked'): the Stop
+        # fails, and its barrier must not outlive it, or every later send
+        # waits behind it for a finish_stop that never comes (QUEUE-N1).
+        if stop is not None:
+            _SLOTS.restore_stop(agent_id, stop.as_dict())
+        raise
     snapshot = stop.as_dict()
     snapshot["account_recovery_parked"] = recovery_parked
     return snapshot, dropped, queue_was_paused

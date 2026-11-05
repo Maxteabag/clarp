@@ -13,6 +13,7 @@ import time
 
 import pytest
 
+from tests.patching import patch_shared
 from lib import agent_ring_live as live
 from lib import agent_ring_live_socket as sock
 from lib import agent_rings as rings
@@ -115,7 +116,7 @@ def test_a_close_whose_audit_fails_still_ends_the_session_and_a_retry_is_ok(call
         if entry.get("outcome") == "live_closed":
             raise OSError("settings store down")
         return audit(entry)
-    monkeypatch.setattr(rings, "_audit", broken)
+    patch_shared(monkeypatch, rings, "_audit", broken)
     assert _close(call.grant)["state"] == "retired"
     thread.join(15)
     _settles(lambda: not thread.is_alive() and h.wfile.frames()[-1]["reason"] == "user_hangup" and call.up.closed)
@@ -391,7 +392,7 @@ def test_a_fallback_whose_audit_fails_still_has_stopped_live_and_started_classic
         if entry.get("outcome") == "live_fallback":
             raise OSError("settings store down")
         return audit(entry)
-    monkeypatch.setattr(rings, "_audit", broken)
+    patch_shared(monkeypatch, rings, "_audit", broken)
     out = _fallback(call.grant)
     assert out["conversation_mode"] == "classic"
     thread.join(15)
