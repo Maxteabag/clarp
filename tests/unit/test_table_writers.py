@@ -80,19 +80,45 @@ def _sql_strings(tree: ast.AST):
             yield node.value
 
 
+def _bound_name(stmt: ast.stmt) -> str | None:
+    """The one name a top-level statement defines, or None."""
+    if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        return stmt.name
+    targets = stmt.targets if isinstance(stmt, ast.Assign) else [stmt.target] if isinstance(stmt, ast.AnnAssign) else []
+    return targets[0].id if len(targets) == 1 and isinstance(targets[0], ast.Name) else None
+
+
+def _by_origin(rel: str, tree: ast.Module, recipes: pathlib.Path | None = None):
+    """(module, subtree) pairs for one file. In an S9 split part, a top-level
+    definition the recipe moved there counts as its old module, so the facade
+    keeps owning what it owned before the split; anything else in the part,
+    a new writer included, keeps the part's own path."""
+    if split_origin(rel, recipes=recipes) == rel:
+        yield rel, tree
+        return
+    groups: dict[str, list[ast.stmt]] = collections.defaultdict(list)
+    for index, stmt in enumerate(tree.body):
+        if index == 0 and isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant):
+            continue  # the part's module docstring
+        name = _bound_name(stmt)
+        groups[split_origin(rel, name, recipes) if name else rel].append(stmt)
+    for origin, body in groups.items():
+        # A leading `pass` keeps a group's first statement from being read as a docstring.
+        yield origin, ast.Module(body=[ast.Pass(), *body], type_ignores=[])
+
+
 def writers() -> dict[str, set[str]]:
     found: dict[str, set[str]] = collections.defaultdict(set)
     for path in sorted(ROOT.rglob("*.py")):
         rel = path.relative_to(ROOT).as_posix()
         if "/tests/" in rel:
             continue
-        rel = split_origin(rel)   # an S9 split part writes as its old module
-        tree = ast.parse(path.read_text(), filename=str(path))
-        for text in _sql_strings(tree):
-            for match in _WRITE.finditer(text):
-                table = match.group(1)
-                if table not in _NOT_TABLES:
-                    found[table].add(rel)
+        for origin, tree in _by_origin(rel, ast.parse(path.read_text(), filename=str(path))):
+            for text in _sql_strings(tree):
+                for match in _WRITE.finditer(text):
+                    table = match.group(1)
+                    if table not in _NOT_TABLES:
+                        found[table].add(origin)
     return found
 
 
@@ -246,10 +272,10 @@ def status_writers() -> dict[tuple[str, str], set[str]]:
         rel = path.relative_to(ROOT).as_posix()
         if "/tests/" in rel:
             continue
-        rel = split_origin(rel)   # an S9 split part writes as its old module
-        for text in _sql_texts(ast.parse(path.read_text(), filename=str(path))):
-            for key in status_writes(text, by_table):
-                found[key].add(rel)
+        for origin, tree in _by_origin(rel, ast.parse(path.read_text(), filename=str(path))):
+            for text in _sql_texts(tree):
+                for key in status_writes(text, by_table):
+                    found[key].add(origin)
     return found
 
 

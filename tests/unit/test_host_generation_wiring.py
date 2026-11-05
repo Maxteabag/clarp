@@ -312,6 +312,23 @@ def test_structural_the_entrypoint_bootstraps_after_the_locks_and_before_the_dat
 
 # ---- ownership: the only callers --------------------------------------------------------------
 
+def _caller_origins(rel: str, text: str, name: str, recipes: pathlib.Path | None = None) -> set[str]:
+    """Where a file calls `name`. In an S9 split part, a call inside a
+    definition the recipe moved there counts as the old module; any other
+    call keeps the part's own path, so a new caller is a new decision."""
+    call = re.compile(rf"\b{name}\(")
+    if not call.search(text):
+        return set()
+    if split_origin(rel, recipes=recipes) == rel:
+        return {rel}
+    found = set()
+    for stmt in ast.parse(text).body:
+        if call.search(ast.get_source_segment(text, stmt) or ""):
+            moved = getattr(stmt, "name", None)
+            found.add(split_origin(rel, moved, recipes) if moved else rel)
+    return found
+
+
 def _callers(name: str) -> set[str]:
     found = set()
     for path in [*(REPO / "server").rglob("*.py"), *(REPO / "bin").rglob("*"),
@@ -321,8 +338,7 @@ def _callers(name: str) -> set[str]:
                 text = path.read_text()
             except UnicodeDecodeError:
                 continue
-            if re.search(rf"\b{name}\(", text):
-                found.add(split_origin(str(path.relative_to(REPO))))   # an S9 part counts as its module
+            found |= _caller_origins(str(path.relative_to(REPO)), text, name)
     return found
 
 
