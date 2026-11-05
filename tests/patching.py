@@ -87,6 +87,9 @@ def logical_split_trees(paths: Iterable[pathlib.Path], root: pathlib.Path,
         rel = path.relative_to(root).as_posix()
         bodies.setdefault(rel, [])
         tree = ast.parse(path.read_text(), filename=str(path))
+        if split_origin(rel, recipes=recipes) == rel:
+            bodies[rel].extend(tree.body)
+            continue
         for node in tree.body:
             name = getattr(node, "name", None)
             if isinstance(node, ast.Assign) and len(node.targets) == 1:
