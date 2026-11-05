@@ -103,3 +103,27 @@ def synth(text, route, sink: AudioSink, purpose, *, cfg, raw_voice, agent, emit,
     emit("tts_worker", "spoke", context=context(),
          detail={"provider": provider, "voice": selected.voice})
     return written
+
+
+def synth_preview(text, provider, voice, out_path, *, cfg, purpose="preview", agent=None, manifest=None):
+    """Write an audition/narration clip; return whether the requested primary spoke.
+
+    A primary success may enter its existing voice cache. A fallback success
+    must be served temporarily, so a different voice never poisons that cache.
+    Caller validation and HTTP error mapping remain in the route.
+    """
+    from .tts_registry import preview_registry
+    agent = agent or {}
+    route = tts_mode.Route(provider, voice, tts_mode.fallback_for(cfg, provider))
+    registry, primary = preview_registry(cfg, provider, voice, agent, route, manifest=manifest)
+
+    def emit(source, event, **kwargs):
+        # Preserve ordinary route-success telemetry; fallback attempts/failures
+        # retain the shared service's diagnostics.
+        if event != "spoke":
+            emit_event(source, event, **kwargs)
+
+    synth(text, route, AudioSink(out_path), purpose,
+          cfg=cfg, raw_voice=voice, agent=agent, registry=registry,
+          emit=emit, context=lambda: event_context({}, agent))
+    return primary.succeeded
