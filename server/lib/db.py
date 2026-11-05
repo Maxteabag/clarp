@@ -153,6 +153,17 @@ def _record_transaction_statement(connection: sqlite3.Connection, sql: object) -
 def _clear_transaction_owner(connection: sqlite3.Connection) -> None:
     with _TRANSACTION_LOCK:
         _TRANSACTION_OWNERS.pop(id(connection), None)
+    # Every tracked transaction end passes here: write the telemetry rows this
+    # thread's emits queued while it held the transaction (RM-N8b).
+    if not thread_holds_transaction():
+        from .log import flush_deferred
+        flush_deferred()
+
+
+def thread_holds_transaction() -> bool:
+    """Whether this thread's connection is inside a transaction now."""
+    connection = getattr(_LOCAL, "conn", None)
+    return connection is not None and connection.in_transaction
 
 
 def _report_database_locked(waiting_sql: object) -> None:
@@ -374,7 +385,7 @@ class _TrackedConnection(sqlite3.Connection):
             _bump_write_generation()
         if verb == "BEGIN" and self.in_transaction:
             _record_transaction_begin(self, template)
-        elif verb in {"COMMIT", "ROLLBACK", "END"}:
+        elif verb in {"COMMIT", "ROLLBACK", "END", "RELEASE"}:   # RELEASE: an outermost savepoint
             if not self.in_transaction:
                 _clear_transaction_owner(self)
         elif self.in_transaction:
@@ -421,6 +432,15 @@ class _TrackedConnection(sqlite3.Connection):
     def rollback(self):  # type: ignore[override]
         try:
             return super().rollback()
+        finally:
+            if not self.in_transaction:
+                _clear_transaction_owner(self)
+
+    def __exit__(self, *exc):  # type: ignore[override]
+        # `with connection:` commits or rolls back in C, past commit() and
+        # rollback() above; end the tracked transaction here too.
+        try:
+            return super().__exit__(*exc)
         finally:
             if not self.in_transaction:
                 _clear_transaction_owner(self)
