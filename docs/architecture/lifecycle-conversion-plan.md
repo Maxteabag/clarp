@@ -255,10 +255,18 @@ stored value.
      `{"claimed": "claimed_at", "started": "started_at"}`. It is used
      instead of `entered_column`, never together with it.
    - A transition stamps `now` only into its target state's column, if that
-     state has one. Clearing `claimed_at` on release stays an explicit value,
-     as today.
+     state has one. Only that column is reserved: a caller's values may not
+     overwrite it, but may clear another state's column. Three writers clear
+     `claimed_at` today, and keep doing so as an explicit value:
+     `release_claim` (claimed → queued), `cancel` (claimed → cancelled) and
+     `reset_stale_claims` (claimed → queued).
    - The reaper reads the source state's column. Validation requires a
      column for every state with a `Deadline`.
+   - A NULL entry time counts as 0, so the row is overdue. This holds in the
+     reaper's select, its order and its keyset. Today's claim reset does the
+     same with `COALESCE(claimed_at, 0) <= cutoff`, and `claimed_at` is
+     nullable. A G0 case pins it: a claimed row with a NULL `claimed_at` is
+     reset by the sweep.
    - The alternative was a migration adding a `status_at` column. That would
      write a new stored value on every transition, which raises the
      reader-first and rollback questions. The mapping avoids both.
@@ -272,25 +280,41 @@ stored value.
      `resettle_<outcome>` from the three other settled outcomes.
    - The correction pairs are exactly those the matrix shows. A `cancelled`,
      `withdrawn` or `unknown` receipt is never resettled.
-3. **Set-based writers keep their single statement (kit change 6).** Many
-   writers move every matching row in one statement:
-   - `requeue_rows`, `requeue_parked`, `settle_receipt`, `cancel_for_traces`,
-     `reset_stale_claims` and the terminalizing sweeps;
-   - in each, `WHERE status IN (...)` is already a compare-and-set over a set
-     of rows.
+3. **Every status writer goes through one set-based compare-and-set (kit
+   change 6).** Each writer today is a single
+   `UPDATE ... WHERE <key or filter> AND status IN (...)`. It returns the
+   rowcount (or a bool made from it), and some add predicates of their own:
+   `withdraw_unclaimed` adds `claimed_at IS NULL`. `lk.transition` would not
+   keep that, for three reasons:
+   - it reads, decides and then writes, so one statement becomes two;
+   - it raises `IllegalTransition` or `Conflict` where today's writers return
+     False, 0 or None (the matrix records those values);
+   - it cannot carry an extra predicate.
 
-   Rewriting them as one kit call per row would change their statement count
-   and their cost under the writer lock. Instead the kit gains
-   `compare_and_set_where(con, lc, events, where, params, values=)`, which
-   runs:
+   So no queue writer uses `lk.transition`. Each one, single-row writers
+   included, calls
+   `compare_and_set_where(con, lc, events, where, params, values=)` with its
+   own filter (`queue_id = ?` and any extra predicate). That call runs:
 
    ```sql
    UPDATE t SET state = <target>, ... WHERE state IN (<declared sources>) AND <where>
    ```
 
    - The sources come from the declaration, never from the caller.
-   - It runs once per target state, inside the caller's transaction.
-   - It returns the count, or the rows changed if `RETURNING` is asked for.
+   - It runs one statement per target state and returns the count, or the
+     rows changed if `RETURNING` is asked for. Each writer maps that to its
+     return value exactly as today.
+   - **Transaction rule.** If the connection is already in a transaction, the
+     call joins it. That is the case in agent_rings' transactions
+     (`claim_for_dispatch`, `withdraw_claimed`, `release_claim` and
+     `mark_unknown` at `agent_rings.py:1875-1913`, `:1958` and `:2030-2044`)
+     and in `cancel_for_traces`' caller. If not, an event set with one target
+     runs as one autocommit statement, as today
+     (`turn_dispatch.py:736, 1417, 2033-2076, 2410, 2724`). An event set with
+     several targets wraps its statements in one `BEGIN IMMEDIATE`.
+   - The two terminalizing sweeps (`turn_queue.py:337-341`, `:413-417`) loop
+     one `UPDATE` per row today. They keep that loop, with one call per row,
+     so their statement count is unchanged.
 4. **What stays outside the kit, named in the declaration's comment.**
    - **Inserts** (`enqueue`, `park`, `park_at_head`) create a row directly in
      `queued` or `parked`. An insert cannot race a status, and the kit's
@@ -301,10 +325,12 @@ stored value.
      status predicates, as today.
    - **`allow_paused` and `allow_paused_for`** write a flag, not the state.
 
-**A gap in G0.** The matrix never exercises
-`mark_launched_call_open_unknown`'s effect, because it acts only on
-`call-open:` ids. A tests-only commit on main adds a `call-open:` target row
-first, before any conversion commit.
+**Gaps in G0.** Two behaviours are not pinned yet:
+- `mark_launched_call_open_unknown`'s effect, because it acts only on
+  `call-open:` ids;
+- the claim reset of a row with a NULL `claimed_at`.
+
+A tests-only commit on main covers both before any conversion commit.
 
 **Declaration** (`QUEUE_RECEIPT`, in `turn_queue.py`). Event names follow the
 functions:
@@ -327,8 +353,10 @@ functions:
   - `settle_<o>`: started → done, failed, interrupted or ended;
   - `resettle_<o>`: corrections among done, failed, interrupted and ended,
     matching the matrix;
-  - `idle_settle` and `ended_settle` (the sweeps): started → ended, or to the
-    settled outcome.
+  - `idle_settle` (the idle sweep, `:415`): started → ended only;
+  - `ended_settle` (the ended sweep, `:325-341`): started → done, failed,
+    interrupted or ended. Both are ordinary edges that share targets with
+    `settle_<o>`.
 - **Waits:**
   - claimed: `Deadline(30 s, expire_to=queued)`;
   - started, queued and parked: `WaitForever`, as in the waits above.
@@ -337,11 +365,15 @@ functions:
 1. Kit changes 5 and 6, on main (they have no production caller).
 2. The G0 top-up for `call-open:` rows, on main.
 3. Activate `QUEUE_RECEIPT`.
-4. Route the single-row writers through `lk.transition`.
-5. Route the set-based writers through `compare_and_set_where`.
+4. Route the single-row writers through `compare_and_set_where`.
+5. Route the set-based writers and the per-row sweeps through it.
 6. `_move_behind`.
 7. The bounded reaper with the claim-reset `exclude` and the idle sweep's
    gates.
+
+**S4 boundary** (agreed with rf-s4, 5 Nov): none in `turn_dispatch.py`. The
+conversion edits only `turn_queue.py`, and every public function keeps its
+name, signature and return values.
 
 Each commit keeps the G0 matrix byte-identical, and G2 between main and
 integration stays at zero.
