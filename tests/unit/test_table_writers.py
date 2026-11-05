@@ -317,3 +317,26 @@ def test_status_writer_allowlist_entries_are_still_real():
     from test_lifecycle_guards import lifecycle_owners
     stale = stale_status_writers(status_writers(), lifecycle_owners(), STATUS_WRITERS)
     assert not stale, f"remove stale STATUS_WRITERS entries: {stale}"
+
+
+def test_a_split_part_writes_as_its_old_module_only_for_the_names_its_recipe_moved(tmp_path):
+    # Review B (cut 1c): split_origin(rel) without a name mapped EVERY
+    # definition in a part to the old module, so a new, unlisted writer added
+    # to a part was absorbed into the facade's ownership; it must keep its
+    # own path and need an ALLOWED reason like any other second writer.
+    (tmp_path / "s9.toml").write_text(
+        '[[split]]\nname = "x"\nmodule = "lib/old.py"\n'
+        '[[split.part]]\nmodule = "lib/old_part.py"\nnames = ["moved_writer", "MOVED_SQL"]\n')
+    tree = ast.parse(
+        '"""Moved out of lib/old.py: UPDATE nothing."""\n'
+        'MOVED_SQL = "UPDATE dream_runs SET status = ? WHERE id = ?"\n'
+        'def moved_writer(con):\n    con.execute("DELETE FROM dream_runs WHERE id = ?")\n'
+        'def unlisted_new_writer(con):\n    con.execute("UPDATE dream_runs SET status = ?")\n')
+    found = {origin: sorted(text for text in _sql_strings(sub) if "dream_runs" in text)
+             for origin, sub in _by_origin("lib/old_part.py", tree, tmp_path)}
+    assert found == {
+        "lib/old.py": ["DELETE FROM dream_runs WHERE id = ?", "UPDATE dream_runs SET status = ? WHERE id = ?"],
+        "lib/old_part.py": ["UPDATE dream_runs SET status = ?"],
+    }
+    # A file no recipe lists is one origin, itself.
+    assert [o for o, _ in _by_origin("lib/other.py", tree, tmp_path)] == ["lib/other.py"]
