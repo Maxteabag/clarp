@@ -17,6 +17,7 @@ sys.path.insert(0, str(_SERVER_DIR))
 from lib import agents as agents_db                  # noqa: E402
 from lib import tts_queue                             # noqa: E402
 from lib.protocol import TurnSource          # noqa: E402
+from lib import tts_registry
 
 
 # ---- Fixtures -----------------------------------------------------------
@@ -69,7 +70,7 @@ def stub_streaming(monkeypatch):
         return total
 
     from lib import tts_worker as _tw
-    monkeypatch.setattr(_tw, "synthesize_streaming", fake)
+    monkeypatch.setattr(tts_registry, "synthesize_streaming", fake)
     return captured
 
 
@@ -130,7 +131,7 @@ def test_pwa_streaming_failure_marks_row_failed(env, monkeypatch):
     from lib import tts_worker as _tw, eleven_ws
     def boom(**kw):
         raise eleven_ws.ElevenWSError("auth refused")
-    monkeypatch.setattr(_tw, "synthesize_streaming", boom)
+    monkeypatch.setattr(tts_registry, "synthesize_streaming", boom)
 
     tts_queue.enqueue(
         agent_id=env["agent_id"],
@@ -171,7 +172,7 @@ def test_clip_row_exists_BEFORE_first_audio_byte(env, monkeypatch):
         return 2
 
     from lib import tts_worker as _tw
-    monkeypatch.setattr(_tw, "synthesize_streaming", fake_streaming)
+    monkeypatch.setattr(tts_registry, "synthesize_streaming", fake_streaming)
 
     tts_queue.enqueue(
         agent_id=env["agent_id"], text="hello",

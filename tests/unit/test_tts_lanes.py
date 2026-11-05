@@ -21,6 +21,7 @@ from lib import agents as agents_db                 # noqa: E402
 from lib import eventlog, tts_queue                  # noqa: E402
 from lib.db import conn                              # noqa: E402
 from lib.protocol import TurnSource                  # noqa: E402
+from lib import tts_registry
 
 
 @pytest.fixture
@@ -47,7 +48,7 @@ def _fake_provider(monkeypatch, speak):
         speak(text, voice_id)
         pathlib.Path(out_path).write_bytes(b"\xff\xfb\x90\x00")
         return 4
-    monkeypatch.setattr(tts_worker, "synthesize_streaming", _ws)
+    monkeypatch.setattr(tts_registry, "synthesize_streaming", _ws)
 
 
 def _enqueue(agent_id, text, *, trace_id="t", voice_id="V", session="s"):

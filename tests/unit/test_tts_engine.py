@@ -12,6 +12,7 @@ from lib.tts_engine import (
     parse_clip_filename,
 )
 from lib.roster import AGENT_ROSTER
+from lib import tts_registry
 
 
 @pytest.mark.parametrize("session", list(AGENT_ROSTER.keys()) + [None])
@@ -150,8 +151,8 @@ def test_emotion_tags_reach_gemini_but_not_its_cartesia_fallback(tmp_path, monke
         return 3
 
     monkeypatch.setattr(gemini_tts, "synthesize", failing_gemini)
-    monkeypatch.setattr(tts_worker, "cartesia_synthesize", cartesia)
-    monkeypatch.setattr(tts_worker, "_gemini_voice", lambda *a, **k: "Kore")
+    monkeypatch.setattr(tts_registry, "cartesia_synthesize", cartesia)
+    monkeypatch.setattr(tts_registry, "_gemini_voice", lambda *a, **k: "Kore")
     tts_worker._synthesize(
         cfg=cfg, row={"text": "Ha, [laughing] it works.", "voice_id": "c-uuid"},
         agent={"persona": "Rachel"}, out_path=tmp_path / "x.mp3", on_chunk=None,

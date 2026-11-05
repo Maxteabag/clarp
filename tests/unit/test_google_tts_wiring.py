@@ -12,6 +12,7 @@ import pytest
 
 from lib import (config, google_tts, server_identity, tts_mode, tts_providers, tts_worker,
                  voice_catalog)
+from lib import tts_registry
 
 AOEDE, KORE, NOBODY = ("nb-NO-Chirp3-HD-Aoede", "nb-NO-Chirp3-HD-Kore",
                        "nb-NO-Chirp3-HD-Nobody")
@@ -55,7 +56,7 @@ class Spoken:
 
         self.texts: list[str] = []
         monkeypatch.setattr(google_tts, "synthesize", google)
-        monkeypatch.setattr(tts_worker, "cartesia_synthesize", cartesia)
+        monkeypatch.setattr(tts_registry, "cartesia_synthesize", cartesia)
         monkeypatch.setattr(tts_worker, "_emit",
                             lambda _source, event, **kw: self.events.append((event, kw.get("detail") or {})))
 
