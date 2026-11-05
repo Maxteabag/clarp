@@ -16,7 +16,7 @@ names = [
     "_RECOVERY_LOCK", "_RECOVERY_BACKOFF", "_RECOVERY_RESUMING_ORIGINS", "_NO_LOCK",
     "_JANITOR_SPAWN_LOCKS", "_TERMINAL_SENTINEL", "_STOPPING_SENTINEL", "_PROCESS_OWNER_PREFIX",
     "_PROCESS_EXIT_POLL_S", "LEAKED_SLOT_GRACE_MS", "ORPHAN_SPAWN_GRACE_S", "REPAIR_SPAWN_GRACE_S",
-    "_launching", "_launch_running", "runtime_status", "held_order", "log_held_order",
+    "_launching", "_launch_running", "_alive", "runtime_status", "held_order", "log_held_order",
     "RECOVERY_PARK_PREFIX", "_transfer_refusal", "account_recovery_carry",
     "resume_account_recovery", "unpersisted_held", "provider_turns", "UPDATE_HOLD_HEADLINE",
     "refresh_hold_headlines", "_ADMISSION", "live_work", "reset_for_tests", "_terminal_live",
