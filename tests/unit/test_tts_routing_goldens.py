@@ -120,3 +120,92 @@ def test_the_worker_ladder_matches_its_golden_table(monkeypatch, tmp_path):
     assert sorted(table) == sorted(golden)
     different = [name for name in table if table[name] != golden[name]]
     assert not different, f"{len(different)} rows differ, first: {different[0]}: {table[different[0]]} != {golden[different[0]]}"
+
+
+ONE_OFF_FIXTURE = FIXTURE.with_name("tts_one_off_goldens.json")
+
+
+def _one_off_scenarios():
+    # Ring openings and context announcements both call synthesize directly;
+    # separate purpose rows make the VP-10 exclusion explicit in the diff.
+    for provider, fallback, key, override, failure, purpose in itertools.product(
+            PROVIDERS, FALLBACKS, (True, False), OVERRIDES,
+            ("ok", "primary-fails", "both-fail"),
+            ("herald", "ring", "context", "preview")):
+        yield {"provider": provider, "fallback": fallback, "primary_key": key,
+               "override": override, "failure": failure, "purpose": purpose}
+
+
+def _run_one_off(s, monkeypatch, tmp_path):
+    from dataclasses import replace
+    from lib import agents, cartesia_tts, clips, eventlog, tts_engine
+    from lib.eleven_ws import ElevenWSError
+
+    calls = []
+    agent = {"agent_id": "a1", "persona": "Ada", "session": "ada"}
+    cfg = _config({**s, "override": "none"} if s["purpose"] == "preview" else s)
+    if s["override"] != "none":
+        provider, voice = s["override"].split(":")
+        cfg = replace(cfg, tts_agent_overrides={"ada": {"provider": provider, f"{provider}_voice": voice}})
+    effective = cfg.tts_provider
+    if s["purpose"] != "preview" and s["override"] != "none":
+        effective = s["override"].split(":")[0]
+
+    def fake(provider, transport):
+        def speak(*args, **kw):
+            text = kw.get("text", args[0] if args else "")
+            voice = kw.get("voice_id") or kw.get("voice") or (args[1] if len(args) > 1 else None)
+            target = kw.get("out_path", args[2] if len(args) > 2 else None)
+            calls.append({"provider": provider, "transport": transport, "voice": voice,
+                          "text": "spoken" if "[laughing]" in text else "plain",
+                          "settings": {k: kw[k] for k in ("api_key", "model", "speed", "timeout") if k in kw}})
+            if s["failure"] == "both-fail" or (s["failure"] == "primary-fails" and provider == effective):
+                error = {"cartesia": cartesia_tts.CartesiaError,
+                         "elevenlabs": ElevenWSError}.get(provider, RuntimeError)
+                raise error(f"{provider} failed")
+            pathlib.Path(target).write_bytes(b"ID3" + provider.encode())
+            return pathlib.Path(target).stat().st_size
+        return speak
+
+    monkeypatch.setattr(config, "_CACHED", cfg)
+    monkeypatch.setattr(agents, "get_by_session", lambda session: agent)
+    monkeypatch.setattr(clips, "write_sidecar", lambda *a, **kw: None)
+    monkeypatch.setattr(eventlog, "emit", lambda *a, **kw: None)
+    monkeypatch.setattr(eventlog, "emit_exception", lambda *a, **kw: None)
+    monkeypatch.setattr(tts_registry, "cartesia_synthesize", fake("cartesia", "stream"))
+    monkeypatch.setattr(tts_registry, "synthesize_streaming", fake("elevenlabs", "stream"))
+    monkeypatch.setattr(cartesia_tts, "synthesize", fake("cartesia", "direct"))
+    monkeypatch.setattr(tts_engine, "synthesize_to_file", fake("elevenlabs", "direct"))
+    monkeypatch.setattr(gemini_tts, "synthesize", fake("gemini", "stream"))
+    monkeypatch.setattr(deepgram_tts, "synthesize", fake("deepgram", "stream"))
+    monkeypatch.setattr(google_tts, "synthesize", fake("google", "stream"))
+    monkeypatch.setattr(google_tts, "refuse_if_collision", lambda cfg: None)
+    monkeypatch.setattr(google_tts, "credentials", lambda cfg: "creds")
+    engine = tts_engine.ElevenLabsEngine(tmp_path / "one-off", api_key="engine-key",
+                                       model="engine-model", speed=1.3, timeout=12)
+    voice = json.dumps({"cartesia": "cart-ada", "elevenlabs": "eleven-ada",
+                        "gemini": "Kore", "google": "nb-NO-Chirp3-HD-Aoede"})
+    try:
+        method = {"herald": engine.synthesize_herald, "preview": engine.synthesize_preview,
+                  "ring": engine.synthesize, "context": engine.synthesize}[s["purpose"]]
+        path = method("Hello [laughing] there", voice, session="ada")
+        result = "ok:" + path.read_bytes().decode()
+        internal = path.name.startswith("herald-internal-")
+    except Exception as error:  # noqa: BLE001 - record the owner boundary's result
+        result = f"{type(error).__name__}: {error}"
+        internal = None
+    return {"calls": calls, "result": result, "internal_filename": internal}
+
+
+def test_one_off_ladders_match_their_golden_table(monkeypatch, tmp_path):
+    table = {}
+    for scenario in _one_off_scenarios():
+        with monkeypatch.context() as m:
+            table[_name(scenario)] = _run_one_off(scenario, m, tmp_path)
+    if os.environ.get("CLARP_REGEN_TTS_GOLDENS") == "1":
+        ONE_OFF_FIXTURE.write_text(json.dumps(table, indent=1, sort_keys=True) + "\n")
+        pytest.skip(f"regenerated {ONE_OFF_FIXTURE.name} ({len(table)} rows)")
+    golden = json.loads(ONE_OFF_FIXTURE.read_text())
+    assert sorted(table) == sorted(golden)
+    different = [name for name in table if table[name] != golden[name]]
+    assert not different, f"{len(different)} one-off rows differ, first: {different[0]}"
