@@ -381,6 +381,8 @@ def test_raw_pcm_outage_restarts_only_before_audio(env, monkeypatch, mode, fallb
             return frame
         def close(self):
             self.closed = True
+        def shutdown(self):
+            self.closed = True
 
     socket = Socket()
     monkeypatch.setattr(cartesia_ws, '_open_ws', lambda *_, **__: socket)

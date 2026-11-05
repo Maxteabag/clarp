@@ -90,6 +90,9 @@ class _FakeWS:
     def close(self) -> None:
         pass
 
+    def shutdown(self) -> None:
+        pass
+
 
 def test_cartesia_request_uses_configured_format(monkeypatch, tmp_path):
     fake = _FakeWS()
