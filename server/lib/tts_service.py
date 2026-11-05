@@ -69,8 +69,10 @@ def synth(text, route, sink: AudioSink, purpose, *, cfg, raw_voice, agent, emit,
     except Exception as primary_error:
         preserve_primary = purpose in {"preview", "narration"}
         if preserve_primary:
-            from .google_tts import GoogleIdCollision
-            if isinstance(primary_error, GoogleIdCollision):
+            from .google_tts import GoogleIdCollision, GoogleTTSError
+            if (isinstance(primary_error, GoogleIdCollision)
+                    or (isinstance(primary_error, GoogleTTSError)
+                        and primary_error.code == "voice_unavailable")):
                 raise  # a voice-id guard refusal, never a provider outage
         fallback = route.fallback
         if fallback in {"", "none", provider}:
