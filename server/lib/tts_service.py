@@ -11,7 +11,25 @@ from .voice import CARTESIA, GEMINI
 from .voice_markup import strip_emotion_tags
 
 
-def synth(text, route, sink: AudioSink, purpose, *, cfg, raw_voice, agent, emit, context):
+def event_context(row: dict, agent: dict | None = None):
+    from .eventlog import EventContext
+    return EventContext(
+        trace_id=row.get("trace_id") or None,
+        agent_id=(agent or {}).get("agent_id") or row.get("agent_id") or None,
+        session=row.get("session") or None,
+        backend_session_id=(agent or {}).get("backend_session_id") or None,
+    )
+
+
+def emit_event(*a, **kw):
+    try:
+        from . import eventlog
+        eventlog.emit(*a, **kw)
+    except Exception:
+        pass
+
+
+def synth(text, route, sink: AudioSink, purpose, *, cfg, raw_voice, agent, emit, context, registry=None):
     """Speak into a sink; purpose identifies the caller without changing its policy.
 
     Raw PCM remains Cartesia-only. File/stream clips retry only before a
@@ -20,7 +38,8 @@ def synth(text, route, sink: AudioSink, purpose, *, cfg, raw_voice, agent, emit,
     spoken, plain = text, strip_emotion_tags(text)
     if route is None:
         route = tts_mode.Route(cfg.tts_provider, None, tts_mode.fallback_for(cfg, cfg.tts_provider))
-    registry = ProviderRegistry(cfg, raw_voice, agent, route)
+    if registry is None:
+        registry = ProviderRegistry(cfg, raw_voice, agent, route)
     provider = route.provider
     cartesia_voice = registry.cartesia_voice
     want_cartesia = provider == CARTESIA and cartesia_voice and cfg.cartesia_key()

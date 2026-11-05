@@ -29,28 +29,11 @@ from .config import load as load_config
 from .log import log_exception
 from .paths import RuntimePaths
 from .tts_registry import _gemini_voice, _google_voice
+from .tts_service import event_context as _event_context, emit_event as _emit
 from . import tts_mode
 from .voice import (
     CARTESIA, DEEPGRAM, ELEVENLABS, GEMINI, GOOGLE, resolve_voice,
 )
-
-
-def _event_context(row: dict, agent: dict | None = None):
-    from .eventlog import EventContext
-    return EventContext(
-        trace_id=row.get("trace_id") or None,
-        agent_id=(agent or {}).get("agent_id") or row.get("agent_id") or None,
-        session=row.get("session") or None,
-        backend_session_id=(agent or {}).get("backend_session_id") or None,
-    )
-
-
-def _emit(*a, **kw):
-    try:
-        from . import eventlog
-        eventlog.emit(*a, **kw)
-    except Exception:
-        pass
 
 
 def synth_one(*,
