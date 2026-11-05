@@ -552,3 +552,19 @@ fn a_failed_send_keeps_the_hosts_reason_until_it_is_resent() {
     let row = h.model.rows().iter().find(|m| m.id == "u-a").expect("the row");
     assert!(row.pending && !row.delivery_failed && row.delivery_error.is_empty(), "a resend clears it");
 }
+
+#[test]
+fn a_stopped_send_keeps_its_state_until_the_host_says_otherwise() {
+    // F4: a read that omits the delivery block (unknown, e.g. after a runtime
+    // restart) keeps the last state the Host gave; a new state replaces it.
+    let mut h = Harness::new("s");
+    let row = |delivery: Value| json!({"conversation_id": "c", "turns": [
+        {"id": "u-abc", "role": "user", "text": "do it", "revision": 1, "delivery": delivery}]});
+    h.log(row(json!({"state": "stopped", "for": {"client_msg_id": "abc"}})), LoadKind::Tail);
+    assert_eq!(h.model.rows()[0].send_state, "stopped");
+    h.log(json!({"conversation_id": "c", "turns": [
+        {"id": "u-abc", "role": "user", "text": "do it", "revision": 1}]}), LoadKind::Tail);
+    assert_eq!(h.model.rows()[0].send_state, "stopped", "unknown never clears a known state");
+    h.log(row(json!({"state": "handed_over", "for": {"client_msg_id": "abc"}})), LoadKind::Tail);
+    assert_eq!(h.model.rows()[0].send_state, "handed_over");
+}

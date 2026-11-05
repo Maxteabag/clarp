@@ -8,6 +8,18 @@ import threading
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "server"))
 from lib import eventlog  # noqa: E402
 
+import pytest  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _diagnostics_on_for_the_whole_test():
+    # conftest seeds the diagnostics settings in the cache only, which a re-read
+    # replaces after CACHE_TTL_SEC; a slow run (50 threads under load) then emitted
+    # into a disabled log (G1 flake: 47-52 of 1000 lines lost). Stored, the seed
+    # survives the re-read.
+    from lib import diagnostics_settings
+    diagnostics_settings.update({"enabled": True, "categories": list(diagnostics_settings.CATEGORIES)})
+
 
 def _read_lines(p: pathlib.Path) -> list[dict]:
     return [json.loads(ln) for ln in p.read_text().splitlines() if ln]
@@ -311,3 +323,16 @@ def test_sqlite_diagnostic_views_are_queryable(tmp_path, monkeypatch):
     assert trace["path"] == "server:httpRequest -> audio_stream:broadcast -> server:boom"
     error = _db_rows("SELECT event, trace_id FROM errors")[0]
     assert dict(error) == {"event": "boom", "trace_id": "trace-a"}
+
+
+def test_the_seeded_diagnostics_settings_outlive_their_cache_window(tmp_path, monkeypatch):
+    # A test of this file running past the settings cache's window (CACHE_TTL_SEC)
+    # under load must not see events switched off.
+    from lib import diagnostics_settings
+    monkeypatch.setattr(eventlog, "LOG_DIR", tmp_path)
+    eventlog.emit("test", "before")
+    later = diagnostics_settings.time.monotonic() + 10 * diagnostics_settings.CACHE_TTL_SEC
+    monkeypatch.setattr(diagnostics_settings.time, "monotonic", lambda: later)
+    eventlog.emit("test", "after")
+    rows = _read_lines(next(tmp_path.glob("*.jsonl")))
+    assert [r["event"] for r in rows] == ["before", "after"]

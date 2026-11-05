@@ -28,6 +28,10 @@ import collections
 import pathlib
 import re
 
+import pytest
+
+from tests.patching import logical_split_tree_map, split_origin
+
 SERVER = pathlib.Path(__file__).resolve().parents[2] / "server"
 IDS = frozenset({"claude", "codex", "agy", "antigravity", "grok", "opencode", "deepseek", "muse"})
 _REFS = frozenset(i.upper() for i in IDS)
@@ -84,17 +88,22 @@ def _is_ref(node) -> bool:
             and isinstance(node.value, ast.Name) and node.value.id in ("backends", "AgentBackend"))
 
 
-def identity_uses(tree: ast.Module) -> collections.Counter[str]:
-    constants = {target.id for stmt in tree.body if isinstance(stmt, ast.Assign) and _is_id(stmt.value)
-                 for target in stmt.targets if isinstance(target, ast.Name)}
+def _id_constants(tree: ast.Module) -> set[str]:
+    return {target.id for stmt in tree.body if isinstance(stmt, ast.Assign) and _is_id(stmt.value)
+            for target in stmt.targets if isinstance(target, ast.Name)}
+
+
+def identity_uses(tree: ast.Module, known_constants=()) -> collections.Counter[str]:
+    constants = _id_constants(tree)
     found: collections.Counter[str] = collections.Counter({"constant": len(constants)})
+    references = constants | set(known_constants)
     in_compare: set[int] = set()
 
     def idish(node) -> bool:
         if isinstance(node, (ast.Set, ast.List, ast.Tuple)) and any(_is_id(e) or _is_ref(e) for e in node.elts):
             in_compare.add(id(node))
             return True
-        return _is_id(node) or _is_ref(node) or (isinstance(node, ast.Name) and node.id in constants)
+        return _is_id(node) or _is_ref(node) or (isinstance(node, ast.Name) and node.id in references)
 
     nodes = list(ast.walk(tree))
     for node in nodes:
@@ -116,11 +125,14 @@ def identity_uses(tree: ast.Module) -> collections.Counter[str]:
 
 def current() -> dict[tuple[str, str], int]:
     out = {}
-    for path in sorted((SERVER / "lib").rglob("*.py")) + [SERVER / "server.py"]:
-        rel = path.relative_to(SERVER).as_posix()
+    trees = logical_split_tree_map(sorted((SERVER / "lib").rglob("*.py")) + [SERVER / "server.py"], SERVER)
+    for rel, tree in trees.items():
         if rel in EXEMPT:
             continue
-        for kind, count in identity_uses(ast.parse(path.read_text(), filename=str(path))).items():
+        # Unlisted new code in a part must still recognize the family's moved
+        # constants, but its uses are charged to its physical module.
+        context = trees.get(split_origin(rel), tree)
+        for kind, count in identity_uses(tree, _id_constants(context)).items():
             out[(rel, kind)] = count
     return out
 
@@ -155,3 +167,36 @@ def test_the_scanner_sees_every_form():
         '    if b == "other": pass\n')
     assert identity_uses(tree) == {"constant": 1, "compare": 3, "dict_key": 1, "collection": 1,
                                    "by_id": 1, "sql": 1}
+
+
+@pytest.mark.parametrize("split", [False, True])
+def test_identity_ratchet_survives_a_split_and_still_rejects_growth(tmp_path, monkeypatch, split):
+    from tests import patching
+    root = tmp_path / "server"
+    (root / "lib").mkdir(parents=True)
+    (root / "server.py").write_text("")
+    recipes = tmp_path / "splits"
+    recipes.mkdir()
+    (recipes / "quota.toml").write_text(
+        '[[split]]\nname="quota"\nmodule="lib/quota.py"\n'
+        '[[split.part]]\nmodule="lib/quota_part.py"\nnames=["CODEX", "allowed"]\n')
+    monkeypatch.setattr(patching, "_RECIPES", recipes)
+    monkeypatch.setitem(globals(), "SERVER", root)
+    monkeypatch.setitem(globals(), "BASELINE", {("lib/quota.py", "constant"): 1,
+                                               ("lib/quota.py", "compare"): 1})
+    owner = root / "lib/quota.py"
+    source = root / "lib/quota_part.py" if split else owner
+    if split:
+        owner.write_text("from .quota_part import CODEX, allowed\n")
+    good = 'CODEX = "codex"\ndef allowed(backend):\n    return backend == CODEX\n'
+    source.write_text(good)
+    test_no_new_backend_identity_logic()
+    test_baseline_only_shrinks()
+    source.write_text(good.replace("backend == CODEX", 'backend == CODEX or backend == "muse"'))
+    with pytest.raises(AssertionError, match="backend identity logic grew"):
+        test_no_new_backend_identity_logic()
+    if split:
+        source.write_text(good + "def unlisted(backend):\n    return backend == CODEX\n")
+        assert current()[("lib/quota_part.py", "compare")] == 1
+        with pytest.raises(AssertionError, match="lib/quota_part.py"):
+            test_no_new_backend_identity_logic()

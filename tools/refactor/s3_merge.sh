@@ -63,7 +63,19 @@ $merge_out"
 fi
 # The recipe and replay list as they stand in the merged tree.
 git checkout "$main" -- tools/refactor/s3_moves.toml tools/refactor/s3_replay.txt 2>/dev/null || true
-git checkout "$main" -- tools/refactor/splits tools/refactor/split_apply.py 2>/dev/null || true
+# S9 split tooling comes from main only: remove the merged tree's copies first, so a
+# recipe (or a split_apply.py) that exists only on integration is never listed or run.
+for path in tools/refactor/splits tools/refactor/split_apply.py; do
+  git rm -r -q --cached --ignore-unmatch -- "$path" || die 8 "cannot clear $path"
+  rm -rf -- "$path" || die 8 "cannot remove the merged tree's $path"
+  [ ! -e "$path" ] || die 8 "the merged tree's $path is still there after removal"
+  if git cat-file -e "$main:$path" 2>/dev/null; then
+    git checkout "$main" -- "$path" || die 8 "cannot take main's $path"
+  fi
+  extra=$(git ls-files --others -- "$path") || die 8 "git ls-files failed for $path"
+  [ -z "$extra" ] || die 8 "files that are not main's under $path:
+$extra"
+done
 # S9: one line per split or repoint, "split|repoint NAME OLD=OLD,PART,...", in apply order.
 split_specs=""
 if [ -f tools/refactor/split_apply.py ] && [ -d tools/refactor/splits ]; then

@@ -634,7 +634,7 @@ def _audio_operation(
         if info.st_size <= 0 or info.st_size > MAX_AUDIO_BYTES:
             raise AdapterError("adapter audio output size is invalid")
         if manifest.audio_format == "audio/wav":
-            from .audio_codec import _wav_to_mp3
+            from .tts_providers import _wav_to_mp3
             _wav_to_mp3(produced, out_path)
         else:
             shutil.copyfile(produced, out_path)

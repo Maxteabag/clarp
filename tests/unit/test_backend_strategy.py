@@ -19,6 +19,7 @@ sys.path.insert(0, str(ROOT / "server"))
 from lib import backends  # noqa: E402
 from lib.backend import registry  # noqa: E402
 from lib.backend.base import Backend, CompactionStrategy, Unsupported  # noqa: E402
+from tests.patching import patch_shared
 from lib.backend.claude import ClaudeBackend  # noqa: E402
 from lib.backend.codex import CodexBackend  # noqa: E402
 from lib.backend.deepseek import DeepSeekBackend  # noqa: E402
@@ -440,7 +441,7 @@ def test_quota_identity_matches_the_janitor_window_key():
 def test_classify_usage_limit_records_a_provider_event_for_codex_only(monkeypatch):
     from lib import backend_usage
     recorded = []
-    monkeypatch.setattr(backend_usage, "record_classified_usage_limit",
+    patch_shared(monkeypatch, backend_usage, "record_classified_usage_limit",
                         lambda provider: recorded.append(provider) or {"provider": provider})
     for name in IDS:
         b = registry.by_id(name)

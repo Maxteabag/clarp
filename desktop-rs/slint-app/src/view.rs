@@ -637,6 +637,9 @@ pub(crate) fn message_row(
         status_due: false,
         failed: m.delivery_failed,
         failure: m.delivery_error.as_str().into(),
+        // A Stop withdrew this send before handoff (F4); never shown on a
+        // send this client still has pending or failed.
+        stopped: m.send_state == "stopped" && !m.pending && !m.delivery_failed,
         activity_label: label.into(),
         group_id: group_id.into(),
         expanded: open,

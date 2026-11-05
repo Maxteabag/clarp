@@ -1086,13 +1086,16 @@ def test_prompt_history_preserves_routed_voice_admission(
 def test_get_diagnostics_health_returns_subsystem_state(running_server):
     from lib import health
     health.reset_for_tests()
-    health.mark_success("tts_worker", now=123.0)
+    # A subsystem only this test writes: the running server's real workers (the TTS
+    # worker among them) mark their own health meanwhile, and one overwrote a
+    # 'tts_worker' value set here (G1 flake, 3 occurrences).
+    health.mark_success("diagnostics-test-subsystem", now=123.0)
     base, _ctx, _srv = running_server
 
     status, body = _get(base + "/diagnostics/health")
 
     assert status == 200
-    assert json.loads(body)["subsystems"]["tts_worker"]["last_success_at"] == 123.0
+    assert json.loads(body)["subsystems"]["diagnostics-test-subsystem"]["last_success_at"] == 123.0
 
 
 def test_diagnostics_settings_are_computer_owned_and_validated(running_server):
@@ -1179,6 +1182,7 @@ def test_get_backend_usage_reports_claude_from_turn_accounting(
     a statusline never renders under `-p`, which is how every turn is spawned.
     """
     from lib import backend_usage, turn_usage
+    from tests.patching import patch_shared
 
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / "missing-codex"))
 
@@ -1187,7 +1191,7 @@ def test_get_backend_usage_reports_claude_from_turn_accounting(
 
     for name in ("fetch_claude_usage", "fetch_codex_usage",
                  "fetch_codex_usage_app_server"):
-        monkeypatch.setattr(backend_usage, name, offline)
+        patch_shared(monkeypatch, backend_usage, name, offline)
     turn_usage.record(backend="claude", agent_id="a1", detail={
         "tokens_in": 1200, "tokens_out": 340, "cost_usd": 0.042,
         "duration_ms": 5100, "trace_id": "t-1",
@@ -3739,8 +3743,17 @@ def test_agent_assignment_endpoint_keeps_existing_session(running_server):
 def test_anonymous_creation_returns_its_agent_without_a_fleet_query(running_server, monkeypatch):
     base, _ctx, _srv = running_server
     from lib import agents as agents_db
-    monkeypatch.setattr(agents_db, "dashboard_states", lambda: pytest.fail("creation must not build the fleet"))
+    # Only the request path is in question. The Host's own background sweep (stale_work)
+    # may build the fleet meanwhile; a plain AssertionError there is caught and logged by
+    # its loop, where pytest.fail (a BaseException) killed the thread and warned in G1.
+    callers = []
+
+    def no_fleet():
+        callers.append(threading.current_thread().name)
+        raise AssertionError("creation must not build the fleet")
+    monkeypatch.setattr(agents_db, "dashboard_states", no_fleet)
     status, body = _post(base + "/agents", {"anonymous": True, "backend": "codex", "cwd": "/tmp"})
+    assert not [name for name in callers if "process_request" in name], "creation built the fleet"
     response = json.loads(body)
     assert status == 200
     assert response["agent"]["session"] == response["session"]

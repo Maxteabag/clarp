@@ -1,0 +1,50 @@
+# S4 turn engine (rf-s4): turn_dispatch.py, cut 1 (module-level definitions), move-only.
+# Applied by tools/refactor/split_apply.py; see its docstring. turn_dispatch.py stays the
+# facade and keeps the two global-rebound names (_RUNTIME_CLIENT, _DELIVERY_STREAM), their
+# readers, and TurnDispatchService. Design: docs/refactor/s4-turn-engine.md.
+
+[[split]]
+name = "turn-dispatch-module"
+module = "lib/turn_dispatch.py"
+
+[[split.part]]
+# Turn ownership state: constants, the slot lock and slots, account failover, held work and hold headlines, live-work views (TP-26's globals in one home).
+module = "lib/turn_dispatch_state.py"
+names = [
+    "MAX_ATTEMPTS", "BACKOFF_BASE_SEC", "_TURN_LOCK", "_SLOTS", "_FAILOVERS", "_pool_backend",
+    "account_failover", "account_selector", "_INFLIGHT", "_QUEUED", "_CLAIMED_AT",
+    "_RECOVERY_LOCK", "_RECOVERY_BACKOFF", "_RECOVERY_RESUMING_ORIGINS", "_NO_LOCK",
+    "_JANITOR_SPAWN_LOCKS", "_TERMINAL_SENTINEL", "_STOPPING_SENTINEL", "_PROCESS_OWNER_PREFIX",
+    "_PROCESS_EXIT_POLL_S", "LEAKED_SLOT_GRACE_MS", "ORPHAN_SPAWN_GRACE_S", "REPAIR_SPAWN_GRACE_S",
+    "_launching", "_launch_running", "runtime_status", "held_order", "log_held_order",
+    "RECOVERY_PARK_PREFIX", "_transfer_refusal", "account_recovery_carry",
+    "resume_account_recovery", "unpersisted_held", "provider_turns", "UPDATE_HOLD_HEADLINE",
+    "refresh_hold_headlines", "_ADMISSION", "live_work", "reset_for_tests", "_terminal_live",
+]
+
+[[split.part]]
+# Dispatch values and admission helpers: DispatchResult, the DispatchError family, _TurnSpec, DispatchCommand, parking, delivery context.
+module = "lib/turn_command.py"
+names = [
+    "DispatchResult", "_with_delivery", "_resolve_llm", "_TurnSpec", "_pause_exempt_on_arrival",
+    "_stop_holds", "_park", "_park_at_head", "DispatchError", "_refuse_oversized",
+    "JanitorDispatchError", "_LaunchReceiptUnrecorded", "UNCONFIRMED_DELIVERY",
+    "_LaunchReceiptRefused", "DELIVERY_HINT_BUSY_MS", "_record_launch_attempt",
+    "GoalWakeDispatchError", "_validate_goal_dispatch", "_janitor_run_active", "_admission_facts",
+    "_admit", "_validate_janitor_target", "_recovered_janitor_run", "_janitor_spawn_lock",
+    "_REGENERATED_ORIGINS", "_UNLAUNCHED_MARKER_RETRY_SEC", "_unlaunched_marked",
+    "_remove_queued_run", "_default_retry_scheduler", "OPENING_NOT_CONFIRMED", "OPENING_WITHDRAWN",
+    "_AdmissionRefused", "_ADMISSION_REFUSED", "_is_call_opening", "_mark_backend_invoked",
+    "_backend_invoked", "_with_team_context", "_with_delivery_context", "_REQUEST_LOCKS",
+    "_REQUEST_LOCKS_GUARD", "DispatchCommand", "_serialize_client_retry",
+]
+
+[[split.part]]
+# Turn results and the Stop helpers that read no facade-only name.
+module = "lib/turn_stop.py"
+names = [
+    "_existing_cwd", "_result_error_text", "_result_detail", "_result_assistant_text",
+    "_record_dreaming_result", "_FENCE_RETRY_DELAYS", "_record_janitor_cancelled",
+    "_recovery_parked", "snapshot_stop_state", "begin_stop", "restore_stop_state",
+    "prepare_queued_for_finish",
+]

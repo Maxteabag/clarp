@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import pytest
 
+from tests.patching import patch_shared
 from lib import agents as agents_db
 from lib import dreaming, heartbeat, message_store, team_leader
 
@@ -43,7 +44,7 @@ def test_a_user_turn_reply_that_mentions_a_token_is_kept_live(tmp_path, reply):
 def test_a_user_turn_never_ends_a_dream_or_records_a_leader_noop(tmp_path, monkeypatch):
     agent_id = _agent(tmp_path)
     recorded = []
-    monkeypatch.setattr(dreaming, "mark_active_noop", lambda aid: recorded.append(("dream", aid)))
+    patch_shared(monkeypatch, dreaming, "mark_active_noop", lambda aid: recorded.append(("dream", aid)))
     monkeypatch.setattr(team_leader, "record_leader_noop", lambda aid: recorded.append(("leader", aid)))
     message_store.store_transcript_turns(
         agent_id=agent_id, backend_session_id="s1", source_file="/tmp/transcript.jsonl",
