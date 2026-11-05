@@ -239,6 +239,35 @@ conversion that first needs it.
 **Behaviour changes to register:** none intended. If commit 4 changes the
 order of rows with equal positions, that is registered.
 
+### Queue reorder transaction (Phase 3, commit 6)
+
+Keep the existing delete/reinsert operation, shared by `_move_behind` and
+`move_to_back` as `_reinsert_at_back`. It changes only `queue_seq`: every
+other column, including status, entry times, admission and pause rights, is
+copied from the same row. This is a reorder within the receipt's lifecycle,
+not a status transition. Allocating the sequence through the existing
+AUTOINCREMENT insert also preserves SQLite's high-water mark; computing
+`MAX(queue_seq) + 1` would reuse positions after deletions.
+
+The transaction has one owner:
+
+- `move_to_back` owns its existing `BEGIN IMMEDIATE` through commit or
+  rollback, including the revision bump.
+- `park_at_head` and `take_over_at_head` join their caller's existing write
+  transaction. The dispatcher owns that transaction in `_park_at_head` and
+  `transfer_parked_recoveries_for_update`. It covers the new or parked head,
+  every other open row reinserted in their original sequence order, and the
+  revision bump. For a recovery transfer it also covers turn settlement and
+  the handoff projection.
+- Neither `_move_behind` nor `_reinsert_at_back` begins or commits a
+  transaction. A nested lifecycle transaction would refuse these callers;
+  an inner commit would split their atomic handoff.
+
+There is no new stored value, status, transaction boundary or intended
+behaviour difference. The unchanged G0 matrix pins `move_to_back`,
+`park_at_head` and `take_over_at_head`, including ordering, copied row fields
+and revisions. The two dispatcher entry points keep their names and code.
+
 ## 2. Dream runs
 
 **Today** (`dreaming.py`).
