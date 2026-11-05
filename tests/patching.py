@@ -11,10 +11,12 @@ module alone and this is exactly `monkeypatch.setattr(module, name, value)`.
 """
 from __future__ import annotations
 
+import ast
 import importlib
 import pathlib
 import tomllib
 import types
+from collections.abc import Iterable
 
 _REPO = pathlib.Path(__file__).resolve().parents[1]
 _RECIPES = _REPO / "tools" / "refactor" / "splits"
@@ -70,3 +72,27 @@ def patch_shared(monkeypatch, module: types.ModuleType, name: str, value,
     for part in split_family(module, recipes):
         if getattr(part, name, _MISSING) is original:
             monkeypatch.setattr(part, name, value)
+
+
+def logical_split_trees(paths: Iterable[pathlib.Path], root: pathlib.Path,
+                        recipes: pathlib.Path | None = None) -> dict[str, ast.Module]:
+    """Group exact recipe-listed definitions for source guards, without importing them.
+
+    Unlisted definitions and unnamed statements stay at their physical path.
+    The original module's constants and their moved consumers share one tree,
+    while new code in a part remains a separate owner for the guards.
+    """
+    bodies: dict[str, list[ast.stmt]] = {}
+    for path in paths:
+        rel = path.relative_to(root).as_posix()
+        bodies.setdefault(rel, [])
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for node in tree.body:
+            name = getattr(node, "name", None)
+            if isinstance(node, ast.Assign) and len(node.targets) == 1:
+                name = getattr(node.targets[0], "id", None)
+            elif isinstance(node, ast.AnnAssign):
+                name = getattr(node.target, "id", None)
+            origin = split_origin(rel, name, recipes) if name is not None else rel
+            bodies.setdefault(origin, []).append(node)
+    return {rel: ast.Module(body=body, type_ignores=[]) for rel, body in bodies.items()}
