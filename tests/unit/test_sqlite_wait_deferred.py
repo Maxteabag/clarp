@@ -3,6 +3,8 @@ import json
 import sqlite3
 import gc
 import threading
+import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -157,5 +159,31 @@ def test_failed_wait_producer_does_not_defer_later_unrelated_logging(tmp_path, m
         log.log("sqliteWriteWait", "synthetic unrelated producer")
         assert "synthetic unrelated producer" in capsys.readouterr().err
         assert [row["event"] for row in _lines(tmp_path)] == ["sqliteWriteWait"]
+    finally:
+        connection.rollback()
+
+
+def test_admission_precedes_wait_deferral_and_its_timestamp_is_not_reset(monkeypatch):
+    connection = db.conn()
+    telemetry.conn()
+    tick = [100.0]
+    original = eventlog.defer_sqlite_write_wait
+    seen = []
+
+    def observe(connection, line, detail):
+        seen.append(db._TRANSACTION_OWNERS.get(id(connection)))
+        result = original(connection, line, detail)
+        tick[0] = 200.0
+        return result
+
+    monkeypatch.setattr(db, "time", SimpleNamespace(
+        monotonic=lambda: tick[0], perf_counter=time.perf_counter, sleep=time.sleep))
+    monkeypatch.setattr(db, "_LONG_WRITE_WAIT_SECONDS", -1)
+    monkeypatch.setattr(eventlog, "defer_sqlite_write_wait", observe)
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        assert len(seen) == 1 and seen[0] is not None
+        assert seen[0].started_monotonic == 100.0
+        assert db._TRANSACTION_OWNERS[id(connection)].started_monotonic == 100.0
     finally:
         connection.rollback()
