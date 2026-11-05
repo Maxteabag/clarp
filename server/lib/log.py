@@ -9,6 +9,11 @@ from __future__ import annotations
 import sys
 import time
 import traceback
+import threading
+
+# Only the synchronous sqliteWriteWait producer supplies this connection.
+# It is restored on every exit and never keeps a connection in the queue.
+_WAIT_CONTEXT = threading.local()
 
 
 def _eventlog_emit(event: str, level: str, detail: str) -> None:
@@ -40,16 +45,24 @@ def log(event: str, detail: str = "") -> None:
     line = f"{time.strftime('%H:%M:%S')} {event}"
     if detail:
         line += f" {detail}"
+    if event == "sqliteWriteWait":
+        connection = getattr(_WAIT_CONTEXT, "connection", None)
+        if connection is not None:
+            from . import eventlog
+            if eventlog.defer_sqlite_write_wait(connection, line, detail):
+                return
     print(line, file=sys.stderr, flush=True)
     _eventlog_emit(event, "info", detail)
 
 
 def sqlite_write_wait(detail: str, connection) -> None:
     """Defer every sink of this line while its explicit state transaction is open."""
-    from . import eventlog
-    line = f"{time.strftime('%H:%M:%S')} sqliteWriteWait {detail}"
-    if not eventlog.defer_sqlite_write_wait(connection, line, detail):
+    previous = getattr(_WAIT_CONTEXT, "connection", None)
+    _WAIT_CONTEXT.connection = connection
+    try:
         log("sqliteWriteWait", detail)
+    finally:
+        _WAIT_CONTEXT.connection = previous
 
 
 def log_exception(event: str, exc: BaseException, detail: str = "") -> None:
