@@ -214,6 +214,9 @@ def test_a_split_resolves_each_moved_read_in_its_new_home(tmp_path, capsys, b_te
     # Python 3.14 adds a synthetic __conditional_annotations__ to the symtable
     # of an annotated assignment; it is not a module read (rf-s4, rf-s6).
     ("X: Foo = 1", ["Foo"]),
+    # ...but a name the source really reads keeps counting, whatever it is
+    # called (review B on 03b0631e).
+    ("def run():\n    return __conditional_annotations__()", ["__conditional_annotations__"]),
 ])
 def test_global_reads_are_module_reads_only(source, reads):
     """Python 3.12's symtable lists inlined comprehension variables in the
