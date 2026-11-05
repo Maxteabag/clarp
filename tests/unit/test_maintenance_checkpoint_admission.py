@@ -78,7 +78,8 @@ def test_checkpoint_allows_writer_while_reader_stays_open_and_later_truncates(ch
                    for event, detail in reports if event == "maintenanceCheckpoint"]
         assert [(r["mode"], r["busy"]) for r in results] == [("TRUNCATE", "0")]
         assert connection.execute("PRAGMA busy_timeout").fetchone()[0] == timeout_ms
-        assert connection.execute("SELECT value FROM checkpoint_admission_probe ORDER BY value").fetchall() == [
+        assert [tuple(row) for row in connection.execute(
+            "SELECT value FROM checkpoint_admission_probe ORDER BY value").fetchall()] == [
             (1,), (2,), (3,)]
     finally:
         connection.set_trace_callback(None)
