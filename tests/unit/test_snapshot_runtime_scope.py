@@ -146,7 +146,7 @@ def test_non_snapshot_status_keeps_ttl_and_default_timeout(fleet, monkeypatch, b
 @pytest.mark.parametrize("fresh", ["clear", "admitted", "timeout"])
 def test_snapshot_ghost_candidates_share_one_fresh_bounded_read(fleet, monkeypatch, fresh):
     ctx, status = fleet
-    candidates = ["fixture-00", "fixture-15"]
+    candidates = ["fixture-15", "fixture-00"]
     for aid in candidates:
         agents.bind_backend_session(aid, f"ghost-{aid}")
     # Resume-target lookup is a filesystem dependency; no real transcripts.
@@ -167,9 +167,38 @@ def test_snapshot_ghost_candidates_share_one_fresh_bounded_read(fleet, monkeypat
     snapshot.build_agent_snapshot(ctx)
     assert runtime.timeouts == [2.0, 2.0]
     for aid in candidates:
-        assert bool(agents.live_backend_session(aid)) == (fresh != "clear")
+        assert bool(agents.live_backend_session(aid)) == (fresh != "clear" or aid != candidates[0])
     if fresh == "timeout":
         runtime.timeouts.clear()
         snapshot.build_agent_snapshot(ctx)
         assert runtime.timeouts == [2.0, 2.0]
         assert all(agents.live_backend_session(aid) for aid in candidates)
+
+
+def test_snapshot_admission_after_first_fresh_sample_keeps_second_binding(fleet, monkeypatch):
+    ctx, status = fleet
+    first, second = "fixture-15", "fixture-00"
+    for aid in (first, second):
+        agents.bind_backend_session(aid, f"ghost-{aid}")
+
+    class RacingRuntime(Runtime):
+        admitted = False
+
+        def status(self, *, timeout=None):
+            self.timeouts.append(timeout)
+            # A detached status result: later admissions do not mutate it.
+            return dict(self.sample, admitting=[second] if self.admitted else [])
+
+    runtime = RacingRuntime(status)
+    def missing_resume_target(self, bsid, *args):
+        if bsid == f"ghost-{second}":
+            assert runtime.timeouts == [2.0, 2.0]
+            runtime.admitted = True
+        return None
+    monkeypatch.setattr(type(backends.by_id("claude")), "resume_target", missing_resume_target)
+    backends.configure_runtime_client(runtime)
+    snapshot.build_agent_snapshot(ctx)
+    assert runtime.admitted
+    assert agents.live_backend_session(first) == ""
+    assert agents.live_backend_session(second) == f"ghost-{second}"
+    assert runtime.timeouts == [2.0, 2.0]
