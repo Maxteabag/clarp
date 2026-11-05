@@ -142,7 +142,7 @@ def _run(case, monkeypatch, directory, host_module):
     answer = {}
     handler._send = lambda status, body: answer.update(status=status, body=body.decode())
     handler._json_error = lambda status, message: answer.update(status=status, body={"error": message})
-    handler._send_file = lambda path: answer.update(status=200, body=pathlib.Path(path).read_bytes().decode())
+    handler._send_file = lambda path, **kw: answer.update(status=200, body=pathlib.Path(path).read_bytes().decode())
     if case["edge"] == "unsafe-cache":
         target = directory / "symlink-target"
         target.mkdir()
