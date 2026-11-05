@@ -61,13 +61,8 @@ def test_returning_consumption_and_transaction_boundary(tmp_path, explicit):
         assert connection.in_transaction is explicit
         assert [tuple(row) for row in cursor.fetchall()] == [(1, "a"), (2, "b")]
         assert cursor.fetchone() is None
-        assert [entry[0] for entry in cursor.description] == ["id", "value"]
-        assert cursor.rowcount == 2
-        assert cursor.lastrowid == 2
-        assert list(cursor) == []
-        cursor.close()
-        with pytest.raises(sqlite3.ProgrammingError):
-            cursor.fetchone()
+        if explicit:
+            assert isinstance(cursor, sqlite3.Cursor)
         connection.rollback()
     finally:
         connection.close()

@@ -359,48 +359,16 @@ def _is_lock_contention(exc: BaseException) -> bool:
 
 
 class _PrefetchedCursor:
-    """Only an autocommit RETURNING result, exhausted before wait-log I/O.
+    """Autocommit RETURNING rows, using only the two audited caller methods."""
 
-    The audited callers use fetchone/fetchall. Keep the small result cursor
-    interface (including metadata and iteration), without wrapping any other
-    statement or an explicit transaction's cursor.
-    """
-
-    def __init__(self, cursor: sqlite3.Cursor, rows: list):
-        self._cursor = cursor
+    def __init__(self, rows: list):
         self._rows = iter(rows)
-        self._closed = False
-
-    @property
-    def rowcount(self):
-        return self._cursor.rowcount
-
-    @property
-    def lastrowid(self):
-        return self._cursor.lastrowid
-
-    @property
-    def description(self):
-        return self._cursor.description
-
-    def __iter__(self):
-        return self
-
-    def __next__(self):
-        if self._closed:
-            raise sqlite3.ProgrammingError("Cannot operate on a closed cursor.")
-        return next(self._rows)
 
     def fetchone(self):
-        return next(self, None)
+        return next(self._rows, None)
 
     def fetchall(self):
-        return list(self)
-
-    def close(self):
-        self._cursor.close()
-        self._rows = iter(())
-        self._closed = True
+        return list(self._rows)
 
 
 class _TrackedConnection(sqlite3.Connection):
@@ -448,7 +416,7 @@ class _TrackedConnection(sqlite3.Connection):
             # despite in_transaction=False. Fetch outside the BUSY retry loop:
             # a fetch error must never replay an already-admitted write.
             if not self.in_transaction and cursor.description is not None:
-                return _PrefetchedCursor(cursor, cursor.fetchall())
+                return _PrefetchedCursor(cursor.fetchall())
             return cursor
         finally:
             super().execute(f"PRAGMA busy_timeout = {deadline_ms}")
