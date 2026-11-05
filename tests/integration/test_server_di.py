@@ -4488,7 +4488,10 @@ def test_a_voice_change_writes_only_that_agent(running_server, monkeypatch):
     An agent created between its read and its write was deleted again."""
     from lib import agents as agents_db
     base, _ctx, _srv = running_server
-    real_load = server_module.load_agents
+    # Patch load_agents in the globals the voice handler actually reads: server.py
+    # on main, its route mixin once S3 moves the handler (refactor/integration).
+    handler_globals = server_module.Handler._handle_agent_voice.__globals__
+    real_load = handler_globals["load_agents"]
     created = []
 
     def stale_roster(path):
@@ -4499,7 +4502,7 @@ def test_a_voice_change_writes_only_that_agent(running_server, monkeypatch):
                 session="latecomer"))
         return roster
 
-    monkeypatch.setattr(server_module, "load_agents", stale_roster)
+    monkeypatch.setitem(handler_globals, "load_agents", stale_roster)
     status, body = _post_status(base + "/agent-voice", {"session": "claude", "voice_id": "fresh-voice"})
     assert status == 200, body
     assert agents_db.get_by_session("latecomer") is not None
