@@ -116,3 +116,26 @@ def test_every_applied_split_part_maps_exactly_its_recipe_names_to_the_old_modul
                 assert {_bound_name(s) for s in moved.body} - {None} == set(part["names"]), part["module"]
                 stays = groups.get(part["module"], ast.Module(body=[], type_ignores=[]))
                 assert all(isinstance(s, (ast.Pass, ast.Import, ast.ImportFrom)) for s in stays.body), part["module"]
+
+
+def test_patch_reaches_a_method_mixin_of_a_split_part_only(monkeypatch, tmp_path):
+    from tests.patching import split_origin
+    splits, methods = tmp_path / 'splits', tmp_path / 'methods'
+    splits.mkdir(); methods.mkdir()
+    (splits / 's9.toml').write_text(
+        '[[split]]\nmodule = "lib/agent_rings.py"\n'
+        '[[split.part]]\nmodule = "lib/message_live.py"\nnames = ["read"]\n')
+    (methods / 's4.toml').write_text(
+        'source_module = "lib/message_live.py"\nsource_class = "Engine"\n'
+        '[[group]]\nmodule = "lib/heard_audio.py"\nmembers = ["read"]\n')
+    original = agent_rings.now_ms
+    monkeypatch.setattr(message_live, 'now_ms', original)
+    monkeypatch.setattr(heard_audio, 'now_ms', original)
+    independent = clock.now_ms
+    patch_shared(monkeypatch, agent_rings, 'now_ms', _fake, recipes=splits)
+    assert message_live.now_ms is _fake and heard_audio.now_ms is _fake
+    assert clock.now_ms is independent
+    assert split_origin('lib/heard_audio.py', recipes=splits) == 'lib/agent_rings.py'
+    assert split_origin('lib/heard_audio.py', 'read', splits) == 'lib/agent_rings.py'
+    # New physical mutable state never inherits the original module's allowance.
+    assert split_origin('lib/heard_audio.py', 'NEW_STATE', splits) == 'lib/heard_audio.py'

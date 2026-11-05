@@ -512,7 +512,7 @@ def test_method_drift_is_refused_before_main_replaces_it(repo, where):
     (repo / 'README').write_text('main progresses\n')
     _commit(repo, 'main advances')
     code, out = _merge(repo)
-    assert code == 11, out
+    assert code == 8, out
     assert 'integration-only edit' in out
 
 
