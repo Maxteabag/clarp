@@ -35,7 +35,6 @@ _GOAL = "goal (AUT-01/20)"
 _LATER = "converts when a slice touches it"
 UNCONVERTED: dict[tuple[str, str], str] = {
     ("state_log", "kind"): _TURN,
-    ("queued_turns", "status"): _TURN,
     ("task_plans", "status"): _GOAL,
     ("task_items", "status"): _GOAL,
     ("agent_goals", "status"): _GOAL,
@@ -73,7 +72,7 @@ UNCONVERTED: dict[tuple[str, str], str] = {
     ("user_value_facts", "status"): _LATER,
 }
 # Lower this when a column converts; never raise it.
-UNCONVERTED_CEILING = 37
+UNCONVERTED_CEILING = 36
 
 
 def status_columns() -> set[tuple[str, str]]:

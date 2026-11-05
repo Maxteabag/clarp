@@ -200,7 +200,6 @@ STATUS_WRITERS: dict[tuple[str, str], set[str]] = {
     ("orchestrator_pending_utterances", "status"): {"lib/orchestrator.py"},
     ("podcast_conversations", "status"): {"lib/podcast_history.py"},
     ("provider_limit_episodes", "status"): {"lib/backend_usage.py"},
-    ("queued_turns", "status"): {"lib/turn_queue.py"},
     ("state_log", "kind"): {"lib/turn_lifecycle.py"},
     ("task_items", "status"): {"lib/task_plans.py"},
     ("task_plans", "status"): {"lib/task_plans.py"},
