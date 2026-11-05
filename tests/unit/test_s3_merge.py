@@ -333,3 +333,51 @@ def test_an_integration_only_edit_before_the_first_split_stops_with_8(repo_with_
     code, out = _merge(repo_with_split)
     assert code == 8, out
     assert "integration-only edit in server/lib/big.py (split big, not yet applied)" in out
+
+
+def _conflict_in_other_module(repo):
+    """main and integration both edit server/lib/other.py on the same line."""
+    _git(repo, "switch", "-q", "main")
+    (repo / "server" / "lib" / "other.py").write_text("VALUE = 1\n")
+    _commit(repo, "other on main")
+    _git(repo, "switch", "-q", "integration")
+    _git(repo, "merge", "-q", "--no-edit", "main")
+    (repo / "server" / "lib" / "other.py").write_text("VALUE = 2  # integration\n")
+    _commit(repo, "integration edits other")
+    _git(repo, "switch", "-q", "main")
+    (repo / "server" / "lib" / "other.py").write_text("VALUE = 3  # main\n")
+    _commit(repo, "main edits other")
+
+
+def _resolution(repo, blobs, resolved="VALUE = 23  # both\n"):
+    folder = repo / "tools" / "refactor" / "merge_resolutions"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "other.py.resolved").write_text(resolved)
+    base, main_blob, integration_blob = blobs
+    (folder / "other.toml").write_text(
+        f'path = "server/lib/other.py"\nresolved = "other.py.resolved"\n'
+        f'base_blob = "{base}"\nmain_blob = "{main_blob}"\nintegration_blob = "{integration_blob}"\n')
+    _commit(repo, "resolution on main")
+
+
+def _blobs(repo):
+    base = _git(repo, "merge-base", "main", "integration")
+    return tuple(_git(repo, "rev-parse", f"{ref}:server/lib/other.py") for ref in (base, "main", "integration"))
+
+
+def test_a_reviewed_resolution_applies_when_all_three_blobs_match(repo):
+    _conflict_in_other_module(repo)
+    _resolution(repo, _blobs(repo))
+    code, out = _merge(repo)
+    assert code == 0, out
+    assert "merge_resolution other: applied to server/lib/other.py, blobs base/main/int = " in out
+    assert _git(repo, "show", "work:server/lib/other.py") == "VALUE = 23  # both"
+
+
+def test_a_stale_resolution_stops_with_10(repo):
+    _conflict_in_other_module(repo)
+    base, main_blob, _ = _blobs(repo)
+    _resolution(repo, (base, main_blob, "0" * 40))
+    code, out = _merge(repo)
+    assert code == 10, out
+    assert "STALE other.toml server/lib/other.py" in out
