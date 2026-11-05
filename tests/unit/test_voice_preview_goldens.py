@@ -13,7 +13,7 @@ import os
 import pathlib
 import sys
 from types import SimpleNamespace
-from urllib.parse import parse_qs, urlencode, urlsplit
+from urllib.parse import parse_qs, quote, urlencode, urlsplit
 
 import pytest
 
@@ -133,10 +133,10 @@ def _run(case, monkeypatch, directory, host_module):
     if registry is not None:
         monkeypatch.setattr(registry, "cartesia_synthesize", cartesia)
         monkeypatch.setattr(registry, "synthesize_streaming", eleven)
-    text = {"empty-text": "", "long-text": "x" * 241}.get(case["edge"], "Press once")
+    text = {"empty-text": "", "long-text": "x" * 241}.get(case["edge"], case.get("text", "Press once"))
     query = {"provider": case["provider"], "id": voice, "text": text}
     handler = object.__new__(host_module.Handler)
-    handler.path = "/" + case["kind"] + "?" + urlencode(query)
+    handler.path = "/" + case["kind"] + "?" + urlencode(query, **({"quote_via": quote} if "text" in case else {}))
     handler.server = SimpleNamespace(ctx=SimpleNamespace(agents_path=directory / "agents.json"))
     handler._query = lambda: parse_qs(urlsplit(handler.path).query, keep_blank_values=True)
     answer = {}
@@ -174,3 +174,15 @@ def test_preview_and_narration_match_their_golden_table(monkeypatch, tmp_path, h
     assert sorted(table) == sorted(golden)
     different = [name for name in table if table[name] != golden[name]]
     assert not different, f"{len(different)} rows differ, first: {different[0]}"
+
+
+@pytest.mark.parametrize("cached", [False, True])
+def test_primary_narration_preserves_valid_bracketed_text(monkeypatch, tmp_path, host_module, cached):
+    text = "Press [laughing] once"
+    case = dict(kind="controller-narration", provider="cartesia", fallback="none",
+                failure="ok", cached=cached, edge="none", text=text)
+    result = _run(case, monkeypatch, tmp_path, host_module)
+    assert result["response"] == {"status": 200, "body": "audio:cartesia"}
+    assert [call["text"] for call in result["calls"]] == ([] if cached else [text])
+    assert len(result["files"]) == 1
+    assert result["files"][0]["body"] == "audio:cartesia"
