@@ -200,6 +200,9 @@ continue as before.
 | Reviewer B (rest) | `rf-review-rest-a79f` | Codex | verdicts only |
 | Reviewer C (read model, voice) | `rf-review-readmodel-300e` | Codex | verdicts only |
 | Reviewer A2 (turn engine, database) | `rf-review-core2-cf19` | Claude | verdicts only |
+| Slice owner S4 (turn engine) | `rf-s4-ca35` | Claude | the turn engine restructure on `refactor/integration` (recipe + generator + facade, regenerated from main's text); G0 tests on main |
+| Slice owner S6 (backends) | `rf-s6-8970` | Claude | the backends restructure on `refactor/integration` (codex_app_server, the Codex pool, backend modules), same method; G0 tests on main |
+| Reviewer A3 (turn engine restructure, Phase 3) | `rf-review-core3-7399` | Claude | verdicts only (S4 and the Phase 3 lifecycle conversions; A2 keeps fixes on main, A reviews S6) |
 
 Reviewers never edit sources, never run jobs against the live Host and never
 grant more than the exact commit they reviewed.
