@@ -128,6 +128,7 @@ def load_recipe(path: pathlib.Path) -> list[dict]:
         raise Refusal("recipe: source_class must be an identifier")
     seen = set()
     outputs = set()
+    classes = set()
     for g in groups:
         g["source_module"] = source_module
         g["source_class"] = source_class
@@ -138,9 +139,10 @@ def load_recipe(path: pathlib.Path) -> list[dict]:
             raise Refusal(f"recipe: group {g['name']} listed twice")
         seen.add(g["name"])
         _check_module(g["name"], g["module"], g["class"], source_module)
-        if g["module"] in outputs or g["class"] == source_class:
+        if g["module"] in outputs or g["class"] in classes or g["class"] == source_class:
             raise Refusal(f"recipe: group {g['name']} duplicates an output or the source class")
         outputs.add(g["module"])
+        classes.add(g["class"])
         _acknowledged(g, f"group {g['name']}")
     names = [m for g in groups for m in g["members"]]
     dup = sorted({m for m in names if names.count(m) > 1})
@@ -791,6 +793,12 @@ def apply(root: pathlib.Path, groups: list[dict], scan_root: pathlib.Path | None
         else:
             # Reuse the module-split scanner, including computed-name refusal.
             from split_apply import old_module_rebinds
+            for name in g["members"]:
+                for stmt in tool.imports_in(members[name]):
+                    for bound, module, attr in tool.bindings(stmt, tool._package(source_module)):
+                        _refuse_family_imports(root, source_module, {bound: (module, attr)})
+                if any(isinstance(n, ast.Global) for n in ast.walk(members[name])):
+                    raise Refusal(f"{name}: writes module globals")
             _refuse_family_imports(root, source_module, reads)
             records = old_module_rebinds(scan_root or root, source_module, set(reads),
                                          {"server/" + item["module"] for item in groups})
