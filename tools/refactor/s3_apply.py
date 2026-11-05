@@ -767,6 +767,26 @@ def apply(root: pathlib.Path, groups: list[dict], scan_root: pathlib.Path | None
     cut: list[tuple[int, int]] = []
     applied: list[str] = [g["class"] for g in groups if g["class"] in current_bases]
     new_groups = [g for g in groups if g["class"] not in current_bases]
+    if not legacy:
+        # A same-named inherited base is not evidence that this recipe ran.
+        # Accept a no-op only for the intended output import and moved methods.
+        bindings = module_bindings(tree)
+        for g in groups:
+            if g["class"] not in applied:
+                continue
+            expected = (g["class"], g["module"][:-3].replace("/", "."), g["class"])
+            imports = [binding for stmt in tree.body if isinstance(stmt, ast.ImportFrom)
+                       for binding in tool.bindings(stmt, tool._package(source_module))
+                       if binding[0] == g["class"]]
+            output = root / "server" / g["module"]
+            if (imports != [expected] or len(bindings.get(g["class"], [])) != 1
+                    or not output.is_file() or any(name in members for name in g["members"])):
+                raise Refusal(f"group {g['name']}: {g['class']} is not a genuine applied group")
+            output_class = _handler(ast.parse(output.read_text()), g["class"], g["module"])
+            output_members = _member_nodes(output_class)
+            if any(not isinstance(output_members.get(name), (ast.FunctionDef, ast.AsyncFunctionDef))
+                   for name in g["members"]):
+                raise Refusal(f"group {g['name']}: {g['class']} is not a genuine applied group")
     if legacy and new_groups and not (root / "server" / "lib" / "routes" / "__init__.py").exists():
         raise Refusal("server/lib/routes/__init__.py is missing: the route seam must be applied first")
     for g in new_groups:
