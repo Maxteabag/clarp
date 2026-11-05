@@ -26,7 +26,7 @@ import pytest
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "server"))
-from tests.patching import split_origin
+from tests.patching import logical_split_trees
 from lib import host_generation as hg  # noqa: E402
 
 OLD = "5d2f8a3e-1c4b-4e7a-8f60-3b9d7c2e4a10"
@@ -312,6 +312,19 @@ def test_structural_the_entrypoint_bootstraps_after_the_locks_and_before_the_dat
 
 # ---- ownership: the only callers --------------------------------------------------------------
 
+def _caller_origins(rel: str, text: str, name: str, recipes: pathlib.Path | None = None) -> set[str]:
+    """Where a file calls `name`: its own path, or for a call inside a
+    definition an S9 recipe moved into a split part, the old module
+    (logical_split_trees). A new caller in a part is a new decision."""
+    call = re.compile(rf"\b{name}\(")
+    if not call.search(text):
+        return set()
+    if not rel.endswith(".py"):
+        return {rel}
+    return {origin for origin, tree in logical_split_trees(rel, ast.parse(text), recipes)
+            if call.search(ast.unparse(tree))}
+
+
 def _callers(name: str) -> set[str]:
     found = set()
     for path in [*(REPO / "server").rglob("*.py"), *(REPO / "bin").rglob("*"),
@@ -321,8 +334,7 @@ def _callers(name: str) -> set[str]:
                 text = path.read_text()
             except UnicodeDecodeError:
                 continue
-            if re.search(rf"\b{name}\(", text):
-                found.add(split_origin(str(path.relative_to(REPO))))   # an S9 part counts as its module
+            found |= _caller_origins(str(path.relative_to(REPO)), text, name)
     return found
 
 

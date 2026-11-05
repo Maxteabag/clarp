@@ -30,7 +30,7 @@ import re
 
 import pytest
 
-from tests.patching import logical_split_trees, split_origin
+from tests.patching import logical_split_tree_map, split_origin
 
 SERVER = pathlib.Path(__file__).resolve().parents[2] / "server"
 IDS = frozenset({"claude", "codex", "agy", "antigravity", "grok", "opencode", "deepseek", "muse"})
@@ -125,7 +125,7 @@ def identity_uses(tree: ast.Module, known_constants=()) -> collections.Counter[s
 
 def current() -> dict[tuple[str, str], int]:
     out = {}
-    trees = logical_split_trees(sorted((SERVER / "lib").rglob("*.py")) + [SERVER / "server.py"], SERVER)
+    trees = logical_split_tree_map(sorted((SERVER / "lib").rglob("*.py")) + [SERVER / "server.py"], SERVER)
     for rel, tree in trees.items():
         if rel in EXEMPT:
             continue
