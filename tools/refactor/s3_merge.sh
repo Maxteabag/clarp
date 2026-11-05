@@ -23,7 +23,8 @@
 # 3 a merge conflict outside server.py and the generated files, 4 a replayed diff
 # does not apply, 5 s3_apply refused, 6 ast_identity failed, 7 a local gate failed,
 # 8 a split refused or a split module was edited on integration (rf-fix3 / rf-fix2),
-# 9 ast_identity failed for a split or repoint (rf-fix3 / rf-fix2).
+# 9 ast_identity failed for a split or repoint (rf-fix3 / rf-fix2), 10 a merge resolution
+# entry in tools/refactor/merge_resolutions/ does not match this merge's blobs (stale).
 # The work branch is left as it stopped, for inspection; nothing is pushed.
 set -uo pipefail
 die() { echo "s3_merge: STOP ($1): $2" >&2; exit "$1"; }
@@ -87,7 +88,46 @@ PYEOF
 ) || die 2 "cannot read the groups of tools/refactor/s3_moves.toml"
 replay=$(grep -v '^\s*#' tools/refactor/s3_replay.txt | awk 'NF {print $1}')
 
+# Reviewed merge resolutions (tools/refactor/merge_resolutions/*.toml, taken from main):
+# one per conflicted file outside S3's own, naming the exact merge-base, main and
+# integration blobs it resolves and the resolved file. It applies only when all three
+# blobs match this merge; anything else is still a conflict that stops with 3.
+git checkout "$main" -- tools/refactor/merge_resolutions 2>/dev/null || true
+merge_base=$(git merge-base "$main" "$integration") || die 3 "no merge base"
+resolved=""
+if [ -d tools/refactor/merge_resolutions ]; then
+  resolved=$("$PY" - "$merge_base" "$main" "$integration" $conflicts <<'PYEOF'
+import pathlib, subprocess, sys, tomllib
+base, main, integration, *conflicts = sys.argv[1:]
+def blob(ref, path):
+    out = subprocess.run(["git", "rev-parse", "-q", "--verify", f"{ref}:{path}"],
+                         capture_output=True, text=True)
+    return out.stdout.strip() if out.returncode == 0 else ""
+for entry in sorted(pathlib.Path("tools/refactor/merge_resolutions").glob("*.toml")):
+    spec = tomllib.loads(entry.read_text())
+    path = spec["path"]
+    if path not in conflicts:
+        continue
+    want = (spec["base_blob"], spec["main_blob"], spec["integration_blob"])
+    have = (blob(base, path), blob(main, path), blob(integration, path))
+    if want != have:
+        print(f"STALE {entry.name} {path} recorded={'/'.join(want)} now={'/'.join(have)}")
+        continue
+    target = pathlib.Path(path)
+    target.write_bytes((entry.parent / spec["resolved"]).read_bytes())
+    subprocess.run(["git", "add", "--", path], check=True)
+    print(f"APPLIED {entry.stem} {path} {'/'.join(have)}")
+PYEOF
+) || die 3 "cannot read tools/refactor/merge_resolutions"
+fi
+stale=$(printf '%s\n' "$resolved" | grep '^STALE ' || true)
+[ -z "$stale" ] || die 10 "a merge resolution entry does not match this merge's blobs (stale or partial; refresh it with its reviewers):
+$stale"
+printf '%s\n' "$resolved" | awk '$1 == "APPLIED" {print "s3_merge: merge_resolution " $2 ": applied to " $3 ", blobs base/main/int = " $4}'
+resolved=$(printf '%s\n' "$resolved" | awk '$1 == "APPLIED" {print $3}')
+
 for path in $conflicts; do
+  printf '%s\n' "$resolved" | grep -qx "$path" && continue
   case "$path" in
     server/server.py) ;;
     *) printf '%s\n' "$generated" $split_old $split_generated | grep -qx "$path" \
