@@ -18,4 +18,7 @@ class TTSProvider(Protocol):
     id: str
     voice: str | None
 
+    @property
+    def available(self) -> bool: ...
+
     def synthesize(self, text: str, sink: AudioSink) -> int: ...

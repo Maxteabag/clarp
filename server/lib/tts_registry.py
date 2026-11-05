@@ -76,6 +76,19 @@ class ConfiguredProvider:
         self.id, self.registry = selected, registry
         self.voice = None
 
+    @property
+    def available(self) -> bool:
+        """False only for a provider whose missing key/voice is known locally.
+
+        Other providers validate their credentials at synthesis time; this does
+        not contact providers or replace their authoritative error handling.
+        """
+        if self.id == CARTESIA:
+            return bool(self.registry.cartesia_voice and self.registry.cfg.cartesia_key())
+        if self.id == ELEVENLABS:
+            return bool(self.registry.eleven_voice and self.registry.cfg.eleven_key())
+        return True
+
     def synthesize(self, text: str, sink: AudioSink) -> int:
         selected, cfg = self.id, self.registry.cfg
         raw_voice, agent = self.registry.raw_voice, self.registry.agent
