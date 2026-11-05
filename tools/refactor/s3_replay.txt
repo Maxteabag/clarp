@@ -4,3 +4,4 @@
 # port of a diff that no longer applies; '#' starts a comment.
 file:s3_replay/seam-on-main-06d5f840.diff  # S3 seam (052ac4ba) ported to main 06d5f840: do_PATCH keeps HTTP-02's limited-device guard in its gate prelude
 c1b7b999e3f5906cef4ca58a61962dabc82c18f9  # S3 rebinding: _handle_diagnostics_health reads srv.boot_config
+file:s3_replay/s7-3c-preview-narration.diff  # S7 3c: signed VP-10 preview/narration fallback, before recipe 10 regenerates VoiceRoutes
