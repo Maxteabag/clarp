@@ -500,6 +500,30 @@ def test_spawn_turn_drainer_is_daemon_so_python_can_exit(fake_clarp, tmp_path):
     assert handle.drain_thread.daemon is True
 
 
+def test_isolated_turn_delivers_only_the_last_results_assistant_text(fake_clarp, tmp_path):
+    """A resumed process may answer a background task before the requested turn."""
+    fake_clarp([
+        {"type": "system", "subtype": "init", "session_id": "multi-result"},
+        {"type": "assistant", "message": {"content": "Background answer"}},
+        {"type": "result", "subtype": "success", "result": "background"},
+        {"type": "stream_event", "event": {
+            "type": "content_block_delta", "delta": {"type": "text_delta", "text": "Final "}}},
+        {"type": "stream_event", "event": {
+            "type": "content_block_delta", "delta": {"type": "text_delta", "text": "answer"}}},
+        {"type": "result", "subtype": "success", "result": "requested"},
+    ])
+    results, errors = [], []
+    handle = CLAUDE.start_turn(
+        text="requested", cwd=tmp_path, isolated=True,
+        on_result=results.append, on_error=errors.append)
+    handle.wait(timeout=5)
+    handle.drain_thread.join(timeout=5)
+    assert not handle.drain_thread.is_alive()
+    assert errors == []
+    assert results == [{"type": "result", "subtype": "success",
+                        "result": "requested", "_assistant_text": "Final answer"}]
+
+
 def test_spawn_turn_callback_exception_is_isolated(fake_clarp, tmp_path):
     """A bad on_session_init must not crash the drainer thread or
     prevent subsequent events (result) from firing."""
