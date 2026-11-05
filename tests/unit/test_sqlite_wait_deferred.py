@@ -138,3 +138,24 @@ def test_wait_queue_does_not_keep_an_abandoned_writer_connection_alive(tmp_path,
         other.rollback()
     eventlog.flush_deferred()
     assert [r["event"] for r in _lines(tmp_path)] == ["sqliteWriteWait"]
+
+
+def test_failed_wait_producer_does_not_defer_later_unrelated_logging(tmp_path, monkeypatch, capsys):
+    connection = db.conn()
+    eventlog.reset_for_tests(tmp_path)
+    connection.execute("BEGIN IMMEDIATE")
+
+    def failing_log(event, detail):
+        raise RuntimeError("synthetic sink failure")
+
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(log, "log", failing_log)
+            with pytest.raises(RuntimeError, match="synthetic sink failure"):
+                log.sqlite_write_wait("synthetic failed producer", connection)
+        capsys.readouterr()
+        log.log("sqliteWriteWait", "synthetic unrelated producer")
+        assert "synthetic unrelated producer" in capsys.readouterr().err
+        assert [row["event"] for row in _lines(tmp_path)] == ["sqliteWriteWait"]
+    finally:
+        connection.rollback()
