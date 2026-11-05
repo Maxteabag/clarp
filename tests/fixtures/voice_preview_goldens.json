@@ -94,9 +94,21 @@
     },
     "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
     "voice": "cart-voice"
+   },
+   {
+    "operation": "synthesize",
+    "provider": "deepgram",
+    "settings": {
+     "api_key": "deepgram-key"
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "flux-haley-en"
    }
   ],
-  "events": [],
+  "events": [
+   "providerFallback",
+   "providerFallbackFailed"
+  ],
   "files": [],
   "response": {
    "body": "preview unavailable",
@@ -114,9 +126,21 @@
     },
     "text": "Press+once",
     "voice": "narrator-voice"
+   },
+   {
+    "operation": "synthesize",
+    "provider": "deepgram",
+    "settings": {
+     "api_key": "deepgram-key"
+    },
+    "text": "Press+once",
+    "voice": "flux-haley-en"
    }
   ],
-  "events": [],
+  "events": [
+   "providerFallback",
+   "providerFallbackFailed"
+  ],
   "files": [],
   "response": {
    "body": "narration unavailable",
@@ -134,9 +158,21 @@
     },
     "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
     "voice": "cart-voice"
+   },
+   {
+    "operation": "synthesize",
+    "provider": "deepgram",
+    "settings": {
+     "api_key": "deepgram-key"
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "flux-haley-en"
    }
   ],
-  "events": [],
+  "events": [
+   "providerFallback",
+   "providerFallbackFailed"
+  ],
   "files": [],
   "response": {
    "body": "preview unavailable",
@@ -151,9 +187,21 @@
     "settings": {},
     "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
     "voice": "custom-voice"
+   },
+   {
+    "operation": "synthesize",
+    "provider": "deepgram",
+    "settings": {
+     "api_key": "deepgram-key"
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "flux-haley-en"
    }
   ],
-  "events": [],
+  "events": [
+   "providerFallback",
+   "providerFallbackFailed"
+  ],
   "files": [],
   "response": {
    "body": "preview unavailable",
@@ -191,9 +239,21 @@
     },
     "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
     "voice": "eleven-voice"
+   },
+   {
+    "operation": "synthesize",
+    "provider": "deepgram",
+    "settings": {
+     "api_key": "deepgram-key"
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "flux-haley-en"
    }
   ],
-  "events": [],
+  "events": [
+   "providerFallback",
+   "providerFallbackFailed"
+  ],
   "files": [],
   "response": {
    "body": "preview unavailable",
@@ -211,9 +271,21 @@
     },
     "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
     "voice": "Kore"
+   },
+   {
+    "operation": "synthesize",
+    "provider": "deepgram",
+    "settings": {
+     "api_key": "deepgram-key"
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "flux-haley-en"
    }
   ],
-  "events": [],
+  "events": [
+   "providerFallback",
+   "providerFallbackFailed"
+  ],
   "files": [],
   "response": {
    "body": "preview unavailable",
@@ -228,9 +300,21 @@
     "settings": {},
     "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
     "voice": "nb-NO-Chirp3-HD-Aoede"
+   },
+   {
+    "operation": "synthesize",
+    "provider": "deepgram",
+    "settings": {
+     "api_key": "deepgram-key"
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "flux-haley-en"
    }
   ],
-  "events": [],
+  "events": [
+   "providerFallback",
+   "providerFallbackFailed"
+  ],
   "files": [],
   "response": {
    "body": "preview unavailable",
@@ -245,9 +329,21 @@
     "settings": {},
     "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
     "voice": "openai-voice"
+   },
+   {
+    "operation": "synthesize",
+    "provider": "deepgram",
+    "settings": {
+     "api_key": "deepgram-key"
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "flux-haley-en"
    }
   ],
-  "events": [],
+  "events": [
+   "providerFallback",
+   "providerFallbackFailed"
+  ],
   "files": [],
   "response": {
    "body": "preview unavailable",
@@ -265,9 +361,23 @@
     },
     "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
     "voice": "cart-voice"
+   },
+   {
+    "operation": "synthesize",
+    "provider": "elevenlabs",
+    "settings": {
+     "api_key": "eleven-key",
+     "model": "eleven_flash_v2_5",
+     "speed": 1.2
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "cart-voice"
    }
   ],
-  "events": [],
+  "events": [
+   "providerFallback",
+   "providerFallbackFailed"
+  ],
   "files": [],
   "response": {
    "body": "preview unavailable",
@@ -285,9 +395,23 @@
     },
     "text": "Press+once",
     "voice": "narrator-voice"
+   },
+   {
+    "operation": "synthesize",
+    "provider": "elevenlabs",
+    "settings": {
+     "api_key": "eleven-key",
+     "model": "eleven_flash_v2_5",
+     "speed": 1.2
+    },
+    "text": "Press+once",
+    "voice": "narrator-voice"
    }
   ],
-  "events": [],
+  "events": [
+   "providerFallback",
+   "providerFallbackFailed"
+  ],
   "files": [],
   "response": {
    "body": "narration unavailable",
@@ -305,9 +429,23 @@
     },
     "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
     "voice": "cart-voice"
+   },
+   {
+    "operation": "synthesize",
+    "provider": "elevenlabs",
+    "settings": {
+     "api_key": "eleven-key",
+     "model": "eleven_flash_v2_5",
+     "speed": 1.2
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "cart-voice"
    }
   ],
-  "events": [],
+  "events": [
+   "providerFallback",
+   "providerFallbackFailed"
+  ],
   "files": [],
   "response": {
    "body": "preview unavailable",
@@ -322,9 +460,23 @@
     "settings": {},
     "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
     "voice": "custom-voice"
+   },
+   {
+    "operation": "synthesize",
+    "provider": "elevenlabs",
+    "settings": {
+     "api_key": "eleven-key",
+     "model": "eleven_flash_v2_5",
+     "speed": 1.2
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "custom-voice"
    }
   ],
-  "events": [],
+  "events": [
+   "providerFallback",
+   "providerFallbackFailed"
+  ],
   "files": [],
   "response": {
    "body": "preview unavailable",
@@ -341,9 +493,23 @@
     },
     "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
     "voice": "aura-asteria-en"
+   },
+   {
+    "operation": "synthesize",
+    "provider": "elevenlabs",
+    "settings": {
+     "api_key": "eleven-key",
+     "model": "eleven_flash_v2_5",
+     "speed": 1.2
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "aura-asteria-en"
    }
   ],
-  "events": [],
+  "events": [
+   "providerFallback",
+   "providerFallbackFailed"
+  ],
   "files": [],
   "response": {
    "body": "preview unavailable",
@@ -382,9 +548,23 @@
     },
     "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
     "voice": "Kore"
+   },
+   {
+    "operation": "synthesize",
+    "provider": "elevenlabs",
+    "settings": {
+     "api_key": "eleven-key",
+     "model": "eleven_flash_v2_5",
+     "speed": 1.2
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "Kore"
    }
   ],
-  "events": [],
+  "events": [
+   "providerFallback",
+   "providerFallbackFailed"
+  ],
   "files": [],
   "response": {
    "body": "preview unavailable",
@@ -399,9 +579,23 @@
     "settings": {},
     "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
     "voice": "nb-NO-Chirp3-HD-Aoede"
+   },
+   {
+    "operation": "synthesize",
+    "provider": "elevenlabs",
+    "settings": {
+     "api_key": "eleven-key",
+     "model": "eleven_flash_v2_5",
+     "speed": 1.2
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "nb-NO-Chirp3-HD-Aoede"
    }
   ],
-  "events": [],
+  "events": [
+   "providerFallback",
+   "providerFallbackFailed"
+  ],
   "files": [],
   "response": {
    "body": "preview unavailable",
@@ -416,9 +610,23 @@
     "settings": {},
     "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
     "voice": "openai-voice"
+   },
+   {
+    "operation": "synthesize",
+    "provider": "elevenlabs",
+    "settings": {
+     "api_key": "eleven-key",
+     "model": "eleven_flash_v2_5",
+     "speed": 1.2
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "openai-voice"
    }
   ],
-  "events": [],
+  "events": [
+   "providerFallback",
+   "providerFallbackFailed"
+  ],
   "files": [],
   "response": {
    "body": "preview unavailable",
@@ -1282,13 +1490,24 @@
     },
     "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
     "voice": "cart-voice"
+   },
+   {
+    "operation": "synthesize",
+    "provider": "deepgram",
+    "settings": {
+     "api_key": "deepgram-key"
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "flux-haley-en"
    }
   ],
-  "events": [],
+  "events": [
+   "providerFallback"
+  ],
   "files": [],
   "response": {
-   "body": "preview unavailable",
-   "status": 502
+   "body": "audio:deepgram",
+   "status": 200
   }
  },
  "cached=False|edge=none|failure=primary-fails|fallback=deepgram|kind=controller-narration|provider=cartesia": {
@@ -1302,13 +1521,24 @@
     },
     "text": "Press+once",
     "voice": "narrator-voice"
+   },
+   {
+    "operation": "synthesize",
+    "provider": "deepgram",
+    "settings": {
+     "api_key": "deepgram-key"
+    },
+    "text": "Press+once",
+    "voice": "flux-haley-en"
    }
   ],
-  "events": [],
+  "events": [
+   "providerFallback"
+  ],
   "files": [],
   "response": {
-   "body": "narration unavailable",
-   "status": 502
+   "body": "audio:deepgram",
+   "status": 200
   }
  },
  "cached=False|edge=none|failure=primary-fails|fallback=deepgram|kind=voice-preview|provider=cartesia": {
@@ -1322,13 +1552,24 @@
     },
     "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
     "voice": "cart-voice"
+   },
+   {
+    "operation": "synthesize",
+    "provider": "deepgram",
+    "settings": {
+     "api_key": "deepgram-key"
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "flux-haley-en"
    }
   ],
-  "events": [],
+  "events": [
+   "providerFallback"
+  ],
   "files": [],
   "response": {
-   "body": "preview unavailable",
-   "status": 502
+   "body": "audio:deepgram",
+   "status": 200
   }
  },
  "cached=False|edge=none|failure=primary-fails|fallback=deepgram|kind=voice-preview|provider=custom.rec": {
@@ -1339,13 +1580,24 @@
     "settings": {},
     "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
     "voice": "custom-voice"
+   },
+   {
+    "operation": "synthesize",
+    "provider": "deepgram",
+    "settings": {
+     "api_key": "deepgram-key"
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "flux-haley-en"
    }
   ],
-  "events": [],
+  "events": [
+   "providerFallback"
+  ],
   "files": [],
   "response": {
-   "body": "preview unavailable",
-   "status": 502
+   "body": "audio:deepgram",
+   "status": 200
   }
  },
  "cached=False|edge=none|failure=primary-fails|fallback=deepgram|kind=voice-preview|provider=deepgram": {
@@ -1379,13 +1631,24 @@
     },
     "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
     "voice": "eleven-voice"
+   },
+   {
+    "operation": "synthesize",
+    "provider": "deepgram",
+    "settings": {
+     "api_key": "deepgram-key"
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "flux-haley-en"
    }
   ],
-  "events": [],
+  "events": [
+   "providerFallback"
+  ],
   "files": [],
   "response": {
-   "body": "preview unavailable",
-   "status": 502
+   "body": "audio:deepgram",
+   "status": 200
   }
  },
  "cached=False|edge=none|failure=primary-fails|fallback=deepgram|kind=voice-preview|provider=gemini": {
@@ -1399,13 +1662,24 @@
     },
     "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
     "voice": "Kore"
+   },
+   {
+    "operation": "synthesize",
+    "provider": "deepgram",
+    "settings": {
+     "api_key": "deepgram-key"
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "flux-haley-en"
    }
   ],
-  "events": [],
+  "events": [
+   "providerFallback"
+  ],
   "files": [],
   "response": {
-   "body": "preview unavailable",
-   "status": 502
+   "body": "audio:deepgram",
+   "status": 200
   }
  },
  "cached=False|edge=none|failure=primary-fails|fallback=deepgram|kind=voice-preview|provider=google": {
@@ -1416,13 +1690,24 @@
     "settings": {},
     "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
     "voice": "nb-NO-Chirp3-HD-Aoede"
+   },
+   {
+    "operation": "synthesize",
+    "provider": "deepgram",
+    "settings": {
+     "api_key": "deepgram-key"
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "flux-haley-en"
    }
   ],
-  "events": [],
+  "events": [
+   "providerFallback"
+  ],
   "files": [],
   "response": {
-   "body": "preview unavailable",
-   "status": 502
+   "body": "audio:deepgram",
+   "status": 200
   }
  },
  "cached=False|edge=none|failure=primary-fails|fallback=deepgram|kind=voice-preview|provider=openai": {
@@ -1433,13 +1718,24 @@
     "settings": {},
     "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
     "voice": "openai-voice"
+   },
+   {
+    "operation": "synthesize",
+    "provider": "deepgram",
+    "settings": {
+     "api_key": "deepgram-key"
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "flux-haley-en"
    }
   ],
-  "events": [],
+  "events": [
+   "providerFallback"
+  ],
   "files": [],
   "response": {
-   "body": "preview unavailable",
-   "status": 502
+   "body": "audio:deepgram",
+   "status": 200
   }
  },
  "cached=False|edge=none|failure=primary-fails|fallback=elevenlabs|kind=cartesia-voice-preview|provider=cartesia": {
@@ -1453,13 +1749,26 @@
     },
     "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
     "voice": "cart-voice"
+   },
+   {
+    "operation": "synthesize",
+    "provider": "elevenlabs",
+    "settings": {
+     "api_key": "eleven-key",
+     "model": "eleven_flash_v2_5",
+     "speed": 1.2
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "cart-voice"
    }
   ],
-  "events": [],
+  "events": [
+   "providerFallback"
+  ],
   "files": [],
   "response": {
-   "body": "preview unavailable",
-   "status": 502
+   "body": "audio:elevenlabs",
+   "status": 200
   }
  },
  "cached=False|edge=none|failure=primary-fails|fallback=elevenlabs|kind=controller-narration|provider=cartesia": {
@@ -1473,13 +1782,26 @@
     },
     "text": "Press+once",
     "voice": "narrator-voice"
+   },
+   {
+    "operation": "synthesize",
+    "provider": "elevenlabs",
+    "settings": {
+     "api_key": "eleven-key",
+     "model": "eleven_flash_v2_5",
+     "speed": 1.2
+    },
+    "text": "Press+once",
+    "voice": "narrator-voice"
    }
   ],
-  "events": [],
+  "events": [
+   "providerFallback"
+  ],
   "files": [],
   "response": {
-   "body": "narration unavailable",
-   "status": 502
+   "body": "audio:elevenlabs",
+   "status": 200
   }
  },
  "cached=False|edge=none|failure=primary-fails|fallback=elevenlabs|kind=voice-preview|provider=cartesia": {
@@ -1493,13 +1815,26 @@
     },
     "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
     "voice": "cart-voice"
+   },
+   {
+    "operation": "synthesize",
+    "provider": "elevenlabs",
+    "settings": {
+     "api_key": "eleven-key",
+     "model": "eleven_flash_v2_5",
+     "speed": 1.2
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "cart-voice"
    }
   ],
-  "events": [],
+  "events": [
+   "providerFallback"
+  ],
   "files": [],
   "response": {
-   "body": "preview unavailable",
-   "status": 502
+   "body": "audio:elevenlabs",
+   "status": 200
   }
  },
  "cached=False|edge=none|failure=primary-fails|fallback=elevenlabs|kind=voice-preview|provider=custom.rec": {
@@ -1510,13 +1845,26 @@
     "settings": {},
     "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
     "voice": "custom-voice"
+   },
+   {
+    "operation": "synthesize",
+    "provider": "elevenlabs",
+    "settings": {
+     "api_key": "eleven-key",
+     "model": "eleven_flash_v2_5",
+     "speed": 1.2
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "custom-voice"
    }
   ],
-  "events": [],
+  "events": [
+   "providerFallback"
+  ],
   "files": [],
   "response": {
-   "body": "preview unavailable",
-   "status": 502
+   "body": "audio:elevenlabs",
+   "status": 200
   }
  },
  "cached=False|edge=none|failure=primary-fails|fallback=elevenlabs|kind=voice-preview|provider=deepgram": {
@@ -1529,13 +1877,26 @@
     },
     "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
     "voice": "aura-asteria-en"
+   },
+   {
+    "operation": "synthesize",
+    "provider": "elevenlabs",
+    "settings": {
+     "api_key": "eleven-key",
+     "model": "eleven_flash_v2_5",
+     "speed": 1.2
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "aura-asteria-en"
    }
   ],
-  "events": [],
+  "events": [
+   "providerFallback"
+  ],
   "files": [],
   "response": {
-   "body": "preview unavailable",
-   "status": 502
+   "body": "audio:elevenlabs",
+   "status": 200
   }
  },
  "cached=False|edge=none|failure=primary-fails|fallback=elevenlabs|kind=voice-preview|provider=elevenlabs": {
@@ -1570,13 +1931,26 @@
     },
     "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
     "voice": "Kore"
+   },
+   {
+    "operation": "synthesize",
+    "provider": "elevenlabs",
+    "settings": {
+     "api_key": "eleven-key",
+     "model": "eleven_flash_v2_5",
+     "speed": 1.2
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "Kore"
    }
   ],
-  "events": [],
+  "events": [
+   "providerFallback"
+  ],
   "files": [],
   "response": {
-   "body": "preview unavailable",
-   "status": 502
+   "body": "audio:elevenlabs",
+   "status": 200
   }
  },
  "cached=False|edge=none|failure=primary-fails|fallback=elevenlabs|kind=voice-preview|provider=google": {
@@ -1587,13 +1961,26 @@
     "settings": {},
     "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
     "voice": "nb-NO-Chirp3-HD-Aoede"
+   },
+   {
+    "operation": "synthesize",
+    "provider": "elevenlabs",
+    "settings": {
+     "api_key": "eleven-key",
+     "model": "eleven_flash_v2_5",
+     "speed": 1.2
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "nb-NO-Chirp3-HD-Aoede"
    }
   ],
-  "events": [],
+  "events": [
+   "providerFallback"
+  ],
   "files": [],
   "response": {
-   "body": "preview unavailable",
-   "status": 502
+   "body": "audio:elevenlabs",
+   "status": 200
   }
  },
  "cached=False|edge=none|failure=primary-fails|fallback=elevenlabs|kind=voice-preview|provider=openai": {
@@ -1604,13 +1991,26 @@
     "settings": {},
     "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
     "voice": "openai-voice"
+   },
+   {
+    "operation": "synthesize",
+    "provider": "elevenlabs",
+    "settings": {
+     "api_key": "eleven-key",
+     "model": "eleven_flash_v2_5",
+     "speed": 1.2
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "openai-voice"
    }
   ],
-  "events": [],
+  "events": [
+   "providerFallback"
+  ],
   "files": [],
   "response": {
-   "body": "preview unavailable",
-   "status": 502
+   "body": "audio:elevenlabs",
+   "status": 200
   }
  },
  "cached=False|edge=none|failure=primary-fails|fallback=none|kind=cartesia-voice-preview|provider=cartesia": {
