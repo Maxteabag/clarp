@@ -949,3 +949,18 @@ def test_an_explainer_patch_crossing_into_the_next_turn_stays_a_difference():
     in_turn = [frame(1, start), frame(2, tool), frame(3, explain), frame(4, done)]
     after_done = [frame(1, start), frame(2, tool), frame(3, done), frame(4, explain)]
     assert not _report(_capture(sse=in_turn), _capture(sse=after_done)).items
+
+
+def test_an_errors_only_scenario_gates_on_its_run_error_but_is_not_compared():
+    import run
+    import scenarios
+    s = {'id': 's', 'errors_only': 'a race with two correct outcomes'}
+    other = {'id': 'o'}
+    gating, known = run.split([s, other])
+    assert gating == [s, other] and not known
+    assert run.compared(gating) == [other]
+    results = {'run1': {'s': {'error': 'step 4 (quiesce): timed out'}, 'o': {'error': None}}}
+    assert run.errors(results, gating) == ['run1/s: step 4 (quiesce): timed out']
+    # Every errors_only scenario says why its captures are not compared.
+    assert all(isinstance(x['errors_only'], str) and x['errors_only'] for x in scenarios.SCENARIOS
+               if 'errors_only' in x)
