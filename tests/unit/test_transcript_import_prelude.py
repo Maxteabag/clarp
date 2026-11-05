@@ -2,6 +2,8 @@
 import sqlite3
 import time
 
+import pytest
+
 from lib import agents, db, message_store, message_turns, message_writes
 
 
@@ -85,3 +87,30 @@ def test_concurrent_provenance_change_is_revalidated_before_writing(tmp_path, mo
     assert out[-1]["sender_agent_id"] == "sender"
     assert tuple(connection.execute(
         "SELECT origin,sender_agent_id FROM messages WHERE message_id='reply'").fetchone()) == ("team", "sender")
+
+
+def test_repeated_prelude_changes_defer_without_partial_writes(tmp_path, monkeypatch):
+    agent = agents.create_agent(persona="Synthetic", voice_id="v", cwd=str(tmp_path), session="synthetic")
+    user = message_store.record_user_message(
+        agent_id=agent, backend_session_id="fixture", client_msg_id="client", text="question")
+    connection = db.conn()
+    path = connection.execute("PRAGMA database_list").fetchone()[2]
+    original = message_turns.TurnIndex.__init__
+    changes = []
+
+    def change_every_snapshot(self, database, agent_id):
+        original(self, database, agent_id)
+        with sqlite3.connect(path, isolation_level=None, timeout=0) as other:
+            other.execute("UPDATE messages SET updated_at=updated_at+1 WHERE message_id=?", (user["id"],))
+        changes.append(1)
+
+    monkeypatch.setattr(message_turns.TurnIndex, "__init__", change_every_snapshot)
+    with pytest.raises(sqlite3.OperationalError, match="database is locked"):
+        message_store.store_transcript_turns(
+            agent_id=agent, backend_session_id="fixture", source_file="fixture", turns=[
+                {"id": "new", "role": "assistant", "text": "answer",
+                 "timestamp": "2026-01-01T00:00:01Z"}])
+    assert 1 < len(changes) <= 4
+    assert not connection.in_transaction
+    assert not getattr(db._LOCAL, "import_batch", False)
+    assert connection.execute("SELECT count(*) FROM messages WHERE message_id='new'").fetchone()[0] == 0
