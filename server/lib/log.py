@@ -23,6 +23,14 @@ def _eventlog_emit(event: str, level: str, detail: str) -> None:
         pass
 
 
+def flush_deferred() -> None:
+    """Write the telemetry rows this thread queued inside a state transaction
+    (RM-N8b). db.py calls it when a transaction ends; it reaches the eventlog
+    through here because logging is the one way down the layers."""
+    from . import eventlog as _el
+    _el.flush_deferred()
+
+
 def log(event: str, detail: str = "") -> None:
     """Emit a single-line structured log entry to stderr AND a JSONL row.
 
