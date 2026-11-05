@@ -21,6 +21,8 @@ import ast
 import collections
 import pathlib
 
+import pytest
+
 SERVER = pathlib.Path(__file__).resolve().parents[2] / "server"
 _BROAD = frozenset({"Exception", "BaseException"})
 # Builtins whose no-argument call is an empty collection (set() has no literal).
@@ -193,14 +195,16 @@ def test_the_scanner_sees_every_silent_form():
     assert len(swallowed(tree)) == 8
 
 
-def test_declared_swallow_moves_with_its_source_but_new_code_stays_physical(tmp_path, monkeypatch):
+@pytest.mark.parametrize("cut", ["split", "method", "method-part"])
+def test_declared_swallow_moves_with_its_source_but_new_code_stays_physical(tmp_path, monkeypatch, cut):
     import sys
     import pytest
     from tests import patching
     root = tmp_path / 'server'
     (root / 'lib').mkdir(parents=True)
     (root / 'server.py').write_text('')
-    body = 'def moved():\n    try: pass\n    except Exception: pass\n'
+    body = ('def moved():\n    try: pass\n    except Exception: pass\n' if cut == 'split' else
+            'class Engine:\n    def moved(self):\n        try: pass\n        except Exception: pass\n')
     original = root / 'lib/old.py'
     original.write_text(body)
     recipes = tmp_path / 'splits'
@@ -209,10 +213,27 @@ def test_declared_swallow_moves_with_its_source_but_new_code_stays_physical(tmp_
     monkeypatch.setattr(sys.modules[__name__], 'SERVER', root)
     monkeypatch.setattr(sys.modules[__name__], 'BASELINE', {'lib/old.py': 1})
     assert current() == {'lib/old.py': 1}
-    (recipes / 's4.toml').write_text(
-        '[[split]]\nmodule="lib/old.py"\n'
-        '[[split.part]]\nmodule="lib/part.py"\nnames=["moved"]\n')
-    original.write_text('from .part import moved\n')
+    if cut == 'split':
+        (recipes / 's4.toml').write_text(
+            '[[split]]\nmodule="lib/old.py"\n'
+            '[[split.part]]\nmodule="lib/part.py"\nnames=["moved"]\n')
+        original.write_text('from .part import moved\n')
+    else:
+        source = 'lib/source.py' if cut == 'method-part' else 'lib/old.py'
+        if cut == 'method-part':
+            (recipes / 's4.toml').write_text(
+                '[[split]]\nmodule="lib/old.py"\n'
+                '[[split.part]]\nmodule="lib/source.py"\nnames=["Engine"]\n')
+            original.write_text('from .source import Engine\n')
+        methods = root.parent / 'tools/refactor/methods'
+        methods.mkdir(parents=True)
+        (methods / 's4.toml').write_text(
+            f'source_module="{source}"\nsource_class="Engine"\n'
+            '[[group]]\nname="debt"\nmodule="lib/part.py"\n'
+            'class="DebtMixin"\nmembers=["moved"]\n')
+        (root / source).write_text('from .part import DebtMixin\n'
+                                  'class Engine(DebtMixin):\n    def stays(self): pass\n')
+        body = body.replace('class Engine:', 'class DebtMixin:')
     part = root / 'lib/part.py'
     part.write_text(body)
     assert current() == {'lib/old.py': 1}
@@ -221,6 +242,16 @@ def test_declared_swallow_moves_with_its_source_but_new_code_stays_physical(tmp_
     assert current() == {'lib/old.py': 1, 'lib/part.py': 1}
     with pytest.raises(AssertionError, match='lib/part.py'):
         test_no_new_silently_swallowed_excepts()
+    if cut != 'split':
+        unlisted = '    def unlisted(self):\n        try: pass\n        except Exception: pass\n'
+        part.write_text(body + unlisted + added)
+        assert current() == {'lib/old.py': 1, 'lib/part.py': 2}
+        extra = body.replace('except Exception: pass',
+                             'except Exception: pass\n        try: pass\n        except Exception: pass')
+        part.write_text(extra + added)
+        assert current() == {'lib/old.py': 2, 'lib/part.py': 1}
+        with pytest.raises(AssertionError, match='lib/old.py'):
+            test_no_new_silently_swallowed_excepts()
     part.write_text(body.replace('except Exception: pass', 'except Exception: raise') + added)
     with pytest.raises(AssertionError, match='lib/old.py'):
         test_baseline_only_shrinks()
