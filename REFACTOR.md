@@ -185,9 +185,9 @@ continue as before.
 | Role | Session | Model | Owns |
 |---|---|---|---|
 | Lead | `hobbles-18b0` | Claude | this brief, scope, decisions, registers, sign-offs |
-| Merge captain | `rf-merge-f870` | Claude | landing on main, the gate script, the flake quarantine list, the parked-branch manifest |
+| Merge captain | `rf-mergec-fc0a` (was `rf-merge-f870`) | Codex | landing on main, the gate script, the flake quarantine list, the parked-branch manifest |
 | Release owner | `rf-release-d188` | Claude | windows, tags, backup, deploy, health check, rollback, break-glass, the canary node |
-| Harness owner | `rf-harness-eeb2` | Claude | `tests/replay/` (new), the corpus tools, planted changes, diff report |
+| Harness owner | `rf-harnessc-4a4a` (was `rf-harness-eeb2`) | Codex | `tests/replay/` (new), the corpus tools, planted changes, diff report |
 | Contract owner | `rf-contractc-be17` (was `rf-contract-80af`) | Codex | `server/lib/db_schema.py`, `server/lib/db_migrations.py`, `contract/`, `server/lib/server_identity.py` contract constants, the lifecycle kit (`server/lib/lifecycle.py`, `docs/architecture/lifecycles.md`), schema goldens |
 | Fix-lane owner | `rf-fix-c4ab` | Claude | one fix per commit, in the files the lead names per fix |
 | Fix-lane author 2 | `rf-fix2c-4f08` (was `rf-fix2-56f3`) | Codex | one fix per commit (voice, Oracle, autonomy findings), in the files the lead names |
@@ -199,10 +199,10 @@ continue as before.
 | Reviewer A (core) | `rf-review-core-bbc1` | Codex | verdicts only |
 | Reviewer B (rest) | `rf-review-rest-a79f` | Codex | verdicts only |
 | Reviewer C (read model, voice) | `rf-review-readmodel-300e` | Codex | verdicts only |
-| Reviewer A2 (turn engine, database) | `rf-review-core2-cf19` | Claude | verdicts only |
+| Reviewer A2 (turn engine, database) | `rf-review-core2c-d509` (was `rf-review-core2-cf19`) | Codex | verdicts only |
 | Slice owner S4 (turn engine) | `rf-s4c-8be3` (was `rf-s4-ca35`) | Codex | the turn engine restructure on `refactor/integration` (recipe + generator + facade, regenerated from main's text); G0 tests on main |
 | Slice owner S6 (backends) | `rf-s6c-0876` (was `rf-s6-8970`) | Codex | the backends restructure on `refactor/integration` (codex_app_server, the Codex pool, backend modules), same method; G0 tests on main |
-| Reviewer A3 (turn engine restructure, Phase 3) | `rf-review-core3-7399` | Claude | verdicts only (S4 and the Phase 3 lifecycle conversions; A2 keeps fixes on main, A reviews S6) |
+| Reviewer A3 (turn engine restructure, Phase 3) | `rf-review-core3c-d37f` (was `rf-review-core3-7399`) | Codex | verdicts only (S4 and the Phase 3 lifecycle conversions; A2 keeps fixes on main, A reviews S6) |
 | Sweep author a (function size) | `rf-sweep-a-0800` | Codex | over-150-line functions in realtime voice and Oracle (lead 543) |
 | Sweep author b (function size) | `rf-sweep-b-5ed1` | Codex | over-150-line functions in configuration, policies and providers (lead 543) |
 | Sweep author c (function size) | `rf-sweep-c-6178` | Codex | over-150-line functions in the runtime bridge, snapshots, goal recovery and explanations (lead 543) |
