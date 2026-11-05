@@ -24,7 +24,7 @@ from __future__ import annotations
 import re
 import sqlite3
 import time
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 
@@ -98,6 +98,10 @@ class Lifecycle:
     key: str = ""
     state_column: str = ""
     entered_column: str = ""  # epoch ms of the last transition; the reaper reads it
+    # Instead of one entered_column: a column per state that records its own
+    # entry time (claimed -> claimed_at). A transition stamps only its target's
+    # column, if it has one; the reaper reads the source state's column.
+    entered_columns: Mapping[str, str] = field(default_factory=dict)
     _table: dict[tuple[str, str], str] = field(init=False, repr=False, compare=False)
     _settled: frozenset[tuple[str, str]] = field(init=False, repr=False, compare=False)
 
@@ -118,8 +122,18 @@ class Lifecycle:
         return frozenset(found)
 
     def problems(self) -> list[str]:
-        binding = (self.table, self.key, self.state_column, self.entered_column)
-        out = [] if not any(binding) else [f"bad identifier {v!r}" for v in binding if not _IDENT.match(v)]
+        binding = (self.table, self.key, self.state_column)
+        stamps = ((self.entered_column,) if not self.entered_columns else ()) + tuple(self.entered_columns.values())
+        out = [] if not any(binding + stamps) else [
+            f"bad identifier {v!r}" for v in binding + stamps if not _IDENT.match(v)]
+        if self.entered_column and self.entered_columns:
+            out.append("use entered_column or entered_columns, not both")
+        if self.entered_columns and not self.table:
+            out.append("entered_columns needs a table")
+        out += [f"entered_columns names unknown state {s!r}" for s in sorted(set(self.entered_columns) - self.states)]
+        if self.entered_columns:
+            out += [f"state {s!r} has a deadline but no entered column" for s, w in sorted(self.waits.items())
+                    if isinstance(w, Deadline) and s not in self.entered_columns]
         if not self.final:
             out.append("no final state")
         if self.initial in self.final:
@@ -186,6 +200,10 @@ class Lifecycle:
         transition and is written."""
         return (event, state) in self._settled and (event, state) not in self._table
 
+    def entered_of(self, state: str) -> str:
+        """The column that holds ``state``'s entry time ('' when it has none)."""
+        return self.entered_columns.get(state, "") if self.entered_columns else self.entered_column
+
     def deadline(self, state: str, entered_at: int) -> int | None:
         wait = self.waits.get(state)
         return entered_at + wait.after_ms if isinstance(wait, Deadline) else None
@@ -246,13 +264,22 @@ def transaction(con: sqlite3.Connection) -> Iterator[Outbox]:
     outbox.run()
 
 
-def _columns(lc: Lifecycle, values: Mapping[str, object] | None) -> dict[str, object]:
+def _columns(lc: Lifecycle, values: Mapping[str, object] | None, target: str) -> dict[str, object]:
+    """The writes of a transition into ``target``: its state, its entry stamp
+    (if the state has an entered column) and the caller's values, which may
+    not touch the key, the state or that stamp."""
     values = dict(values or {})
-    reserved = {lc.key, lc.state_column, lc.entered_column} & set(values)
+    reserved = {lc.key, lc.state_column, lc.entered_of(target)} - {""}
+    reserved &= set(values)
     bad = [c for c in values if not _IDENT.match(c)]
     if reserved or bad:
         raise LifecycleError(f"{lc.name}: cannot set {sorted(reserved) + bad}")
     return values
+
+
+def _stamp(lc: Lifecycle, state: str, now: int) -> dict[str, object]:
+    stamp = lc.entered_of(state)
+    return {lc.state_column: state, **({stamp: now} if stamp else {})}
 
 
 def _require_txn(con: sqlite3.Connection, lc: Lifecycle) -> None:
@@ -265,7 +292,7 @@ def _require_txn(con: sqlite3.Connection, lc: Lifecycle) -> None:
 def create(con: sqlite3.Connection, lc: Lifecycle, key: object, *, now: int,
            values: Mapping[str, object] | None = None) -> Transition:
     _require_txn(con, lc)
-    cols = {lc.key: key, lc.state_column: lc.initial, lc.entered_column: now, **_columns(lc, values)}
+    cols = {lc.key: key, **_stamp(lc, lc.initial, now), **_columns(lc, values, lc.initial)}
     con.execute(f"INSERT INTO {lc.table} ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
                 tuple(cols.values()))
     return Transition(key, "created", "", lc.initial, now)
@@ -275,7 +302,7 @@ def compare_and_set(con: sqlite3.Connection, lc: Lifecycle, key: object, *, even
                     source: str, target: str, now: int,
                     values: Mapping[str, object] | None = None) -> Transition:
     _require_txn(con, lc)
-    cols = {lc.state_column: target, lc.entered_column: now, **_columns(lc, values)}
+    cols = {**_stamp(lc, target, now), **_columns(lc, values, target)}
     assignments = ", ".join(f"{c} = ?" for c in cols)
     cursor = con.execute(
         f"UPDATE {lc.table} SET {assignments} WHERE {lc.key} = ? AND {lc.state_column} = ?",
@@ -283,6 +310,46 @@ def compare_and_set(con: sqlite3.Connection, lc: Lifecycle, key: object, *, even
     if cursor.rowcount != 1:
         raise Conflict(lc.name, key, source)
     return Transition(key, event, source, target, now)
+
+
+def compare_and_set_where(con: sqlite3.Connection, lc: Lifecycle, events: str | Sequence[str], *,
+                          where: str, params: Sequence[object] = (), now: int,
+                          values: Mapping[str, object] | None = None,
+                          returning: str = "") -> int | list:
+    """A set-based compare-and-set, for an owner that moves every matching row
+    in one statement: ``UPDATE t SET state = <target> ... WHERE state IN
+    (<declared sources of the events>) AND (<where>)``, one statement per
+    target, in the caller's transaction. The sources come from the
+    declaration, never from the caller, so a row in any other state (a final
+    one in particular) is never touched; a correction never matches a row
+    already in its target. ``where`` is the owner's own SQL (never user
+    input). Returns the number of rows moved, or the ``returning`` columns of
+    every moved row."""
+    _require_txn(con, lc)
+    events = (events,) if isinstance(events, str) else tuple(events)
+    by_target: dict[str, set[str]] = {}
+    for (event, source), target in lc._table.items():
+        if event in events:
+            by_target.setdefault(target, set()).add(source)
+    unknown = [e for e in events if not any(k[0] == e for k in lc._table)]
+    if unknown:
+        raise LifecycleError(f"{lc.name}: no edge for event(s) {unknown}")
+    if returning and not all(_IDENT.match(c.strip()) for c in returning.split(",")):
+        raise LifecycleError(f"{lc.name}: bad returning columns {returning!r}")
+    moved: int | list = [] if returning else 0
+    for target, sources in sorted(by_target.items()):
+        cols = {**_stamp(lc, target, now), **_columns(lc, values, target)}
+        ordered = sorted(sources)
+        cursor = con.execute(
+            f"UPDATE {lc.table} SET {', '.join(f'{c} = ?' for c in cols)}"
+            f" WHERE {lc.state_column} IN ({', '.join('?' * len(ordered))}) AND ({where})"
+            + (f" RETURNING {returning}" if returning else ""),
+            (*cols.values(), *ordered, *params))
+        if returning:
+            moved += cursor.fetchall()
+        else:
+            moved += cursor.rowcount
+    return moved
 
 
 def transition(con: sqlite3.Connection, lc: Lifecycle, key: object, event: str, *, now: int,
@@ -326,12 +393,13 @@ def reap(con: sqlite3.Connection, lc: Lifecycle, *, now: int, limit: int = 100,
     for state, wait in deadlines:
         if after is not None and state < after[0]:
             continue
+        entered = lc.entered_of(state)  # validation guarantees one for a Deadline state
         keyset, args = "", []
         if after is not None and state == after[0]:
-            keyset, args = f" AND ({lc.entered_column}, {lc.key}) > (?, ?)", [after[1], after[2]]
+            keyset, args = f" AND ({entered}, {lc.key}) > (?, ?)", [after[1], after[2]]
         cursor = con.execute(
-            f"SELECT * FROM {lc.table} WHERE {lc.state_column} = ? AND {lc.entered_column} <= ?{keyset}"
-            f" ORDER BY {lc.entered_column}, {lc.key} LIMIT ?",
+            f"SELECT * FROM {lc.table} WHERE {lc.state_column} = ? AND {entered} <= ?{keyset}"
+            f" ORDER BY {entered}, {lc.key} LIMIT ?",
             (state, now - wait.after_ms, *args, limit - examined))
         names = [d[0] for d in cursor.description]
         rows = [dict(zip(names, r)) for r in cursor.fetchall()]
@@ -343,7 +411,7 @@ def reap(con: sqlite3.Connection, lc: Lifecycle, *, now: int, limit: int = 100,
                 moved.append(compare_and_set(con, lc, row[lc.key], event=event, source=state,
                                              target=target, now=now))
             if examined == limit:
-                return ReapBatch(moved, examined, (state, row[lc.entered_column], row[lc.key]))
+                return ReapBatch(moved, examined, (state, row[entered], row[lc.key]))
     return ReapBatch(moved, examined, None)
 
 
