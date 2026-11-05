@@ -286,9 +286,38 @@ a cancellation arriving after every lease deadline.
 
 This makes overlap conservation explicit and can delay the latest handoff
 until an earlier lease finishes/expires. It is a separately stated intended
-ordering refinement for lead/A2 review, not authority to change lease
-timeouts, duplicate-finish responses or public payloads. Mutants discarding
-S1's snapshot, forgetting cleanup after pop, or releasing S2 from S1 fail.
+ordering refinement APPROVED IN PRINCIPLE by lead642. The exact implementation
+commit still needs A2 code review and the lead's exact intended-difference
+signature. It is not authority to change lease timeouts, duplicate-finish
+responses or public payloads. Mutants discarding S1's snapshot, forgetting
+cleanup after pop, or releasing S2 from S1 fail.
+
+The current production lease deadline is **30 seconds from the existing
+lease timer's publication/start**, not 30 seconds from a later Stop or finish:
+runtime_bridge.py:467 defaults stop_lease_timeout to30.0; :489 retains the
+existing minimum clamp; :663-669 starts that timer after lease publication.
+server/runtime.py:47 does not override it. Tests may inject shorter clocks/
+deadlines; that is not a production timeout change. Each earlier record keeps
+its original deadline. Supersession, waiting, retry or a duplicate finish must
+never restart/extend it. The added payload-readiness wait ends when Host
+finish arrives or, at worst, at that earlier lease's existing deadline. The
+usual expiry/cleanup/owner checks still execute; this is not a new wall-clock
+SLA for an OS timer, storage or an unrelated live provider owner.
+
+Specify a virtual-clock control: S1 publishes at t0 with deadline t0+30;
+S2 finishes at t0+5 while S1 is pending. No handoff before S1 finishes, but
+if no finish arrives, its existing expiry claims readiness at t0+30 with no
+new grace period. Exercise both finish orders, both expiry winners, S2
+failure, cancelled parked/taken-over rows and fresh Q2. Verify kept Q0 then
+Q1 then Q2, existing pause/fresh-arrival rights and ONE final handoff. A
+mutant extending the older deadline or skipping payload readiness must fail.
+
+Emit ONE log line on the transition into waiting for earlier payloads (not
+each poll): event stopPayloadWait with current/waited trace IDs, barrier/
+payload generation IDs and existing deadline/remaining duration. No prompts,
+queue text, transcripts or other content. Duplicate finish/polls do not log
+the same wait again. Test log cardinality/identifiers and absence of content
+using synthetic inputs; no new public event, payload or environment variable.
 
 ### 5. Drain uses tickets plus an atomic final generation check
 
