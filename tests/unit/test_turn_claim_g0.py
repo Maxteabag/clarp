@@ -18,7 +18,10 @@ def queued(tmp_path, monkeypatch):
                        text='synthetic queued request', trace_id='queued-trace',
                        client_msg_id='manual', synthesize_audio=False,
                        origin='user', sender_agent_id='')
-    return service, backend, agent_id
+    try:
+        yield service, backend, agent_id
+    finally:
+        td.reset_for_tests()
 
 
 def test_manual_send_busy_backend_preserves_retryable_queue(queued):
