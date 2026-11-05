@@ -1,0 +1,3451 @@
+{
+ "cached=False|edge=cold-catalog|failure=ok|fallback=elevenlabs|kind=cartesia-voice-preview|provider=cartesia": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "cartesia",
+    "settings": {
+     "api_key": "cart-key",
+     "model": "sonic-3.5"
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "cart-voice"
+   }
+  ],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:cartesia",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:cartesia",
+   "status": 200
+  }
+ },
+ "cached=False|edge=empty-text|failure=ok|fallback=elevenlabs|kind=controller-narration|provider=cartesia": {
+  "calls": [],
+  "events": [],
+  "files": [],
+  "response": {
+   "body": "text required (at most 240 characters)",
+   "status": 400
+  }
+ },
+ "cached=False|edge=id-collision|failure=ok|fallback=elevenlabs|kind=voice-preview|provider=google": {
+  "calls": [],
+  "events": [],
+  "files": [],
+  "response": {
+   "body": {
+    "error": "google_id_collision"
+   },
+   "status": 409
+  }
+ },
+ "cached=False|edge=id-unverifiable|failure=ok|fallback=elevenlabs|kind=voice-preview|provider=google": {
+  "calls": [],
+  "events": [],
+  "files": [],
+  "response": {
+   "body": {
+    "error": "google_id_unverifiable"
+   },
+   "status": 409
+  }
+ },
+ "cached=False|edge=long-text|failure=ok|fallback=elevenlabs|kind=controller-narration|provider=cartesia": {
+  "calls": [],
+  "events": [],
+  "files": [],
+  "response": {
+   "body": "text required (at most 240 characters)",
+   "status": 400
+  }
+ },
+ "cached=False|edge=missing-key|failure=ok|fallback=elevenlabs|kind=controller-narration|provider=cartesia": {
+  "calls": [],
+  "events": [],
+  "files": [],
+  "response": {
+   "body": "narration voice unavailable",
+   "status": 503
+  }
+ },
+ "cached=False|edge=missing-voice|failure=ok|fallback=elevenlabs|kind=controller-narration|provider=cartesia": {
+  "calls": [],
+  "events": [],
+  "files": [],
+  "response": {
+   "body": "narration voice unavailable",
+   "status": 503
+  }
+ },
+ "cached=False|edge=none|failure=both-fail|fallback=deepgram|kind=cartesia-voice-preview|provider=cartesia": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "cartesia",
+    "settings": {
+     "api_key": "cart-key",
+     "model": "sonic-3.5"
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "cart-voice"
+   },
+   {
+    "operation": "synthesize",
+    "provider": "deepgram",
+    "settings": {
+     "api_key": "deepgram-key"
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "flux-haley-en"
+   }
+  ],
+  "events": [
+   "providerFallback",
+   "providerFallbackFailed"
+  ],
+  "files": [],
+  "response": {
+   "body": "preview unavailable",
+   "status": 502
+  }
+ },
+ "cached=False|edge=none|failure=both-fail|fallback=deepgram|kind=controller-narration|provider=cartesia": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "cartesia",
+    "settings": {
+     "api_key": "cart-key",
+     "model": "sonic-3.5"
+    },
+    "text": "Press+once",
+    "voice": "narrator-voice"
+   },
+   {
+    "operation": "synthesize",
+    "provider": "deepgram",
+    "settings": {
+     "api_key": "deepgram-key"
+    },
+    "text": "Press+once",
+    "voice": "flux-haley-en"
+   }
+  ],
+  "events": [
+   "providerFallback",
+   "providerFallbackFailed"
+  ],
+  "files": [],
+  "response": {
+   "body": "narration unavailable",
+   "status": 502
+  }
+ },
+ "cached=False|edge=none|failure=both-fail|fallback=deepgram|kind=voice-preview|provider=cartesia": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "cartesia",
+    "settings": {
+     "api_key": "cart-key",
+     "model": "sonic-3.5"
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "cart-voice"
+   },
+   {
+    "operation": "synthesize",
+    "provider": "deepgram",
+    "settings": {
+     "api_key": "deepgram-key"
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "flux-haley-en"
+   }
+  ],
+  "events": [
+   "providerFallback",
+   "providerFallbackFailed"
+  ],
+  "files": [],
+  "response": {
+   "body": "preview unavailable",
+   "status": 502
+  }
+ },
+ "cached=False|edge=none|failure=both-fail|fallback=deepgram|kind=voice-preview|provider=custom.rec": {
+  "calls": [
+   {
+    "operation": "preview",
+    "provider": "custom.rec",
+    "settings": {},
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "custom-voice"
+   },
+   {
+    "operation": "synthesize",
+    "provider": "deepgram",
+    "settings": {
+     "api_key": "deepgram-key"
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "flux-haley-en"
+   }
+  ],
+  "events": [
+   "providerFallback",
+   "providerFallbackFailed"
+  ],
+  "files": [],
+  "response": {
+   "body": "preview unavailable",
+   "status": 502
+  }
+ },
+ "cached=False|edge=none|failure=both-fail|fallback=deepgram|kind=voice-preview|provider=deepgram": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "deepgram",
+    "settings": {
+     "api_key": "deepgram-key"
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "aura-asteria-en"
+   }
+  ],
+  "events": [],
+  "files": [],
+  "response": {
+   "body": "preview unavailable",
+   "status": 502
+  }
+ },
+ "cached=False|edge=none|failure=both-fail|fallback=deepgram|kind=voice-preview|provider=elevenlabs": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "elevenlabs",
+    "settings": {
+     "api_key": "eleven-key",
+     "model": "eleven_multilingual_v2",
+     "speed": 1.0
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "eleven-voice"
+   },
+   {
+    "operation": "synthesize",
+    "provider": "deepgram",
+    "settings": {
+     "api_key": "deepgram-key"
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "flux-haley-en"
+   }
+  ],
+  "events": [
+   "providerFallback",
+   "providerFallbackFailed"
+  ],
+  "files": [],
+  "response": {
+   "body": "preview unavailable",
+   "status": 502
+  }
+ },
+ "cached=False|edge=none|failure=both-fail|fallback=deepgram|kind=voice-preview|provider=gemini": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "gemini",
+    "settings": {
+     "api_key": "gemini-key",
+     "model": "gemini-3.8-flash-tts"
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "Kore"
+   },
+   {
+    "operation": "synthesize",
+    "provider": "deepgram",
+    "settings": {
+     "api_key": "deepgram-key"
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "flux-haley-en"
+   }
+  ],
+  "events": [
+   "providerFallback",
+   "providerFallbackFailed"
+  ],
+  "files": [],
+  "response": {
+   "body": "preview unavailable",
+   "status": 502
+  }
+ },
+ "cached=False|edge=none|failure=both-fail|fallback=deepgram|kind=voice-preview|provider=google": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "google",
+    "settings": {},
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "nb-NO-Chirp3-HD-Aoede"
+   },
+   {
+    "operation": "synthesize",
+    "provider": "deepgram",
+    "settings": {
+     "api_key": "deepgram-key"
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "flux-haley-en"
+   }
+  ],
+  "events": [
+   "providerFallback",
+   "providerFallbackFailed"
+  ],
+  "files": [],
+  "response": {
+   "body": "preview unavailable",
+   "status": 502
+  }
+ },
+ "cached=False|edge=none|failure=both-fail|fallback=deepgram|kind=voice-preview|provider=openai": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "openai",
+    "settings": {},
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "openai-voice"
+   },
+   {
+    "operation": "synthesize",
+    "provider": "deepgram",
+    "settings": {
+     "api_key": "deepgram-key"
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "flux-haley-en"
+   }
+  ],
+  "events": [
+   "providerFallback",
+   "providerFallbackFailed"
+  ],
+  "files": [],
+  "response": {
+   "body": "preview unavailable",
+   "status": 502
+  }
+ },
+ "cached=False|edge=none|failure=both-fail|fallback=elevenlabs|kind=cartesia-voice-preview|provider=cartesia": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "cartesia",
+    "settings": {
+     "api_key": "cart-key",
+     "model": "sonic-3.5"
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "cart-voice"
+   },
+   {
+    "operation": "synthesize",
+    "provider": "elevenlabs",
+    "settings": {
+     "api_key": "eleven-key",
+     "model": "eleven_flash_v2_5",
+     "speed": 1.2
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "cart-voice"
+   }
+  ],
+  "events": [
+   "providerFallback",
+   "providerFallbackFailed"
+  ],
+  "files": [],
+  "response": {
+   "body": "preview unavailable",
+   "status": 502
+  }
+ },
+ "cached=False|edge=none|failure=both-fail|fallback=elevenlabs|kind=controller-narration|provider=cartesia": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "cartesia",
+    "settings": {
+     "api_key": "cart-key",
+     "model": "sonic-3.5"
+    },
+    "text": "Press+once",
+    "voice": "narrator-voice"
+   },
+   {
+    "operation": "synthesize",
+    "provider": "elevenlabs",
+    "settings": {
+     "api_key": "eleven-key",
+     "model": "eleven_flash_v2_5",
+     "speed": 1.2
+    },
+    "text": "Press+once",
+    "voice": "narrator-voice"
+   }
+  ],
+  "events": [
+   "providerFallback",
+   "providerFallbackFailed"
+  ],
+  "files": [],
+  "response": {
+   "body": "narration unavailable",
+   "status": 502
+  }
+ },
+ "cached=False|edge=none|failure=both-fail|fallback=elevenlabs|kind=voice-preview|provider=cartesia": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "cartesia",
+    "settings": {
+     "api_key": "cart-key",
+     "model": "sonic-3.5"
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "cart-voice"
+   },
+   {
+    "operation": "synthesize",
+    "provider": "elevenlabs",
+    "settings": {
+     "api_key": "eleven-key",
+     "model": "eleven_flash_v2_5",
+     "speed": 1.2
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "cart-voice"
+   }
+  ],
+  "events": [
+   "providerFallback",
+   "providerFallbackFailed"
+  ],
+  "files": [],
+  "response": {
+   "body": "preview unavailable",
+   "status": 502
+  }
+ },
+ "cached=False|edge=none|failure=both-fail|fallback=elevenlabs|kind=voice-preview|provider=custom.rec": {
+  "calls": [
+   {
+    "operation": "preview",
+    "provider": "custom.rec",
+    "settings": {},
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "custom-voice"
+   },
+   {
+    "operation": "synthesize",
+    "provider": "elevenlabs",
+    "settings": {
+     "api_key": "eleven-key",
+     "model": "eleven_flash_v2_5",
+     "speed": 1.2
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "custom-voice"
+   }
+  ],
+  "events": [
+   "providerFallback",
+   "providerFallbackFailed"
+  ],
+  "files": [],
+  "response": {
+   "body": "preview unavailable",
+   "status": 502
+  }
+ },
+ "cached=False|edge=none|failure=both-fail|fallback=elevenlabs|kind=voice-preview|provider=deepgram": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "deepgram",
+    "settings": {
+     "api_key": "deepgram-key"
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "aura-asteria-en"
+   },
+   {
+    "operation": "synthesize",
+    "provider": "elevenlabs",
+    "settings": {
+     "api_key": "eleven-key",
+     "model": "eleven_flash_v2_5",
+     "speed": 1.2
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "aura-asteria-en"
+   }
+  ],
+  "events": [
+   "providerFallback",
+   "providerFallbackFailed"
+  ],
+  "files": [],
+  "response": {
+   "body": "preview unavailable",
+   "status": 502
+  }
+ },
+ "cached=False|edge=none|failure=both-fail|fallback=elevenlabs|kind=voice-preview|provider=elevenlabs": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "elevenlabs",
+    "settings": {
+     "api_key": "eleven-key",
+     "model": "eleven_multilingual_v2",
+     "speed": 1.0
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "eleven-voice"
+   }
+  ],
+  "events": [],
+  "files": [],
+  "response": {
+   "body": "preview unavailable",
+   "status": 502
+  }
+ },
+ "cached=False|edge=none|failure=both-fail|fallback=elevenlabs|kind=voice-preview|provider=gemini": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "gemini",
+    "settings": {
+     "api_key": "gemini-key",
+     "model": "gemini-3.8-flash-tts"
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "Kore"
+   },
+   {
+    "operation": "synthesize",
+    "provider": "elevenlabs",
+    "settings": {
+     "api_key": "eleven-key",
+     "model": "eleven_flash_v2_5",
+     "speed": 1.2
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "Kore"
+   }
+  ],
+  "events": [
+   "providerFallback",
+   "providerFallbackFailed"
+  ],
+  "files": [],
+  "response": {
+   "body": "preview unavailable",
+   "status": 502
+  }
+ },
+ "cached=False|edge=none|failure=both-fail|fallback=elevenlabs|kind=voice-preview|provider=google": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "google",
+    "settings": {},
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "nb-NO-Chirp3-HD-Aoede"
+   },
+   {
+    "operation": "synthesize",
+    "provider": "elevenlabs",
+    "settings": {
+     "api_key": "eleven-key",
+     "model": "eleven_flash_v2_5",
+     "speed": 1.2
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "nb-NO-Chirp3-HD-Aoede"
+   }
+  ],
+  "events": [
+   "providerFallback",
+   "providerFallbackFailed"
+  ],
+  "files": [],
+  "response": {
+   "body": "preview unavailable",
+   "status": 502
+  }
+ },
+ "cached=False|edge=none|failure=both-fail|fallback=elevenlabs|kind=voice-preview|provider=openai": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "openai",
+    "settings": {},
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "openai-voice"
+   },
+   {
+    "operation": "synthesize",
+    "provider": "elevenlabs",
+    "settings": {
+     "api_key": "eleven-key",
+     "model": "eleven_flash_v2_5",
+     "speed": 1.2
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "openai-voice"
+   }
+  ],
+  "events": [
+   "providerFallback",
+   "providerFallbackFailed"
+  ],
+  "files": [],
+  "response": {
+   "body": "preview unavailable",
+   "status": 502
+  }
+ },
+ "cached=False|edge=none|failure=both-fail|fallback=none|kind=cartesia-voice-preview|provider=cartesia": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "cartesia",
+    "settings": {
+     "api_key": "cart-key",
+     "model": "sonic-3.5"
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "cart-voice"
+   }
+  ],
+  "events": [],
+  "files": [],
+  "response": {
+   "body": "preview unavailable",
+   "status": 502
+  }
+ },
+ "cached=False|edge=none|failure=both-fail|fallback=none|kind=controller-narration|provider=cartesia": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "cartesia",
+    "settings": {
+     "api_key": "cart-key",
+     "model": "sonic-3.5"
+    },
+    "text": "Press+once",
+    "voice": "narrator-voice"
+   }
+  ],
+  "events": [],
+  "files": [],
+  "response": {
+   "body": "narration unavailable",
+   "status": 502
+  }
+ },
+ "cached=False|edge=none|failure=both-fail|fallback=none|kind=voice-preview|provider=cartesia": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "cartesia",
+    "settings": {
+     "api_key": "cart-key",
+     "model": "sonic-3.5"
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "cart-voice"
+   }
+  ],
+  "events": [],
+  "files": [],
+  "response": {
+   "body": "preview unavailable",
+   "status": 502
+  }
+ },
+ "cached=False|edge=none|failure=both-fail|fallback=none|kind=voice-preview|provider=custom.rec": {
+  "calls": [
+   {
+    "operation": "preview",
+    "provider": "custom.rec",
+    "settings": {},
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "custom-voice"
+   }
+  ],
+  "events": [],
+  "files": [],
+  "response": {
+   "body": "preview unavailable",
+   "status": 502
+  }
+ },
+ "cached=False|edge=none|failure=both-fail|fallback=none|kind=voice-preview|provider=deepgram": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "deepgram",
+    "settings": {
+     "api_key": "deepgram-key"
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "aura-asteria-en"
+   }
+  ],
+  "events": [],
+  "files": [],
+  "response": {
+   "body": "preview unavailable",
+   "status": 502
+  }
+ },
+ "cached=False|edge=none|failure=both-fail|fallback=none|kind=voice-preview|provider=elevenlabs": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "elevenlabs",
+    "settings": {
+     "api_key": "eleven-key",
+     "model": "eleven_multilingual_v2",
+     "speed": 1.0
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "eleven-voice"
+   }
+  ],
+  "events": [],
+  "files": [],
+  "response": {
+   "body": "preview unavailable",
+   "status": 502
+  }
+ },
+ "cached=False|edge=none|failure=both-fail|fallback=none|kind=voice-preview|provider=gemini": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "gemini",
+    "settings": {
+     "api_key": "gemini-key",
+     "model": "gemini-3.8-flash-tts"
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "Kore"
+   }
+  ],
+  "events": [],
+  "files": [],
+  "response": {
+   "body": "preview unavailable",
+   "status": 502
+  }
+ },
+ "cached=False|edge=none|failure=both-fail|fallback=none|kind=voice-preview|provider=google": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "google",
+    "settings": {},
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "nb-NO-Chirp3-HD-Aoede"
+   }
+  ],
+  "events": [],
+  "files": [],
+  "response": {
+   "body": "preview unavailable",
+   "status": 502
+  }
+ },
+ "cached=False|edge=none|failure=both-fail|fallback=none|kind=voice-preview|provider=openai": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "openai",
+    "settings": {},
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "openai-voice"
+   }
+  ],
+  "events": [],
+  "files": [],
+  "response": {
+   "body": "preview unavailable",
+   "status": 502
+  }
+ },
+ "cached=False|edge=none|failure=ok|fallback=deepgram|kind=cartesia-voice-preview|provider=cartesia": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "cartesia",
+    "settings": {
+     "api_key": "cart-key",
+     "model": "sonic-3.5"
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "cart-voice"
+   }
+  ],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:cartesia",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:cartesia",
+   "status": 200
+  }
+ },
+ "cached=False|edge=none|failure=ok|fallback=deepgram|kind=controller-narration|provider=cartesia": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "cartesia",
+    "settings": {
+     "api_key": "cart-key",
+     "model": "sonic-3.5"
+    },
+    "text": "Press+once",
+    "voice": "narrator-voice"
+   }
+  ],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:cartesia",
+    "directory": "controller-narration",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:cartesia",
+   "status": 200
+  }
+ },
+ "cached=False|edge=none|failure=ok|fallback=deepgram|kind=voice-preview|provider=cartesia": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "cartesia",
+    "settings": {
+     "api_key": "cart-key",
+     "model": "sonic-3.5"
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "cart-voice"
+   }
+  ],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:cartesia",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:cartesia",
+   "status": 200
+  }
+ },
+ "cached=False|edge=none|failure=ok|fallback=deepgram|kind=voice-preview|provider=custom.rec": {
+  "calls": [
+   {
+    "operation": "preview",
+    "provider": "custom.rec",
+    "settings": {},
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "custom-voice"
+   }
+  ],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:custom.rec",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:custom.rec",
+   "status": 200
+  }
+ },
+ "cached=False|edge=none|failure=ok|fallback=deepgram|kind=voice-preview|provider=deepgram": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "deepgram",
+    "settings": {
+     "api_key": "deepgram-key"
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "aura-asteria-en"
+   }
+  ],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:deepgram",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:deepgram",
+   "status": 200
+  }
+ },
+ "cached=False|edge=none|failure=ok|fallback=deepgram|kind=voice-preview|provider=elevenlabs": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "elevenlabs",
+    "settings": {
+     "api_key": "eleven-key",
+     "model": "eleven_multilingual_v2",
+     "speed": 1.0
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "eleven-voice"
+   }
+  ],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:elevenlabs",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:elevenlabs",
+   "status": 200
+  }
+ },
+ "cached=False|edge=none|failure=ok|fallback=deepgram|kind=voice-preview|provider=gemini": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "gemini",
+    "settings": {
+     "api_key": "gemini-key",
+     "model": "gemini-3.8-flash-tts"
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "Kore"
+   }
+  ],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:gemini",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:gemini",
+   "status": 200
+  }
+ },
+ "cached=False|edge=none|failure=ok|fallback=deepgram|kind=voice-preview|provider=google": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "google",
+    "settings": {},
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "nb-NO-Chirp3-HD-Aoede"
+   }
+  ],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:google",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:google",
+   "status": 200
+  }
+ },
+ "cached=False|edge=none|failure=ok|fallback=deepgram|kind=voice-preview|provider=openai": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "openai",
+    "settings": {},
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "openai-voice"
+   }
+  ],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:openai",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:openai",
+   "status": 200
+  }
+ },
+ "cached=False|edge=none|failure=ok|fallback=elevenlabs|kind=cartesia-voice-preview|provider=cartesia": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "cartesia",
+    "settings": {
+     "api_key": "cart-key",
+     "model": "sonic-3.5"
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "cart-voice"
+   }
+  ],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:cartesia",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:cartesia",
+   "status": 200
+  }
+ },
+ "cached=False|edge=none|failure=ok|fallback=elevenlabs|kind=controller-narration|provider=cartesia": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "cartesia",
+    "settings": {
+     "api_key": "cart-key",
+     "model": "sonic-3.5"
+    },
+    "text": "Press+once",
+    "voice": "narrator-voice"
+   }
+  ],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:cartesia",
+    "directory": "controller-narration",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:cartesia",
+   "status": 200
+  }
+ },
+ "cached=False|edge=none|failure=ok|fallback=elevenlabs|kind=voice-preview|provider=cartesia": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "cartesia",
+    "settings": {
+     "api_key": "cart-key",
+     "model": "sonic-3.5"
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "cart-voice"
+   }
+  ],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:cartesia",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:cartesia",
+   "status": 200
+  }
+ },
+ "cached=False|edge=none|failure=ok|fallback=elevenlabs|kind=voice-preview|provider=custom.rec": {
+  "calls": [
+   {
+    "operation": "preview",
+    "provider": "custom.rec",
+    "settings": {},
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "custom-voice"
+   }
+  ],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:custom.rec",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:custom.rec",
+   "status": 200
+  }
+ },
+ "cached=False|edge=none|failure=ok|fallback=elevenlabs|kind=voice-preview|provider=deepgram": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "deepgram",
+    "settings": {
+     "api_key": "deepgram-key"
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "aura-asteria-en"
+   }
+  ],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:deepgram",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:deepgram",
+   "status": 200
+  }
+ },
+ "cached=False|edge=none|failure=ok|fallback=elevenlabs|kind=voice-preview|provider=elevenlabs": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "elevenlabs",
+    "settings": {
+     "api_key": "eleven-key",
+     "model": "eleven_multilingual_v2",
+     "speed": 1.0
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "eleven-voice"
+   }
+  ],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:elevenlabs",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:elevenlabs",
+   "status": 200
+  }
+ },
+ "cached=False|edge=none|failure=ok|fallback=elevenlabs|kind=voice-preview|provider=gemini": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "gemini",
+    "settings": {
+     "api_key": "gemini-key",
+     "model": "gemini-3.8-flash-tts"
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "Kore"
+   }
+  ],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:gemini",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:gemini",
+   "status": 200
+  }
+ },
+ "cached=False|edge=none|failure=ok|fallback=elevenlabs|kind=voice-preview|provider=google": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "google",
+    "settings": {},
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "nb-NO-Chirp3-HD-Aoede"
+   }
+  ],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:google",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:google",
+   "status": 200
+  }
+ },
+ "cached=False|edge=none|failure=ok|fallback=elevenlabs|kind=voice-preview|provider=openai": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "openai",
+    "settings": {},
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "openai-voice"
+   }
+  ],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:openai",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:openai",
+   "status": 200
+  }
+ },
+ "cached=False|edge=none|failure=ok|fallback=none|kind=cartesia-voice-preview|provider=cartesia": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "cartesia",
+    "settings": {
+     "api_key": "cart-key",
+     "model": "sonic-3.5"
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "cart-voice"
+   }
+  ],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:cartesia",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:cartesia",
+   "status": 200
+  }
+ },
+ "cached=False|edge=none|failure=ok|fallback=none|kind=controller-narration|provider=cartesia": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "cartesia",
+    "settings": {
+     "api_key": "cart-key",
+     "model": "sonic-3.5"
+    },
+    "text": "Press+once",
+    "voice": "narrator-voice"
+   }
+  ],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:cartesia",
+    "directory": "controller-narration",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:cartesia",
+   "status": 200
+  }
+ },
+ "cached=False|edge=none|failure=ok|fallback=none|kind=voice-preview|provider=cartesia": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "cartesia",
+    "settings": {
+     "api_key": "cart-key",
+     "model": "sonic-3.5"
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "cart-voice"
+   }
+  ],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:cartesia",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:cartesia",
+   "status": 200
+  }
+ },
+ "cached=False|edge=none|failure=ok|fallback=none|kind=voice-preview|provider=custom.rec": {
+  "calls": [
+   {
+    "operation": "preview",
+    "provider": "custom.rec",
+    "settings": {},
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "custom-voice"
+   }
+  ],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:custom.rec",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:custom.rec",
+   "status": 200
+  }
+ },
+ "cached=False|edge=none|failure=ok|fallback=none|kind=voice-preview|provider=deepgram": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "deepgram",
+    "settings": {
+     "api_key": "deepgram-key"
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "aura-asteria-en"
+   }
+  ],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:deepgram",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:deepgram",
+   "status": 200
+  }
+ },
+ "cached=False|edge=none|failure=ok|fallback=none|kind=voice-preview|provider=elevenlabs": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "elevenlabs",
+    "settings": {
+     "api_key": "eleven-key",
+     "model": "eleven_multilingual_v2",
+     "speed": 1.0
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "eleven-voice"
+   }
+  ],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:elevenlabs",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:elevenlabs",
+   "status": 200
+  }
+ },
+ "cached=False|edge=none|failure=ok|fallback=none|kind=voice-preview|provider=gemini": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "gemini",
+    "settings": {
+     "api_key": "gemini-key",
+     "model": "gemini-3.8-flash-tts"
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "Kore"
+   }
+  ],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:gemini",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:gemini",
+   "status": 200
+  }
+ },
+ "cached=False|edge=none|failure=ok|fallback=none|kind=voice-preview|provider=google": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "google",
+    "settings": {},
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "nb-NO-Chirp3-HD-Aoede"
+   }
+  ],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:google",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:google",
+   "status": 200
+  }
+ },
+ "cached=False|edge=none|failure=ok|fallback=none|kind=voice-preview|provider=openai": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "openai",
+    "settings": {},
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "openai-voice"
+   }
+  ],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:openai",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:openai",
+   "status": 200
+  }
+ },
+ "cached=False|edge=none|failure=primary-fails|fallback=deepgram|kind=cartesia-voice-preview|provider=cartesia": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "cartesia",
+    "settings": {
+     "api_key": "cart-key",
+     "model": "sonic-3.5"
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "cart-voice"
+   },
+   {
+    "operation": "synthesize",
+    "provider": "deepgram",
+    "settings": {
+     "api_key": "deepgram-key"
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "flux-haley-en"
+   }
+  ],
+  "events": [
+   "providerFallback"
+  ],
+  "files": [],
+  "response": {
+   "body": "audio:deepgram",
+   "status": 200
+  }
+ },
+ "cached=False|edge=none|failure=primary-fails|fallback=deepgram|kind=controller-narration|provider=cartesia": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "cartesia",
+    "settings": {
+     "api_key": "cart-key",
+     "model": "sonic-3.5"
+    },
+    "text": "Press+once",
+    "voice": "narrator-voice"
+   },
+   {
+    "operation": "synthesize",
+    "provider": "deepgram",
+    "settings": {
+     "api_key": "deepgram-key"
+    },
+    "text": "Press+once",
+    "voice": "flux-haley-en"
+   }
+  ],
+  "events": [
+   "providerFallback"
+  ],
+  "files": [],
+  "response": {
+   "body": "audio:deepgram",
+   "status": 200
+  }
+ },
+ "cached=False|edge=none|failure=primary-fails|fallback=deepgram|kind=voice-preview|provider=cartesia": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "cartesia",
+    "settings": {
+     "api_key": "cart-key",
+     "model": "sonic-3.5"
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "cart-voice"
+   },
+   {
+    "operation": "synthesize",
+    "provider": "deepgram",
+    "settings": {
+     "api_key": "deepgram-key"
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "flux-haley-en"
+   }
+  ],
+  "events": [
+   "providerFallback"
+  ],
+  "files": [],
+  "response": {
+   "body": "audio:deepgram",
+   "status": 200
+  }
+ },
+ "cached=False|edge=none|failure=primary-fails|fallback=deepgram|kind=voice-preview|provider=custom.rec": {
+  "calls": [
+   {
+    "operation": "preview",
+    "provider": "custom.rec",
+    "settings": {},
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "custom-voice"
+   },
+   {
+    "operation": "synthesize",
+    "provider": "deepgram",
+    "settings": {
+     "api_key": "deepgram-key"
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "flux-haley-en"
+   }
+  ],
+  "events": [
+   "providerFallback"
+  ],
+  "files": [],
+  "response": {
+   "body": "audio:deepgram",
+   "status": 200
+  }
+ },
+ "cached=False|edge=none|failure=primary-fails|fallback=deepgram|kind=voice-preview|provider=deepgram": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "deepgram",
+    "settings": {
+     "api_key": "deepgram-key"
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "aura-asteria-en"
+   }
+  ],
+  "events": [],
+  "files": [],
+  "response": {
+   "body": "preview unavailable",
+   "status": 502
+  }
+ },
+ "cached=False|edge=none|failure=primary-fails|fallback=deepgram|kind=voice-preview|provider=elevenlabs": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "elevenlabs",
+    "settings": {
+     "api_key": "eleven-key",
+     "model": "eleven_multilingual_v2",
+     "speed": 1.0
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "eleven-voice"
+   },
+   {
+    "operation": "synthesize",
+    "provider": "deepgram",
+    "settings": {
+     "api_key": "deepgram-key"
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "flux-haley-en"
+   }
+  ],
+  "events": [
+   "providerFallback"
+  ],
+  "files": [],
+  "response": {
+   "body": "audio:deepgram",
+   "status": 200
+  }
+ },
+ "cached=False|edge=none|failure=primary-fails|fallback=deepgram|kind=voice-preview|provider=gemini": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "gemini",
+    "settings": {
+     "api_key": "gemini-key",
+     "model": "gemini-3.8-flash-tts"
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "Kore"
+   },
+   {
+    "operation": "synthesize",
+    "provider": "deepgram",
+    "settings": {
+     "api_key": "deepgram-key"
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "flux-haley-en"
+   }
+  ],
+  "events": [
+   "providerFallback"
+  ],
+  "files": [],
+  "response": {
+   "body": "audio:deepgram",
+   "status": 200
+  }
+ },
+ "cached=False|edge=none|failure=primary-fails|fallback=deepgram|kind=voice-preview|provider=google": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "google",
+    "settings": {},
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "nb-NO-Chirp3-HD-Aoede"
+   },
+   {
+    "operation": "synthesize",
+    "provider": "deepgram",
+    "settings": {
+     "api_key": "deepgram-key"
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "flux-haley-en"
+   }
+  ],
+  "events": [
+   "providerFallback"
+  ],
+  "files": [],
+  "response": {
+   "body": "audio:deepgram",
+   "status": 200
+  }
+ },
+ "cached=False|edge=none|failure=primary-fails|fallback=deepgram|kind=voice-preview|provider=openai": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "openai",
+    "settings": {},
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "openai-voice"
+   },
+   {
+    "operation": "synthesize",
+    "provider": "deepgram",
+    "settings": {
+     "api_key": "deepgram-key"
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "flux-haley-en"
+   }
+  ],
+  "events": [
+   "providerFallback"
+  ],
+  "files": [],
+  "response": {
+   "body": "audio:deepgram",
+   "status": 200
+  }
+ },
+ "cached=False|edge=none|failure=primary-fails|fallback=elevenlabs|kind=cartesia-voice-preview|provider=cartesia": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "cartesia",
+    "settings": {
+     "api_key": "cart-key",
+     "model": "sonic-3.5"
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "cart-voice"
+   },
+   {
+    "operation": "synthesize",
+    "provider": "elevenlabs",
+    "settings": {
+     "api_key": "eleven-key",
+     "model": "eleven_flash_v2_5",
+     "speed": 1.2
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "cart-voice"
+   }
+  ],
+  "events": [
+   "providerFallback"
+  ],
+  "files": [],
+  "response": {
+   "body": "audio:elevenlabs",
+   "status": 200
+  }
+ },
+ "cached=False|edge=none|failure=primary-fails|fallback=elevenlabs|kind=controller-narration|provider=cartesia": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "cartesia",
+    "settings": {
+     "api_key": "cart-key",
+     "model": "sonic-3.5"
+    },
+    "text": "Press+once",
+    "voice": "narrator-voice"
+   },
+   {
+    "operation": "synthesize",
+    "provider": "elevenlabs",
+    "settings": {
+     "api_key": "eleven-key",
+     "model": "eleven_flash_v2_5",
+     "speed": 1.2
+    },
+    "text": "Press+once",
+    "voice": "narrator-voice"
+   }
+  ],
+  "events": [
+   "providerFallback"
+  ],
+  "files": [],
+  "response": {
+   "body": "audio:elevenlabs",
+   "status": 200
+  }
+ },
+ "cached=False|edge=none|failure=primary-fails|fallback=elevenlabs|kind=voice-preview|provider=cartesia": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "cartesia",
+    "settings": {
+     "api_key": "cart-key",
+     "model": "sonic-3.5"
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "cart-voice"
+   },
+   {
+    "operation": "synthesize",
+    "provider": "elevenlabs",
+    "settings": {
+     "api_key": "eleven-key",
+     "model": "eleven_flash_v2_5",
+     "speed": 1.2
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "cart-voice"
+   }
+  ],
+  "events": [
+   "providerFallback"
+  ],
+  "files": [],
+  "response": {
+   "body": "audio:elevenlabs",
+   "status": 200
+  }
+ },
+ "cached=False|edge=none|failure=primary-fails|fallback=elevenlabs|kind=voice-preview|provider=custom.rec": {
+  "calls": [
+   {
+    "operation": "preview",
+    "provider": "custom.rec",
+    "settings": {},
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "custom-voice"
+   },
+   {
+    "operation": "synthesize",
+    "provider": "elevenlabs",
+    "settings": {
+     "api_key": "eleven-key",
+     "model": "eleven_flash_v2_5",
+     "speed": 1.2
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "custom-voice"
+   }
+  ],
+  "events": [
+   "providerFallback"
+  ],
+  "files": [],
+  "response": {
+   "body": "audio:elevenlabs",
+   "status": 200
+  }
+ },
+ "cached=False|edge=none|failure=primary-fails|fallback=elevenlabs|kind=voice-preview|provider=deepgram": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "deepgram",
+    "settings": {
+     "api_key": "deepgram-key"
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "aura-asteria-en"
+   },
+   {
+    "operation": "synthesize",
+    "provider": "elevenlabs",
+    "settings": {
+     "api_key": "eleven-key",
+     "model": "eleven_flash_v2_5",
+     "speed": 1.2
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "aura-asteria-en"
+   }
+  ],
+  "events": [
+   "providerFallback"
+  ],
+  "files": [],
+  "response": {
+   "body": "audio:elevenlabs",
+   "status": 200
+  }
+ },
+ "cached=False|edge=none|failure=primary-fails|fallback=elevenlabs|kind=voice-preview|provider=elevenlabs": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "elevenlabs",
+    "settings": {
+     "api_key": "eleven-key",
+     "model": "eleven_multilingual_v2",
+     "speed": 1.0
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "eleven-voice"
+   }
+  ],
+  "events": [],
+  "files": [],
+  "response": {
+   "body": "preview unavailable",
+   "status": 502
+  }
+ },
+ "cached=False|edge=none|failure=primary-fails|fallback=elevenlabs|kind=voice-preview|provider=gemini": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "gemini",
+    "settings": {
+     "api_key": "gemini-key",
+     "model": "gemini-3.8-flash-tts"
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "Kore"
+   },
+   {
+    "operation": "synthesize",
+    "provider": "elevenlabs",
+    "settings": {
+     "api_key": "eleven-key",
+     "model": "eleven_flash_v2_5",
+     "speed": 1.2
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "Kore"
+   }
+  ],
+  "events": [
+   "providerFallback"
+  ],
+  "files": [],
+  "response": {
+   "body": "audio:elevenlabs",
+   "status": 200
+  }
+ },
+ "cached=False|edge=none|failure=primary-fails|fallback=elevenlabs|kind=voice-preview|provider=google": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "google",
+    "settings": {},
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "nb-NO-Chirp3-HD-Aoede"
+   },
+   {
+    "operation": "synthesize",
+    "provider": "elevenlabs",
+    "settings": {
+     "api_key": "eleven-key",
+     "model": "eleven_flash_v2_5",
+     "speed": 1.2
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "nb-NO-Chirp3-HD-Aoede"
+   }
+  ],
+  "events": [
+   "providerFallback"
+  ],
+  "files": [],
+  "response": {
+   "body": "audio:elevenlabs",
+   "status": 200
+  }
+ },
+ "cached=False|edge=none|failure=primary-fails|fallback=elevenlabs|kind=voice-preview|provider=openai": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "openai",
+    "settings": {},
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "openai-voice"
+   },
+   {
+    "operation": "synthesize",
+    "provider": "elevenlabs",
+    "settings": {
+     "api_key": "eleven-key",
+     "model": "eleven_flash_v2_5",
+     "speed": 1.2
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "openai-voice"
+   }
+  ],
+  "events": [
+   "providerFallback"
+  ],
+  "files": [],
+  "response": {
+   "body": "audio:elevenlabs",
+   "status": 200
+  }
+ },
+ "cached=False|edge=none|failure=primary-fails|fallback=none|kind=cartesia-voice-preview|provider=cartesia": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "cartesia",
+    "settings": {
+     "api_key": "cart-key",
+     "model": "sonic-3.5"
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "cart-voice"
+   }
+  ],
+  "events": [],
+  "files": [],
+  "response": {
+   "body": "preview unavailable",
+   "status": 502
+  }
+ },
+ "cached=False|edge=none|failure=primary-fails|fallback=none|kind=controller-narration|provider=cartesia": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "cartesia",
+    "settings": {
+     "api_key": "cart-key",
+     "model": "sonic-3.5"
+    },
+    "text": "Press+once",
+    "voice": "narrator-voice"
+   }
+  ],
+  "events": [],
+  "files": [],
+  "response": {
+   "body": "narration unavailable",
+   "status": 502
+  }
+ },
+ "cached=False|edge=none|failure=primary-fails|fallback=none|kind=voice-preview|provider=cartesia": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "cartesia",
+    "settings": {
+     "api_key": "cart-key",
+     "model": "sonic-3.5"
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "cart-voice"
+   }
+  ],
+  "events": [],
+  "files": [],
+  "response": {
+   "body": "preview unavailable",
+   "status": 502
+  }
+ },
+ "cached=False|edge=none|failure=primary-fails|fallback=none|kind=voice-preview|provider=custom.rec": {
+  "calls": [
+   {
+    "operation": "preview",
+    "provider": "custom.rec",
+    "settings": {},
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "custom-voice"
+   }
+  ],
+  "events": [],
+  "files": [],
+  "response": {
+   "body": "preview unavailable",
+   "status": 502
+  }
+ },
+ "cached=False|edge=none|failure=primary-fails|fallback=none|kind=voice-preview|provider=deepgram": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "deepgram",
+    "settings": {
+     "api_key": "deepgram-key"
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "aura-asteria-en"
+   }
+  ],
+  "events": [],
+  "files": [],
+  "response": {
+   "body": "preview unavailable",
+   "status": 502
+  }
+ },
+ "cached=False|edge=none|failure=primary-fails|fallback=none|kind=voice-preview|provider=elevenlabs": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "elevenlabs",
+    "settings": {
+     "api_key": "eleven-key",
+     "model": "eleven_multilingual_v2",
+     "speed": 1.0
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "eleven-voice"
+   }
+  ],
+  "events": [],
+  "files": [],
+  "response": {
+   "body": "preview unavailable",
+   "status": 502
+  }
+ },
+ "cached=False|edge=none|failure=primary-fails|fallback=none|kind=voice-preview|provider=gemini": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "gemini",
+    "settings": {
+     "api_key": "gemini-key",
+     "model": "gemini-3.8-flash-tts"
+    },
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "Kore"
+   }
+  ],
+  "events": [],
+  "files": [],
+  "response": {
+   "body": "preview unavailable",
+   "status": 502
+  }
+ },
+ "cached=False|edge=none|failure=primary-fails|fallback=none|kind=voice-preview|provider=google": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "google",
+    "settings": {},
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "nb-NO-Chirp3-HD-Aoede"
+   }
+  ],
+  "events": [],
+  "files": [],
+  "response": {
+   "body": "preview unavailable",
+   "status": 502
+  }
+ },
+ "cached=False|edge=none|failure=primary-fails|fallback=none|kind=voice-preview|provider=openai": {
+  "calls": [
+   {
+    "operation": "synthesize",
+    "provider": "openai",
+    "settings": {},
+    "text": "Hello, I'm Ada. This is how I'll sound in Clarp.",
+    "voice": "openai-voice"
+   }
+  ],
+  "events": [],
+  "files": [],
+  "response": {
+   "body": "preview unavailable",
+   "status": 502
+  }
+ },
+ "cached=False|edge=provider-unavailable|failure=ok|fallback=elevenlabs|kind=voice-preview|provider=cartesia": {
+  "calls": [],
+  "events": [],
+  "files": [],
+  "response": {
+   "body": "voice unavailable",
+   "status": 404
+  }
+ },
+ "cached=False|edge=unknown-voice|failure=ok|fallback=elevenlabs|kind=cartesia-voice-preview|provider=cartesia": {
+  "calls": [],
+  "events": [],
+  "files": [],
+  "response": {
+   "body": "not found",
+   "status": 404
+  }
+ },
+ "cached=False|edge=unknown-voice|failure=ok|fallback=elevenlabs|kind=voice-preview|provider=cartesia": {
+  "calls": [],
+  "events": [],
+  "files": [],
+  "response": {
+   "body": "voice unavailable",
+   "status": 404
+  }
+ },
+ "cached=False|edge=unsafe-cache|failure=ok|fallback=elevenlabs|kind=cartesia-voice-preview|provider=cartesia": {
+  "calls": [],
+  "events": [
+   "cartesiaPreviewCacheUnsafe"
+  ],
+  "files": [],
+  "response": {
+   "body": "preview cache unavailable",
+   "status": 500
+  }
+ },
+ "cached=False|edge=unsafe-cache|failure=ok|fallback=elevenlabs|kind=controller-narration|provider=cartesia": {
+  "calls": [],
+  "events": [
+   "controllerNarrationCacheUnsafe"
+  ],
+  "files": [],
+  "response": {
+   "body": "narration cache unavailable",
+   "status": 500
+  }
+ },
+ "cached=True|edge=none|failure=both-fail|fallback=deepgram|kind=cartesia-voice-preview|provider=cartesia": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:cartesia",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:cartesia",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=both-fail|fallback=deepgram|kind=controller-narration|provider=cartesia": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:cartesia",
+    "directory": "controller-narration",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:cartesia",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=both-fail|fallback=deepgram|kind=voice-preview|provider=cartesia": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:cartesia",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:cartesia",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=both-fail|fallback=deepgram|kind=voice-preview|provider=custom.rec": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:custom.rec",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:custom.rec",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=both-fail|fallback=deepgram|kind=voice-preview|provider=deepgram": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:deepgram",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:deepgram",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=both-fail|fallback=deepgram|kind=voice-preview|provider=elevenlabs": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:elevenlabs",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:elevenlabs",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=both-fail|fallback=deepgram|kind=voice-preview|provider=gemini": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:gemini",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:gemini",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=both-fail|fallback=deepgram|kind=voice-preview|provider=google": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:google",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:google",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=both-fail|fallback=deepgram|kind=voice-preview|provider=openai": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:openai",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:openai",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=both-fail|fallback=elevenlabs|kind=cartesia-voice-preview|provider=cartesia": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:cartesia",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:cartesia",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=both-fail|fallback=elevenlabs|kind=controller-narration|provider=cartesia": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:cartesia",
+    "directory": "controller-narration",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:cartesia",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=both-fail|fallback=elevenlabs|kind=voice-preview|provider=cartesia": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:cartesia",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:cartesia",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=both-fail|fallback=elevenlabs|kind=voice-preview|provider=custom.rec": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:custom.rec",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:custom.rec",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=both-fail|fallback=elevenlabs|kind=voice-preview|provider=deepgram": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:deepgram",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:deepgram",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=both-fail|fallback=elevenlabs|kind=voice-preview|provider=elevenlabs": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:elevenlabs",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:elevenlabs",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=both-fail|fallback=elevenlabs|kind=voice-preview|provider=gemini": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:gemini",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:gemini",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=both-fail|fallback=elevenlabs|kind=voice-preview|provider=google": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:google",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:google",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=both-fail|fallback=elevenlabs|kind=voice-preview|provider=openai": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:openai",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:openai",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=both-fail|fallback=none|kind=cartesia-voice-preview|provider=cartesia": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:cartesia",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:cartesia",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=both-fail|fallback=none|kind=controller-narration|provider=cartesia": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:cartesia",
+    "directory": "controller-narration",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:cartesia",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=both-fail|fallback=none|kind=voice-preview|provider=cartesia": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:cartesia",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:cartesia",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=both-fail|fallback=none|kind=voice-preview|provider=custom.rec": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:custom.rec",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:custom.rec",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=both-fail|fallback=none|kind=voice-preview|provider=deepgram": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:deepgram",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:deepgram",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=both-fail|fallback=none|kind=voice-preview|provider=elevenlabs": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:elevenlabs",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:elevenlabs",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=both-fail|fallback=none|kind=voice-preview|provider=gemini": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:gemini",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:gemini",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=both-fail|fallback=none|kind=voice-preview|provider=google": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:google",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:google",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=both-fail|fallback=none|kind=voice-preview|provider=openai": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:openai",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:openai",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=ok|fallback=deepgram|kind=cartesia-voice-preview|provider=cartesia": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:cartesia",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:cartesia",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=ok|fallback=deepgram|kind=controller-narration|provider=cartesia": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:cartesia",
+    "directory": "controller-narration",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:cartesia",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=ok|fallback=deepgram|kind=voice-preview|provider=cartesia": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:cartesia",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:cartesia",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=ok|fallback=deepgram|kind=voice-preview|provider=custom.rec": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:custom.rec",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:custom.rec",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=ok|fallback=deepgram|kind=voice-preview|provider=deepgram": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:deepgram",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:deepgram",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=ok|fallback=deepgram|kind=voice-preview|provider=elevenlabs": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:elevenlabs",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:elevenlabs",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=ok|fallback=deepgram|kind=voice-preview|provider=gemini": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:gemini",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:gemini",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=ok|fallback=deepgram|kind=voice-preview|provider=google": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:google",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:google",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=ok|fallback=deepgram|kind=voice-preview|provider=openai": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:openai",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:openai",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=ok|fallback=elevenlabs|kind=cartesia-voice-preview|provider=cartesia": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:cartesia",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:cartesia",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=ok|fallback=elevenlabs|kind=controller-narration|provider=cartesia": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:cartesia",
+    "directory": "controller-narration",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:cartesia",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=ok|fallback=elevenlabs|kind=voice-preview|provider=cartesia": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:cartesia",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:cartesia",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=ok|fallback=elevenlabs|kind=voice-preview|provider=custom.rec": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:custom.rec",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:custom.rec",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=ok|fallback=elevenlabs|kind=voice-preview|provider=deepgram": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:deepgram",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:deepgram",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=ok|fallback=elevenlabs|kind=voice-preview|provider=elevenlabs": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:elevenlabs",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:elevenlabs",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=ok|fallback=elevenlabs|kind=voice-preview|provider=gemini": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:gemini",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:gemini",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=ok|fallback=elevenlabs|kind=voice-preview|provider=google": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:google",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:google",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=ok|fallback=elevenlabs|kind=voice-preview|provider=openai": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:openai",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:openai",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=ok|fallback=none|kind=cartesia-voice-preview|provider=cartesia": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:cartesia",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:cartesia",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=ok|fallback=none|kind=controller-narration|provider=cartesia": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:cartesia",
+    "directory": "controller-narration",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:cartesia",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=ok|fallback=none|kind=voice-preview|provider=cartesia": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:cartesia",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:cartesia",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=ok|fallback=none|kind=voice-preview|provider=custom.rec": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:custom.rec",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:custom.rec",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=ok|fallback=none|kind=voice-preview|provider=deepgram": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:deepgram",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:deepgram",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=ok|fallback=none|kind=voice-preview|provider=elevenlabs": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:elevenlabs",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:elevenlabs",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=ok|fallback=none|kind=voice-preview|provider=gemini": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:gemini",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:gemini",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=ok|fallback=none|kind=voice-preview|provider=google": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:google",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:google",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=ok|fallback=none|kind=voice-preview|provider=openai": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:openai",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:openai",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=primary-fails|fallback=deepgram|kind=cartesia-voice-preview|provider=cartesia": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:cartesia",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:cartesia",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=primary-fails|fallback=deepgram|kind=controller-narration|provider=cartesia": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:cartesia",
+    "directory": "controller-narration",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:cartesia",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=primary-fails|fallback=deepgram|kind=voice-preview|provider=cartesia": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:cartesia",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:cartesia",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=primary-fails|fallback=deepgram|kind=voice-preview|provider=custom.rec": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:custom.rec",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:custom.rec",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=primary-fails|fallback=deepgram|kind=voice-preview|provider=deepgram": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:deepgram",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:deepgram",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=primary-fails|fallback=deepgram|kind=voice-preview|provider=elevenlabs": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:elevenlabs",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:elevenlabs",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=primary-fails|fallback=deepgram|kind=voice-preview|provider=gemini": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:gemini",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:gemini",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=primary-fails|fallback=deepgram|kind=voice-preview|provider=google": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:google",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:google",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=primary-fails|fallback=deepgram|kind=voice-preview|provider=openai": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:openai",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:openai",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=primary-fails|fallback=elevenlabs|kind=cartesia-voice-preview|provider=cartesia": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:cartesia",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:cartesia",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=primary-fails|fallback=elevenlabs|kind=controller-narration|provider=cartesia": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:cartesia",
+    "directory": "controller-narration",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:cartesia",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=primary-fails|fallback=elevenlabs|kind=voice-preview|provider=cartesia": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:cartesia",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:cartesia",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=primary-fails|fallback=elevenlabs|kind=voice-preview|provider=custom.rec": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:custom.rec",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:custom.rec",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=primary-fails|fallback=elevenlabs|kind=voice-preview|provider=deepgram": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:deepgram",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:deepgram",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=primary-fails|fallback=elevenlabs|kind=voice-preview|provider=elevenlabs": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:elevenlabs",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:elevenlabs",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=primary-fails|fallback=elevenlabs|kind=voice-preview|provider=gemini": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:gemini",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:gemini",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=primary-fails|fallback=elevenlabs|kind=voice-preview|provider=google": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:google",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:google",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=primary-fails|fallback=elevenlabs|kind=voice-preview|provider=openai": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:openai",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:openai",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=primary-fails|fallback=none|kind=cartesia-voice-preview|provider=cartesia": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:cartesia",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:cartesia",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=primary-fails|fallback=none|kind=controller-narration|provider=cartesia": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:cartesia",
+    "directory": "controller-narration",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:cartesia",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=primary-fails|fallback=none|kind=voice-preview|provider=cartesia": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:cartesia",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:cartesia",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=primary-fails|fallback=none|kind=voice-preview|provider=custom.rec": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:custom.rec",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:custom.rec",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=primary-fails|fallback=none|kind=voice-preview|provider=deepgram": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:deepgram",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:deepgram",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=primary-fails|fallback=none|kind=voice-preview|provider=elevenlabs": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:elevenlabs",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:elevenlabs",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=primary-fails|fallback=none|kind=voice-preview|provider=gemini": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:gemini",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:gemini",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=primary-fails|fallback=none|kind=voice-preview|provider=google": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:google",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:google",
+   "status": 200
+  }
+ },
+ "cached=True|edge=none|failure=primary-fails|fallback=none|kind=voice-preview|provider=openai": {
+  "calls": [],
+  "events": [],
+  "files": [
+   {
+    "body": "audio:openai",
+    "directory": "voice-previews",
+    "suffix": ".mp3"
+   }
+  ],
+  "response": {
+   "body": "audio:openai",
+   "status": 200
+  }
+ }
+}

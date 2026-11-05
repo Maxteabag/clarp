@@ -58,7 +58,8 @@ def _commit(repo, message):
 @pytest.fixture
 def repo(tmp_path):
     root = tmp_path / "repo"
-    for rel in ("tools/refactor/s3_apply.py", "tools/refactor/s3_merge.sh", "scripts/refactor/ast_identity.py"):
+    for rel in ("tools/refactor/s3_apply.py", "tools/refactor/s3_merge.sh", "tools/refactor/s3_methods.py",
+                "tools/refactor/split_apply.py", "scripts/refactor/ast_identity.py"):
         (root / rel).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(_REPO / rel, root / rel)
     (root / "tools" / "refactor" / "s3_moves.toml").write_text(RECIPE)
@@ -185,7 +186,8 @@ def repo_with_helpers(tmp_path):
     """Like `repo`, but member a reads the server.py helper and the recipe moves
     the helper too: integration carries both stages."""
     root = tmp_path / "repo"
-    for rel in ("tools/refactor/s3_apply.py", "tools/refactor/s3_merge.sh", "scripts/refactor/ast_identity.py"):
+    for rel in ("tools/refactor/s3_apply.py", "tools/refactor/s3_merge.sh", "tools/refactor/s3_methods.py",
+                "tools/refactor/split_apply.py", "scripts/refactor/ast_identity.py"):
         (root / rel).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(_REPO / rel, root / rel)
     (root / "tools" / "refactor" / "s3_moves.toml").write_text(HELPERS_RECIPE)
@@ -441,3 +443,160 @@ def test_a_failed_cleanup_stops_before_any_integration_only_recipe_is_applied(re
     assert code == 8, out
     assert "cannot remove the merged tree's tools/refactor/splits" in out
     assert not (root / "server" / "lib" / "extra_part.py").exists(), out
+
+
+def _method_family(repo, split):
+    source = 'lib/client.py' if split else 'lib/engine.py'
+    (repo / 'tools/refactor/methods').mkdir(parents=True)
+    (repo / 'tools/refactor/methods/engine.toml').write_text(
+        f'source_module = "{source}"\nsource_class = "Engine"\n'
+        '[[group]]\nname = "read"\nmodule = "lib/read.py"\n'
+        'class = "ReadMixin"\nmembers = ["read"]\n')
+    text = ('VALUE = 5\n' if split else 'from .values import VALUE\n') + '''
+class Engine:
+    def __init__(self, bias=2):
+        self.bias = bias
+
+    def read(self):
+        return VALUE + self.bias
+'''
+    (repo / 'server/lib/engine.py').write_text(text)
+    if split:
+        (repo / 'tools/refactor/splits').mkdir(exist_ok=True)
+        (repo / 'tools/refactor/splits/engine.toml').write_text(
+            '[[split]]\nname = "engine"\nmodule = "lib/engine.py"\n'
+            '[[split.part]]\nmodule = "lib/values.py"\nnames = ["VALUE"]\n'
+            '[[split.part]]\nmodule = "lib/client.py"\nnames = ["Engine"]\n')
+    else:
+        (repo / 'server/lib/values.py').write_text('VALUE = 5\n')
+    base = _commit(repo, 'method recipe on main')
+    _git(repo, 'switch', '-q', 'integration')
+    _git(repo, 'merge', '--no-edit', base)
+    if split:
+        subprocess.run([sys.executable, 'tools/refactor/split_apply.py', '--all'],
+                       cwd=repo, capture_output=True, check=True)
+        _commit(repo, 'split engine')
+    subprocess.run([sys.executable, 'tools/refactor/s3_apply.py', '--recipe',
+                    'tools/refactor/methods/engine.toml', '--all'],
+                   cwd=repo, capture_output=True, check=True)
+    _commit(repo, 'method move')
+    _git(repo, 'switch', '-q', 'main')
+    return source
+
+
+@pytest.mark.parametrize('split', [False, True])
+def test_named_methods_follow_splits_and_main_edits_reach_the_mixin(repo, split):
+    _method_family(repo, split)
+    path = repo / 'server/lib/engine.py'
+    path.write_text(path.read_text().replace('VALUE + self.bias', 'VALUE * self.bias'))
+    _commit(repo, 'main edit to method')
+    code, out = _merge(repo)
+    assert code == 0, out
+    assert 'method read: ast_identity' in out
+    check = subprocess.run([sys.executable, '-c',
+        'from lib.engine import Engine; assert Engine().read() == 10'],
+        cwd=repo / 'server', capture_output=True, text=True)
+    assert check.returncode == 0, check.stderr
+    log = _git(repo, 'log', '--format=%s')
+    if split:
+        assert log.index('s3_apply: method read') < log.index('split_apply: engine')
+
+
+@pytest.mark.parametrize('where', ['source', 'mixin'])
+def test_method_drift_is_refused_before_main_replaces_it(repo, where):
+    source = _method_family(repo, False)
+    _git(repo, 'switch', '-q', 'integration')
+    path = repo / 'server' / (source if where == 'source' else 'lib/read.py')
+    path.write_text(path.read_text() + '\n# integration-only edit\n')
+    _commit(repo, 'unrecorded method family edit')
+    _git(repo, 'switch', '-q', 'main')
+    (repo / 'README').write_text('main progresses\n')
+    _commit(repo, 'main advances')
+    code, out = _merge(repo)
+    assert code == 8, out
+    assert 'integration-only edit' in out
+
+
+def test_an_integration_only_method_recipe_and_tool_never_execute(repo):
+    _git(repo, 'switch', '-q', 'integration')
+    (repo / 'tools/refactor/methods').mkdir()
+    (repo / 'tools/refactor/methods/injected.toml').write_text('broken TOML !!!')
+    (repo / 'tools/refactor/s3_methods.py').write_text('raise RuntimeError("INJECTED TOOL")\n')
+    _commit(repo, 'integration injection')
+    _git(repo, 'switch', '-q', 'main')
+    (repo / 'README').write_text('main advances\n')
+    _commit(repo, 'main update')
+    code, out = _merge(repo)
+    assert code == 0, out
+    assert 'INJECTED TOOL' not in out
+    assert not (repo / 'tools/refactor/methods/injected.toml').exists()
+
+
+def test_method_identity_difference_stops_with_12(repo):
+    _method_family(repo, False)
+    _git(repo, 'switch', '-q', 'integration')
+    _git(repo, 'checkout', 'main', '--', 'server/lib/engine.py')
+    _git(repo, 'rm', 'server/lib/read.py')
+    _commit(repo, 'integration has not applied the method recipe yet')
+    _git(repo, 'switch', '-q', 'main')
+    tool = repo / 'tools/refactor/s3_apply.py'
+    tool.write_text(tool.read_text().replace(
+        '.write_text(changes[path])',
+        '.write_text(changes[path].replace("return VALUE + self.bias", "return VALUE - self.bias"))'))
+    _commit(repo, 'plant a method mover body change')
+    code, out = _merge(repo)
+    assert code == 12, out
+    assert 'method identity failed for read' in out
+
+
+@pytest.mark.parametrize('cleanup_exit', [0, 1])
+def test_failed_method_recipe_cleanup_stops_before_discovery(repo, monkeypatch, cleanup_exit):
+    _git(repo, 'switch', '-q', 'integration')
+    (repo / 'tools/refactor/methods').mkdir()
+    (repo / 'tools/refactor/methods/injected.toml').write_text('invalid TOML !!!')
+    _commit(repo, 'integration method injection')
+    _git(repo, 'switch', '-q', 'main')
+    (repo / 'README').write_text('main advances\n')
+    _commit(repo, 'main advances')
+    shim_dir = repo.parent / 'method-cleanup-shim'
+    shim_dir.mkdir()
+    shim = shim_dir / 'rm'
+    shim.write_text('#!/bin/sh\nif [ "$*" = "-rf -- tools/refactor/methods" ]; then\n'
+                    '  echo "synthetic method cleanup refusal" >&2\n'
+                    f'  exit {cleanup_exit}\nfi\nexec /bin/rm "$@"\n')
+    shim.chmod(0o755)
+    monkeypatch.setenv('PATH', str(shim_dir) + os.pathsep + os.environ['PATH'])
+    code, out = _merge(repo)
+    assert code == 11, out
+    assert 'synthetic method cleanup refusal' in out
+    assert 'TOMLDecodeError' not in out
+    assert (repo / 'tools/refactor/methods/injected.toml').exists()
+
+
+def test_an_unrelated_existing_base_is_not_an_applied_method_output(repo):
+    folder=repo/'tools/refactor/methods'
+    folder.mkdir()
+    (repo/'server/lib/base_class.py').write_text('class ExistingMixin:\n    pass\n')
+    (repo/'server/lib/engine.py').write_text(
+        'from .base_class import ExistingMixin\n\n'
+        'class Engine(ExistingMixin):\n'
+        '    def __init__(self):\n        self.active = True\n\n'
+        '    def read(self):\n        return 5\n')
+    (folder/'engine.toml').write_text(
+        'source_module="lib/engine.py"\nsource_class="Engine"\n'
+        '[[group]]\nname="read"\nmodule="lib/read.py"\n'
+        'class="ExistingMixin"\nmembers=["read"]\n')
+    baseline=_commit(repo,'method recipe whose proposed class matches an unrelated base')
+    _git(repo,'switch','-q','integration')
+    _git(repo,'merge','--no-edit',baseline)
+    _git(repo,'switch','-q','main')
+    (repo/'README').write_text('main advances after the common method baseline\n')
+    _commit(repo,'main advances')
+    code,out=_merge(repo)
+    output=(repo/'server/lib/read.py').exists()
+    source=(repo/'server/lib/engine.py').read_text()
+    print('MERGE_EXIT',code,'OUTPUT_EXISTS',output,'READ_STILL_IN_SOURCE','def read(self)' in source)
+    assert code == 11, out
+    assert 'not a genuine applied group' in out
+    assert not output
+    assert 'def read(self)' in source
