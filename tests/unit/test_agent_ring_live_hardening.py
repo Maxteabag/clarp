@@ -403,8 +403,12 @@ def test_a_fallback_whose_audit_fails_still_has_stopped_live_and_started_classic
 # ---- H-5 ------------------------------------------------------------------------------------
 
 def test_without_client_ready_no_silence_goes_upstream_and_the_readiness_deadline_retires_the_call(call, monkeypatch):
-    monkeypatch.setattr(sock, "READY_S", 0.5)
+    # As in the ping test below: the window is shortened only once the provider is
+    # ready, and ends 0.5 s from then. Shortened before the join, a loaded machine ran
+    # it out before the provider was ready (G1 flake: 'condition not met').
     h, thread = _provider_ready(call)
+    session = _session(call)
+    monkeypatch.setattr(sock, "READY_S", time.monotonic() - session.joined_at + 0.5)
     thread.join(15)
     assert not call.up.of("session.input_audio.append")
     assert next(f for f in h.wfile.frames() if f["type"] == "agent_live.error")["code"] == "live_unavailable"
