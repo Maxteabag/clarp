@@ -18,6 +18,7 @@ import pytest
 from lib import account_failover, message_store, turn_lifecycle, turn_queue
 from lib import agents as agents_db
 from lib import turn_dispatch as td
+from tests.patching import patch_shared
 from lib.account_failover import AccountFailover
 from lib.protocol import AgentState
 from lib.runtime_bridge import RuntimeRPCServer
@@ -341,7 +342,7 @@ def test_other_owners_keep_the_seal_and_nothing_is_transferred(
         tmp_path, monkeypatch, selector_configured):
     agent, service, provider, pool, runtime = _parked_scene(tmp_path, monkeypatch)
     # A shared-provider turn (a Codex goal continuation) is still running.
-    monkeypatch.setattr(td, "provider_turns", lambda: ["codex-agent"])
+    patch_shared(monkeypatch, td, "provider_turns", lambda: ["codex-agent"])
     try:
         blockers = runtime.seal_if_drained()
     finally:
@@ -517,7 +518,7 @@ def test_refusal_reasons_belong_to_the_attempt_that_tried(tmp_path, monkeypatch,
     try:
         assert "account_recovery_refused" in runtime.seal_if_drained()
         # A later attempt that tries no transfer (another owner) says nothing.
-        monkeypatch.setattr(td, "provider_turns", lambda: ["codex-agent"])
+        patch_shared(monkeypatch, td, "provider_turns", lambda: ["codex-agent"])
         assert "account_recovery_refused" not in runtime.seal_if_drained()
     finally:
         runtime.server_close()
