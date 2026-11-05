@@ -319,13 +319,18 @@ def compare_and_set_where(con: sqlite3.Connection, lc: Lifecycle, events: str | 
     """A set-based compare-and-set, for an owner that moves every matching row
     in one statement: ``UPDATE t SET state = <target> ... WHERE state IN
     (<declared sources of the events>) AND (<where>)``, one statement per
-    target, in the caller's transaction. The sources come from the
-    declaration, never from the caller, so a row in any other state (a final
-    one in particular) is never touched; a correction never matches a row
-    already in its target. ``where`` is the owner's own SQL (never user
-    input). Returns the number of rows moved, or the ``returning`` columns of
-    every moved row."""
-    _require_txn(con, lc)
+    target. The sources come from the declaration, never from the caller, so
+    a row in any other state (a final one in particular) is never touched; a
+    correction never matches a row already in its target. ``where`` is the
+    owner's own SQL (never user input). Returns the number of rows moved, or
+    the ``returning`` columns of every moved row.
+
+    Transaction rule: inside an open transaction the call joins it. Outside
+    one, a single target runs as one autocommit statement (atomic by itself,
+    as the owner's writers run today), and several targets are wrapped in one
+    BEGIN IMMEDIATE ... COMMIT of their own."""
+    if not lc.table:
+        raise LifecycleError(f"{lc.name}: in-memory lifecycle has no table")
     events = (events,) if isinstance(events, str) else tuple(events)
     by_target: dict[str, set[str]] = {}
     for (event, source), target in lc._table.items():
@@ -336,6 +341,21 @@ def compare_and_set_where(con: sqlite3.Connection, lc: Lifecycle, events: str | 
         raise LifecycleError(f"{lc.name}: no edge for event(s) {unknown}")
     if returning and not all(_IDENT.match(c.strip()) for c in returning.split(",")):
         raise LifecycleError(f"{lc.name}: bad returning columns {returning!r}")
+    own = len(by_target) > 1 and not con.in_transaction
+    if own:
+        con.execute("BEGIN IMMEDIATE")
+    try:
+        moved = _cas_where(con, lc, by_target, where, params, now, values, returning)
+        if own:
+            con.execute("COMMIT")
+    except BaseException:
+        if own and con.in_transaction:
+            con.execute("ROLLBACK")
+        raise
+    return moved
+
+
+def _cas_where(con, lc, by_target, where, params, now, values, returning):
     moved: int | list = [] if returning else 0
     for target, sources in sorted(by_target.items()):
         cols = {**_stamp(lc, target, now), **_columns(lc, values, target)}
@@ -393,7 +413,9 @@ def reap(con: sqlite3.Connection, lc: Lifecycle, *, now: int, limit: int = 100,
     for state, wait in deadlines:
         if after is not None and state < after[0]:
             continue
-        entered = lc.entered_of(state)  # validation guarantees one for a Deadline state
+        # Validation guarantees a column for a Deadline state. A NULL entry
+        # time counts as 0 (overdue), as the queue's claim reset does today.
+        entered = f"COALESCE({lc.entered_of(state)}, 0)"
         keyset, args = "", []
         if after is not None and state == after[0]:
             keyset, args = f" AND ({entered}, {lc.key}) > (?, ?)", [after[1], after[2]]
@@ -411,7 +433,7 @@ def reap(con: sqlite3.Connection, lc: Lifecycle, *, now: int, limit: int = 100,
                 moved.append(compare_and_set(con, lc, row[lc.key], event=event, source=state,
                                              target=target, now=now))
             if examined == limit:
-                return ReapBatch(moved, examined, (state, row[entered], row[lc.key]))
+                return ReapBatch(moved, examined, (state, row[lc.entered_of(state)] or 0, row[lc.key]))
     return ReapBatch(moved, examined, None)
 
 
