@@ -394,3 +394,50 @@ def test_an_entry_only_on_integration_never_applies(repo):
     code, out = _merge(repo)
     assert code == 3, out
     assert "merge_resolution" not in out and "conflict outside server.py" in out
+
+
+def test_a_recipe_only_on_integration_is_never_applied(repo_with_split):
+    # Review B via rf-routes: 'git checkout $main -- <dir>' kept files only the
+    # merged tree has; stage D must read the split recipes from main alone.
+    _git(repo_with_split, "switch", "-q", "integration")
+    rogue = repo_with_split / "tools" / "refactor" / "splits" / "s9-rogue.toml"
+    rogue.write_text('[[split]]\nname = "rogue"\nmodule = "lib/big.py"\n'
+                     '[[split.part]]\nmodule = "lib/big_rogue.py"\nnames = ["stays"]\n')
+    _commit(repo_with_split, "integration-only recipe")
+    _git(repo_with_split, "switch", "-q", "main")
+    (repo_with_split / "README").write_text("main moved\n")
+    _commit(repo_with_split, "main moves")
+    code, out = _merge(repo_with_split)
+    assert code == 0, out
+    assert "rogue" not in out
+    assert not (repo_with_split / "server" / "lib" / "big_rogue.py").exists()
+    assert not rogue.exists()
+
+
+def test_a_failed_cleanup_stops_before_any_integration_only_recipe_is_applied(repo_with_split, monkeypatch):
+    # Review B (s9 provenance r1): an unchecked rm -rf left the merged tree's
+    # recipes in place, and the rogue split was applied before a later check.
+    root = repo_with_split
+    (root / "server" / "lib" / "extra.py").write_text("def hidden():\n    return 3\n")
+    _commit(root, "shared unchanged module")
+    _git(root, "switch", "-q", "integration")
+    _git(root, "merge", "-q", "--no-ff", "-m", "share unchanged module", "main")
+    (root / "tools" / "refactor" / "splits" / "s9-rogue.toml").write_text(
+        '[[split]]\nname = "rogue"\nmodule = "lib/extra.py"\n'
+        '[[split.part]]\nmodule = "lib/extra_part.py"\nnames = ["hidden"]\n')
+    _commit(root, "integration-only split recipe")
+    _git(root, "switch", "-q", "main")
+    (root / "README").write_text("main moved\n")
+    _commit(root, "main moves")
+    shim_dir = root.parent / "cleanup-shim"
+    shim_dir.mkdir()
+    shim = shim_dir / "rm"
+    shim.write_text('#!/bin/sh\nif [ "$*" = "-rf -- tools/refactor/splits" ]; then\n'
+                    '  echo "synthetic cleanup failure" >&2\n  exit 1\nfi\nexec /bin/rm "$@"\n')
+    shim.chmod(0o755)
+    monkeypatch.setenv("PATH", str(shim_dir) + os.pathsep + os.environ["PATH"])
+    code, out = _merge(root)
+    assert "synthetic cleanup failure" in out
+    assert code == 8, out
+    assert "cannot remove the merged tree's tools/refactor/splits" in out
+    assert not (root / "server" / "lib" / "extra_part.py").exists(), out
