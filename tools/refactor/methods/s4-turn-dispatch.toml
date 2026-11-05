@@ -1,0 +1,14 @@
+# S4 cut 2: drain methods, applied after the module split in stage D.
+# Regenerated from main's text; no behavior change.
+source_module = "lib/turn_dispatch.py"
+source_class = "TurnDispatchService"
+
+[[group]]
+name = "turn_drain"
+module = "lib/turn_drain.py"
+class = "DrainMixin"
+members = [
+    "begin_admission_fence", "admission_fenced", "refresh_hold_headlines",
+    "clear_hold_headlines", "lower_admission_fence", "start_held_work",
+    "persist_held", "transfer_recovery_parks",
+]
