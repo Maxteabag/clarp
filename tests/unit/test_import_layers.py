@@ -29,6 +29,7 @@ from __future__ import annotations
 import ast
 import collections
 import pathlib
+import tomllib
 
 import pytest
 
@@ -204,7 +205,16 @@ UPWARD_BASELINE = frozenset({
 def _logical_module(module: str) -> str:
     """Generated parts keep their declared source module's architectural owner."""
     from tests.patching import split_origin
-    path = split_origin(module.replace(".", "/") + ".py")
+    rel = module.replace(".", "/") + ".py"
+    # Method mixins inherit the source class's module owner. That source may
+    # itself be an S9 part, so resolve the module split after the method move.
+    methods = SERVER.parent / "tools/refactor/methods"
+    for recipe in sorted(methods.glob("*.toml")):
+        data = tomllib.loads(recipe.read_text())
+        if data.get("source_module") and any(g.get("module") == rel for g in data.get("group", [])):
+            rel = data["source_module"]
+            break
+    path = split_origin(rel)
     parts = list(pathlib.PurePosixPath(path).with_suffix("").parts)
     if len(parts) > 1 and parts[-1] == "__init__":
         parts.pop()
