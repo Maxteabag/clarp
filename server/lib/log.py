@@ -44,6 +44,14 @@ def log(event: str, detail: str = "") -> None:
     _eventlog_emit(event, "info", detail)
 
 
+def sqlite_write_wait(detail: str, connection) -> None:
+    """Defer every sink of this line while its explicit state transaction is open."""
+    from . import eventlog
+    line = f"{time.strftime('%H:%M:%S')} sqliteWriteWait {detail}"
+    if not eventlog.defer_sqlite_write_wait(connection, line, detail):
+        log("sqliteWriteWait", detail)
+
+
 def log_exception(event: str, exc: BaseException, detail: str = "") -> None:
     """Log a caught exception with type, message, and short traceback summary.
 

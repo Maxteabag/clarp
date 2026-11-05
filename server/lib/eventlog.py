@@ -42,6 +42,8 @@ import os
 import pathlib
 import hashlib
 import sys
+import sqlite3
+import weakref
 import threading
 import time
 import traceback
@@ -117,13 +119,19 @@ def _sanitize_detail(value: object, key: str = "") -> object:
     return value
 
 
-# An emit while this thread holds a state.sqlite transaction must not wait on
-# telemetry.sqlite under the state lock (RM-N8b): its row is queued and written
-# when the transaction ends (db.py calls flush_deferred), or at the latest by
-# the thread's next emit outside a transaction, by any flush once the thread
-# has ended, or at process exit. The JSONL line is written at once as before.
-# _DEFERRED_LOCK guards only the dict, never a SQLite call (see _write_sqlite).
-_DEFERRED: dict[int, list[tuple[dict, _dt.datetime]]] = {}
+# Ordinary emits queue only their SQLite row; JSONL stays synchronous. The
+# sqliteWriteWait record queues both sinks (and stderr) until its particular
+# explicit/open state transaction ends (RM-N8b addition B).
+@dataclass(frozen=True)
+class _DeferredRecord:
+    record: dict | None
+    now: _dt.datetime
+    jsonl: bool = False
+    stderr_line: str | None = None
+    connection: weakref.ReferenceType | None = None
+
+
+_DEFERRED: dict[int, list[_DeferredRecord]] = {}
 _DEFERRED_LOCK = threading.Lock()
 
 # Process-local loss accounting, independent of the contended telemetry DB.
@@ -139,27 +147,68 @@ def _in_state_transaction() -> bool:
 
 
 def flush_deferred() -> None:
-    """Write the queued rows of this thread and of any thread that has ended."""
+    """Write this thread's queued rows and those of threads that have ended."""
     if not _DEFERRED:
         return
     me = threading.get_ident()
     alive = {thread.ident for thread in threading.enumerate()}
     with _DEFERRED_LOCK:
         owners = [ident for ident in _DEFERRED if ident == me or ident not in alive]
-        batches = [_DEFERRED.pop(ident) for ident in owners]
-    for batch in batches:
-        for record, now in batch:
-            _insert_sqlite(record, now)
+        batches = [(ident, _DEFERRED.pop(ident)) for ident in owners]
+    for owner, batch in batches:
+        _flush_batch(owner, batch)
+
+
+def _flush_batch(owner: int, batch: list[_DeferredRecord]) -> None:
+    for index, item in enumerate(batch):
+        connection = item.connection() if item.connection is not None else None
+        if connection is not None:
+            try:
+                blocked = connection.in_transaction
+            except sqlite3.ProgrammingError:  # a closed connection released its lock
+                blocked = False
+            if blocked:
+                # Manual/exit flushes must not bypass this wait's transaction.
+                # Prepend before later emits to preserve this thread's order.
+                with _DEFERRED_LOCK:
+                    _DEFERRED[owner] = batch[index:] + _DEFERRED.get(owner, [])
+                return
+        if item.stderr_line is not None:
+            print(item.stderr_line, file=sys.stderr, flush=True)
+        if item.record is not None:
+            _insert_sqlite(item.record, item.now)
+            if item.jsonl:
+                _append_jsonl(item.record, item.now)
 
 
 def _flush_all_deferred() -> None:
     with _DEFERRED_LOCK:
-        batches = list(_DEFERRED.values())
+        batches = list(_DEFERRED.items())
         _DEFERRED.clear()
-    for batch in batches:
-        for record, now in batch:
-            _insert_sqlite(record, now)
+    for owner, batch in batches:
+        _flush_batch(owner, batch)
     _report_dropped(_dt.datetime.now(_dt.timezone.utc), force=True)
+
+
+def defer_sqlite_write_wait(connection, stderr_line: str, detail: str) -> bool:
+    """Queue the wait line without sink I/O while its explicit transaction is open.
+
+    Autocommit RETURNING cursors are deliberately outside this predicate (RM-N13).
+    Weak ownership never keeps an abandoned connection/its writer lock alive.
+    """
+    if not connection.in_transaction:
+        return False
+    from . import diagnostics_settings
+    now = _dt.datetime.now(_dt.timezone.utc)
+    record = None
+    if diagnostics_settings.allows_event(source="server", event="sqliteWriteWait"):
+        record = {"ts": _iso(now), "source": "server", "event": "sqliteWriteWait",
+                  "level": "info", "detail": {"msg": detail}}
+    item = _DeferredRecord(record, now, jsonl=True, stderr_line=stderr_line,
+                           connection=weakref.ref(connection))
+    with _DEFERRED_LOCK:
+        _DEFERRED.setdefault(threading.get_ident(), []).append(item)
+    return True
 
 
 atexit.register(_flush_all_deferred)
@@ -168,7 +217,7 @@ atexit.register(_flush_all_deferred)
 def _write_sqlite(record: dict, now: _dt.datetime) -> None:
     if _in_state_transaction():
         with _DEFERRED_LOCK:
-            _DEFERRED.setdefault(threading.get_ident(), []).append((record, now))
+            _DEFERRED.setdefault(threading.get_ident(), []).append(_DeferredRecord(record, now))
         return
     flush_deferred()
     _insert_sqlite(record, now)
@@ -342,8 +391,12 @@ def emit(source: str, event: str, *,
             print(f"eventlog serialization failed: {error}", file=sys.stderr)
             return
     _write_sqlite(record, now_dt)
+    _append_jsonl(record, now_dt)
+
+
+def _append_jsonl(record: dict, now: _dt.datetime) -> None:
     try:
-        _write_jsonl(record, now_dt)
+        _write_jsonl(record, now)
     except OSError as error:
         # Never let logging hurt the caller, but leave a journal trail.
         print(f"eventlog write failed: {error}", file=sys.stderr)
