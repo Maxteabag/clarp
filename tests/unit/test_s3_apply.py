@@ -556,6 +556,8 @@ def test_named_class_move_executes_and_passes_method_identity(tmp_path, capsys):
     ('return __class__', '', '__class__'),
     ('return value.__secret', '', 'private name'),
     ('return engine.VALUE', 'from . import engine', 'source facade'),
+    ('from . import engine; return engine.VALUE', '', 'source facade'),
+    ('global VALUE; VALUE = 2', 'from .helper import VALUE', 'writes module globals'),
     ('return VALUE', 'from .later import VALUE', 'later split part'),
 ])
 def test_named_source_refuses_unsafe_moves(tmp_path, capsys, method, imports, reason):
