@@ -186,7 +186,7 @@ continue as before.
 |---|---|---|---|
 | Lead | `hobbles-18b0` | Claude | this brief, scope, decisions, registers, sign-offs |
 | Merge captain | `rf-mergec-fc0a` (was `rf-merge-f870`) | Codex | landing on main, the gate script, the flake quarantine list, the parked-branch manifest |
-| Release owner | `rf-release-d188` | Claude | windows, tags, backup, deploy, health check, rollback, break-glass, the canary node |
+| Release owner | `rf-releasec-29c5` (was `rf-release-d188`) | Codex | windows, tags, backup, deploy, health check, rollback, break-glass, the canary node |
 | Harness owner | `rf-harnessc-4a4a` (was `rf-harness-eeb2`) | Codex | `tests/replay/` (new), the corpus tools, planted changes, diff report |
 | Contract owner | `rf-contractc-be17` (was `rf-contract-80af`) | Codex | `server/lib/db_schema.py`, `server/lib/db_migrations.py`, `contract/`, `server/lib/server_identity.py` contract constants, the lifecycle kit (`server/lib/lifecycle.py`, `docs/architecture/lifecycles.md`), schema goldens |
 | Fix-lane owner | `rf-fix-c4ab` | Claude | one fix per commit, in the files the lead names per fix |
