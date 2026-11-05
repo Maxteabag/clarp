@@ -636,3 +636,43 @@ def test_a_fallback_after_the_empty_stream_deadline_is_not_marked_done(env, monk
     assert len(failures) == 1
     assert failures[0]['code'] == 'raw_stream_wait_timeout'
     assert 'Synthetic fallback' not in str(failures[0])
+
+
+def test_sdk_pings_start_the_same_stream_fallback_at_ten_seconds(env, monkeypatch):
+    from tests.unit.test_cartesia_ws import _ping_wire
+    from lib import config, db, tts_worker
+    from lib.clip_delivery.raw_pcm import RawPcmDelivery
+    from lib.clip_stream import ClipStreamBroker
+    wire = _ping_wire(monkeypatch, 3)
+    monkeypatch.setattr(config, '_CACHED', config.Config(
+        tts_provider='cartesia', tts_fallback='elevenlabs',
+        cartesia_api_key='primary-key', eleven_api_key='fallback-key',
+        cartesia_voices={'Mike': 'primary-voice'}))
+    calls, events = [], []
+    def backup(*, out_path, on_chunk, **kwargs):
+        calls.append(wire.now[0])
+        assert on_chunk is None
+        data = _fallback_wav()
+        pathlib.Path(out_path).write_bytes(data)
+        return len(data)
+    monkeypatch.setattr(tts_worker, 'synthesize_streaming', backup)
+    class Stream:
+        def broadcast(self, event):
+            events.append(event)
+    broker = ClipStreamBroker()
+    qid = tts_queue.enqueue(agent_id=env['agent_id'], text='Synthetic', voice_id='fallback-voice',
+                            session='claude', source=TurnSource.PWA, trace_id='ping-budget')
+    assert tts_worker.synth_one(audio_dir=env['audio_dir'], broker=broker,
+                               delivery=RawPcmDelivery(broker=broker), stream=Stream())
+    row = next(r for r in tts_queue.recent() if r['queue_id'] == qid)
+    assert calls == [10.0], 'SDK control traffic delayed fallback beyond the original deadline'
+    assert row['status'] == tts_queue.DONE
+    clip = db.conn().execute('SELECT clip_id,path,producer_status FROM clips').fetchone()
+    live = broker.get(clip['clip_id'])
+    assert live.finished and not live.failed
+    assert b''.join(live.chunks) == pathlib.Path(clip['path']).read_bytes()
+    assert len(b''.join(live.chunks)) == 17640  # .1s mono f32le at advertised44.1kHz
+    audio = [e for e in events if e['type'] == 'audio']
+    assert len(audio) == 1 and audio[0]['clip_id'] == clip['clip_id']
+    assert audio[0]['delivery'] == 'raw-pcm' and audio[0]['trace_id'] == 'ping-budget'
+    assert not [e for e in events if e['type'] == 'tts-error']

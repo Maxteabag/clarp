@@ -5,6 +5,8 @@ import json
 import pathlib
 import sys
 
+import pytest
+
 _SERVER_DIR = pathlib.Path(__file__).resolve().parents[2] / "server"
 sys.path.insert(0, str(_SERVER_DIR))
 
@@ -111,3 +113,94 @@ def test_connection_and_send_share_the_absolute_first_byte_budget(monkeypatch, t
     assert socket.closed
     assert now[0] <= cartesia_ws.RAW_FIRST_BYTE_BUDGET_SEC, 'connect + send consumed separate budgets before fallback could begin'
 
+
+
+def _ping_wire(monkeypatch, ping_count, *, after_audio=False):
+    """Real SDK receive loop; virtual frames and an interruptible transport.
+
+    Advancing a frame also advances scheduled watchdogs. Socket closure wakes
+    the pending arrival at its deadline, like shutdown(SHUT_RDWR) on a real recv.
+    """
+    import threading
+    from types import SimpleNamespace
+    now, timers, closed, pongs, timeouts = [0.0], [], [], [], []
+
+    class Timer:
+        daemon = False
+        def __init__(self, interval, function):
+            self.when, self.function = now[0] + interval, function
+            self.cancelled = False
+        def start(self):
+            timers.append(self)
+        def cancel(self):
+            self.cancelled = True
+
+    def advance(seconds):
+        target = now[0] + seconds
+        while True:
+            pending = [t for t in timers if not t.cancelled and t.when <= target]
+            if not pending:
+                break
+            timer = min(pending, key=lambda t: t.when)
+            timer.cancelled = True
+            now[0] = timer.when
+            timer.function()
+            if closed:
+                return
+        now[0] = target
+
+    ws = cartesia_ws.websocket.WebSocket()
+    abnf = cartesia_ws.websocket.ABNF
+    audio = json.dumps({'type': 'chunk', 'data': base64.b64encode(b'PCM!').decode(),
+                        'done': not after_audio})
+    pings = [abnf.create_frame(b'heartbeat', abnf.OPCODE_PING) for _ in range(ping_count)]
+    frames = ([abnf.create_frame(audio, abnf.OPCODE_TEXT)] + pings +
+              [abnf.create_frame(json.dumps({'type': 'done'}), abnf.OPCODE_TEXT)]
+              if after_audio else pings + [abnf.create_frame(audio, abnf.OPCODE_TEXT)])
+
+    def frame():
+        advance(4.0)
+        if closed:
+            raise cartesia_ws.websocket.WebSocketConnectionClosedException('transport aborted')
+        return frames.pop(0)
+
+    monkeypatch.setattr(ws, 'recv_frame', frame)
+    monkeypatch.setattr(ws, 'pong', pongs.append)
+    monkeypatch.setattr(ws, 'send', lambda payload: None)
+    monkeypatch.setattr(ws, 'settimeout', timeouts.append)
+    monkeypatch.setattr(ws, 'abort', lambda: closed.append('abort'))
+    monkeypatch.setattr(ws, 'shutdown', lambda: closed.append('shutdown'))
+    monkeypatch.setattr(ws, 'close', lambda: closed.append('close'))
+    monkeypatch.setattr(cartesia_ws, '_open_ws', lambda *args, **kwargs: ws)
+    monkeypatch.setattr(cartesia_ws, 'time', SimpleNamespace(perf_counter=lambda: now[0]))
+    monkeypatch.setattr(cartesia_ws, 'threading',
+                        SimpleNamespace(Timer=Timer, Lock=threading.Lock), raising=False)
+    return SimpleNamespace(now=now, closed=closed, pongs=pongs, timeouts=timeouts)
+
+
+@pytest.mark.parametrize('ping_count,after_audio', [
+    pytest.param(1, False, id='below-budget'),
+    pytest.param(3, False, id='over-budget'),
+    pytest.param(3, True, id='after-first-audio'),
+])
+def test_protocol_pings_cannot_extend_the_first_byte_deadline(monkeypatch, tmp_path,
+                                                            ping_count, after_audio):
+    wire = _ping_wire(monkeypatch, ping_count, after_audio=after_audio)
+    delivered = []
+    def run():
+        return cartesia_ws.synthesize_raw_pcm(
+            text='Synthetic', voice_id='v', api_key='key', out_path=tmp_path/'raw.pcm',
+            on_chunk=lambda index, chunk: delivered.append(chunk))
+    if ping_count == 3 and not after_audio:
+        with pytest.raises(cartesia_ws.CartesiaError):
+            run()
+        assert delivered == []
+        assert wire.now[0] <= 10, 'control frames extended the absolute first-byte budget'
+        assert len(wire.pongs) == 2
+    else:
+        assert run() == 4 and delivered == [b'PCM!']
+        assert wire.now[0] == (20 if after_audio else 8)
+        assert len(wire.pongs) == ping_count
+        assert 30.0 in wire.timeouts
+        assert wire.closed == ['close']
+    assert wire.closed
