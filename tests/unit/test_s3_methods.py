@@ -134,3 +134,16 @@ def test_two_group_sequential_stage_output_validates(tmp_path, split):
     base, _ = _tree(tmp_path, split, two_groups=True)
     head = _apply(tmp_path, split)
     methods.validate(tmp_path, base, head, methods.recipes(tmp_path))
+
+
+def test_unstarted_split_with_a_part_repoint_keeps_its_baseline_valid(tmp_path):
+    _tree(tmp_path, True)
+    recipe = tmp_path / 'tools/refactor/splits/engine.toml'
+    recipe.write_text(recipe.read_text() + (
+        '\n[[repoint]]\nname = "client-values"\nfile = "lib/client.py"\n'
+        'from_module = ".values"\nto_module = ".replacement"\nnames = ["VALUE"]\n'))
+    (tmp_path / 'server/lib/replacement.py').write_text('from .values import VALUE\n')
+    base = _commit(tmp_path, 'baseline includes split and following part repoint')
+    # Nothing has moved on integration yet. D will create the part before its
+    # repoint runs; preflight must preserve today's original source meanwhile.
+    methods.validate(tmp_path, base, base, methods.recipes(tmp_path))
