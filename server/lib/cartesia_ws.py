@@ -79,7 +79,7 @@ def synthesize_raw_pcm(*,
     chunk_count = 0
     t_first_chunk: float | None = None
     try:
-        ws.send(json.dumps({
+        request = json.dumps({
             "model_id": model,
             "transcript": text,
             "voice": {"mode": "id", "id": voice_id},
@@ -92,7 +92,18 @@ def synthesize_raw_pcm(*,
                 "encoding": encoding,
                 "sample_rate": sample_rate,
             },
-        }))
+        })
+        # Connection/setup already spent part of this same absolute budget.
+        remaining = RAW_FIRST_BYTE_BUDGET_SEC - (time.perf_counter() - t_start)
+        if remaining <= 0:
+            raise CartesiaError("cartesia_raw_first_byte_timeout")
+        ws.settimeout(min(timeout, remaining))
+        try:
+            ws.send(request)
+        except (websocket.WebSocketTimeoutException,
+                websocket.WebSocketConnectionClosedException,
+                ConnectionResetError, OSError) as error:
+            raise CartesiaError("cartesia_raw_request_send_failed") from error
 
         if out_path is not None:
             out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -148,6 +159,8 @@ def synthesize_raw_pcm(*,
                     if not decoded:
                         continue
                     if t_first_chunk is None:
+                        if time.perf_counter() - t_start >= RAW_FIRST_BYTE_BUDGET_SEC:
+                            raise CartesiaError("cartesia_raw_first_byte_timeout")
                         ws.settimeout(timeout)
                         t_first_chunk = time.perf_counter()
                         _emit("cartesia_ws", "firstChunk", trace_id=trace_id,
@@ -170,7 +183,12 @@ def synthesize_raw_pcm(*,
                 saw_done = bool(msg.get("done"))
     finally:
         try:
-            ws.close()
+            if t_first_chunk is None:
+                # No close handshake may spend another 3 s after the budget.
+                # websocket-client shutdown closes the transport immediately.
+                ws.shutdown()
+            else:
+                ws.close()
         except Exception:
             pass
 
