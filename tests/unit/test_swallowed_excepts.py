@@ -20,6 +20,7 @@ from __future__ import annotations
 import ast
 import collections
 import pathlib
+import tomllib
 
 import pytest
 
@@ -133,16 +134,39 @@ def swallowed(tree: ast.AST) -> list[int]:
 
 
 def current() -> dict[str, int]:
-    from tests.patching import logical_split_tree_map
+    from tests.patching import logical_split_tree_map, split_origin
     counts: collections.Counter[str] = collections.Counter()
     paths = [path for path in sorted(SERVER.rglob("*.py")) if "tests" not in path.parts]
     # Only exact recipe-declared definitions keep their original module's
     # debt. Undeclared code in a generated part remains a physical owner.
-    for origin, tree in logical_split_tree_map(paths, SERVER).items():
+    trees = logical_split_tree_map(paths, SERVER)
+    for origin, tree in trees.items():
         found = swallowed(tree)
         if found:
             counts[origin] = len(found)
-    return dict(counts)
+    # A generated class may contain both declared moved methods and new code.
+    # Reattribute only the exact methods in the declared mixin class; all other
+    # methods, classes and module statements retain physical ownership.
+    for recipe in sorted((SERVER.parent / "tools/refactor/methods").glob("*.toml")):
+        data = tomllib.loads(recipe.read_text())
+        if not data.get("source_module"):
+            continue
+        source = split_origin(data["source_module"], data.get("source_class", "Handler"))
+        for group in data.get("group", []):
+            module = group["module"]
+            tree = trees.get(module)
+            if tree is None:
+                continue
+            for cls in tree.body:
+                if not isinstance(cls, ast.ClassDef) or cls.name != group["class"]:
+                    continue
+                for method in cls.body:
+                    if (isinstance(method, (ast.FunctionDef, ast.AsyncFunctionDef))
+                            and method.name in group["members"]):
+                        moved = len(swallowed(method))
+                        counts[module] -= moved
+                        counts[source] += moved
+    return {module: count for module, count in counts.items() if count}
 
 
 def test_no_new_silently_swallowed_excepts():
