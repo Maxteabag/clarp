@@ -6,7 +6,13 @@ from types import SimpleNamespace
 
 import pytest
 
-from lib import db, eventlog, telemetry
+from lib import db, diagnostics_settings, eventlog, telemetry
+
+
+@pytest.fixture(autouse=True)
+def _enabled_diagnostics():
+    # Persist the setting: initializing the databases can outlast the cache TTL.
+    diagnostics_settings.update({"enabled": True, "categories": list(diagnostics_settings.CATEGORIES)})
 
 
 def _lines(path):
