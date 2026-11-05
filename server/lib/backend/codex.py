@@ -501,6 +501,18 @@ class CodexBackend(StreamJsonBackend):
                 on_error(st.failed_error)
             return
 
+        self._handle_legacy_event(
+            ev, st, agent_id=agent_id, session=session, trace_id=trace_id,
+            on_session_init=on_session_init, on_error=on_error,
+            stream=stream, enqueue=enqueue)
+
+    def _handle_legacy_event(
+        self, ev: dict, st: TurnState, *,
+        agent_id: str, session: str, trace_id: str,
+        on_session_init: Optional[Callable[[str], None]],
+        on_error: Optional[Callable[[str], None]],
+        stream: Any, enqueue: Callable[..., int],
+    ) -> None:
         # ===== Legacy rollout/event_msg schema (fallback) ===================
         inner, payload = _event_parts(ev)
 
