@@ -1,6 +1,8 @@
 """An admitted explicit transaction must not write its wait log to any sink."""
 import json
 import sqlite3
+import gc
+import threading
 
 import pytest
 
@@ -63,6 +65,9 @@ def test_wait_sinks_run_after_transaction_end_and_other_jsonl_stays_immediate(tm
         eventlog.emit("test", "ordinaryInside")
         assert [r["event"] for r in _lines(tmp_path)] == ["ordinaryInside"]
         assert telemetry.conn().execute("SELECT count(*) FROM diagnostic_events").fetchone()[0] == 0
+        eventlog.flush_deferred()
+        eventlog._flush_all_deferred()
+        assert attempts == []  # backstops cannot bypass the admitted transaction
 
     try:
         if ending.startswith("with_"):
@@ -104,3 +109,32 @@ def test_wait_outside_transaction_is_immediate_and_disabled_capture_still_logs_s
     connection.rollback()
     assert "synthetic disabled" in capsys.readouterr().err
     assert len(_lines(tmp_path)) == 1
+
+
+def test_wait_queue_does_not_keep_an_abandoned_writer_connection_alive(tmp_path, monkeypatch):
+    path = db.conn().execute("PRAGMA database_list").fetchone()[2]
+    telemetry.conn()
+    eventlog.reset_for_tests(tmp_path)
+    monkeypatch.setattr(db, "_LONG_WRITE_WAIT_SECONDS", -1)
+    errors = []
+
+    def abandoned():
+        try:
+            connection = db.conn()
+            connection.execute("BEGIN IMMEDIATE")
+            # Deliberately leave the transaction for connection destruction.
+            # The logger must not retain it beyond the thread-local lifetime.
+        except Exception as error:
+            errors.append(type(error).__name__)
+
+    worker = threading.Thread(target=abandoned)
+    worker.start()
+    worker.join(5)
+    assert not worker.is_alive()
+    assert errors == []
+    gc.collect()
+    with sqlite3.connect(path, isolation_level=None, timeout=0.1) as other:
+        other.execute("BEGIN IMMEDIATE")
+        other.rollback()
+    eventlog.flush_deferred()
+    assert [r["event"] for r in _lines(tmp_path)] == ["sqliteWriteWait"]
