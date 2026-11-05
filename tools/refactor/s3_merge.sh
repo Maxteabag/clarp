@@ -59,6 +59,7 @@ $merge_out"
 fi
 # The recipe and replay list as they stand in the merged tree.
 git checkout "$main" -- tools/refactor/s3_moves.toml tools/refactor/s3_replay.txt 2>/dev/null || true
+git checkout "$main" -- tools/refactor/s3_replay 2>/dev/null || true
 git checkout "$main" -- tools/refactor/splits tools/refactor/split_apply.py 2>/dev/null || true
 # S9: one line per split or repoint, "split|repoint NAME OLD=OLD,PART,...", in apply order.
 split_specs=""
@@ -189,8 +190,14 @@ for path in $generated; do git rm -q --cached --ignore-unmatch "$path"; rm -f "$
 for path in $split_old; do git checkout "$main" -- "$path" || die 8 "cannot take main's $path"; done
 for path in $split_generated; do git rm -q --cached --ignore-unmatch "$path"; rm -f "$path"; done
 for sha in $replay; do
-  git diff "$sha^" "$sha" -- server/server.py | git apply --3way --index - \
-    || die 4 "the server.py diff of $sha does not apply to main's server.py; port it by hand and update s3_replay.txt"
+  case "$sha" in
+    file:*)   # a reviewed port of a replayed diff, kept on main as a patch file
+      git apply --3way --index "tools/refactor/${sha#file:}" \
+        || die 4 "the replay patch ${sha#file:} does not apply to main's server.py; port it by hand and update s3_replay.txt" ;;
+    *)
+      git diff "$sha^" "$sha" -- server/server.py | git apply --3way --index - \
+        || die 4 "the server.py diff of $sha does not apply to main's server.py; port it by hand and update s3_replay.txt" ;;
+  esac
 done
 git add server/server.py $split_old
 git -c core.hooksPath=/dev/null commit -q -m "merge main $(git rev-parse --short "$main") into integration (S3: server.py replayed, moves to regenerate)" \
