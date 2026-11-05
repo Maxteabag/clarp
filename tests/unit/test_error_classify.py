@@ -197,3 +197,13 @@ def test_provider_message_unwraps_the_json_a_codex_error_carries():
     # Malformed JSON is shown as it came, never dropped.
     assert ec.provider_message('boom: {"message": "unterminated') == (
         'boom: {"message": "unterminated')
+
+
+def test_muse_session_lock_is_one_terminal_reason_even_with_provider_noise():
+    for message in [
+        'muse_session_locked: Session is held by pid 123; close it and resend.',
+        'muse_session_locked: holder unverifiable; network error timeout waiting for response',
+    ]:
+        assert ec.classify_error(message) == 'muse_session_locked'
+        assert ec.classify_error(message) in ec.NOTIFY
+    assert ec.classify_error('some text mentions muse_session_locked') == ec.UNKNOWN
