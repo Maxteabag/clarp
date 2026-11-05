@@ -35,11 +35,12 @@ APT
   if ((attempt < 3)); then sleep 2; fi
 done
 
-# Dated release + exact archive hash, never the moving "latest" asset. The
+# Month-end release (upstream retains it for two years) + exact archive hash,
+# never the moving "latest" asset or an expiring daily build. The
 # upstream release's checksums.sha256 and GitHub asset digest agree on this pin.
-release=autobuild-2026-11-05-12-48
-bundle=ffmpeg-N-128433-gdb8537d8cc-linux64-gpl
-digest=759cc1547e23f77f324944e034d27654c383ddbc1117823c08b025db1cf5fa14
+release=autobuild-2026-10-31-12-59
+bundle=ffmpeg-N-128227-g4811625b5f-linux64-gpl
+digest=67929be39bbb696f41d3295686597a439aeac902f61d82be660ccc1453c1fdfb
 url="https://github.com/BtbN/FFmpeg-Builds/releases/download/$release/$bundle.tar.xz"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
