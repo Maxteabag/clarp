@@ -21,7 +21,10 @@ def handoff(tmp_path, monkeypatch):
         context=eventlog.EventContext(agent_id=agent_id, session='mike'),
         synthesize_audio=False)
     td._SLOTS.claim(agent_id, spec.trace_id)
-    return service, backend, spec, scheduled
+    try:
+        yield service, backend, spec, scheduled
+    finally:
+        td.reset_for_tests()
 
 
 def _fail(*args, **kwargs):
