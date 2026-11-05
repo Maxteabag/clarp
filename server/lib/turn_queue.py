@@ -4,7 +4,47 @@ from __future__ import annotations
 from typing import Callable
 
 from . import db, prompt_admissions
+from .lifecycle import Deadline, Edge, Lifecycle, WaitForever
 from .log import log
+
+# The receipt's lifecycle (docs/architecture/lifecycles.md; Phase 3 queue
+# conversion, docs/architecture/lifecycle-conversion-plan.md section 1). This
+# module is the only writer of queued_turns.status. Outside the kit, by design:
+# inserts (enqueue, park, park_at_head create a row in queued or parked),
+# deletes (remove, remove_taken_over, unpark, discard_parked,
+# remove_for_agent take a row out of the lifecycle with their own status
+# predicates) and the allow_paused flag, which is not the state.
+_SETTLED = ("done", "failed", "interrupted", "ended")
+QUEUE_RECEIPT = Lifecycle(
+    name="queue_receipt", owner="lib/turn_queue.py",
+    table="queued_turns", key="queue_id", state_column="status",
+    entered_columns={"claimed": "claimed_at", "started": "started_at"},
+    initial="queued",
+    final=frozenset({*_SETTLED, "unknown", "cancelled", "withdrawn"}),
+    edges=(
+        Edge("claim", frozenset({"queued"}), "claimed"),
+        Edge("release", frozenset({"claimed"}), "queued"),
+        Edge("start", frozenset({"queued", "claimed"}), "started"),
+        Edge("park", frozenset({"queued"}), "parked"),
+        Edge("requeue", frozenset({"parked"}), "queued"),
+        Edge("cancel", frozenset({"queued", "claimed", "parked"}), "cancelled"),
+        Edge("withdraw", frozenset({"queued", "parked"}), "withdrawn"),
+        Edge("withdraw_claimed", frozenset({"claimed"}), "withdrawn"),
+        Edge("mark_unknown", frozenset({"queued", "claimed", "parked"}), "unknown"),
+        Edge("call_open_unknown", frozenset({"claimed", "started"}), "unknown"),
+        # A turn settles its receipt; the newest settlement wins (resettle).
+        *(Edge(f"settle_{s}", frozenset({"started"}), s) for s in _SETTLED),
+        *(Edge(f"resettle_{s}", frozenset(_SETTLED) - {s}, s, correction=True) for s in _SETTLED),
+        Edge("idle_settle", frozenset({"started"}), "ended"),
+        *(Edge(f"ended_settle_{s}", frozenset({"started"}), s) for s in _SETTLED),
+    ),
+    waits={
+        "queued": WaitForever("dispatch, cancel or the agent's deletion ends it"),
+        "parked": WaitForever("the user resumes or cancels the paused queue"),
+        "claimed": Deadline(30_000, "queued"),
+        "started": WaitForever("its turn's settlement ends it; the idle and ended sweeps repair a missed one"),
+    },
+)
 
 def enqueue(*, queue_id: str, agent_id: str, session: str, text: str,
             trace_id: str, client_msg_id: str, synthesize_audio: bool,
