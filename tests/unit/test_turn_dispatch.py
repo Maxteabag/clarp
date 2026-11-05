@@ -2235,7 +2235,7 @@ class _TransactionAwareStream(_Stream):
 def test_dispatch_never_takes_turn_lock_or_broadcasts_inside_its_write_transaction(tmp_path, monkeypatch):
     import sqlite3
     guard = _OrderedTurnLock(_td._TURN_LOCK)
-    monkeypatch.setattr(_td, "_TURN_LOCK", guard)
+    patch_shared(monkeypatch, _td, "_TURN_LOCK", guard)
     service, backends, agent_id = _make_service(tmp_path)
     stream = _TransactionAwareStream()
     service.ctx.stream = stream
@@ -2703,7 +2703,7 @@ def _leak_slot(tmp_path, *, settled_ms_ago):
 
 def test_leaked_slot_of_a_settled_turn_is_released_and_logged(tmp_path, monkeypatch):
     logged = []
-    monkeypatch.setattr(_td, "log", lambda event, msg="": logged.append((event, msg)))
+    patch_shared(monkeypatch, _td, "log", lambda event, msg="": logged.append((event, msg)))
     service, _backends, agent_id = _leak_slot(tmp_path, settled_ms_ago=10 * 60_000)
 
     released = service.release_leaked_slots()
