@@ -1,0 +1,5178 @@
+{
+ "agent=none|engine=bytes-only|first_fails=busy|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:large-v3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=busy|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:large-v3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=busy|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:large-v3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=busy|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:large-v3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=busy|header=faster-whisper:small|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:small",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=busy|header=faster-whisper:small|long=|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:small",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=busy|header=faster-whisper:small|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:small",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=busy|header=faster-whisper:small|long=|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:small",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=busy|header=server-default|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:large-v3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=busy|header=server-default|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:large-v3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=busy|header=server-default|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:large-v3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=busy|header=server-default|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:large-v3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=busy|header=server-default|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "bytes"
+  ],
+  "error": "whisper busy",
+  "status": 429,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=busy|header=server-default|long=|ready=False|selected=server-default": {
+  "calls": [
+   "bytes"
+  ],
+  "error": "whisper busy",
+  "status": 429,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=busy|header=server-default|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "bytes"
+  ],
+  "error": "whisper busy",
+  "status": 429,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=busy|header=server-default|long=|ready=True|selected=server-default": {
+  "calls": [
+   "bytes"
+  ],
+  "error": "whisper busy",
+  "status": 429,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=busy|header=|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:large-v3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=busy|header=|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:large-v3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=busy|header=|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:large-v3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=busy|header=|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:large-v3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=busy|header=|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=busy|header=|long=|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "whisper model loading",
+  "status": 503,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=busy|header=|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=busy|header=|long=|ready=True|selected=server-default": {
+  "calls": [
+   "bytes"
+  ],
+  "error": "whisper busy",
+  "status": 429,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=error|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:large-v3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=error|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:large-v3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=error|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:large-v3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=error|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:large-v3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=error|header=faster-whisper:small|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:small",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=error|header=faster-whisper:small|long=|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:small",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=error|header=faster-whisper:small|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:small",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=error|header=faster-whisper:small|long=|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:small",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=error|header=server-default|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:large-v3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=error|header=server-default|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:large-v3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=error|header=server-default|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:large-v3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=error|header=server-default|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:large-v3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=error|header=server-default|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "bytes"
+  ],
+  "error": "provider down",
+  "status": 500,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=error|header=server-default|long=|ready=False|selected=server-default": {
+  "calls": [
+   "bytes"
+  ],
+  "error": "provider down",
+  "status": 500,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=error|header=server-default|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "bytes"
+  ],
+  "error": "provider down",
+  "status": 500,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=error|header=server-default|long=|ready=True|selected=server-default": {
+  "calls": [
+   "bytes"
+  ],
+  "error": "provider down",
+  "status": 500,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=error|header=|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:large-v3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=error|header=|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:large-v3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=error|header=|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:large-v3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=error|header=|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:large-v3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=error|header=|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=error|header=|long=|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "whisper model loading",
+  "status": 503,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=error|header=|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=error|header=|long=|ready=True|selected=server-default": {
+  "calls": [
+   "bytes"
+  ],
+  "error": "provider down",
+  "status": 500,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=loading|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:large-v3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=loading|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:large-v3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=loading|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:large-v3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=loading|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:large-v3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=loading|header=faster-whisper:small|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:small",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=loading|header=faster-whisper:small|long=|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:small",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=loading|header=faster-whisper:small|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:small",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=loading|header=faster-whisper:small|long=|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:small",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=loading|header=server-default|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:large-v3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=loading|header=server-default|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:large-v3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=loading|header=server-default|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:large-v3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=loading|header=server-default|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:large-v3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=loading|header=server-default|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "bytes"
+  ],
+  "error": "loading",
+  "status": 503,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=loading|header=server-default|long=|ready=False|selected=server-default": {
+  "calls": [
+   "bytes"
+  ],
+  "error": "loading",
+  "status": 503,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=loading|header=server-default|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "bytes"
+  ],
+  "error": "loading",
+  "status": 503,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=loading|header=server-default|long=|ready=True|selected=server-default": {
+  "calls": [
+   "bytes"
+  ],
+  "error": "loading",
+  "status": 503,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=loading|header=|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:large-v3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=loading|header=|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:large-v3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=loading|header=|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:large-v3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=loading|header=|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:large-v3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=loading|header=|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=loading|header=|long=|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "whisper model loading",
+  "status": 503,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=loading|header=|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=loading|header=|long=|ready=True|selected=server-default": {
+  "calls": [
+   "bytes"
+  ],
+  "error": "loading",
+  "status": 503,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=no|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:large-v3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=no|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:large-v3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=no|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:large-v3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=no|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:large-v3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=no|header=faster-whisper:small|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:small",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=no|header=faster-whisper:small|long=|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:small",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=no|header=faster-whisper:small|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:small",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=no|header=faster-whisper:small|long=|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:small",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=no|header=server-default|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:large-v3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=no|header=server-default|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:large-v3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=no|header=server-default|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:large-v3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=no|header=server-default|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:large-v3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=no|header=server-default|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "bytes"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=none|engine=bytes-only|first_fails=no|header=server-default|long=|ready=False|selected=server-default": {
+  "calls": [
+   "bytes"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=none|engine=bytes-only|first_fails=no|header=server-default|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "bytes"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=none|engine=bytes-only|first_fails=no|header=server-default|long=|ready=True|selected=server-default": {
+  "calls": [
+   "bytes"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=none|engine=bytes-only|first_fails=no|header=|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:large-v3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=no|header=|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:large-v3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=no|header=|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:large-v3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=no|header=|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:large-v3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=no|header=|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=no|header=|long=|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "whisper model loading",
+  "status": 503,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=no|header=|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=no|header=|long=|ready=True|selected=server-default": {
+  "calls": [
+   "bytes"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=none|engine=bytes-only|first_fails=unknown|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:large-v3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=unknown|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:large-v3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=unknown|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:large-v3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=unknown|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:large-v3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=unknown|header=faster-whisper:small|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:small",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=unknown|header=faster-whisper:small|long=|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:small",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=unknown|header=faster-whisper:small|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:small",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=unknown|header=faster-whisper:small|long=|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:small",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=unknown|header=server-default|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:large-v3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=unknown|header=server-default|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:large-v3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=unknown|header=server-default|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:large-v3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=unknown|header=server-default|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:large-v3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=unknown|header=server-default|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "bytes"
+  ],
+  "error": "unknown model",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=unknown|header=server-default|long=|ready=False|selected=server-default": {
+  "calls": [
+   "bytes"
+  ],
+  "error": "unknown model",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=unknown|header=server-default|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "bytes"
+  ],
+  "error": "unknown model",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=unknown|header=server-default|long=|ready=True|selected=server-default": {
+  "calls": [
+   "bytes"
+  ],
+  "error": "unknown model",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=unknown|header=|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:large-v3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=unknown|header=|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:large-v3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=unknown|header=|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:large-v3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=unknown|header=|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:large-v3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=unknown|header=|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=unknown|header=|long=|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "whisper model loading",
+  "status": 503,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=unknown|header=|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=bytes-only|first_fails=unknown|header=|long=|ready=True|selected=server-default": {
+  "calls": [
+   "bytes"
+  ],
+  "error": "unknown model",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=busy|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:large-v3"
+  ],
+  "error": "whisper busy",
+  "status": 429,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=busy|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [
+   "faster-whisper:large-v3"
+  ],
+  "error": "whisper busy",
+  "status": 429,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=busy|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:large-v3"
+  ],
+  "error": "whisper busy",
+  "status": 429,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=busy|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [
+   "faster-whisper:large-v3"
+  ],
+  "error": "whisper busy",
+  "status": 429,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=busy|header=faster-whisper:small|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:small"
+  ],
+  "error": "whisper busy",
+  "status": 429,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=busy|header=faster-whisper:small|long=|ready=False|selected=server-default": {
+  "calls": [
+   "faster-whisper:small"
+  ],
+  "error": "whisper busy",
+  "status": 429,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=busy|header=faster-whisper:small|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:small"
+  ],
+  "error": "whisper busy",
+  "status": 429,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=busy|header=faster-whisper:small|long=|ready=True|selected=server-default": {
+  "calls": [
+   "faster-whisper:small"
+  ],
+  "error": "whisper busy",
+  "status": 429,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=busy|header=server-default|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:large-v3"
+  ],
+  "error": "whisper busy",
+  "status": 429,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=busy|header=server-default|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [
+   "faster-whisper:large-v3"
+  ],
+  "error": "whisper busy",
+  "status": 429,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=busy|header=server-default|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:large-v3"
+  ],
+  "error": "whisper busy",
+  "status": 429,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=busy|header=server-default|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [
+   "faster-whisper:large-v3"
+  ],
+  "error": "whisper busy",
+  "status": 429,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=busy|header=server-default|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "server-default"
+  ],
+  "error": "whisper busy",
+  "status": 429,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=busy|header=server-default|long=|ready=False|selected=server-default": {
+  "calls": [
+   "server-default"
+  ],
+  "error": "whisper busy",
+  "status": 429,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=busy|header=server-default|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "server-default"
+  ],
+  "error": "whisper busy",
+  "status": 429,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=busy|header=server-default|long=|ready=True|selected=server-default": {
+  "calls": [
+   "server-default"
+  ],
+  "error": "whisper busy",
+  "status": 429,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=busy|header=|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:large-v3"
+  ],
+  "error": "whisper busy",
+  "status": 429,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=busy|header=|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [
+   "faster-whisper:large-v3"
+  ],
+  "error": "whisper busy",
+  "status": 429,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=busy|header=|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:large-v3"
+  ],
+  "error": "whisper busy",
+  "status": 429,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=busy|header=|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [
+   "faster-whisper:large-v3"
+  ],
+  "error": "whisper busy",
+  "status": 429,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=busy|header=|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "whisper busy",
+  "status": 429,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=busy|header=|long=|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "whisper model loading",
+  "status": 503,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=busy|header=|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "whisper busy",
+  "status": 429,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=busy|header=|long=|ready=True|selected=server-default": {
+  "calls": [
+   "bytes"
+  ],
+  "error": "whisper busy",
+  "status": 429,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=error|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:large-v3"
+  ],
+  "error": "provider down",
+  "status": 500,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=error|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [
+   "faster-whisper:large-v3"
+  ],
+  "error": "provider down",
+  "status": 500,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=error|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:large-v3"
+  ],
+  "error": "provider down",
+  "status": 500,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=error|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [
+   "faster-whisper:large-v3"
+  ],
+  "error": "provider down",
+  "status": 500,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=error|header=faster-whisper:small|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:small"
+  ],
+  "error": "provider down",
+  "status": 500,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=error|header=faster-whisper:small|long=|ready=False|selected=server-default": {
+  "calls": [
+   "faster-whisper:small"
+  ],
+  "error": "provider down",
+  "status": 500,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=error|header=faster-whisper:small|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:small"
+  ],
+  "error": "provider down",
+  "status": 500,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=error|header=faster-whisper:small|long=|ready=True|selected=server-default": {
+  "calls": [
+   "faster-whisper:small"
+  ],
+  "error": "provider down",
+  "status": 500,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=error|header=server-default|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:large-v3"
+  ],
+  "error": "provider down",
+  "status": 500,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=error|header=server-default|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [
+   "faster-whisper:large-v3"
+  ],
+  "error": "provider down",
+  "status": 500,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=error|header=server-default|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:large-v3"
+  ],
+  "error": "provider down",
+  "status": 500,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=error|header=server-default|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [
+   "faster-whisper:large-v3"
+  ],
+  "error": "provider down",
+  "status": 500,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=error|header=server-default|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "server-default"
+  ],
+  "error": "provider down",
+  "status": 500,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=error|header=server-default|long=|ready=False|selected=server-default": {
+  "calls": [
+   "server-default"
+  ],
+  "error": "provider down",
+  "status": 500,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=error|header=server-default|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "server-default"
+  ],
+  "error": "provider down",
+  "status": 500,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=error|header=server-default|long=|ready=True|selected=server-default": {
+  "calls": [
+   "server-default"
+  ],
+  "error": "provider down",
+  "status": 500,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=error|header=|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:large-v3"
+  ],
+  "error": "provider down",
+  "status": 500,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=error|header=|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [
+   "faster-whisper:large-v3"
+  ],
+  "error": "provider down",
+  "status": 500,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=error|header=|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:large-v3"
+  ],
+  "error": "provider down",
+  "status": 500,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=error|header=|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [
+   "faster-whisper:large-v3"
+  ],
+  "error": "provider down",
+  "status": 500,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=error|header=|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "provider down",
+  "status": 500,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=error|header=|long=|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "whisper model loading",
+  "status": 503,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=error|header=|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "provider down",
+  "status": 500,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=error|header=|long=|ready=True|selected=server-default": {
+  "calls": [
+   "bytes"
+  ],
+  "error": "provider down",
+  "status": 500,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=loading|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:large-v3"
+  ],
+  "error": "loading",
+  "status": 503,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=loading|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [
+   "faster-whisper:large-v3"
+  ],
+  "error": "loading",
+  "status": 503,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=loading|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:large-v3"
+  ],
+  "error": "loading",
+  "status": 503,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=loading|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [
+   "faster-whisper:large-v3"
+  ],
+  "error": "loading",
+  "status": 503,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=loading|header=faster-whisper:small|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:small"
+  ],
+  "error": "loading",
+  "status": 503,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=loading|header=faster-whisper:small|long=|ready=False|selected=server-default": {
+  "calls": [
+   "faster-whisper:small"
+  ],
+  "error": "loading",
+  "status": 503,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=loading|header=faster-whisper:small|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:small"
+  ],
+  "error": "loading",
+  "status": 503,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=loading|header=faster-whisper:small|long=|ready=True|selected=server-default": {
+  "calls": [
+   "faster-whisper:small"
+  ],
+  "error": "loading",
+  "status": 503,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=loading|header=server-default|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:large-v3"
+  ],
+  "error": "loading",
+  "status": 503,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=loading|header=server-default|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [
+   "faster-whisper:large-v3"
+  ],
+  "error": "loading",
+  "status": 503,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=loading|header=server-default|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:large-v3"
+  ],
+  "error": "loading",
+  "status": 503,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=loading|header=server-default|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [
+   "faster-whisper:large-v3"
+  ],
+  "error": "loading",
+  "status": 503,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=loading|header=server-default|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "server-default"
+  ],
+  "error": "loading",
+  "status": 503,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=loading|header=server-default|long=|ready=False|selected=server-default": {
+  "calls": [
+   "server-default"
+  ],
+  "error": "loading",
+  "status": 503,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=loading|header=server-default|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "server-default"
+  ],
+  "error": "loading",
+  "status": 503,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=loading|header=server-default|long=|ready=True|selected=server-default": {
+  "calls": [
+   "server-default"
+  ],
+  "error": "loading",
+  "status": 503,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=loading|header=|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:large-v3"
+  ],
+  "error": "loading",
+  "status": 503,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=loading|header=|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [
+   "faster-whisper:large-v3"
+  ],
+  "error": "loading",
+  "status": 503,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=loading|header=|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:large-v3"
+  ],
+  "error": "loading",
+  "status": 503,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=loading|header=|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [
+   "faster-whisper:large-v3"
+  ],
+  "error": "loading",
+  "status": 503,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=loading|header=|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "loading",
+  "status": 503,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=loading|header=|long=|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "whisper model loading",
+  "status": 503,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=loading|header=|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "loading",
+  "status": 503,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=loading|header=|long=|ready=True|selected=server-default": {
+  "calls": [
+   "bytes"
+  ],
+  "error": "loading",
+  "status": 503,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=no|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:large-v3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=none|engine=model-capable|first_fails=no|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [
+   "faster-whisper:large-v3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=none|engine=model-capable|first_fails=no|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:large-v3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=none|engine=model-capable|first_fails=no|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [
+   "faster-whisper:large-v3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=none|engine=model-capable|first_fails=no|header=faster-whisper:small|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:small"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=none|engine=model-capable|first_fails=no|header=faster-whisper:small|long=|ready=False|selected=server-default": {
+  "calls": [
+   "faster-whisper:small"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=none|engine=model-capable|first_fails=no|header=faster-whisper:small|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:small"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=none|engine=model-capable|first_fails=no|header=faster-whisper:small|long=|ready=True|selected=server-default": {
+  "calls": [
+   "faster-whisper:small"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=none|engine=model-capable|first_fails=no|header=server-default|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:large-v3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=none|engine=model-capable|first_fails=no|header=server-default|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [
+   "faster-whisper:large-v3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=none|engine=model-capable|first_fails=no|header=server-default|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:large-v3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=none|engine=model-capable|first_fails=no|header=server-default|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [
+   "faster-whisper:large-v3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=none|engine=model-capable|first_fails=no|header=server-default|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "server-default"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=none|engine=model-capable|first_fails=no|header=server-default|long=|ready=False|selected=server-default": {
+  "calls": [
+   "server-default"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=none|engine=model-capable|first_fails=no|header=server-default|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "server-default"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=none|engine=model-capable|first_fails=no|header=server-default|long=|ready=True|selected=server-default": {
+  "calls": [
+   "server-default"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=none|engine=model-capable|first_fails=no|header=|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:large-v3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=none|engine=model-capable|first_fails=no|header=|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [
+   "faster-whisper:large-v3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=none|engine=model-capable|first_fails=no|header=|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:large-v3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=none|engine=model-capable|first_fails=no|header=|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [
+   "faster-whisper:large-v3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=none|engine=model-capable|first_fails=no|header=|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=none|engine=model-capable|first_fails=no|header=|long=|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "whisper model loading",
+  "status": 503,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=no|header=|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=none|engine=model-capable|first_fails=no|header=|long=|ready=True|selected=server-default": {
+  "calls": [
+   "bytes"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=none|engine=model-capable|first_fails=unknown|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:large-v3"
+  ],
+  "error": "unknown model",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=unknown|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [
+   "faster-whisper:large-v3"
+  ],
+  "error": "unknown model",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=unknown|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:large-v3"
+  ],
+  "error": "unknown model",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=unknown|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [
+   "faster-whisper:large-v3"
+  ],
+  "error": "unknown model",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=unknown|header=faster-whisper:small|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:small"
+  ],
+  "error": "unknown model",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=unknown|header=faster-whisper:small|long=|ready=False|selected=server-default": {
+  "calls": [
+   "faster-whisper:small"
+  ],
+  "error": "unknown model",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=unknown|header=faster-whisper:small|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:small"
+  ],
+  "error": "unknown model",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=unknown|header=faster-whisper:small|long=|ready=True|selected=server-default": {
+  "calls": [
+   "faster-whisper:small"
+  ],
+  "error": "unknown model",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=unknown|header=server-default|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:large-v3"
+  ],
+  "error": "unknown model",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=unknown|header=server-default|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [
+   "faster-whisper:large-v3"
+  ],
+  "error": "unknown model",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=unknown|header=server-default|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:large-v3"
+  ],
+  "error": "unknown model",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=unknown|header=server-default|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [
+   "faster-whisper:large-v3"
+  ],
+  "error": "unknown model",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=unknown|header=server-default|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "server-default"
+  ],
+  "error": "unknown model",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=unknown|header=server-default|long=|ready=False|selected=server-default": {
+  "calls": [
+   "server-default"
+  ],
+  "error": "unknown model",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=unknown|header=server-default|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "server-default"
+  ],
+  "error": "unknown model",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=unknown|header=server-default|long=|ready=True|selected=server-default": {
+  "calls": [
+   "server-default"
+  ],
+  "error": "unknown model",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=unknown|header=|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:large-v3"
+  ],
+  "error": "unknown model",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=unknown|header=|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [
+   "faster-whisper:large-v3"
+  ],
+  "error": "unknown model",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=unknown|header=|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:large-v3"
+  ],
+  "error": "unknown model",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=unknown|header=|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [
+   "faster-whisper:large-v3"
+  ],
+  "error": "unknown model",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=unknown|header=|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "unknown model",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=unknown|header=|long=|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "whisper model loading",
+  "status": 503,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=unknown|header=|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "unknown model",
+  "status": 400,
+  "text": ""
+ },
+ "agent=none|engine=model-capable|first_fails=unknown|header=|long=|ready=True|selected=server-default": {
+  "calls": [
+   "bytes"
+  ],
+  "error": "unknown model",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=busy|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=busy|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=busy|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=busy|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=busy|header=faster-whisper:small|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=busy|header=faster-whisper:small|long=|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=busy|header=faster-whisper:small|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=busy|header=faster-whisper:small|long=|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=busy|header=server-default|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=busy|header=server-default|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=busy|header=server-default|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=busy|header=server-default|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=busy|header=server-default|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=busy|header=server-default|long=|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=busy|header=server-default|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=busy|header=server-default|long=|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=busy|header=|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=busy|header=|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=busy|header=|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=busy|header=|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=busy|header=|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=busy|header=|long=|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=busy|header=|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=busy|header=|long=|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=error|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=error|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=error|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=error|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=error|header=faster-whisper:small|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=error|header=faster-whisper:small|long=|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=error|header=faster-whisper:small|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=error|header=faster-whisper:small|long=|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=error|header=server-default|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=error|header=server-default|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=error|header=server-default|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=error|header=server-default|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=error|header=server-default|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=error|header=server-default|long=|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=error|header=server-default|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=error|header=server-default|long=|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=error|header=|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=error|header=|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=error|header=|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=error|header=|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=error|header=|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=error|header=|long=|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=error|header=|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=error|header=|long=|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=loading|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=loading|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=loading|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=loading|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=loading|header=faster-whisper:small|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=loading|header=faster-whisper:small|long=|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=loading|header=faster-whisper:small|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=loading|header=faster-whisper:small|long=|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=loading|header=server-default|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=loading|header=server-default|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=loading|header=server-default|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=loading|header=server-default|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=loading|header=server-default|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=loading|header=server-default|long=|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=loading|header=server-default|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=loading|header=server-default|long=|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=loading|header=|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=loading|header=|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=loading|header=|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=loading|header=|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=loading|header=|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=loading|header=|long=|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=loading|header=|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=loading|header=|long=|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=no|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=no|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=no|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=no|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=no|header=faster-whisper:small|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=no|header=faster-whisper:small|long=|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=no|header=faster-whisper:small|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=no|header=faster-whisper:small|long=|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=no|header=server-default|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=no|header=server-default|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=no|header=server-default|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=no|header=server-default|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=no|header=server-default|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=no|header=server-default|long=|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=no|header=server-default|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=no|header=server-default|long=|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=no|header=|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=no|header=|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=no|header=|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=no|header=|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=no|header=|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=no|header=|long=|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=no|header=|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=no|header=|long=|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=unknown|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=unknown|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=unknown|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=unknown|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=unknown|header=faster-whisper:small|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=unknown|header=faster-whisper:small|long=|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=unknown|header=faster-whisper:small|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=unknown|header=faster-whisper:small|long=|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=unknown|header=server-default|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=unknown|header=server-default|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=unknown|header=server-default|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=unknown|header=server-default|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=unknown|header=server-default|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=unknown|header=server-default|long=|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=unknown|header=server-default|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=unknown|header=server-default|long=|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=unknown|header=|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=unknown|header=|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=unknown|header=|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=unknown|header=|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=unknown|header=|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=unknown|header=|long=|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=unknown|header=|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=bytes-only|first_fails=unknown|header=|long=|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: deepgram:nova-3",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=busy|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "whisper busy",
+  "status": 429,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=busy|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "whisper busy",
+  "status": 429,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=busy|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "whisper busy",
+  "status": 429,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=busy|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "whisper busy",
+  "status": 429,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=busy|header=faster-whisper:small|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "whisper busy",
+  "status": 429,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=busy|header=faster-whisper:small|long=|ready=False|selected=server-default": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "whisper busy",
+  "status": 429,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=busy|header=faster-whisper:small|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "whisper busy",
+  "status": 429,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=busy|header=faster-whisper:small|long=|ready=True|selected=server-default": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "whisper busy",
+  "status": 429,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=busy|header=server-default|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "whisper busy",
+  "status": 429,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=busy|header=server-default|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "whisper busy",
+  "status": 429,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=busy|header=server-default|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "whisper busy",
+  "status": 429,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=busy|header=server-default|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "whisper busy",
+  "status": 429,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=busy|header=server-default|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "whisper busy",
+  "status": 429,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=busy|header=server-default|long=|ready=False|selected=server-default": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "whisper busy",
+  "status": 429,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=busy|header=server-default|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "whisper busy",
+  "status": 429,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=busy|header=server-default|long=|ready=True|selected=server-default": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "whisper busy",
+  "status": 429,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=busy|header=|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "whisper busy",
+  "status": 429,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=busy|header=|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "whisper busy",
+  "status": 429,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=busy|header=|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "whisper busy",
+  "status": 429,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=busy|header=|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "whisper busy",
+  "status": 429,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=busy|header=|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "whisper busy",
+  "status": 429,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=busy|header=|long=|ready=False|selected=server-default": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "whisper busy",
+  "status": 429,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=busy|header=|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "whisper busy",
+  "status": 429,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=busy|header=|long=|ready=True|selected=server-default": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "whisper busy",
+  "status": 429,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=error|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "provider down",
+  "status": 500,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=error|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "provider down",
+  "status": 500,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=error|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "provider down",
+  "status": 500,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=error|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "provider down",
+  "status": 500,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=error|header=faster-whisper:small|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "provider down",
+  "status": 500,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=error|header=faster-whisper:small|long=|ready=False|selected=server-default": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "provider down",
+  "status": 500,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=error|header=faster-whisper:small|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "provider down",
+  "status": 500,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=error|header=faster-whisper:small|long=|ready=True|selected=server-default": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "provider down",
+  "status": 500,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=error|header=server-default|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "provider down",
+  "status": 500,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=error|header=server-default|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "provider down",
+  "status": 500,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=error|header=server-default|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "provider down",
+  "status": 500,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=error|header=server-default|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "provider down",
+  "status": 500,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=error|header=server-default|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "provider down",
+  "status": 500,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=error|header=server-default|long=|ready=False|selected=server-default": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "provider down",
+  "status": 500,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=error|header=server-default|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "provider down",
+  "status": 500,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=error|header=server-default|long=|ready=True|selected=server-default": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "provider down",
+  "status": 500,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=error|header=|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "provider down",
+  "status": 500,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=error|header=|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "provider down",
+  "status": 500,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=error|header=|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "provider down",
+  "status": 500,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=error|header=|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "provider down",
+  "status": 500,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=error|header=|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "provider down",
+  "status": 500,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=error|header=|long=|ready=False|selected=server-default": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "provider down",
+  "status": 500,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=error|header=|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "provider down",
+  "status": 500,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=error|header=|long=|ready=True|selected=server-default": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "provider down",
+  "status": 500,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=loading|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "loading",
+  "status": 503,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=loading|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "loading",
+  "status": 503,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=loading|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "loading",
+  "status": 503,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=loading|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "loading",
+  "status": 503,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=loading|header=faster-whisper:small|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "loading",
+  "status": 503,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=loading|header=faster-whisper:small|long=|ready=False|selected=server-default": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "loading",
+  "status": 503,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=loading|header=faster-whisper:small|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "loading",
+  "status": 503,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=loading|header=faster-whisper:small|long=|ready=True|selected=server-default": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "loading",
+  "status": 503,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=loading|header=server-default|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "loading",
+  "status": 503,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=loading|header=server-default|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "loading",
+  "status": 503,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=loading|header=server-default|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "loading",
+  "status": 503,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=loading|header=server-default|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "loading",
+  "status": 503,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=loading|header=server-default|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "loading",
+  "status": 503,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=loading|header=server-default|long=|ready=False|selected=server-default": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "loading",
+  "status": 503,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=loading|header=server-default|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "loading",
+  "status": 503,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=loading|header=server-default|long=|ready=True|selected=server-default": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "loading",
+  "status": 503,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=loading|header=|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "loading",
+  "status": 503,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=loading|header=|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "loading",
+  "status": 503,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=loading|header=|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "loading",
+  "status": 503,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=loading|header=|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "loading",
+  "status": 503,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=loading|header=|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "loading",
+  "status": 503,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=loading|header=|long=|ready=False|selected=server-default": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "loading",
+  "status": 503,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=loading|header=|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "loading",
+  "status": 503,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=loading|header=|long=|ready=True|selected=server-default": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "loading",
+  "status": 503,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=no|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=one|engine=model-capable|first_fails=no|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=one|engine=model-capable|first_fails=no|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=one|engine=model-capable|first_fails=no|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=one|engine=model-capable|first_fails=no|header=faster-whisper:small|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=one|engine=model-capable|first_fails=no|header=faster-whisper:small|long=|ready=False|selected=server-default": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=one|engine=model-capable|first_fails=no|header=faster-whisper:small|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=one|engine=model-capable|first_fails=no|header=faster-whisper:small|long=|ready=True|selected=server-default": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=one|engine=model-capable|first_fails=no|header=server-default|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=one|engine=model-capable|first_fails=no|header=server-default|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=one|engine=model-capable|first_fails=no|header=server-default|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=one|engine=model-capable|first_fails=no|header=server-default|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=one|engine=model-capable|first_fails=no|header=server-default|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=one|engine=model-capable|first_fails=no|header=server-default|long=|ready=False|selected=server-default": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=one|engine=model-capable|first_fails=no|header=server-default|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=one|engine=model-capable|first_fails=no|header=server-default|long=|ready=True|selected=server-default": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=one|engine=model-capable|first_fails=no|header=|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=one|engine=model-capable|first_fails=no|header=|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=one|engine=model-capable|first_fails=no|header=|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=one|engine=model-capable|first_fails=no|header=|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=one|engine=model-capable|first_fails=no|header=|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=one|engine=model-capable|first_fails=no|header=|long=|ready=False|selected=server-default": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=one|engine=model-capable|first_fails=no|header=|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=one|engine=model-capable|first_fails=no|header=|long=|ready=True|selected=server-default": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=one|engine=model-capable|first_fails=unknown|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "unknown model",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=unknown|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "unknown model",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=unknown|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "unknown model",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=unknown|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "unknown model",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=unknown|header=faster-whisper:small|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "unknown model",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=unknown|header=faster-whisper:small|long=|ready=False|selected=server-default": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "unknown model",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=unknown|header=faster-whisper:small|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "unknown model",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=unknown|header=faster-whisper:small|long=|ready=True|selected=server-default": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "unknown model",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=unknown|header=server-default|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "unknown model",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=unknown|header=server-default|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "unknown model",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=unknown|header=server-default|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "unknown model",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=unknown|header=server-default|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "unknown model",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=unknown|header=server-default|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "unknown model",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=unknown|header=server-default|long=|ready=False|selected=server-default": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "unknown model",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=unknown|header=server-default|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "unknown model",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=unknown|header=server-default|long=|ready=True|selected=server-default": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "unknown model",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=unknown|header=|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "unknown model",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=unknown|header=|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "unknown model",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=unknown|header=|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "unknown model",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=unknown|header=|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "unknown model",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=unknown|header=|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "unknown model",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=unknown|header=|long=|ready=False|selected=server-default": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "unknown model",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=unknown|header=|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "unknown model",
+  "status": 400,
+  "text": ""
+ },
+ "agent=one|engine=model-capable|first_fails=unknown|header=|long=|ready=True|selected=server-default": {
+  "calls": [
+   "deepgram:nova-3"
+  ],
+  "error": "unknown model",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=busy|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=busy|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=busy|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=busy|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=busy|header=faster-whisper:small|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=busy|header=faster-whisper:small|long=|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=busy|header=faster-whisper:small|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=busy|header=faster-whisper:small|long=|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=busy|header=server-default|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=busy|header=server-default|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=busy|header=server-default|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=busy|header=server-default|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=busy|header=server-default|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=busy|header=server-default|long=|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=busy|header=server-default|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=busy|header=server-default|long=|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=busy|header=|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=busy|header=|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=busy|header=|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=busy|header=|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=busy|header=|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=busy|header=|long=|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=busy|header=|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=busy|header=|long=|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=error|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=error|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=error|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=error|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=error|header=faster-whisper:small|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=error|header=faster-whisper:small|long=|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=error|header=faster-whisper:small|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=error|header=faster-whisper:small|long=|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=error|header=server-default|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=error|header=server-default|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=error|header=server-default|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=error|header=server-default|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=error|header=server-default|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=error|header=server-default|long=|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=error|header=server-default|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=error|header=server-default|long=|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=error|header=|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=error|header=|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=error|header=|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=error|header=|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=error|header=|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=error|header=|long=|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=error|header=|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=error|header=|long=|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=loading|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=loading|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=loading|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=loading|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=loading|header=faster-whisper:small|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=loading|header=faster-whisper:small|long=|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=loading|header=faster-whisper:small|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=loading|header=faster-whisper:small|long=|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=loading|header=server-default|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=loading|header=server-default|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=loading|header=server-default|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=loading|header=server-default|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=loading|header=server-default|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=loading|header=server-default|long=|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=loading|header=server-default|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=loading|header=server-default|long=|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=loading|header=|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=loading|header=|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=loading|header=|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=loading|header=|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=loading|header=|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=loading|header=|long=|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=loading|header=|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=loading|header=|long=|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=no|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=no|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=no|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=no|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=no|header=faster-whisper:small|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=no|header=faster-whisper:small|long=|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=no|header=faster-whisper:small|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=no|header=faster-whisper:small|long=|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=no|header=server-default|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=no|header=server-default|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=no|header=server-default|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=no|header=server-default|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=no|header=server-default|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=no|header=server-default|long=|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=no|header=server-default|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=no|header=server-default|long=|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=no|header=|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=no|header=|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=no|header=|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=no|header=|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=no|header=|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=no|header=|long=|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=no|header=|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=no|header=|long=|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=unknown|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=unknown|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=unknown|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=unknown|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=unknown|header=faster-whisper:small|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=unknown|header=faster-whisper:small|long=|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=unknown|header=faster-whisper:small|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=unknown|header=faster-whisper:small|long=|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=unknown|header=server-default|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=unknown|header=server-default|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=unknown|header=server-default|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=unknown|header=server-default|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=unknown|header=server-default|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=unknown|header=server-default|long=|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=unknown|header=server-default|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=unknown|header=server-default|long=|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=unknown|header=|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=unknown|header=|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=unknown|header=|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=unknown|header=|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=unknown|header=|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=unknown|header=|long=|ready=False|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=unknown|header=|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=bytes-only|first_fails=unknown|header=|long=|ready=True|selected=server-default": {
+  "calls": [],
+  "error": "transcription model not installed: faster-whisper:medium",
+  "status": 400,
+  "text": ""
+ },
+ "agent=two|engine=model-capable|first_fails=busy|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=busy|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=busy|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=busy|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=busy|header=faster-whisper:small|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=busy|header=faster-whisper:small|long=|ready=False|selected=server-default": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=busy|header=faster-whisper:small|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=busy|header=faster-whisper:small|long=|ready=True|selected=server-default": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=busy|header=server-default|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=busy|header=server-default|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=busy|header=server-default|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=busy|header=server-default|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=busy|header=server-default|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=busy|header=server-default|long=|ready=False|selected=server-default": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=busy|header=server-default|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=busy|header=server-default|long=|ready=True|selected=server-default": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=busy|header=|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=busy|header=|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=busy|header=|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=busy|header=|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=busy|header=|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=busy|header=|long=|ready=False|selected=server-default": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=busy|header=|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=busy|header=|long=|ready=True|selected=server-default": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=error|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=error|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=error|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=error|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=error|header=faster-whisper:small|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=error|header=faster-whisper:small|long=|ready=False|selected=server-default": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=error|header=faster-whisper:small|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=error|header=faster-whisper:small|long=|ready=True|selected=server-default": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=error|header=server-default|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=error|header=server-default|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=error|header=server-default|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=error|header=server-default|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=error|header=server-default|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=error|header=server-default|long=|ready=False|selected=server-default": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=error|header=server-default|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=error|header=server-default|long=|ready=True|selected=server-default": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=error|header=|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=error|header=|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=error|header=|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=error|header=|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=error|header=|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=error|header=|long=|ready=False|selected=server-default": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=error|header=|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=error|header=|long=|ready=True|selected=server-default": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=loading|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=loading|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=loading|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=loading|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=loading|header=faster-whisper:small|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=loading|header=faster-whisper:small|long=|ready=False|selected=server-default": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=loading|header=faster-whisper:small|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=loading|header=faster-whisper:small|long=|ready=True|selected=server-default": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=loading|header=server-default|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=loading|header=server-default|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=loading|header=server-default|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=loading|header=server-default|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=loading|header=server-default|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=loading|header=server-default|long=|ready=False|selected=server-default": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=loading|header=server-default|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=loading|header=server-default|long=|ready=True|selected=server-default": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=loading|header=|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=loading|header=|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=loading|header=|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=loading|header=|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=loading|header=|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=loading|header=|long=|ready=False|selected=server-default": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=loading|header=|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=loading|header=|long=|ready=True|selected=server-default": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=no|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:medium"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=no|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [
+   "faster-whisper:medium"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=no|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:medium"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=no|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [
+   "faster-whisper:medium"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=no|header=faster-whisper:small|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:medium"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=no|header=faster-whisper:small|long=|ready=False|selected=server-default": {
+  "calls": [
+   "faster-whisper:medium"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=no|header=faster-whisper:small|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:medium"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=no|header=faster-whisper:small|long=|ready=True|selected=server-default": {
+  "calls": [
+   "faster-whisper:medium"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=no|header=server-default|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:medium"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=no|header=server-default|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [
+   "faster-whisper:medium"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=no|header=server-default|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:medium"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=no|header=server-default|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [
+   "faster-whisper:medium"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=no|header=server-default|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:medium"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=no|header=server-default|long=|ready=False|selected=server-default": {
+  "calls": [
+   "faster-whisper:medium"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=no|header=server-default|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:medium"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=no|header=server-default|long=|ready=True|selected=server-default": {
+  "calls": [
+   "faster-whisper:medium"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=no|header=|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:medium"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=no|header=|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [
+   "faster-whisper:medium"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=no|header=|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:medium"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=no|header=|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [
+   "faster-whisper:medium"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=no|header=|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:medium"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=no|header=|long=|ready=False|selected=server-default": {
+  "calls": [
+   "faster-whisper:medium"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=no|header=|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:medium"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=no|header=|long=|ready=True|selected=server-default": {
+  "calls": [
+   "faster-whisper:medium"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=unknown|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=unknown|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=unknown|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=unknown|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=unknown|header=faster-whisper:small|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=unknown|header=faster-whisper:small|long=|ready=False|selected=server-default": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=unknown|header=faster-whisper:small|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=unknown|header=faster-whisper:small|long=|ready=True|selected=server-default": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=unknown|header=server-default|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=unknown|header=server-default|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=unknown|header=server-default|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=unknown|header=server-default|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=unknown|header=server-default|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=unknown|header=server-default|long=|ready=False|selected=server-default": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=unknown|header=server-default|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=unknown|header=server-default|long=|ready=True|selected=server-default": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=unknown|header=|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=unknown|header=|long=faster-whisper:large-v3|ready=False|selected=server-default": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=unknown|header=|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=unknown|header=|long=faster-whisper:large-v3|ready=True|selected=server-default": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=unknown|header=|long=|ready=False|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=unknown|header=|long=|ready=False|selected=server-default": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=unknown|header=|long=|ready=True|selected=deepgram:nova-3": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ },
+ "agent=two|engine=model-capable|first_fails=unknown|header=|long=|ready=True|selected=server-default": {
+  "calls": [
+   "faster-whisper:medium",
+   "deepgram:nova-3"
+  ],
+  "error": "",
+  "status": 200,
+  "text": "hello"
+ }
+}
