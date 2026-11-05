@@ -332,3 +332,21 @@ def test_only_process_starts_bootstrap_only_the_restore_rotates_and_only_agent_r
     assert _callers("rotate_instance_generation") == {"server/lib/data_root_locks.py"}
     # The listen-first opening fence is the one consumer; any other reader is a new decision.
     assert _callers("read_host_generation") == {"server/lib/agent_rings.py"}
+
+
+def test_a_caller_in_a_split_part_counts_as_its_old_module_only_inside_a_moved_definition(tmp_path):
+    # Review B (cut 1c): a whole-part mapping let a new, unlisted caller added
+    # to a split part pass as the old module's existing call.
+    (tmp_path / "s9.toml").write_text(
+        '[[split]]\nname = "x"\nmodule = "lib/old.py"\n'
+        '[[split.part]]\nmodule = "lib/old_part.py"\nnames = ["moved"]\n')
+    text = ("from .host_generation import read_host_generation\n\n"
+            "def moved():\n    return read_host_generation()\n\n"
+            "def unlisted():\n    return read_host_generation()\n")
+    assert _caller_origins("server/lib/old_part.py", text, "read_host_generation", tmp_path) == {
+        "server/lib/old.py", "server/lib/old_part.py"}
+    moved_only = text.split("\n\ndef unlisted")[0] + "\n"
+    assert _caller_origins("server/lib/old_part.py", moved_only, "read_host_generation", tmp_path) == {
+        "server/lib/old.py"}
+    assert _caller_origins("docker/entrypoint.sh", "x read_host_generation(", "read_host_generation",
+                           tmp_path) == {"docker/entrypoint.sh"}
