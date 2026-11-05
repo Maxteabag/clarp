@@ -2373,6 +2373,7 @@ class DreamingScheduler:
         self._thread: threading.Thread | None = None
         self._wake_lock = threading.Lock()
         self._pending_wakes: set[str] = set()
+        self._again_wakes: dict[str, int] = {}
         set_advance_request_callback(self.request_advance)
 
     def start(self) -> None:
@@ -2386,6 +2387,8 @@ class DreamingScheduler:
 
     def stop(self, timeout: float = 2.0) -> None:
         self._stop.set()
+        with self._wake_lock:
+            self._again_wakes.clear()
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=timeout)
         set_advance_request_callback(None)
@@ -2471,7 +2474,7 @@ class DreamingScheduler:
             log_exception("dreamingTickFail", e, detail=run.get("session") or "")
             return 0
 
-    def request_advance(self, run_id: str) -> None:
+    def request_advance(self, run_id: str, *, _generation: int | None = None) -> None:
         """Advance a run soon after a round's hidden output reaches the ledger.
 
         The normal poll still exists as a safety net, but deep dreaming must not
@@ -2479,28 +2482,48 @@ class DreamingScheduler:
         between every sub-turn. A short retry loop lets the backend fully clear
         its active handle before the next round is dispatched.
         """
-        if self._stop.is_set():
+        from . import turn_queue
+        run = get_run(run_id)
+        if not run or run.get("status") != "active":
             return
+        generation = turn_queue.stop_generation(run["agent_id"])
+        if turn_queue.is_paused(run["agent_id"]):
+            return
+        if _generation is not None and _generation != generation:
+            return  # a Stop invalidates the old token even after queue Resume
         with self._wake_lock:
+            if self._stop.is_set():
+                self._again_wakes.pop(run_id, None)
+                return
             if run_id in self._pending_wakes:
+                # A request can have read its generation before Stop while
+                # a newer post-Stop wake won this lock in the meantime.
+                self._again_wakes[run_id] = max(
+                    generation, self._again_wakes.get(run_id, generation))
                 return
             self._pending_wakes.add(run_id)
         wake = threading.Thread(
             target=self._advance_when_ready,
-            args=(run_id,),
+            args=(run_id, generation),
             daemon=True,
             name=f"dreaming-advance-{run_id[:12]}",
         )
         wake.start()
 
-    def _advance_when_ready(self, run_id: str) -> None:
+    def _advance_when_ready(self, run_id: str, generation: int) -> None:
         try:
             for attempt in range(self.chain_attempts):
+                if self._stop.is_set():
+                    return
                 delay = self.chain_delay_sec if attempt == 0 else self.chain_retry_sec
                 if delay and self._stop.wait(delay):
                     return
                 run = get_run(run_id)
                 if not run or run.get("status") != "active":
+                    return
+                from . import turn_queue
+                if (turn_queue.is_paused(run["agent_id"])
+                        or turn_queue.stop_generation(run["agent_id"]) != generation):
                     return
                 if self._advance_run(run):
                     return
@@ -2511,6 +2534,19 @@ class DreamingScheduler:
         finally:
             with self._wake_lock:
                 self._pending_wakes.discard(run_id)
+                again = self._again_wakes.pop(run_id, None)
+            # A completion can race the previous worker's successful send.
+            # Release its pending slot before scheduling the coalesced wake;
+            # request_advance handles another requester winning that slot.
+            if again is not None and not self._stop.is_set():
+                try:
+                    from . import turn_queue
+                    run = get_run(run_id)
+                    if (run and run.get("status") == "active"
+                            and not turn_queue.is_paused(run["agent_id"])):
+                        self.request_advance(run_id, _generation=again)
+                except Exception as e:  # noqa: BLE001
+                    log_exception("dreamingAdvanceFail", e, detail=run_id)
 
     def _loop(self) -> None:
         if self._stop.wait(min(60.0, self.poll_interval_sec)):
