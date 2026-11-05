@@ -59,9 +59,22 @@ class TurnIndex:
     """An agent's turns by start time, to attribute rows that no prompt names."""
 
     def __init__(self, database, agent_id: str):
-        rows = database.execute(
+        self._set_rows(self.read_rows(database, agent_id))
+
+    @staticmethod
+    def read_rows(database, agent_id: str):
+        return database.execute(
             """SELECT trace_id, started_at, settled_at, outcome FROM turns
                 WHERE agent_id = ? ORDER BY started_at""", (agent_id,)).fetchall()
+
+    @classmethod
+    def from_rows(cls, rows):
+        """Rebuild from the raw rows already read during import validation."""
+        index = cls.__new__(cls)
+        index._set_rows(rows)
+        return index
+
+    def _set_rows(self, rows):
         self._starts = [int(r["started_at"]) for r in rows]
         self._rows = rows
         self.outcomes = {str(r["trace_id"]): r["outcome"] for r in rows if r["trace_id"]}
