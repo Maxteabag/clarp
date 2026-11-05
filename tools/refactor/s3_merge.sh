@@ -177,18 +177,10 @@ for path in $conflicts; do
   esac
 done
 
-# Named-source families compare split+method reconstruction together, before
-# any original source is replaced by main (including sources without an S9 split).
-if [ -n "$method_specs" ]; then
-  method_base=$(git merge-base "$main" "$integration") || die 8 "no method merge base"
-  "$PY" tools/refactor/s3_methods.py --root "$root" --validate "$method_base" "$integration" \
-    || die 8 "method-family integration drift"
-fi
-
 # S9: integration may change a split module only through its recipe. Regenerating the
 # split from the merge base's text must give exactly integration's files; anything else
 # is an integration-only edit that taking main's text below would silently drop.
-if [ -n "$split_specs" ]; then
+if [ -n "$split_specs$method_specs" ]; then
   base=$(git merge-base "$main" "$integration") || die 8 "no merge base"
   "$PY" - "$root" "$base" "$integration" "$method_affected" <<'PYEOF' || die 8 "a split module differs on integration from its recipe applied to the merge base (see above): port the edit to main or into the recipe"
 import pathlib, subprocess, sys, tempfile
@@ -196,6 +188,14 @@ root, base, integration, method_affected = sys.argv[1:5]
 method_affected = set(method_affected.splitlines())
 sys.path.insert(0, f"{root}/tools/refactor")
 import split_apply
+# With methods, extend this S9 validation block with one complete ordered
+# reconstruction. Do not also run split-only checks on the same files.
+if pathlib.Path(root, "tools/refactor/s3_methods.py").exists():
+    import s3_methods
+    method_recipes = s3_methods.recipes(pathlib.Path(root))
+    if method_recipes:
+        s3_methods.validate(pathlib.Path(root), base, integration, method_recipes)
+        sys.exit(0)
 def show(ref, rel):
     out = subprocess.run(["git", "-C", root, "show", f"{ref}:{rel}"], capture_output=True, text=True)
     return out.stdout if out.returncode == 0 else None
@@ -203,8 +203,6 @@ splits, repoints = split_apply.load_recipes(pathlib.Path(root, "tools/refactor/s
 bad = []
 with tempfile.TemporaryDirectory() as tmp:
     for entry in splits:
-        if entry["module"] in method_affected:
-            continue  # validated above as a combined split+method family
         rels = ["server/" + entry["module"]] + ["server/" + p["module"] for p in entry["part"]]
         if show(integration, rels[1]) is None:
             # Not applied on integration yet: stage A still takes main's text of
