@@ -1086,13 +1086,16 @@ def test_prompt_history_preserves_routed_voice_admission(
 def test_get_diagnostics_health_returns_subsystem_state(running_server):
     from lib import health
     health.reset_for_tests()
-    health.mark_success("tts_worker", now=123.0)
+    # A subsystem only this test writes: the running server's real workers (the TTS
+    # worker among them) mark their own health meanwhile, and one overwrote a
+    # 'tts_worker' value set here (G1 flake, 3 occurrences).
+    health.mark_success("diagnostics-test-subsystem", now=123.0)
     base, _ctx, _srv = running_server
 
     status, body = _get(base + "/diagnostics/health")
 
     assert status == 200
-    assert json.loads(body)["subsystems"]["tts_worker"]["last_success_at"] == 123.0
+    assert json.loads(body)["subsystems"]["diagnostics-test-subsystem"]["last_success_at"] == 123.0
 
 
 def test_diagnostics_settings_are_computer_owned_and_validated(running_server):
