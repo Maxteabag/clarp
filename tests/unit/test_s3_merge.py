@@ -58,7 +58,8 @@ def _commit(repo, message):
 @pytest.fixture
 def repo(tmp_path):
     root = tmp_path / "repo"
-    for rel in ("tools/refactor/s3_apply.py", "tools/refactor/s3_merge.sh", "scripts/refactor/ast_identity.py"):
+    for rel in ("tools/refactor/s3_apply.py", "tools/refactor/s3_merge.sh", "tools/refactor/s3_methods.py",
+                "tools/refactor/split_apply.py", "scripts/refactor/ast_identity.py"):
         (root / rel).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(_REPO / rel, root / rel)
     (root / "tools" / "refactor" / "s3_moves.toml").write_text(RECIPE)
@@ -185,7 +186,8 @@ def repo_with_helpers(tmp_path):
     """Like `repo`, but member a reads the server.py helper and the recipe moves
     the helper too: integration carries both stages."""
     root = tmp_path / "repo"
-    for rel in ("tools/refactor/s3_apply.py", "tools/refactor/s3_merge.sh", "scripts/refactor/ast_identity.py"):
+    for rel in ("tools/refactor/s3_apply.py", "tools/refactor/s3_merge.sh", "tools/refactor/s3_methods.py",
+                "tools/refactor/split_apply.py", "scripts/refactor/ast_identity.py"):
         (root / rel).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(_REPO / rel, root / rel)
     (root / "tools" / "refactor" / "s3_moves.toml").write_text(HELPERS_RECIPE)
@@ -441,3 +443,89 @@ def test_a_failed_cleanup_stops_before_any_integration_only_recipe_is_applied(re
     assert code == 8, out
     assert "cannot remove the merged tree's tools/refactor/splits" in out
     assert not (root / "server" / "lib" / "extra_part.py").exists(), out
+
+
+def _method_family(repo, split):
+    source = 'lib/client.py' if split else 'lib/engine.py'
+    (repo / 'tools/refactor/methods').mkdir(parents=True)
+    (repo / 'tools/refactor/methods/engine.toml').write_text(
+        f'source_module = "{source}"\nsource_class = "Engine"\n'
+        '[[group]]\nname = "read"\nmodule = "lib/read.py"\n'
+        'class = "ReadMixin"\nmembers = ["read"]\n')
+    text = ('VALUE = 5\n' if split else 'from .values import VALUE\n') + '''
+class Engine:
+    def __init__(self, bias=2):
+        self.bias = bias
+
+    def read(self):
+        return VALUE + self.bias
+'''
+    (repo / 'server/lib/engine.py').write_text(text)
+    if split:
+        (repo / 'tools/refactor/splits').mkdir(exist_ok=True)
+        (repo / 'tools/refactor/splits/engine.toml').write_text(
+            '[[split]]\nname = "engine"\nmodule = "lib/engine.py"\n'
+            '[[split.part]]\nmodule = "lib/values.py"\nnames = ["VALUE"]\n'
+            '[[split.part]]\nmodule = "lib/client.py"\nnames = ["Engine"]\n')
+    else:
+        (repo / 'server/lib/values.py').write_text('VALUE = 5\n')
+    base = _commit(repo, 'method recipe on main')
+    _git(repo, 'switch', '-q', 'integration')
+    _git(repo, 'merge', '--no-edit', base)
+    if split:
+        subprocess.run([sys.executable, 'tools/refactor/split_apply.py', '--all'],
+                       cwd=repo, capture_output=True, check=True)
+        _commit(repo, 'split engine')
+    subprocess.run([sys.executable, 'tools/refactor/s3_apply.py', '--recipe',
+                    'tools/refactor/methods/engine.toml', '--all'],
+                   cwd=repo, capture_output=True, check=True)
+    _commit(repo, 'method move')
+    _git(repo, 'switch', '-q', 'main')
+    return source
+
+
+@pytest.mark.parametrize('split', [False, True])
+def test_named_methods_follow_splits_and_main_edits_reach_the_mixin(repo, split):
+    _method_family(repo, split)
+    path = repo / 'server/lib/engine.py'
+    path.write_text(path.read_text().replace('VALUE + self.bias', 'VALUE * self.bias'))
+    _commit(repo, 'main edit to method')
+    code, out = _merge(repo)
+    assert code == 0, out
+    assert 'method read: ast_identity' in out
+    check = subprocess.run([sys.executable, '-c',
+        'from lib.engine import Engine; assert Engine().read() == 10'],
+        cwd=repo / 'server', capture_output=True, text=True)
+    assert check.returncode == 0, check.stderr
+    log = _git(repo, 'log', '--format=%s')
+    assert log.index('s3_apply: method read') < log.index('split_apply: engine') if split else True
+
+
+@pytest.mark.parametrize('where', ['source', 'mixin'])
+def test_method_drift_is_refused_before_main_replaces_it(repo, where):
+    source = _method_family(repo, False)
+    _git(repo, 'switch', '-q', 'integration')
+    path = repo / 'server' / (source if where == 'source' else 'lib/read.py')
+    path.write_text(path.read_text() + '\n# integration-only edit\n')
+    _commit(repo, 'unrecorded method family edit')
+    _git(repo, 'switch', '-q', 'main')
+    (repo / 'README').write_text('main progresses\n')
+    _commit(repo, 'main advances')
+    code, out = _merge(repo)
+    assert code == 11, out
+    assert 'integration-only edit' in out
+
+
+def test_an_integration_only_method_recipe_and_tool_never_execute(repo):
+    _git(repo, 'switch', '-q', 'integration')
+    (repo / 'tools/refactor/methods').mkdir()
+    (repo / 'tools/refactor/methods/injected.toml').write_text('broken TOML !!!')
+    (repo / 'tools/refactor/s3_methods.py').write_text('raise RuntimeError("INJECTED TOOL")\n')
+    _commit(repo, 'integration injection')
+    _git(repo, 'switch', '-q', 'main')
+    (repo / 'README').write_text('main advances\n')
+    _commit(repo, 'main update')
+    code, out = _merge(repo)
+    assert code == 0, out
+    assert 'INJECTED TOOL' not in out
+    assert not (repo / 'tools/refactor/methods/injected.toml').exists()
