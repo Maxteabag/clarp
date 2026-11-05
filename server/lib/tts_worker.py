@@ -638,17 +638,20 @@ def _publish_clip_event(*, stream: Any | None, herald: Any | None,
         except Exception as e:  # noqa: BLE001
             log_exception("ttsWorkerHeraldPublishFail", e, detail=url)
     if stream is not None:
-        events.broadcast(stream, events.audio(
-            url=url,
-            name=name,
-            session=row["session"],
-            clip_id=session.clip_id,
-            agent_id=agent["agent_id"],
-            persona=agent.get("persona"),
-            trace_id=trace_id,
+        # Merge once before the call: raw PCM already supplies the same url.
+        # Explicit keys keep their positions; delivery fields follow as before.
+        payload = {
+            "url": url,
+            "name": name,
+            "session": row["session"],
+            "clip_id": session.clip_id,
+            "agent_id": agent["agent_id"],
+            "persona": agent.get("persona"),
+            "trace_id": trace_id,
             **session.sse_fields,
             **tag,
-        ))
+        }
+        events.broadcast(stream, events.audio(**payload))
 
 
 
