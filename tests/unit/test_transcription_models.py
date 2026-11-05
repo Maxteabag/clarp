@@ -8,6 +8,7 @@ import sqlite3
 import subprocess
 
 import pytest
+from tests.patching import patch_shared
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "server"))
 from lib import agents, background_jobs, service_manager, transcription_models  # noqa: E402
@@ -68,7 +69,7 @@ def test_catalog_status_recovers_installing_state_from_durable_job(monkeypatch):
     model_id = "faster-whisper:medium"
     # The fake worker PID stands for a live install worker; a dead one is
     # reconciled to failed at once.
-    monkeypatch.setattr(background_jobs, "worker_is_alive", lambda _pid, _token: True)
+    patch_shared(monkeypatch, background_jobs, "worker_is_alive", lambda _pid, _token: True)
     agents.create_agent(
         persona="Mike", voice_id="voice", cwd="/tmp", session="mike")
     monkeypatch.setattr(transcription_models, "installed_records", lambda: [])
@@ -315,7 +316,7 @@ def test_start_install_reuses_active_generation_after_server_restart(monkeypatch
     model_id = "faster-whisper:medium"
     # The fake worker PID stands for a live install worker; a dead one is
     # reconciled to failed at once.
-    monkeypatch.setattr(background_jobs, "worker_is_alive", lambda _pid, _token: True)
+    patch_shared(monkeypatch, background_jobs, "worker_is_alive", lambda _pid, _token: True)
     agents.create_agent(
         persona="Mike", voice_id="voice", cwd="/tmp", session="mike")
     monkeypatch.setattr(transcription_models, "installed_records", lambda: [])
@@ -345,7 +346,7 @@ def test_registry_publication_does_not_outrun_active_job_truth(monkeypatch):
     model_id = "faster-whisper:medium"
     # The fake worker PID stands for a live install worker; a dead one is
     # reconciled to failed at once.
-    monkeypatch.setattr(background_jobs, "worker_is_alive", lambda _pid, _token: True)
+    patch_shared(monkeypatch, background_jobs, "worker_is_alive", lambda _pid, _token: True)
     agents.create_agent(
         persona="Mike", voice_id="voice", cwd="/tmp", session="mike")
     existing = background_jobs.upsert(

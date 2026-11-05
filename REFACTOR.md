@@ -185,9 +185,9 @@ continue as before.
 | Role | Session | Model | Owns |
 |---|---|---|---|
 | Lead | `hobbles-18b0` | Claude | this brief, scope, decisions, registers, sign-offs |
-| Merge captain | `rf-merge-f870` | Claude | landing on main, the gate script, the flake quarantine list, the parked-branch manifest |
-| Release owner | `rf-release-d188` | Claude | windows, tags, backup, deploy, health check, rollback, break-glass, the canary node |
-| Harness owner | `rf-harness-eeb2` | Claude | `tests/replay/` (new), the corpus tools, planted changes, diff report |
+| Merge captain | `rf-mergec-fc0a` (was `rf-merge-f870`) | Codex | landing on main, the gate script, the flake quarantine list, the parked-branch manifest |
+| Release owner | `rf-releasec-29c5` (was `rf-release-d188`) | Codex | windows, tags, backup, deploy, health check, rollback, break-glass, the canary node |
+| Harness owner | `rf-harnessc-4a4a` (was `rf-harness-eeb2`) | Codex | `tests/replay/` (new), the corpus tools, planted changes, diff report |
 | Contract owner | `rf-contractc-be17` (was `rf-contract-80af`) | Codex | `server/lib/db_schema.py`, `server/lib/db_migrations.py`, `contract/`, `server/lib/server_identity.py` contract constants, the lifecycle kit (`server/lib/lifecycle.py`, `docs/architecture/lifecycles.md`), schema goldens |
 | Fix-lane owner | `rf-fix-c4ab` | Claude | one fix per commit, in the files the lead names per fix |
 | Fix-lane author 2 | `rf-fix2c-4f08` (was `rf-fix2-56f3`) | Codex | one fix per commit (voice, Oracle, autonomy findings), in the files the lead names |
@@ -199,10 +199,14 @@ continue as before.
 | Reviewer A (core) | `rf-review-core-bbc1` | Codex | verdicts only |
 | Reviewer B (rest) | `rf-review-rest-a79f` | Codex | verdicts only |
 | Reviewer C (read model, voice) | `rf-review-readmodel-300e` | Codex | verdicts only |
-| Reviewer A2 (turn engine, database) | `rf-review-core2-cf19` | Claude | verdicts only |
+| Reviewer A2 (turn engine, database) | `rf-review-core2c-d509` (was `rf-review-core2-cf19`) | Codex | verdicts only |
 | Slice owner S4 (turn engine) | `rf-s4c-8be3` (was `rf-s4-ca35`) | Codex | the turn engine restructure on `refactor/integration` (recipe + generator + facade, regenerated from main's text); G0 tests on main |
 | Slice owner S6 (backends) | `rf-s6c-0876` (was `rf-s6-8970`) | Codex | the backends restructure on `refactor/integration` (codex_app_server, the Codex pool, backend modules), same method; G0 tests on main |
-| Reviewer A3 (turn engine restructure, Phase 3) | `rf-review-core3-7399` | Claude | verdicts only (S4 and the Phase 3 lifecycle conversions; A2 keeps fixes on main, A reviews S6) |
+| Reviewer A3 (turn engine restructure, Phase 3) | `rf-review-core3c-d37f` (was `rf-review-core3-7399`) | Codex | verdicts only (S4 and the Phase 3 lifecycle conversions; A2 keeps fixes on main, A reviews S6) |
+| Sweep author a (function size) | `rf-sweep-a-0800` | Codex | over-150-line functions in realtime voice and Oracle (lead 543) |
+| Sweep author b (function size) | `rf-sweep-b-5ed1` | Codex | over-150-line functions in configuration, policies and providers (lead 543) |
+| Sweep author c (function size) | `rf-sweep-c-6178` | Codex | over-150-line functions in the runtime bridge, snapshots, goal recovery and explanations (lead 543) |
+| Reviewer D (function-size sweep) | `rf-review-d-762e` | Codex | verdicts only (the sweep authors' G0 and extractions) |
 
 Reviewers never edit sources, never run jobs against the live Host and never
 grant more than the exact commit they reviewed.
@@ -234,6 +238,7 @@ Order rule (5 Nov): on a file that a regenerated split owns (S3, S4, S6, S9), th
 | 5 Nov 11:3x | S6 (`rf-s6c-0876`) | cut 2 on `refactor/integration` only: `server/lib/codex_app_server.py` split into `codex_app_types.py`, `codex_app_client.py` (`_Client` with the pool state) and `codex_app_rpc.py` (`CodexRpcMixin`: the 11 RPC and goal methods, by S4's named-source method stage), with `codex_app_server.py` as the facade (lead 517); regenerated from main's text at every merge, so stage 1/2, TP-N3 and BACKENDS-N2 flow through; lands after stage 2 is on main | the big release |
 | 5 Nov 11:5x | S9 (`rf-fix3c-7498`) | cut 1d on `refactor/integration` only: `server/lib/background_jobs.py` (1571 lines) split: the process identity, argv, adoption, liveness and termination helpers and their worker-timeout constants move to `background_job_process.py`; `background_jobs.py` stays the facade with the registry, clock, log and native-projection logic (under 1500 lines); recipe `tools/refactor/splits/s9-background-jobs.toml` on main; regenerated from main's text at every merge (lead 520) | the big release |
 | 5 Nov 12:4x | S6 (`rf-s6c-0876`) | cut 3a/3b on `refactor/integration` only: `ClaudeBackend._drain_stdout` (236 lines) in `server/lib/backend/claude.py` and `CodexBackend._handle_event` (160) in `server/lib/backend/codex.py`, each extracted into helper methods of the same class; hand-written and behaviour-preserving (G0 per method, G2 at zero, reviewer A), so these functions join rf-merge's forward-port watch (no file is regenerated); `_Client._notification` follows cut 2 as a replay patch (lead 528) | the big release |
+| 5 Nov 14:2x | Sweep (`rf-sweep-a-0800`, `rf-sweep-b-5ed1`, `rf-sweep-c-6178`) | on `refactor/integration` only, hand-written and behaviour-preserving (G0 at least 85% as tests-only commits on main, G2 at zero, reviewer D): same-module helper extraction so each function ends at 150 lines or fewer. a: `oracle_live_stable.serve`, `oracle_live.serve`, `oracle_realtime.serve`, `eleven_ws.synthesize_streaming`; b: `policies/agent_spec._parse`, `config._parse_into_cache`, `transcription_models.start_install`, `provider_capabilities._discover_provider`; c: `runtime_bridge._dispatch_request`, `snapshot.build_agent_snapshot`, `tool_explanations._drain`, `task_goal_recovery._claim`. No file is regenerated; each touched function joins the forward-port watch when it lands (lead 543) | the big release |
 | 3 Nov 12:17 | S5 (`rf-readmodel-12f8`) | `server/lib/message_writes.py` import section (`store_transcript_turns`, `_ImportWriter`, `_store_transcript_turns_txn` and its helpers, `_attach_authority_tools`, `stamp_turn`); `server/lib/message_store.py` facade re-exports; `tests/readmodel/` | the S5 extraction commits land; `rf-fix-c4ab`'s RM-N1 commit may edit the upsert and twin path |
 
 ## 7. How to work

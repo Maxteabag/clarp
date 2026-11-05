@@ -186,3 +186,47 @@ def test_avatar_size_limit_and_mcp_dedup():
 def test_tier_mismatch_is_a_recommendation_not_a_refusal():
     spec = parse({"name": "Rachel", "backend": "grok"})
     assert isinstance(spec, AgentSpec)
+
+
+def test_avatar_and_explicit_pins_survive_create_without_mutating_request():
+    data = {"name": "Rachel", "avatar_base64": base64.b64encode(b"avatar").decode(),
+            "model": " claude-small ", "effort": " HIGH ",
+            "avatar_symbol": " badge ", "personality": " focused ",
+            "creation_request_id": "request-1"}
+    original = dict(data)
+    spec = parse(data)
+    assert isinstance(spec, AgentSpec)
+    assert spec.avatar_raw == b"avatar"
+    assert (spec.model, spec.effort) == ("claude-small", "high")
+    assert spec.llm_update == {"model": "claude-small", "effort": "high"}
+    assert spec.presentation_update == {"avatar_symbol": "badge", "personality": "focused",
+                                        "avatar_path": "/a.png"}
+    assert spec.creation_request_id == "request-1"
+    assert data == original
+
+
+def test_listed_resume_uses_recorded_model_and_keeps_requested_directory():
+    view = replace(VIEW, resume_listed=lambda backend, cwd, sid: (
+        backend, cwd, sid) == ("claude", "/repo", "saved"),
+        recorded_model=lambda backend, sid: "claude-small")
+    spec = parse({"name": "X", "open_existing": True, "resume_session_id": "saved",
+                  "cwd": "/repo"}, view)
+    assert isinstance(spec, AgentSpec)
+    assert (spec.cwd, spec.resume_session_id, spec.model, spec.reopen) == (
+        "/repo", "saved", "claude-small", None)
+    assert spec.llm_update == {"model": "claude-small"}
+
+
+def test_relaunch_presentation_updates_only_requested_fields():
+    view = replace(VIEW, agents={"r": {"name": "Rachel", "backend": "claude"}},
+                   existing_agent=lambda sid: {"backend": "claude"})
+    spec = parse({"name": "Rachel", "replace_sid": "r", "personality": " new "}, view)
+    assert isinstance(spec, AgentSpec)
+    assert spec.presentation_update == {"personality": "new"}
+
+
+def test_lineage_refusal_propagates_without_creating_spec():
+    result = parse({"name": "X", "role": "helper"})
+    assert isinstance(result, SpecError)
+    assert (result.status, result.message, result.detail) == (
+        400, "helper_requires_parent", "A helper needs a parent session.")

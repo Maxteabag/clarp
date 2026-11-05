@@ -20,6 +20,9 @@ from __future__ import annotations
 import ast
 import collections
 import pathlib
+import tomllib
+
+import pytest
 
 SERVER = pathlib.Path(__file__).resolve().parents[2] / "server"
 _BROAD = frozenset({"Exception", "BaseException"})
@@ -132,16 +135,39 @@ def swallowed(tree: ast.AST) -> list[int]:
 
 
 def current() -> dict[str, int]:
-    from tests.patching import logical_split_tree_map
+    from tests.patching import logical_split_tree_map, split_origin
     counts: collections.Counter[str] = collections.Counter()
     paths = [path for path in sorted(SERVER.rglob("*.py")) if "tests" not in path.parts]
     # Only exact recipe-declared definitions keep their original module's
     # debt. Undeclared code in a generated part remains a physical owner.
-    for origin, tree in logical_split_tree_map(paths, SERVER).items():
+    trees = logical_split_tree_map(paths, SERVER)
+    for origin, tree in trees.items():
         found = swallowed(tree)
         if found:
             counts[origin] = len(found)
-    return dict(counts)
+    # A generated class may contain both declared moved methods and new code.
+    # Reattribute only the exact methods in the declared mixin class; all other
+    # methods, classes and module statements retain physical ownership.
+    for recipe in sorted((SERVER.parent / "tools/refactor/methods").glob("*.toml")):
+        data = tomllib.loads(recipe.read_text())
+        if not data.get("source_module"):
+            continue
+        source = split_origin(data["source_module"], data.get("source_class", "Handler"))
+        for group in data.get("group", []):
+            module = group["module"]
+            tree = trees.get(module)
+            if tree is None:
+                continue
+            for cls in tree.body:
+                if not isinstance(cls, ast.ClassDef) or cls.name != group["class"]:
+                    continue
+                for method in cls.body:
+                    if (isinstance(method, (ast.FunctionDef, ast.AsyncFunctionDef))
+                            and method.name in group["members"]):
+                        moved = len(swallowed(method))
+                        counts[module] -= moved
+                        counts[source] += moved
+    return {module: count for module, count in counts.items() if count}
 
 
 def test_no_new_silently_swallowed_excepts():
@@ -194,14 +220,16 @@ def test_the_scanner_sees_every_silent_form():
     assert len(swallowed(tree)) == 8
 
 
-def test_declared_swallow_moves_with_its_source_but_new_code_stays_physical(tmp_path, monkeypatch):
+@pytest.mark.parametrize("cut", ["split", "method", "method-part"])
+def test_declared_swallow_moves_with_its_source_but_new_code_stays_physical(tmp_path, monkeypatch, cut):
     import sys
     import pytest
     from tests import patching
     root = tmp_path / 'server'
     (root / 'lib').mkdir(parents=True)
     (root / 'server.py').write_text('')
-    body = 'def moved():\n    try: pass\n    except Exception: pass\n'
+    body = ('def moved():\n    try: pass\n    except Exception: pass\n' if cut == 'split' else
+            'class Engine:\n    def moved(self):\n        try: pass\n        except Exception: pass\n')
     original = root / 'lib/old.py'
     original.write_text(body)
     recipes = tmp_path / 'splits'
@@ -210,10 +238,27 @@ def test_declared_swallow_moves_with_its_source_but_new_code_stays_physical(tmp_
     monkeypatch.setattr(sys.modules[__name__], 'SERVER', root)
     monkeypatch.setattr(sys.modules[__name__], 'BASELINE', {'lib/old.py': 1})
     assert current() == {'lib/old.py': 1}
-    (recipes / 's4.toml').write_text(
-        '[[split]]\nmodule="lib/old.py"\n'
-        '[[split.part]]\nmodule="lib/part.py"\nnames=["moved"]\n')
-    original.write_text('from .part import moved\n')
+    if cut == 'split':
+        (recipes / 's4.toml').write_text(
+            '[[split]]\nmodule="lib/old.py"\n'
+            '[[split.part]]\nmodule="lib/part.py"\nnames=["moved"]\n')
+        original.write_text('from .part import moved\n')
+    else:
+        source = 'lib/source.py' if cut == 'method-part' else 'lib/old.py'
+        if cut == 'method-part':
+            (recipes / 's4.toml').write_text(
+                '[[split]]\nmodule="lib/old.py"\n'
+                '[[split.part]]\nmodule="lib/source.py"\nnames=["Engine"]\n')
+            original.write_text('from .source import Engine\n')
+        methods = root.parent / 'tools/refactor/methods'
+        methods.mkdir(parents=True)
+        (methods / 's4.toml').write_text(
+            f'source_module="{source}"\nsource_class="Engine"\n'
+            '[[group]]\nname="debt"\nmodule="lib/part.py"\n'
+            'class="DebtMixin"\nmembers=["moved"]\n')
+        (root / source).write_text('from .part import DebtMixin\n'
+                                  'class Engine(DebtMixin):\n    def stays(self): pass\n')
+        body = body.replace('class Engine:', 'class DebtMixin:')
     part = root / 'lib/part.py'
     part.write_text(body)
     assert current() == {'lib/old.py': 1}
@@ -222,6 +267,16 @@ def test_declared_swallow_moves_with_its_source_but_new_code_stays_physical(tmp_
     assert current() == {'lib/old.py': 1, 'lib/part.py': 1}
     with pytest.raises(AssertionError, match='lib/part.py'):
         test_no_new_silently_swallowed_excepts()
+    if cut != 'split':
+        unlisted = '    def unlisted(self):\n        try: pass\n        except Exception: pass\n'
+        part.write_text(body + unlisted + added)
+        assert current() == {'lib/old.py': 1, 'lib/part.py': 2}
+        extra = body.replace('except Exception: pass',
+                             'except Exception: pass\n        try: pass\n        except Exception: pass')
+        part.write_text(extra + added)
+        assert current() == {'lib/old.py': 2, 'lib/part.py': 1}
+        with pytest.raises(AssertionError, match='lib/old.py'):
+            test_no_new_silently_swallowed_excepts()
     part.write_text(body.replace('except Exception: pass', 'except Exception: raise') + added)
     with pytest.raises(AssertionError, match='lib/old.py'):
         test_baseline_only_shrinks()

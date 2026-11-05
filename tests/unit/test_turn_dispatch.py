@@ -573,7 +573,7 @@ class _SlowExitBackends(_Backends):
 def test_preemption_does_not_spawn_until_the_old_process_exits(tmp_path, monkeypatch):
     """TP-01: two CLIs on one native session interleave and corrupt it."""
     import time
-    monkeypatch.setattr(_td, "_PROCESS_EXIT_POLL_S", 0.01)
+    patch_shared(monkeypatch, _td, "_PROCESS_EXIT_POLL_S", 0.01)
     service, backends, agent_id = _make_service(tmp_path)
     slow = _SlowExitBackends()
     service.backends = slow
@@ -602,7 +602,7 @@ def test_a_send_waiting_for_a_preempted_process_survives_a_restart(tmp_path, mon
     """TP-01 review: a preempting send that waits for the old process is
     acknowledged as queued, so it must not live only in memory."""
     import time
-    monkeypatch.setattr(_td, "_PROCESS_EXIT_POLL_S", 0.01)
+    patch_shared(monkeypatch, _td, "_PROCESS_EXIT_POLL_S", 0.01)
     service, _backends, agent_id = _make_service(tmp_path)
     slow = _SlowExitBackends()
     service.backends = slow
@@ -637,7 +637,7 @@ def test_a_follow_up_behind_a_preempted_process_is_durable_too(tmp_path, monkeyp
     """TP-01 review round 2: every send acknowledged as waiting behind the old
     process has a durable row, not only the one that preempted it."""
     import time
-    monkeypatch.setattr(_td, "_PROCESS_EXIT_POLL_S", 0.01)
+    patch_shared(monkeypatch, _td, "_PROCESS_EXIT_POLL_S", 0.01)
     service, _backends, agent_id = _make_service(tmp_path)
     slow = _SlowExitBackends()
     service.backends = slow
@@ -665,7 +665,7 @@ def test_a_follow_up_behind_a_preempted_process_is_durable_too(tmp_path, monkeyp
 def test_the_preempting_send_keeps_its_place_ahead_of_queued_work(tmp_path, monkeypatch):
     """TP-01 review round 2: the preempting send runs before work that was
     already queued, in memory and in the durable order a restart recovers."""
-    monkeypatch.setattr(_td, "_PROCESS_EXIT_POLL_S", 0.01)
+    patch_shared(monkeypatch, _td, "_PROCESS_EXIT_POLL_S", 0.01)
     service, _backends, agent_id = _make_service(tmp_path)
     slow = _SlowExitBackends()
     service.backends = slow
@@ -692,7 +692,7 @@ def test_a_send_behind_a_leftover_process_is_durable(tmp_path, monkeypatch):
     """TP-01b: the free-slot-but-process-running branch acknowledges a waiting
     send as queued, so it needs a durable row too."""
     import time
-    monkeypatch.setattr(_td, "_PROCESS_EXIT_POLL_S", 0.01)
+    patch_shared(monkeypatch, _td, "_PROCESS_EXIT_POLL_S", 0.01)
     service, _backends, agent_id = _make_service(tmp_path)
     leftover = _LeftoverProcessBackends()
     service.backends = leftover
@@ -715,7 +715,7 @@ def test_a_stop_finishing_after_the_send_parked_leaves_one_durable_row(tmp_path,
     finished before the send took the turn lock while the old CLI still runs.
     That park row is the send's one durable row; no second row is left over."""
     import time
-    monkeypatch.setattr(_td, "_PROCESS_EXIT_POLL_S", 0.01)
+    patch_shared(monkeypatch, _td, "_PROCESS_EXIT_POLL_S", 0.01)
     service, _backends, agent_id = _make_service(tmp_path)
     leftover = _LeftoverProcessBackends()
     service.backends = leftover
@@ -892,7 +892,7 @@ def test_explicit_queue_does_not_steer_busy_codex_turn(tmp_path):
 def test_explicit_queue_behind_terminal_is_durable(tmp_path, monkeypatch):
     from lib import turn_dispatch as module, turn_queue
     service, backends, _agent_id = _make_service(tmp_path)
-    monkeypatch.setattr(module, "_terminal_live", lambda _agent_id: True)
+    patch_shared(monkeypatch, module, "_terminal_live", lambda _agent_id: True)
     result = service.dispatch(
         text="after terminal", requested_session="mike", trace_id="t-terminal",
         client_msg_id="u-terminal", queue_if_busy=True)
@@ -2378,10 +2378,10 @@ def test_enqueue_paths_write_nothing_under_the_turn_lock(tmp_path, monkeypatch):
         _td._CLAIMED_AT.pop(agent_id, None)
         service.dispatch(text="q2", requested_session="mike", trace_id="t-3",
                          client_msg_id="q2", queue_if_busy=True)
-        monkeypatch.setattr(_td, "_terminal_live", lambda _agent: True)
+        patch_shared(monkeypatch, _td, "_terminal_live", lambda _agent: True)
         service.dispatch(text="q3", requested_session="mike", trace_id="t-4",
                          client_msg_id="q3", queue_if_busy=True)
-        monkeypatch.setattr(_td, "_terminal_live", lambda _agent: False)
+        patch_shared(monkeypatch, _td, "_terminal_live", lambda _agent: False)
         # Stop barrier: parks durably.
         _td.clear_for_agent(agent_id, preserve_queue=True)
         _td._INFLIGHT[agent_id] = _td._STOPPING_SENTINEL
@@ -3323,7 +3323,7 @@ def test_retry_while_the_message_waits_behind_a_busy_turn_is_not_launched_twice(
     service = TurnDispatchService(ctx, backend_registry=backends, home=tmp_path,
                                   uuid_factory=lambda: "backend-session-1")
     # An interactive terminal holds the agent: the send waits in this process's memory.
-    monkeypatch.setattr(_td, "_terminal_live", lambda agent: agent == agent_id)
+    patch_shared(monkeypatch, _td, "_terminal_live", lambda agent: agent == agent_id)
     service.dispatch(text="later", requested_session="mike", trace_id="t-held",
                      client_msg_id="u-held")
     assert _receipt_state("t-held") == "pending"

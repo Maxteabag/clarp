@@ -3,6 +3,7 @@ import importlib.util
 import pathlib
 
 from lib import agents, background_jobs
+from tests.patching import patch_shared
 
 
 _SCRIPT = pathlib.Path(__file__).resolve().parents[2] / "scripts" / "agent_bg.py"
@@ -13,7 +14,7 @@ _SPEC.loader.exec_module(agent_bg)
 
 
 def test_message_watch_worker_argv_maps_to_exact_target_job_ids(monkeypatch):
-    monkeypatch.setattr(
+    patch_shared(monkeypatch,
         background_jobs, "process_argv",
         lambda _pid: [
             "python3", "/skills/message-watch/scripts/watch_messages.py",
@@ -32,7 +33,7 @@ def test_message_watch_worker_argv_maps_to_exact_target_job_ids(monkeypatch):
 
 
 def test_message_watch_provider_comes_from_subcommand_not_label(monkeypatch):
-    monkeypatch.setattr(
+    patch_shared(monkeypatch,
         background_jobs, "process_argv",
         lambda _pid: [
             "python3", "/skills/message-watch/scripts/watch_messages.py",
