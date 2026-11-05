@@ -16,7 +16,14 @@ import time
 
 import pytest
 
-from lib import db, eventlog, telemetry
+from lib import db, diagnostics_settings, eventlog, telemetry
+
+
+@pytest.fixture(autouse=True)
+def _persist_enabled_diagnostics(_isolated_db):
+    # A cache-only seed expires after 2 s or a cache clear. These tests exercise
+    # deferred delivery, so capture must stay enabled for the whole test.
+    diagnostics_settings.update({"enabled": True, "categories": list(diagnostics_settings.CATEGORIES)})
 
 
 def _rows(event: str) -> int:
