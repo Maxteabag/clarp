@@ -130,3 +130,30 @@ def test_non_snapshot_status_keeps_ttl_and_default_timeout(fleet, monkeypatch):
     clock[0] += backends.RUNTIME_STATUS_TTL + .01
     assert backends.runtime_status() == status
     assert runtime.timeouts == [None, None]
+
+
+@pytest.mark.parametrize("fresh", ["clear", "admitted", "timeout"])
+def test_snapshot_ghost_candidates_share_one_fresh_bounded_read(fleet, monkeypatch, fresh):
+    ctx, status = fleet
+    candidates = ["fixture-00", "fixture-15"]
+    for aid in candidates:
+        agents.bind_backend_session(aid, f"ghost-{aid}")
+    # Resume-target lookup is a filesystem dependency; no real transcripts.
+    monkeypatch.setattr(type(backends.by_id("claude")), "resume_target",
+                        lambda *args: None)
+
+    class AdmissionRuntime(Runtime):
+        def status(self, *, timeout=None):
+            self.timeouts.append(timeout)
+            if len(self.timeouts) == 1:
+                return self.sample
+            if fresh == "timeout":
+                raise RuntimeUnavailable("synthetic fresh-read timeout")
+            return dict(self.sample, admitting=candidates if fresh == "admitted" else [])
+
+    runtime = AdmissionRuntime(status)
+    backends.configure_runtime_client(runtime)
+    snapshot.build_agent_snapshot(ctx)
+    assert runtime.timeouts == [2.0, 2.0]
+    for aid in candidates:
+        assert bool(agents.live_backend_session(aid)) == (fresh != "clear")
