@@ -14,26 +14,6 @@ members = [
 ]
 
 [[group]]
-name = "turn_recovery"
-module = "lib/turn_recovery.py"
-class = "RecoveryMixin"
-members = [
-    "recover_queued",
-    "_rehydrate_once",
-    "_recover_queued_locked",
-    "_recovery_failed",
-    "clear_recovery_backoff",
-    "_retire_goal_queue",
-    "_release_superseded",
-    "release_leaked_slots",
-    "_start_ownerless_queues",
-    "_orphaned_spawn",
-    "repair_slot",
-    "_superseded",
-    "_preempt",
-]
-
-[[group]]
 name = "turn_retry"
 module = "lib/turn_retry.py"
 class = "RetryMixin"

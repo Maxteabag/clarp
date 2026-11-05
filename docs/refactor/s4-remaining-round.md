@@ -77,7 +77,7 @@ Methods: `recover_queued`, `_rehydrate_once`, `_recover_queued_locked`, `_recove
 
 G0: 194/226 = 85.8%; all methods AST-identical to the measured source.
 
-**Included in this combined round.** Generator audit accepts the group.
+**Deferred to a follow-up round.** Generator patch audit accepts the group, but the existing silent-except debt guard does not yet preserve logical ownership for a method mixin. `_rehydrate_once.live` has one existing silent broad except; the generated RecoveryMixin scanner reports it at line 52. Moving it would produce one new physical recovery count and remove one source count. The baseline is unchanged; no exception is suppressed or repaired in this move.
 
 ## ClaimMixin
 
@@ -155,8 +155,10 @@ group turn_admission: imported names its members read are patched through the se
 
 ## Combined candidate and boundaries
 
-RecoveryMixin and RetryMixin advance together in one recipe update and one generated review/G1/G2 round after DrainMixin. Claim, handoff, launcher and admission remain in the source class pending their recorded follow-ups. No silent acknowledgements are added and no exception is bypassed. New G0 characterization for the three coverage gaps belongs in tests-only main commits before those follow-up moves.
+RetryMixin advances in the single eligible recipe/generated review/G1/G2 round after DrainMixin. Recovery, claim, handoff, launcher and admission remain in the source class pending their recorded follow-ups; none holds the eligible group. No silent acknowledgements are added and no exception is bypassed. New G0 characterization for the three coverage gaps belongs in tests-only main commits before those follow-up moves.
 
 The runtime-wide RPC lock remains in runtime_bridge.py (TP-02); this round does not change it. Queue lifecycle ownership stays with rf-contractc. Stage 1/2, TP-N3 and AUT-20b source changes continue to flow through the main-text generator; a changed measured method requires its G0 evidence refreshed. The three long-function extractions follow the moves as separately reviewed integration replay patches.
+
+Sequential-prefix audit: `/var/tmp/rf-s4/remaining-prefix-audit.json` and `.log`. The existing silent-except AST scanner finds one count in the recovery output and none in drain/retry. This is source preflight evidence, not an executed gate.
 
 Raw audit and counts: `/var/tmp/rf-s4/remaining-six-survey.json` and `.log`. No G1/G2 or generated approval is claimed by this survey. Quiet-window cutoff: 17:30 Europe/Oslo.
