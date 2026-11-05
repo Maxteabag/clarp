@@ -278,6 +278,24 @@ def prune_event_logs(log_dir: pathlib.Path, *, max_age_ms: int,
     return removed
 
 
+def _checkpoint_database() -> None:
+    # A blocking checkpoint can hold the writer while waiting for readers.
+    # Keep TRUNCATE opportunistic, without raising a caller's shorter timeout.
+    with db.busy_timeout_at_most(100) as connection:
+        result = connection.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+    _log_checkpoint_result("TRUNCATE", result)
+    if result[0]:
+        # PASSIVE copies what it can without waiting for readers or writers.
+        # Retry truncation on the next ordinary hourly pass, as before.
+        result = db.conn().execute("PRAGMA wal_checkpoint(PASSIVE)").fetchone()
+        _log_checkpoint_result("PASSIVE", result)
+
+
+def _log_checkpoint_result(mode: str, result) -> None:
+    log("maintenanceCheckpoint",
+        f"mode={mode} busy={result[0]} log_frames={result[1]} checkpointed_frames={result[2]}")
+
+
 class MaintenanceWorker:
     """Run conservative retention cleanup at startup and then hourly."""
 
@@ -334,15 +352,12 @@ class MaintenanceWorker:
                 log_exception("telemetryMaintenanceFail", e)
             if any(counts.values()):
                 log("maintenancePruned", str(counts))
-            # Passive checkpoints never truncate under constant readers, so the
-            # WAL grows without bound (it once reached 3 GB and stalled writes
-            # for minutes). TRUNCATE here keeps it capped; busy_timeout bounds
-            # how long it may wait, and a busy result just defers to next hour.
+            # Keep trying to truncate hourly so a quiet pass can cap the WAL.
+            # A reader prevents truncation only for the short busy budget;
+            # PASSIVE then makes progress without holding up new writers.
             if checkpoint:
                 try:
-                    # Its outcome "ok" means only that execute() returned: it does NOT prove the TRUNCATE completed or
-                    # that the checkpoint was not busy (the PRAGMA reports busy in its result row, which is not read).
-                    phases.run("wal_checkpoint", lambda: db.conn().execute("PRAGMA wal_checkpoint(TRUNCATE)"))
+                    phases.run("wal_checkpoint", _checkpoint_database)
                 except Exception as e:  # noqa: BLE001
                     log_exception("maintenanceCheckpointFail", e)
             return counts
