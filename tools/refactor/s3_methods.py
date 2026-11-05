@@ -164,7 +164,10 @@ def validate(root: pathlib.Path, base: str, integration: str, found: list) -> No
                     raise s3_apply.Refusal(f'no baseline text for {source}')
                 write(work, {source: text})
             if prefix:
-                write(work, s3_apply.apply(work, prefix))
+                # Stage E applies successive prefixes; the mover prepends each
+                # new mixin, so a one-shot application changes MRO/import order.
+                for count in range(1, len(prefix) + 1):
+                    write(work, s3_apply.apply(work, prefix[:count]))
                 rewritten.add(source)
         for rel in sorted(checked):
             expected = (work / rel).read_text() if (work / rel).exists() else None
