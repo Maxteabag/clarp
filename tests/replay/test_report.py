@@ -125,7 +125,7 @@ def test_intended_id_binds_the_values_not_just_the_place():
 def test_planted_change_refuses_a_stale_anchor(tmp_path):
     (tmp_path / 'server').mkdir()
     (tmp_path / 'server/x.py').write_text('a = 1\n')
-    with pytest.raises(RuntimeError, match='anchor found 0 times'):
+    with pytest.raises(RuntimeError, match='anchor found 0 in server/x.py'):
         planted.apply({'id': 't', 'file': 'server/x.py', 'find': 'b = 2', 'replace': ''}, tmp_path)
 
 
@@ -140,11 +140,31 @@ def test_a_planted_change_counts_only_its_own_observable():
 @pytest.mark.parametrize('change', planted.CHANGES, ids=lambda c: c['id'])
 def test_every_planted_anchor_matches_this_tree(change, tmp_path):
     repo = pathlib.Path(__file__).resolve().parents[2]
-    target = tmp_path / change['file']
-    target.parent.mkdir(parents=True)
-    target.write_text((repo / change['file']).read_text())
+    present = [name for name in planted.files(change) if (repo / name).is_file()]
+    for name in present:
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).write_text((repo / name).read_text())
     planted.apply(change, tmp_path)
-    assert target.read_text() != (repo / change['file']).read_text()
+    assert sum((tmp_path / n).read_text() != (repo / n).read_text() for n in present) == 1
+
+
+def test_a_planted_anchor_must_match_in_exactly_one_candidate_file(tmp_path):
+    change = {'id': 'c', 'file': ('a.py', 'b.py'), 'find': 'x = 1\n', 'replace': 'x = 2\n'}
+    (tmp_path / 'a.py').write_text('y = 0\n')
+    (tmp_path / 'b.py').write_text('x = 1\n')
+    planted.apply(change, tmp_path)                              # moved: found in the second
+    assert (tmp_path / 'b.py').read_text() == 'x = 2\n' and (tmp_path / 'a.py').read_text() == 'y = 0\n'
+    (tmp_path / 'a.py').write_text('x = 1\n')
+    (tmp_path / 'b.py').write_text('x = 1\n')
+    with pytest.raises(RuntimeError, match='exactly one'):       # in both: ambiguous
+        planted.apply(change, tmp_path)
+    (tmp_path / 'a.py').write_text('y = 0\n')
+    (tmp_path / 'b.py').unlink()
+    with pytest.raises(RuntimeError, match='0 in a.py'):         # in neither (one file absent)
+        planted.apply(change, tmp_path)
+    single = {'id': 's', 'file': 'a.py', 'find': 'y = 0\n', 'replace': 'y = 1\n'}
+    planted.apply(single, tmp_path)                              # a plain path still works
+    assert (tmp_path / 'a.py').read_text() == 'y = 1\n'
 
 
 def test_cross_lane_order_counts_only_where_calibration_agrees():
