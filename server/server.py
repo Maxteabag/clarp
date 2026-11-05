@@ -52,6 +52,7 @@ from lib import db  # noqa: E402
 from lib import eventlog  # noqa: E402
 
 from lib.outdated_clients import _note_outdated_client  # noqa: E402
+from lib.turn_identity import TurnIdentityUnavailable  # noqa: E402
 from lib import audio_metrics, voice_events  # noqa: E402
 from lib import health  # noqa: E402
 from lib import agents as agents_db  # noqa: E402
@@ -741,6 +742,17 @@ class Handler(BaseHTTPRequestHandler):
         self._trace_id = None
         try:
             super().handle_one_request()
+        except TurnIdentityUnavailable as exc:
+            # HTTP-N5: the turn token's lookup failed. Every call site asks before
+            # any side effect or response, so this is a retryable 503. Should a
+            # response already have started, it cannot become one: log and close
+            # the connection so the client never reuses a half-answered socket.
+            if self._status_code:
+                log_exception("turnIdentityAfterResponse", exc)
+                self.close_connection = True
+            else:
+                self._json(503, {"error": "turn identity unavailable", "retryable": True})
+                self.wfile.flush()
         finally:
             # `self.command` and a status set by send_response are only set
             # after super() parses the request line. If the connection dies
@@ -4690,14 +4702,18 @@ class Handler(BaseHTTPRequestHandler):
         return who.principal
 
     def _turn_caller(self) -> str:
-        """The agent whose Clarp turn sent this request (X-Clarp-Turn), or ""."""
+        """The agent whose Clarp turn sent this request (X-Clarp-Turn), or ""
+        when the request carries no turn token. A token whose lookup fails is
+        unknown identity, not "no turn": it raises TurnIdentityUnavailable,
+        which handle_one_request answers with a retryable 503 (HTTP-N5)."""
         from lib import turn_identity
         from lib.provider_background_jobs import TURN_ENV
         try:
             return turn_identity.caller_agent_id(
                 {TURN_ENV: (getattr(self, "headers", None) or {}).get("X-Clarp-Turn", "")})
-        except Exception:  # noqa: BLE001 - no proof means no refusal
-            return ""
+        except Exception as exc:  # noqa: BLE001 - fail closed: refused, logged and retryable
+            log_exception("turnCallerLookupFail", exc)
+            raise turn_identity.TurnIdentityUnavailable() from exc
 
     def _calls_by(self, data: dict) -> str:
         """The agent making a change: its turn identity, else the session it names."""
@@ -4706,7 +4722,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             agent_id = turn_identity.caller_agent_id(
                 {TURN_ENV: (getattr(self, "headers", None) or {}).get("X-Clarp-Turn", "")})
-        except Exception:  # noqa: BLE001 - attribution only
+        except Exception as exc:  # noqa: BLE001 - attribution only: logged, then unattributed
+            log_exception("callsByLookupFail", exc)
             agent_id = ""
         agent = identity.lookup(agent_id) if agent_id else None
         if agent:
@@ -5140,16 +5157,12 @@ class Handler(BaseHTTPRequestHandler):
         An agent is verified by the Host-issued identity of the turn its tool
         runs in (X-Clarp-Turn, lib.turn_identity); a paired device acts for
         its user. Anything else is the caller's claim (default "user") and is
-        reported as unverified; a verified identity replaces the claim."""
-        from lib import turn_identity
-        from lib.provider_background_jobs import TURN_ENV
+        reported as unverified; a verified identity replaces the claim. A turn
+        token whose lookup fails is refused (retryable 503 through _turn_caller),
+        never read as the claim: an agent's Stop applied as the user's would
+        withdraw the user's sends (HTTP-N5)."""
         claimed = str(data.get("actor") or "").strip()[:80] or "user"
-        try:
-            agent_id = turn_identity.caller_agent_id(
-                {TURN_ENV: (self.headers.get("X-Clarp-Turn") or "")})
-        except Exception as exc:  # noqa: BLE001 - attribution falls back to the claim
-            log_exception("controlActorIdentityFail", exc)
-            agent_id = ""
+        agent_id = self._turn_caller()
         agent = identity.lookup(agent_id) if agent_id else None
         if agent:
             actor = f"agent:{agent['session']}"
@@ -5964,10 +5977,8 @@ class Handler(BaseHTTPRequestHandler):
         A bookkeeping delegate is held to its scope; an agent it starts would not
         be. The creator is the turn identity the CLI sent (X-Clarp-Turn), not a
         name in the request; the named parent or fork source is checked too."""
-        from lib import goal_ledger, turn_identity
-        from lib.provider_background_jobs import TURN_ENV
-        creator = turn_identity.caller_agent_id(
-            {TURN_ENV: self.headers.get("X-Clarp-Turn", "")})
+        from lib import goal_ledger
+        creator = self._turn_caller()   # a failed lookup is a retryable 503 (HTTP-N5)
         candidates = [creator] + [(identity.lookup(n) or {}).get("agent_id", "") for n in names if n]
         if any(goal_ledger.descends_from_active_delegate(a) for a in candidates if a):
             return "a bookkeeping delegate does not start helpers or forks"
