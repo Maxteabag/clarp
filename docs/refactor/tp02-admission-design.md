@@ -128,6 +128,44 @@ accepted but paused before it appears in active/spawning/admitting.
 No fabricated agent slot, durable thinking row, live upsert or public
 conversation key is needed for this reservation.
 
+**Original intent ordering (A2 finding 1).** Every initial reservation gets
+an immutable sequence s from the coordinator, before it is unbound. Every
+USER Stop publishes a sequence cutoff for its canonical agent at its
+barrier transition. Resolving or rekeying D to A compares D.s with A's
+retained successful USER-Stop cutoff: D.s <= cutoff is old intent and may
+not launch as a fresh post-Stop request. Never replace D.s or sample a new
+per-agent generation to make that comparison pass. An ordinary withdrawn
+send uses the existing refusal; already acknowledged explicit queue work
+stays durable/paused rather than being lost or relabelled fresh. Keep s through
+every rekey, then bind the existing durable user-stop generation for the
+receipt/handoff checks. A Stop committed after binding is caught by that
+later check too.
+
+A cutoff is provisional while barrier/pause installation can still roll
+back without a durable user fence. Remove that provisional cutoff only if
+its own installation failed before a durable user-stop generation/receipt
+fence committed, and only if no newer Stop replaced it. Once the durable
+user fence committed, retain its cutoff even if interruption later fails:
+today rollback of pause/slot does not decrement the user-stop generation
+or undo fenced receipts. A maintenance Stop publishes no USER cutoff and
+does not withdraw old user intent. Its barrier still orders handoff.
+
+Retain cutoff history while any outstanding unbound/rekeyable reservation
+could precede it; prune only below a proven reservation watermark, never
+on a timeout alone. A request resolving from A to B keeps s and checks B's
+cutoff; identity revalidation cannot transfer already committed work to B.
+On runtime death there is no transferable in-memory RPC authority: resume
+only existing durable producer/receipt work with its saved identity and
+fences. This is not a new cross-runtime timestamp or wire field.
+
+Forward trace: reserve D(s=10), block lookup, USER Stop(A,s=11) commits and
+finishes, D resolves A: refuse the old attempt through the signed existing
+error/receipt semantics, no provider handoff. Reverse: Stop finishes then
+D(s=12) resolves A: ordinary fresh-intent rules apply. Repeat with rekeying,
+maintenance Stop, pre-durable failed Stop and post-durable interrupt failure.
+The future mutant that samples the current generation after lookup must
+fail, as must premature cutoff pruning.
+
 ### 2. Resolve the canonical resource before taking an admission lane
 
 Resolve agent ID from the same routing/identity semantics as today.
@@ -208,11 +246,49 @@ one claimant calls complete_stop. That ticket remains a drain blocker
 AFTER removal until queue restore/filter/handoff is settled. The loser
 keeps today's finish-not-found or expiry-no-op result.
 
-Subsequent Stop generations fence stale completion/rollback, with no new
-persistent schema. Preserve current queue merge/cancellation semantics;
-do not solve overlapping leases by rejecting valid operations with an
-unapproved new status. Exact duplicate-Stop/superseded-lease behavior is a
-required control, not an assumption that STOPPING alone proves ownership.
+**Overlapping payload ownership (A2 finding 2).** A per-agent Stop chain
+owns saved payloads independently from the latest barrier and individual
+RPC/timer claimant. Each generation record retains its original trace,
+saved queue segment, pause baseline/arrival rights, pending lease deadline,
+cancelled-trace set and parked/taken-over cleanup obligations. The lease
+refers to that record; supersession transfers the record into the chain,
+not into a discard list. There is one current barrier owner but potentially
+several unfinished payload owners.
+
+| Transition | Payload and barrier result |
+| --- | --- |
+| S1 begins | Chain takes Q0 out of the slot; S1 owns interruption/publication and its saved segment. New arrivals form Q1. |
+| S2 begins before S1 completes | Append Q1 as S2's segment; retain S1/Q0 and every unfinished cleanup. S2 becomes the barrier owner. Q0 remains pre-Stop held; Q1 is now also captured pre-S2 and loses its pre-S2 bypass right, exactly as prepare_queued_for_finish does to a captured snapshot. New arrivals form Q2 and retain only the usual post-S2 fresh-intent rights. |
+| Valid finish(S1) after S2 | One claimant merges S1 cancelled IDs and completes S1 cleanup; mark that record ready. It never restores/releases S2's barrier. The earlier Host result is consumed here even though its generation is superseded. |
+| finish(S2) before S1 is ready | Complete S2's own payload, but retain the barrier/chain until all earlier payload obligations are ready or expire through their existing timeout path. |
+| Expiry competes with finish(Si) | Exactly one claims Si. Expiry uses the existing empty cancellation result, revalidates durable removals, and marks Si ready; no second restore/handoff. A losing/duplicate Host finish retains today's not-found result, not an invented success. |
+| S2 installation/interrupt fails | If S2 still owns the barrier, roll back its control transition to the surviving S1 chain, carrying all arrivals/cleanup. If S1 is already ready, complete the chain only after S2 rollback is accounted for. Never restore a terminated old trace or discard Q1/Q2. |
+| S1 failure arrives after S2 | Settle S1's failure/data obligations; no older slot/pause rollback over S2. A committed USER cutoff stays committed. |
+| All records ready | Current barrier owner alone filters the union of accepted cancellations, applies cleanup once, and merges kept Q0,Q1,Q2 in original order with unchanged Stop pause/fresh-arrival rules. Then hand off once through ordinary generation checks. |
+
+Final assembly re-reads each durable row/status before launch; it cannot
+resurrect a row the Host already removed. Cleanup is keyed by the existing
+row/trace identity and is idempotent. Preserve the captured cancellation
+sets until their park/taken-over cleanup is known complete, including a
+transient cleanup failure; a record cannot disappear merely because its
+lease was popped. Memory-only work retains an explicit chain owner until
+it is restored or made durable.
+
+Conservation trace: Q0 precedes S1; Q1 arrives before S2; Q2 arrives after
+S2. Finish S2 then finish S1 cancelling a parked/taken-over member of Q0:
+only kept(Q0,Q1,Q2) can hand off, once, after both payloads are ready. Reverse
+the finish order and each expiry winner; fail S2; deliver S1 cancellation
+after supersession but before its lease is claimed. All accepted payloads
+must survive. A finish that loses to expiry is not an accepted late payload;
+retain the existing bounded lease contract/404, and revalidate any already
+committed durable removal. Do not promise to undo effects launched before
+a cancellation arriving after every lease deadline.
+
+This makes overlap conservation explicit and can delay the latest handoff
+until an earlier lease finishes/expires. It is a separately stated intended
+ordering refinement for lead/A2 review, not authority to change lease
+timeouts, duplicate-finish responses or public payloads. Mutants discarding
+S1's snapshot, forgetting cleanup after pop, or releasing S2 from S1 fail.
 
 ### 5. Drain uses tickets plus an atomic final generation check
 
@@ -247,16 +323,92 @@ fast-drain returns false while tickets exist. Revert/cancel changes the
 release epoch so a stale outside-lock scan cannot seal the restored
 runtime. Retry through the existing monitor schedule, not a busy loop.
 
-**Release-policy decision required before implementation:** current hard
-rejection covers only four methods. Proposed treatment is to classify
-every native-launch-capable mutation (including compact, goal actions
-that can wake work, quota recovery) into the same no-new-launch policy,
-while status/live transport/Stop/lease completion stay available. This is
-an explicit intended concurrency difference, not a claim about today's
-code. Reviewer/lead must approve the exact action allowlist and existing
-error envelopes, or require a separately owned change. No new public
-payload/contract or silent exclusion of such operations from seal proof
-is authorized by this design.
+## Sealed runtime policy (lead 636)
+
+Approved in principle as a SEPARATE, independently revertible commit in
+the TP-02 candidate. It needs its own deterministic RED and A2 review, then
+the lead signs its exact intended difference on the exact commit. It is
+not yet signed code. Reverting it restores the previous four-method
+policy; do not then claim the complete no-new-launch proof still holds.
+
+At the SAME dispatch_request lifecycle point as :519-525, before method
+body validation, lookup, claims or provider activity, a denied operation
+returns EXACTLY the current envelope:
+
+    {"ok": false, "status": 503,
+     "error": "agent runtime is draining for an update"}
+
+No new status, error text, fields or protocol version. Unknown RPC methods
+remain 404, not a blanket 503. Soft-fenced operations may still be admitted
+durably as held work; the matrix below applies to the hard SEALED phase.
+
+| Method/action | Sealed policy | Why |
+| --- | --- | --- |
+| dispatch, dispatch_queued, recover_queued, steer | DENY | Existing four; may start/continue provider work. |
+| compact | DENY | Starts an interactive native process/worker. |
+| recover_janitor_quota | DENY | May run selector/recovery and resume turns. |
+| explanation_command | DENY | Conservative native-reader-capable operation, explicitly included by 636; do not bootstrap a reader after seal. At the inspected pin answer/resolve is cache-only; this narrower current implementation is not a general permission for future native-reader fallback. |
+| goal/start | DENY | Activates native work and may bootstrap its app-server. |
+| goal/resume | DENY | Activates native continuation and may bootstrap. |
+| goal/pause | DENY | Although reducing goal activity, current path first obtains _client and _ensure_loaded; it can create/reload native work before pausing. |
+| goal/clear | DENY | Same native client/load path before clearing. |
+| goal/get | DENY | The outer goal() obtains _client even for get; a read can start a new app-server/reader. No speculative cache-only API is added. |
+| goal/unknown or missing action | DENY | Same dispatch lifecycle point; current enum validation is after client creation. When OPEN retain existing validation/errors. This is not an unknown RPC method. |
+| release_leaked_slots, repair_slot | DENY | They can hand off ownerless queues/recover work, not merely edit a map (turn_dispatch.py:3708-3778). Internal drain cleanup can settle slots but any child launch is independently fenced. |
+| status, live_snapshot | ALLOW | Snapshot/read; must not create a provider as a side effect. |
+| live_stream | ALLOW | Existing streaming transport bypass; ends on runtime close. |
+| live_observe, live_patch | ALLOW | Existing projection operations; no new provider launch. |
+| interrupt, interrupt_any, begin_stop | ALLOW | Stop existing work using its captured identity. No bootstrap of a missing native client. |
+| finish_stop, timer expiry | ALLOW | Complete cancellation/lease obligations; any descendant queue launch must separately pass the same generation check and may remain held. |
+| cancel_janitor_run | ALLOW | Cancels/reduces exact-run work; does not gain a native-launch exception. |
+| release_agent | ALLOW | Stop/delete; captured-owner guards and child-launch fence remain. |
+| any unknown RPC method | Existing 404 | Do not accidentally turn validation into launch permission. New methods require an explicit classification before registration. |
+
+All known goal actions are listed individually deliberately: pause/clear/
+get are not automatically safe merely because their intent sounds like a
+read or reduction. Stop's internal pause/cleanup against an ALREADY owned
+native process remains available through its Stop path; it must not call
+a client factory to turn that exception into a new process launch. Pin and
+recheck these backend call paths after the Sunday fixes before coding.
+
+### Automatic work conservation and re-arm owners
+
+A 503 is not completion, cancellation, quota exhaustion or a permanent
+goal failure. Refused user-initiated operations behave like today's refused
+send: existing error propagation, no hidden automatic replay. Automatic
+producers instead retain their original intent/identity until a canonical
+admission or valid superseding cancellation is known. An in-memory wakeup
+is an optimization, never the sole post-handover truth.
+
+| Trigger | Mechanism on refusal/lower/handover | Deterministic future control |
+| --- | --- | --- |
+| Host goal wake via task_goal_recovery.tick | Existing continuation.request_id and goal revision remain; its exception path records retry/due_at, not admitted. Existing tick retries the SAME ID after lower/new runtime and revalidates owner/native binding/Stop/approval. | Refuse one wake, lower or restart, advance clock: one admission with same ID; pause goal before retry: none. |
+| Automatic schedules, heartbeat/leader/Janitor/decision delivery through dispatch_adapters | Keep the producer's durable due/claim unconsumed until admission. Ordinary prompt work without such a producer claim must be placed in an EXISTING normal queued_turns row, with stable client ID/origin/owner, before its callback can finish. Existing recover_queued after lower/startup drains it; no special control command encoded in chat text. | Refuse one-shot and periodic producers, restart runtime, recover: each retained eligible intent once, no acknowledged work lost; cancelled/superseded producer never fires. |
+| Queued handoff, retry timer, provider completion callback | Preserve the current spec/queue row, original trace and existing backoff/cap; park ordinary unlaunched prompt work using existing queue/park format before losing the callback owner. Lower schedules ownerless and durable recovery. If partially launched, keep backend ownership, never reclassify it as unsent. | Fence after decision but before deferred spawn; expire callback thread/restart; kept row runs once, old writer/Stop guard still wins. |
+| Janitor quota recovery, automatic mode | Recompute still-eligible exhausted-provider/unfinished-owned-work recovery on subsequent quota ticks independently of whether a NEW notification receipt was inserted. The current code only calls request_recovery inside the inserted-receipt branch; that is not sufficient re-arm. Preserve existing attempt/park/carry identity and parked_since cap; revalidate owner generation/mode each time. Untransferable work blocks handover instead of being dropped. | Refuse after receipt insertion, repeat same quota window (no new notification), lower/new runtime: selector requested once for retained work; disable owner before retry: none. |
+| Janitor quota recovery, approved mode | Existing durable accepted artifact remains unconsumed: recover_approved already marks its settings key only for recovering/nothing_to_resume, never for 503. Next quota tick retries the same approval after lower/new runtime and verifies current owner generation. | Refuse then restart/tick, same artifact once; revoked/stale generation prevents recovery. |
+| Automatic compaction | No Host automatic compact_session caller exists at this source: only the user HTTP path calls it. Native CLI auto-compaction is part of an ALREADY owned provider turn, so drain retains that owner rather than refusing/lossily replaying a new RPC. If the implementation-time census adds a Host automatic compaction producer, it MUST retain its original durable parent job/claim until success; add its specific re-arm control before enabling this policy. Do not invent a new automatic feature or persist control commands in chat rows. | Native turn compacts while fenced: seal waits for owned turn. For any newly found Host producer, refuse before _active publication, lower/restart and prove its durable parent retries once; no producer means no fictitious passing test. |
+| Direct automatic goal start/resume | None found in the inspected Host caller graph; Host automatic goal wakes use dispatch and the continuation row above. An implementation-time direct automatic caller must retain its durable parent goal action/revision until ACK, then re-enter the gate; user goal RPCs are not silently auto-replayed. | Caller-census guard plus any real producer's refusal/restart/supersession control; do not infer durability from a native mirror written only AFTER its reply. |
+| Automatic command explanation/native reader | Existing tool_explanation_queue is the durable owner, but currently commands.expand runs BEFORE durable_queue.request (:tool_explanations.py:250-314). Move any reader-capable expansion behind enqueue/claim of the original activity/target demand, using existing activity_json/demand IDs; rederive keys/parts through reviewed existing rekey mechanisms after expansion. RuntimeClient.explanation_command/_ask must distinguish the existing drain503 internally instead of collapsing it into an empty successful cache miss. Return/release the claim with durable_queue.abandon and retry on lower/new runtime while demand is current. No new stored fields or silent success from a clipped fallback. | Refuse reader BEFORE expansion, verify original demand was persisted first, restart/lower: one eventual completion; released/stale demand does no provider work. Cache-only source behavior stays separately covered; a plain periodic-poll assumption is insufficient. |
+| Reconcile leak release/slot repair | Existing periodic reconcile/ownerless recovery retries; a sealed refusal never asserts that a live slot was released. Actual queue work remains in the existing durable queue/park. Drain's internal cleanup does not launch descendants past the fence. | Refuse repair with durable waiting row, lower/restart: one safe repair/handoff; live session holder never reclaimed. |
+
+The implementation must audit every actual producer's claim/ACK boundary;
+"the scheduler will run again" alone is not evidence for a one-shot event.
+If an automatic producer has neither existing durable intent nor a compatible
+existing prompt queue representation, add a specifically reviewed recovery
+owner BEFORE enabling refusal for it. Any new stored representation needs
+the contract owner's reader-before-writer rollout; no such format change is
+approved here. Do not claim the policy complete with a missing re-arm owner.
+
+The same last-moment release/owner generation check is required at
+_spawn_attempt_claimed, the steering handoff, compaction worker publication,
+native goal/client startup, account-selector resume, _retry_handoff,
+_resume_and_spawn, _resume_after_account_switch, _schedule_retry's callback,
+start_held_work, and _finish_slot/Stop-completion deferred launches. Audit
+direct backend calls on the actual implementation base. Publishing a deferred
+child must transfer the parent's ticket to the child before release; no
+release-to-callback interval may disappear from the seal proof. Provider
+events describing existing work do not get a fresh-launch exemption.
 
 ### Lock order, callbacks and failure rules
 
@@ -312,9 +464,11 @@ part of the planned proof, not yet executed claims.
 
 ## Integration and implementation route
 
-1. A2 reviews this design; lead signs exact intended concurrency differences
-   and resolves the native-launch hard-seal policy. No implementation until
-   after big merge #1. No request for acceptance of the HIGH finding.
+1. A2 reviews this design and its exact matrix/re-arm obligations; lead636
+   is in-principle approval, not a code signature. The sealed-policy commit
+   gets its OWN RED, A2 source review and THEN the lead's signature on that
+   exact commit. Keep it independently revertible inside the candidate.
+   No implementation until after big merge #1; no HIGH risk acceptance.
 2. On then-current main, add the deterministic failing controls first. Add
    explicit coordinator/ticket and dispatcher admission/effect seams in a
    narrow fix series; preserve old wire and stored formats. Validate backend
