@@ -236,3 +236,37 @@ def test_a_moved_definition_that_rebinds_a_staying_global_is_refused(tmp_path):
     # The global itself cannot move either: its `global` write is a second binding.
     with pytest.raises(Refusal, match="not a single plain top-level definition"):
         split_apply.apply_split(root, _split([("lib/old_part.py", ["_CALLBACK", "set_callback", "call"])]))
+
+
+@pytest.mark.parametrize("imports,expression,expected", [
+    ("import ctypes\nimport ctypes.util\n", "(ctypes.__name__, ctypes.util.__name__)",
+     ("ctypes", "ctypes.util")),
+    ("import ctypes.util\nimport ctypes\n", "(ctypes.__name__, ctypes.util.__name__)",
+     ("ctypes", "ctypes.util")),
+    ("import xml.dom\nimport xml.etree\n", "(xml.dom.__name__, xml.etree.__name__)",
+     ("xml.dom", "xml.etree")),
+])
+def test_plain_imports_of_the_same_root_move_in_source_order(tmp_path, imports, expression, expected):
+    root = _tree(tmp_path, old=imports + "\n\ndef run():\n    return " + expression + "\n")
+    changes = split_apply.apply_split(root, _split([("lib/old_part.py", ["run"])]))
+    part = changes["server/lib/old_part.py"]
+    emitted = [ast.unparse(node) for node in ast.parse(part).body if isinstance(node, ast.Import)]
+    assert emitted == imports.splitlines(), "both imports must remain in their original order"
+    namespace = {}
+    exec(compile(part, "old_part.py", "exec"), namespace)
+    assert namespace["run"]() == expected
+
+
+@pytest.mark.parametrize("bindings", [
+    "import ctypes as ctypes\nimport ctypes.util\n",  # even a redundant alias stays refused
+    "import ctypes\nimport ctypes.util as ctypes\n",
+    "from ctypes import util as ctypes\nimport ctypes.util\n",
+    "import ctypes\nctypes = object()\nimport ctypes.util\n",
+    "import ctypes\ndef ctypes():\n    return None\nimport ctypes.util\n",
+    "import ctypes\nimport json as ctypes\n",  # different root, same binding
+    "import ctypes\nif True:\n    import ctypes.util\n",  # not an unconditional top-level import
+])
+def test_other_import_rebindings_still_refuse_a_move(tmp_path, bindings):
+    root = _tree(tmp_path, old=bindings + "\n\ndef run():\n    return ctypes\n")
+    with pytest.raises(Refusal, match="imports and also rebinds"):
+        split_apply.apply_split(root, _split([("lib/old_part.py", ["run"])]))
