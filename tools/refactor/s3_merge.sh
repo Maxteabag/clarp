@@ -180,9 +180,9 @@ done
 # Named-source families compare split+method reconstruction together, before
 # any original source is replaced by main (including sources without an S9 split).
 if [ -n "$method_specs" ]; then
-  method_base=$(git merge-base "$main" "$integration") || die 11 "no method merge base"
+  method_base=$(git merge-base "$main" "$integration") || die 8 "no method merge base"
   "$PY" tools/refactor/s3_methods.py --root "$root" --validate "$method_base" "$integration" \
-    || die 11 "method-family integration drift"
+    || die 8 "method-family integration drift"
 fi
 
 # S9: integration may change a split module only through its recipe. Regenerating the

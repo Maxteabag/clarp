@@ -31,6 +31,9 @@ def recipes(root: pathlib.Path) -> list[tuple[pathlib.Path, list[dict]]]:
         if not groups or s3_apply.load_helpers(path):
             raise s3_apply.Refusal(f'{path.name}: methods require groups and no helpers')
         source = groups[0]['source_module']
+        # Reuse S9's canonical lib path and sibling-output validation.
+        split_apply._check_split({'name': path.name, 'module': source,
+            'part': [{'module': g['module'], 'names': g['members']} for g in groups]})
         key = (source, groups[0]['source_class'])
         if key == ('server.py', 'Handler') or key in sources:
             raise s3_apply.Refusal(f'{path.name}: duplicate or default S3 source class')
