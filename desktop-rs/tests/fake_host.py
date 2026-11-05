@@ -1383,6 +1383,20 @@ class Handler(BaseHTTPRequestHandler):
             global artifacts_delay
             artifacts_delay = float(body.get("seconds", 0))
             return self.reply(200, {"ok": True})
+        if url.path == "/__control/delivery":
+            # Test control (F4): the Host's projection of a user send's
+            # delivery state changes without a new revision; clients only get
+            # the delivery-updated hint and re-read /log.
+            session, cid = body["session"], body["client_msg_id"]
+            with state_lock:
+                for turn in turns.get(session, []):
+                    if turn["id"] == "u-" + cid:
+                        turn["delivery"] = {"state": body["state"], "rev": 1, "seq": 1,
+                                            "for": {"client_msg_id": cid, "trace_id": ""}}
+            agent_id = next((a["agent_id"] for a in agents if a["session"] == session), "")
+            broadcast({"type": "delivery-updated", "agent_id": agent_id, "session": session,
+                       "message_id": "u-" + cid})
+            return self.reply(200, {"ok": True})
         if url.path == "/__control/send-delay":
             # Test control: each /send is filed and answered after `seconds`.
             global send_delay
