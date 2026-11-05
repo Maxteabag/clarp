@@ -43,6 +43,7 @@ import pathlib
 import hashlib
 import sys
 import threading
+import time
 import traceback
 from dataclasses import dataclass
 
@@ -83,6 +84,8 @@ def reset_for_tests(path: pathlib.Path | None = None) -> None:
         str(pathlib.Path.home() / ".cache" / "clarp" / "logs"),
     ))
     LOG_DIR.mkdir(parents=True, exist_ok=True)
+    with _DROPPED_LOCK:
+        _DROPPED.update(pid=os.getpid(), total=0, reported=0, last_report=None)
 
 
 def _iso(now: _dt.datetime | None = None) -> str:
@@ -123,6 +126,12 @@ def _sanitize_detail(value: object, key: str = "") -> object:
 _DEFERRED: dict[int, list[tuple[dict, _dt.datetime]]] = {}
 _DEFERRED_LOCK = threading.Lock()
 
+# Process-local loss accounting, independent of the contended telemetry DB.
+# Report the first loss immediately, then at most once per minute on an insert
+# attempt (including recovery); orderly exit flushes any remaining count.
+_DROPPED = {"pid": os.getpid(), "total": 0, "reported": 0, "last_report": None}
+_DROPPED_LOCK = threading.Lock()
+
 
 def _in_state_transaction() -> bool:
     from . import db
@@ -150,6 +159,7 @@ def _flush_all_deferred() -> None:
     for batch in batches:
         for record, now in batch:
             _insert_sqlite(record, now)
+    _report_dropped(_dt.datetime.now(_dt.timezone.utc), force=True)
 
 
 atexit.register(_flush_all_deferred)
@@ -165,6 +175,7 @@ def _write_sqlite(record: dict, now: _dt.datetime) -> None:
 
 
 def _insert_sqlite(record: dict, now: _dt.datetime) -> None:
+    dropped = False
     try:
         from . import telemetry
 
@@ -209,7 +220,9 @@ def _insert_sqlite(record: dict, now: _dt.datetime) -> None:
             ),
         )
     except Exception as error:
+        dropped = True
         print(f"eventlog sqlite write failed: {error}", file=sys.stderr)
+    _report_dropped(_dt.datetime.now(_dt.timezone.utc), dropped=dropped)
 
 
 def _write_jsonl(record: dict, now: _dt.datetime) -> None:
@@ -222,6 +235,37 @@ def _write_jsonl(record: dict, now: _dt.datetime) -> None:
                 f.write(line)
             finally:
                 fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+
+
+def _report_dropped(now: _dt.datetime, *, dropped: bool = False, force: bool = False) -> None:
+    # Never call emit() here: a summary must not attempt SQLite or recursively
+    # count itself. Hold this lock only across accounting and the JSONL append,
+    # never across an insert, state transaction or deferred-queue lock.
+    with _DROPPED_LOCK:
+        pid = os.getpid()
+        if _DROPPED["pid"] != pid:  # a fork starts a new process counter
+            _DROPPED.update(pid=pid, total=0, reported=0, last_report=None)
+        if dropped:
+            _DROPPED["total"] += 1
+        pending = _DROPPED["total"] - _DROPPED["reported"]
+        if not pending:
+            return
+        tick = time.monotonic()
+        last = _DROPPED["last_report"]
+        if not force and last is not None and tick - last < 60:
+            return
+        record = {
+            "ts": _iso(now), "source": "server", "event": "eventlogDropped", "level": "warn",
+            "detail": {"pid": pid, "dropped": pending, "total_dropped": _DROPPED["total"]},
+        }
+        try:
+            _write_jsonl(record, now)
+        except OSError as error:
+            # Retain the count for the next attempt; logging cannot break callers.
+            print(f"eventlog drop report failed: {error}", file=sys.stderr)
+            return
+        _DROPPED["reported"] = _DROPPED["total"]
+        _DROPPED["last_report"] = tick
 
 
 def emit(source: str, event: str, *,
