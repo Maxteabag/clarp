@@ -13,6 +13,7 @@ from lib import agents, background_jobs, turn_lifecycle
 from lib.background_job_watcher import BackgroundJobWatcher
 from lib.policies.helper_state import HelperEvent, Role
 from lib.snapshot import build_agent_snapshot
+from tests.patching import patch_shared
 
 
 _SCRIPT = pathlib.Path(__file__).resolve().parents[2] / "scripts" / "agent_bg.py"
@@ -258,7 +259,7 @@ def test_a_host_restart_gives_a_verified_alive_worker_one_timeout():
 def test_owner_session_can_cancel_but_not_fail_a_fenced_job(monkeypatch):
     _parent()
     _parent("stranger")
-    monkeypatch.setattr(background_jobs, "worker_is_alive", lambda _pid, _token: True)
+    patch_shared(monkeypatch, background_jobs, "worker_is_alive", lambda _pid, _token: True)
     job = background_jobs.upsert(
         session="boss", job_id="fenced", kind="worker", title="Fenced",
         worker_pid=4242, worker_start_token="boot:worker")

@@ -5,6 +5,7 @@ import sys
 
 from lib import agents, background_jobs, db, transcription_models
 from lib.background_job_watcher import BackgroundJobWatcher
+from tests.patching import patch_shared
 
 
 _SCRIPT = pathlib.Path(__file__).resolve().parents[2] / "scripts/transcription_model_job.py"
@@ -58,7 +59,7 @@ class RunningProcess(CompletingProcess):
 
 def _identity(monkeypatch):
     monkeypatch.setattr(worker.os, "getpid", lambda: 5252)
-    monkeypatch.setattr(
+    patch_shared(monkeypatch,
         background_jobs, "process_start_token",
         lambda pid: "boot:model-worker" if pid == 5252 else "")
 
@@ -122,7 +123,7 @@ def test_model_worker_failure_is_terminal(monkeypatch):
 def test_missing_model_worker_identity_fails_queued_generation(monkeypatch):
     job = _queued_job()
     monkeypatch.setattr(worker.os, "getpid", lambda: 5252)
-    monkeypatch.setattr(background_jobs, "process_start_token", lambda _pid: "")
+    patch_shared(monkeypatch, background_jobs, "process_start_token", lambda _pid: "")
 
     result = worker.supervise_install(
         handle=background_jobs.job_handle(job), model_id=MODEL_ID)
