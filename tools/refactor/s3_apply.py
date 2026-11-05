@@ -21,6 +21,15 @@ plugin/, skills/, bin/, tools/) unless its target expression names `helpers`.
 Each such site is listed; after the move a patch through the server module
 would silently stop affecting the mixins.
 
+Named sources: recipe-level `source_module` (server-relative, default
+`server.py`) and `source_class` (default `Handler`) select another top-level
+class. Group `module` / `class` still name the output; named-module outputs
+must be siblings of the source, so relative imports retain their meaning.
+Apply these groups after split_apply module parts exist. They use the same
+byte mover and method AST gate, refuse __class__, class-body value reads and
+imports from their own source/facade or later split parts, and reuse S9's
+patch-site scanner. No module-level helpers are supported for named sources.
+
 A group move is data (tools/refactor/s3_moves.toml) plus this generator; it is
 re-applied to whatever server.py is in the tree, never merged by hand
 (docs/architecture/route-registry.md, section 11). For each group, in recipe
@@ -60,6 +69,8 @@ import sys
 import tomllib
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
+# split_apply shares this mover and supplies its module-family patch scanner.
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 SERVER = "server/server.py"
 HANDLER = "Handler"
 HEADER = ('"""{cls}: Handler routes moved out of server.py by tools/refactor/s3_apply.py\n'
@@ -81,12 +92,19 @@ def _ast_identity():
 _IDENT = __import__("re").compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
-def _check_module(group: str, module: str, cls: str) -> None:
+def _check_module(group: str, module: str, cls: str, source_module: str = "server.py") -> None:
     """A group's module is exactly lib/routes/<identifier>.py (no traversal, no
     package or helpers module) and its class an identifier."""
     parts = pathlib.PurePosixPath(module).parts
     stem = pathlib.PurePosixPath(module).stem
-    if (len(parts) != 3 or parts[:2] != ("lib", "routes") or not module.endswith(".py")
+    if source_module != "server.py":
+        source = pathlib.PurePosixPath(source_module)
+        target = pathlib.PurePosixPath(module)
+        if (target.parent != source.parent or target == source or str(target) != module
+                or not module.endswith(".py") or not _IDENT.fullmatch(stem)
+                or stem == "__init__"):
+            raise Refusal(f"recipe: group {group} module must be a new sibling of {source_module}")
+    elif (len(parts) != 3 or parts[:2] != ("lib", "routes") or not module.endswith(".py")
             or not _IDENT.match(stem) or stem in ("__init__", "helpers", "registry")):
         raise Refusal(f"recipe: group {group} module must be lib/routes/<name>.py (got {module!r})")
     if not _IDENT.match(str(cls)):
@@ -96,15 +114,33 @@ def _check_module(group: str, module: str, cls: str) -> None:
 def load_recipe(path: pathlib.Path) -> list[dict]:
     data = tomllib.loads(path.read_text())
     groups = data.get("group", [])
+    source_module = data.get("source_module", "server.py")
+    source_class = data.get("source_class", "Handler")
+    if not isinstance(source_module, str):
+        raise Refusal("recipe: source_module must be a string")
+    source = pathlib.PurePosixPath(source_module)
+    if (str(source) != source_module
+            or source.is_absolute() or ".." in source.parts or source.suffix != ".py"
+            or not source.parts or any(not _IDENT.fullmatch(p) for p in source.parts[:-1])
+            or not _IDENT.fullmatch(source.stem)):
+        raise Refusal("recipe: source_module must be a canonical server-relative Python module")
+    if not isinstance(source_class, str) or not _IDENT.fullmatch(source_class):
+        raise Refusal("recipe: source_class must be an identifier")
     seen = set()
+    outputs = set()
     for g in groups:
+        g["source_module"] = source_module
+        g["source_class"] = source_class
         for key in ("name", "module", "class", "members"):
             if key not in g:
                 raise Refusal(f"recipe: group {g.get('name', '?')} lacks {key}")
         if g["name"] in seen:
             raise Refusal(f"recipe: group {g['name']} listed twice")
         seen.add(g["name"])
-        _check_module(g["name"], g["module"], g["class"])
+        _check_module(g["name"], g["module"], g["class"], source_module)
+        if g["module"] in outputs or g["class"] == source_class:
+            raise Refusal(f"recipe: group {g['name']} duplicates an output or the source class")
+        outputs.add(g["module"])
         _acknowledged(g, f"group {g['name']}")
     names = [m for g in groups for m in g["members"]]
     dup = sorted({m for m in names if names.count(m) > 1})
@@ -113,11 +149,11 @@ def load_recipe(path: pathlib.Path) -> list[dict]:
     return groups
 
 
-def _handler(tree: ast.Module) -> ast.ClassDef:
+def _handler(tree: ast.Module, source_class: str = HANDLER, source_path: str = SERVER) -> ast.ClassDef:
     for stmt in tree.body:
-        if isinstance(stmt, ast.ClassDef) and stmt.name == HANDLER:
+        if isinstance(stmt, ast.ClassDef) and stmt.name == source_class:
             return stmt
-    raise Refusal(f"{SERVER}: class {HANDLER} not found")
+    raise Refusal(f"{source_path}: class {source_class} not found")
 
 
 def _member_nodes(cls: ast.ClassDef) -> dict[str, ast.stmt]:
@@ -284,32 +320,34 @@ def rebound_imports(tree: ast.Module, tool=None) -> dict[str, str]:
     return found
 
 
-def _refuse_member(name: str, node: ast.stmt, tree: ast.Module, tool) -> list[tuple[str, tuple]]:
+def _refuse_member(name: str, node: ast.stmt, tree: ast.Module, tool, source_module: str = "server.py") -> list[tuple[str, tuple]]:
     """The module-level reads of a member, as (name, import binding); refuses
     what cannot move verbatim."""
     for sub in ast.walk(node):
         if isinstance(sub, ast.Call) and isinstance(sub.func, ast.Name) and sub.func.id == "super" and not sub.args:
             raise Refusal(f"{name}: uses zero-argument super()")
         ident = sub.attr if isinstance(sub, ast.Attribute) else sub.id if isinstance(sub, ast.Name) else ""
+        if ident == "__class__":
+            raise Refusal(f"{name}: uses __class__")
         if ident.startswith("__") and not ident.endswith("__"):
             raise Refusal(f"{name}: uses private name {ident}")
-    imports = tool.top_imports(tree, "")
+    imports = tool.top_imports(tree, tool._package(source_module))
     rebound = rebound_imports(tree, tool)
     reads = []
     for read in sorted(tool.global_reads(node)):
         if read in rebound:
-            raise Refusal(f"{name}: reads {read}, which server.py imports and also rebinds ({rebound[read]}); "
+            raise Refusal(f"{name}: reads {read}, which {source_module} imports and also rebinds ({rebound[read]}); "
                           "the owner is ambiguous, prepare it first")
         if read in imports:
             reads.append((read, imports[read]))
             continue
-        binding = tool.module_binding(tree, "server.py", read)
+        binding = tool.module_binding(tree, source_module, read)
         if binding is not None:
-            raise Refusal(f"{name}: reads {read}, which server.py defines (composition-root state; "
+            raise Refusal(f"{name}: reads {read}, which {source_module} defines (composition-root state; "
                           "needs a reviewed preparatory edit first)")
         if hasattr(builtins, read):
             continue
-        raise Refusal(f"{name}: reads {read}, which server.py does not bind with a plain top-level import")
+        raise Refusal(f"{name}: reads {read}, which {source_module} does not bind with a plain top-level import")
     return reads
 
 
@@ -338,18 +376,18 @@ def _futures(tree: ast.Module, lines: list[str]) -> list[str]:
             if isinstance(s, ast.ImportFrom) and s.module == "__future__"]
 
 
-def _bases_line(line: str, mixins: list[str]) -> str:
+def _bases_line(line: str, mixins: list[str], source_class: str = HANDLER, source_path: str = SERVER) -> str:
     stripped = line.rstrip()
     indent = line[:len(line) - len(line.lstrip())]
-    if stripped == f"{indent}class {HANDLER}:":
+    if stripped == f"{indent}class {source_class}:":
         bases: list[str] = []
     else:
-        head, sep, rest = line.partition(f"class {HANDLER}(")
+        head, sep, rest = line.partition(f"class {source_class}(")
         if not sep or not rest.rstrip().endswith("):"):
-            raise Refusal(f"{SERVER}: class {HANDLER} header must be one line ending in ':' or '):'")
+            raise Refusal(f"{source_path}: class {source_class} header must be one line ending in ':' or '):'")
         bases = [b.strip() for b in rest.rstrip()[:-2].split(",") if b.strip()]
     kept = [b for b in bases if b not in mixins]
-    return f"{indent}class {HANDLER}({', '.join(mixins + kept)}):\n"
+    return f"{indent}class {source_class}({', '.join(mixins + kept)}):\n"
 
 
 HELPERS_MODULE = "lib/routes/helpers.py"
@@ -682,46 +720,90 @@ def apply_helpers(root: pathlib.Path, names: list[str],
     return {"server/" + HELPERS_MODULE: helpers_text, SERVER: "".join(out_lines)}
 
 
+def _refuse_family_imports(root: pathlib.Path, source_module: str, reads: dict) -> None:
+    """A mixin may read earlier module-split parts, never its source or later parts."""
+    own = source_module[:-3].replace("/", ".")
+    forbidden = {own}
+    recipes = root / "tools" / "refactor" / "splits"
+    for recipe in sorted(recipes.glob("*.toml")):
+        for split in tomllib.loads(recipe.read_text()).get("split", []):
+            family = [p["module"] for p in split["part"]]
+            if source_module in family:
+                forbidden.add(split["module"][:-3].replace("/", "."))
+                forbidden.update(p[:-3].replace("/", ".")
+                                 for p in family[family.index(source_module):])
+    for name, (module, attr) in reads.items():
+        targets = {module, module + "." + attr} if attr else {module}
+        if any(t == p or t.startswith(p + ".") for t in targets for p in forbidden):
+            raise Refusal(f"{name}: imports the source facade or a later split part ({module})")
+
+
 def apply(root: pathlib.Path, groups: list[dict], scan_root: pathlib.Path | None = None) -> dict[str, str]:
     """New text per changed file (paths relative to root); refuses on any problem."""
     tool = _ast_identity()
-    server_path = root / SERVER
+    source_module = groups[0].get("source_module", "server.py") if groups else "server.py"
+    source_class = groups[0].get("source_class", HANDLER) if groups else HANDLER
+    if any((g.get("source_module", "server.py"), g.get("source_class", HANDLER))
+           != (source_module, source_class) for g in groups):
+        raise Refusal("one recipe must target one source module and class")
+    source_path = "server/" + source_module
+    legacy = (source_module, source_class) == ("server.py", HANDLER)
+    server_path = root / source_path
     text = server_path.read_text()
     refuse_dynamic_globals(text)
     lines = text.splitlines(keepends=True)
     tree = ast.parse(text)
     refuse_wildcards(tree)
-    cls = _handler(tree)
+    cls = _handler(tree, source_class, source_path)
+    if not legacy and cls.decorator_list:
+        raise Refusal(f"{source_path}: decorated source classes are unsupported")
     current_bases = [ast.unparse(b) for b in cls.bases]
     members = _member_nodes(cls)
+    class_values = {name for name, node in members.items()
+                    if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
     out: dict[str, str] = {}
     cut: list[tuple[int, int]] = []
     applied: list[str] = [g["class"] for g in groups if g["class"] in current_bases]
     new_groups = [g for g in groups if g["class"] not in current_bases]
-    if new_groups and not (root / "server" / "lib" / "routes" / "__init__.py").exists():
+    if legacy and new_groups and not (root / "server" / "lib" / "routes" / "__init__.py").exists():
         raise Refusal("server/lib/routes/__init__.py is missing: the route seam must be applied first")
     for g in new_groups:
         module_path = root / "server" / g["module"]
         if module_path.exists():
-            raise Refusal(f"group {g['name']}: {g['module']} exists but {g['class']} is not a Handler base")
+            raise Refusal(f"group {g['name']}: {g['module']} exists but {g['class']} is not a {source_class} base")
         reads: dict[str, tuple] = {}
         bodies = []
         for name in g["members"]:
             node = members.get(name)
             if node is None:
-                raise Refusal(f"group {g['name']}: {name} is not a member of {HANDLER}")
-            reads.update(dict(_refuse_member(name, node, tree, tool)))
+                raise Refusal(f"group {g['name']}: {name} is not a member of {source_class}")
+            if not legacy and not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                raise Refusal(f"{name}: named-source groups move methods only")
+            if not legacy and any(isinstance(n, ast.Attribute) and n.attr in class_values
+                                  for n in ast.walk(node)):
+                raise Refusal(f"{name}: reads a class-body value")
+            reads.update(dict(_refuse_member(name, node, tree, tool, source_module)))
             start, end = _span(lines, node)
             cut.append((start, end))
             bodies.append("".join(lines[start:end]))
-        patched = _unacknowledged(rebinding_records(scan_root or root, set(reads), server_targets_only=True),
-                                  _acknowledged(g, f"group {g['name']}"))
+        if legacy:
+            records = rebinding_records(scan_root or root, set(reads), server_targets_only=True)
+        else:
+            # Reuse the module-split scanner, including computed-name refusal.
+            from split_apply import old_module_rebinds
+            _refuse_family_imports(root, source_module, reads)
+            records = old_module_rebinds(scan_root or root, source_module, set(reads),
+                                         {"server/" + item["module"] for item in groups})
+        patched = _unacknowledged(records, _acknowledged(g, f"group {g['name']}"))
         if patched:
             raise Refusal(f"group {g['name']}: imported names its members read are patched through the "
                           "server module; after the move the patch would not reach them:\n  "
                           + "\n  ".join(patched))
         body = "\n".join(b if b.endswith("\n") else b + "\n" for b in bodies)
-        parts = [HEADER.format(cls=g["class"], group=g["name"])]
+        header = HEADER if legacy else (
+            '"""{cls}: methods moved out of ' + source_module + '::' + source_class
+            + ' by tools/refactor/s3_apply.py\n(group "{group}"). Generated: change the recipe, not this file."""\n')
+        parts = [header.format(cls=g["class"], group=g["name"])]
         futures = _futures(tree, lines)
         if futures:
             parts.append("".join(futures))
@@ -732,6 +814,8 @@ def apply(root: pathlib.Path, groups: list[dict], scan_root: pathlib.Path | None
         out["server/" + g["module"]] = "\n".join(p.rstrip("\n") + "\n" for p in parts[:-1]) + parts[-1]
     if not new_groups:
         return out
+    if not legacy and {m for g in new_groups for m in g["members"]} == set(members):
+        raise Refusal(f"{source_path}: source class must retain a member")
     # server.py: cut members (with one following blank line), import the mixins
     # above Handler, put the new mixins first in Handler's bases (recipe order),
     # ahead of the mixins already applied: the order ast_identity's method mode
@@ -750,14 +834,14 @@ def apply(root: pathlib.Path, groups: list[dict], scan_root: pathlib.Path | None
             continue
         if i == header_index:
             for g in new_groups:
-                module = "lib.routes." + pathlib.PurePosixPath(g["module"]).stem
+                module = g["module"][:-3].replace("/", ".")
                 new_lines.append(f"from {module} import {g['class']}  # noqa: E402  (s3_apply)\n")
             if new_groups:
                 new_lines.append("\n\n")
-            new_lines.append(_bases_line(line, mixins))
+            new_lines.append(_bases_line(line, mixins, source_class, source_path))
             continue
         new_lines.append(line)
-    out[SERVER] = "".join(new_lines)
+    out[source_path] = "".join(new_lines)
     return out
 
 
@@ -777,6 +861,8 @@ def main(argv: list[str]) -> int:
     try:
         groups = load_recipe(recipe)
         helpers = load_helpers(recipe)
+        if helpers and groups and (groups[0]["source_module"], groups[0]["source_class"]) != ("server.py", HANDLER):
+            raise Refusal("named-source recipes cannot contain [helpers]")
         helpers_ack = _acknowledged(tomllib.loads(recipe.read_text()).get("helpers", {}), "[helpers]")
         if args.group:
             unknown = sorted(set(args.group) - {g["name"] for g in groups})
