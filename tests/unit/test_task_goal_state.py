@@ -1000,3 +1000,47 @@ def test_replan_caps_a_kept_step_title_like_a_new_one(tmp_path):
     p = make_goal(tmp_path)
     p = _replan(p, "Longer title", [{"id": "method", "title": "x" * 600}])
     assert len(_item(p, "method")["title"]) == 500
+
+
+def test_scheduler_ledger_work_is_bounded_by_the_new_entry(tmp_path):
+    """A scheduler CAS must not scan old ledger JSON while holding the writer."""
+    from lib import goal_ledger
+
+    p = make_goal(tmp_path)
+    con = db.conn()
+    payload = json.dumps({"detail": {"synthetic": "x" * 1024}})
+    with recovery._transaction():
+        con.executemany(
+            "INSERT INTO goal_events (plan_id,at,kind,actor_kind,new_json,idempotency_key) "
+            "VALUES (?,0,'wake_claim','system',?,?)",
+            [(p["plan_id"], payload, f"synthetic:{i}") for i in range(2000)],
+        )
+    for kind in sorted(goal_ledger.SYSTEM_KINDS | {"dependency_result"}):
+        row = con.execute("SELECT * FROM task_plans WHERE plan_id=?", (p["plan_id"],)).fetchone()
+        text = row["goal_json"]
+        stored, goal = json.loads(text), json.loads(text)
+        goal["history"].append(dict(at=db.now_ms(), kind=kind, revision=row["revision"],
+                                    detail={"request_id": "synthetic-wake"}))
+        held_steps = 0
+
+        def bound_writer_work():
+            nonlocal held_steps
+            if con.in_transaction:
+                held_steps += 100
+            return int(held_steps > 5000)
+
+        con.set_progress_handler(bound_writer_work, 100)
+        try:
+            assert recovery._commit(row, text, stored, goal)
+        finally:
+            con.set_progress_handler(None, 0)
+        event = con.execute(
+            "SELECT kind,actor_kind,new_json FROM goal_events WHERE plan_id=? "
+            "ORDER BY event_id DESC LIMIT 1", (p["plan_id"],)
+        ).fetchone()
+        assert (event["kind"], event["actor_kind"]) == (kind, "system")
+        assert json.loads(event["new_json"])["detail"] == {"request_id": "synthetic-wake"}
+        saved = json.loads(con.execute(
+            "SELECT goal_json FROM task_plans WHERE plan_id=?", (p["plan_id"],)
+        ).fetchone()[0])
+        assert saved["history"][-1]["kind"] == kind
