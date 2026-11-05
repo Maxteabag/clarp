@@ -12,3 +12,35 @@ members = [
     "clear_hold_headlines", "lower_admission_fence", "start_held_work",
     "persist_held", "transfer_recovery_parks",
 ]
+
+[[group]]
+name = "turn_recovery"
+module = "lib/turn_recovery.py"
+class = "RecoveryMixin"
+members = [
+    "recover_queued",
+    "_rehydrate_once",
+    "_recover_queued_locked",
+    "_recovery_failed",
+    "clear_recovery_backoff",
+    "_retire_goal_queue",
+    "_release_superseded",
+    "release_leaked_slots",
+    "_start_ownerless_queues",
+    "_orphaned_spawn",
+    "repair_slot",
+    "_superseded",
+    "_preempt",
+]
+
+[[group]]
+name = "turn_retry"
+module = "lib/turn_retry.py"
+class = "RetryMixin"
+members = [
+    "_handle_failure",
+    "_schedule_retry",
+    "_mark_interrupted",
+    "_end_opening_state",
+    "_record_failure_row",
+]
