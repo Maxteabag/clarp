@@ -365,6 +365,10 @@ def test_lost_worker_timeout_replans_and_stale_wake_is_rejected(host):
 
 def test_queued_goal_checkpoint_then_restart_retires_old_wake_and_runs_user_work(host):
     p = create(host)
+    # The scheduler wakes only an idle owner. create() returns once the interview's
+    # reply is in the log, which can precede the turn's own end under load; a tick
+    # then sees rachel busy and claims nothing (G1 flake, 2nd occurrence).
+    host.wait_busy("rachel", False)
     # Drive the production scheduler against the actual Host. User work lands
     # between its idle check and dispatch, creating a genuinely admitted wake
     # in the durable queue rather than fabricating a SQLite receipt.
