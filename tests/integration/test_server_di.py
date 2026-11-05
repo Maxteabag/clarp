@@ -4002,6 +4002,8 @@ def test_controller_narration_speaks_once_per_text_and_caches(running_server, mo
         out_path.write_bytes(b"ID3narration")
 
     monkeypatch.setattr(cartesia_tts, "synthesize", fake_synthesize)
+    from lib import tts_registry
+    monkeypatch.setattr(tts_registry, "cartesia_synthesize", fake_synthesize)
     real_load = app_config.load
 
     def loaded():
@@ -4567,10 +4569,9 @@ def test_a_google_preview_speaks_the_requested_voice_and_fails_with_fixed_status
     assert asked == [GOOGLE_AOEDE, "nb-NO-Chirp3-HD-Charon"]
 
 
-def test_a_google_voice_preview_is_the_requested_voice_only_even_with_a_fallback(
+def test_a_google_voice_preview_uses_configured_fallback_after_provider_failure(
         running_server, monkeypatch, tmp_path):
-    """GET /voice-preview and POST /preview agree: the requested google voice or a truthful
-    failure, never the configured fallback provider."""
+    """VP-10: an ordinary Google failure uses the configured fallback at the HTTP surface."""
     from lib import config, google_tts
     base, _ctx, _srv = running_server
     _google_configured(monkeypatch, tmp_path)
@@ -4589,11 +4590,16 @@ def test_a_google_voice_preview_is_the_requested_voice_only_even_with_a_fallback
         raise google_tts.GoogleTTSError("google_http_error", "HTTP 503")
     monkeypatch.setattr(google_tts, "synthesize", google)
     from lib import eleven_ws
-    monkeypatch.setattr(eleven_ws, "synthesize_streaming", lambda **kw: others.append(kw) or 0)
-    with pytest.raises(urllib.error.HTTPError) as failed:
-        _get(base + f"/voice-preview?provider=google&id={GOOGLE_AOEDE}")
-    assert failed.value.code == 502
-    assert asked == [GOOGLE_AOEDE] and others == []
+    def fallback(**kw):
+        others.append(kw)
+        kw["out_path"].write_bytes(b"ID3configured-fallback")
+        return len(b"ID3configured-fallback")
+    monkeypatch.setattr(eleven_ws, "synthesize_streaming", fallback)
+    from lib import tts_registry
+    monkeypatch.setattr(tts_registry, "synthesize_streaming", fallback)
+    status, audio = _get(base + f"/voice-preview?provider=google&id={GOOGLE_AOEDE}")
+    assert status == 200 and audio == b"ID3configured-fallback"
+    assert asked == [GOOGLE_AOEDE] and len(others) == 1
 
 
 def test_send_refused_by_a_launch_receipt_keeps_the_legacy_503_body(running_server, monkeypatch):
