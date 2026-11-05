@@ -327,7 +327,7 @@ def test_an_alias_import_counts_as_its_new_module(tmp_path):
     assert layer("lib.persistence.schema") == layer("lib.persistence.migrations.v099") == 0
 
 
-@pytest.mark.parametrize("cut", ["split", "method", "method-part"])
+@pytest.mark.parametrize("cut", ["split", "handwritten", "method", "method-part"])
 def test_declared_moves_preserve_layer_and_import_debt_but_not_new_edges(tmp_path, monkeypatch, cut):
     import sys
     from tests import patching
@@ -345,8 +345,13 @@ def test_declared_moves_preserve_layer_and_import_debt_but_not_new_edges(tmp_pat
     monkeypatch.setattr(sys.modules[__name__], 'SERVER', root)
     before = upward()
     assert before == {'lib.turn_dispatch -> lib.dreaming'}
-    if cut == 'split':
-        (recipes / 's4.toml').write_text(
+    if cut in {'split', 'handwritten'}:
+        declarations = recipes
+        if cut == 'handwritten':
+            declarations = tmp_path / 'handwritten'
+            declarations.mkdir()
+            monkeypatch.setattr(patching, '_HANDWRITTEN_RECIPES', declarations)
+        (declarations / 's4.toml').write_text(
             '[[split]]\nmodule="lib/turn_dispatch.py"\n'
             '[[split.part]]\nmodule="lib/turn_command.py"\nnames=["moved"]\n')
         original.write_text('from .turn_command import moved\n')

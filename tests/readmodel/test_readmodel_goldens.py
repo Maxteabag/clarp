@@ -15,6 +15,8 @@ specification. Regenerate them only for a registered intended difference:
 """
 from __future__ import annotations
 
+from tests.patching import patch_shared
+
 import json
 import os
 import pathlib
@@ -40,7 +42,7 @@ def importer(monkeypatch):
     monkeypatch.setattr(message_store, "IMPORT_WRITE_BUDGET_SECONDS", 1e9)
     monkeypatch.setattr(message_store, "IMPORT_WRITER_YIELD_SECONDS", 0)
     clock = world.Clock()
-    monkeypatch.setattr(message_writes, "now_ms", clock)
+    patch_shared(monkeypatch, message_writes, "now_ms", clock)
     return clock
 
 

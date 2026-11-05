@@ -31,6 +31,8 @@ lists today.
 """
 from __future__ import annotations
 
+from tests.patching import patch_shared
+
 import hashlib
 import json
 import os
@@ -54,7 +56,7 @@ _VOLATILE = ("device", "inode", "mtime_ns", "parser_version", "audited_at", "upd
 @pytest.fixture
 def importer(monkeypatch):
     clock = world.Clock()
-    monkeypatch.setattr(message_writes, "now_ms", clock)
+    patch_shared(monkeypatch, message_writes, "now_ms", clock)
     monkeypatch.setattr(message_store, "IMPORT_COMMIT_EVERY", 0)
     monkeypatch.setattr(message_store, "IMPORT_WRITE_BUDGET_SECONDS", 1e9)
     monkeypatch.setattr(message_store, "IMPORT_WRITER_YIELD_SECONDS", 0)

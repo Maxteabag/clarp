@@ -42,3 +42,36 @@ touch.
 | 5 | (this commit) | from `timestamp = turn.get("timestamp")` to the `final_rows` bookkeeping: the existing-row read, the row trace and settled tool statuses, the unchanged check, revision and `updated_at`, RM-N1b's park before a moving rewrite, and the `INSERT … ON CONFLICT(message_id)` | `_upsert_row(database, *, agent_id, backend_session_id, source_file, seq, msg_id, turn, role, text, origin, sender_agent_id, request_trace, phase, turn_index, final_rows) -> _Upserted(timestamp, tools, display_cells, row_trace, unchanged, revision, changed)`; the caller keeps `newest_trace`, `touched_traces` and `latest_revision` |
 
 What stays in the loop: the per-turn classification (user, assistant, tool rows; ack tokens; client-row linking via `_ClientProvenance`; agy authority via `_AgyAuthority`), the heartbeat accounting and the team/oracle captures after the upsert, and the output list.
+
+
+## Module-size cut after merge16 (lead603/604)
+
+Base `a7331017` has the reviewed RM-N10 prelude. Exact named moves and AST
+fingerprints are in [s5-message-split.json](s5-message-split.json); ownership and
+test patching use `tools/refactor/handwritten/s5-message.toml`. These modules
+are hand-written and join the captain's forward-port watch; no generator owns
+or regenerates them.
+
+| Canonical module | Responsibility |
+|---|---|
+| `message_import_common` | IDs, revision increment, row/provenance normalization, timestamp/retry helpers and scalar matching constants |
+| `message_import_rows` | client provenance, agy authority, final-row cache, parking/twins and row upsert |
+| `message_writes` | public full/tail/planning entrypoints, writer admission/batching, pure phases, exact RM-N10 prelude revalidation and finish orchestration |
+
+`_visible_replies`, `_finish_import`, `stamp_turn`, `turn_stamp` and
+`_attach_authority_tools` stay in `message_writes`; `_FinalRows` is canonical in
+`message_import_rows`. The `message_store` facade (including
+`dashboard_messages`) is unchanged; `conn` and `IMPORT_*` are still resolved at
+call time by the existing orchestrator. Helpers use its supplied writer and
+connection, preserving reads, decisions, writes, commits, yields and side effects.
+Both new modules enter `transcript_incremental._COMMON_SOURCES` so old parser
+versions still invalidate checkpoints. Existing checkpoint/epoch guards stay.
+
+G0 preceded every source move: original-D tests pass (194); the additional
+Codex collaboration characterization passes (23). Identical-source coverage
+union: rows 202/209 (96.65%), common 38/38 (100%), Codex cells 589/676 (87.13%).
+The three moved constant declarations are also covered. No golden was changed;
+fixtures use the existing family-aware `patch_shared` helper for clocks and
+fault injection. This cut changes module boundaries, with no intended behavior
+difference. RM-N14's later tail-import work retains the orchestrator and its
+atomicity; it is not implemented by this split.

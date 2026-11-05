@@ -11,6 +11,8 @@ difference to register, not a refactor.
 """
 from __future__ import annotations
 
+from tests.patching import patch_shared
+
 import json
 
 import pytest
@@ -63,7 +65,7 @@ def clock(tmp_path, monkeypatch):
                   " VALUES (?,?,?,?,?,?,'claude')", (agent, agent, "v", "/redacted", agent, 1))
     c.commit()
     clock = Clock()
-    monkeypatch.setattr(message_writes, "now_ms", clock)
+    patch_shared(monkeypatch, message_writes, "now_ms", clock)
     monkeypatch.setattr(message_store, "IMPORT_COMMIT_EVERY", 0)
     monkeypatch.setattr(message_store, "IMPORT_WRITE_BUDGET_SECONDS", 1e9)
     monkeypatch.setattr(message_store, "IMPORT_WRITER_YIELD_SECONDS", 0)
@@ -569,7 +571,7 @@ def test_a_failure_after_the_first_batch_leaves_that_batch_and_skips_cleanup(clo
         if count["n"] == 3:
             raise RuntimeError("injected after batch 1")
         return real(database)
-    monkeypatch.setattr(message_writes, "_next_revision", flaky)
+    patch_shared(monkeypatch, message_writes, "_next_revision", flaky)
     with pytest.raises(RuntimeError):
         store([u("q0", 0), a("A0", 1), u("q1", 2), a("A1", 3)])     # shorter and edited
     got = {r["seq"]: r["text"] for r in transcript_rows()}

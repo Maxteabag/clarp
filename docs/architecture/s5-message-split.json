@@ -1,0 +1,249 @@
+{
+  "source_base": "a733101781144cbfaf5e6dcdc3386cd71f445be0",
+  "characterization_head": "ec95f4f1591c8d95a7cbe701b87d97603377250b",
+  "moves": [
+    {
+      "name": "_message_id",
+      "from": "lib/message_writes.py",
+      "to": "lib/message_import_common.py",
+      "ast_sha256": "139d0a6c6ffa8c8e4cd333ae3009ee490257833e543ca0c93d17101c8a4fa84f"
+    },
+    {
+      "name": "_client_message_id",
+      "from": "lib/message_writes.py",
+      "to": "lib/message_import_common.py",
+      "ast_sha256": "f7331b7238e1d235bf39c8a7d29f975e18f307fb2b2b6422a5afb45062f3a70b"
+    },
+    {
+      "name": "_norm_text",
+      "from": "lib/message_writes.py",
+      "to": "lib/message_import_common.py",
+      "ast_sha256": "e4c93e9f758b07dbd3d3065b2e4f4b763b27989a5f9c5f302ae52bc34c01e067"
+    },
+    {
+      "name": "_next_revision",
+      "from": "lib/message_writes.py",
+      "to": "lib/message_import_common.py",
+      "ast_sha256": "e1bf1e646dcec83898bcefe5f2817bcf486ed15336e97c65b1cbe20785f639c7"
+    },
+    {
+      "name": "_row_payload",
+      "from": "lib/message_writes.py",
+      "to": "lib/message_import_common.py",
+      "ast_sha256": "8b3faa83adcf5955dfbd43f0c755b5c31a1fd2c2a2ba5d3dad777d15cfd69790"
+    },
+    {
+      "name": "_latest_user_provenance",
+      "from": "lib/message_writes.py",
+      "to": "lib/message_import_common.py",
+      "ast_sha256": "4b8dba9e20532ae73e5ea8a6a51030f5317a4d3c2bf021d601e3f274a3d5a0bf"
+    },
+    {
+      "name": "_FINAL_TWIN_WINDOW_S",
+      "from": "lib/message_writes.py",
+      "to": "lib/message_import_common.py",
+      "ast_sha256": "88c1b3207568447a2bed14f7a46bc2fdc610dfdb4c5765cef92f34f469f75d9f"
+    },
+    {
+      "name": "_RETRY_ECHO_SLACK_S",
+      "from": "lib/message_writes.py",
+      "to": "lib/message_import_common.py",
+      "ast_sha256": "25778379b72f01682c150b0818b077ed6d1ae7878cc3c2cf2946f3c1a924c9a0"
+    },
+    {
+      "name": "_parse_timestamp",
+      "from": "lib/message_writes.py",
+      "to": "lib/message_import_common.py",
+      "ast_sha256": "4567eccb322a15b18b6b529b17a12f2d5e44e798e9c878262ace1eae1f28bf06"
+    },
+    {
+      "name": "_is_retry_echo",
+      "from": "lib/message_writes.py",
+      "to": "lib/message_import_common.py",
+      "ast_sha256": "df29b7a08a2be2af22a8c6aa2c06ff7596c854e350bd716f563c04fa18d9873f"
+    },
+    {
+      "name": "_PARKED_SEQ_BASE",
+      "from": "lib/message_writes.py",
+      "to": "lib/message_import_common.py",
+      "ast_sha256": "6db5e1018d2ea5ef4de378469cd68fc98c2c1b5a05c1bfd844bbdf1a5a8582d7"
+    },
+    {
+      "name": "_client_provenance_rows",
+      "from": "lib/message_writes.py",
+      "to": "lib/message_import_common.py",
+      "ast_sha256": "438e1465d91983eeaffa8ce7645b3fd30bec31f5432162a543970a1804e95987"
+    },
+    {
+      "name": "_client_provenance",
+      "from": "lib/message_writes.py",
+      "to": "lib/message_import_common.py",
+      "ast_sha256": "709cb8be9e4c406e9c5c737c8179d54d8e8149d5c558a21fe2711c22ee4dce15"
+    },
+    {
+      "name": "_park_adopted_occupant",
+      "from": "lib/message_writes.py",
+      "to": "lib/message_import_rows.py",
+      "ast_sha256": "a700af0fc6ac2255fc7d109e521a23a8f4bba8bc76675b359e8f71b487ad14c4"
+    },
+    {
+      "name": "_seq_taken",
+      "from": "lib/message_writes.py",
+      "to": "lib/message_import_rows.py",
+      "ast_sha256": "8d391f2817a878dd90ecb625b8f48c6a98e7fe6cd842e0c0b03d7064e2caaa0d"
+    },
+    {
+      "name": "_restore_unadopted_parked",
+      "from": "lib/message_writes.py",
+      "to": "lib/message_import_rows.py",
+      "ast_sha256": "bfa3dc362ad90b71decb5c54b55da8e04d5f27c4bbd7666c38ebb58abba9ebf5"
+    },
+    {
+      "name": "_parked_twin",
+      "from": "lib/message_writes.py",
+      "to": "lib/message_import_rows.py",
+      "ast_sha256": "e960886746249557407f0bd7c3ddc230108c5cec1c4ed215b7bc8dfefc9c841d"
+    },
+    {
+      "name": "_shifted_twin",
+      "from": "lib/message_writes.py",
+      "to": "lib/message_import_rows.py",
+      "ast_sha256": "5620d00f1b1acb0c04b6761842cca11d5b80c2511ce1a525ccc2443e7265f551"
+    },
+    {
+      "name": "_FinalRows",
+      "from": "lib/message_writes.py",
+      "to": "lib/message_import_rows.py",
+      "ast_sha256": "5e9097793e7230bbeb0763e0541def1b080066e5a33b16a5fc222962e38ba776"
+    },
+    {
+      "name": "_streamed_twin",
+      "from": "lib/message_writes.py",
+      "to": "lib/message_import_rows.py",
+      "ast_sha256": "01b4114ae8738b3e5c0cff2b67acaffc234e94336cdefb61acdc1daae75c1fe2"
+    },
+    {
+      "name": "_diagnose",
+      "from": "lib/message_writes.py",
+      "to": "lib/message_import_rows.py",
+      "ast_sha256": "38594cc0a237182a4a342b484fbe3f6498fc720038cb595019ce71e6f15f1462"
+    },
+    {
+      "name": "_related",
+      "from": "lib/message_writes.py",
+      "to": "lib/message_import_rows.py",
+      "ast_sha256": "c67e365cf58c9a737516131908b45fc9b1ea8018a09853b42a1b492453df3245"
+    },
+    {
+      "name": "_final_twins",
+      "from": "lib/message_writes.py",
+      "to": "lib/message_import_rows.py",
+      "ast_sha256": "9d387a2a06418c8886cfa204fa0fa811131e532ebd5c56e376f2e28082700516"
+    },
+    {
+      "name": "_delete_slot",
+      "from": "lib/message_writes.py",
+      "to": "lib/message_import_rows.py",
+      "ast_sha256": "30667e046b29772b031a46c6bcc260f64e025558befadc538cb2bb2185933a8f"
+    },
+    {
+      "name": "_ClientProvenance",
+      "from": "lib/message_writes.py",
+      "to": "lib/message_import_rows.py",
+      "ast_sha256": "68cef0822465465c5a665c9e7f90f9eb461f5b4b4ae3f6e55434388845a93b3d"
+    },
+    {
+      "name": "_AgyAuthority",
+      "from": "lib/message_writes.py",
+      "to": "lib/message_import_rows.py",
+      "ast_sha256": "d80641314d95983a6c33e35531cfa5eb500b3eeda704e10919ae5800acd22667"
+    },
+    {
+      "name": "_resolve_reply_id",
+      "from": "lib/message_writes.py",
+      "to": "lib/message_import_rows.py",
+      "ast_sha256": "8701a2815471852109788d4cf42b7e2e4a0919bbf7e979ac2fa183f9c862a089"
+    },
+    {
+      "name": "_Upserted",
+      "from": "lib/message_writes.py",
+      "to": "lib/message_import_rows.py",
+      "ast_sha256": "98b413931b1a8da7d6d848398500e2520c4e3db8f251c4007e0452c1e4b0463c"
+    },
+    {
+      "name": "_upsert_row",
+      "from": "lib/message_writes.py",
+      "to": "lib/message_import_rows.py",
+      "ast_sha256": "2cd730b69b81914cf812e026312add7b191e9f0b7a87c2ee12c61e85ae2c138a"
+    }
+  ],
+  "unchanged_orchestrator_definitions": [
+    "_facade",
+    "client_message_trace",
+    "relink_client_message",
+    "has_client_message",
+    "_row_phases",
+    "latest_turn_user_origin",
+    "_message_activity_sql",
+    "record_user_message",
+    "marker_message_id",
+    "has_interruption_marker",
+    "record_interruption_marker",
+    "record_call_notice",
+    "record_dream_digest",
+    "carry_conversation",
+    "_WriteNeeded",
+    "_ImportWriter",
+    "store_transcript_turns",
+    "_visible_replies",
+    "_write_checkpoint",
+    "store_transcript_tail",
+    "_PlanCursor",
+    "_PlanWriter",
+    "plan_transcript_tail",
+    "_ImportPrelude",
+    "_prepare_import_prelude",
+    "_revalidate_import_prelude",
+    "_store_transcript_turns_txn",
+    "_finish_import",
+    "_attach_authority_tools",
+    "turn_stamp",
+    "stamp_turn",
+    "restamp_turn"
+  ],
+  "canonical": {
+    "_visible_replies": "lib/message_writes.py",
+    "_finish_import": "lib/message_writes.py",
+    "stamp_turn": "lib/message_writes.py",
+    "turn_stamp": "lib/message_writes.py",
+    "_attach_authority_tools": "lib/message_writes.py",
+    "_FinalRows": "lib/message_import_rows.py"
+  },
+  "g0": {
+    "message_import_rows": {
+      "hit": 202,
+      "total": 209,
+      "percent": 96.65071770334929,
+      "source_sha256": "ff6fb326f8e435fd95bc2e267e535f961c94e8622c806fef26a5d31223a8798f"
+    },
+    "message_import_common": {
+      "hit": 38,
+      "total": 38,
+      "percent": 100.0,
+      "source_sha256": "ff6fb326f8e435fd95bc2e267e535f961c94e8622c806fef26a5d31223a8798f"
+    },
+    "codex_tool_cells": {
+      "hit": 589,
+      "total": 676,
+      "percent": 87.1301775147929,
+      "source_sha256": "5dd71eda5ee01130a814caa1b69d132bee1fcf69685900a2f0c52c208f35d813"
+    }
+  },
+  "g0_const_declarations_covered": [
+    "_FINAL_TWIN_WINDOW_S",
+    "_RETRY_ECHO_SLACK_S",
+    "_PARKED_SEQ_BASE"
+  ],
+  "ownership": "tools/refactor/handwritten/s5-message.toml (not generator input)",
+  "fwdport": "handwritten: captain adds source/functions to forward-port watch on landing"
+}
