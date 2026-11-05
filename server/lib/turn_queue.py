@@ -122,6 +122,22 @@ def allow_paused(queue_id: str) -> bool:
     return bool(cursor.rowcount)
 
 
+def _reinsert_at_back(con, row) -> None:
+    """Allocate the next queue_seq, preserving every other column.
+
+    The caller owns the write transaction: deleting and reinserting is one
+    reorder, not a receipt leaving and re-entering its lifecycle. In
+    particular, do not commit here: a drain also records its handoff in that
+    transaction. Keep SQLite's AUTOINCREMENT allocation for queue_seq.
+    """
+    columns = [key for key in row.keys() if key != "queue_seq"]
+    con.execute("DELETE FROM queued_turns WHERE queue_id = ?", (row["queue_id"],))
+    con.execute(
+        f"INSERT INTO queued_turns ({', '.join(columns)}) "
+        f"VALUES ({', '.join('?' * len(columns))})",
+        [row[key] for key in columns])
+
+
 def _move_behind(agent_id: str, head: str) -> None:
     """Re-insert every other open row of the agent after ``head``, in their
     order (the caller holds the write transaction)."""
@@ -133,12 +149,7 @@ def _move_behind(agent_id: str, head: str) -> None:
     for row_id in behind:
         row = con.execute("SELECT * FROM queued_turns WHERE queue_id = ?",
                           (row_id,)).fetchone()
-        columns = [key for key in row.keys() if key != "queue_seq"]
-        con.execute("DELETE FROM queued_turns WHERE queue_id = ?", (row_id,))
-        con.execute(
-            f"INSERT INTO queued_turns ({', '.join(columns)}) "
-            f"VALUES ({', '.join('?' * len(columns))})",
-            [row[key] for key in columns])
+        _reinsert_at_back(con, row)
     _bump_revision(agent_id)
 
 
@@ -225,12 +236,7 @@ def move_to_back(queue_id: str) -> bool:
             """SELECT * FROM queued_turns WHERE queue_id = ?
                  AND status IN ('queued', 'parked')""", (queue_id,)).fetchone()
         if row is not None:
-            columns = [key for key in row.keys() if key != "queue_seq"]
-            con.execute("DELETE FROM queued_turns WHERE queue_id = ?", (queue_id,))
-            con.execute(
-                f"INSERT INTO queued_turns ({', '.join(columns)}) "
-                f"VALUES ({', '.join('?' * len(columns))})",
-                [row[key] for key in columns])
+            _reinsert_at_back(con, row)
             _bump_revision(str(row["agent_id"]))
         con.execute("COMMIT")
     except BaseException:
