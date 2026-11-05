@@ -16,7 +16,7 @@ import pytest
 SCRIPT = pathlib.Path(__file__).resolve().parents[2] / '.github/scripts/install-test-ffmpeg.sh'
 
 
-def _run(tmp_path, *, installed=False, apt_success=1, timeout_attempts=0,
+def _run(tmp_path, register_fake, *, installed=False, apt_success=1, timeout_attempts=0,
          bad_hash=False, download_fails=False, baseline=False):
     tmp_path.mkdir(parents=True, exist_ok=True)
     bindir = tmp_path / 'commands'
@@ -72,6 +72,8 @@ raise SystemExit('unknown mock '+name)
         p = bindir / name
         p.write_text(mock)
         p.chmod(0o755)
+        if name == 'sudo':
+            register_fake(p)
     for name in ('bash', 'mktemp', 'rm', 'sha256sum', 'tar', 'install', 'xz'):
         target = shutil.which(name)
         assert target is not None, name
@@ -92,15 +94,15 @@ raise SystemExit('unknown mock '+name)
     return result, calls, publish
 
 
-def test_existing_ffmpeg_skips_all_privilege_and_network_commands(tmp_path):
-    result, calls, _ = _run(tmp_path, installed=True)
+def test_existing_ffmpeg_skips_all_privilege_and_network_commands(tmp_path, fake_backend_cli):
+    result, calls, _ = _run(tmp_path, fake_backend_cli, installed=True)
     assert result.returncode == 0, result.stderr
     assert calls == []
 
 
 @pytest.mark.parametrize('timeout_attempts', [0, 2])
-def test_apt_success_or_timeout_retry_uses_one_bounded_attempt(tmp_path, timeout_attempts):
-    result, calls, publish = _run(tmp_path, timeout_attempts=timeout_attempts)
+def test_apt_success_or_timeout_retry_uses_one_bounded_attempt(tmp_path, timeout_attempts, fake_backend_cli):
+    result, calls, publish = _run(tmp_path, fake_backend_cli, timeout_attempts=timeout_attempts)
     assert result.returncode == 0, result.stderr
     attempts = [args for name, args in calls if name == 'timeout']
     assert len(attempts) == timeout_attempts + 1
@@ -109,10 +111,10 @@ def test_apt_success_or_timeout_retry_uses_one_bounded_attempt(tmp_path, timeout
     assert (publish / 'ffmpeg').exists()
 
 
-def test_exhausted_apt_falls_back_to_checked_archive_visible_to_sandbox(tmp_path):
-    old, _, _ = _run(tmp_path / 'old', apt_success=99, baseline=True)
+def test_exhausted_apt_falls_back_to_checked_archive_visible_to_sandbox(tmp_path, fake_backend_cli):
+    old, _, _ = _run(tmp_path / 'old', fake_backend_cli, apt_success=99, baseline=True)
     assert old.returncode != 0  # The former workflow has no mirror-independent recovery.
-    result, calls, publish = _run(tmp_path / 'new', apt_success=99)
+    result, calls, publish = _run(tmp_path / 'new', fake_backend_cli, apt_success=99)
     assert result.returncode == 0, result.stderr
     assert sum(name == 'apt-get' for name, _ in calls) == 3
     timeout = [args for name, args in calls if name == 'timeout']
@@ -124,8 +126,8 @@ def test_exhausted_apt_falls_back_to_checked_archive_visible_to_sandbox(tmp_path
 
 
 @pytest.mark.parametrize('bad_hash,download_fails', [(True, False), (False, True)])
-def test_untrusted_or_unavailable_download_never_publishes_a_binary(tmp_path, bad_hash, download_fails):
-    result, calls, publish = _run(tmp_path, apt_success=99, bad_hash=bad_hash,
+def test_untrusted_or_unavailable_download_never_publishes_a_binary(tmp_path, bad_hash, download_fails, fake_backend_cli):
+    result, calls, publish = _run(tmp_path, fake_backend_cli, apt_success=99, bad_hash=bad_hash,
                                   download_fails=download_fails)
     assert result.returncode != 0
     assert not (publish / 'ffmpeg').exists() and not (publish / 'ffprobe').exists()
