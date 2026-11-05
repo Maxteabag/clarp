@@ -485,10 +485,12 @@ SCENARIOS = [
     {
         'id': 'stop-at-admission',
         'what': 'a Stop between the two thinking rows of a turn start (pins TP-N1)',
-        # Known bug: the late thinking row overwrites the stop and the agent stays busy,
-        # so this scenario fails (in most runs) until the fix lands. It runs and is
-        # reported, but never counts in the zero or the exit code.
-        'known_bug': 'TP-N1',
+        # Before TP-N1's fix (a307bbd9) the late thinking row overwrote the stop and the
+        # agent stayed busy, and quiesce timed out (10/10 runs at dfc558ba). Since the
+        # fix, whether the Stop lands before or after the second thinking row is timing
+        # (both are correct; 2/10 runs differ), so its run error counts, its captures
+        # are not compared.
+        'errors_only': 'TP-N1 race: either order of Stop and the second thinking row is correct',
         'steps': [
             _send('rachel', '[qa-slow] synthetic task stopped at once', 'november'),
             {'op': 'wait_open', 'message_id': 'u-november'},
