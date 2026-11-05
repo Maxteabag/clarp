@@ -588,13 +588,7 @@ class ClaudeBackend(Backend):
                 agent_id, bound["backend_session_id"] or "", trace_id, key))
 
         def settle_message() -> None:
-            if message["text"]:
-                pacer.offer(message["text"], final=True)
-                _settle_live_message(
-                    agent_id=agent_id, backend_session_id=bound["backend_session_id"],
-                    trace_id=trace_id, item_key=message["key"], session=session,
-                    stream=stream)
-            pacer.cancel()
+            self._drain_settle(message, pacer, bound, agent_id, trace_id, session, stream)
         isolated_texts: list[str] = []
         live_backend_session_id = backend_session_id
         reported = False        # a terminal outcome reached on_result/on_error
@@ -628,19 +622,9 @@ class ClaudeBackend(Backend):
                         saw_init = True
                         live_backend_session_id = sid
                         bound["backend_session_id"] = sid
-                        log("clarpSessionInit", f"sid={sid} trace={trace_id or '∅'}")
-                        if on_session_init is not None:
-                            try:
-                                accepted = on_session_init(sid)
-                                if accepted is False:
-                                    if proc.poll() is None:
-                                        handle.terminate() if handle else proc.terminate()
-                                    if on_error is not None:
-                                        on_error("backend session binding rejected")
-                                    return
-                            except Exception as e:        # noqa: BLE001
-                                log_exception("clarpRunnerInitCbFail", e,
-                                              detail=trace_id or sid)
+                        if not self._drain_init(
+                                sid, trace_id, on_session_init, on_error, proc, handle):
+                            return
                 elif _is_assistant_event(ev):
                     current = _stream_phase(ev)
                     if current and current != phase and agent_id and not isolated:
@@ -654,35 +638,8 @@ class ClaudeBackend(Backend):
                         pacer = new_pacer(message_id)
                     if not isolated and _is_message_stop(ev):
                         settle_message()
-                    text, is_delta = _assistant_event_text(ev)
-                    if text:
-                        if isolated and not is_delta:
-                            isolated_texts.append(text)
-                        elif isolated and is_delta:
-                            if isolated_texts:
-                                isolated_texts[-1] += text
-                            else:
-                                isolated_texts.append(text)
-                        if is_delta:
-                            live_text += text
-                        elif text.startswith(live_text):
-                            live_text = text
-                        elif live_text and not live_text.endswith(text):
-                            live_text += text
-                        else:
-                            live_text = text
-                        current_text = message["text"]
-                        if is_delta:
-                            current_text += text
-                        elif text.startswith(current_text):
-                            current_text = text
-                        elif current_text and not current_text.endswith(text):
-                            current_text += text
-                        else:
-                            current_text = text
-                        message["text"] = current_text
-                        if not isolated:
-                            pacer.offer(current_text)
+                    live_text = self._drain_text(
+                        ev, isolated, isolated_texts, live_text, message, pacer)
                 elif typ == "result":
                     # One process can run several CLI turns: resuming a
                     # session whose last process left background tasks
@@ -694,13 +651,7 @@ class ClaudeBackend(Backend):
                     saw_result = True
                     if not isolated:
                         settle_message()
-                    assistant_text = (
-                        "\n\n".join(t for t in isolated_texts if t.strip())
-                        if isolated else live_text
-                    )
-                    final_result = (
-                        {**ev, "_assistant_text": assistant_text}
-                        if assistant_text else ev)
+                    final_result = self._drain_result(ev, isolated, isolated_texts, live_text)
                     live_text = ""
                     isolated_texts = []
             rc = proc.wait()
@@ -711,62 +662,145 @@ class ClaudeBackend(Backend):
                 except Exception as e:                    # noqa: BLE001
                     log_exception("clarpRunnerResultCbFail", e,
                                   detail=trace_id)
-            err = stderr_text(proc)
-            if rc != 0 and not saw_usage_limit:
-                log("clarpExitErr", f"rc={rc} trace={trace_id or '∅'} "
-                                    f"stderr={(err or '')[:500]!r}")
-                if on_error is not None:
-                    reported = True
-                    try:
-                        on_error(err or f"clarp exited rc={rc}")
-                    except Exception as e:                # noqa: BLE001
-                        log_exception("clarpRunnerErrCbFail", e, detail=trace_id)
-            elif not saw_result and not saw_usage_limit:
-                msg = err or (
-                    f"clarp exited rc={rc} without stream-json result or system.init"
-                )
-                log("clarpNoResult", f"trace={trace_id or '∅'} "
-                                      f"stderr={(err or '')[:500]!r}")
-                if on_error is not None:
-                    reported = True
-                    try:
-                        on_error(msg)
-                    except Exception as e:                # noqa: BLE001
-                        log_exception("clarpRunnerErrCbFail", e, detail=trace_id)
+            error = self._drain_exit_error(proc, rc, saw_usage_limit, saw_result, trace_id)
+            if error is not None and on_error is not None:
+                reported = True
+                try:
+                    on_error(error)
+                except Exception as e:                    # noqa: BLE001
+                    log_exception("clarpRunnerErrCbFail", e, detail=trace_id)
             if not saw_init:
                 log("clarpNoInitEvent",
                     f"trace={trace_id or '∅'} — turn ran but stream-json "
                     f"never delivered system.init; transcript_streamer may "
                     f"have missed the session binding")
         except Exception as e:                            # noqa: BLE001
-            log_exception("clarpRunnerDrainFail", e, detail=trace_id)
-            # Nothing reads this CLI any more: stop it and end the turn once.
-            stop_after_drain_failure(proc, handle)
-            if not reported and on_error is not None:
-                try:
-                    on_error(f"clarp drain failed: {str(e)[:300]}")
-                except Exception as cb:                   # noqa: BLE001
-                    log_exception("clarpRunnerErrCbFail", cb, detail=trace_id)
+            self._drain_failure(e, proc, handle, on_error, trace_id, reported)
         finally:
-            if not isolated and not saw_result and message["text"]:
-                pacer.offer(message["text"], final=True)
-            pacer.cancel()
-            if agent_id and handle is not None and not isolated:
-                self.unregister_handle(agent_id, handle)
-            # This process is gone, and its background Bash tasks with it.
-            # (stdout can close a moment before the exit; past that, the
-            # observer reaps the turn by its process identity.)
-            if turn_token:
-                try:
-                    proc.wait(timeout=5)
-                except Exception:                         # noqa: BLE001
-                    pass
-            if turn_token and proc.poll() is not None:
-                try:
-                    from .. import provider_background_jobs as provider_jobs
-                    provider_jobs.turn_exited(turn_token)
-                except Exception as e:                    # noqa: BLE001
-                    log_exception("providerTurnExitFail", e, detail=trace_id)
+            self._drain_cleanup(
+                proc, handle, pacer, message, isolated, saw_result,
+                agent_id, turn_token, trace_id)
+
+    def _drain_settle(self, message, pacer, bound, agent_id, trace_id, session, stream):
+        """Settle the current message with the pacer selected by the drain."""
+        if message["text"]:
+            pacer.offer(message["text"], final=True)
+            _settle_live_message(
+                agent_id=agent_id, backend_session_id=bound["backend_session_id"],
+                trace_id=trace_id, item_key=message["key"], session=session,
+                stream=stream)
+        pacer.cancel()
+
+    def _drain_result(self, ev, isolated, isolated_texts, live_text):
+        """Attach only this result's accumulated assistant text."""
+        assistant_text = (
+            "\n\n".join(t for t in isolated_texts if t.strip())
+            if isolated else live_text
+        )
+        return (
+            {**ev, "_assistant_text": assistant_text}
+            if assistant_text else ev)
+
+    def _drain_init(self, sid, trace_id, on_session_init, on_error, proc, handle):
+        """Report a session binding; False means the callback rejected it."""
+        log("clarpSessionInit", f"sid={sid} trace={trace_id or '∅'}")
+        if on_session_init is not None:
+            try:
+                accepted = on_session_init(sid)
+                if accepted is False:
+                    if proc.poll() is None:
+                        handle.terminate() if handle else proc.terminate()
+                    if on_error is not None:
+                        on_error("backend session binding rejected")
+                    return False
+            except Exception as e:        # noqa: BLE001
+                log_exception("clarpRunnerInitCbFail", e,
+                              detail=trace_id or sid)
+        return True
+
+    def _drain_text(self, ev, isolated, isolated_texts, live_text, message, pacer):
+        """Accumulate a provider text event and offer its current message to the pacer."""
+        text, is_delta = _assistant_event_text(ev)
+        if text:
+            if isolated and not is_delta:
+                isolated_texts.append(text)
+            elif isolated and is_delta:
+                if isolated_texts:
+                    isolated_texts[-1] += text
+                else:
+                    isolated_texts.append(text)
+            if is_delta:
+                live_text += text
+            elif text.startswith(live_text):
+                live_text = text
+            elif live_text and not live_text.endswith(text):
+                live_text += text
+            else:
+                live_text = text
+            current_text = message["text"]
+            if is_delta:
+                current_text += text
+            elif text.startswith(current_text):
+                current_text = text
+            elif current_text and not current_text.endswith(text):
+                current_text += text
+            else:
+                current_text = text
+            message["text"] = current_text
+            if not isolated:
+                pacer.offer(current_text)
+        return live_text
+
+    def _drain_exit_error(self, proc, rc, saw_usage_limit, saw_result, trace_id):
+        """Read and log the terminal error, before the caller invokes on_error."""
+        err = stderr_text(proc)
+        if rc != 0 and not saw_usage_limit:
+            log("clarpExitErr", f"rc={rc} trace={trace_id or '∅'} "
+                                f"stderr={(err or '')[:500]!r}")
+            return err or f"clarp exited rc={rc}"
+        elif not saw_result and not saw_usage_limit:
+            msg = err or (
+                f"clarp exited rc={rc} without stream-json result or system.init"
+            )
+            log("clarpNoResult", f"trace={trace_id or '∅'} "
+                                  f"stderr={(err or '')[:500]!r}")
+            return msg
+        return None
+
+    def _drain_failure(self, e, proc, handle, on_error, trace_id, reported):
+        """Stop a failed drain and report only if no terminal callback was reached."""
+        log_exception("clarpRunnerDrainFail", e, detail=trace_id)
+        # Nothing reads this CLI any more: stop it and end the turn once.
+        stop_after_drain_failure(proc, handle)
+        if not reported and on_error is not None:
+            try:
+                on_error(f"clarp drain failed: {str(e)[:300]}")
+            except Exception as cb:                   # noqa: BLE001
+                log_exception("clarpRunnerErrCbFail", cb, detail=trace_id)
+
+    def _drain_cleanup(self, proc, handle, pacer, message, isolated, saw_result,
+                       agent_id, turn_token, trace_id):
+        """Settle pacing and process ownership when the drain leaves its try block."""
+        if not isolated and not saw_result and message["text"]:
+            pacer.offer(message["text"], final=True)
+        pacer.cancel()
+        if agent_id and handle is not None and not isolated:
+            self.unregister_handle(agent_id, handle)
+        # This process is gone, and its background Bash tasks with it.
+        # (stdout can close a moment before the exit; past that, the
+        # observer reaps the turn by its process identity.)
+        if turn_token:
+            try:
+                proc.wait(timeout=5)
+            except Exception:                         # noqa: BLE001
+                pass
+        if turn_token and proc.poll() is not None:
+            try:
+                from .. import provider_background_jobs as provider_jobs
+                provider_jobs.turn_exited(turn_token)
+            except Exception as e:                    # noqa: BLE001
+                log_exception("providerTurnExitFail", e, detail=trace_id)
+
 
     # ---- orchestrator routing ----------------------------------------------
 
