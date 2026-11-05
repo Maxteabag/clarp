@@ -245,3 +245,26 @@ def test_the_ended_receipt_sweep(clock, case, turns, live, expected):
         _turn(agent, trace, started=started, outcome=outcome)
     turn_queue.terminalize_ended_receipts(live)
     assert turn_queue.status("q1") == expected, case
+
+
+# --- a launched listen-first call's row (call-open: ids only) ---------------
+
+@pytest.mark.parametrize("status", STATUSES)
+def test_a_failed_call_open_launch_becomes_unknown_only_from_claimed_or_started(clock, status):
+    """mark_launched_call_open_unknown acts only on a call-open: row that is
+    claimed or started (its one launch): the row becomes unknown with its text
+    cleared. Every other status, and an ordinary id, is untouched."""
+    db.conn().execute("DELETE FROM queued_turns")
+    _insert("call-open:r1", status, at=NOW - 60_000)
+    _insert("q2", status, at=NOW - 50_000)
+    hit = turn_queue.mark_launched_call_open_unknown("call-open:r1")
+    ordinary = turn_queue.mark_launched_call_open_unknown("q2")
+    acts = status in ("claimed", "started")
+    assert (hit, ordinary) == (acts, False)
+    assert _rows() == [
+        ["call-open:r1", AGENT, TRACE, "unknown" if acts else status, "" if acts else "hello",
+         NOW - 60_000 if status not in ("queued", "parked", "claimed") else None,
+         NOW - 60_000 if status == "claimed" else None, 0],
+        ["q2", AGENT, TRACE, status, "hello",
+         NOW - 50_000 if status not in ("queued", "parked", "claimed") else None,
+         NOW - 50_000 if status == "claimed" else None, 0]]
