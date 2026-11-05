@@ -574,9 +574,10 @@ def _synth_pwa_via_delivery(row: dict, agent: dict,
     if raw:
         try:
             check_active()
-        except _RawCancelled as error:
+        except (_RawCancelled, RuntimeError) as error:
             session.fail(str(error))
-            return _PwaStreamResult(False, error=str(error), cancelled=True)
+            return _PwaStreamResult(False, error=str(error),
+                                    cancelled=isinstance(error, _RawCancelled))
     if not publish_late:
         _publish_clip_event(
             stream=stream, herald=herald,
