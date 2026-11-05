@@ -204,3 +204,13 @@ def test_a_patch_through_the_old_module_with_a_computed_name_is_refused(tmp_path
     split = _split([("lib/old_base.py", ["LIMIT", "A", "B", "helper"]), ("lib/old_store.py", ["Store"])])
     with pytest.raises(Refusal, match="computed name"):
         split_apply.apply_split(root, split)
+
+
+def test_comprehension_variables_in_a_moved_assignment_are_not_reads(tmp_path):
+    # rf-s4: an assignment's comprehension variables were read as module names,
+    # so moving this refused with "reads pool, which ... does not bind".
+    old = ("BACKENDS = (('a', 'x'), ('b', ''))\n"
+           "_FAILOVERS = {pool: pool.upper() for pool in dict.fromkeys(b[1] for b in BACKENDS) if pool}\n")
+    root = _tree(tmp_path, old=old)
+    changes = split_apply.apply_split(root, _split([("lib/old_part.py", ["BACKENDS", "_FAILOVERS"])]))
+    assert "_FAILOVERS = {pool" in changes["server/lib/old_part.py"]
