@@ -58,7 +58,10 @@ def test_turn_caller_and_calls_by_without_proof(monkeypatch):
         raise RuntimeError("no turn record")
     monkeypatch.setattr(turn_identity, "caller_agent_id", unprovable)
     handler = _bare_handler({"X-Clarp-Turn": "t1"})
-    assert handler._turn_caller() == ""
+    # HTTP-N5: an unprovable turn is unknown identity, refused (503 upstream);
+    # _calls_by is attribution only and stays unattributed.
+    with pytest.raises(turn_identity.TurnIdentityUnavailable):
+        handler._turn_caller()
     assert handler._calls_by({}) == ""
 
 
