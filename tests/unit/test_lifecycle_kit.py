@@ -506,8 +506,23 @@ def test_the_reaper_reads_the_source_states_own_column(qcon):
         qcon.execute("INSERT INTO q (id, status) VALUES ('stampless', 'claimed')")   # claimed_at NULL
     with lk.transaction(qcon):
         batch = lk.reap(qcon, lc, now=30_000)
-    assert [t.key for t in batch.moved] == ["old"] and batch.cursor is None
+    # A NULL entry time counts as 0, so the stampless claim is overdue (review A3,
+    # queue design delta F2: today's claim reset uses COALESCE(claimed_at, 0)).
+    assert [t.key for t in batch.moved] == ["old", "stampless"] and batch.cursor is None  # both at 0, by key
     assert _q(qcon, "old") == ("queued", 0, None, None)   # leaving claimed does not clear it by itself
+
+
+def test_the_reaper_keyset_works_across_null_entry_times(qcon):
+    lc = _queue()
+    with lk.transaction(qcon):
+        for key in ("n1", "n2", "n3"):
+            qcon.execute("INSERT INTO q (id, status) VALUES (?, 'claimed')", (key,))
+    with lk.transaction(qcon):
+        first = lk.reap(qcon, lc, now=30_000, limit=2)
+    assert [t.key for t in first.moved] == ["n1", "n2"] and first.cursor == ("claimed", 0, "n2")
+    with lk.transaction(qcon):
+        rest = lk.reap(qcon, lc, now=30_000, limit=2, after=first.cursor)
+    assert [t.key for t in rest.moved] == ["n3"] and rest.cursor is None
 
 
 @pytest.mark.parametrize("overrides, problem", [
@@ -551,12 +566,10 @@ def test_compare_and_set_where_groups_events_by_target_and_stamps_each(qcon):
         assert lk.compare_and_set_where(qcon, lc, "claim", where="1", now=70, returning="id") == []
 
 
-def test_compare_and_set_where_refuses_unknown_events_and_runs_only_in_a_transaction(qcon):
+def test_compare_and_set_where_refuses_unknown_events_and_bad_returning(qcon):
     lc = _queue()
     with pytest.raises(lk.LifecycleError, match="no edge for event"), lk.transaction(qcon):
         lk.compare_and_set_where(qcon, lc, "nope", where="1", now=1)
-    with pytest.raises(lk.LifecycleError, match="inside lifecycle.transaction"):
-        lk.compare_and_set_where(qcon, lc, "cancel", where="1", now=1)
     with pytest.raises(lk.LifecycleError, match="bad returning"), lk.transaction(qcon):
         lk.compare_and_set_where(qcon, lc, "cancel", where="1", now=1, returning="id; DROP TABLE q")
 
@@ -567,3 +580,42 @@ def test_compare_and_set_where_stamps_the_target_column(qcon):
     with lk.transaction(qcon):
         assert lk.compare_and_set_where(qcon, lc, "start", where="1", now=80) == 2
     assert [_q(qcon, k) for k in ("t1-a", "t1-b")] == [("started", None, 80, None), ("started", None, 80, None)]
+
+
+def _traced(con):
+    seen = []
+    con.set_trace_callback(seen.append)
+    return seen
+
+
+def test_compare_and_set_where_outside_a_transaction_is_one_autocommit_statement(qcon):
+    """Review A3 (queue design delta F1): today's writers run in autocommit;
+    a single target stays one statement, with no BEGIN of its own."""
+    lc = _queue()
+    _rows_in(qcon, ("t1-a", "queued"))
+    seen = _traced(qcon)
+    assert lk.compare_and_set_where(qcon, lc, "claim", where="id = ?", params=("t1-a",), now=5) == 1
+    qcon.set_trace_callback(None)
+    assert len(seen) == 1 and seen[0].startswith("UPDATE") and not qcon.in_transaction
+
+
+def test_compare_and_set_where_wraps_several_targets_in_one_transaction(qcon):
+    lc = _queue()
+    _rows_in(qcon, ("t1-a", "started"), ("t1-b", "failed"))
+    seen = _traced(qcon)
+    lk.compare_and_set_where(qcon, lc, ("settle_failed", "resettle_done"), where="1", now=6)
+    qcon.set_trace_callback(None)
+    assert [x.split()[0] for x in seen] == ["BEGIN", "UPDATE", "UPDATE", "COMMIT"]
+    assert [_q(qcon, k)[0] for k in ("t1-a", "t1-b")] == ["failed", "done"]
+
+
+def test_compare_and_set_where_joins_the_callers_transaction(qcon):
+    lc = _queue()
+    _rows_in(qcon, ("t1-a", "started"), ("t1-b", "failed"))
+    qcon.execute("BEGIN IMMEDIATE")
+    seen = _traced(qcon)
+    lk.compare_and_set_where(qcon, lc, ("settle_failed", "resettle_done"), where="1", now=6)
+    qcon.set_trace_callback(None)
+    assert [x.split()[0] for x in seen] == ["UPDATE", "UPDATE"]          # no nested BEGIN or COMMIT
+    qcon.execute("ROLLBACK")                                             # the caller's rollback undoes both
+    assert [_q(qcon, k)[0] for k in ("t1-a", "t1-b")] == ["started", "failed"]
