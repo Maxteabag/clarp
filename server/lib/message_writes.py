@@ -15,7 +15,6 @@ from __future__ import annotations
 import datetime as _dt
 import hashlib
 import json
-import sqlite3
 from dataclasses import dataclass
 import time
 from typing import Any
@@ -707,59 +706,53 @@ def store_transcript_turns(*, agent_id: str, backend_session_id: str,
     # before taking SQLite's single writer lock, once per assistant message.
     visible_replies = _visible_replies(turns)
     database = _facade().conn()
-    # The marker precedes the snapshot's first read. Any other connection's
-    # commit after it invalidates the prepared reads, even if it occurs before
-    # the probe acquires its snapshot. Revalidation happens under the writer,
-    # before any prepared decision can cause a write (RM-N2 / RM-N10).
-    for _attempt in range(3):
-        marker = database.execute("PRAGMA data_version").fetchone()[0]
-        writer = _ImportWriter(database, locked=False)
-        try:
-            prelude = _prepare_import_prelude(
-                writer, agent_id, backend_session_id, turns)
-            out = _store_transcript_turns_txn(
-                writer, agent_id=agent_id,
-                backend_session_id=backend_session_id,
-                source_file=source_file, turns=turns,
-                capture_at=capture_at, captured=captured, out_seqs=out_seqs,
-                visible_replies=visible_replies, prelude=prelude.for_pass())
-            if on_stored is not None:
-                _write_checkpoint(writer, database, on_stored, captured)
-            if database.in_transaction:
-                database.execute("COMMIT")
-            return out
-        except _WriteNeeded:
-            if database.in_transaction:
-                database.execute("ROLLBACK")
-        except Exception:
-            if database.in_transaction:
-                database.execute("ROLLBACK")
-            raise
-        # Copy the consumable client lists before taking the writer, too.
-        prepared = prelude.for_pass()
-        writer = _ImportWriter(database, locked=True)
-        try:
-            observed = writer.execute("PRAGMA data_version").fetchone()[0]
-            if observed != marker:
-                database.execute("ROLLBACK")
-                continue
-            out = _store_transcript_turns_txn(
-                writer, agent_id=agent_id,
-                backend_session_id=backend_session_id,
-                source_file=source_file, turns=turns,
-                capture_at=capture_at, captured=captured, out_seqs=out_seqs,
-                visible_replies=visible_replies, prelude=prepared)
-            if on_stored is not None:
-                _write_checkpoint(writer, database, on_stored, captured)
-            writer.commit()
-            return out
-        except Exception:
-            if database.in_transaction:
-                database.execute("ROLLBACK")
-            raise
-    # Use the existing importer's bounded SQLITE_BUSY retry/defer path. No
-    # rows or recording helpers ran for a rejected prepared snapshot.
-    raise sqlite3.OperationalError("database is locked: transcript prelude changed")
+    # Pure transcript work runs once, never while holding the writer. The
+    # database-dependent prelude belongs to the probe's single read snapshot.
+    phases = _row_phases(turns)
+    writer = _ImportWriter(database, locked=False)
+    try:
+        prelude = _prepare_import_prelude(
+            writer, agent_id, backend_session_id, turns, phases=phases)
+        out = _store_transcript_turns_txn(
+            writer, agent_id=agent_id,
+            backend_session_id=backend_session_id,
+            source_file=source_file, turns=turns,
+            capture_at=capture_at, captured=captured, out_seqs=out_seqs,
+            visible_replies=visible_replies, prelude=prelude.for_pass())
+        if on_stored is not None:
+            _write_checkpoint(writer, database, on_stored, captured)
+        if database.in_transaction:
+            database.execute("COMMIT")
+        return out
+    except _WriteNeeded:
+        if database.in_transaction:
+            database.execute("ROLLBACK")
+    except Exception:
+        if database.in_transaction:
+            database.execute("ROLLBACK")
+        raise
+    # Copy consumable lists before admission. Re-read only the prelude's raw
+    # database inputs under BEGIN IMMEDIATE. Unrelated commits do not matter;
+    # changed inputs rebuild just their component, without a second probe or
+    # a new failure path. Row decisions remain protected, as before RM-N10.
+    prepared = prelude.for_pass()
+    writer = _ImportWriter(database, locked=True)
+    try:
+        prepared = _revalidate_import_prelude(writer, agent_id, backend_session_id, prepared)
+        out = _store_transcript_turns_txn(
+            writer, agent_id=agent_id,
+            backend_session_id=backend_session_id,
+            source_file=source_file, turns=turns,
+            capture_at=capture_at, captured=captured, out_seqs=out_seqs,
+            visible_replies=visible_replies, prelude=prepared)
+        if on_stored is not None:
+            _write_checkpoint(writer, database, on_stored, captured)
+        writer.commit()
+        return out
+    except Exception:
+        if database.in_transaction:
+            database.execute("ROLLBACK")
+        raise
 
 
 def _visible_replies(turns: list[dict[str, Any]]) -> list[str]:
@@ -1168,40 +1161,60 @@ class _ImportPrelude:
     phases: list[str | None]
     client_user_provenance: dict[str, list[tuple[str, str, str, str]]]
     user_provenance: tuple[str, str, str]
+    client_rows: list
 
     def for_pass(self) -> _ImportPrelude:
         return _ImportPrelude(
             self.turn_index, self.phases,
             {key: list(rows) for key, rows in self.client_user_provenance.items()},
-            self.user_provenance)
+            self.user_provenance, self.client_rows)
 
 
-def _prepare_import_prelude(database, agent_id, backend_session_id, turns) -> _ImportPrelude:
-    from . import message_turns
-    # Which turn wrote each row, how that turn ended, and each text row's
-    # phase (docs/live-items.md §9).
-    turn_index = message_turns.TurnIndex(database, agent_id)
-    phases = _row_phases(turns)
-    # User turns the client already recorded durably (keyed by client_msg_id).
-    # Claude's transcript carries its own copy of each; we link those back to
-    # the client rows by text in send order rather than inserting a duplicate.
-    client_user_provenance: dict[str, list[tuple[str, str, str, str]]] = {}
-    for r in database.execute(
+def _client_provenance_rows(database, agent_id, backend_session_id):
+    return database.execute(
         """SELECT message_id, text, origin, sender_agent_id, timestamp FROM messages
             WHERE agent_id = ? AND backend_session_id = ?
               AND source_file LIKE 'client:%'
             ORDER BY updated_at ASC, seq ASC""",
-        (agent_id, backend_session_id),
-    ).fetchall():
-        key = _norm_text(r["text"])
-        client_user_provenance.setdefault(key, []).append((
-            r["message_id"],
-            r["origin"] or "user",
-            r["sender_agent_id"] or "",
-            r["timestamp"],
-        ))
-    return _ImportPrelude(turn_index, phases, client_user_provenance,
-                          _latest_user_provenance(database, agent_id, backend_session_id))
+        (agent_id, backend_session_id)).fetchall()
+
+
+def _client_provenance(rows) -> dict[str, list[tuple[str, str, str, str]]]:
+    provenance: dict[str, list[tuple[str, str, str, str]]] = {}
+    for row in rows:
+        key = _norm_text(row["text"])
+        provenance.setdefault(key, []).append((
+            row["message_id"], row["origin"] or "user",
+            row["sender_agent_id"] or "", row["timestamp"]))
+    return provenance
+
+
+def _prepare_import_prelude(database, agent_id, backend_session_id, turns,
+                            *, phases=None) -> _ImportPrelude:
+    from . import message_turns
+    turn_index = message_turns.TurnIndex(database, agent_id)
+    phases = _row_phases(turns) if phases is None else phases
+    rows = _client_provenance_rows(database, agent_id, backend_session_id)
+    return _ImportPrelude(turn_index, phases, _client_provenance(rows),
+                          _latest_user_provenance(database, agent_id, backend_session_id), rows)
+
+
+def _revalidate_import_prelude(database, agent_id, backend_session_id,
+                              prelude: _ImportPrelude) -> _ImportPrelude:
+    from . import message_turns
+    # Exact ordered raw-row comparisons cover inserts, edits, deletes, changes
+    # of membership and ordering. A count/MAX fingerprint cannot certify that.
+    # No normalization or index rebuilding is done unless that input changed.
+    turn_rows = message_turns.TurnIndex.read_rows(database, agent_id)
+    client_rows = _client_provenance_rows(database, agent_id, backend_session_id)
+    user = _latest_user_provenance(database, agent_id, backend_session_id)
+    turn_index = prelude.turn_index
+    if turn_rows != turn_index._rows:
+        turn_index = message_turns.TurnIndex.from_rows(turn_rows)
+    provenance = prelude.client_user_provenance
+    if client_rows != prelude.client_rows:
+        provenance = _client_provenance(client_rows)
+    return _ImportPrelude(turn_index, prelude.phases, provenance, user, client_rows)
 
 
 def _store_transcript_turns_txn(database, *, agent_id: str,
