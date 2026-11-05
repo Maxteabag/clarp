@@ -10,6 +10,8 @@ same rows, heads, revisions and clock.
 """
 from __future__ import annotations
 
+from tests.patching import patch_shared
+
 import json
 import os
 import pathlib
@@ -242,7 +244,7 @@ def shadow_on(monkeypatch):
 @pytest.fixture
 def clock(monkeypatch):
     state = {"ms": 1_791_700_000_000}
-    monkeypatch.setattr(message_writes, "now_ms", lambda: state["ms"])
+    patch_shared(monkeypatch, message_writes, "now_ms", lambda: state["ms"])
     return state
 
 
@@ -382,6 +384,29 @@ def test_edits_and_rewrites_of_earlier_records_force_a_full_import(tmp_path, clo
     replacement.write_bytes(data + b"\n")
     os.replace(replacement, transcript)
     assert _decide(cp, "claude", transcript) == "inode"
+
+
+@pytest.mark.parametrize("backend", ["claude", "codex", "agy"])
+@pytest.mark.parametrize("helper", ["message_import_rows.py", "message_import_common.py"])
+def test_parser_version_changes_when_an_import_helper_changes(monkeypatch, backend, helper):
+    """A moved store/carry dependency must invalidate checkpoints on every backend."""
+    original = pathlib.Path.read_bytes
+    root = pathlib.Path(inc.__file__).resolve().parent
+
+    def changed_bytes(path):
+        content = original(path)
+        return content + b"\n# changed helper\n" if path == root / helper else content
+
+    inc.parser_version.cache_clear()
+    try:
+        before = inc.parser_version(backend)
+        with monkeypatch.context() as scope:
+            scope.setattr(pathlib.Path, "read_bytes", changed_bytes)
+            inc.parser_version.cache_clear()
+            after = inc.parser_version(backend)
+        assert after != before
+    finally:
+        inc.parser_version.cache_clear()
 
 
 def test_a_checkpoint_from_another_parser_version_is_refused(tmp_path, clock, shadow_on, monkeypatch):

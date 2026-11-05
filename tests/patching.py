@@ -20,20 +20,28 @@ from collections.abc import Iterable, Iterator
 
 _REPO = pathlib.Path(__file__).resolve().parents[1]
 _RECIPES = _REPO / "tools" / "refactor" / "splits"
+_HANDWRITTEN_RECIPES = _REPO / "tools" / "refactor" / "handwritten"
 _MISSING = object()
+
+
+def _recipe_paths(recipes: pathlib.Path | None) -> list[pathlib.Path]:
+    """Explicit recipe directories stay isolated; defaults include manual moves."""
+    roots = [recipes] if recipes is not None else [_RECIPES, _HANDWRITTEN_RECIPES]
+    return sorted(path for root in roots if root.is_dir() for path in root.glob("*.toml"))
 
 
 def split_family(module: types.ModuleType, recipes: pathlib.Path | None = None, *,
                  methods: pathlib.Path | None = None) -> list[types.ModuleType]:
     """The parts the split recipes say came from `module`, as imported modules;
     parts whose file does not exist (the split is not applied) are left out."""
+    recipe_paths = _recipe_paths(recipes)
     recipes = recipes or _RECIPES
     name = module.__name__
     if not name.startswith("lib."):
         return []
     old = name.replace(".", "/") + ".py"
     parts: list[types.ModuleType] = []
-    for path in sorted(recipes.glob("*.toml")) if recipes.is_dir() else ():
+    for path in recipe_paths:
         for split in tomllib.loads(path.read_text()).get("split", []):
             if split.get("module") != old:
                 continue
@@ -65,10 +73,9 @@ def split_origin(path: str, name: str | None = None, recipes: pathlib.Path | Non
     With `name`, only when the recipe moved exactly that name into this part:
     anything else defined in the part keeps its own path (new state is new).
     Lets path-based guards keep naming the old module on integration."""
-    recipes = recipes or _RECIPES
     prefix = "server/" if path.startswith("server/") else ""
     rel = path[len(prefix):]
-    for recipe in sorted(recipes.glob("*.toml")) if recipes.is_dir() else ():
+    for recipe in _recipe_paths(recipes):
         for split in tomllib.loads(recipe.read_text()).get("split", []):
             for part in split.get("part", []):
                 if part.get("module") == rel and (name is None or name in part.get("names", [])):

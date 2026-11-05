@@ -21,6 +21,8 @@ Characterization only: nothing serves the incremental result in production
 """
 from __future__ import annotations
 
+from tests.patching import patch_shared
+
 import json
 import pathlib
 
@@ -55,7 +57,7 @@ def importer(monkeypatch):
     monkeypatch.setattr(eventlog, "emit", emit)
     clock = world.Clock()
     clock.verdicts = verdicts
-    monkeypatch.setattr(message_writes, "now_ms", clock)
+    patch_shared(monkeypatch, message_writes, "now_ms", clock)
     return clock
 
 

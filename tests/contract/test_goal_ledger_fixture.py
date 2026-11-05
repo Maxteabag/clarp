@@ -11,6 +11,8 @@ intended, additive change, and tell the native clients.
 """
 from __future__ import annotations
 
+from tests.patching import patch_shared
+
 import json
 import os
 import pathlib
@@ -36,7 +38,7 @@ def _scenario(monkeypatch, tmp_path) -> dict:
     tick = lambda: next(clock)   # noqa: E731
     monkeypatch.setattr(db, "now_ms", tick)
     from lib import message_writes
-    monkeypatch.setattr(message_writes, "now_ms", tick)   # message rows share the pinned clock
+    patch_shared(monkeypatch, message_writes, "now_ms", tick)   # message rows share the pinned clock
 
     def agent(session, persona, parent=None):
         agent_id = agents.create_agent(persona=persona, voice_id="v", cwd=str(tmp_path), session=session)

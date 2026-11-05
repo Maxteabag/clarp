@@ -1,0 +1,44 @@
+# S5 manual extraction. Ownership and test patching metadata ONLY.
+# Not a split_apply recipe: these files are hand-written and forward-ported.
+# Exact declared definitions retain their original architectural/table owner.
+[[split]]
+module = "lib/message_writes.py"
+
+[[split.part]]
+module = "lib/message_import_common.py"
+names = [
+    "_message_id",
+    "_client_message_id",
+    "_norm_text",
+    "_next_revision",
+    "_row_payload",
+    "_latest_user_provenance",
+    "_FINAL_TWIN_WINDOW_S",
+    "_RETRY_ECHO_SLACK_S",
+    "_parse_timestamp",
+    "_is_retry_echo",
+    "_PARKED_SEQ_BASE",
+    "_client_provenance_rows",
+    "_client_provenance",
+]
+
+[[split.part]]
+module = "lib/message_import_rows.py"
+names = [
+    "_park_adopted_occupant",
+    "_seq_taken",
+    "_restore_unadopted_parked",
+    "_parked_twin",
+    "_shifted_twin",
+    "_FinalRows",
+    "_streamed_twin",
+    "_diagnose",
+    "_related",
+    "_final_twins",
+    "_delete_slot",
+    "_ClientProvenance",
+    "_AgyAuthority",
+    "_resolve_reply_id",
+    "_Upserted",
+    "_upsert_row",
+]

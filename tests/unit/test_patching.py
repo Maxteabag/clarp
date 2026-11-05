@@ -52,8 +52,10 @@ def test_without_an_applied_split_it_is_monkeypatch_setattr(monkeypatch, tmp_pat
     assert agent_rings.now_ms is _fake
 
 
-def test_logical_trees_move_only_exact_named_definitions(tmp_path):
+@pytest.mark.parametrize("handwritten", [False, True])
+def test_logical_trees_move_only_exact_named_definitions(tmp_path, monkeypatch, handwritten):
     import ast
+    from tests import patching
     from tests.patching import logical_split_tree_map
     root = tmp_path / "server"
     (root / "lib").mkdir(parents=True)
@@ -62,12 +64,14 @@ def test_logical_trees_move_only_exact_named_definitions(tmp_path):
     (recipes / "quota.toml").write_text(
         '[[split]]\nname="quota"\nmodule="lib/quota.py"\n'
         '[[split.part]]\nmodule="lib/part.py"\nnames=["CODEX", "moved", "Handle", "FLAG"]\n')
+    if handwritten:
+        monkeypatch.setattr(patching, "_HANDWRITTEN_RECIPES", recipes)
     owner = root / "lib/quota.py"
     owner.write_text("from .part import CODEX, moved, Handle, FLAG\n")
     part = root / "lib/part.py"
     part.write_text('CODEX="codex"\nFLAG: bool = True\ndef moved(): pass\n'
                     'class Handle: pass\ndef new(): pass\nother=1\na,b=2,3\nregister()\n')
-    trees = logical_split_tree_map([owner, part], root, recipes)
+    trees = logical_split_tree_map([owner, part], root, None if handwritten else recipes)
     assert {getattr(n, "name", None) for n in trees["lib/quota.py"].body
             if isinstance(n, (ast.FunctionDef, ast.ClassDef))} == {"moved", "Handle"}
     actual = trees["lib/part.py"]
@@ -105,9 +109,9 @@ def test_every_applied_split_part_maps_exactly_its_recipe_names_to_the_old_modul
     import ast
     import pathlib
     import tomllib
-    from tests.patching import _RECIPES, _bound_name, logical_split_trees
+    from tests.patching import _recipe_paths, _bound_name, logical_split_trees
     server = pathlib.Path(__file__).resolve().parents[2] / "server"
-    for recipe in sorted(_RECIPES.glob("*.toml")):
+    for recipe in _recipe_paths(None):
         for split in tomllib.loads(recipe.read_text()).get("split", []):
             for part in split.get("part", []):
                 path = server / part["module"]

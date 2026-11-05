@@ -1,4 +1,6 @@
 """Import preparation must yield the writer and reject stale preparation."""
+
+from tests.patching import patch_shared
 import sqlite3
 import time
 
@@ -174,7 +176,7 @@ def test_unrelated_sse_commit_does_not_recompute_or_refuse_import(tmp_path, monk
 
 def test_changed_turn_falls_back_once_and_matches_lock_only_import(tmp_path, monkeypatch):
     agent = agents.create_agent(persona="Synthetic", voice_id="v", cwd=str(tmp_path), session="synthetic")
-    monkeypatch.setattr(message_writes, "now_ms", lambda: 1770000000000)
+    patch_shared(monkeypatch, message_writes, "now_ms", lambda: 1770000000000)
     connection = db.conn()
     connection.execute(
         "INSERT INTO turns(agent_id,source,trace_id,started_at,settled_at,outcome) "
