@@ -8,6 +8,7 @@ import urllib.error
 
 import pytest
 
+from tests.patching import patch_shared
 from lib import agents as agents_db
 from lib import dream_seeds, dreaming
 
@@ -107,7 +108,7 @@ def test_the_nightly_loop_skips_an_agent_whose_manual_run_started_meanwhile(monk
     monkeypatch.setattr(dreaming, "pending_dreaming_agents", lambda now=None: [{
         **agent, "dreaming_local_date": "2026-06-24", "dreaming_timezone": "UTC",
         "dreaming_timezone_source": "test", "dreaming_settings": dreaming.get_settings()}])
-    monkeypatch.setattr(dreaming, "active_runs", lambda: [])
+    patch_shared(monkeypatch, dreaming, "active_runs", lambda: [])
     sends = []
     dreaming.DreamingScheduler(send_dream=lambda s, p: sends.append(s) or True).run_once()
     assert _active_runs(aid) == 1

@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 
 import pytest
 
+from tests.patching import patch_shared
 from lib import agents as agents_db
 from lib import dream_seeds, dreaming, location, message_store
 from lib.protocol import AgentState
@@ -549,7 +550,7 @@ def test_isolated_dream_dispatch_uses_snapshot_without_touching_live_chat(monkey
         return object()
 
     monkeypatch.setattr(dreaming.backends, "spawn_turn", fake_spawn_turn)
-    monkeypatch.setattr(dreaming, "_dream_scratch_cwd", lambda _agent, _prompt: pathlib.Path("/tmp/dream-scratch"))
+    patch_shared(monkeypatch, dreaming, "_dream_scratch_cwd", lambda _agent, _prompt: pathlib.Path("/tmp/dream-scratch"))
 
     assert dreaming.dispatch_isolated_dream(agent, dream_round["prompt"]) is True
 
@@ -969,7 +970,7 @@ def test_harvest_commits_dream_work_to_a_branch_then_removes_the_worktree(
                     str(target), "HEAD"], check=True,
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     (target / "invention.py").write_text("# what the dream built\n")
-    monkeypatch.setattr(dreaming, "_dream_worktree_path", lambda rid: target)
+    patch_shared(monkeypatch, dreaming, "_dream_worktree_path", lambda rid: target)
 
     branch = dreaming.harvest_worktree(run_id)
 
@@ -1001,7 +1002,7 @@ def test_harvest_of_a_clean_worktree_records_no_branch(tmp_path, monkeypatch):
     subprocess.run(["git", "-C", str(root), "worktree", "add", "--detach",
                     str(target), "HEAD"], check=True,
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    monkeypatch.setattr(dreaming, "_dream_worktree_path", lambda rid: target)
+    patch_shared(monkeypatch, dreaming, "_dream_worktree_path", lambda rid: target)
 
     assert dreaming.harvest_worktree(run_id) == ""
     assert dreaming.get_run(run_id)["artifact_branch"] == ""
@@ -1024,7 +1025,7 @@ def test_harvest_keeps_the_worktree_when_committing_fails(tmp_path, monkeypatch)
                     str(target), "HEAD"], check=True,
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     (target / "precious.py").write_text("# unreviewed but real\n")
-    monkeypatch.setattr(dreaming, "_dream_worktree_path", lambda rid: target)
+    patch_shared(monkeypatch, dreaming, "_dream_worktree_path", lambda rid: target)
 
     real_run = subprocess.run
 
@@ -1061,7 +1062,7 @@ def test_disabling_dreaming_mid_run_ends_it_instead_of_stranding_it(monkeypatch)
     assert run["status"] == "active"
 
     harvested: list[str] = []
-    monkeypatch.setattr(dreaming, "harvest_worktree",
+    patch_shared(monkeypatch, dreaming, "harvest_worktree",
                         lambda rid: harvested.append(rid) or "")
 
     agents_db.update_agent(aid, dreaming_enabled=False)
@@ -1176,7 +1177,7 @@ def test_a_dream_that_keeps_failing_ends_and_frees_the_next_night(tmp_path, monk
     run = dreaming.create_dream_run(agent, local_date="2026-01-01", timezone_name="UTC",
                                     timezone_source="synthetic")
     callbacks = {}
-    monkeypatch.setattr(dreaming, "_dream_scratch_cwd", lambda *_: tmp_path)
+    patch_shared(monkeypatch, dreaming, "_dream_scratch_cwd", lambda *_: tmp_path)
     monkeypatch.setattr(dreaming.backends, "spawn_turn",
                         lambda _backend, **kw: callbacks.update(kw))
     monkeypatch.setattr(dreaming.backends, "active_handles", lambda *_: [])
@@ -1206,7 +1207,7 @@ def _live_dream_worker(monkeypatch, tmp_path, agent_id, run, *, pid=True):
     from types import SimpleNamespace
     proc = subprocess.Popen(["sleep", "60"])
     handle = SimpleNamespace(pid=proc.pid, proc=proc) if pid else SimpleNamespace()
-    monkeypatch.setattr(dreaming, "_dream_scratch_cwd", lambda *_: tmp_path)
+    patch_shared(monkeypatch, dreaming, "_dream_scratch_cwd", lambda *_: tmp_path)
     monkeypatch.setattr(dreaming.backends, "spawn_turn", lambda *_a, **_k: handle)
     prompt = dreaming.next_round_for_run(run)["prompt"]
     assert dreaming.dispatch_isolated_dream(agents_db.get_by_agent_id(agent_id), prompt)
@@ -1223,9 +1224,9 @@ def test_a_run_past_its_deadline_is_harvested_only_once_its_worker_stops(tmp_pat
     committed and removed only when the run's own dream worker has exited."""
     agent_id, run, _clock = _expired_dream_run(tmp_path, monkeypatch)
     worker = _live_dream_worker(monkeypatch, tmp_path, agent_id, run)
-    monkeypatch.setattr(dreaming, "_dream_worktree_path", lambda run_id: tmp_path)
+    patch_shared(monkeypatch, dreaming, "_dream_worktree_path", lambda run_id: tmp_path)
     harvested = []
-    monkeypatch.setattr(dreaming, "harvest_worktree", harvested.append)
+    patch_shared(monkeypatch, dreaming, "harvest_worktree", harvested.append)
     scheduler = dreaming.DreamingScheduler(send_dream=lambda *_: False)
     try:
         scheduler._advance_run(run)
@@ -1248,8 +1249,8 @@ def test_a_late_digest_does_not_complete_an_abandoned_run(tmp_path, monkeypatch)
     clock = int(run["started_at"]) + dreaming.DREAM_RUN_DEADLINE_SEC * 1000 + 1
     monkeypatch.setattr(dreaming.db, "now_ms", lambda: clock)
     harvested, delivered = [], []
-    monkeypatch.setattr(dreaming, "harvest_worktree", harvested.append)
-    monkeypatch.setattr(dreaming, "_deliver_digest", lambda **kw: delivered.append(kw))
+    patch_shared(monkeypatch, dreaming, "harvest_worktree", harvested.append)
+    patch_shared(monkeypatch, dreaming, "_deliver_digest", lambda **kw: delivered.append(kw))
     round_id = dreaming._insert_round(run_id=run["run_id"], stage="synthesize",
                                       round_index=100, target_tokens=100)
     dreaming.mark_round_sent(round_id)
@@ -1280,7 +1281,7 @@ def test_routine_activity_does_not_hide_a_busy_dream_worker_from_cleanup(tmp_pat
     worker = _live_dream_worker(monkeypatch, tmp_path, agent_id, run)
     agents_db.record_state(agent_id, "thinking", {"origin": "heartbeat"})
     harvested = []
-    monkeypatch.setattr(dreaming, "harvest_worktree", harvested.append)
+    patch_shared(monkeypatch, dreaming, "harvest_worktree", harvested.append)
     try:
         dreaming.DreamingScheduler(send_dream=lambda *_: False)._advance_run(run)
     finally:
@@ -1305,7 +1306,7 @@ def test_a_runtime_view_without_the_dream_worker_does_not_free_its_worktree(tmp_
 
     monkeypatch.setattr(dreaming.backends, "runtime_status", runtime_status)
     harvested = []
-    monkeypatch.setattr(dreaming, "harvest_worktree", harvested.append)
+    patch_shared(monkeypatch, dreaming, "harvest_worktree", harvested.append)
     try:
         dreaming.DreamingScheduler(send_dream=lambda *_: False)._advance_run(run)
     finally:
@@ -1317,9 +1318,9 @@ def test_a_dream_worker_of_unknown_identity_defers_cleanup(tmp_path, monkeypatch
     agent_id, run, _clock = _expired_dream_run(tmp_path, monkeypatch)
     worker = _live_dream_worker(monkeypatch, tmp_path, agent_id, run, pid=False)
     _stop(worker)
-    monkeypatch.setattr(dreaming, "_dream_worktree_path", lambda run_id: tmp_path)
+    patch_shared(monkeypatch, dreaming, "_dream_worktree_path", lambda run_id: tmp_path)
     harvested = []
-    monkeypatch.setattr(dreaming, "harvest_worktree", harvested.append)
+    patch_shared(monkeypatch, dreaming, "harvest_worktree", harvested.append)
     scheduler = dreaming.DreamingScheduler(send_dream=lambda *_: False)
     scheduler._advance_run(run)
     scheduler.run_once()
@@ -1331,9 +1332,9 @@ def test_a_deferred_cleanup_survives_a_day_of_downtime(tmp_path, monkeypatch):
     kept until it succeeds, however long the worker or the Host was away."""
     agent_id, run, clock = _expired_dream_run(tmp_path, monkeypatch)
     worker = _live_dream_worker(monkeypatch, tmp_path, agent_id, run)
-    monkeypatch.setattr(dreaming, "_dream_worktree_path", lambda _run_id: tmp_path)
+    patch_shared(monkeypatch, dreaming, "_dream_worktree_path", lambda _run_id: tmp_path)
     harvested = []
-    monkeypatch.setattr(dreaming, "harvest_worktree", harvested.append)
+    patch_shared(monkeypatch, dreaming, "harvest_worktree", harvested.append)
     monkeypatch.setattr(dreaming, "pending_dreaming_agents", lambda **_: [])
     scheduler = dreaming.DreamingScheduler(send_dream=lambda *_: False)
     try:
@@ -1355,8 +1356,8 @@ def test_abandoning_does_not_overwrite_a_completion_that_won(tmp_path, monkeypat
     round_id = dreaming._insert_round(run_id=run["run_id"], stage="synthesize",
                                       round_index=100, target_tokens=100)
     dreaming.mark_round_sent(round_id)
-    monkeypatch.setattr(dreaming, "harvest_worktree", lambda *_: None)
-    monkeypatch.setattr(dreaming, "_deliver_digest", lambda **_: None)
+    patch_shared(monkeypatch, dreaming, "harvest_worktree", lambda *_: None)
+    patch_shared(monkeypatch, dreaming, "_deliver_digest", lambda **_: None)
     real_get = dreaming.get_run
     raced = []
 
@@ -1368,7 +1369,7 @@ def test_abandoning_does_not_overwrite_a_completion_that_won(tmp_path, monkeypat
                                          round_id=round_id, digest="synthetic completed digest")
         return snapshot
 
-    monkeypatch.setattr(dreaming, "get_run", completion_after_the_read)
+    patch_shared(monkeypatch, dreaming, "get_run", completion_after_the_read)
     dreaming.abandon_run(run["run_id"], harvest=False)
 
     assert raced and real_get(run["run_id"])["status"] == "completed"
@@ -1380,9 +1381,9 @@ def test_a_live_worker_whose_start_was_unreadable_is_not_taken_for_gone(monkeypa
     import os
     real_start = dreaming._process_start
     claim = dreaming._claim_worker("synthetic-unknown-start")
-    monkeypatch.setattr(dreaming, "_process_start", lambda _pid: None)
+    patch_shared(monkeypatch, dreaming, "_process_start", lambda _pid: None)
     dreaming._fill_worker(claim, os.getpid())
-    monkeypatch.setattr(dreaming, "_process_start", real_start)
+    patch_shared(monkeypatch, dreaming, "_process_start", real_start)
     assert not dreaming._workers_gone("synthetic-unknown-start")
 
 
