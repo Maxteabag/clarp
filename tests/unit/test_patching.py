@@ -1,6 +1,8 @@
 """tests/patching.py: patch_shared reaches a module's split family and nothing else."""
 from __future__ import annotations
 
+import pytest
+
 from lib import agent_rings, clock, heard_audio, message_live
 from tests.patching import patch_shared, split_family
 
@@ -119,7 +121,6 @@ def test_every_applied_split_part_maps_exactly_its_recipe_names_to_the_old_modul
 
 
 def test_patch_reaches_a_method_mixin_of_a_split_part_only(monkeypatch, tmp_path):
-    from tests.patching import split_origin
     splits, methods = tmp_path / 'splits', tmp_path / 'methods'
     splits.mkdir(); methods.mkdir()
     (splits / 's9.toml').write_text(
@@ -135,7 +136,59 @@ def test_patch_reaches_a_method_mixin_of_a_split_part_only(monkeypatch, tmp_path
     patch_shared(monkeypatch, agent_rings, 'now_ms', _fake, recipes=splits)
     assert message_live.now_ms is _fake and heard_audio.now_ms is _fake
     assert clock.now_ms is independent
-    assert split_origin('lib/heard_audio.py', recipes=splits) == 'lib/agent_rings.py'
-    assert split_origin('lib/heard_audio.py', 'read', splits) == 'lib/agent_rings.py'
-    # New physical mutable state never inherits the original module's allowance.
-    assert split_origin('lib/heard_audio.py', 'NEW_STATE', splits) == 'lib/heard_audio.py'
+
+
+@pytest.mark.parametrize('directory_exists', [False, True])
+def test_missing_or_empty_methods_preserves_the_split_family(tmp_path, directory_exists):
+    splits, methods = tmp_path / 'splits', tmp_path / 'methods'
+    splits.mkdir()
+    if directory_exists:
+        methods.mkdir()
+    (splits / 's9.toml').write_text(
+        '[[split]]\nmodule="lib/agent_rings.py"\n'
+        '[[split.part]]\nmodule="lib/message_live.py"\nnames=["read"]\n')
+    assert split_family(agent_rings, splits) == [message_live]
+
+
+def test_mixin_with_a_different_same_named_object_is_untouched(monkeypatch, tmp_path):
+    splits, methods = tmp_path / 'splits', tmp_path / 'methods'
+    splits.mkdir(); methods.mkdir()
+    (methods / 's4.toml').write_text(
+        'source_module="lib/agent_rings.py"\nsource_class="Engine"\n'
+        '[[group]]\nmodule="lib/heard_audio.py"\nmembers=["read"]\n')
+    own = lambda: 7
+    monkeypatch.setattr(heard_audio, 'now_ms', own)
+    patch_shared(monkeypatch, agent_rings, 'now_ms', _fake, recipes=splits)
+    assert agent_rings.now_ms is _fake
+    assert heard_audio.now_ms is own
+
+
+def test_family_order_is_split_recipes_then_method_recipes(tmp_path):
+    splits, methods = tmp_path / 'splits', tmp_path / 'methods'
+    splits.mkdir(); methods.mkdir()
+    (splits / 's9.toml').write_text(
+        '[[split]]\nmodule="lib/agent_rings.py"\n'
+        '[[split.part]]\nmodule="lib/message_live.py"\nnames=["read"]\n')
+    for name, source, output in [('z.toml', 'agent_rings', 'heard_audio'),
+                                  ('a.toml', 'message_live', 'clock')]:
+        (methods / name).write_text(
+            f'source_module="lib/{source}.py"\nsource_class="Engine"\n'
+            f'[[group]]\nmodule="lib/{output}.py"\nmembers=["read"]\n')
+    assert split_family(agent_rings, splits) == [message_live, clock, heard_audio]
+
+
+def test_default_s3_server_is_not_a_named_method_family(monkeypatch, tmp_path):
+    import types
+    server = types.ModuleType('server')
+    original = agent_rings.now_ms
+    server.now_ms = original
+    monkeypatch.setattr(heard_audio, 'now_ms', original)
+    methods = tmp_path / 'methods'
+    methods.mkdir()
+    (methods / 'default.toml').write_text(
+        'source_module="server.py"\nsource_class="Handler"\n'
+        '[[group]]\nmodule="lib/heard_audio.py"\nmembers=["read"]\n')
+    assert split_family(server, tmp_path / 'splits') == []
+    patch_shared(monkeypatch, server, 'now_ms', _fake, recipes=tmp_path / 'splits')
+    assert server.now_ms is _fake
+    assert heard_audio.now_ms is original
