@@ -253,3 +253,34 @@ def test_failed_snapshot_upgrade_is_not_a_confirmed_writer(tmp_path, capsys):
     finally:
         reader.close()
         other.close()
+
+
+@pytest.mark.parametrize("raises", [False, True])
+def test_context_exit_removes_confirmed_owner_on_commit_and_rollback(tmp_path, raises):
+    connection = _tracked_connection(tmp_path / "context.sqlite")
+    try:
+        try:
+            with connection:
+                connection.execute("BEGIN IMMEDIATE")
+                if raises:
+                    raise ValueError("synthetic rollback")
+        except ValueError:
+            pass
+        assert not connection.in_transaction
+        assert id(connection) not in db._TRANSACTION_OWNERS
+    finally:
+        connection.close()
+
+
+def test_sqlite_implicit_rollback_removes_confirmed_owner(tmp_path):
+    connection = _tracked_connection(tmp_path / "implicit.sqlite")
+    connection.execute("CREATE TABLE sample(value INTEGER UNIQUE)")
+    connection.execute("INSERT INTO sample VALUES (1)")
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute("INSERT OR ROLLBACK INTO sample VALUES (1)")
+        assert not connection.in_transaction
+        assert id(connection) not in db._TRANSACTION_OWNERS
+    finally:
+        connection.close()
