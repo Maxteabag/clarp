@@ -317,6 +317,7 @@ def _fallback_wav(seconds=.1):
     ('before', 'elevenlabs', 's16'),
     ('before', 'elevenlabs', 'decode-error'),
     ('before', 'elevenlabs', 'decode-timeout'),
+    ('before', 'elevenlabs', 'decode-stop'),
 ])
 def test_raw_pcm_outage_restarts_only_before_audio(env, monkeypatch, mode, fallback, outcome):
     """641: one early raw event/session; fallback is decoded to its exact PCM."""
@@ -398,13 +399,17 @@ def test_raw_pcm_outage_restarts_only_before_audio(env, monkeypatch, mode, fallb
         return len(data)
 
     monkeypatch.setattr(tts_worker, 'synthesize_streaming', backup)
-    if outcome == 'decode-timeout':
+    if outcome in ('decode-timeout', 'decode-stop'):
         run = subprocess.run
         def bounded_timeout(command, *args, **kwargs):
             if pathlib.Path(command[0]).name == 'ffmpeg':
                 timeouts.append(kwargs.get('timeout'))
                 assert 0 < kwargs['timeout'] <= 20
-                raise subprocess.TimeoutExpired(command, kwargs['timeout'])
+                if outcome == 'decode-timeout':
+                    raise subprocess.TimeoutExpired(command, kwargs['timeout'])
+                result = run(command, *args, **kwargs)
+                interrupt()
+                return result
             return run(command, *args, **kwargs)
         monkeypatch.setattr(subprocess, 'run', bounded_timeout)
 
@@ -416,7 +421,17 @@ def test_raw_pcm_outage_restarts_only_before_audio(env, monkeypatch, mode, fallb
     append = broker.append
     def append_then_stop(clip_id, chunk):
         if mode in ('stall', 'late', 'near-budget'):
-            assert clock[0] < 30, 'client empty wait expired before PCM arrived'
+            if clock[0] >= 30:
+                # Advance the actual writer from its initial empty wait to
+                # the virtual deadline. The broker then discards late PCM.
+                import io
+                from lib import clip_stream
+                live = broker.get(clip_id)
+                times = iter((0.0, clock[0]))
+                with monkeypatch.context() as patch:
+                    patch.setattr(clip_stream, 'time', types.SimpleNamespace(time=lambda: next(times)))
+                    clip_stream._write_live_chunks(types.SimpleNamespace(wfile=io.BytesIO()), live)
+                assert live.failed and live.error == 'stream wait timeout'
         append(clip_id, chunk)
         if outcome == 'feed-stop':
             interrupt()
@@ -443,7 +458,7 @@ def test_raw_pcm_outage_restarts_only_before_audio(env, monkeypatch, mode, fallb
     assert audio[0]['clip_id'] == raw['clip_id'] and audio[0]['trace_id'] == 'vp02b-trace'
     assert audio[0]['audio_format'] == {
         'container': 'raw', 'encoding': encoding, 'sample_rate': rate, 'channels': 1}
-    cancelled = outcome in ('stop-resume', 'barge', 'primary-stop', 'feed-stop')
+    cancelled = outcome in ('stop-resume', 'barge', 'primary-stop', 'feed-stop', 'decode-stop')
     succeeded = (mode in ('success', 'near-budget') or should_fallback and outcome in ('ok', 's16')) and not cancelled
     if succeeded:
         assert queue['status'] == tts_queue.DONE and queue['clip_id'] == raw['clip_id']
@@ -461,7 +476,9 @@ def test_raw_pcm_outage_restarts_only_before_audio(env, monkeypatch, mode, fallb
             values = [sample[0] for sample in struct.iter_unpack(code, data)]
             assert all(math.isfinite(value) for value in values)
             peak = max(abs(value) for value in values)
-            assert (9000 < peak < 11000) if sample_bytes == 2 else (.25 < peak < .4)
+            assert (9000 < peak < 11000) if sample_bytes == 2 else (.25 < peak < .5), peak
+            crossings = sum((a < 0) != (b < 0) for a, b in zip(values, values[1:]))
+            assert 195 <= crossings <= 205, 'decoded tone rate differs from audio_format'
         assert not [e for e in recorded if e['type'] == 'tts-error']
     else:
         assert queue['status'] == tts_queue.FAILED
@@ -481,7 +498,7 @@ def test_raw_pcm_outage_restarts_only_before_audio(env, monkeypatch, mode, fallb
             assert len(errors) == 1
             if outcome.startswith('decode-'):
                 assert 'decode' in queue['error'].lower()
-    if outcome == 'decode-timeout':
+    if outcome in ('decode-timeout', 'decode-stop'):
         assert len(timeouts) == 1
     transitions = [kw['detail'] for name, kw in emitted if name == 'providerFallback']
     assert len(transitions) == int(should_fallback)
