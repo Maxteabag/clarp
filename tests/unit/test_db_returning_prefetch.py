@@ -24,8 +24,9 @@ def test_waited_returning_releases_writer_before_wait_sinks(tmp_path, monkeypatc
         ticks = iter([100.0, 100.01, 100.5])
         monkeypatch.setattr(db, "time", SimpleNamespace(monotonic=lambda: next(ticks, 100.5), sleep=release))
         sink_admissions = []
-        def sink(_detail, connection):
-            assert not connection.in_transaction
+        def sink(event, _detail=""):
+            assert event == "sqliteWriteWait"
+            assert not writer.in_transaction
             try:
                 contender.execute("BEGIN IMMEDIATE")
             except sqlite3.OperationalError as error:
@@ -34,7 +35,7 @@ def test_waited_returning_releases_writer_before_wait_sinks(tmp_path, monkeypatc
                 sink_admissions.append(None)
             finally:
                 contender.rollback()
-        monkeypatch.setattr(log, "sqlite_write_wait", sink)
+        monkeypatch.setattr(log, "log", sink)
         cursor = writer.execute("INSERT INTO sample VALUES(7),(8) RETURNING value")
         assert polls == [True]  # the first real admission attempt was BUSY
         assert sink_admissions == [None]
@@ -63,7 +64,10 @@ def test_returning_consumption_and_transaction_boundary(tmp_path, explicit):
         assert [entry[0] for entry in cursor.description] == ["id", "value"]
         assert cursor.rowcount == 2
         assert cursor.lastrowid == 2
+        assert list(cursor) == []
         cursor.close()
+        with pytest.raises(sqlite3.ProgrammingError):
+            cursor.fetchone()
         connection.rollback()
     finally:
         connection.close()
