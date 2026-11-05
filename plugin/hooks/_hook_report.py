@@ -15,8 +15,6 @@ import os
 import pathlib
 import time
 
-import _clarp_lib  # noqa: F401  — puts Clarp's `lib` on sys.path
-
 
 def _detail(exc: BaseException) -> dict:
     detail = {"error": type(exc).__name__}
@@ -29,6 +27,10 @@ def _detail(exc: BaseException) -> dict:
 def report(hook: str, event: str, exc: BaseException) -> None:
     detail = _detail(exc)
     try:
+        # Imported here, not at module level: _clarp_lib resolves the home
+        # directory at import, which raises in a container without one, and
+        # importing this module must never fail (agy_state is fail-open).
+        import _clarp_lib  # noqa: F401  — puts Clarp's `lib` on sys.path
         from lib.eventlog import emit
         emit(hook, event, level="error", detail=detail)
         return
@@ -36,13 +38,18 @@ def report(hook: str, event: str, exc: BaseException) -> None:
         unrecorded = type(emit_error).__name__
     try:
         from lib.paths import RuntimePaths
-        log = RuntimePaths.from_home(pathlib.Path.home()).hook_log
+        # expanduser never raises; without a home it returns "~" unchanged.
+        home = pathlib.Path(os.path.expanduser("~"))
+        if not home.is_absolute():
+            return
+        log = RuntimePaths.from_home(home).hook_log
         log.parent.mkdir(parents=True, exist_ok=True)
         with log.open("a") as f:
             f.write(f"{time.strftime('%H:%M:%S')} {hook} {os.getpid()} {event} "
                     f"{detail['error']}{' ' + detail['code'] if 'code' in detail else ''} "
                     f"(event log unavailable: {unrecorded})\n")
-    except (ImportError, OSError):
-        # Clarp is not importable or the log is not writable: nothing is left
-        # to write to, and a hook must not fail the user's turn.
+    except (ImportError, OSError, RuntimeError, ValueError):
+        # Clarp is not importable, there is no home, or the log is not
+        # writable: nothing is left to write to, and a hook must not fail the
+        # user's turn.
         return
