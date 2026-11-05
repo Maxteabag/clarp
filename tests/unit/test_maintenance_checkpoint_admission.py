@@ -87,3 +87,23 @@ def test_checkpoint_allows_writer_while_reader_stays_open_and_later_truncates(ch
             reader.execute("ROLLBACK")
         reader.close()
         writer.join(5)
+
+
+def test_checkpoint_error_restores_timeout_and_keeps_maintenance_best_effort(checkpoint_only, monkeypatch):
+    worker, reports = checkpoint_only
+    connection = db.conn()
+    connection.execute("PRAGMA busy_timeout=4321")
+    original = db._TrackedConnection.execute
+    errors = []
+
+    def fail_checkpoint(self, sql, *args, **kwargs):
+        if str(sql).upper() == "PRAGMA WAL_CHECKPOINT(TRUNCATE)":
+            raise sqlite3.OperationalError("synthetic checkpoint failure")
+        return original(self, sql, *args, **kwargs)
+
+    monkeypatch.setattr(db._TrackedConnection, "execute", fail_checkpoint)
+    monkeypatch.setattr(maintenance, "log_exception", lambda event, error: errors.append((event, type(error))))
+    worker.run_once()
+    assert errors == [("maintenanceCheckpointFail", sqlite3.OperationalError)]
+    assert connection.execute("PRAGMA busy_timeout").fetchone()[0] == 4321
+    assert not [event for event, detail in reports if event == "maintenanceCheckpoint"]
