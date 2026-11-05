@@ -21,6 +21,8 @@ import pathlib
 import pytest
 
 from lib import config, deepgram_tts, gemini_tts, google_tts, tts_mode, tts_worker
+from lib import tts_registry
+from lib import tts_service
 
 FIXTURE = pathlib.Path(__file__).resolve().parents[1] / "fixtures" / "tts_routing_goldens.json"
 PROVIDERS = ("cartesia", "elevenlabs", "gemini", "deepgram", "google")
@@ -79,9 +81,9 @@ def _run(s, monkeypatch, tmp_path):
             return 1
         return synth
 
-    monkeypatch.setattr(tts_worker, "cartesia_synthesize", fake("cartesia"))
-    monkeypatch.setattr(tts_worker, "cartesia_synthesize_raw_pcm", fake("cartesia-raw"))
-    monkeypatch.setattr(tts_worker, "synthesize_streaming", fake("elevenlabs"))
+    monkeypatch.setattr(tts_registry, "cartesia_synthesize", fake("cartesia"))
+    monkeypatch.setattr(tts_service, "cartesia_synthesize_raw_pcm", fake("cartesia-raw"))
+    monkeypatch.setattr(tts_registry, "synthesize_streaming", fake("elevenlabs"))
     monkeypatch.setattr(gemini_tts, "synthesize", fake("gemini"))
     monkeypatch.setattr(deepgram_tts, "synthesize", fake("deepgram"))
     monkeypatch.setattr(google_tts, "synthesize", fake("google"))

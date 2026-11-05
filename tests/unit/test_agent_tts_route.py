@@ -20,6 +20,7 @@ import pytest
 
 from lib import agent_rings as rings
 from lib import cartesia_tts, config, custom_tts_adapters, db, tts_engine, tts_mode, tts_worker
+from lib import tts_registry
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 
@@ -107,8 +108,8 @@ class Env:
         # Built-in providers, recorded at their module boundary (no network).
         monkeypatch.setattr(tts_engine, "synthesize_to_file", recorder("elevenlabs-direct"))
         monkeypatch.setattr(cartesia_tts, "synthesize", recorder("cartesia-direct"))
-        monkeypatch.setattr(tts_worker, "cartesia_synthesize", recorder("cartesia"))
-        monkeypatch.setattr(tts_worker, "synthesize_streaming", recorder("elevenlabs"))
+        monkeypatch.setattr(tts_registry, "cartesia_synthesize", recorder("cartesia"))
+        monkeypatch.setattr(tts_registry, "synthesize_streaming", recorder("elevenlabs"))
         _agent("a-sander", "Sander", "sander-1")
         _agent("a-theo", "Theo", "theo-97e5")
 

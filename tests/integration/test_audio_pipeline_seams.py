@@ -44,6 +44,7 @@ from lib.protocol import TurnSource          # noqa: E402
 from lib.tts_engine import FakeTTSEngine              # noqa: E402
 
 import importlib.util as _ilu                         # noqa: E402
+from lib import tts_registry
 _spec = _ilu.spec_from_file_location(
     "claude_pwa_server_for_seams", _SERVER_DIR / "server.py")
 assert _spec and _spec.loader
@@ -155,7 +156,7 @@ def test_streamable_flag_survives_worker_through_herald_to_wire(harness, monkeyp
         return 6
 
     from lib import tts_worker as _tw
-    monkeypatch.setattr(_tw, "synthesize_streaming", slow_streaming)
+    monkeypatch.setattr(tts_registry, "synthesize_streaming", slow_streaming)
 
     # Enqueue + start the worker in a thread (so we can release write_lock
     # while it's mid-stream).
@@ -215,7 +216,7 @@ def test_sidecar_is_readable_at_every_moment_the_mp3_is_visible(harness, monkeyp
         return 9
 
     from lib import tts_worker as _tw
-    monkeypatch.setattr(_tw, "synthesize_streaming", streaming_with_probe)
+    monkeypatch.setattr(tts_registry, "synthesize_streaming", streaming_with_probe)
 
     tts_queue.enqueue(
         agent_id=harness["agent_id"], text="probe",
@@ -412,7 +413,7 @@ def test_failure_path_leaves_no_partial_mp3(harness, monkeypatch):
         with out.open("wb") as f:
             f.write(b"PARTIAL"); f.flush()
         raise eleven_ws.ElevenWSError("connection reset mid-stream")
-    monkeypatch.setattr(_tw, "synthesize_streaming", boom_mid_stream)
+    monkeypatch.setattr(tts_registry, "synthesize_streaming", boom_mid_stream)
 
     tts_queue.enqueue(
         agent_id=harness["agent_id"], text="x",

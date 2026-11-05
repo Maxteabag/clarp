@@ -25,28 +25,14 @@ from . import health
 from . import tts_queue
 from .clip_delivery import ClipDelivery, ClipDeliverySession
 from .clip_delivery.chunked_file import ChunkedFileDelivery
-from .cartesia_tts import CartesiaError
-from .cartesia_tts import synthesize as cartesia_synthesize
 from .config import load as load_config
-from .eleven_ws import ElevenWSError, synthesize_streaming
 from .log import log_exception
 from .paths import RuntimePaths
-from .voice_markup import strip_emotion_tags
+from .tts_registry import _gemini_voice, _google_voice
 from . import tts_mode
 from .voice import (
     CARTESIA, DEEPGRAM, ELEVENLABS, GEMINI, GOOGLE, resolve_voice,
 )
-
-
-def cartesia_synthesize_raw_pcm(**kwargs) -> int:
-    """Lazy wrapper so importing tts_worker doesn't require websocket-client.
-
-    Tests monkeypatch this symbol directly, so keep the seam at module scope
-    while deferring the optional dependency until raw-pcm delivery is actually
-    selected.
-    """
-    from .cartesia_ws import synthesize_raw_pcm
-    return synthesize_raw_pcm(**kwargs)
 
 
 def _event_context(row: dict, agent: dict | None = None):
@@ -211,36 +197,6 @@ class _PwaStreamResult:
     clip_id: int | None = None
 
 
-def _gemini_voice(cfg, raw_voice, persona: str, agent: dict | None,
-                  route_voice: str | None, cartesia_voice: str | None) -> str | None:
-    """Gemini voice for this clip, or None when the agent has none.
-
-    A helper speaking with a contact's Cartesia voice keeps that contact's
-    Gemini voice. The default voice is only for agents moved to Gemini on
-    purpose; a contact with no voice stays silent, as it would under Cartesia.
-    """
-    return (route_voice or resolve_voice(raw_voice, GEMINI)
-            or cfg.gemini_voice_for(persona)
-            or cfg.gemini_voice_for_cartesia(cartesia_voice)
-            or (cfg.gemini_voice
-                if cfg.tts_override_for(agent).get("provider") == GEMINI else None))
-
-
-def _google_voice(raw_voice: str | None, route_voice: str | None) -> str:
-    """The agent's Google voice: its [tts.agents] google_voice, else its stored google key, else a
-    bare stored id that is a Google voice (a preview passes the voice it auditions). Only an agent
-    with no Google voice at all gets the documented default for a new choice. A saved voice off
-    the allowlist is returned as it is, so synthesis refuses it (voice_unavailable) and it is
-    never replaced by the default."""
-    from . import google_tts
-    saved = route_voice or resolve_voice(raw_voice, GOOGLE)
-    if saved:
-        return saved
-    if raw_voice and raw_voice.strip() in google_tts.VOICES:
-        return raw_voice.strip()
-    return google_tts.DEFAULT_VOICE
-
-
 def _google_collision_refusal(cfg, clip_route) -> str | None:
     """The fixed code when this clip routes to built-in Google while a legacy custom "google"
     adapter blocks it AND no explicit non-google fallback is configured; else None. With such a
@@ -286,158 +242,13 @@ def _synthesize(*, cfg, row: dict, agent: dict,
                 out_path, on_chunk, trace_id,
                 delivery_fields: dict | None = None,
                 clip_route: "tts_mode.Route | None" = None) -> int:
-    """Provider dispatch for one clip.
-
-    Cartesia (Sonic) is primary; ElevenLabs is the backup. The agent's
-    stored voice_id may carry a per-provider map (see lib.voice) — we
-    resolve the right id for each provider, falling back to the persona
-    keyed Cartesia map for agents whose voice_id predates it.
-
-    On a Cartesia failure (or a persona with no Cartesia voice / no key)
-    we transparently fall back to ElevenLabs. The exception only escapes
-    when the fallback also fails, so the caller surfaces a real outage, or
-    when the primary already sent audio to the live stream.
-    """
-    raw_voice = row["voice_id"]
-    persona = (agent or {}).get("persona", "")
-    spoken = row["text"]
-    # [laughing]-style tags are acted out by Gemini and read aloud by every
-    # other engine, so only Gemini receives them (a fallback included).
-    plain = strip_emotion_tags(spoken)
-
-    if clip_route is None:
-        clip_route = tts_mode.Route(
-            cfg.tts_provider, None, tts_mode.fallback_for(cfg, cfg.tts_provider))
-    provider = clip_route.provider
-
-    def voice_for(selected: str) -> str | None:
-        """Per-agent [tts.agents] voice for the routed provider, else stored."""
-        if selected == provider and clip_route.voice:
-            return clip_route.voice
-        return resolve_voice(raw_voice, selected)
-
-    cartesia_voice = voice_for(CARTESIA) or cfg.cartesia_voice_for(persona)
-    eleven_voice = voice_for(ELEVENLABS) or raw_voice
-    want_cartesia = (provider == CARTESIA
-                     and cartesia_voice and cfg.cartesia_key())
-    wants_raw_pcm = (delivery_fields or {}).get("delivery") == "raw-pcm"
-    if wants_raw_pcm:
-        if not want_cartesia:
-            raise CartesiaError(
-                "raw-pcm delivery requires Cartesia provider, key, and voice"
-            )
-        return cartesia_synthesize_raw_pcm(
-            text=plain,
-            voice_id=cartesia_voice,
-            out_path=out_path,
-            api_key=cfg.cartesia_key(),
-            model=cfg.cartesia_model,
-            on_chunk=on_chunk,
-            trace_id=trace_id,
-            encoding=getattr(cfg, "raw_pcm_encoding", "pcm_f32le"),
-            sample_rate=getattr(cfg, "raw_pcm_sample_rate", 44100),
-        )
-
-    # A fallback restarts the reply from the top, so it may only run while the
-    # live stream is still empty; after that it would play a second clip (VP-01).
-    fed: list[bool] = []
-    if on_chunk is not None:
-        live_feed = on_chunk
-
-        def on_chunk(index, chunk):
-            fed[:] = [True]
-            live_feed(index, chunk)
-
-    spoke: dict[str, str | None] = {}   # the voice the provider that ran actually used
-
-    def run(selected: str) -> int:
-        text = spoken if selected == GEMINI else plain
-        if selected == CARTESIA:
-            if not (cartesia_voice and cfg.cartesia_key()):
-                raise CartesiaError("Cartesia key or voice is not configured")
-            spoke["voice"] = cartesia_voice
-            return cartesia_synthesize(
-                text=text, voice_id=cartesia_voice, out_path=out_path,
-                api_key=cfg.cartesia_key(), model=cfg.cartesia_model,
-                on_chunk=on_chunk, trace_id=trace_id)
-        if selected == ELEVENLABS:
-            if not (eleven_voice and cfg.eleven_key()):
-                raise ElevenWSError("ElevenLabs key or voice is not configured")
-            spoke["voice"] = eleven_voice
-            return synthesize_streaming(
-                text=text, voice_id=eleven_voice, out_path=out_path,
-                api_key=cfg.eleven_key(), model=cfg.eleven_model,
-                speed=cfg.eleven_speed, on_chunk=on_chunk,
-                trace_id=trace_id)
-        if selected == GEMINI:
-            from .gemini_tts import GeminiTTSError, synthesize as gemini_synthesize
-            gemini_voice = _gemini_voice(
-                cfg, raw_voice, persona, agent,
-                clip_route.voice if provider == GEMINI else None, cartesia_voice)
-            if not gemini_voice:
-                raise GeminiTTSError(f"no Gemini voice configured for {persona!r}")
-            spoke["voice"] = gemini_voice
-            return gemini_synthesize(
-                text=text,
-                voice=cfg.gemini_tts_voice(gemini_voice),
-                out_path=out_path, api_key=cfg.gemini_tts_key(),
-                backend=cfg.gemini_backend,
-                model=cfg.gemini_model, on_chunk=on_chunk,
-                trace_id=trace_id)
-        if selected == DEEPGRAM:
-            from .deepgram_tts import synthesize as deepgram_synthesize
-            deepgram_voice = voice_for(DEEPGRAM) or cfg.deepgram_model
-            spoke["voice"] = deepgram_voice
-            return deepgram_synthesize(
-                text=text, voice_id=deepgram_voice, out_path=out_path,
-                api_key=cfg.deepgram_key(), on_chunk=on_chunk,
-                trace_id=trace_id)
-        if selected == GOOGLE:
-            from . import google_tts
-            # First: a legacy custom "google" adapter refuses built-in Google before any voice is
-            # interpreted or credentials are built (raises GoogleIdCollision, str = the bare code).
-            google_tts.refuse_if_collision(cfg)
-            google_voice = _google_voice(raw_voice, clip_route.voice if provider == GOOGLE else None)
-            spoke["voice"] = google_voice
-            return google_tts.synthesize(
-                text=text, voice=google_voice, out_path=out_path,
-                creds=google_tts.credentials(cfg), on_chunk=on_chunk)
-        from .custom_tts_adapters import get as custom_adapter
-        from .tts_providers import VALID_IDS, synthesize as provider_synthesize
-        manifest = custom_adapter(selected, reserved_ids=VALID_IDS)
-        if manifest is not None:
-            adapter_voice = voice_for(selected) or manifest.default_voice
-            spoke["voice"] = adapter_voice
-            return provider_synthesize(
-                selected, text=text, voice=adapter_voice,
-                out_path=out_path, on_chunk=on_chunk)
-        raise RuntimeError(f"unsupported server TTS provider: {selected}")
-
-    try:
-        written = run(provider)
-    except Exception as primary_error:
-        fallback = clip_route.fallback
-        if fallback in {"", "none", provider}:
-            raise
-        if fed:
-            _emit("tts_worker", "providerFallbackSkipped",
-                  context=_event_context(row, agent), level="warn",
-                  detail={"provider": provider, "error": str(primary_error)[:200],
-                          "fallback": fallback, "reason": "audio_streamed"})
-            raise
-        _emit("tts_worker", "providerFallback",
-              context=_event_context(row, agent), level="warn",
-              detail={"provider": provider, "error": str(primary_error)[:200],
-                      "fallback": fallback})
-        spoke.clear()
-        written = run(fallback)
-        # Provenance: the provider and voice that actually spoke, not the route's.
-        _emit("tts_worker", "spoke", context=_event_context(row, agent),
-              detail={"provider": fallback, "voice": spoke.get("voice"), "fallback_for": provider})
-        return written
-    _emit("tts_worker", "spoke", context=_event_context(row, agent),
-          detail={"provider": provider, "voice": spoke.get("voice")})
-    return written
+    """Synthesize one queued clip through the shared provider service."""
+    from .tts_provider import AudioSink
+    from .tts_service import synth
+    return synth(
+        row["text"], clip_route, AudioSink(out_path, on_chunk, trace_id, delivery_fields),
+        "queue", cfg=cfg, raw_voice=row["voice_id"], agent=agent,
+        emit=_emit, context=lambda: _event_context(row, agent))
 
 
 def _synth_pwa_via_delivery(row: dict, agent: dict,

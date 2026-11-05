@@ -18,6 +18,7 @@ sys.path.insert(0, str(_SERVER_DIR))
 from lib import agents as agents_db                 # noqa: E402
 from lib import tts_queue                            # noqa: E402
 from lib.protocol import ClipStatus, TurnSource  # noqa: E402
+from lib import tts_registry
 
 
 @pytest.fixture
@@ -53,7 +54,7 @@ def patch_eleven(monkeypatch):
         import pathlib
         pathlib.Path(out_path).write_bytes(b"\xff\xfb\x90\x00")
         return 4
-    monkeypatch.setattr(tts_worker, "synthesize_streaming", _fake_ws)
+    monkeypatch.setattr(tts_registry, "synthesize_streaming", _fake_ws)
 
 
 def test_enqueue_then_drain_lands_clip_on_disk(env, patch_eleven):
@@ -151,15 +152,15 @@ def test_cartesia_fallback_is_used_only_when_explicit(env, monkeypatch):
         cartesia_api_key="cartesia-key", eleven_api_key="eleven-key",
         cartesia_voices={"Mike": "cartesia-voice"}))
     monkeypatch.setattr(
-        tts_worker, "cartesia_synthesize",
+        tts_registry, "cartesia_synthesize",
         lambda **_kwargs: (_ for _ in ()).throw(
-            tts_worker.CartesiaError("outage")))
+            tts_registry.CartesiaError("outage")))
 
     def eleven(**kwargs):
         pathlib.Path(kwargs["out_path"]).write_bytes(b"mp3")
         return 3
 
-    monkeypatch.setattr(tts_worker, "synthesize_streaming", eleven)
+    monkeypatch.setattr(tts_registry, "synthesize_streaming", eleven)
     tts_queue.enqueue(
         agent_id=env["agent_id"], text="Fallback",
         voice_id="eleven-voice", session="claude", source=TurnSource.PWA)
@@ -236,7 +237,7 @@ def _fallback_clip(env, monkeypatch, *, primary_reads):
         pathlib.Path(out_path).write_bytes(b"ELEVEN-FULL-1ELEVEN-FULL-2")
         return 26
 
-    monkeypatch.setattr(tts_worker, "synthesize_streaming", eleven)
+    monkeypatch.setattr(tts_registry, "synthesize_streaming", eleven)
     live: list[tuple[int, bytes]] = []
     row = {"voice_id": "eleven-voice", "text": "Sure, I'll check the logs",
            "agent_id": env["agent_id"], "session": "claude"}
@@ -257,7 +258,7 @@ def test_fallback_after_audio_reached_the_stream_fails_the_clip(env, monkeypatch
     emitted = []
     monkeypatch.setattr(tts_worker, "_emit",
                         lambda _src, name, **kw: emitted.append((name, kw)))
-    with pytest.raises(tts_worker.CartesiaError):
+    with pytest.raises(tts_registry.CartesiaError):
         run()
     assert live == [(0, b"CARTESIA-PART-1")]
     assert not fallback_ran

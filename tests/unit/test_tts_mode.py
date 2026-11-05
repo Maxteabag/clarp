@@ -17,6 +17,7 @@ sys.path.insert(0, str(_SERVER_DIR))
 from lib import agents as agents_db                  # noqa: E402
 from lib import tts_queue                             # noqa: E402
 from lib.protocol import TurnSource                   # noqa: E402
+from lib import tts_registry
 
 
 @pytest.fixture
@@ -51,7 +52,7 @@ def providers(monkeypatch):
         return synth
 
     from lib import gemini_tts, tts_worker
-    monkeypatch.setattr(tts_worker, "cartesia_synthesize", fake("cartesia"))
+    monkeypatch.setattr(tts_registry, "cartesia_synthesize", fake("cartesia"))
     monkeypatch.setattr(gemini_tts, "synthesize", fake("gemini"))
     return calls
 
