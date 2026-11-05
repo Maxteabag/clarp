@@ -82,7 +82,8 @@ BASELINE: dict[str, int] = {
     'lib/transcript_streamer.py': 1,
     'lib/transcript_watcher.py': 2,
     'lib/tts_engine.py': 3,
-    'lib/tts_worker.py': 2,
+    'lib/tts_service.py': 1,  # S7: existing worker._emit moved here as emit_event.
+    'lib/tts_worker.py': 1,
     'lib/turn_dispatch.py': 7,
     'lib/turn_lifecycle.py': 1,
     'lib/turn_slots.py': 2,
