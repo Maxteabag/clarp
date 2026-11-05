@@ -81,7 +81,7 @@ _STATUS_SCOPE: ContextVar[_ScopedRuntimeStatus | None] = ContextVar(
 
 @contextmanager
 def runtime_status_scope(*, timeout: float):
-    """Pin snapshot reads, with one extra bounded read for max_age=0 repairs.
+    """Pin snapshot reads, with one extra bounded read for the first repair.
 
     No shared-cache lock is taken: another caller's default 10 s RPC must
     not consume the snapshot's budget. Other threads and calls after exit
@@ -137,6 +137,20 @@ def runtime_status(*, max_age: float | None = None) -> dict:
         if error is not None:
             raise error
         return result if isinstance(result, dict) else {}
+
+
+def runtime_status_for_repair() -> dict | None:
+    """Fresh ownership after this candidate's checks, or unknown (None).
+
+    A snapshot permits only one fresh RPC. Its result can authorize repair
+    only for the first candidate: later binding checks happen after that
+    sample and may race a new admission, so later candidates stay owned.
+    Outside a snapshot every candidate keeps its own fresh read.
+    """
+    scope = _STATUS_SCOPE.get()
+    if scope is not None and True in scope.samples:
+        return None
+    return runtime_status(max_age=0)
 
 
 def peek_runtime_status(*, max_age: float) -> tuple[str, dict | None, int]:

@@ -104,9 +104,11 @@ def _runtime_owns_now(agent_id: str) -> bool:
     if getattr(backends, "_RUNTIME_CLIENT", None) is None:
         return False   # in process, has_live_work read the slot table itself
     try:
-        status = backends.runtime_status(max_age=0)
+        status = backends.runtime_status_for_repair()
     except Exception:  # noqa: BLE001 - runtime_status logs the outage
         return True
+    if status is None:
+        return True  # this build already spent its fresh read on another candidate
     return (agent_id in (status.get("active") or {})
             or agent_id in (status.get("spawning") or ())
             or agent_id in (status.get("admitting") or ())
