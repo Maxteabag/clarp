@@ -609,89 +609,9 @@ class RuntimeRPCServer(socketserver.ThreadingMixIn,
                 )
             return {"ok": True, "result": result}
         if method == "begin_stop":
-            from . import backends, turn_dispatch, turn_queue
-            agent_id = str(params.get("agent_id") or "")
-            backend = str(params.get("backend") or "")
-            if not agent_id:
-                return {"ok": False, "status": 400,
-                        "error": "agent_id is required"}
-            # The Host's Stop. Unless it says a verified agent stopped this one,
-            # it is the user's: its pause moves the user stop generation and it
-            # fences the agent's pending user receipts.
-            user_stop = params.get("fence_user_receipts", True) is not False
-            try:
-                snapshot, dropped, queue_was_paused = turn_dispatch.begin_stop(
-                    agent_id, user_stop=user_stop)
-            except Exception as exc:
-                # Its barrier is already rolled back (QUEUE-N1); the Stop fails.
-                from .log import log_exception
-                log_exception("runtimeStopBeginFail", exc, detail=agent_id)
-                self._handoff_after_failed_stop(agent_id)
-                return {"ok": False, "status": 503, "error": str(exc)}
-            if user_stop:
-                try:
-                    turn_dispatch.fence_user_stop(agent_id)
-                except Exception as exc:
-                    # Roll back as a failed interrupt does: a barrier left
-                    # behind holds every later send (QUEUE-N1).
-                    turn_dispatch.restore_stop_state(agent_id, snapshot)
-                    try:
-                        turn_queue.set_paused(agent_id, queue_was_paused)
-                    except Exception as restore_exc:  # noqa: BLE001
-                        from .log import log_exception
-                        log_exception("runtimeStopRollbackFail", restore_exc,
-                                      detail=agent_id)
-                    self._handoff_after_failed_stop(agent_id)
-                    return {"ok": False, "status": 503, "error": str(exc)}
-            try:
-                terminated = int(backends.interrupt(backend, agent_id) or 0)
-            except Exception as exc:
-                turn_dispatch.restore_stop_state(agent_id, snapshot)
-                turn_queue.set_paused(agent_id, queue_was_paused)
-                return {"ok": False, "status": 502, "error": str(exc)}
-            if (bool(params.get("strict")) and snapshot.get("trace_id")
-                    and terminated <= 0 and not snapshot.get("account_recovery_parked")):
-                turn_dispatch.restore_stop_state(agent_id, snapshot)
-                turn_queue.set_paused(agent_id, queue_was_paused)
-                return {"ok": False, "status": 502,
-                        "error": "backend did not confirm interruption"}
-            lease_id = ""
-            if bool(params.get("hold", True)):
-                lease_id = f"stop-{uuid.uuid4()}"
-                with self._stop_lease_lock:
-                    self._stop_leases[lease_id] = (agent_id, snapshot)
-                timer = threading.Timer(
-                    self.stop_lease_timeout,
-                    self._expire_stop_lease,
-                    args=(lease_id,),
-                )
-                timer.daemon = True
-                timer.start()
-            else:
-                turn_dispatch.complete_stop(
-                    self.dispatch_service.ctx, agent_id, snapshot, set(),
-                    backend_registry=self.dispatch_service.backends)
-            return {"ok": True, "result": {
-                "lease_id": lease_id,
-                "trace_id": str(snapshot.get("trace_id") or ""),
-                "terminated": terminated,
-                "dropped": dropped,
-            }}
+            return self._begin_stop_request(params)
         if method == "finish_stop":
-            lease_id = str(params.get("lease_id") or "")
-            with self._stop_lease_lock:
-                lease = self._stop_leases.pop(lease_id, None)
-            if lease is None:
-                return {"ok": False, "status": 404,
-                        "error": "runtime stop lease not found"}
-            from . import turn_dispatch
-            agent_id, snapshot = lease
-            turn_dispatch.complete_stop(
-                self.dispatch_service.ctx, agent_id, snapshot,
-                {str(item) for item in (
-                    params.get("cancelled_trace_ids") or [])},
-                backend_registry=self.dispatch_service.backends)
-            return {"ok": True, "result": True}
+            return self._finish_stop_request(params)
         if method == "release_leaked_slots":
             agent_id = str(params.get("agent_id") or "")
             if not agent_id:
@@ -730,27 +650,7 @@ class RuntimeRPCServer(socketserver.ThreadingMixIn,
             agents_db.soft_delete(agent_id)
             return {"ok": True, "result": terminated}
         if method == "goal":
-            from . import agents as agents_db
-            from . import backends
-            agent_id = str(params.get("agent_id") or "")
-            agent = agents_db.get_by_agent_id(agent_id)
-            if not agent:
-                return {"ok": False, "status": 404, "error": "no such agent"}
-            try:
-                result = backends.goal(
-                    str(agent.get("backend") or ""), agent_id,
-                    str(params.get("action") or ""),
-                    objective=str(params.get("objective") or ""),
-                    stream=self.dispatch_service.ctx.stream)
-            except backends.GoalUnsupported as exc:
-                return {"ok": False, "status": 501, "error": str(exc)}
-            except ValueError as exc:
-                return {"ok": False, "status": 400, "error": str(exc)}
-            except Exception as exc:  # noqa: BLE001 - the app-server answer is the message
-                from .log import log_exception
-                log_exception("runtimeGoalFail", exc, detail=agent_id)
-                return {"ok": False, "status": 502, "error": str(exc)}
-            return {"ok": True, "result": result}
+            return self._goal_request(params)
         if method == "compact":
             from . import compaction
             session = str(params.get("session") or "").strip()
@@ -763,30 +663,142 @@ class RuntimeRPCServer(socketserver.ThreadingMixIn,
                 str(params.get("queue_id") or ""))
             return {"ok": True, "result": dataclasses.asdict(result)}
         if method == "dispatch":
-            from .turn_dispatch import DispatchCommand
-            try:
-                command = DispatchCommand.from_wire(params)
-            except ValueError as exc:
-                return {"ok": False, "status": 400, "error": str(exc)}
-            # This side owns turns: the command is admitted here, once.
-            submit = getattr(self.dispatch_service, "submit", None)
-            try:
-                result = (submit(command) if submit is not None
-                          else self.dispatch_service.dispatch(**command.as_kwargs()))
-            except Exception as exc:
-                from .turn_dispatch import DispatchError
-                if isinstance(exc, DispatchError):
-                    return {"ok": False, "status": exc.status,
-                            "error": str(exc)}
-                raise
-            payload = dataclasses.asdict(result)
-            if payload.get("delivery") is not None:
-                # F4 E2-S1: the receipt's writer reports who it is in the SAME
-                # result, so the Host never binds S1 to a cached observation.
-                payload["delivery_runtime"] = self._delivery_identity()
-            return {"ok": True, "result": payload}
+            return self._submit_dispatch_request(params)
         return {"ok": False, "status": 404,
                 "error": f"unknown runtime method: {method}"}
+
+    def _begin_stop_request(self, params: dict[str, Any]) -> dict:
+        from . import backends, turn_dispatch, turn_queue
+        agent_id = str(params.get("agent_id") or "")
+        backend = str(params.get("backend") or "")
+        if not agent_id:
+            return {"ok": False, "status": 400,
+                    "error": "agent_id is required"}
+        # The Host's Stop. Unless it says a verified agent stopped this one,
+        # it is the user's: its pause moves the user stop generation and it
+        # fences the agent's pending user receipts.
+        user_stop = params.get("fence_user_receipts", True) is not False
+        try:
+            snapshot, dropped, queue_was_paused = turn_dispatch.begin_stop(
+                agent_id, user_stop=user_stop)
+        except Exception as exc:
+            # Its barrier is already rolled back (QUEUE-N1); the Stop fails.
+            from .log import log_exception
+            log_exception("runtimeStopBeginFail", exc, detail=agent_id)
+            self._handoff_after_failed_stop(agent_id)
+            return {"ok": False, "status": 503, "error": str(exc)}
+        if user_stop:
+            try:
+                turn_dispatch.fence_user_stop(agent_id)
+            except Exception as exc:
+                # Roll back as a failed interrupt does: a barrier left
+                # behind holds every later send (QUEUE-N1).
+                turn_dispatch.restore_stop_state(agent_id, snapshot)
+                try:
+                    turn_queue.set_paused(agent_id, queue_was_paused)
+                except Exception as restore_exc:  # noqa: BLE001
+                    from .log import log_exception
+                    log_exception("runtimeStopRollbackFail", restore_exc,
+                                  detail=agent_id)
+                self._handoff_after_failed_stop(agent_id)
+                return {"ok": False, "status": 503, "error": str(exc)}
+        try:
+            terminated = int(backends.interrupt(backend, agent_id) or 0)
+        except Exception as exc:
+            turn_dispatch.restore_stop_state(agent_id, snapshot)
+            turn_queue.set_paused(agent_id, queue_was_paused)
+            return {"ok": False, "status": 502, "error": str(exc)}
+        if (bool(params.get("strict")) and snapshot.get("trace_id")
+                and terminated <= 0 and not snapshot.get("account_recovery_parked")):
+            turn_dispatch.restore_stop_state(agent_id, snapshot)
+            turn_queue.set_paused(agent_id, queue_was_paused)
+            return {"ok": False, "status": 502,
+                    "error": "backend did not confirm interruption"}
+        lease_id = ""
+        if bool(params.get("hold", True)):
+            lease_id = f"stop-{uuid.uuid4()}"
+            with self._stop_lease_lock:
+                self._stop_leases[lease_id] = (agent_id, snapshot)
+            timer = threading.Timer(
+                self.stop_lease_timeout,
+                self._expire_stop_lease,
+                args=(lease_id,),
+            )
+            timer.daemon = True
+            timer.start()
+        else:
+            turn_dispatch.complete_stop(
+                self.dispatch_service.ctx, agent_id, snapshot, set(),
+                backend_registry=self.dispatch_service.backends)
+        return {"ok": True, "result": {
+            "lease_id": lease_id,
+            "trace_id": str(snapshot.get("trace_id") or ""),
+            "terminated": terminated,
+            "dropped": dropped,
+        }}
+
+    def _goal_request(self, params: dict[str, Any]) -> dict:
+        from . import agents as agents_db
+        from . import backends
+        agent_id = str(params.get("agent_id") or "")
+        agent = agents_db.get_by_agent_id(agent_id)
+        if not agent:
+            return {"ok": False, "status": 404, "error": "no such agent"}
+        try:
+            result = backends.goal(
+                str(agent.get("backend") or ""), agent_id,
+                str(params.get("action") or ""),
+                objective=str(params.get("objective") or ""),
+                stream=self.dispatch_service.ctx.stream)
+        except backends.GoalUnsupported as exc:
+            return {"ok": False, "status": 501, "error": str(exc)}
+        except ValueError as exc:
+            return {"ok": False, "status": 400, "error": str(exc)}
+        except Exception as exc:  # noqa: BLE001 - the app-server answer is the message
+            from .log import log_exception
+            log_exception("runtimeGoalFail", exc, detail=agent_id)
+            return {"ok": False, "status": 502, "error": str(exc)}
+        return {"ok": True, "result": result}
+
+    def _submit_dispatch_request(self, params: dict[str, Any]) -> dict:
+        from .turn_dispatch import DispatchCommand
+        try:
+            command = DispatchCommand.from_wire(params)
+        except ValueError as exc:
+            return {"ok": False, "status": 400, "error": str(exc)}
+        # This side owns turns: the command is admitted here, once.
+        submit = getattr(self.dispatch_service, "submit", None)
+        try:
+            result = (submit(command) if submit is not None
+                      else self.dispatch_service.dispatch(**command.as_kwargs()))
+        except Exception as exc:
+            from .turn_dispatch import DispatchError
+            if isinstance(exc, DispatchError):
+                return {"ok": False, "status": exc.status,
+                        "error": str(exc)}
+            raise
+        payload = dataclasses.asdict(result)
+        if payload.get("delivery") is not None:
+            # F4 E2-S1: the receipt's writer reports who it is in the SAME
+            # result, so the Host never binds S1 to a cached observation.
+            payload["delivery_runtime"] = self._delivery_identity()
+        return {"ok": True, "result": payload}
+
+    def _finish_stop_request(self, params: dict[str, Any]) -> dict:
+        lease_id = str(params.get("lease_id") or "")
+        with self._stop_lease_lock:
+            lease = self._stop_leases.pop(lease_id, None)
+        if lease is None:
+            return {"ok": False, "status": 404,
+                    "error": "runtime stop lease not found"}
+        from . import turn_dispatch
+        agent_id, snapshot = lease
+        turn_dispatch.complete_stop(
+            self.dispatch_service.ctx, agent_id, snapshot,
+            {str(item) for item in (
+                params.get("cancelled_trace_ids") or [])},
+            backend_registry=self.dispatch_service.backends)
+        return {"ok": True, "result": True}
 
     def _delivery_identity(self) -> dict[str, Any]:
         return {"release_id": self.release_id, "instance": self.instance,
