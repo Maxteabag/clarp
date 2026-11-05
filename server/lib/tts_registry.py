@@ -155,3 +155,74 @@ class ConfiguredProvider:
                 selected, text=text, voice=adapter_voice,
                 out_path=out_path, on_chunk=on_chunk)
         raise RuntimeError(f"unsupported server TTS provider: {selected}")
+
+
+class _ElevenPreviewProvider:
+    """The voice catalog's existing preview model/speed and WS transport."""
+    id = ELEVENLABS
+
+    def __init__(self, cfg, voice):
+        self.cfg, self.voice = cfg, voice
+
+    @property
+    def available(self):
+        return bool(self.voice and self.cfg.eleven_key())
+
+    def synthesize(self, text, sink):
+        from .voice_catalog import ELEVEN_PREVIEW_MODEL, ELEVEN_PREVIEW_SPEED
+        return synthesize_streaming(
+            text=text, voice_id=self.voice, out_path=sink.out_path,
+            api_key=self.cfg.eleven_key(), model=ELEVEN_PREVIEW_MODEL,
+            speed=ELEVEN_PREVIEW_SPEED)
+
+
+class _AdapterPreviewProvider:
+    """Custom previews keep their preview operation; generic providers keep synthesis."""
+    def __init__(self, provider, voice, manifest):
+        self.id, self.voice, self.manifest = provider, voice, manifest
+
+    @property
+    def available(self):
+        return True  # the route's catalog has already admitted this requested voice
+
+    def synthesize(self, text, sink):
+        if self.manifest is not None:
+            from .custom_tts_adapters import preview
+            return preview(self.manifest, text=text, voice=self.voice, out_path=sink.out_path)
+        from .tts_providers import synthesize
+        return synthesize(self.id, text=text, voice=self.voice, out_path=sink.out_path)
+
+
+class _PreviewPrimary:
+    """Track cache ownership from synthesis success, independent of telemetry."""
+    def __init__(self, delegate):
+        self.delegate = delegate
+        self.id = delegate.id
+        self.succeeded = False
+
+    @property
+    def voice(self):
+        return self.delegate.voice
+
+    @property
+    def available(self):
+        return self.delegate.available
+
+    def synthesize(self, text, sink):
+        written = self.delegate.synthesize(text, sink)
+        self.succeeded = True
+        return written
+
+
+def preview_registry(cfg, provider, voice, agent, route, *, manifest=None):
+    """Pin the auditioned voice and retain each primary's existing preview options."""
+    registry = ProviderRegistry(cfg, voice, agent, route)
+    if provider == ELEVENLABS:
+        primary = _ElevenPreviewProvider(cfg, voice)
+    elif provider not in {CARTESIA, GEMINI, DEEPGRAM, GOOGLE}:
+        primary = _AdapterPreviewProvider(provider, voice, manifest)
+    else:
+        primary = registry.get(provider)
+    primary = _PreviewPrimary(primary)
+    registry.providers[provider] = primary
+    return registry, primary
