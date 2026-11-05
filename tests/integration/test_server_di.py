@@ -130,9 +130,15 @@ def _running_context_server(fake_ctx):
     srv.server_close()
 
 
+# How long a test client waits for the in-process Host. Requests here answer in
+# milliseconds alone, but under a loaded parallel run a /log page took over 2 s of
+# real work (G1 flakes: bootstrap pages under gate exhaustion, 3 and 5 Nov; the
+# signed notification avatar, 4 Nov). A hung handler still fails, just later.
+CLIENT_TIMEOUT_S = 10
+
 def _get(url, **kw):
     req = urllib.request.Request(url, **kw)
-    with urllib.request.urlopen(req, timeout=2) as r:
+    with urllib.request.urlopen(req, timeout=CLIENT_TIMEOUT_S) as r:
         return r.status, r.read()
 
 
@@ -160,7 +166,7 @@ def _post(url, body: dict):
     req = urllib.request.Request(
         url, data=json.dumps(body).encode(),
         headers={"Content-Type": "application/json"}, method="POST")
-    with urllib.request.urlopen(req, timeout=2) as r:
+    with urllib.request.urlopen(req, timeout=CLIENT_TIMEOUT_S) as r:
         return r.status, r.read()
 
 
@@ -168,7 +174,7 @@ def _post_with_headers(url, body: dict, headers: dict):
     req = urllib.request.Request(
         url, data=json.dumps(body).encode(),
         headers={"Content-Type": "application/json", **headers}, method="POST")
-    with urllib.request.urlopen(req, timeout=2) as r:
+    with urllib.request.urlopen(req, timeout=CLIENT_TIMEOUT_S) as r:
         return r.status, r.read()
 
 
@@ -478,7 +484,7 @@ def _delete_status(url, body: bytes | None = None):
     req = urllib.request.Request(url, data=body, method="DELETE",
                                  headers={"Content-Type": "application/json"} if body else {})
     try:
-        with urllib.request.urlopen(req, timeout=2) as r:
+        with urllib.request.urlopen(req, timeout=CLIENT_TIMEOUT_S) as r:
             return r.status, json.loads(r.read())
     except urllib.error.HTTPError as e:
         return e.code, json.loads(e.read())
@@ -600,20 +606,20 @@ def _put(url, body: dict):
     req = urllib.request.Request(
         url, data=json.dumps(body).encode(),
         headers={"Content-Type": "application/json"}, method="PUT")
-    with urllib.request.urlopen(req, timeout=2) as r:
+    with urllib.request.urlopen(req, timeout=CLIENT_TIMEOUT_S) as r:
         return r.status, r.read()
 
 
 def _delete(url):
     req = urllib.request.Request(url, method="DELETE")
-    with urllib.request.urlopen(req, timeout=2) as r:
+    with urllib.request.urlopen(req, timeout=CLIENT_TIMEOUT_S) as r:
         return r.status, r.read()
 
 
 def _post_raw(url, body: bytes, headers: dict):
     req = urllib.request.Request(
         url, data=body, headers=headers, method="POST")
-    with urllib.request.urlopen(req, timeout=2) as r:
+    with urllib.request.urlopen(req, timeout=CLIENT_TIMEOUT_S) as r:
         return r.status, r.read()
 
 
@@ -634,7 +640,7 @@ def _post_truncated_raw(url: str, body: bytes, advertised_length: int,
         + "\r\n"
     ).encode()
     with socket.create_connection(
-        (parsed.hostname, parsed.port), timeout=2,
+        (parsed.hostname, parsed.port), timeout=CLIENT_TIMEOUT_S,
     ) as client:
         client.sendall(head + body)
         client.shutdown(socket.SHUT_WR)
@@ -690,11 +696,11 @@ def test_host_file_browsing_requires_full_device_scope(
         f"{base}{endpoint}?{urlencode(query)}", headers=headers)
     if scope == "limited":
         with pytest.raises(urllib.error.HTTPError) as error:
-            urllib.request.urlopen(request, timeout=2)
+            urllib.request.urlopen(request, timeout=CLIENT_TIMEOUT_S)
         assert error.value.code == 403
         assert b"host secret" not in error.value.read()
     else:
-        with urllib.request.urlopen(request, timeout=2) as response:
+        with urllib.request.urlopen(request, timeout=CLIENT_TIMEOUT_S) as response:
             payload = json.load(response)
         if endpoint == "/agent-file":
             assert payload["content"] == "host secret"
@@ -750,7 +756,7 @@ def test_one_time_pairing_issues_revocable_device_credential(fake_ctx):
                      "Authorization": f"Bearer {token}"},
             method="POST")
         with pytest.raises(urllib.error.HTTPError) as limited:
-            urllib.request.urlopen(request, timeout=2)
+            urllib.request.urlopen(request, timeout=CLIENT_TIMEOUT_S)
         assert limited.value.code == 403
 
         admin_headers = {"Authorization": "Bearer administrator-token"}
@@ -1650,7 +1656,7 @@ def test_location_rejects_out_of_range_coordinates(running_server):
         method="POST",
     )
     with pytest.raises(urllib.error.HTTPError) as exc:
-        urllib.request.urlopen(req, timeout=2)
+        urllib.request.urlopen(req, timeout=CLIENT_TIMEOUT_S)
     assert exc.value.code == 400
 
 
@@ -1666,7 +1672,7 @@ def test_auth_accepts_cookie_for_headerless_transports(fake_ctx):
             base + "/agents/snapshot",
             headers={"Cookie": "claude_pwa_token=secret-token"},
         )
-        with urllib.request.urlopen(req, timeout=2) as r:
+        with urllib.request.urlopen(req, timeout=CLIENT_TIMEOUT_S) as r:
             assert r.status == 200
     finally:
         srv.shutdown()
@@ -1681,7 +1687,7 @@ def test_large_json_responses_are_gzipped_when_requested(running_server):
         base + "/agents/snapshot",
         headers={"Accept-Encoding": "gzip"},
     )
-    with urllib.request.urlopen(req, timeout=2) as response:
+    with urllib.request.urlopen(req, timeout=CLIENT_TIMEOUT_S) as response:
         encoded = response.read()
         assert response.headers["Content-Encoding"] == "gzip"
     assert json.loads(gzip.decompress(encoded))["agents"]
@@ -2403,7 +2409,7 @@ def test_post_transcribe_uses_stub_stt(running_server):
         base + "/transcribe",
         data=b"\x00" * 100,
         headers={"Content-Type": "audio/webm"}, method="POST")
-    with urllib.request.urlopen(req, timeout=2) as r:
+    with urllib.request.urlopen(req, timeout=CLIENT_TIMEOUT_S) as r:
         body = json.loads(r.read())
     # Response now also carries a per-turn trace_id; check fixed fields only.
     assert body["text"] == "hello there"
@@ -2577,7 +2583,7 @@ def test_new_transcription_prunes_abandoned_results_after_retention(running_serv
 
 def test_transcription_capabilities_advertise_server_default(running_server):
     base, _ctx, _srv = running_server
-    with urllib.request.urlopen(base + "/transcription-capabilities", timeout=2) as response:
+    with urllib.request.urlopen(base + "/transcription-capabilities", timeout=CLIENT_TIMEOUT_S) as response:
         body = json.loads(response.read())
     assert body["available"] is True
     assert body["default_model"] == "server-default"
@@ -2591,9 +2597,9 @@ def test_disabled_transcription_keeps_server_health_ready(running_server, monkey
     monkeypatch.setattr(transcription_models, "catalog_status", lambda: [])
     monkeypatch.setattr(stt_module, "installed_transcription_models", lambda: [])
     ctx.replace_service("stt", DisabledSTT())
-    with urllib.request.urlopen(base + "/diagnostics/health", timeout=2) as response:
+    with urllib.request.urlopen(base + "/diagnostics/health", timeout=CLIENT_TIMEOUT_S) as response:
         health_body = json.loads(response.read())
-    with urllib.request.urlopen(base + "/transcription-capabilities", timeout=2) as response:
+    with urllib.request.urlopen(base + "/transcription-capabilities", timeout=CLIENT_TIMEOUT_S) as response:
         capability_body = json.loads(response.read())
     assert health_body["ready"] is True
     assert health_body["checks"]["stt_ready"] is True
@@ -3653,7 +3659,7 @@ def test_404_for_unknown_path(running_server):
     base, _ctx, _srv = running_server
     req = urllib.request.Request(base + "/nope")
     with pytest.raises(urllib.error.HTTPError) as excinfo:
-        urllib.request.urlopen(req, timeout=2).read()
+        urllib.request.urlopen(req, timeout=CLIENT_TIMEOUT_S).read()
     assert excinfo.value.code == 404
 
 
@@ -3949,11 +3955,11 @@ def test_device_http_auth_survives_database_write_contention(
     writer = sqlite3.connect(str(db.DB_PATH), isolation_level=None)
     try:
         writer.execute("BEGIN IMMEDIATE")
-        with urllib.request.urlopen(request(device["token"]), timeout=2) as response:
+        with urllib.request.urlopen(request(device["token"]), timeout=CLIENT_TIMEOUT_S) as response:
             assert response.status == 200
             assert isinstance(json.load(response), dict)
         with pytest.raises(urllib.error.HTTPError) as error:
-            urllib.request.urlopen(request("cld_" + "invalid" * 8), timeout=2)
+            urllib.request.urlopen(request("cld_" + "invalid" * 8), timeout=CLIENT_TIMEOUT_S)
         assert error.value.code == 401
         assert db.conn().execute(
             "SELECT last_seen_at FROM paired_devices WHERE device_id = ?",
@@ -3964,7 +3970,7 @@ def test_device_http_auth_survives_database_write_contention(
 
     assert device_pairing.revoke(device["device_id"])
     with pytest.raises(urllib.error.HTTPError) as error:
-        urllib.request.urlopen(request(device["token"]), timeout=2)
+        urllib.request.urlopen(request(device["token"]), timeout=CLIENT_TIMEOUT_S)
     assert error.value.code == 401
 
 
