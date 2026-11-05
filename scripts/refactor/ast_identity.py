@@ -363,6 +363,11 @@ def global_reads(member: ast.stmt) -> set[str]:
             found.add(sym.get_name())
     for child in table.get_children():
         visit(child)
+    # Python 3.14 lists a synthetic __conditional_annotations__ for an
+    # annotated assignment. Drop it only when the source never names it, so
+    # a real read of a name spelled that way still counts.
+    if not any(isinstance(n, ast.Name) and n.id == "__conditional_annotations__" for n in ast.walk(member)):
+        found.discard("__conditional_annotations__")
     return found
 
 

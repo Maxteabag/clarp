@@ -15,6 +15,8 @@ import re
 
 import pytest
 
+from tests.patching import logical_split_trees
+
 ROOT = pathlib.Path(__file__).resolve().parents[2] / "server"
 _WRITE = re.compile(
     r"\b(?:INSERT(?:\s+OR\s+\w+)?\s+INTO|REPLACE\s+INTO|UPDATE|DELETE\s+FROM)\s+([a-z_][a-z0-9_]*)\b")
@@ -88,12 +90,12 @@ def writers() -> dict[str, set[str]]:
         rel = path.relative_to(ROOT).as_posix()
         if "/tests/" in rel:
             continue
-        tree = ast.parse(path.read_text(), filename=str(path))
-        for text in _sql_strings(tree):
-            for match in _WRITE.finditer(text):
-                table = match.group(1)
-                if table not in _NOT_TABLES:
-                    found[table].add(rel)
+        for origin, tree in logical_split_trees(rel, ast.parse(path.read_text(), filename=str(path))):
+            for text in _sql_strings(tree):
+                for match in _WRITE.finditer(text):
+                    table = match.group(1)
+                    if table not in _NOT_TABLES:
+                        found[table].add(origin)
     return found
 
 
@@ -246,9 +248,10 @@ def status_writers() -> dict[tuple[str, str], set[str]]:
         rel = path.relative_to(ROOT).as_posix()
         if "/tests/" in rel:
             continue
-        for text in _sql_texts(ast.parse(path.read_text(), filename=str(path))):
-            for key in status_writes(text, by_table):
-                found[key].add(rel)
+        for origin, tree in logical_split_trees(rel, ast.parse(path.read_text(), filename=str(path))):
+            for text in _sql_texts(tree):
+                for key in status_writes(text, by_table):
+                    found[key].add(origin)
     return found
 
 
@@ -316,3 +319,72 @@ def test_status_writer_allowlist_entries_are_still_real():
     from test_lifecycle_guards import lifecycle_owners
     stale = stale_status_writers(status_writers(), lifecycle_owners(), STATUS_WRITERS)
     assert not stale, f"remove stale STATUS_WRITERS entries: {stale}"
+
+
+@pytest.mark.parametrize("split", [False, True])
+def test_writer_guards_survive_a_split_and_still_reject_violations(tmp_path, monkeypatch, split):
+    from tests import patching
+    import test_lifecycle_guards as lifecycle_guards
+    root = tmp_path / "server"
+    (root / "lib").mkdir(parents=True)
+    recipes = tmp_path / "splits"
+    recipes.mkdir()
+    (recipes / "store.toml").write_text(
+        '[[split]]\nname="store"\nmodule="lib/store.py"\n'
+        '[[split.part]]\nmodule="lib/store_part.py"\nnames=["write"]\n')
+    monkeypatch.setattr(patching, "_RECIPES", recipes)
+    monkeypatch.setitem(globals(), "ROOT", root)
+    monkeypatch.setitem(globals(), "OWNERS", {"things": "lib/store.py", "forbidden": "lib/other.py"})
+    monkeypatch.setitem(globals(), "ALLOWED", {})
+    monkeypatch.setitem(globals(), "STATUS_WRITERS", {("things", "status"): {"lib/store.py"}})
+    monkeypatch.setattr(lifecycle_guards, "status_columns", lambda: [("things", "status"), ("forbidden", "status")])
+    monkeypatch.setattr(lifecycle_guards, "lifecycle_owners", lambda: {})
+    owner = root / "lib/store.py"
+    source = root / "lib/store_part.py" if split else owner
+    if split:
+        owner.write_text("from .store_part import write\n")
+    good = "def write(conn):\n    conn.execute(\"UPDATE things SET status='done'\")\n"
+    source.write_text(good)
+    status_writers.cache_clear()
+    try:
+        test_every_table_has_one_writer_or_an_allowed_reason()
+        test_status_columns_are_written_only_through_their_lifecycle()
+        test_status_writer_allowlist_entries_are_still_real()
+        source.write_text(good + "    conn.execute(\"UPDATE forbidden SET status='done'\")\n")
+        status_writers.cache_clear()
+        with pytest.raises(AssertionError, match="forbidden"):
+            test_every_table_has_one_writer_or_an_allowed_reason()
+        with pytest.raises(AssertionError, match="forbidden.status"):
+            test_status_columns_are_written_only_through_their_lifecycle()
+        if split:
+            source.write_text(good + "def unlisted(conn):\n    conn.execute(\"UPDATE things SET status='done'\")\n")
+            status_writers.cache_clear()
+            with pytest.raises(AssertionError, match="lib/store_part.py"):
+                test_every_table_has_one_writer_or_an_allowed_reason()
+            with pytest.raises(AssertionError, match="lib/store_part.py"):
+                test_status_columns_are_written_only_through_their_lifecycle()
+    finally:
+        status_writers.cache_clear()
+
+
+def test_a_moved_sql_constant_counts_as_its_old_module_and_an_unlisted_writer_stays_physical(tmp_path):
+    # Review B on cut 1c (P2): a constant moves with the functions that use
+    # it, so a recipe-listed constant's SQL is the old module's; a new,
+    # unlisted writer in the same part keeps the part's own path, and the
+    # generated docstring is no SQL source.
+    (tmp_path / "s9.toml").write_text(
+        '[[split]]\nname = "x"\nmodule = "lib/old.py"\n'
+        '[[split.part]]\nmodule = "lib/old_part.py"\nnames = ["moved_writer", "MOVED_SQL"]\n')
+    tree = ast.parse(
+        '"""Moved out of lib/old.py: UPDATE dream_runs SET status = ?"""\n'
+        'MOVED_SQL = "UPDATE dream_runs SET status = ? WHERE id = ?"\n'
+        'def moved_writer(con):\n    con.execute("DELETE FROM dream_runs WHERE id = ?")\n'
+        'def unlisted_new_writer(con):\n    con.execute("UPDATE dream_runs SET status = ?")\n')
+    found = {origin: sorted(text for text in _sql_strings(sub) if "dream_runs" in text)
+             for origin, sub in logical_split_trees("lib/old_part.py", tree, tmp_path)}
+    assert found == {
+        "lib/old.py": ["DELETE FROM dream_runs WHERE id = ?", "UPDATE dream_runs SET status = ? WHERE id = ?"],
+        "lib/old_part.py": ["UPDATE dream_runs SET status = ?"],
+    }
+    # A file no recipe lists is one origin: itself, with its own Module object.
+    assert list(logical_split_trees("lib/other.py", tree, tmp_path)) == [("lib/other.py", tree)]

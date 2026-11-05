@@ -23,6 +23,8 @@ Old module paths that S1 turns into sys.modules aliases (ALIASES) count as the
 module they alias, so importing lib.db_schema is an edge to
 lib.persistence.schema. Edges S1 keeps on purpose are NAMED_EXCEPTIONS, each
 with its reason; the list is exact (an exception that no longer exists fails).
+Recipe-declared generated parts keep their source module's layer and import
+ownership; facade/part self-edges are internal. Baseline debt is unchanged.
 """
 from __future__ import annotations
 
@@ -190,7 +192,18 @@ UPWARD_BASELINE = frozenset({
 })
 
 
+def _logical_module(module: str) -> str:
+    """Generated parts keep their declared source module's architectural owner."""
+    from tests.patching import split_origin
+    path = split_origin(module.replace(".", "/") + ".py")
+    parts = list(pathlib.PurePosixPath(path).with_suffix("").parts)
+    if len(parts) > 1 and parts[-1] == "__init__":
+        parts.pop()
+    return ".".join(parts)
+
+
 def layer(module: str) -> int:
+    module = _logical_module(module)
     if module in PERSISTENCE or any(module == p or module.startswith(p + ".") for p in PERSISTENCE_PACKAGES):
         return 0
     if module in CORE or any(module == p or module.startswith(p + ".") for p in CORE_PACKAGES):
@@ -232,7 +245,11 @@ def imports_of(name: str, path: pathlib.Path, known: dict) -> set[str]:
 
 def edges() -> set[tuple[str, str]]:
     known = modules()
-    return {(name, target) for name, path in known.items() for target in imports_of(name, path, known)}
+    owners = {name: _logical_module(name) for name in known}
+    # Splitting cannot introduce debt from a facade to its own parts or move
+    # existing debt to a new architectural owner. New targets still count.
+    return {(owners[name], owners[target]) for name, path in known.items()
+            for target in imports_of(name, path, known) if owners[name] != owners[target]}
 
 
 def upward() -> set[str]:
@@ -296,3 +313,39 @@ def test_an_alias_import_counts_as_its_new_module(tmp_path):
     # Before the target exists the old module is a real module and stays itself.
     assert imports_of("lib.probe", probe, {"lib": None, "lib.db_schema": None}) == {"lib.db_schema"}
     assert layer("lib.persistence.schema") == layer("lib.persistence.migrations.v099") == 0
+
+
+def test_declared_split_preserves_layer_and_import_debt_but_not_new_edges(tmp_path, monkeypatch):
+    import sys
+    from tests import patching
+    root = tmp_path / 'server'
+    (root / 'lib').mkdir(parents=True)
+    (root / 'server.py').write_text('')
+    (root / 'lib/__init__.py').write_text('')
+    (root / 'lib/dreaming.py').write_text('')
+    original = root / 'lib/turn_dispatch.py'
+    body = 'def moved():\n    from . import dreaming\n'
+    original.write_text(body)
+    recipes = tmp_path / 'splits'
+    recipes.mkdir()
+    monkeypatch.setattr(patching, '_RECIPES', recipes)
+    monkeypatch.setattr(sys.modules[__name__], 'SERVER', root)
+    before = upward()
+    assert before == {'lib.turn_dispatch -> lib.dreaming'}
+    (recipes / 's4.toml').write_text(
+        '[[split]]\nmodule="lib/turn_dispatch.py"\n'
+        '[[split.part]]\nmodule="lib/turn_command.py"\nnames=["moved"]\n')
+    original.write_text('from .turn_command import moved\n')
+    part = root / 'lib/turn_command.py'
+    part.write_text(body)
+    assert layer('lib.turn_command') == layer('lib.turn_dispatch')
+    assert upward() == before
+    (root / 'lib/new_feature.py').write_text('')
+    part.write_text(body + '\ndef new():\n    from . import new_feature\n')
+    assert 'lib.turn_dispatch -> lib.new_feature' in upward() - UPWARD_BASELINE - set(NAMED_EXCEPTIONS)
+    (root / 'lib/routes').mkdir()
+    (root / 'lib/routes/__init__.py').write_text('')
+    part.write_text(body + '\nfrom . import routes\n')
+    import pytest
+    with pytest.raises(AssertionError, match='server/lib must not import lib.routes'):
+        test_only_the_route_layer_imports_routes()

@@ -1660,6 +1660,13 @@ impl Engine {
                 }
             }
             "agent-roster" => self.request_snapshot(),
+            "delivery-updated" => {
+                // F4: a send's delivery state changed without a new revision;
+                // the hint carries no state, so re-read the chat's tail.
+                if self.conversations.contains_key(&session) {
+                    self.request_tail(&session, false);
+                }
+            }
             "transcript-updated" => {
                 if self.conversations.contains_key(&session) {
                     self.request_delta(&session);

@@ -150,7 +150,7 @@ def _new_process(monkeypatch):
     """What a restart leaves: no in-memory slots and no per-request locks
     (the held old worker keeps the old ones; the new process never sees them)."""
     _td.reset_for_tests()
-    monkeypatch.setattr(_td, "_REQUEST_LOCKS", {})
+    patch_shared(monkeypatch, _td, "_REQUEST_LOCKS", {})
 
 
 def test_W2_a_claim_in_flight_across_a_restart_never_spawns_again(env, monkeypatch):
@@ -921,7 +921,7 @@ def _write_just_before_the_flag(env, monkeypatch, write):
                              "row": turn_queue.status(intent["admission_id"])})
                 write()
         return real(agent, janitor_run_id, trace_id)
-    monkeypatch.setattr(_td, "_validate_janitor_target", hook)
+    patch_shared(monkeypatch, _td, "_validate_janitor_target", hook)
     return done
 
 
@@ -1371,7 +1371,7 @@ def _end_refusal_reasons(monkeypatch):
             found = re.search(r"reason=(\S+)", detail)
             reasons.append(found.group(1) if found else event)
         return real(event, detail)
-    monkeypatch.setattr(_td, "log", recording)
+    patch_shared(monkeypatch, _td, "log", recording)
     return reasons
 
 

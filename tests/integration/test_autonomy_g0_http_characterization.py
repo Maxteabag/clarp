@@ -11,6 +11,7 @@ import urllib.request
 
 import pytest
 
+from tests.patching import patch_shared
 from tests.integration.test_server_di import (  # noqa: F401 - fixtures
     _model_catalog_never_probes_installed_clis, fake_ctx, running_server, server_module)
 
@@ -97,7 +98,7 @@ def test_agent_dreaming_refusals(running_server):
 def test_dreaming_runs_bad_limit_and_settings_bad_json(running_server, monkeypatch):
     from lib import dreaming
     seen = []
-    monkeypatch.setattr(dreaming, "list_dream_runs",
+    patch_shared(monkeypatch, dreaming, "list_dream_runs",
                         lambda session, limit: seen.append(limit) or [])
     base, _ctx, _srv = running_server
     status, body = _call(base, "GET", "/dreaming/runs?limit=x")

@@ -11,10 +11,12 @@ module alone and this is exactly `monkeypatch.setattr(module, name, value)`.
 """
 from __future__ import annotations
 
+import ast
 import importlib
 import pathlib
 import tomllib
 import types
+from collections.abc import Iterable, Iterator
 
 _REPO = pathlib.Path(__file__).resolve().parents[1]
 _RECIPES = _REPO / "tools" / "refactor" / "splits"
@@ -70,3 +72,56 @@ def patch_shared(monkeypatch, module: types.ModuleType, name: str, value,
     for part in split_family(module, recipes):
         if getattr(part, name, _MISSING) is original:
             monkeypatch.setattr(part, name, value)
+
+
+def _bound_name(stmt: ast.stmt) -> str | None:
+    """The one name a top-level statement defines, or None."""
+    if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        return stmt.name
+    if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1:
+        return getattr(stmt.targets[0], "id", None)
+    if isinstance(stmt, ast.AnnAssign):
+        return getattr(stmt.target, "id", None)
+    return None
+
+
+def logical_split_trees(rel: str, tree: ast.Module, recipes: pathlib.Path | None = None
+                        ) -> Iterator[tuple[str, ast.Module]]:
+    """(origin, module) pairs for one parsed file, for source guards.
+
+    A file no split recipe lists yields itself: exactly (rel, tree), the same
+    Module object. In an S9 split part, a top-level definition the recipe
+    moved there by name counts as its old module, so the facade keeps owning
+    what it owned before the split; anything else in the part (new code,
+    imports, unnamed statements) keeps the part's own path. The part's
+    generated docstring is skipped, and each group starts with `pass` so its
+    first statement is never read as a docstring.
+    """
+    if split_origin(rel, recipes=recipes) == rel:
+        yield rel, tree
+        return
+    groups: dict[str, list[ast.stmt]] = {}
+    for index, stmt in enumerate(tree.body):
+        if index == 0 and isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant):
+            continue  # the generated "Moved out of ..." docstring
+        name = _bound_name(stmt)
+        groups.setdefault(split_origin(rel, name, recipes) if name else rel, []).append(stmt)
+    for origin, body in groups.items():
+        yield origin, ast.Module(body=[ast.Pass(), *body], type_ignores=[])
+
+
+def logical_split_tree_map(paths: Iterable[pathlib.Path], root: pathlib.Path,
+                           recipes: pathlib.Path | None = None) -> dict[str, ast.Module]:
+    """logical_split_trees over many files, merged per origin: every path's own
+    key is present, and a file that is its origin's only contributor keeps its
+    own Module object. The original module's constants and their moved
+    consumers share one tree, while new code in a part stays a separate owner."""
+    merged: dict[str, list[ast.Module]] = {}
+    for path in paths:
+        rel = path.relative_to(root).as_posix()
+        merged.setdefault(rel, [])
+        for origin, module in logical_split_trees(rel, ast.parse(path.read_text(), filename=str(path)), recipes):
+            merged.setdefault(origin, []).append(module)
+    return {rel: modules[0] if len(modules) == 1 else
+            ast.Module(body=[stmt for module in modules for stmt in module.body], type_ignores=[])
+            for rel, modules in merged.items()}   # no modules: an empty Module

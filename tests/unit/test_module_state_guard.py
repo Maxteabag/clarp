@@ -208,14 +208,18 @@ def _is_container(value: ast.expr | None) -> bool:
     return False
 
 
-def module_state(path: pathlib.Path) -> set[str]:
-    tree = ast.parse(path.read_text(), filename=str(path))
+def _constructed_containers(tree: ast.Module) -> set[str]:
     containers = set()
     for node in tree.body:
         if isinstance(node, ast.Assign) and _is_container(node.value):
             containers |= {t.id for t in node.targets if isinstance(t, ast.Name)}
         elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and _is_container(node.value):
             containers.add(node.target.id)
+    return containers
+
+
+def _tree_state(tree: ast.Module) -> set[str]:
+    containers = _constructed_containers(tree)
     rebound, mutated = set(), set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Global):
@@ -230,18 +234,33 @@ def module_state(path: pathlib.Path) -> set[str]:
     return (containers & mutated) | rebound
 
 
+def module_state(path: pathlib.Path) -> set[str]:
+    return _tree_state(ast.parse(path.read_text(), filename=str(path)))
+
+
 def found() -> set[tuple[str, str]]:
     # State an S9 split recipe moved into a part is reported under its old
     # module (the facade's path), so ALLOWED names one place on main and on
     # integration alike. Only declared state maps; anything else in a part
     # keeps its own path, and two physical owners of one name both stay
     # visible (each under its own path), so neither inherits an allowance.
-    from tests.patching import split_origin
+    from tests.patching import logical_split_tree_map, split_origin
     paths = sorted((SERVER / "lib").rglob("*.py")) + [SERVER / "server.py"]
+    logical_live = {rel: _tree_state(tree)
+                    for rel, tree in logical_split_tree_map(paths, SERVER).items()}
     owners: dict[tuple[str, str], list[str]] = {}
     for p in paths:
         rel = p.relative_to(SERVER).as_posix()
-        for name in module_state(p):
+        tree = ast.parse(p.read_text(), filename=str(p))
+        state = _tree_state(tree)  # Preserve the physical scan and new-state owners.
+        for name in _constructed_containers(tree):
+            origin = split_origin(rel, name)
+            # A declared constructor and its declared mutator may move into
+            # different parts. Only declared moved state gets logical liveness;
+            # physical owner counting below still detects separate real owners.
+            if origin != rel and name in logical_live.get(origin, set()):
+                state.add(name)
+        for name in state:
             owners.setdefault((split_origin(rel, name), name), []).append(rel)
     out = set()
     for key, physical in owners.items():
@@ -290,3 +309,29 @@ def test_split_state_maps_only_declared_names_and_keeps_duplicate_owners(tmp_pat
     (root / "lib" / "old.py").write_text(mutated.format(name="_cache"))
     owners = found()
     assert ("lib/old.py", "_cache") in owners and ("lib/old_base.py", "_cache") in owners
+
+
+def test_declared_state_stays_live_when_another_split_part_mutates_it(tmp_path, monkeypatch):
+    from tests import patching
+    recipes = tmp_path / 'splits'
+    recipes.mkdir()
+    (recipes / 's4.toml').write_text(
+        '[[split]]\nname="state"\nmodule="lib/old.py"\n'
+        '[[split.part]]\nmodule="lib/old_state.py"\nnames=["_cache"]\n'
+        '[[split.part]]\nmodule="lib/old_ops.py"\nnames=["put"]\n')
+    monkeypatch.setattr(patching, '_RECIPES', recipes)
+    root = tmp_path / 'server'
+    (root / 'lib').mkdir(parents=True)
+    (root / 'server.py').write_text('')
+    (root / 'lib/old.py').write_text('from .old_state import _cache\nfrom .old_ops import put\n')
+    (root / 'lib/old_state.py').write_text('_cache = {}\n')
+    (root / 'lib/old_ops.py').write_text(
+        'from .old_state import _cache\ndef put(key, value):\n    _cache[key] = value\n')
+    monkeypatch.setattr(sys.modules[__name__], 'SERVER', root)
+    assert found() == {('lib/old.py', '_cache')}
+    # A new same-named physical owner must not inherit that logical allowance.
+    (root / 'lib/old_ops.py').write_text(
+        '_cache = {}\ndef put(key, value):\n    _cache[key] = value\n')
+    owners = found()
+    assert ('lib/old.py', '_cache') in owners
+    assert ('lib/old_ops.py', '_cache') in owners

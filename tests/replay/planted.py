@@ -18,7 +18,9 @@ CHANGES = [
     {
         'id': 'response-field',
         'what': 'POST /send stops returning queue_depth',
-        'file': 'server/server.py',
+        # S3 recipe 11 moves Handler._send_direct to the send routes module on the
+        # integration track; main keeps it in server.py until that lands.
+        'file': ('server/server.py', 'server/lib/routes/send.py'),
         'find': '                "queue_depth": result.queue_depth,\n',
         'replace': '',
         'expect': {'channel': 'http', 'locator': r'\.body\.queue_depth$', 'kinds': {'field-removed'}},
@@ -140,18 +142,26 @@ def _http_index(scenario_id: str, step_name: str) -> int:
     return next(i for i, s in enumerate(steps) if s.get('name') == step_name)
 
 
+def files(change: dict) -> tuple[str, ...]:
+    """The files a change may live in: one path, or candidates for code that one
+    refactor track moves and the other does not (the anchor must match in one)."""
+    return (change['file'],) if isinstance(change['file'], str) else tuple(change['file'])
+
+
 def apply(change: dict, root: Path) -> None:
-    path = root / change['file']
-    text = path.read_text()
     if 'swap' in change:
         first, second = change['swap']
         change = {**change, 'find': first + second, 'replace': second + first}
-    found = text.count(change['find'])
     expected = change.get('count', 1)
-    if found != expected:
-        raise RuntimeError(f"planted change {change['id']}: anchor found {found} times in "
-                           f"{change['file']}, expected {expected}; update the anchor")
-    path.write_text(text.replace(change['find'], change['replace']))
+    counts = {name: (root / name).read_text().count(change['find'])
+              for name in files(change) if (root / name).is_file()}
+    hits = [name for name, n in counts.items() if n]
+    if len(hits) != 1 or counts[hits[0]] != expected:
+        where = ', '.join(f'{n} in {name}' for name, n in counts.items()) or 'no candidate file exists'
+        raise RuntimeError(f"planted change {change['id']}: anchor found {where}; expected {expected} "
+                           f"in exactly one of {', '.join(files(change))}; update the anchor")
+    path = root / hits[0]
+    path.write_text(path.read_text().replace(change['find'], change['replace']))
 
 
 def caught(change: dict, differences: list[dict]) -> list[dict]:

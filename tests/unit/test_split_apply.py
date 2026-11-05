@@ -204,3 +204,35 @@ def test_a_patch_through_the_old_module_with_a_computed_name_is_refused(tmp_path
     split = _split([("lib/old_base.py", ["LIMIT", "A", "B", "helper"]), ("lib/old_store.py", ["Store"])])
     with pytest.raises(Refusal, match="computed name"):
         split_apply.apply_split(root, split)
+
+
+def test_comprehension_variables_in_a_moved_assignment_are_not_reads(tmp_path):
+    # rf-s4: an assignment's comprehension variables were read as module names,
+    # so moving this refused with "reads pool, which ... does not bind".
+    old = ("BACKENDS = (('a', 'x'), ('b', ''))\n"
+           "_FAILOVERS = {pool: pool.upper() for pool in dict.fromkeys(b[1] for b in BACKENDS) if pool}\n")
+    root = _tree(tmp_path, old=old)
+    changes = split_apply.apply_split(root, _split([("lib/old_part.py", ["BACKENDS", "_FAILOVERS"])]))
+    assert "_FAILOVERS = {pool" in changes["server/lib/old_part.py"]
+
+
+def test_a_moved_reader_of_a_staying_helper_named_like_a_synthetic_symbol_is_refused(tmp_path):
+    # Review B on 03b0631e: dropping __conditional_annotations__ everywhere let
+    # run() move without the helper it calls; the moved run() raised NameError.
+    old = "def __conditional_annotations__():\n    return 5\n\n\ndef run():\n    return __conditional_annotations__()\n"
+    root = _tree(tmp_path, old=old)
+    with pytest.raises(Refusal, match="which stays in lib/old.py"):
+        split_apply.apply_split(root, _split([("lib/old_part.py", ["run"])]))
+
+
+def test_a_moved_definition_that_rebinds_a_staying_global_is_refused(tmp_path):
+    # Cut 1c trial G1: set_advance_request_callback moved and its `global`
+    # write split the state from the readers left in the old module.
+    old = ("_CALLBACK = None\n\n\ndef set_callback(cb):\n    global _CALLBACK\n    _CALLBACK = cb\n\n\n"
+           "def call():\n    return _CALLBACK and _CALLBACK()\n")
+    root = _tree(tmp_path, old=old)
+    with pytest.raises(Refusal, match="rebinds module global"):
+        split_apply.apply_split(root, _split([("lib/old_part.py", ["set_callback"])]))
+    # The global itself cannot move either: its `global` write is a second binding.
+    with pytest.raises(Refusal, match="not a single plain top-level definition"):
+        split_apply.apply_split(root, _split([("lib/old_part.py", ["_CALLBACK", "set_callback", "call"])]))

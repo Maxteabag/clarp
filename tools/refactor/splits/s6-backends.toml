@@ -1,0 +1,47 @@
+# S6 backends restructure (rf-s6): cut 1, backend_usage.py.
+# Applied by tools/refactor/split_apply.py; regenerated from main's text at every
+# main->integration merge. Prepared on main by moving the backend_usage test patch
+# sites to tests/patching.py:patch_shared. Stays in backend_usage.py (the facade):
+# fetch_claude_usage and fetch_codex_usage (they read urllib, which the module imports
+# twice), _structured_provider, get_backend_usage, exhausted_backends, UsageRefreshWorker.
+[[split]]
+name = "backend-usage"
+module = "lib/backend_usage.py"
+
+[[split.part]]
+# Constants, rows, identity, limit events and episodes, and the Codex window recorders
+# (here, not in the Codex part: their local `events` reads as the events module to ast_identity).
+module = "lib/backend_usage_store.py"
+names = [
+    "CLAUDE", "CODEX", "AGY", "SCHEMA_VERSION", "FRESH_MS", "CODEX_REFRESH_MS", "CLAUDE_REFRESH_MS",
+    "CODEX_FRESH_MS", "WARNING_THRESHOLD", "WARNING_THRESHOLD_ID", "_IDENTITY_SECRET_KEY", "CODEX_SOURCE_REF",
+    "QUOTA_WINDOW_NAMES", "CLAUDE_USAGE_ENDPOINT", "PROVIDER_COLLECTORS",
+    "_iso_from_epoch_seconds", "_normalize_time", "_to_float", "_window_from_payload", "_upsert", "_row",
+    "_record_unknown", "_freshness", "_decode_raw", "_quota_windows", "_canonical_id", "_identity_secret",
+    "_private_ref", "_codex_identity", "_computer_id", "_provider_instance_id", "_iso_to_ms", "_window_id",
+    "_event_payload", "_insert_limit_event", "_open_episode", "_invalidate_rotated_auth",
+    "_observe_auth_generation", "_retire_omitted_windows", "_response_row", "_OPEN_LIMITS_SQL",
+    "_expired_limits", "_reconcile_expired_limits", "_limit_projection",
+    "_window_by_duration", "_record_codex_five_hour", "_record_codex_weekly",
+]
+
+[[split.part]]
+# Claude OAuth credentials and the Claude usage row.
+module = "lib/backend_usage_claude.py"
+names = ["_claude_response_row", "_claude_config_dir", "_read_claude_auth", "_claude_needs_refresh"]
+
+[[split.part]]
+# Antigravity (agy /usage) collector.
+module = "lib/backend_usage_agy.py"
+names = ["AGY_WINDOW_KINDS", "_agy_executable", "_AGY_FETCH_LOCK", "_AGY_LAST_ATTEMPT_MS", "fetch_agy_usage",
+         "_run_agy_usage", "_agy_windows", "_agy_needs_refresh"]
+
+[[split.part]]
+# Codex auth, app-server probe, rate-limit capture and classified limits.
+module = "lib/backend_usage_codex.py"
+names = [
+    "_codex_needs_refresh", "_codex_home",
+    "_read_codex_auth", "_read_codex_chatgpt_base_url", "_codex_usage_url", "_codex_rpc",
+    "fetch_codex_usage_app_server", "capture_codex_rate_limits", "_codex_block_from_payload", "_fresh_codex_block",
+    "_codex_snapshot_from_payload", "_select_rate_limit_payload", "record_classified_usage_limit",
+]

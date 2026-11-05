@@ -16,6 +16,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from tests.patching import patch_shared
+
 from lib import oracle_live_stable as mod, oracle_realtime
 from lib.oracle_prompt import PROMPT
 
@@ -549,7 +551,7 @@ def test_a_call_interrupt_never_stops_an_agent_or_strands_a_pending_chat_send(co
     def no_stop(*_args, **_kwargs):
         raise AssertionError("a call interrupt must not stop an agent")
     for name in ("begin_stop", "clear_for_agent", "fence_user_stop"):
-        monkeypatch.setattr(turn_dispatch, name, no_stop)
+        patch_shared(monkeypatch, turn_dispatch, name, no_stop)
     launch_receipts.record_pending(
         agent_id="chat-agent", trace_id="t-chat", client_msg_id="u-chat", origin="user",
         user_stop_generation=turn_queue.user_stop_generation("chat-agent"))
