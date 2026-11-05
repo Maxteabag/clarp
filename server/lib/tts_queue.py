@@ -150,19 +150,6 @@ def recent(limit: int = 50) -> list[dict[str, Any]]:
     return [dict(r) for r in rows]
 
 
-# ---- cost ceiling -------------------------------------------------------
-
-def recent_synth_count(window_ms: int) -> int:
-    """How many rows have been enqueued in the last `window_ms`. Used by
-    the worker / hook to enforce a cost ceiling."""
-    cutoff = now_ms() - window_ms
-    row = conn().execute(
-        "SELECT COUNT(*) AS n FROM tts_queue WHERE enqueued_at > ?",
-        (cutoff,),
-    ).fetchone()
-    return int(row["n"]) if row else 0
-
-
 # ---- janitor ------------------------------------------------------------
 
 def prune_old(*, max_age_ms: int) -> int:
