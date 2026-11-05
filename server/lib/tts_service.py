@@ -29,11 +29,12 @@ def emit_event(*a, **kw):
         pass
 
 
-def synth(text, route, sink: AudioSink, purpose, *, cfg, raw_voice, agent, emit, context, registry=None):
+def synth(text, route, sink: AudioSink, purpose, *, cfg, raw_voice, agent, emit, context, registry=None, primary_text=None):
     """Speak into a sink; purpose identifies the caller without changing its policy.
 
     Raw PCM remains Cartesia-only. File/stream clips retry only before a
     chunk has reached their sink. Events keep their existing worker source.
+    primary_text preserves direct-route input without changing fallback markup policy.
     """
     spoken, plain = text, strip_emotion_tags(text)
     if route is None:
@@ -65,7 +66,8 @@ def synth(text, route, sink: AudioSink, purpose, *, cfg, raw_voice, agent, emit,
 
     selected = registry.get(provider)
     try:
-        written = selected.synthesize(spoken if provider == GEMINI else plain, sink)
+        text_for_primary = primary_text if primary_text is not None else (spoken if provider == GEMINI else plain)
+        written = selected.synthesize(text_for_primary, sink)
     except Exception as primary_error:
         preserve_primary = purpose in {"preview", "narration"}
         if preserve_primary:
@@ -124,6 +126,6 @@ def synth_preview(text, provider, voice, out_path, *, cfg, purpose="preview", ag
             emit_event(source, event, **kwargs)
 
     synth(text, route, AudioSink(out_path), purpose,
-          cfg=cfg, raw_voice=voice, agent=agent, registry=registry,
+          cfg=cfg, raw_voice=voice, agent=agent, registry=registry, primary_text=text,
           emit=emit, context=lambda: event_context({}, agent))
     return primary.succeeded
