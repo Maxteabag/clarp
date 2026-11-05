@@ -191,8 +191,8 @@ continue as before.
 | Contract owner | `rf-contractc-be17` (was `rf-contract-80af`) | Codex | `server/lib/db_schema.py`, `server/lib/db_migrations.py`, `contract/`, `server/lib/server_identity.py` contract constants, the lifecycle kit (`server/lib/lifecycle.py`, `docs/architecture/lifecycles.md`), schema goldens |
 | Fix-lane owner | `rf-fix-c4ab` | Claude | one fix per commit, in the files the lead names per fix |
 | Fix-lane author 2 | `rf-fix2c-4f08` (was `rf-fix2-56f3`) | Codex | one fix per commit (voice, Oracle, autonomy findings), in the files the lead names |
-| Fix-lane author 3 | `rf-fix3-9875` | Claude | one fix per commit, pulled from `registers/backlog.md` (B and C areas) |
-| Slice owner S9 (module splits) | `rf-fix3-9875` | Claude | the module-split tool (recipe + generator + facade + ast_identity) and the move-only splits of unowned oversized modules on `refactor/integration` |
+| Fix-lane author 3 | `rf-fix3c-7498` (was `rf-fix3-9875`) | Codex | one fix per commit, pulled from `registers/backlog.md` (B and C areas) |
+| Slice owner S9 (module splits) | `rf-fix3c-7498` (was `rf-fix3-9875`) | Codex | the module-split tool (recipe + generator + facade + ast_identity) and the move-only splits of unowned oversized modules on `refactor/integration` |
 | Slice owner S3 | `rf-routesc-352a` (was `rf-routes-0f54`) | Codex | route goldens now; the route seam and route modules after go/no-go 1 |
 | Slice owner S5 | `rf-readmodelc-cb42` (was `rf-readmodel-12f8`) | Codex | read-model goldens now; the read model after go/no-go 1 |
 | Compute owner | `rf-computec-d8ca` (was `rf-compute-aa87`) | Codex | `/var/tmp/clarp-refactor-program/bin/heavy-remote`, the buildbox ledger |
@@ -217,7 +217,7 @@ Order rule (5 Nov): on a file that a regenerated split owns (S3, S4, S6, S9), th
 
 | Since | Slice (owner) | Claimed | Until |
 |---|---|---|---|
-| 4 Nov 10:0x | S9 (`rf-fix3-9875`) | on `refactor/integration` only: `server/lib/agent_live_tools.py` (pilot), then `agent_rings.py`, `dreaming.py`, `background_jobs.py`, `orchestrator.py`, each claimed when its cut starts; main's fixes keep flowing because the splits are regenerated from main's text at every merge | the big release |
+| 4 Nov 10:0x | S9 (`rf-fix3c-7498`, was `rf-fix3-9875`) | on `refactor/integration` only: `server/lib/agent_live_tools.py` (pilot), then `agent_rings.py`, `dreaming.py`, `background_jobs.py`, `orchestrator.py`, each claimed when its cut starts; main's fixes keep flowing because the splits are regenerated from main's text at every merge | the big release |
 | 4 Nov 11:5x | S9 (`rf-fix3-9875`) | cut 1b on `refactor/integration` only: `server/lib/agent_rings.py` split along its section headers into `agent_rings/` modules (store, voip, openings, host identity) with `agent_rings.py` as the facade; regenerated from main's text at every merge (RTO-04 (a) on main flows through) | the big release |
 | 5 Nov 01:0x | S9 (`rf-fix3-9875`) | cut 1c on `refactor/integration` only: `server/lib/dreaming.py` split along its section headers into modules with `dreaming.py` as the facade; regenerated from main's text at every merge (AUT-04/06/06b, AUT-11 and AUT-12 on main flow through) | the big release |
 | 4 Nov 10:4x | S7 (`rf-fix2-56f3`) | on `refactor/integration` only: `server/lib/tts_providers.py` (the `_wav_to_mp3` definition, which stays as a facade re-export), new `server/lib/audio_codec.py`, and the one lazy import of it in `server/lib/custom_tts_adapters.py`; regenerated from main's text at every merge with S9's split tool | the big release |
