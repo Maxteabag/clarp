@@ -428,3 +428,142 @@ def test_an_ordinary_self_loop_is_written_not_skipped(con):
         ("running", 900, "renewed")
     with lk.transaction(con):
         assert lk.reap(con, lc, now=10 + 30 * MIN).moved == []     # counted from the renewal at 900
+
+
+# Kit changes 5 and 6 (lifecycle-conversion-plan.md, queue design delta):
+# per-state entry columns and a set-based compare-and-set.
+
+def _queue(**overrides) -> Lifecycle:
+    """queued_turns' shape: only claimed and started record when they began."""
+    spec = dict(
+        name="queue", owner="lib/q.py", table="q", key="id", state_column="status",
+        entered_columns={"claimed": "claimed_at", "started": "started_at"},
+        initial="queued", final=frozenset({"done", "failed", "cancelled"}),
+        edges=(
+            Edge("claim", frozenset({"queued"}), "claimed"),
+            Edge("release", frozenset({"claimed"}), "queued"),
+            Edge("start", frozenset({"queued", "claimed"}), "started"),
+            Edge("cancel", frozenset({"queued", "claimed"}), "cancelled"),
+            Edge("settle_done", frozenset({"started"}), "done"),
+            Edge("settle_failed", frozenset({"started"}), "failed"),
+            Edge("resettle_done", frozenset({"failed"}), "done", correction=True),
+        ),
+        waits={"queued": WaitForever("dispatch or cancel ends it"),
+               "claimed": Deadline(30_000, "queued"),
+               "started": WaitForever("its turn's settlement ends it")},
+    )
+    spec.update(overrides)
+    return Lifecycle(**spec)
+
+
+@pytest.fixture
+def qcon():
+    connection = sqlite3.connect(":memory:", isolation_level=None)
+    connection.execute("CREATE TABLE q (id TEXT PRIMARY KEY, status TEXT NOT NULL, claimed_at INTEGER,"
+                       " started_at INTEGER, trace TEXT NOT NULL DEFAULT 't1', note TEXT)")
+    yield connection
+    connection.close()
+
+
+def _q(con, key):
+    return con.execute("SELECT status, claimed_at, started_at, note FROM q WHERE id = ?", (key,)).fetchone()
+
+
+def test_each_state_stamps_only_its_own_entry_column(qcon):
+    lc = _queue()
+    with lk.transaction(qcon):
+        lk.create(qcon, lc, "a", now=1)
+    assert _q(qcon, "a") == ("queued", None, None, None)               # queued records no time
+    with lk.transaction(qcon):
+        lk.transition(qcon, lc, "a", "claim", now=5)
+    assert _q(qcon, "a") == ("claimed", 5, None, None)
+    with lk.transaction(qcon):
+        lk.transition(qcon, lc, "a", "release", now=7, values={"claimed_at": None})
+    assert _q(qcon, "a") == ("queued", None, None, None)               # clearing it is an explicit value
+    with lk.transaction(qcon):
+        lk.transition(qcon, lc, "a", "start", now=9)
+    assert _q(qcon, "a") == ("started", None, 9, None)
+    with pytest.raises(lk.LifecycleError, match="cannot set"), lk.transaction(qcon):
+        lk.transition(qcon, lc, "a", "settle_done", now=11, values={"status": "x"})
+
+
+def test_a_values_write_to_the_target_stamp_is_refused(qcon):
+    lc = _queue()
+    with lk.transaction(qcon):
+        lk.create(qcon, lc, "a", now=1)
+    with pytest.raises(lk.LifecycleError, match=re.escape("cannot set ['claimed_at']")), lk.transaction(qcon):
+        lk.transition(qcon, lc, "a", "claim", now=5, values={"claimed_at": 99})
+
+
+def test_the_reaper_reads_the_source_states_own_column(qcon):
+    lc = _queue()
+    with lk.transaction(qcon):
+        for key, at in (("old", 0), ("fresh", 20_000)):
+            lk.create(qcon, lc, key, now=at)
+            lk.transition(qcon, lc, key, "claim", now=at)
+        lk.create(qcon, lc, "started", now=0)
+        lk.transition(qcon, lc, "started", "start", now=0)
+        qcon.execute("INSERT INTO q (id, status) VALUES ('stampless', 'claimed')")   # claimed_at NULL
+    with lk.transaction(qcon):
+        batch = lk.reap(qcon, lc, now=30_000)
+    assert [t.key for t in batch.moved] == ["old"] and batch.cursor is None
+    assert _q(qcon, "old") == ("queued", 0, None, None)   # leaving claimed does not clear it by itself
+
+
+@pytest.mark.parametrize("overrides, problem", [
+    ({"entered_column": "status_at"}, "use entered_column or entered_columns, not both"),
+    ({"entered_columns": {"claimed": "claimed_at", "nowhere": "x_at"}}, "entered_columns names unknown state 'nowhere'"),
+    ({"entered_columns": {"started": "started_at"}}, "state 'claimed' has a deadline but no entered column"),
+    ({"entered_columns": {"claimed": "claimed at"}}, "bad identifier 'claimed at'"),
+    ({"table": "", "key": "", "state_column": ""}, "entered_columns needs a table"),
+])
+def test_bad_entered_columns_are_refused(overrides, problem):
+    with pytest.raises(lk.LifecycleError, match=re.escape(problem)):
+        _queue(**overrides)
+
+
+def _rows_in(con, *states_by_key):
+    for key, state in states_by_key:
+        con.execute("INSERT INTO q (id, status, trace) VALUES (?, ?, ?)", (key, state, key.split("-")[0]))
+
+
+def test_compare_and_set_where_moves_only_declared_sources_matching_the_filter(qcon):
+    lc = _queue()
+    _rows_in(qcon, ("t1-a", "queued"), ("t1-b", "claimed"), ("t1-c", "started"), ("t1-d", "done"),
+             ("t2-a", "queued"))
+    with lk.transaction(qcon):
+        moved = lk.compare_and_set_where(qcon, lc, "cancel", where="trace = ?", params=("t1",), now=50,
+                                         values={"note": "x"})
+    assert moved == 2
+    assert {k: _q(qcon, k)[0] for k in ("t1-a", "t1-b", "t1-c", "t1-d", "t2-a")} == {
+        "t1-a": "cancelled", "t1-b": "cancelled", "t1-c": "started", "t1-d": "done", "t2-a": "queued"}
+
+
+def test_compare_and_set_where_groups_events_by_target_and_stamps_each(qcon):
+    lc = _queue()
+    _rows_in(qcon, ("t1-a", "started"), ("t1-b", "failed"), ("t1-c", "done"), ("t1-d", "cancelled"))
+    with lk.transaction(qcon):
+        rows = lk.compare_and_set_where(qcon, lc, ("settle_done", "resettle_done"), where="trace = ?",
+                                        params=("t1",), now=60, returning="id")
+    assert sorted(r[0] for r in rows) == ["t1-a", "t1-b"]                 # done stays, cancelled untouched
+    assert [_q(qcon, k)[0] for k in ("t1-a", "t1-b", "t1-c", "t1-d")] == ["done", "done", "done", "cancelled"]
+    with lk.transaction(qcon):
+        assert lk.compare_and_set_where(qcon, lc, "claim", where="1", now=70, returning="id") == []
+
+
+def test_compare_and_set_where_refuses_unknown_events_and_runs_only_in_a_transaction(qcon):
+    lc = _queue()
+    with pytest.raises(lk.LifecycleError, match="no edge for event"), lk.transaction(qcon):
+        lk.compare_and_set_where(qcon, lc, "nope", where="1", now=1)
+    with pytest.raises(lk.LifecycleError, match="inside lifecycle.transaction"):
+        lk.compare_and_set_where(qcon, lc, "cancel", where="1", now=1)
+    with pytest.raises(lk.LifecycleError, match="bad returning"), lk.transaction(qcon):
+        lk.compare_and_set_where(qcon, lc, "cancel", where="1", now=1, returning="id; DROP TABLE q")
+
+
+def test_compare_and_set_where_stamps_the_target_column(qcon):
+    lc = _queue()
+    _rows_in(qcon, ("t1-a", "queued"), ("t1-b", "claimed"))
+    with lk.transaction(qcon):
+        assert lk.compare_and_set_where(qcon, lc, "start", where="1", now=80) == 2
+    assert [_q(qcon, k) for k in ("t1-a", "t1-b")] == [("started", None, 80, None), ("started", None, 80, None)]
