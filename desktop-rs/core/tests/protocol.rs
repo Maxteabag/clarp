@@ -299,3 +299,21 @@ fn only_web_and_mail_links_are_openable() {
         assert!(!is_openable_link(bad), "{bad}");
     }
 }
+
+#[test]
+fn a_user_row_reads_its_own_send_delivery_state() {
+    // F4 (send_delivery_state): `delivery` is an object on a user row whose
+    // `for.client_msg_id` names that row; `delivery` stays the agent-message
+    // string ("sent"/"private") it was.
+    let stopped = Message::from_json(&obj(json!({"id": "u-abc", "role": "user", "text": "hi",
+        "delivery": {"state": "stopped", "rev": 2, "seq": 7, "for": {"client_msg_id": "abc", "trace_id": "t"}}})));
+    assert_eq!(stopped.send_state, "stopped");
+    assert_eq!(stopped.delivery, "");
+    let other = Message::from_json(&obj(json!({"id": "u-abc", "role": "user",
+        "delivery": {"state": "stopped", "for": {"client_msg_id": "someone-else"}}})));
+    assert_eq!(other.send_state, "", "a receipt for another message is not this row's");
+    let agent = Message::from_json(&obj(json!({"id": "m1", "role": "user", "delivery": "sent"})));
+    assert_eq!((agent.delivery.as_str(), agent.send_state.as_str()), ("sent", ""));
+    let unknown = Message::from_json(&obj(json!({"id": "u-abc", "role": "user"})));
+    assert_eq!(unknown.send_state, "", "absent means unknown");
+}
