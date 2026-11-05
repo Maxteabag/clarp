@@ -53,8 +53,9 @@ def _google_voice(raw_voice: str | None, route_voice: str | None) -> str:
 class ProviderRegistry:
     """Resolve voices once for one clip, keeping fallback voices provider-specific."""
 
-    def __init__(self, cfg, raw_voice, agent, route):
+    def __init__(self, cfg, raw_voice, agent, route, *, providers=None):
         self.cfg, self.raw_voice, self.agent, self.route = cfg, raw_voice, agent, route
+        self.providers = providers or {}
         self.persona = (agent or {}).get("persona", "")
         self.cartesia_voice = self.voice_for(CARTESIA) or cfg.cartesia_voice_for(self.persona)
         self.eleven_voice = self.voice_for(ELEVENLABS) or raw_voice
@@ -65,6 +66,8 @@ class ProviderRegistry:
         return resolve_voice(self.raw_voice, selected)
 
     def get(self, selected: str) -> TTSProvider:
+        if selected in self.providers:
+            return self.providers[selected]
         return ConfiguredProvider(selected, self)
 
 
