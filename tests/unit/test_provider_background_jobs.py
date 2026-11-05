@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 import pytest
 
 from lib import agents, background_jobs as jobs, db, provider_background_jobs as provider
+from tests.patching import patch_shared
 
 NATIVE = '1ab7df52-76aa-423e-83b3-6eafc7ef8eb2'
 TOOL = 'toolu_01FdHka33VdcPRqDDyLBPdJ1'
@@ -683,7 +684,7 @@ def test_an_unreadable_process_identity_never_closes_a_live_turn(case, monkeypat
     """Out of file descriptors, every /proc read fails; that proves nothing."""
     owner, path, ident = case
     token = _turn(owner)              # this test process: alive
-    monkeypatch.setattr(jobs, 'process_start_token', lambda _pid: '')
+    patch_shared(monkeypatch, jobs, 'process_start_token', lambda _pid: '')
     assert provider.reap_exited_turns() == 0
     assert db.conn().execute('SELECT exited_at FROM provider_turns WHERE turn_token=?',
                              (token,)).fetchone()[0] is None
