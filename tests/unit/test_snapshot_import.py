@@ -87,3 +87,38 @@ def test_blocked_snapshot_returns_within_bound_and_logs_only_codes(tmp_path, cap
     finally:
         release.set()
         assert cache.wait_for_background(2)
+
+
+def test_recent_slow_history_skips_wait_then_recovers_after_a_fast_import(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(cache, "_BACKGROUND_MIN_INTERVAL", 0)
+    path = tmp_path / "private-canary-source"
+    path.write_text("first")
+    second_entered, second_release = threading.Event(), threading.Event()
+    imported = []
+
+    def importer():
+        if not imported:
+            time.sleep(0.6)  # a measured import longer than the test's 0.5 s bound
+        elif len(imported) == 1:
+            second_entered.set()
+            assert second_release.wait(3)
+        imported.append(path.read_text())
+
+    assert cache.schedule_import(path, importer, owner="private-canary-owner")
+    assert cache.wait_for_background(2)
+    path.write_text("second")
+    try:
+        started = time.monotonic()
+        assert not cache.import_for_snapshot(path, importer, owner="private-canary-owner", timeout=0.5)
+        assert time.monotonic() - started < 0.3
+        assert second_entered.wait(1), "skip must still schedule the normal refresh"
+        captured = capsys.readouterr().err
+        assert "snapshotImportSkip code=recent_slow" in captured
+        assert "private-canary" not in captured
+    finally:
+        second_release.set()
+        assert cache.wait_for_background(2)
+    path.write_text("third")
+    assert cache.import_for_snapshot(path, importer, owner="private-canary-owner", timeout=0.5)
+    assert cache.wait_for_background(2)
+    assert imported == ["first", "second", "third"]

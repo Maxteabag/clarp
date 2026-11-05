@@ -255,3 +255,28 @@ def test_long_tool_turn_only_loses_a_tail_row_at_the_page_boundary(
     assert len(tail["turns"]) == 100 and tail["has_more"]
     after_tools = {r["id"] for r in tail["turns"] if r["tools"] or r["display_cells"]}
     assert len(before_tools - after_tools) == (0 if queue else 1)
+
+
+def test_slow_import_returns_existing_snapshot_at_the_deadline(
+        running_server, monkeypatch, tmp_path, capsys):
+    from lib import conversation
+    base, agent, transcript, source, _spawned, _steered, _trace = _active_turn(
+        running_server, monkeypatch, tmp_path, "codex")
+    transcript.write_text("".join(json.dumps(r) + "\n" for r in source.header + source.groups[0][:4]))
+    before = _log(base)
+    assert before["turns"]
+    with _held_import(monkeypatch, transcript) as (entered, _release):
+        with transcript.open("a") as output:
+            output.write(json.dumps(source.groups[0][4]) + "\n")
+        transcript_import_cache.schedule_import(
+            transcript, lambda: transcript_incremental.import_transcript(
+                backend="codex", path=transcript, agent_id=agent["agent_id"],
+                backend_session_id="synthetic-native"), owner=agent["agent_id"])
+        assert entered.wait(2)
+        started = time.monotonic()
+        snapshot = _log(base)
+        elapsed = time.monotonic() - started
+        bound = conversation.ACTIVE_SNAPSHOT_IMPORT_TIMEOUT_SECONDS
+        assert bound * 0.9 <= elapsed < bound + 1
+        assert snapshot["turns"] == before["turns"]
+        assert "snapshotImportTimeout code=deadline" in capsys.readouterr().err
