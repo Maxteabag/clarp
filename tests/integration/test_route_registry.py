@@ -86,6 +86,12 @@ def test_handler_dispatches_only_through_the_registry(server_module, method):
     import inspect
     source = inspect.getsource(getattr(server_module.Handler, "do_" + method))
     assert source.rstrip().endswith(f'return route_registry.dispatch(self, "{method}", path)')
+    # HTTP-02's limited-device guard is part of do_PATCH's gate prelude (it
+    # answers 403 only for the route, so unmatched PATCHes keep their 404).
+    gate = 'if path.startswith("/schedules/") and self._device_forbidden(path, "PATCH"):'
+    if method == "PATCH":
+        assert source.count(gate) <= 1   # 0 until main's HTTP-02 reaches integration
+        source = source.replace(gate, "")
     assert "startswith" not in source and "_dispatch_exact" not in source
 
 
