@@ -550,6 +550,11 @@ impl Conversation {
         let mut optimistic: Vec<Message> =
             self.messages.iter().filter(|m| m.pending || m.delivery_failed).cloned().collect();
         for message in rows.iter_mut() {
+            // F4: a reload that omits a send's receipt (unknown) keeps its last state.
+            if message.send_state.is_empty()
+                && let Some(row) = self.index_of(&message.id) {
+                    message.send_state = self.messages[row].send_state.clone();
+                }
             if let Some(at) = optimistic.iter().position(|local| local.id == message.id) {
                 let local = optimistic.remove(at);
                 message.pending = local.pending;
@@ -584,6 +589,10 @@ impl Conversation {
                 incoming.pending = previous.pending;
                 incoming.delivery_failed = previous.delivery_failed || incoming.delivery_failed;
                 incoming.delivery_error = previous.delivery_error.clone();
+                // F4: a read that omits the receipt (unknown) keeps the last state.
+                if incoming.send_state.is_empty() {
+                    incoming.send_state = previous.send_state.clone();
+                }
                 let roles = changed_roles(previous, &incoming);
                 self.update(existing, incoming, roles);
                 continue;
@@ -771,7 +780,8 @@ fn changed_roles(previous: &Message, incoming: &Message) -> Vec<Role> {
     check(previous.delivery != incoming.delivery, Role::Delivery);
     check(previous.pending != incoming.pending, Role::Pending);
     check(previous.delivery_failed != incoming.delivery_failed
-        || previous.delivery_error != incoming.delivery_error, Role::DeliveryFailed);
+        || previous.delivery_error != incoming.delivery_error
+        || previous.send_state != incoming.send_state, Role::DeliveryFailed);
     check(previous.activity != incoming.activity, Role::Activity);
     check(previous.tools != incoming.tools, Role::Tools);
     check(previous.display_cells != incoming.display_cells, Role::DisplayCells);

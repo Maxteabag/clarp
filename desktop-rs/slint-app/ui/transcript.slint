@@ -116,6 +116,8 @@ export struct MessageRow {
     failed: bool,
     // A failed send's one-line reason from the Host ("" when none).
     failure: string,
+    // A saved send the user's Stop withdrew before handoff (F4).
+    stopped: bool,
     // Tool activity: the toggle's label, whether the cards show, the cards.
     activity-label: string,
     group-id: string,
@@ -901,8 +903,8 @@ component TranscriptRow inherits HorizontalLayout {
             // A send is drawn as it will stay: "Sending…" only once it has
             // been unsent for the grace period, a failure at once; either
             // fades in. Otherwise the time, when timestamps are on.
-            if ((root.message.pending && root.message.status-due) || root.message.failed) && (root.message.prompt.key == "" || root.message.prompt.expanded): RevealText {
-                text: root.message.failed ? "Not delivered" : "Sending…";
+            if ((root.message.pending && root.message.status-due) || root.message.failed || root.message.stopped) && (root.message.prompt.key == "" || root.message.prompt.expanded): RevealText {
+                text: root.message.failed ? "Not delivered" : root.message.stopped ? "Not sent (stopped)" : "Sending…";
                 color: root.message.failed ? Palette.danger : Palette.faint;
                 font-size: ChatText.note;
                 horizontal-alignment: root.message.author == "user" ? right : left;
@@ -920,7 +922,7 @@ component TranscriptRow inherits HorizontalLayout {
                 accessible-id: root.measuring ? "" : "failure:" + root.message.id;
                 accessible-label: self.text;
             }
-            if !((root.message.pending && root.message.status-due) || root.message.failed) && root.message.stamp != "" && (root.message.prompt.key == "" || root.message.prompt.expanded): Text {
+            if !((root.message.pending && root.message.status-due) || root.message.failed || root.message.stopped) && root.message.stamp != "" && (root.message.prompt.key == "" || root.message.prompt.expanded): Text {
                 text: root.message.stamp;
                 color: Palette.faint;
                 font-size: ChatText.note;
