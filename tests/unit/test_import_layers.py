@@ -21,6 +21,8 @@ Old module paths that S1 turns into sys.modules aliases (ALIASES) count as the
 module they alias, so importing lib.db_schema is an edge to
 lib.persistence.schema. Edges S1 keeps on purpose are NAMED_EXCEPTIONS, each
 with its reason; the list is exact (an exception that no longer exists fails).
+Recipe-declared generated parts keep their source module's layer and import
+ownership; facade/part self-edges are internal. Baseline debt is unchanged.
 """
 from __future__ import annotations
 
@@ -197,7 +199,18 @@ UPWARD_BASELINE = frozenset({
 })
 
 
+def _logical_module(module: str) -> str:
+    """Generated parts keep their declared source module's architectural owner."""
+    from tests.patching import split_origin
+    path = split_origin(module.replace(".", "/") + ".py")
+    parts = list(pathlib.PurePosixPath(path).with_suffix("").parts)
+    if len(parts) > 1 and parts[-1] == "__init__":
+        parts.pop()
+    return ".".join(parts)
+
+
 def layer(module: str) -> int:
+    module = _logical_module(module)
     if module in PERSISTENCE or any(module == p or module.startswith(p + ".") for p in PERSISTENCE_PACKAGES):
         return 0
     if module in CORE or any(module == p or module.startswith(p + ".") for p in CORE_PACKAGES):
@@ -239,7 +252,11 @@ def imports_of(name: str, path: pathlib.Path, known: dict) -> set[str]:
 
 def edges() -> set[tuple[str, str]]:
     known = modules()
-    return {(name, target) for name, path in known.items() for target in imports_of(name, path, known)}
+    owners = {name: _logical_module(name) for name in known}
+    # Splitting cannot introduce debt from a facade to its own parts or move
+    # existing debt to a new architectural owner. New targets still count.
+    return {(owners[name], owners[target]) for name, path in known.items()
+            for target in imports_of(name, path, known) if owners[name] != owners[target]}
 
 
 def upward() -> set[str]:
