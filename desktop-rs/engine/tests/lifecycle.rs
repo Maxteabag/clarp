@@ -327,3 +327,23 @@ fn a_late_error_after_the_delivery_timer_shows_the_hosts_reason_in_the_chat_that
             .any(|r| r.text == "Slow and refused" && r.delivery_failed && !r.delivery_error.is_empty())
     });
 }
+
+#[test]
+fn a_send_the_hosts_stop_withdrew_shows_as_stopped_after_the_hint() {
+    // F4 (send_delivery_state): the Host marks a saved send withdrawn by a
+    // Stop without a new revision and sends only the delivery-updated hint;
+    // the chat re-reads and its row carries the state.
+    let host = Host::start("delivery-stopped");
+    let mut d = Driver::new(&host.base);
+    d.connect();
+    d.until("rachel open", |e| e.conversation("rachel").is_some_and(|c| c.rows().len() == 2));
+    d.engine.send("Stop me");
+    d.until("delivered", |e| e.conversation("rachel").unwrap().rows().iter()
+        .any(|r| r.text == "Stop me" && !r.pending && !r.delivery_failed));
+    let id = d.engine.conversation("rachel").unwrap().rows().iter()
+        .find(|r| r.text == "Stop me").unwrap().id.clone();
+    let cid = id.strip_prefix("u-").unwrap().to_owned();
+    host.control("/__control/delivery", json!({"session": "rachel", "client_msg_id": cid, "state": "stopped"}));
+    d.until("the row shows the Stop", |e| e.conversation("rachel").unwrap().rows().iter()
+        .any(|r| r.id == id && r.send_state == "stopped"));
+}
