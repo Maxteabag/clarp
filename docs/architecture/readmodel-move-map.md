@@ -75,3 +75,21 @@ fixtures use the existing family-aware `patch_shared` helper for clocks and
 fault injection. This cut changes module boundaries, with no intended behavior
 difference. RM-N14's later tail-import work retains the orchestrator and its
 atomicity; it is not implemented by this split.
+
+## S5 Codex cells size cut
+
+The hand-written `codex_tool_cells.py` module owns tool and display cell builders,
+output attachment, legacy cell rendering, and their 14 supporting bindings.
+`codex_transcript.py` keeps parsing, event ordering, normalization, and session
+discovery, and re-exports all 55 moved names. The shell split cache has one
+canonical instance in `codex_tool_cells`; its compatibility export is the same
+object. Exact names and AST hashes are in `s5-codex-split.json`.
+
+Both Codex and AGY parser-version source closures include the new module; AGY
+reaches these helpers directly and through OpenCode. Layer, table, state, swallow,
+and fixture ownership use `tools/refactor/handwritten/s5-codex.toml` for declared
+names only. This metadata is not a generator input. The captain must add the new
+module and moved functions to the forward-port watch.
+
+This cut leaves the RM-N10 prelude, import writer, supplied connections, and
+RM-N14 tail import entrypoints unchanged from the first size cut.
