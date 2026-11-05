@@ -563,3 +563,67 @@ def test_a_queued_utterance_cannot_overtake_its_raw_fallback(env, monkeypatch):
         release.set()
         worker.stop(timeout=5)
         assert all(not thread.is_alive() for thread in worker._threads)
+
+
+@pytest.mark.parametrize('phase', ['before-feed', 'during-feed', 'finalize'])
+def test_a_fallback_after_the_empty_stream_deadline_is_not_marked_done(env, monkeypatch, phase):
+    import io
+    from pathlib import Path
+    from types import SimpleNamespace
+    from lib import config, db, tts_worker, tts_queue, clip_stream
+    from lib.clip_delivery.raw_pcm import RawPcmDelivery
+    monkeypatch.setattr(config, '_CACHED', config.Config(
+        tts_provider='cartesia', tts_fallback='elevenlabs',
+        cartesia_api_key='primary-key', eleven_api_key='backup-key',
+        cartesia_voices={'Mike':'primary-voice'}))
+    broker = clip_stream.ClipStreamBroker()
+    records, emitted = [], []
+    monkeypatch.setattr(tts_worker, '_emit', lambda source, event, **kwargs: emitted.append((event, kwargs)))
+    class Stream:
+        def broadcast(self, event):records.append(event)
+    def primary(**kwargs):raise tts_worker.CartesiaError('before-byte outage')
+    def expire():
+        cid = db.conn().execute('SELECT clip_id FROM clips ORDER BY clip_id DESC LIMIT 1').fetchone()[0]
+        live = broker.get(cid)
+        ticks = iter((0.0, 31.0))
+        with monkeypatch.context() as patch:
+            patch.setattr(clip_stream, 'time', SimpleNamespace(time=lambda: next(ticks)))
+            clip_stream._write_live_chunks(SimpleNamespace(wfile=io.BytesIO()), live)
+        assert live.failed and live.error == 'stream wait timeout'
+    def backup(*, out_path, on_chunk, **kwargs):
+        assert on_chunk is None
+        Path(out_path).write_bytes(_fallback_wav(2 if phase == 'during-feed' else .1))
+        if phase == 'before-feed':
+            expire()
+        return Path(out_path).stat().st_size
+    if phase == 'during-feed':
+        append = broker.append
+        def append_then_expire(cid, data):
+            append(cid, data)
+            if not broker.get(cid).failed:
+                expire()
+        monkeypatch.setattr(broker, 'append', append_then_expire)
+    if phase == 'finalize':
+        from lib.clip_delivery.raw_pcm import RawPcmSession
+        finalize = RawPcmSession.finalize
+        def finalize_after_expiry(self, **kwargs):
+            expire()
+            return finalize(self, **kwargs)
+        monkeypatch.setattr(RawPcmSession, 'finalize', finalize_after_expiry)
+    monkeypatch.setattr(tts_worker, 'cartesia_synthesize_raw_pcm', primary)
+    monkeypatch.setattr(tts_worker, 'synthesize_streaming', backup)
+    qid = tts_queue.enqueue(agent_id=env['agent_id'], text='Synthetic fallback', voice_id='backup-voice',
+                            session='claude', source='pwa', trace_id='trace')
+    assert tts_worker.synth_one(audio_dir=env['audio_dir'], broker=broker,
+                               delivery=RawPcmDelivery(broker=broker), stream=Stream())
+    row = next(r for r in tts_queue.recent() if r['queue_id'] == qid)
+    assert row['status'] == tts_queue.FAILED, 'expired live stream discarded fallback bytes but queue reported successful speech'
+    assert len([r for r in records if r['type'] == 'tts-error']) == 1
+    clip = db.conn().execute('SELECT producer_status,path FROM clips ORDER BY clip_id DESC LIMIT 1').fetchone()
+    assert clip['producer_status'] == 'failed'
+    assert not Path(clip['path']).exists()
+
+    failures = [kw['detail'] for name, kw in emitted if name == 'rawStreamFailed']
+    assert len(failures) == 1
+    assert failures[0]['code'] == 'raw_stream_wait_timeout'
+    assert 'Synthetic fallback' not in str(failures[0])
