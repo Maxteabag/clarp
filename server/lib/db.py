@@ -358,6 +358,51 @@ def _is_lock_contention(exc: BaseException) -> bool:
         and "database is locked" in str(exc).lower()
 
 
+class _PrefetchedCursor:
+    """Only an autocommit RETURNING result, exhausted before wait-log I/O.
+
+    The audited callers use fetchone/fetchall. Keep the small result cursor
+    interface (including metadata and iteration), without wrapping any other
+    statement or an explicit transaction's cursor.
+    """
+
+    def __init__(self, cursor: sqlite3.Cursor, rows: list):
+        self._cursor = cursor
+        self._rows = iter(rows)
+        self._closed = False
+
+    @property
+    def rowcount(self):
+        return self._cursor.rowcount
+
+    @property
+    def lastrowid(self):
+        return self._cursor.lastrowid
+
+    @property
+    def description(self):
+        return self._cursor.description
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if self._closed:
+            raise sqlite3.ProgrammingError("Cannot operate on a closed cursor.")
+        return next(self._rows)
+
+    def fetchone(self):
+        return next(self, None)
+
+    def fetchall(self):
+        return list(self)
+
+    def close(self):
+        self._cursor.close()
+        self._rows = iter(())
+        self._closed = True
+
+
 class _TrackedConnection(sqlite3.Connection):
     """Connection that records explicit transaction ownership for diagnostics."""
 
@@ -391,13 +436,20 @@ class _TrackedConnection(sqlite3.Connection):
                     # Successful write admission must be visible while the
                     # finally block restores the budget and emits diagnostics.
                     _record_transaction_admission(self, template)
-                    return cursor
+                    break
                 except sqlite3.OperationalError as exc:
                     if not _is_lock_contention(exc) or \
                             (time.monotonic() - started) * 1000 >= deadline_ms:
                         raise
                     saw_import = saw_import or _import_holds_lock()
                 time.sleep(_LOCK_POLL_SECONDS)
+            # A polled write has result columns only with RETURNING. SQLite
+            # still holds its autocommit writer until that cursor reaches DONE,
+            # despite in_transaction=False. Fetch outside the BUSY retry loop:
+            # a fetch error must never replay an already-admitted write.
+            if not self.in_transaction and cursor.description is not None:
+                return _PrefetchedCursor(cursor, cursor.fetchall())
+            return cursor
         finally:
             super().execute(f"PRAGMA busy_timeout = {deadline_ms}")
             waited = time.monotonic() - started
