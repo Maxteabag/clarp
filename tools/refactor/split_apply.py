@@ -257,12 +257,8 @@ def old_module_rebinds(root: pathlib.Path, old: str, names: set[str], skip: set[
 # ---- one split -----------------------------------------------------------------
 
 def _stmt_reads(tool, stmt: ast.stmt) -> set[str]:
-    if isinstance(stmt, (ast.Assign, ast.AnnAssign)):
-        value = stmt.value if stmt.value is not None else stmt
-        reads = {n.id for n in ast.walk(value) if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)}
-        if isinstance(stmt, ast.AnnAssign):
-            reads |= {n.id for n in ast.walk(stmt.annotation) if isinstance(n, ast.Name)}
-        return reads
+    # ast_identity's reads for assignments too: a comprehension's own
+    # variables are not module reads (rf-s4).
     return tool.global_reads(stmt)
 
 
