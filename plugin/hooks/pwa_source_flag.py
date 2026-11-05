@@ -21,6 +21,7 @@ from dataclasses import dataclass
 import _clarp_lib  # noqa: F401  — puts Clarp's `lib` on sys.path
 try:
     from lib import agents as _agents                # noqa: E402
+    from _hook_report import report                # noqa: E402
     from lib import turn_lifecycle                   # noqa: E402
     from lib.transcript_cursor import CursorStoreError, reset_spoken_first_all  # noqa: E402
     from lib.hook_runtime import app_session  # noqa: E402
@@ -73,8 +74,8 @@ def main() -> int:
     payload = {}
     try:
         payload = json.loads(sys.stdin.read() or "{}")
-    except Exception:
-        pass
+    except Exception as exc:
+        report("userprompt_hook", "stdinFail", exc)
 
     backend_session_id = (payload.get("session_id") or "").strip()
     # CLAUDE_PWA_SESSION is set only by the server's clarp dispatcher, so a
@@ -93,8 +94,8 @@ def main() -> int:
             a = _agents.get_by_backend_session(backend_session_id)
             if a and a.get("session"):
                 session = a["session"]
-        except Exception:
-            pass
+        except Exception as exc:
+            report("userprompt_hook", "sessionLookupFail", exc)
 
     # Fresh PWA-voice marker → this turn arrived via the PWA, not a local
     # terminal. Drives the Stop hook's decision to write into PWA audio.
@@ -110,8 +111,8 @@ def main() -> int:
             backend_session_id=backend_session_id or None,
             detail={"from_pwa_marker": pwa_fresh},
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        report("userprompt_hook", "promptSubmitEmitFail", exc)
 
     # Resolve the agent. Third-party Claude Code (not in DB) → no-op.
     try:
@@ -141,7 +142,7 @@ def main() -> int:
                 try: _emit_event("userprompt_hook", "sessionConflict",
                                  session=session or None,
                                  detail={"err": str(bind_err)})
-                except Exception: pass
+                except Exception as exc: report("userprompt_hook", "sessionConflictEmitFail", exc)
                 return 0
         # Open a turn row. trace_id is "pwa-…" or "local-…" until the
         # /transcribe handler attaches one for PWA-voice turns.
@@ -163,7 +164,7 @@ def main() -> int:
                                  session=session or None,
                                  detail={"trace_id": trace_id,
                                          "reason": "no trace for a Clarp-started turn"})
-                except Exception: pass
+                except Exception as exc: report("userprompt_hook", "traceMintedEmitFail", exc)
             _agents.set_trace(agent_id, trace_id)
         turn_lifecycle.open_turn(agent_id=agent_id,
                                  source=source,
@@ -176,7 +177,7 @@ def main() -> int:
         try: _emit_event("userprompt_hook", "dbStateFail",
                          session=session or None,
                          detail={"err": str(e)})
-        except Exception: pass
+        except Exception as exc: report("userprompt_hook", "dbStateFailEmitFail", exc)
 
     # Eat the pwa-voice marker + reset "spoken first chunk" flags (voice turns
     # only). `voiced` gates the <speak> guidance below.
@@ -192,7 +193,7 @@ def main() -> int:
                 try: _emit_event("userprompt_hook", "cursorResetFail",
                                  session=session or None,
                                  detail={"err": str(e)})
-                except Exception: pass
+                except Exception as exc: report("userprompt_hook", "cursorResetFailEmitFail", exc)
         # Per-paragraph streaming used to be coaxed out of Claude by
         # injecting a system-prompt directive that asked it to emit a
         # `: __pwa_break__` Bash call between paragraphs. clarp's native
@@ -213,8 +214,8 @@ def main() -> int:
                     "additionalContext": context,
                 }
             }))
-        except Exception:
-            pass
+        except Exception as exc:
+            report("userprompt_hook", "contextOutputFail", exc)
     return 0
 
 
@@ -257,7 +258,8 @@ def _group_call_header(agent: dict | None) -> str:
     try:
         from lib import group_calls
         return group_calls.prompt_header(session)
-    except Exception:
+    except Exception as exc:
+        report("userprompt_hook", "groupCallHeaderFail", exc)
         return ""
 
 
