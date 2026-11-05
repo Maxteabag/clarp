@@ -83,14 +83,16 @@ def _sql_strings(tree: ast.AST):
 
 def writers() -> dict[str, set[str]]:
     found: dict[str, set[str]] = collections.defaultdict(set)
-    for rel, tree in logical_split_trees(sorted(ROOT.rglob("*.py")), ROOT).items():
+    for path in sorted(ROOT.rglob("*.py")):
+        rel = path.relative_to(ROOT).as_posix()
         if "/tests/" in rel:
             continue
-        for text in _sql_strings(tree):
-            for match in _WRITE.finditer(text):
-                table = match.group(1)
-                if table not in _NOT_TABLES:
-                    found[table].add(rel)
+        for origin, tree in logical_split_trees(rel, ast.parse(path.read_text(), filename=str(path))):
+            for text in _sql_strings(tree):
+                for match in _WRITE.finditer(text):
+                    table = match.group(1)
+                    if table not in _NOT_TABLES:
+                        found[table].add(origin)
     return found
 
 
@@ -240,12 +242,14 @@ def status_writers() -> dict[tuple[str, str], set[str]]:
     for table, column in columns:
         by_table[table].add(column)
     found: dict[tuple[str, str], set[str]] = collections.defaultdict(set)
-    for rel, tree in logical_split_trees(sorted(ROOT.rglob("*.py")), ROOT).items():
+    for path in sorted(ROOT.rglob("*.py")):
+        rel = path.relative_to(ROOT).as_posix()
         if "/tests/" in rel:
             continue
-        for text in _sql_texts(tree):
-            for key in status_writes(text, by_table):
-                found[key].add(rel)
+        for origin, tree in logical_split_trees(rel, ast.parse(path.read_text(), filename=str(path))):
+            for text in _sql_texts(tree):
+                for key in status_writes(text, by_table):
+                    found[key].add(origin)
     return found
 
 
@@ -359,3 +363,26 @@ def test_writer_guards_survive_a_split_and_still_reject_violations(tmp_path, mon
                 test_status_columns_are_written_only_through_their_lifecycle()
     finally:
         status_writers.cache_clear()
+
+
+def test_a_moved_sql_constant_counts_as_its_old_module_and_an_unlisted_writer_stays_physical(tmp_path):
+    # Review B on cut 1c (P2): a constant moves with the functions that use
+    # it, so a recipe-listed constant's SQL is the old module's; a new,
+    # unlisted writer in the same part keeps the part's own path, and the
+    # generated docstring is no SQL source.
+    (tmp_path / "s9.toml").write_text(
+        '[[split]]\nname = "x"\nmodule = "lib/old.py"\n'
+        '[[split.part]]\nmodule = "lib/old_part.py"\nnames = ["moved_writer", "MOVED_SQL"]\n')
+    tree = ast.parse(
+        '"""Moved out of lib/old.py: UPDATE dream_runs SET status = ?"""\n'
+        'MOVED_SQL = "UPDATE dream_runs SET status = ? WHERE id = ?"\n'
+        'def moved_writer(con):\n    con.execute("DELETE FROM dream_runs WHERE id = ?")\n'
+        'def unlisted_new_writer(con):\n    con.execute("UPDATE dream_runs SET status = ?")\n')
+    found = {origin: sorted(text for text in _sql_strings(sub) if "dream_runs" in text)
+             for origin, sub in logical_split_trees("lib/old_part.py", tree, tmp_path)}
+    assert found == {
+        "lib/old.py": ["DELETE FROM dream_runs WHERE id = ?", "UPDATE dream_runs SET status = ? WHERE id = ?"],
+        "lib/old_part.py": ["UPDATE dream_runs SET status = ?"],
+    }
+    # A file no recipe lists is one origin: itself, with its own Module object.
+    assert list(logical_split_trees("lib/other.py", tree, tmp_path)) == [("lib/other.py", tree)]
