@@ -137,7 +137,7 @@ def _run(case, monkeypatch, directory, host_module):
     query = {"provider": case["provider"], "id": voice, "text": text}
     handler = object.__new__(host_module.Handler)
     handler.path = "/" + case["kind"] + "?" + urlencode(query)
-    handler.ctx = SimpleNamespace(agents_path=directory / "agents.json")
+    handler.server = SimpleNamespace(ctx=SimpleNamespace(agents_path=directory / "agents.json"))
     handler._query = lambda: parse_qs(urlsplit(handler.path).query, keep_blank_values=True)
     answer = {}
     handler._send = lambda status, body: answer.update(status=status, body=body.decode())
