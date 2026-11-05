@@ -34,6 +34,7 @@ Schema (top-level promoted columns; everything else goes in `detail`):
 """
 from __future__ import annotations
 
+import atexit
 import datetime as _dt
 import fcntl
 import json
@@ -113,7 +114,57 @@ def _sanitize_detail(value: object, key: str = "") -> object:
     return value
 
 
+# An emit while this thread holds a state.sqlite transaction must not wait on
+# telemetry.sqlite under the state lock (RM-N8b): its row is queued and written
+# when the transaction ends (db.py calls flush_deferred), or at the latest by
+# the thread's next emit outside a transaction, by any flush once the thread
+# has ended, or at process exit. The JSONL line is written at once as before.
+# _DEFERRED_LOCK guards only the dict, never a SQLite call (see _write_sqlite).
+_DEFERRED: dict[int, list[tuple[dict, _dt.datetime]]] = {}
+_DEFERRED_LOCK = threading.Lock()
+
+
+def _in_state_transaction() -> bool:
+    from . import db
+    return db.thread_holds_transaction()
+
+
+def flush_deferred() -> None:
+    """Write the queued rows of this thread and of any thread that has ended."""
+    if not _DEFERRED:
+        return
+    me = threading.get_ident()
+    alive = {thread.ident for thread in threading.enumerate()}
+    with _DEFERRED_LOCK:
+        owners = [ident for ident in _DEFERRED if ident == me or ident not in alive]
+        batches = [_DEFERRED.pop(ident) for ident in owners]
+    for batch in batches:
+        for record, now in batch:
+            _insert_sqlite(record, now)
+
+
+def _flush_all_deferred() -> None:
+    with _DEFERRED_LOCK:
+        batches = list(_DEFERRED.values())
+        _DEFERRED.clear()
+    for batch in batches:
+        for record, now in batch:
+            _insert_sqlite(record, now)
+
+
+atexit.register(_flush_all_deferred)
+
+
 def _write_sqlite(record: dict, now: _dt.datetime) -> None:
+    if _in_state_transaction():
+        with _DEFERRED_LOCK:
+            _DEFERRED.setdefault(threading.get_ident(), []).append((record, now))
+        return
+    flush_deferred()
+    _insert_sqlite(record, now)
+
+
+def _insert_sqlite(record: dict, now: _dt.datetime) -> None:
     try:
         from . import telemetry
 
