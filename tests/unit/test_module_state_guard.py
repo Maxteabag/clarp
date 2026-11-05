@@ -114,6 +114,7 @@ ALLOWED: dict[tuple[str, str], str] = {
     ("lib/elevenlabs_voices.py", "_cache"): CACHE,
     ("lib/google_stt.py", "_TOKENS"): CACHE,
     ("lib/eventlog.py", "LOG_DIR"): PATHS,
+    ("lib/eventlog.py", "_DEFERRED"): "telemetry rows emitted inside a state transaction, per thread; written at its end, by a later flush once the thread has ended, or at exit (RM-N8b)",
     ("lib/health.py", "_STATE"): JOBS,
     ("lib/heartbeat.py", "_STATE_BY_AGENT"): "per-agent heartbeat timers of the running worker; rebuilt from agents rows on start",
     ("lib/janitor_autonomy.py", "_SCHEMA_READY_FOR"): PATHS,
