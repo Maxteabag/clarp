@@ -81,6 +81,9 @@ class _FakeWS:
     def send(self, raw: str) -> None:
         self.sent.append(json.loads(raw))
 
+    def settimeout(self, timeout):
+        self.timeout = timeout
+
     def recv(self) -> str:
         return self.frames.pop(0)
 
