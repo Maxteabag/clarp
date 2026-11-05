@@ -193,15 +193,15 @@ continue as before.
 | Fix-lane author 2 | `rf-fix2-56f3` | Claude | one fix per commit (voice, Oracle, autonomy findings), in the files the lead names |
 | Fix-lane author 3 | `rf-fix3-9875` | Claude | one fix per commit, pulled from `registers/backlog.md` (B and C areas) |
 | Slice owner S9 (module splits) | `rf-fix3-9875` | Claude | the module-split tool (recipe + generator + facade + ast_identity) and the move-only splits of unowned oversized modules on `refactor/integration` |
-| Slice owner S3 | `rf-routes-0f54` | Claude | route goldens now; the route seam and route modules after go/no-go 1 |
-| Slice owner S5 | `rf-readmodel-12f8` | Claude | read-model goldens now; the read model after go/no-go 1 |
-| Compute owner | `rf-compute-aa87` | Claude | `/var/tmp/clarp-refactor-program/bin/heavy-remote`, the buildbox ledger |
+| Slice owner S3 | `rf-routesc-352a` (was `rf-routes-0f54`) | Codex | route goldens now; the route seam and route modules after go/no-go 1 |
+| Slice owner S5 | `rf-readmodelc-cb42` (was `rf-readmodel-12f8`) | Codex | read-model goldens now; the read model after go/no-go 1 |
+| Compute owner | `rf-computec-d8ca` (was `rf-compute-aa87`) | Codex | `/var/tmp/clarp-refactor-program/bin/heavy-remote`, the buildbox ledger |
 | Reviewer A (core) | `rf-review-core-bbc1` | Codex | verdicts only |
 | Reviewer B (rest) | `rf-review-rest-a79f` | Codex | verdicts only |
 | Reviewer C (read model, voice) | `rf-review-readmodel-300e` | Codex | verdicts only |
 | Reviewer A2 (turn engine, database) | `rf-review-core2-cf19` | Claude | verdicts only |
-| Slice owner S4 (turn engine) | `rf-s4-ca35` | Claude | the turn engine restructure on `refactor/integration` (recipe + generator + facade, regenerated from main's text); G0 tests on main |
-| Slice owner S6 (backends) | `rf-s6-8970` | Claude | the backends restructure on `refactor/integration` (codex_app_server, the Codex pool, backend modules), same method; G0 tests on main |
+| Slice owner S4 (turn engine) | `rf-s4c-8be3` (was `rf-s4-ca35`) | Codex | the turn engine restructure on `refactor/integration` (recipe + generator + facade, regenerated from main's text); G0 tests on main |
+| Slice owner S6 (backends) | `rf-s6c-0876` (was `rf-s6-8970`) | Codex | the backends restructure on `refactor/integration` (codex_app_server, the Codex pool, backend modules), same method; G0 tests on main |
 | Reviewer A3 (turn engine restructure, Phase 3) | `rf-review-core3-7399` | Claude | verdicts only (S4 and the Phase 3 lifecycle conversions; A2 keeps fixes on main, A reviews S6) |
 
 Reviewers never edit sources, never run jobs against the live Host and never
