@@ -567,7 +567,7 @@ def test_a_queued_utterance_cannot_overtake_its_raw_fallback(env, monkeypatch):
         assert all(not thread.is_alive() for thread in worker._threads)
 
 
-@pytest.mark.parametrize('phase', ['before-feed', 'during-feed', 'finalize'])
+@pytest.mark.parametrize('phase', ['begin', 'before-feed', 'during-feed', 'finalize'])
 def test_a_fallback_after_the_empty_stream_deadline_is_not_marked_done(env, monkeypatch, phase):
     import io
     from pathlib import Path
@@ -598,6 +598,13 @@ def test_a_fallback_after_the_empty_stream_deadline_is_not_marked_done(env, monk
         if phase == 'before-feed':
             expire()
         return Path(out_path).stat().st_size
+    if phase == 'begin':
+        begin = RawPcmDelivery.begin
+        def begin_after_expiry(self, **kwargs):
+            session = begin(self, **kwargs)
+            expire()
+            return session
+        monkeypatch.setattr(RawPcmDelivery, 'begin', begin_after_expiry)
     if phase == 'during-feed':
         append = broker.append
         def append_then_expire(cid, data):
