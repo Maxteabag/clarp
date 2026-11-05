@@ -564,6 +564,9 @@ def test_compare_and_set_where_groups_events_by_target_and_stamps_each(qcon):
     assert [_q(qcon, k)[0] for k in ("t1-a", "t1-b", "t1-c", "t1-d")] == ["done", "done", "done", "cancelled"]
     with lk.transaction(qcon):
         assert lk.compare_and_set_where(qcon, lc, "claim", where="1", now=70, returning="id") == []
+    _rows_in(qcon, ("t3-a", "queued"))
+    whole = lk.compare_and_set_where(qcon, lc, "claim", where="id = 't3-a'", now=71, returning="*")
+    assert [tuple(r) for r in whole] == [("t3-a", "claimed", 71, None, "t3", None)]   # the whole moved row
 
 
 def test_compare_and_set_where_refuses_unknown_events_and_bad_returning(qcon):

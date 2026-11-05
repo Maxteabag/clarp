@@ -339,7 +339,7 @@ def compare_and_set_where(con: sqlite3.Connection, lc: Lifecycle, events: str | 
     unknown = [e for e in events if not any(k[0] == e for k in lc._table)]
     if unknown:
         raise LifecycleError(f"{lc.name}: no edge for event(s) {unknown}")
-    if returning and not all(_IDENT.match(c.strip()) for c in returning.split(",")):
+    if returning and returning != "*" and not all(_IDENT.match(c.strip()) for c in returning.split(",")):
         raise LifecycleError(f"{lc.name}: bad returning columns {returning!r}")
     own = len(by_target) > 1 and not con.in_transaction
     if own:
