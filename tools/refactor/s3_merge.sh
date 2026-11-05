@@ -63,7 +63,6 @@ $merge_out"
 fi
 # The recipe and replay list as they stand in the merged tree.
 git checkout "$main" -- tools/refactor/s3_moves.toml tools/refactor/s3_replay.txt 2>/dev/null || true
-git checkout "$main" -- tools/refactor/s3_replay 2>/dev/null || true
 git checkout "$main" -- tools/refactor/splits tools/refactor/split_apply.py 2>/dev/null || true
 # S9: one line per split or repoint, "split|repoint NAME OLD=OLD,PART,...", in apply order.
 split_specs=""
@@ -93,38 +92,42 @@ PYEOF
 ) || die 2 "cannot read the groups of tools/refactor/s3_moves.toml"
 replay=$(grep -v '^\s*#' tools/refactor/s3_replay.txt | awk 'NF {print $1}')
 
-# Reviewed merge resolutions (tools/refactor/merge_resolutions/*.toml, taken from main):
-# one per conflicted file outside S3's own, naming the exact merge-base, main and
-# integration blobs it resolves and the resolved file. It applies only when all three
-# blobs match this merge; anything else is still a conflict that stops with 3.
-git checkout "$main" -- tools/refactor/merge_resolutions 2>/dev/null || true
+# Reviewed merge resolutions (tools/refactor/merge_resolutions/*.toml): one per
+# conflicted file outside S3's own, naming the exact merge-base, main and
+# integration blobs it resolves and the resolved file. Entries and payloads are
+# read only from main's tree (git ls-tree/show "$main"), never from the merged
+# working tree, so an entry that exists only on integration can never apply. An
+# entry applies only when all three blobs match this merge; anything else is
+# still a conflict that stops with 3, a stale entry with 10.
 merge_base=$(git merge-base "$main" "$integration") || die 3 "no merge base"
-resolved=""
-if [ -d tools/refactor/merge_resolutions ]; then
-  resolved=$("$PY" - "$merge_base" "$main" "$integration" $conflicts <<'PYEOF'
-import pathlib, subprocess, sys, tomllib
+resolved=$("$PY" - "$merge_base" "$main" "$integration" $conflicts <<'PYEOF'
+import subprocess, sys, tomllib
 base, main, integration, *conflicts = sys.argv[1:]
+FOLDER = "tools/refactor/merge_resolutions"
+def git(*args, binary=False):
+    return subprocess.run(["git", *args], capture_output=True, check=True, text=not binary).stdout
 def blob(ref, path):
     out = subprocess.run(["git", "rev-parse", "-q", "--verify", f"{ref}:{path}"],
                          capture_output=True, text=True)
     return out.stdout.strip() if out.returncode == 0 else ""
-for entry in sorted(pathlib.Path("tools/refactor/merge_resolutions").glob("*.toml")):
-    spec = tomllib.loads(entry.read_text())
+names = [n for n in git("ls-tree", "--name-only", f"{main}:{FOLDER}").split() if n.endswith(".toml")] \
+    if blob(main, FOLDER) else []
+for name in sorted(names):
+    spec = tomllib.loads(git("show", f"{main}:{FOLDER}/{name}"))
     path = spec["path"]
     if path not in conflicts:
         continue
     want = (spec["base_blob"], spec["main_blob"], spec["integration_blob"])
     have = (blob(base, path), blob(main, path), blob(integration, path))
     if want != have:
-        print(f"STALE {entry.name} {path} recorded={'/'.join(want)} now={'/'.join(have)}")
+        print(f"STALE {name} {path} recorded={'/'.join(want)} now={'/'.join(have)}")
         continue
-    target = pathlib.Path(path)
-    target.write_bytes((entry.parent / spec["resolved"]).read_bytes())
+    with open(path, "wb") as target:
+        target.write(git("show", f"{main}:{FOLDER}/{spec['resolved']}", binary=True))
     subprocess.run(["git", "add", "--", path], check=True)
-    print(f"APPLIED {entry.stem} {path} {'/'.join(have)}")
+    print(f"APPLIED {name[:-5]} {path} {'/'.join(have)}")
 PYEOF
-) || die 3 "cannot read tools/refactor/merge_resolutions"
-fi
+) || die 3 "cannot read $main's tools/refactor/merge_resolutions"
 stale=$(printf '%s\n' "$resolved" | grep '^STALE ' || true)
 [ -z "$stale" ] || die 10 "a merge resolution entry does not match this merge's blobs (stale or partial; refresh it with its reviewers):
 $stale"
@@ -196,7 +199,7 @@ for path in $split_generated; do git rm -q --cached --ignore-unmatch "$path"; rm
 for sha in $replay; do
   case "$sha" in
     file:*)   # a reviewed port of a replayed diff, kept on main as a patch file
-      git apply --3way --index "tools/refactor/${sha#file:}" \
+      git show "$main:tools/refactor/${sha#file:}" | git apply --3way --index - \
         || die 4 "the replay patch ${sha#file:} does not apply to main's server.py; port it by hand and update s3_replay.txt" ;;
     *)
       git diff "$sha^" "$sha" -- server/server.py | git apply --3way --index - \
