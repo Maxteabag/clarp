@@ -12,6 +12,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import tomllib
 
 import s3_apply
 import split_apply
@@ -53,11 +54,12 @@ def recipes(root: pathlib.Path) -> list[tuple[pathlib.Path, list[dict]]]:
     split_paths |= {part['module'] for entry in splits for part in entry['part']}
     if outputs & split_paths:
         raise s3_apply.Refusal('method output collides with a module split')
-    touched = source_paths | {p for entry in splits
-        if source_paths & {entry['module'], *(v['module'] for v in entry['part'])}
-        for p in [entry['module'], *(v['module'] for v in entry['part'])]}
-    if any(entry['file'] in touched for entry in repoints):
-        raise s3_apply.Refusal('method family has a repoint; explicit reconstruction required')
+    forbidden = {entry['file'] for entry in repoints}
+    routes = root / 'tools/refactor/s3_moves.toml'
+    if routes.exists():
+        forbidden |= {g['module'] for g in tomllib.loads(routes.read_text()).get('group', [])}
+    if outputs & forbidden:
+        raise s3_apply.Refusal('method output collides with a repoint file or S3 mixin')
     return found
 
 
@@ -90,64 +92,89 @@ def applied_prefix(root: pathlib.Path, integration: str, groups: list[dict]) -> 
     return groups[:count]
 
 
-def compare_family(root: pathlib.Path, base: str, integration: str, work: pathlib.Path,
-                   original: str, entry: dict | None, found: list) -> None:
-    """Reconstruct one baseline family, then compare sources and generated files."""
-    rel = 'server/' + original
-    text = show(root, base, rel)
-    if text is None:
-        raise s3_apply.Refusal(f'no baseline text for {original}')
-    write(work, {rel: text})
-    family = {original}
-    if entry:
-        family |= {p['module'] for p in entry['part']}
-    consumers = [(path, groups) for path, groups in found
-                 if groups[0]['source_module'] in family]
-    outputs = {'server/' + g['module'] for _, groups in consumers for g in groups}
-    checked = {rel}
-    if entry:
-        parts = ['server/' + p['module'] for p in entry['part']]
-        presence = [show(root, integration, p) is not None for p in parts]
-        if not any(presence):
-            # An unstarted split must be exactly the original baseline, with
-            # no generated method modules hiding beside it.
-            if show(root, integration, rel) != text or any(
-                    show(root, integration, p) is not None for p in outputs):
-                raise s3_apply.Refusal(f'integration-only edit before split {original}')
-            return
-        if not all(presence):
-            raise s3_apply.Refusal(f'partial module split on integration: {original}')
-        if show(root, base, parts[0]) is not None:
-            raise s3_apply.Refusal(f'baseline is already split: {original}; needs explicit reconstruction')
-        write(work, split_apply.apply_split(work, entry))
-        checked.update(parts)
-    for _, groups in consumers:
-        prefix = applied_prefix(root, integration, groups)
-        if prefix:
-            write(work, s3_apply.apply(work, prefix))
-        checked.update('server/' + g['module'] for g in groups)
-    for path in sorted(checked):
-        expected = (work / path).read_text() if (work / path).exists() else None
-        if show(root, integration, path) != expected:
-            raise s3_apply.Refusal(f'integration-only edit in {path}')
+def _baseline_splits(root, base, integration, work, splits, found):
+    checked, unavailable = set(), set()
+    for entry in splits:
+        old = entry['module']
+        rels = ['server/' + old] + ['server/' + p['module'] for p in entry['part']]
+        text = show(root, base, rels[0])
+        if text is None:
+            raise s3_apply.Refusal(f'no baseline text for {old}')
+        write(work, {rels[0]: text})
+        checked.update(rels)
+        present = [show(root, integration, p) is not None for p in rels[1:]]
+        if not any(present):
+            if any(groups[0]['source_module'] == old for _, groups in found):
+                raise s3_apply.Refusal(f'method source is an unstarted split old module: {old}')
+            unavailable.update(rels[1:])
+            continue
+        if not all(present):
+            raise s3_apply.Refusal(f'partial module split on integration: {old}')
+        if show(root, base, rels[1]) is not None:
+            for rel in rels[1:]:
+                text = show(root, base, rel)
+                if text is None:
+                    raise s3_apply.Refusal(f'partial baseline split: {old}')
+                write(work, {rel: text})
+        else:
+            write(work, split_apply.apply_split(work, entry))
+    return checked, unavailable
+
+
+def _baseline_repoints(root, base, work, repoints, unavailable):
+    alternatives = {}
+    for entry in repoints:
+        rel = 'server/' + entry['file']
+        if rel in unavailable:
+            raise s3_apply.Refusal(f'repoint requires an unstarted split part: {rel}')
+        if not (work / rel).exists():
+            text = show(root, base, rel)
+            if text is None:
+                raise s3_apply.Refusal(f'no baseline text for repoint {rel}')
+            write(work, {rel: text})
+        alternatives[rel] = (work / rel).read_text()
+        write(work, split_apply.apply_repoint(work, entry))
+    return alternatives
 
 
 def validate(root: pathlib.Path, base: str, integration: str, found: list) -> None:
-    """Validate affected S9 families and unsplit sources before taking main text."""
-    splits, _ = split_apply.load_recipes(root / 'tools/refactor/splits')
-    touched = affected(root, found)
-    entries = {entry['module']: entry for entry in splits if entry['module'] in touched}
-    covered = {p for entry in entries.values()
-               for p in [entry['module'], *(part['module'] for part in entry['part'])]}
-    standalone = {groups[0]['source_module'] for _, groups in found} - covered
+    """One reconstruction: all S9 splits, then repoints, then named methods."""
+    splits, repoints = split_apply.load_recipes(root / 'tools/refactor/splits')
     with tempfile.TemporaryDirectory(prefix='s3-method-baseline-') as tmp:
-        for index, original in enumerate([*entries, *sorted(standalone)]):
-            work = pathlib.Path(tmp, str(index))
-            # Family import refusal reads only recipe data; no app is imported.
-            for directory in ('tools/refactor/splits', METHODS):
-                if (root / directory).exists():
-                    shutil.copytree(root / directory, work / directory)
-            compare_family(root, base, integration, work, original, entries.get(original), found)
+        work = pathlib.Path(tmp)
+        for directory in ('tools/refactor/splits', METHODS):
+            if (root / directory).exists():
+                shutil.copytree(root / directory, work / directory)
+        checked, unavailable = _baseline_splits(root, base, integration, work, splits, found)
+        alternatives = _baseline_repoints(root, base, work, repoints, unavailable)
+        checked.update(alternatives)
+        rewritten = set()
+        for _, groups in found:
+            source = 'server/' + groups[0]['source_module']
+            prefix = applied_prefix(root, integration, groups)
+            checked.add(source)
+            checked.update('server/' + g['module'] for g in groups)
+            if source in unavailable:
+                if prefix:
+                    raise s3_apply.Refusal(f'method outputs precede their module split: {source}')
+                continue
+            if not (work / source).exists():
+                text = show(root, base, source)
+                if text is None:
+                    raise s3_apply.Refusal(f'no baseline text for {source}')
+                write(work, {source: text})
+            if prefix:
+                write(work, s3_apply.apply(work, prefix))
+                rewritten.add(source)
+        for rel in sorted(checked):
+            expected = (work / rel).read_text() if (work / rel).exists() else None
+            actual = show(root, integration, rel)
+            # D historically allows a repoint that has not yet been applied.
+            # Once methods rewrite its source, only the ordered D->E result is valid.
+            if rel not in rewritten and rel in alternatives and actual == alternatives[rel]:
+                continue
+            if actual != expected:
+                raise s3_apply.Refusal(f'integration-only edit in {rel}')
 
 
 def main() -> int:
