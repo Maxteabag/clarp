@@ -21,7 +21,7 @@ def _parse_cells(tmp_path, events):
 @pytest.mark.parametrize("event,payload,title,status,summary,lines", [
     ("collab_agent_interaction_begin",
      {"receiver_thread_id": "child-1", "receiver_agent_role": "reviewer", "prompt": "  Check\n ownership  "},
-     "Sending input to agent", "running", "[reviewer]", [("Input", "Check ownership", "output")]),
+     "Sending input to agent", "running", "[reviewer]", [("Input", "Check ownership", "detail")]),
     ("collab_agent_interaction_end",
      {"receiver_thread_id": "child-1", "receiver_agent_nickname": "Ada", "status": {"errored": "refused"}},
      "Sent input to agent", "error", "Ada", []),
@@ -82,7 +82,8 @@ def test_protocol_collaboration_retains_identity_state_and_lines(
      "Resumed agent", "ok", "target-1", ("Result", "plain reply")),
     ("close_agent", {"target": "target-12345"}, {"status": None},
      "Closed agent", "recorded", "target-1", ("Status", "Recorded")),
-    ("close_agent", {}, {}, "Closed agent", "ok", "agent", None),
+    ("close_agent", {}, {}, "Closed agent", "ok", "agent", ("Result", "{}")),
+    ("close_agent", {}, "", "Closed agent", "ok", "agent", None),
 ])
 def test_legacy_collaboration_tool_result_updates_its_existing_cell(
         tmp_path, tool, arguments, output, title, status, summary, last_line):
