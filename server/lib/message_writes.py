@@ -1231,6 +1231,102 @@ class _AgyAuthority:
             cells.extend(turn.get("display_cells") or [])
 
 
+def _resolve_reply_id(database, *, agent_id: str, backend_session_id: str,
+                      source_file: str, seq: int, msg_id: str, text: str,
+                      timestamp: Any, request_trace: str, reply_trace: str,
+                      final_rows: "_FinalRows", adopted_final_ids: set[str],
+                      placed_ids: set[str]) -> tuple[str, bool]:
+    """The row a transcript reply without its own id lands on (S5 step 4).
+
+    In order: the slot's occupant, unless another request's adopted reply
+    holds it (parked, RM-N1b); this reply's adopted final row moved with its
+    shifted turn (RM-N1), or a reply this import parked; the request's single
+    final row with the same visible text; the row it streamed into; and the
+    finalized live twin of an unlinked request. Adopted ids join
+    ``adopted_final_ids``. Returns the id and whether any row was removed or
+    parked (the import's replace revision then moves)."""
+    changed = False
+    # Keep the already visible completion identity when its exact
+    # authored request and final text identify this transcript reply.
+    # Never deduplicate equal replies belonging to different requests.
+    slot = database.execute("SELECT message_id, trace_id FROM messages WHERE agent_id=? AND backend_session_id=? AND source_file=? AND seq=? AND role='assistant'",
+        (agent_id, backend_session_id, source_file, seq)).fetchone()
+    if (slot and request_trace
+            and slot["message_id"] != _message_id(
+                agent_id, backend_session_id, source_file, seq)
+            and (slot["trace_id"] or "") != request_trace
+            and _park_adopted_occupant(database, agent_id, backend_session_id,
+                                       source_file, seq, msg_id="")):
+        # Another request's adopted reply holds this slot (its turn left
+        # the transcript): it never lends its id to this reply (RM-N1b).
+        changed = True
+        slot = None
+    moved = None
+    if request_trace and not (
+            slot and slot["message_id"] != _message_id(
+                agent_id, backend_session_id, source_file, seq)):
+        # An earlier import adopted this reply's final row (its
+        # source_file is this transcript's now) and the turns have
+        # shifted since: it moves with its turn, where a fresh import
+        # would place it, and the slot's old occupant goes (RM-N1).
+        moved = _shifted_twin(database, agent_id, backend_session_id,
+                              source_file, request_trace,
+                              _strip_voice_markup(text), seq,
+                              exclude=adopted_final_ids | placed_ids)
+    elif not slot:
+        # A reply this import parked (RM-N1b) whose request could not
+        # be linked: found again by its visible text, as a fresh
+        # import adopts an unlinked reply's final row.
+        moved = _parked_twin(database, agent_id, backend_session_id,
+                             source_file, _strip_voice_markup(text),
+                             exclude=adopted_final_ids | placed_ids)
+    if moved is not None:
+        msg_id = moved[0]
+        adopted_final_ids.add(msg_id)
+        _delete_slot(database, agent_id, backend_session_id, source_file, seq)
+        changed = True
+        slot = None
+    elif slot:
+        msg_id = slot["message_id"]
+    elif request_trace:
+        request_source = "final:" + request_trace
+        visible = _strip_voice_markup(text)
+        matching = [message_id for message_id, source, row_visible, _ts in final_rows.rows()
+                    if source == request_source and message_id not in adopted_final_ids
+                    and row_visible == visible]
+        if len(matching) == 1:
+            msg_id = matching[0]
+            adopted_final_ids.add(msg_id)
+    if not slot and msg_id not in adopted_final_ids:
+        # The row this reply streamed into becomes its durable row,
+        # in place: same id, so no client sees it vanish and return.
+        streamed = _streamed_twin(database, agent_id, backend_session_id,
+                                  text, exclude=adopted_final_ids,
+                                  trace=reply_trace)
+        if streamed:
+            msg_id = streamed
+            adopted_final_ids.add(msg_id)
+    if msg_id not in adopted_final_ids:
+        # Without a request trace (the user turn could not be linked
+        # to its client row) the finalized live row was never adopted
+        # and stayed beside this reply as a second, identical bubble.
+        # Match it by visible text within the same few minutes; a
+        # reply already imported sheds an earlier import's twin.
+        twins = _final_twins(final_rows,
+                             text=text, timestamp=timestamp,
+                             exclude=adopted_final_ids | {msg_id})
+        if len(twins) == 1 and not slot and not request_trace:
+            msg_id = twins[0]
+            adopted_final_ids.add(msg_id)
+        elif twins and slot:
+            removed = database.execute(
+                f"DELETE FROM messages WHERE message_id IN ({','.join('?' * len(twins))})",
+                twins).rowcount
+            final_rows.discard(twins)
+            changed = changed or removed > 0
+    return msg_id, changed
+
+
 def _store_transcript_turns_txn(database, *, agent_id: str,
                                 backend_session_id: str, source_file: str,
                                 turns: list[dict[str, Any]],
@@ -1470,84 +1566,13 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
         elif role == "assistant":
             origin, sender_agent_id = current_origin, current_sender_agent_id
         if role == "assistant" and not turn.get("id"):
-            # Keep the already visible completion identity when its exact
-            # authored request and final text identify this transcript reply.
-            # Never deduplicate equal replies belonging to different requests.
-            slot = database.execute("SELECT message_id, trace_id FROM messages WHERE agent_id=? AND backend_session_id=? AND source_file=? AND seq=? AND role='assistant'",
-                (agent_id, backend_session_id, source_file, seq)).fetchone()
-            if (slot and current_request_trace
-                    and slot["message_id"] != _message_id(
-                        agent_id, backend_session_id, source_file, seq)
-                    and (slot["trace_id"] or "") != current_request_trace
-                    and _park_adopted_occupant(database, agent_id, backend_session_id,
-                                               source_file, seq, msg_id="")):
-                # Another request's adopted reply holds this slot (its turn left
-                # the transcript): it never lends its id to this reply (RM-N1b).
-                skipped_slot_removed = True
-                slot = None
-            moved = None
-            if current_request_trace and not (
-                    slot and slot["message_id"] != _message_id(
-                        agent_id, backend_session_id, source_file, seq)):
-                # An earlier import adopted this reply's final row (its
-                # source_file is this transcript's now) and the turns have
-                # shifted since: it moves with its turn, where a fresh import
-                # would place it, and the slot's old occupant goes (RM-N1).
-                moved = _shifted_twin(database, agent_id, backend_session_id,
-                                      source_file, current_request_trace,
-                                      _strip_voice_markup(text), seq,
-                                      exclude=adopted_final_ids | placed_ids)
-            elif not slot:
-                # A reply this import parked (RM-N1b) whose request could not
-                # be linked: found again by its visible text, as a fresh
-                # import adopts an unlinked reply's final row.
-                moved = _parked_twin(database, agent_id, backend_session_id,
-                                     source_file, _strip_voice_markup(text),
-                                     exclude=adopted_final_ids | placed_ids)
-            if moved is not None:
-                msg_id = moved[0]
-                adopted_final_ids.add(msg_id)
-                _delete_slot(database, agent_id, backend_session_id, source_file, seq)
-                skipped_slot_removed = True
-                slot = None
-            elif slot:
-                msg_id = slot["message_id"]
-            elif current_request_trace:
-                request_source = "final:" + current_request_trace
-                visible = _strip_voice_markup(text)
-                matching = [message_id for message_id, source, row_visible, _ts in final_rows.rows()
-                            if source == request_source and message_id not in adopted_final_ids
-                            and row_visible == visible]
-                if len(matching) == 1:
-                    msg_id = matching[0]
-                    adopted_final_ids.add(msg_id)
-            if not slot and msg_id not in adopted_final_ids:
-                # The row this reply streamed into becomes its durable row,
-                # in place: same id, so no client sees it vanish and return.
-                streamed = _streamed_twin(database, agent_id, backend_session_id,
-                                          text, exclude=adopted_final_ids,
-                                          trace=reply_trace)
-                if streamed:
-                    msg_id = streamed
-                    adopted_final_ids.add(msg_id)
-            if msg_id not in adopted_final_ids:
-                # Without a request trace (the user turn could not be linked
-                # to its client row) the finalized live row was never adopted
-                # and stayed beside this reply as a second, identical bubble.
-                # Match it by visible text within the same few minutes; a
-                # reply already imported sheds an earlier import's twin.
-                twins = _final_twins(final_rows,
-                                     text=text, timestamp=turn.get("timestamp"),
-                                     exclude=adopted_final_ids | {msg_id})
-                if len(twins) == 1 and not slot and not current_request_trace:
-                    msg_id = twins[0]
-                    adopted_final_ids.add(msg_id)
-                elif twins and slot:
-                    removed = database.execute(
-                        f"DELETE FROM messages WHERE message_id IN ({','.join('?' * len(twins))})",
-                        twins).rowcount
-                    final_rows.discard(twins)
-                    skipped_slot_removed = skipped_slot_removed or removed > 0
+            msg_id, changed = _resolve_reply_id(
+                database, agent_id=agent_id, backend_session_id=backend_session_id,
+                source_file=source_file, seq=seq, msg_id=msg_id, text=text,
+                timestamp=turn.get("timestamp"), request_trace=current_request_trace,
+                reply_trace=reply_trace, final_rows=final_rows,
+                adopted_final_ids=adopted_final_ids, placed_ids=placed_ids)
+            skipped_slot_removed = skipped_slot_removed or changed
         timestamp = turn.get("timestamp")
         kind = turn.get("kind")
         tool_name = turn.get("tool_name")
