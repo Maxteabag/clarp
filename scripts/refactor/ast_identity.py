@@ -363,7 +363,9 @@ def global_reads(member: ast.stmt) -> set[str]:
             found.add(sym.get_name())
     for child in table.get_children():
         visit(child)
-    return found
+    # Python 3.14 lists a synthetic __conditional_annotations__ for an
+    # annotated assignment; nothing in the source reads it.
+    return found - {"__conditional_annotations__"}
 
 
 def mixin_reads(tree: ast.Module) -> set[str]:
