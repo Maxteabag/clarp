@@ -10,6 +10,7 @@ import sys
 import _clarp_lib  # noqa: F401  — puts Clarp's `lib` on sys.path
 try:
     from lib import agents as agents_db  # noqa: E402
+    from _hook_report import report                # noqa: E402
     from lib import turn_lifecycle  # noqa: E402
     from lib.activity import summarize_tool_activity, tool_input_from_hook_payload  # noqa: E402
     from lib.hook_runtime import app_session  # noqa: E402
@@ -22,7 +23,8 @@ except ImportError:
 def main() -> int:
     try:
         payload = json.load(sys.stdin)
-    except Exception:
+    except Exception as exc:
+        report("toolstart_hook", "stdinFail", exc)
         return 0
 
     backend_session_id = (payload.get("session_id") or "").strip()
@@ -39,7 +41,8 @@ def main() -> int:
             backend_session_id=backend_session_id or None,
             session=session or None,
         )
-    except Exception:
+    except Exception as exc:
+        report("toolstart_hook", "resolveFail", exc)
         agent = None
     if not agent:
         return 0
@@ -56,8 +59,8 @@ def main() -> int:
             "input": tool_input,
             **summary,
         })
-    except Exception:
-        pass
+    except Exception as exc:
+        report("toolstart_hook", "recordFail", exc)
     if tool_name == "Bash":
         from lib.backend.claude_background_provenance import (
             background_task_context, tool_input_with_origin)
@@ -73,8 +76,8 @@ def main() -> int:
             # This process launched it; its exit is when the task ends.
             try:
                 record_task_turn(agent["agent_id"], backend_session_id, tool_use_id, turn)
-            except Exception:
-                pass
+            except Exception as exc:
+                report("toolstart_hook", "taskTurnFail", exc)
         output = {"hookEventName": "PreToolUse"}
         if updated is not None:
             output["updatedInput"] = updated

@@ -5,6 +5,12 @@ import os
 import sqlite3
 import sys
 
+try:
+    from _hook_report import report
+except ImportError:
+    # A lone hook without its siblings still never blocks terminal work.
+    report = None
+
 
 def _clarp_conversation(conversation_id: str) -> bool:
     """Cheap read-only check before loading Clarp: agy fires these hooks on
@@ -37,9 +43,11 @@ try:
         from lib.backend.agy_hooks import record_event
 
         record_event(sys.argv[1] if len(sys.argv) > 1 else "", payload)
-except Exception:
-    # An unavailable Clarp install must never prevent terminal work.
-    pass
+except Exception as exc:
+    # An unavailable Clarp install must never prevent terminal work; the
+    # report writes no output and never raises (HOOK-01).
+    if report is not None:
+        report("agy_hook", "recordFail", exc)
 
 # No permission, context injection, or continuation decisions.
 print("{}")
