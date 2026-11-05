@@ -54,7 +54,7 @@ multi-batch import publishes every row atomically. Existing batch commits stay
 visible, as today. Do not claim an all-or-nothing import generation without a
 separate publishing/storage design. No long transaction, whole-import writer
 lock or complete-history response cache is introduced to hide intermediate
-commits. This definition is an explicit point for the lead/C to confirm.
+commits. Lead 635 approves this definition; atomic whole-import publication stays out of scope.
 
 RM-N14 step 1 remains the first RM-01 delivery: Claude/Codex append-only fast
 paths, existing checkpoint format, exact RM-N10 database validation and a
@@ -112,9 +112,11 @@ database-format proposal additionally needs the contract owner/A2 and lead.
 | P4: remaining providers and sustained proof | Backend-specific safe ranges for AGY/Grok/Muse; OpenCode WAL-aware range/row strategy or an explicitly measured remaining full fallback; shadow/audit and operational measurements | RM-01 stays open for uncovered normal change paths; RM-02 can close independently once every read is import-free |
 | P5: optional strict DB incrementality | Separate writer-complete change feed/token design, if P1/P2 measurements require it | NOT authorized by lead 582/631; separate stored-contract decision and forward/back reader-first proof |
 
-The paused RM-N14 owner already owns its design/tests-first work. On its explicit
-resume, settle P1/P2 authorship and an exclusive function claim with the lead
-before edits. This plan neither wakes that agent nor duplicates its harness.
+Lead 635 assigns RM-N14 step 1 (P1 and its already-designed P2 frontier pieces)
+to rf-bug-rmn12 on its explicit resume after Friday's ship. S5 owns P0, P3 and P4
+and coordinates the sequence. Settle exclusive function claims with the lead
+before every package's edits. This plan neither wakes the paused owner nor
+duplicates its harness.
 
 Canonical S5 edit locations after the two staged cuts:
 
@@ -179,8 +181,14 @@ Preserve RM-N12 owner/path/epoch isolation, urgent cooldown bypass, measured-slo
 skip/recovery and watcher callback preservation. Retain the signed 2.25-second
 maximum for applicable FULL reads; delta/older pages remain non-waiting. Propose
 using that same bound for cold FULL reads rather than reintroducing the older
-design's separate 2-second policy. This is an intended-difference signature
-request, not an already signed extension of RM-N12.
+design's separate 2-second policy. Lead 635 approves this direction; the exact intended difference is signed on
+the P3 implementation commit. A cold partial/empty response must be recognisable
+as in progress through EXISTING fields. Audit the actual response fields and
+shipped client state machines; do not assume an empty page or `missing` alone
+provides that distinction. Prove recovery to complete history after the
+completion notification on shipped iOS, desktop AND PWA clients. If any shipped
+client cannot recognise or recover, return to the lead before activation,
+without a payload addition or client-contract workaround.
 
 An internal ticket identifies owner, backend session, source frontier, mode/reset
 generation and terminal result. Attempt v1 cannot satisfy a waiter/callback for
@@ -276,8 +284,10 @@ Required controls:
   never advances beyond delivered rows; rows and head share one snapshot;
 - import finishing before SSE subscribe, disconnect/reconnect, adopted cold
   session and missed watch event: iOS/Rust recover through existing head/delta
-  behavior. Device execution is a release requirement routed by the lead; source
-  checks alone do not prove it. No PWA-only work or cargo on this machine.
+  behavior. Lead 635 additionally requires the shipped PWA in these recovery
+  controls, including cold partial/empty in-progress recognition through existing
+  fields. Device execution is a release requirement routed by the lead; source
+  checks alone do not prove it. No unrelated PWA work or cargo on this machine.
 
 Seeded dropped-tail, wrong-carry, missing-delete, corrupted-summary, skipped-effect
 and advanced-cursor mutants must fail the relevant oracle. For comparisons on
@@ -329,18 +339,29 @@ HTTP-thread imports, bounded response behavior, coherent read cursors and
 background notification/recovery proof. Registers change on the lead's evidence
 review, never because this document or the S5 move landed.
 
-## Decisions to sign before implementation/activation
+## Lead 635 decisions and remaining implementation gates
 
-The implementation order and existing RM-N10/RM-N12/RM-N13 limits stand. This
-plan requests confirmation of: (a) committed coherent SQLite snapshot as the
-settled-read contract, retaining visible batch commits; (b) extension of the
-existing 2.25-second FULL wait policy to cold reads; (c) background completion
-notifications with unchanged SSE payloads and reduced idempotent effect calls;
-(d) package authorship/claims with the resumed RM-N14 owner and observation
-schedule. No new stored format/change feed is requested or authorized here.
+The plan/order are approved; C remains FINDINGS ONLY. A settled read is the
+coherent committed snapshot above, and atomic whole-import publication is out of
+scope. RM-02 closes only when every branch has no parse, store or import-lock
+wait on the HTTP thread.
 
-If strict all-import publication or strict changed-row DB validation is required,
-bring its concrete compatibility/cost proposal to the lead. Do not improvise a
-schema change, accept a high risk, or start source implementation from a plan
-review. C is asked for FINDINGS ONLY on this plan; source verdicts follow later
-on exact implementation commits.
+The 2.25-second cold FULL wait/known-slow skip and existing-type/payload completion
+notifications are approved in direction. Exact intended differences are signed
+later on P3's implementation commit. Cold responses must expose progress through
+existing fields and all shipped iOS, desktop and PWA clients must recover complete
+history on completion. A failed recognition/recovery proof blocks activation and
+goes back to the lead. Reduced effect calls require a per-effect idempotence
+proof and each effect named in the signed difference; no blanket exemption.
+
+After P4, deliver measured residuals to the lead: O(history) raw DB validation,
+restart loss of the frontier, and every backend retaining full fallback. Each
+residual is fixed or taken by the lead to Peter as an explicit accept-or-fix
+question. The lead does not accept a high-finding residual, and this plan grants
+no acceptance. P5 remains unauthorized.
+
+S5 coordinates P0/P3/P4; rf-bug-rmn12 retains P1 and its RM-N14 P2 frontier pieces
+when explicitly resumed after Friday's ship. Claims go through the lead before
+edits. Observation remains resource-capped. No source before big merge 1 ships;
+no inclusion in Friday, Saturday or big merge 1. Review of this plan grants no
+implementation, new stored format, live action or release authority.
