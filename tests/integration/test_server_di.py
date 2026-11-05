@@ -1179,6 +1179,7 @@ def test_get_backend_usage_reports_claude_from_turn_accounting(
     a statusline never renders under `-p`, which is how every turn is spawned.
     """
     from lib import backend_usage, turn_usage
+    from tests.patching import patch_shared
 
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / "missing-codex"))
 
@@ -1187,7 +1188,7 @@ def test_get_backend_usage_reports_claude_from_turn_accounting(
 
     for name in ("fetch_claude_usage", "fetch_codex_usage",
                  "fetch_codex_usage_app_server"):
-        monkeypatch.setattr(backend_usage, name, offline)
+        patch_shared(monkeypatch, backend_usage, name, offline)
     turn_usage.record(backend="claude", agent_id="a1", detail={
         "tokens_in": 1200, "tokens_out": 340, "cost_usd": 0.042,
         "duration_ms": 5100, "trace_id": "t-1",
