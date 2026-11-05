@@ -374,3 +374,198 @@ def test_the_generation_read_seeks_the_per_agent_index(tmp_path):
     plan = " ".join(r[3] for r in db.conn().execute(
         "EXPLAIN QUERY PLAN SELECT MAX(state_id) FROM state_log WHERE agent_id = ?", ("a",)))
     assert "idx_state_log_agent_state" in plan, plan
+
+
+def test_a_late_provider_start_does_not_reopen_a_stopped_turn(tmp_path):
+    """TP-N1: the dispatcher writes a turn's 'thinking', a Stop writes
+    'interrupted', then the provider's own turn-start 'thinking' for the same
+    trace arrives. It must not make the agent busy again for good."""
+    agent_id = _agent(tmp_path)
+    turn_lifecycle.transition(agent_id, TurnEvent.SPAWN_STARTED,
+                              {"source": "pwa", "dispatch": "codex", "trace_id": "t-1"})
+    turn_lifecycle.transition(agent_id, TurnEvent.STOP_REQUESTED, {"source": "user_stop"})
+
+    late = turn_lifecycle.try_transition(agent_id, TurnEvent.SPAWN_STARTED,
+                                         {"dispatch": "codex", "trace_id": "t-1"})
+
+    assert late is None
+    assert turn_lifecycle.current_kind(agent_id) == AgentState.INTERRUPTED
+
+
+def test_the_next_turn_still_starts_after_a_stop(tmp_path):
+    agent_id = _agent(tmp_path)
+    turn_lifecycle.transition(agent_id, TurnEvent.SPAWN_STARTED,
+                              {"source": "pwa", "dispatch": "codex", "trace_id": "t-1"})
+    turn_lifecycle.transition(agent_id, TurnEvent.STOP_REQUESTED, {"source": "user_stop"})
+    turn_lifecycle.transition(agent_id, TurnEvent.SPAWN_STARTED,
+                              {"source": "pwa", "dispatch": "codex", "trace_id": "t-2"})
+    assert turn_lifecycle.current_kind(agent_id) == AgentState.THINKING
+
+
+def test_a_reconciler_idle_does_not_hide_the_same_running_turns_start(tmp_path):
+    """TP-N1 review: a reconciler's idle is an observation, not a Stop; the
+    running turn's provider start still lands after one."""
+    agent_id = _agent(tmp_path)
+    turn_lifecycle.transition(agent_id, TurnEvent.SPAWN_STARTED,
+                              {"source": "pwa", "dispatch": "codex", "trace_id": "t-1"})
+    turn_lifecycle.transition(agent_id, TurnEvent.RECONCILE_REPAIR, {"source": "reconcile"})
+    late = turn_lifecycle.try_transition(agent_id, TurnEvent.SPAWN_STARTED,
+                                         {"dispatch": "codex", "trace_id": "t-1"})
+    assert late is not None
+    assert turn_lifecycle.current_kind(agent_id) == AgentState.THINKING
+
+
+def test_the_stop_fence_does_not_expire_after_many_observations(tmp_path):
+    agent_id = _agent(tmp_path)
+    turn_lifecycle.transition(agent_id, TurnEvent.SPAWN_STARTED,
+                              {"source": "pwa", "dispatch": "codex", "trace_id": "t-1"})
+    turn_lifecycle.transition(agent_id, TurnEvent.STOP_REQUESTED, {"source": "user_stop"})
+    for _ in range(60):
+        turn_lifecycle.transition(agent_id, TurnEvent.AUDIT_NOTED, {"source": "synthetic-audit"})
+    turn_lifecycle.try_transition(agent_id, TurnEvent.SPAWN_STARTED,
+                                  {"dispatch": "codex", "trace_id": "t-1"})
+    assert turn_lifecycle.current_kind(agent_id) == AgentState.INTERRUPTED
+
+
+def test_a_stop_between_the_starts_read_and_write_still_wins(tmp_path, monkeypatch):
+    agent_id = _agent(tmp_path)
+    turn_lifecycle.transition(agent_id, TurnEvent.SPAWN_STARTED,
+                              {"source": "pwa", "dispatch": "codex", "trace_id": "t-1"})
+    real = turn_lifecycle.MACHINE.current_kind
+    armed = [True]
+
+    def read_then_stop(aid):
+        observed = real(aid)
+        if armed[0]:
+            armed[0] = False
+            turn_lifecycle.transition(aid, TurnEvent.STOP_REQUESTED, {"source": "user_stop"})
+        return observed
+
+    monkeypatch.setattr(turn_lifecycle.MACHINE, "current_kind", read_then_stop)
+    turn_lifecycle.try_transition(agent_id, TurnEvent.SPAWN_STARTED,
+                                  {"dispatch": "codex", "trace_id": "t-1"})
+    assert real(agent_id) == AgentState.INTERRUPTED
+
+
+def _one_millisecond(monkeypatch):
+    stamp = turn_lifecycle.now_ms()
+    monkeypatch.setattr(turn_lifecycle, "now_ms", lambda: stamp)
+
+
+def _first_turn(agent_id):
+    turn_lifecycle.open_turn(agent_id=agent_id, source="pwa", trace_id="t-1")
+    turn_lifecycle.transition(agent_id, TurnEvent.SPAWN_STARTED,
+                              {"source": "pwa", "dispatch": "codex", "trace_id": "t-1"})
+
+
+def test_a_turn_opened_after_a_stop_in_the_same_millisecond_starts(tmp_path, monkeypatch):
+    """TP-N1 review: a clock tie is no order. The Stop settled the turn it
+    stopped, so it does not fence the turn opened after it."""
+    agent_id = _agent(tmp_path)
+    _one_millisecond(monkeypatch)
+    _first_turn(agent_id)
+    turn_lifecycle.transition(agent_id, TurnEvent.STOP_REQUESTED, {"source": "user_stop"})
+    turn_lifecycle.open_turn(agent_id=agent_id, source="pwa", trace_id="t-2")
+
+    started = turn_lifecycle.try_transition(agent_id, TurnEvent.SPAWN_STARTED,
+                                            {"source": "pwa", "dispatch": "codex", "trace_id": "t-2"})
+
+    assert started is not None
+    assert turn_lifecycle.current_kind(agent_id) == AgentState.THINKING
+
+
+def test_a_stop_naming_the_previous_trace_does_not_fence_the_next_turn(tmp_path, monkeypatch):
+    agent_id = _agent(tmp_path)
+    _one_millisecond(monkeypatch)
+    turn_lifecycle.transition(agent_id, TurnEvent.SPAWN_STARTED,
+                              {"source": "pwa", "dispatch": "codex", "trace_id": "t-1"})
+    turn_lifecycle.transition(agent_id, TurnEvent.STOP_REQUESTED,
+                              {"source": "user_stop", "trace_id": "t-1"})
+    turn_lifecycle.open_turn(agent_id=agent_id, source="pwa", trace_id="t-2")
+
+    started = turn_lifecycle.try_transition(agent_id, TurnEvent.SPAWN_STARTED,
+                                            {"source": "pwa", "dispatch": "codex", "trace_id": "t-2"})
+
+    assert started is not None
+    assert turn_lifecycle.current_kind(agent_id) == AgentState.THINKING
+
+
+def test_a_stop_after_a_turn_opened_in_the_same_millisecond_fences_it(tmp_path, monkeypatch):
+    """The opposite order: the Stop lands after the turn is opened, in the
+    same millisecond, so the turn's start is refused."""
+    agent_id = _agent(tmp_path)
+    _one_millisecond(monkeypatch)
+    _first_turn(agent_id)
+    turn_lifecycle.open_turn(agent_id=agent_id, source="pwa", trace_id="t-2")
+    turn_lifecycle.transition(agent_id, TurnEvent.STOP_REQUESTED, {"source": "user_stop"})
+
+    started = turn_lifecycle.try_transition(agent_id, TurnEvent.SPAWN_STARTED,
+                                            {"source": "pwa", "dispatch": "codex", "trace_id": "t-2"})
+
+    assert started is None
+    assert turn_lifecycle.current_kind(agent_id) == AgentState.INTERRUPTED
+
+
+def test_a_stop_is_written_together_with_its_settlement_or_not_at_all(tmp_path, monkeypatch):
+    """TP-N1b: the settlement that attributes a Stop to its turn was a
+    best-effort write after the Stop row; when it failed, a Stop in a tied
+    millisecond looked foreign and a stopped turn's late start was admitted.
+    The terminal row and its settlement now commit together; a failure
+    rolls both back and is raised, not swallowed."""
+    import sqlite3
+    agent_id = _agent(tmp_path)
+    _one_millisecond(monkeypatch)
+    _first_turn(agent_id)
+    turn_lifecycle.transition(agent_id, TurnEvent.STOP_REQUESTED, {"source": "user_stop"})
+    second = turn_lifecycle.open_turn(agent_id=agent_id, source="pwa", trace_id="t-2")
+    assert turn_lifecycle.try_transition(agent_id, TurnEvent.SPAWN_STARTED,
+                                         {"source": "pwa", "dispatch": "codex", "trace_id": "t-2"})
+
+    def settlement_fails(*_args, **_kwargs):
+        raise sqlite3.OperationalError("database is locked")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(turn_lifecycle, "_record_outcome", settlement_fails)
+        with pytest.raises(sqlite3.OperationalError):
+            turn_lifecycle.transition(agent_id, TurnEvent.STOP_REQUESTED, {"source": "user_stop"})
+
+    assert turn_lifecycle.current_kind(agent_id) == AgentState.THINKING, "a Stop row without its settlement"
+    turn_lifecycle.transition(agent_id, TurnEvent.STOP_REQUESTED, {"source": "user_stop"})
+    settled = db.conn().execute("SELECT settled_at FROM turns WHERE turn_id = ?", (second,)).fetchone()
+    assert settled["settled_at"] is not None
+    late = turn_lifecycle.try_transition(agent_id, TurnEvent.SPAWN_STARTED,
+                                         {"dispatch": "codex", "trace_id": "t-2"})
+    assert late is None and turn_lifecycle.current_kind(agent_id) == AgentState.INTERRUPTED
+
+
+@pytest.mark.parametrize("event", [TurnEvent.PROCESS_EXITED_OK, TurnEvent.PROCESS_EXITED_FAILED,
+                                   TurnEvent.STOP_REQUESTED])
+def test_a_terminal_write_that_meets_one_lock_error_still_ends_settled(tmp_path, monkeypatch, event):
+    """TP-N1b (lead): the Host sees about 30 'database is locked' a hour. A
+    terminal row and its settlement are one write; a lock error rolls both
+    back and the write is retried (bounded), so the turn ends settled and the
+    agent does not stay 'thinking'."""
+    import sqlite3
+    agent_id = _agent(tmp_path)
+    turn = turn_lifecycle.open_turn(agent_id=agent_id, source="pwa", trace_id="t-1")
+    turn_lifecycle.transition(agent_id, TurnEvent.SPAWN_STARTED,
+                              {"source": "pwa", "dispatch": "codex", "trace_id": "t-1"})
+    rows_before = db.conn().execute("SELECT COUNT(*) FROM state_log WHERE agent_id = ?",
+                                    (agent_id,)).fetchone()[0]
+    real = turn_lifecycle._record_outcome
+    calls = []
+
+    def locked_once(*args, **kwargs):
+        calls.append(1)
+        if len(calls) == 1:
+            raise sqlite3.OperationalError("database is locked")
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(turn_lifecycle, "_record_outcome", locked_once)
+    turn_lifecycle.transition(agent_id, event, {"trace_id": "t-1"})
+
+    assert turn_lifecycle.current_kind(agent_id) not in turn_lifecycle.BUSY
+    assert db.conn().execute("SELECT COUNT(*) FROM state_log WHERE agent_id = ?",
+                             (agent_id,)).fetchone()[0] == rows_before + 1
+    assert db.conn().execute("SELECT settled_at FROM turns WHERE turn_id = ?",
+                             (turn,)).fetchone()["settled_at"] is not None

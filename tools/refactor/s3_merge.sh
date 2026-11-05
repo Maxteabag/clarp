@@ -23,7 +23,8 @@
 # 3 a merge conflict outside server.py and the generated files, 4 a replayed diff
 # does not apply, 5 s3_apply refused, 6 ast_identity failed, 7 a local gate failed,
 # 8 a split refused or a split module was edited on integration (rf-fix3 / rf-fix2),
-# 9 ast_identity failed for a split or repoint (rf-fix3 / rf-fix2).
+# 9 ast_identity failed for a split or repoint (rf-fix3 / rf-fix2), 10 a merge resolution
+# entry in tools/refactor/merge_resolutions/ does not match this merge's blobs (stale).
 # The work branch is left as it stopped, for inspection; nothing is pushed.
 set -uo pipefail
 die() { echo "s3_merge: STOP ($1): $2" >&2; exit "$1"; }
@@ -46,8 +47,12 @@ export PYTHONDONTWRITEBYTECODE=1   # the stages' Python must leave no untracked 
 
 git switch -q -c "$work" "$integration" || die 2 "cannot create $work"
 echo "s3_merge: merging $main into $integration on $work"
-merge_out=$(git merge --no-commit --no-ff "$main" 2>&1)
+# rerere off: a resolution recorded on this machine must never resolve a conflict
+# silently; only a reviewed merge_resolutions entry may (below).
+merge_out=$(git -c rerere.enabled=false merge --no-commit --no-ff "$main" 2>&1)
 merge_rc=$?
+# Always shown, so the log records what git merged and which paths conflicted.
+printf '%s\n' "$merge_out" | sed 's/^/s3_merge: git merge: /'
 git rev-parse -q --verify MERGE_HEAD >/dev/null || die 3 "git merge did not start a merge (exit $merge_rc):
 $merge_out"
 [ "$(git rev-parse MERGE_HEAD)" = "$main" ] || die 3 "MERGE_HEAD is not $main"
@@ -87,7 +92,50 @@ PYEOF
 ) || die 2 "cannot read the groups of tools/refactor/s3_moves.toml"
 replay=$(grep -v '^\s*#' tools/refactor/s3_replay.txt | awk 'NF {print $1}')
 
+# Reviewed merge resolutions (tools/refactor/merge_resolutions/*.toml): one per
+# conflicted file outside S3's own, naming the exact merge-base, main and
+# integration blobs it resolves and the resolved file. Entries and payloads are
+# read only from main's tree (git ls-tree/show "$main"), never from the merged
+# working tree, so an entry that exists only on integration can never apply. An
+# entry applies only when all three blobs match this merge; anything else is
+# still a conflict that stops with 3, a stale entry with 10.
+merge_base=$(git merge-base "$main" "$integration") || die 3 "no merge base"
+resolved=$("$PY" - "$merge_base" "$main" "$integration" $conflicts <<'PYEOF'
+import subprocess, sys, tomllib
+base, main, integration, *conflicts = sys.argv[1:]
+FOLDER = "tools/refactor/merge_resolutions"
+def git(*args, binary=False):
+    return subprocess.run(["git", *args], capture_output=True, check=True, text=not binary).stdout
+def blob(ref, path):
+    out = subprocess.run(["git", "rev-parse", "-q", "--verify", f"{ref}:{path}"],
+                         capture_output=True, text=True)
+    return out.stdout.strip() if out.returncode == 0 else ""
+names = [n for n in git("ls-tree", "--name-only", f"{main}:{FOLDER}").split() if n.endswith(".toml")] \
+    if blob(main, FOLDER) else []
+for name in sorted(names):
+    spec = tomllib.loads(git("show", f"{main}:{FOLDER}/{name}"))
+    path = spec["path"]
+    if path not in conflicts:
+        continue
+    want = (spec["base_blob"], spec["main_blob"], spec["integration_blob"])
+    have = (blob(base, path), blob(main, path), blob(integration, path))
+    if want != have:
+        print(f"STALE {name} {path} recorded={'/'.join(want)} now={'/'.join(have)}")
+        continue
+    with open(path, "wb") as target:
+        target.write(git("show", f"{main}:{FOLDER}/{spec['resolved']}", binary=True))
+    subprocess.run(["git", "add", "--", path], check=True)
+    print(f"APPLIED {name[:-5]} {path} {'/'.join(have)}")
+PYEOF
+) || die 3 "cannot read $main's tools/refactor/merge_resolutions"
+stale=$(printf '%s\n' "$resolved" | grep '^STALE ' || true)
+[ -z "$stale" ] || die 10 "a merge resolution entry does not match this merge's blobs (stale or partial; refresh it with its reviewers):
+$stale"
+printf '%s\n' "$resolved" | awk '$1 == "APPLIED" {print "s3_merge: merge_resolution " $2 ": applied to " $3 ", blobs base/main/int = " $4}'
+resolved=$(printf '%s\n' "$resolved" | awk '$1 == "APPLIED" {print $3}')
+
 for path in $conflicts; do
+  printf '%s\n' "$resolved" | grep -qx "$path" && continue
   case "$path" in
     server/server.py) ;;
     *) printf '%s\n' "$generated" $split_old $split_generated | grep -qx "$path" \
@@ -149,8 +197,14 @@ for path in $generated; do git rm -q --cached --ignore-unmatch "$path"; rm -f "$
 for path in $split_old; do git checkout "$main" -- "$path" || die 8 "cannot take main's $path"; done
 for path in $split_generated; do git rm -q --cached --ignore-unmatch "$path"; rm -f "$path"; done
 for sha in $replay; do
-  git diff "$sha^" "$sha" -- server/server.py | git apply --3way --index - \
-    || die 4 "the server.py diff of $sha does not apply to main's server.py; port it by hand and update s3_replay.txt"
+  case "$sha" in
+    file:*)   # a reviewed port of a replayed diff, kept on main as a patch file
+      git show "$main:tools/refactor/${sha#file:}" | git apply --3way --index - \
+        || die 4 "the replay patch ${sha#file:} does not apply to main's server.py; port it by hand and update s3_replay.txt" ;;
+    *)
+      git diff "$sha^" "$sha" -- server/server.py | git apply --3way --index - \
+        || die 4 "the server.py diff of $sha does not apply to main's server.py; port it by hand and update s3_replay.txt" ;;
+  esac
 done
 git add server/server.py $split_old
 git -c core.hooksPath=/dev/null commit -q -m "merge main $(git rev-parse --short "$main") into integration (S3: server.py replayed, moves to regenerate)" \

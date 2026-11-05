@@ -352,6 +352,13 @@ def split(chosen):
     return [s for s in chosen if not s.get('known_bug')], [s for s in chosen if s.get('known_bug')]
 
 
+def compared(gating):
+    """The gating scenarios whose captures are compared. An ``errors_only`` scenario
+    pins a race whose correct outcomes differ by timing: its run errors count (the
+    bug it pins shows as one), its differences between runs do not."""
+    return [s for s in gating if not s.get('errors_only')]
+
+
 def known_lines(results, known, labels) -> list[str]:
     lines = []
     for s in known:
@@ -415,8 +422,8 @@ def _compare(args, run, chosen, base, base_sha, head, head_sha, started) -> int:
     # The base runs twice: a difference between its own runs means the scenario is not
     # reproducible, and its comparison with head proves nothing.
     calibration = ('base', 'base2') if args.cross_lane_order else ()
-    noise = diff_builds(results, 'base', 'base2', chosen, calibration)
-    report = diff_builds(results, 'base', 'head', chosen, calibration)
+    noise = diff_builds(results, 'base', 'base2', compared(chosen), calibration)
+    report = diff_builds(results, 'base', 'head', compared(chosen), calibration)
     intended = load_intended(args.intended)
     print('\n'.join(manifest(f'{base_sha} -> {head_sha}', chosen, [])))
     broken = errors(results, chosen) + verify_unchanged({'base': base, 'head': head})
@@ -469,7 +476,7 @@ def _self_check(args, run, chosen, changes, build, sha, diagnostic, started) -> 
     # must show nothing (with --cross-lane-order, run1+run2 calibrate the diagnostic).
     calibration = ('run1', 'run2') if args.cross_lane_order else ()
     for a, b in (('run1', 'run2'), ('run1', 'run3'), ('run1', 'run4')):
-        report = diff_builds(results, a, b, chosen, calibration)
+        report = diff_builds(results, a, b, compared(chosen), calibration)
         ok &= not report.items
         print(f"unchanged {a} vs {b}: {len(report.items)} differences  {'PASS' if not report.items else 'FAIL'}")
         if report.items:
@@ -478,7 +485,7 @@ def _self_check(args, run, chosen, changes, build, sha, diagnostic, started) -> 
                 print(diff.render(report, set(), f'{a} vs {b}'), end='')
     for change in changes:
         label = f"planted-{change['id']}"
-        report = diff_builds(results, 'run1', label, chosen, calibration)
+        report = diff_builds(results, 'run1', label, compared(chosen), calibration)
         hits = planted.caught(change, report.items)
         ok &= bool(hits)
         print(f"planted {change['id']}: {len(report.items)} differences, {len(hits)} specific  "

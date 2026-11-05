@@ -148,6 +148,19 @@ def test_unknown_agent_gets_404(agent):
     assert not terminal_ws.has_live_terminal("agent-1")
 
 
+def test_a_janitor_has_no_interactive_terminal(agent, monkeypatch):
+    """HTTP-01b: a maintenance agent is inspection-only; /send, /stop and
+    /repair-slot refuse it, and its terminal does too, for every device."""
+    agent["row"]["is_janitor"] = 1
+    served = []
+    monkeypatch.setattr(terminal_ws, "_serve_pty", lambda *a, **k: served.append(True))
+    monkeypatch.setattr(terminal_ws.shutil, "which", lambda name: "/usr/bin/" + name)
+    handler = FakeHandler(_UPGRADE)
+    terminal_ws.serve_terminal(handler, "theo")
+    assert handler.status == 403 and not served
+    assert not terminal_ws.has_live_terminal("agent-1")
+
+
 @pytest.mark.parametrize("backend,bsid,expected", [
     ("claude", "", ["claude", "--dangerously-skip-permissions"]),
     ("claude", "sess-1", ["claude", "--dangerously-skip-permissions", "--resume", "sess-1"]),

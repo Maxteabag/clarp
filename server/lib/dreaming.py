@@ -29,6 +29,7 @@ from . import settings_store
 from . import trace as _trace
 from .log import log, log_exception
 from .protocol import AgentState
+from .revisioned_cache import RevisionedCache
 
 
 DREAMING_OK = "DREAMING_OK"
@@ -55,6 +56,10 @@ DREAM_PLANNED_ROUNDS = (
 DREAM_TARGET_TOKEN_BUDGET = 70_000
 DREAM_TARGET_MINUTES = 120
 DREAM_SENT_RECOVERY_SEC = 90 * 60
+# A run still active this long after it started is ended, so a round that
+# keeps failing cannot hold the agent's nightly dream for ever (AUT-06).
+DREAM_RUN_DEADLINE_SEC = 12 * 60 * 60
+_DEADLINE_REASON = f"dream run passed its {DREAM_RUN_DEADLINE_SEC // 3600} h deadline"
 DREAM_PRIOR_CONTEXT_MAX_CHARS = 7_000
 DREAM_PRIOR_ROUND_EXCERPT_CHARS = 1_000
 
@@ -352,8 +357,8 @@ def strip_dreaming_ack(text: str) -> tuple[bool, str]:
     return False, remaining
 
 
-def process_assistant_text(agent_id: str, text: str, *, live: bool = False
-                           ) -> tuple[bool, str]:
+def process_assistant_text(agent_id: str, text: str, *, origin: str,
+                           live: bool = False) -> tuple[bool, str]:
     """Capture dreaming control markers and return display decision.
 
     Live streamed text is suppressed/cleaned but does not advance the ledger;
@@ -386,9 +391,13 @@ def process_assistant_text(agent_id: str, text: str, *, live: bool = False
             )
         return False, visible
 
-    skip, stripped = strip_dreaming_ack(raw)
+    # DREAMING_OK counts only in a dreaming turn (AUT-07); every caller names
+    # the turn's origin, so a new caller cannot get the dream side effects by
+    # default.
+    skip, stripped = origins.ack_for_origin(
+        strip_dreaming_ack(raw), raw, token=DREAMING_OK, origin=origin, own="dreaming")
     if skip:
-        if not live:
+        if not live and origin == "dreaming":
             mark_active_noop(agent_id)
         return True, ""
     return False, stripped
@@ -466,6 +475,10 @@ def active_runs() -> list[dict[str, Any]]:
     return [dict(r) for r in rows]
 
 
+class ActiveDreamRunExists(ValueError):
+    """The agent already has an active dream run (AUT-11)."""
+
+
 def create_dream_run(agent: dict, *, local_date: str, timezone_name: str,
                      timezone_source: str,
                      settings: DreamingSettings | None = None,
@@ -486,14 +499,18 @@ def create_dream_run(agent: dict, *, local_date: str, timezone_name: str,
         dose = dream_seeds.DOSE_FULL
     material = _gather_seed_material(agent, strategy)
     first_stage = "roleplay_day" if strategy == dream_seeds.ROLEPLAY else "seed"
-    db.conn().execute(
+    # One active run per agent, decided by this one statement: a check before
+    # it (a manual start, the nightly loop) can be overtaken by the other.
+    inserted = db.conn().execute(
         """INSERT INTO dream_runs (
                run_id, agent_id, session, local_date, timezone, timezone_source,
                status, stage, min_directions, planned_directions,
                planned_rounds, target_tokens, target_minutes, started_at,
                updated_at, seed_strategy, context_dose, seed_material
-           ) VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?,
-                     ?, ?, ?)""",
+           ) SELECT ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?
+              WHERE NOT EXISTS (SELECT 1 FROM dream_runs
+                                 WHERE agent_id = ? AND status = 'active')""",
         (
             run_id,
             agent["agent_id"],
@@ -512,8 +529,12 @@ def create_dream_run(agent: dict, *, local_date: str, timezone_name: str,
             strategy,
             dose,
             material,
+            agent["agent_id"],
         ),
-    )
+    ).rowcount
+    if not inserted:
+        raise ActiveDreamRunExists(
+            f"{agent.get('session')} already has an active dream run")
     _insert_round(run_id=run_id, stage=first_stage, round_index=1,
                   target_tokens=stage_tokens["seed"])
     return get_run(run_id) or {}
@@ -674,15 +695,58 @@ def next_round_for_run(run: dict[str, Any]) -> dict[str, Any] | None:
     return dict(queued) if queued else None
 
 
-def mark_round_sent(round_id: str) -> None:
+def claim_round(round_id: str) -> int:
+    """Take a queued round for sending (AUT-11): only one caller, in any
+    process, moves it from queued, so only that one sends it. Returns the
+    claim's stamp (its sent_at), which identifies it to release and finish;
+    0 when another caller holds the round. A crash after the claim is
+    recovered like any stale sent round."""
     now = db.now_ms()
+    claimed = db.conn().execute(
+        """UPDATE dream_rounds
+              SET status = 'sent', sent_at = ?, updated_at = ?
+            WHERE round_id = ? AND status = 'queued'""",
+        (now, now, round_id),
+    ).rowcount
+    return now if claimed else 0
+
+
+def release_round(round_id: str, claimed_at: int) -> None:
+    """A claimed round whose send failed goes back to queued for a later tick,
+    only while it still holds this claim: after a stall past the recovery
+    deadline another scheduler may have recovered and sent it (reviewer C)."""
     db.conn().execute(
         """UPDATE dream_rounds
-              SET status = 'sent', sent_at = COALESCE(sent_at, ?),
-                  updated_at = ?
-            WHERE round_id = ?""",
-        (now, now, round_id),
+              SET status = 'queued', sent_at = NULL, updated_at = ?
+            WHERE round_id = ? AND status = 'sent' AND sent_at = ?""",
+        (db.now_ms(), round_id, claimed_at),
     )
+
+
+def mark_round_sent(round_id: str, claimed_at: int | None = None) -> None:
+    """The round's send was accepted. With `claimed_at`, only this claim
+    finishes: a round recovered to queued meanwhile is taken back (it was
+    sent; leaving it queued would send it again), and a round another
+    scheduler has claimed since is left to that one. A round that was
+    abandoned or completed meanwhile is never touched."""
+    now = db.now_ms()
+    if claimed_at is None:
+        db.conn().execute(
+            """UPDATE dream_rounds
+                  SET status = 'sent', sent_at = COALESCE(sent_at, ?),
+                      updated_at = ?
+                WHERE round_id = ? AND status IN ('queued', 'sent')""",
+            (now, now, round_id),
+        )
+    else:
+        db.conn().execute(
+            """UPDATE dream_rounds
+                  SET status = 'sent', sent_at = COALESCE(sent_at, ?),
+                      updated_at = ?
+                WHERE round_id = ?
+                  AND (status = 'queued' OR (status = 'sent' AND sent_at = ?))""",
+            (now, now, round_id, claimed_at),
+        )
     row = db.conn().execute(
         "SELECT run_id, stage FROM dream_rounds WHERE round_id = ?",
         (round_id,),
@@ -757,6 +821,18 @@ def record_final_digest(*, agent_id: str, run_id: str, round_id: str,
     if row["status"] == "completed":
         return
     now = db.now_ms()
+    # Only a run still in flight completes: an abandoned (deadline, opt-out) or
+    # already finished run is left as it is and nothing is delivered (AUT-06b).
+    completed = db.conn().execute(
+        """UPDATE dream_runs
+              SET status = 'completed', stage = 'completed', finished_at = ?,
+                  updated_at = ?
+            WHERE run_id = ? AND status = 'active'""",
+        (now, now, run_id),
+    ).rowcount
+    if not completed:
+        log("dreamingDigestLate", f"run={run_id} round={round_id}")
+        return
     db.conn().execute(
         """UPDATE dream_rounds
               SET status = 'completed', response = ?, completed_at = ?,
@@ -765,13 +841,6 @@ def record_final_digest(*, agent_id: str, run_id: str, round_id: str,
         (digest, now, len(digest or ""), now, round_id),
     )
     _sync_run_progress(run_id, "completed")
-    db.conn().execute(
-        """UPDATE dream_runs
-              SET status = 'completed', stage = 'completed', finished_at = ?,
-                  updated_at = ?
-            WHERE run_id = ?""",
-        (now, now, run_id),
-    )
     log("dreamingDigestComplete",
         f"run={run_id} round={round_id} chars={len(digest or '')}")
     _deliver_digest(run_id=run_id, agent_id=agent_id, digest=digest)
@@ -779,6 +848,7 @@ def record_final_digest(*, agent_id: str, run_id: str, round_id: str,
         harvest_worktree(run_id)
     except Exception as e:  # noqa: BLE001
         log_exception("dreamHarvestUnexpected", e, detail=run_id)
+    _forget_workers(run_id)
 
 
 class _AlreadyPublished(Exception):
@@ -846,7 +916,8 @@ def _deliver_digest(*, run_id: str, agent_id: str, digest: str) -> None:
         log_exception("dreamingDigestMessageFail", e, detail=run_id)
 
 
-def abandon_run(run_id: str) -> None:
+def abandon_run(run_id: str, reason: str = "dreaming disabled while in flight", *,
+                harvest: bool = True) -> None:
     """End a run whose agent is no longer opted in, keeping what it built.
 
     Called when dreaming is switched off while a run is in flight. The run is
@@ -858,27 +929,141 @@ def abandon_run(run_id: str) -> None:
     if not run or run.get("status") != "active":
         return
     now = db.now_ms()
-    db.conn().execute(
-        """UPDATE dream_runs
-              SET status = 'abandoned', stage = 'abandoned',
-                  finished_at = ?, updated_at = ?,
-                  last_error = COALESCE(NULLIF(last_error, ''),
-                                        'dreaming disabled while in flight')
-            WHERE run_id = ?""",
-        (now, now, run_id),
-    )
-    db.conn().execute(
-        """UPDATE dream_rounds SET status = 'abandoned', updated_at = ?
-            WHERE run_id = ? AND status IN ('queued', 'sent')""",
-        (now, run_id),
-    )
+    with settings_store.transaction():
+        # Only a run still in flight is abandoned: a completion that won the
+        # race keeps the run (AUT-06 review). The cleanup intent is written
+        # with it and kept until the worktree is gone.
+        abandoned = db.conn().execute(
+            """UPDATE dream_runs
+                  SET status = 'abandoned', stage = 'abandoned',
+                      finished_at = ?, updated_at = ?,
+                      last_error = COALESCE(NULLIF(last_error, ''), ?)
+                WHERE run_id = ? AND status = 'active'""",
+            (now, now, reason, run_id),
+        ).rowcount
+        if abandoned:
+            db.conn().execute(
+                """UPDATE dream_rounds SET status = 'abandoned', updated_at = ?
+                    WHERE run_id = ? AND status IN ('queued', 'sent')""",
+                (now, run_id),
+            )
+            settings_store.set_text(_CLEANUP_PREFIX + run_id, run["agent_id"])
+    if not abandoned:
+        return
     log("dreamingAbandoned",
         f"run={run_id} session={run.get('session')} "
         f"rounds={run.get('completed_rounds')}")
+    if not harvest:
+        # Its backend still uses the worktree; the scheduler harvests it once
+        # that backend has stopped (_harvest_abandoned_runs).
+        log("dreamHarvestDeferred", f"run={run_id}")
+        return
+    _harvest_abandoned(run_id)
+
+
+_CLEANUP_PREFIX = "dreaming.cleanup_pending."
+_CLEANUP_BATCH = 50
+
+
+def _harvest_abandoned(run_id: str) -> None:
     try:
         harvest_worktree(run_id)
     except Exception as e:  # noqa: BLE001
         log_exception("dreamAbandonHarvestFail", e, detail=run_id)
+    if _dream_worktree_path(run_id) is None:
+        settings_store.delete(_CLEANUP_PREFIX + run_id)
+        _forget_workers(run_id)
+
+
+_WORKERS_PREFIX = "dreaming.workers."
+
+
+def _process_start(pid: int) -> str | None:
+    """The kernel's start time of ``pid`` (Linux), to tell a reused pid apart."""
+    try:
+        stat = pathlib.Path(f"/proc/{pid}/stat").read_text()
+    except OSError:
+        return None
+    return stat.rsplit(")", 1)[-1].split()[19]
+
+
+def _claim_worker(run_id: str) -> str:
+    """Before a spawn: a claim of its own (one key, one upsert, no list to
+    rewrite), unknown until the spawn reports its pid. Returns the claim key."""
+    key = f"{_WORKERS_PREFIX}{run_id}.{uuid.uuid4().hex}"
+    settings_store.set_text(key, json.dumps({"pid": None, "start": None}))
+    return key
+
+
+def _fill_worker(claim: str, pid: int) -> None:
+    settings_store.set_text(claim, json.dumps({"pid": pid, "start": _process_start(pid)}))
+
+
+def _worker_claims(run_id: str) -> list[tuple[str, str]]:
+    low, high = settings_store._prefix_range(f"{_WORKERS_PREFIX}{run_id}.")
+    return settings_store.items_in_range(low, high, limit=1000)
+
+
+def _forget_workers(run_id: str) -> None:
+    settings_store.delete_keys([key for key, _value in _worker_claims(run_id)])
+
+
+def _workers_gone(run_id: str) -> bool:
+    """Positive proof that no dream worker of the run is alive: every claimed
+    worker's process has exited, or its pid now belongs to another process
+    (a KNOWN recorded start time that differs). A claim without a pid, or a
+    live pid whose original start was unreadable, is unknown, which is not
+    proof. A run with no claims never spawned one. The workers are Host-local
+    processes, so a separate runtime's view of the agent is not consulted."""
+    for _key, raw in _worker_claims(run_id):
+        try:
+            worker = json.loads(raw)
+        except ValueError:
+            return False
+        pid = worker.get("pid") if isinstance(worker, dict) else None
+        if not isinstance(pid, int) or pid <= 0:
+            return False
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            continue
+        except PermissionError:
+            pass
+        recorded, current = worker.get("start"), _process_start(pid)
+        if recorded is None or current is None or current == recorded:
+            return False
+    return True
+
+
+def _cleanup_quiet(run_id: str, agent_id: str) -> bool:
+    """Nothing may still write in the run's worktree: every recorded dream
+    worker is gone, and neither the Host-local backend nor the backends facade
+    reports a handle for the agent. Any one of them saying busy, or failing to
+    answer, defers the cleanup; the worker proof does not need the agent."""
+    if not _workers_gone(run_id):
+        return False
+    agent = agents_db.get_by_agent_id(agent_id) if agent_id else None
+    if agent is None:
+        return True
+    backend = backends.normalize(get_settings().backend or agent.get("backend"))
+    try:
+        return not (backends.by_id(backend).active_handles(agent_id)
+                    or backends.active_handles(backend, agent_id))
+    except Exception as exc:  # noqa: BLE001 - an unreadable registry is no proof
+        log_exception("dreamCleanupQuietCheckFail", exc, detail=run_id)
+        return False
+
+
+def _harvest_abandoned_runs() -> None:
+    """Harvest the worktrees abandoned runs still hold, once their backend is
+    quiet. The intent stays until the worktree is gone; one bounded batch per
+    pass, in key order."""
+    low, high = settings_store._prefix_range(_CLEANUP_PREFIX)
+    for key, agent_id in settings_store.items_in_range(low, high, limit=_CLEANUP_BATCH):
+        run_id = key[len(_CLEANUP_PREFIX):]
+        if _dream_worktree_path(run_id) is not None and not _cleanup_quiet(run_id, agent_id):
+            continue
+        _harvest_abandoned(run_id)
 
 
 def mark_active_noop(agent_id: str) -> None:
@@ -977,6 +1162,16 @@ def resolve_user_timezone(session: str, now: float | None = None) -> ResolvedTim
     return fallback
 
 
+# A zone id does not depend on the timestamp (ZoneInfo applies DST), so one
+# Google lookup serves a location cell (2 decimals, about 1 km) for hours; a
+# failure is retried after a pause instead of on every 300 s poll (AUT-12).
+_TZ_CACHE_OK_S = 6 * 3600
+_TZ_CACHE_FAIL_S = 600
+# cell -> (until, zone id or ""); the revision is unused (always 0).
+_TZ_CACHE: RevisionedCache[tuple[float, float], tuple[float, str]] = RevisionedCache(
+    "dreaming-google-timezone", max_entries=256)
+
+
 def _google_timezone(loc: dict, now: float) -> ResolvedTimeZone | None:
     key = (
         os.environ.get("GOOGLE_MAPS_API_KEY")
@@ -988,6 +1183,20 @@ def _google_timezone(loc: dict, now: float) -> ResolvedTimeZone | None:
         return None
     lat = float(loc["lat"])
     lng = float(loc["lng"])
+    cell = (round(lat, 2), round(lng, 2))
+    entry = _TZ_CACHE.peek(cell)
+    cached = entry[1] if entry is not None else None
+    if cached is not None and now < cached[0]:
+        return (ResolvedTimeZone(tz=ZoneInfo(cached[1]), name=cached[1], source="google-timezone",
+                                 location=loc) if cached[1] else None)
+    resolved = _google_timezone_lookup(loc, lat, lng, now, key)
+    _TZ_CACHE.put(cell, 0, (now + _TZ_CACHE_OK_S, resolved.name) if resolved
+                  else (now + _TZ_CACHE_FAIL_S, ""))
+    return resolved
+
+
+def _google_timezone_lookup(loc: dict, lat: float, lng: float, now: float,
+                            key: str) -> ResolvedTimeZone | None:
     query = urllib.parse.urlencode({
         "location": f"{lat},{lng}",
         "timestamp": str(int(now)),
@@ -1078,12 +1287,15 @@ def _recover_stale_sent_round(run_id: str, *, now_ms: int | None = None) -> bool
     age_ms = now_ms - int(row["sent_at"] or 0)
     if age_ms < timeout_sec * 1000:
         return False
-    db.conn().execute(
+    # Only the expired claim read above: another scheduler may have recovered
+    # it and claimed the round afresh since (AUT-11, reviewer C).
+    if not db.conn().execute(
         """UPDATE dream_rounds
               SET status = 'queued', sent_at = NULL, updated_at = ?
-            WHERE round_id = ? AND status = 'sent'""",
-        (now_ms, row["round_id"]),
-    )
+            WHERE round_id = ? AND status = 'sent' AND sent_at = ?""",
+        (now_ms, row["round_id"], row["sent_at"]),
+    ).rowcount:
+        return False
     db.conn().execute(
         "UPDATE dream_runs SET updated_at = ? WHERE run_id = ?",
         (now_ms, run_id),
@@ -1165,14 +1377,26 @@ def dispatch_isolated_dream(agent: dict, prompt: str) -> bool:
             log("dreamingIsolatedNoOutput",
                 f"agent={agent_id} session={session} trace={trace_id}")
             return
-        process_assistant_text(agent_id, assistant_text, live=False)
+        process_assistant_text(agent_id, assistant_text, live=False, origin="dreaming")
 
     def on_error(message: str) -> None:
         log("dreamingIsolatedError",
             f"agent={agent_id} session={session} trace={trace_id} "
             f"error={str(message or '')[:300]}")
+        if run_id:
+            # Visible on the run, which its deadline later ends (AUT-06).
+            db.conn().execute(
+                "UPDATE dream_runs SET last_error = ?, updated_at = ? "
+                "WHERE run_id = ? AND status = 'active'",
+                (f"isolated round failed: {str(message or '')[:400]}",
+                 db.now_ms(), run_id))
 
-    backends.spawn_turn(
+    claim = ""
+    if run_id:
+        # Before the spawn, so a worker is never alive unrecorded: cleanup of
+        # the run's worktree waits for every claimed worker (AUT-06).
+        claim = _claim_worker(run_id)
+    handle = backends.spawn_turn(
         backend,
         text=text,
         cwd=cwd,
@@ -1192,6 +1416,9 @@ def dispatch_isolated_dream(agent: dict, prompt: str) -> bool:
         isolated=True,
         hook_session="",
     )
+    pid = getattr(handle, "pid", None)
+    if claim and isinstance(pid, int):
+        _fill_worker(claim, pid)
     log("dreamingIsolatedDispatch",
         f"agent={agent_id} session={session} backend={backend} "
         f"bsid={backend_session_id} trace={trace_id} cwd={cwd}")
@@ -2165,18 +2392,23 @@ class DreamingScheduler:
 
     def run_once(self) -> int:
         sent = 0
+        _harvest_abandoned_runs()
         for run in active_runs():
             sent += self._advance_run(run)
         for agent in pending_dreaming_agents(now=self.now()):
             strategy, dose = self.recipe_chooser()
-            run = create_dream_run(
-                agent,
-                local_date=agent["dreaming_local_date"],
-                timezone_name=agent["dreaming_timezone"],
-                timezone_source=agent["dreaming_timezone_source"],
-                seed_strategy=strategy,
-                context_dose=dose,
-            )
+            try:
+                run = create_dream_run(
+                    agent,
+                    local_date=agent["dreaming_local_date"],
+                    timezone_name=agent["dreaming_timezone"],
+                    timezone_source=agent["dreaming_timezone_source"],
+                    seed_strategy=strategy,
+                    context_dose=dose,
+                )
+            except ActiveDreamRunExists:
+                # A manual start created its run after the listing.
+                continue
             sent += self._advance_run(run)
         return sent
 
@@ -2190,6 +2422,12 @@ class DreamingScheduler:
             # instead of abandoning it.
             abandon_run(run["run_id"])
             return 0
+        if db.now_ms() - int(run.get("started_at") or 0) > DREAM_RUN_DEADLINE_SEC * 1000:
+            # The run ends now; a backend still writing in its worktree keeps
+            # it until that backend stops (AUT-06 review).
+            abandon_run(run["run_id"], reason=_DEADLINE_REASON,
+                        harvest=_cleanup_quiet(run["run_id"], run["agent_id"]))
+            return 0
         _recover_stale_sent_round(run["run_id"])
         reason = _skip_busy_reason(agent)
         if reason:
@@ -2199,14 +2437,27 @@ class DreamingScheduler:
         dream_round = next_round_for_run(run)
         if not dream_round:
             return 0
+        # Claimed before the send, so a second advance (the wake thread, the
+        # loop, another Host process) cannot send it too (AUT-11).
+        claimed_at = claim_round(dream_round["round_id"])
+        if not claimed_at:
+            log("dreamingSkip",
+                f"agent={run['agent_id']} session={run['session']} reason=claimed")
+            return 0
         try:
             dispatched = self._send_dream(run["session"], dream_round["prompt"])
-            if dispatched is False:
-                log("dreamingSkip",
-                    f"agent={run['agent_id']} session={run['session']} "
-                    "reason=dispatch-busy")
-                return 0
-            mark_round_sent(dream_round["round_id"])
+        except Exception as e:  # noqa: BLE001
+            release_round(dream_round["round_id"], claimed_at)
+            log_exception("dreamingTickFail", e, detail=run.get("session") or "")
+            return 0
+        if dispatched is False:
+            release_round(dream_round["round_id"], claimed_at)
+            log("dreamingSkip",
+                f"agent={run['agent_id']} session={run['session']} "
+                "reason=dispatch-busy")
+            return 0
+        try:
+            mark_round_sent(dream_round["round_id"], claimed_at)
             if dream_round["round_index"] == 1:
                 mark_dream_started(run["agent_id"], run["local_date"])
             log(

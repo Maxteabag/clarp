@@ -94,3 +94,34 @@ def save_agents(data: dict[str, dict[str, Any]],
             _agents.update_agent(agent_id, persona=new_persona,
                                  voice_id=new_voice, cwd=new_cwd,
                                  backend=new_backend)
+
+
+def save_agent(session: str, info: dict[str, Any]) -> None:
+    """Write one agent of the session map, as ``save_agents`` would for that
+    session: create it when the DB has no live agent of that session, else
+    update the fields that changed. Every other agent is left as it is now in
+    the DB; a caller holding a roster read seconds ago cannot delete, revive
+    or revert them (TP-03)."""
+    current = _agents.session_dict().get(session)
+    info = info or {}
+    if current is None:
+        try:
+            _agents.create_agent(
+                persona=str(info.get("name") or session),
+                voice_id=str(info.get("voice_id") or ""),
+                cwd=str(info.get("cwd") or str(pathlib.Path.home())),
+                session=session,
+                backend=str(info.get("backend") or AgentBackend.CLAUDE),
+            )
+        except Exception as e:  # noqa: BLE001 — as save_agents: log; the caller sees no agent
+            log("agentCreateSyncFail", f"{session} :: {e}")
+        return
+    new_persona = str(info.get("name") or current["name"])
+    new_voice = str(info.get("voice_id") or current["voice_id"])
+    new_cwd = str(info.get("cwd") or current["cwd"])
+    cur_backend = current.get("backend") or AgentBackend.CLAUDE
+    new_backend = str(info.get("backend") or cur_backend)
+    if (new_persona != current["name"] or new_voice != current["voice_id"]
+            or new_cwd != current["cwd"] or new_backend != cur_backend):
+        _agents.update_agent(current["agent_id"], persona=new_persona, voice_id=new_voice,
+                             cwd=new_cwd, backend=new_backend)

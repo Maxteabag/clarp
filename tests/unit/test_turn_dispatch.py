@@ -2,6 +2,7 @@ import pytest
 from pathlib import Path
 from types import SimpleNamespace
 
+from tests.patching import patch_shared
 from lib import agents as agents_db
 from lib import heartbeat, team_leader, team_store
 from lib import tts_queue, turn_queue
@@ -542,6 +543,227 @@ def test_busy_agent_send_preempts_inflight_turn(tmp_path):
     # The new turn completes normally → done.
     second_call["on_result"]({"duration_ms": 7})
     assert agents_db.latest_state(agent_id)["kind"] == AgentState.DONE
+
+
+class _DyingProcess:
+    """A turn process that keeps writing its session until it is let go."""
+
+    def __init__(self):
+        self.alive = True
+
+    def is_alive(self):
+        return self.alive
+
+
+class _SlowExitBackends(_Backends):
+    """SIGTERM is accepted but the old CLI has not exited yet."""
+
+    def __init__(self):
+        super().__init__()
+        self.process = _DyingProcess()
+
+    def interrupt(self, backend, agent_id):
+        self.interrupted.append((backend, agent_id))
+        return 1
+
+    def active_handles(self, backend, agent_id):
+        return [self.process] if self.spawned and self.process.alive else []
+
+
+def test_preemption_does_not_spawn_until_the_old_process_exits(tmp_path, monkeypatch):
+    """TP-01: two CLIs on one native session interleave and corrupt it."""
+    import time
+    monkeypatch.setattr(_td, "_PROCESS_EXIT_POLL_S", 0.01)
+    service, backends, agent_id = _make_service(tmp_path)
+    slow = _SlowExitBackends()
+    service.backends = slow
+    service.dispatch(text="first", requested_session="mike", trace_id="tA",
+                     synthesize_audio=False)
+    assert len(slow.spawned) == 1
+
+    service.dispatch(text="second", requested_session="mike", trace_id="tB",
+                     synthesize_audio=False)
+    assert slow.interrupted == [("claude", agent_id)], "the old turn is preempted"
+    assert len(slow.spawned) == 1, "a second CLI started while the first still runs"
+
+    slow.process.alive = False                  # the SIGTERMed CLI exits
+    deadline = time.monotonic() + 3
+    while len(slow.spawned) < 2 and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert [call["trace_id"] for _b, call in slow.spawned] == ["tA", "tB"]
+
+
+def _open_rows(agent_id):
+    return [(row["trace_id"], row["status"]) for row in agents_db.conn().execute(
+        "SELECT trace_id, status FROM queued_turns WHERE agent_id = ?", (agent_id,))]
+
+
+def test_a_send_waiting_for_a_preempted_process_survives_a_restart(tmp_path, monkeypatch):
+    """TP-01 review: a preempting send that waits for the old process is
+    acknowledged as queued, so it must not live only in memory."""
+    import time
+    monkeypatch.setattr(_td, "_PROCESS_EXIT_POLL_S", 0.01)
+    service, _backends, agent_id = _make_service(tmp_path)
+    slow = _SlowExitBackends()
+    service.backends = slow
+    service.dispatch(text="first", requested_session="mike", trace_id="tA",
+                     client_msg_id="m-first", synthesize_audio=False)
+    result = service.dispatch(text="second", requested_session="mike", trace_id="tB",
+                              client_msg_id="m-second", synthesize_audio=False)
+
+    assert result.queued is True
+    assert len(slow.spawned) == 1
+    assert ("tB", "parked") in _open_rows(agent_id), "only memory holds the queued send"
+
+    slow.process.alive = False
+    deadline = time.monotonic() + 3
+    while len(slow.spawned) < 2 and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert [call["trace_id"] for _b, call in slow.spawned] == ["tA", "tB"]
+    # The park row clears only after the launch returns (a failed launch keeps
+    # it), so it may still be there the moment the spawn is recorded.
+    while ("tB", "parked") in _open_rows(agent_id) and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert ("tB", "parked") not in _open_rows(agent_id), "a launched send keeps no park row"
+
+
+def _durable_order(agent_id):
+    return [row["trace_id"] for row in agents_db.conn().execute(
+        "SELECT trace_id FROM queued_turns WHERE agent_id = ? AND status IN ('queued', 'parked')"
+        " ORDER BY queue_seq", (agent_id,))]
+
+
+def test_a_follow_up_behind_a_preempted_process_is_durable_too(tmp_path, monkeypatch):
+    """TP-01 review round 2: every send acknowledged as waiting behind the old
+    process has a durable row, not only the one that preempted it."""
+    import time
+    monkeypatch.setattr(_td, "_PROCESS_EXIT_POLL_S", 0.01)
+    service, _backends, agent_id = _make_service(tmp_path)
+    slow = _SlowExitBackends()
+    service.backends = slow
+    service.dispatch(text="first", requested_session="mike", trace_id="tA",
+                     client_msg_id="m-first", synthesize_audio=False)
+    second = service.dispatch(text="second", requested_session="mike", trace_id="tB",
+                              client_msg_id="m-second", synthesize_audio=False)
+    third = service.dispatch(text="third", requested_session="mike", trace_id="tC",
+                             client_msg_id="m-third", synthesize_audio=False)
+
+    assert second.queued and third.queued and len(slow.spawned) == 1
+    assert _durable_order(agent_id) == ["tB", "tC"]
+
+    slow.process.alive = False
+    deadline = time.monotonic() + 3
+    while len(slow.spawned) < 2 and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert [call["trace_id"] for _b, call in slow.spawned] == ["tA", "tB"]
+    # tB's park row clears only after its launch returns (see above).
+    while _durable_order(agent_id) != ["tC"] and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert _durable_order(agent_id) == ["tC"]
+
+
+def test_the_preempting_send_keeps_its_place_ahead_of_queued_work(tmp_path, monkeypatch):
+    """TP-01 review round 2: the preempting send runs before work that was
+    already queued, in memory and in the durable order a restart recovers."""
+    monkeypatch.setattr(_td, "_PROCESS_EXIT_POLL_S", 0.01)
+    service, _backends, agent_id = _make_service(tmp_path)
+    slow = _SlowExitBackends()
+    service.backends = slow
+    service.dispatch(text="first", requested_session="mike", trace_id="tA",
+                     client_msg_id="m-first", synthesize_audio=False)
+    service.dispatch(text="queued", requested_session="mike", trace_id="tC",
+                     client_msg_id="m-queued", synthesize_audio=False, queue_if_busy=True)
+    service.dispatch(text="second", requested_session="mike", trace_id="tB",
+                     client_msg_id="m-second", synthesize_audio=False)
+
+    assert [spec.trace_id for spec in _td._SLOTS.queued.get(agent_id, [])] == ["tB", "tC"]
+    assert _durable_order(agent_id) == ["tB", "tC"]
+    slow.process.alive = False
+
+
+class _LeftoverProcessBackends(_SlowExitBackends):
+    """A turn process the Host already took for finished is still running."""
+
+    def active_handles(self, backend, agent_id):
+        return [self.process] if self.process.alive else []
+
+
+def test_a_send_behind_a_leftover_process_is_durable(tmp_path, monkeypatch):
+    """TP-01b: the free-slot-but-process-running branch acknowledges a waiting
+    send as queued, so it needs a durable row too."""
+    import time
+    monkeypatch.setattr(_td, "_PROCESS_EXIT_POLL_S", 0.01)
+    service, _backends, agent_id = _make_service(tmp_path)
+    leftover = _LeftoverProcessBackends()
+    service.backends = leftover
+    result = service.dispatch(text="first", requested_session="mike", trace_id="tA",
+                              client_msg_id="m-first", synthesize_audio=False)
+
+    assert result.queued is True and leftover.spawned == []
+    assert _durable_order(agent_id) == ["tA"]
+
+    leftover.process.alive = False
+    deadline = time.monotonic() + 3
+    while not leftover.spawned and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert [call["trace_id"] for _b, call in leftover.spawned] == ["tA"]
+    assert _durable_order(agent_id) == []
+
+
+def test_a_stop_finishing_after_the_send_parked_leaves_one_durable_row(tmp_path, monkeypatch):
+    """TP-01b review: the send parked behind a Stop barrier, then the Stop
+    finished before the send took the turn lock while the old CLI still runs.
+    That park row is the send's one durable row; no second row is left over."""
+    import time
+    monkeypatch.setattr(_td, "_PROCESS_EXIT_POLL_S", 0.01)
+    service, _backends, agent_id = _make_service(tmp_path)
+    leftover = _LeftoverProcessBackends()
+    service.backends = leftover
+    snapshot, _dropped, _was_paused = _td.begin_stop(agent_id)
+    real_park = _td._park
+    finished = []
+
+    def park_then_finish_stop(spec, **kwargs):
+        row = real_park(spec, **kwargs)
+        if kwargs.get("prefix", "stop-park") == "stop-park" and not finished:
+            _td.complete_stop(service.ctx, agent_id, snapshot, set(),
+                              backend_registry=leftover)
+            finished.append(True)
+        return row
+
+    monkeypatch.setattr(_td, "_park", park_then_finish_stop)
+    result = service.dispatch(text="waiting", requested_session="mike", trace_id="tW",
+                              client_msg_id="m-waiting", synthesize_audio=False)
+
+    assert result.queued and finished == [True] and leftover.spawned == []
+    assert _durable_order(agent_id) == ["tW"]
+    leftover.process.alive = False
+    deadline = time.monotonic() + 3
+    while not leftover.spawned and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert [call["trace_id"] for _b, call in leftover.spawned] == ["tW"]
+    assert _durable_order(agent_id) == []
+
+
+def test_a_send_that_cannot_wait_durably_is_refused(tmp_path, monkeypatch):
+    service, _backends, agent_id = _make_service(tmp_path)
+    slow = _SlowExitBackends()
+    service.backends = slow
+    service.dispatch(text="first", requested_session="mike", trace_id="tA",
+                     synthesize_audio=False)
+
+    def locked(**_kwargs):
+        raise RuntimeError("database is locked")
+
+    monkeypatch.setattr(_td.turn_queue, "park", locked)
+    monkeypatch.setattr(_td.turn_queue, "park_at_head", locked)
+    with pytest.raises(_td.DispatchError) as refused:
+        service.dispatch(text="second", requested_session="mike", trace_id="tB",
+                         synthesize_audio=False)
+    assert refused.value.status == 503
+    assert len(slow.spawned) == 1
+    assert _td._SLOTS.queue_depth(agent_id) == 0
+    slow.process.alive = False
 
 
 def test_explicit_queue_waits_for_current_turn_without_interrupting(tmp_path):
@@ -2778,7 +3000,7 @@ def _call_open_admitted(tmp_path, monkeypatch):
     backends.live = False
     for name, value in (("_kick_queue", lambda: None), ("_push", lambda ring, kind: {}),
                         ("_push_voip", lambda ring: {}), ("_schedule_expiry", lambda ring: None)):
-        monkeypatch.setattr(agent_rings, name, value)
+        patch_shared(monkeypatch, agent_rings, name, value)
     ctx = SimpleNamespace(stream=None, tts=None)
     agent_rings.bind(ctx)
     group_calls.bind(ctx)

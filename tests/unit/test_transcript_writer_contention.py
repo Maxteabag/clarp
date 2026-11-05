@@ -255,6 +255,28 @@ def test_a_write_that_waited_long_logs_one_line(tmp_path, monkeypatch):
     assert "waited_ms=" in waits[0][1] and "import_in_process=False" in waits[0][1]
 
 
+def test_the_long_wait_log_names_the_program_but_never_its_arguments(tmp_path, monkeypatch):
+    from lib import log as log_module
+    connection = db.conn()
+    path = connection.execute('PRAGMA database_list').fetchone()[2]
+    holder = _holder(path)
+    lines = []
+    monkeypatch.setattr(log_module, "log", lambda event, detail="", *a, **k: lines.append((event, detail)))
+    monkeypatch.setattr("sys.argv", ["/opt/clarp/bin/clarp-admin", "prompt", "--text", "private words"])
+    timer = threading.Timer(0.3, lambda: holder.execute("COMMIT"))
+    timer.start()
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        connection.execute("COMMIT")
+    finally:
+        timer.join()
+        holder.close()
+    waits = [d for e, d in lines if e == "sqliteWriteWait"]
+    assert len(waits) == 1, lines
+    assert "process='clarp-admin'" in waits[0]
+    assert "private" not in waits[0] and "prompt" not in waits[0] and "/opt" not in waits[0]
+
+
 def test_the_long_wait_log_knows_when_this_processs_import_holds_the_lock(tmp_path):
     db.conn()
     holding, release, done = threading.Event(), threading.Event(), threading.Event()

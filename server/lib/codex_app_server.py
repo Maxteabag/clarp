@@ -94,7 +94,11 @@ class AppTurnHandle:
         return not self._done.is_set()
 
     def terminate(self) -> None:
-        self.client.interrupt_active(self.agent_id)
+        # Only this handle's own turn: a late terminate (a retry that lost its
+        # slot during the handoff) must not reach the agent's next turn (TP-N1).
+        if self._done.is_set():
+            return
+        self.client.interrupt_active(self.agent_id, handle=self)
 
 
 class _Client:
@@ -104,12 +108,17 @@ class _Client:
         self.auth_fingerprint = _auth_fingerprint()
         self.refresh_requested = False
         self.rate_limits = {}
-        env = {**os.environ, "CLAUDE_PWA_SESSION": session}
-        env.pop("CLARP_PROVIDER_TURN", None)   # one shared server has no turn identity
+        # One shared server serves every Codex agent: it has no turn identity
+        # and no agent identity. Naming the agent that started it would let a
+        # tool in any agent's shell act as that one; without it they refuse
+        # (BACKENDS-N1).
+        env = dict(os.environ)
+        env.pop("CLARP_PROVIDER_TURN", None)
+        env.pop("CLAUDE_PWA_SESSION", None)
         self.proc = subprocess.Popen(
             argv,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE, text=True, bufsize=1,
+            stderr=subprocess.PIPE, text=True, errors="replace", bufsize=1,
             env=env,
         )
         self._write_lock = threading.Lock()
@@ -510,6 +519,7 @@ class _Client:
             "developerInstructions": persona_identity_instruction(
                 str(agent.get("persona") or ""), agent["session"]),
             **({"model": agent["model"]} if agent.get("model") else {}),
+            **_thread_identity(agent["session"]),
         })
         self._loaded_threads.add(thread_id)
 
@@ -541,6 +551,7 @@ class _Client:
                     "approvalPolicy": "never", "sandbox": "danger-full-access",
                     "developerInstructions": developer_instructions,
                     **({"model": model} if model else {}),
+                    **_thread_identity(session),
                 })
             else:
                 result = self.request("thread/start", {
@@ -548,6 +559,7 @@ class _Client:
                     "sandbox": "danger-full-access",
                     "developerInstructions": developer_instructions,
                     **({"model": model} if model else {}),
+                    **_thread_identity(session),
                 })
             thread = result.get("thread") or {}
             thread_id = str(thread.get("id") or backend_session_id)
@@ -612,9 +624,11 @@ class _Client:
         self.request("turn/steer", params)
         return True
 
-    def interrupt_active(self, agent_id: str = "") -> None:
+    def interrupt_active(self, agent_id: str = "", *, handle: "AppTurnHandle | None" = None) -> None:
+        """Interrupt the agent's active turn; with ``handle``, only if that turn
+        is the one the handle was returned for."""
         active = self._actives.get(agent_id) if agent_id else self.active
-        if active:
+        if active and (handle is None or active.handle is handle):
             self._pause_goal_for_stop(active)
             if not active.turn_id:
                 if len(getattr(self, "_actives", {})) <= 1:
@@ -777,6 +791,16 @@ def recover_usage_failure(message: str) -> bool:
             return False
         message.quota_confirmed = _matching_bucket_blocked(previous, limits)
         return not message.quota_confirmed
+
+
+def _thread_identity(session: str) -> dict:
+    """The agent's session for this thread's shell only. The shared server
+    carries none (BACKENDS-N1); the app-server applies a thread's config
+    overrides to the commands that thread runs."""
+    if not session:
+        return {}
+    return {"config": {"shell_environment_policy": {"set": {
+        "CLAUDE_PWA_SESSION": session}}}}
 
 
 def _client(agent_id: str, session: str, stream=None) -> _Client:

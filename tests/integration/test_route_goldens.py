@@ -104,14 +104,7 @@ DYNAMIC_SAMPLES = (
 
 # Pre-existing bugs from the code review (http-shell.md at 09ee9279). The
 # golden records them as they are; the fix lane changes them, not a move.
-KNOWN_ISSUES = {
-    "GET /terminal/s1": "HTTP-01: a limited device reaches the agent terminal",
-    "PATCH /schedules/s1": "HTTP-02: do_PATCH skips the device scope gate",
-    "GET /dirs": "HTTP-03: a limited device can browse host directories",
-    "GET /dirs?path=/": "HTTP-03: a limited device can browse host directories",
-    "GET /past-sessions": "HTTP-03: a limited device lists every project's sessions",
-    "GET /past-sessions?scope=all": "HTTP-03: a limited device lists every project's sessions",
-}
+KNOWN_ISSUES: dict[str, str] = {}
 
 PRINCIPAL_ORDER = ("anonymous", "local_no_token", "limited", "full", "admin",
                    "open_local", "open_remote")

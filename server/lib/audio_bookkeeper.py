@@ -5,6 +5,7 @@ No primary agent prompt, tool or model executes bookkeeping. Observations descri
 reported lifecycle stages, never acoustic output. Clip identity is Host-local.
 """
 
+import time
 
 ROLE = 'audio-bookkeeper'
 # Statements kept separate so migration remains inside its enclosing transaction.
@@ -74,3 +75,47 @@ def drain(limit=32):
             janitor_store.record_config_run(c,config['agent_id'],now,touch_updated=False)
             done += 1
     return done
+
+
+# Retention (VP-04): small transactions so no delete holds the writer lock for
+# long, a short pause between them, and a cap per maintenance pass.
+PRUNE_BATCH = 200
+PRUNE_LIMIT = 2000
+PRUNE_PAUSE_SEC = 0.05
+
+
+def prune(now_ms, *, max_age_ms):
+    """Delete observations older than `max_age_ms` (drained or not) and the
+    completed audio-bookkeeping janitor runs that finished before then, at
+    most PRUNE_LIMIT of each, PRUNE_BATCH per transaction. Logs the longest
+    batch. Event ids are AUTOINCREMENT, so a pruned id never names a new run."""
+    from . import janitor_store
+    from .log import log
+    cutoff = now_ms - max_age_ms
+    longest = [0.0, 0]
+
+    def batches(step):
+        total = 0
+        while total < PRUNE_LIMIT:
+            if longest[1]:
+                time.sleep(PRUNE_PAUSE_SEC)
+            size = min(PRUNE_BATCH, PRUNE_LIMIT - total)
+            started = time.monotonic()
+            with janitor_store.write() as c:
+                n = step(c, size)
+            longest[0] = max(longest[0], time.monotonic() - started)
+            longest[1] += 1
+            total += n
+            if n < size:
+                break
+        return total
+
+    events = batches(lambda c, size: int(c.execute(
+        """DELETE FROM audio_bookkeeping_events WHERE event_id IN (
+               SELECT event_id FROM audio_bookkeeping_events
+                WHERE created_at < ? ORDER BY event_id LIMIT ?)""", (cutoff, size)).rowcount or 0))
+    runs = batches(lambda c, size: janitor_store.prune_completed_runs(
+        c, run_glob='audio-bookkeeping-*', finished_before=cutoff, limit=size))
+    log('audioBookkeepingPruned',
+        f'events={events} runs={runs} batches={longest[1]} longest_batch_ms={round(longest[0] * 1000)}')
+    return {'events': events, 'runs': runs}

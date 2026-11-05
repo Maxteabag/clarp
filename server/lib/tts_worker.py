@@ -14,8 +14,9 @@ from __future__ import annotations
 
 import pathlib
 import threading
+import time
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 from . import agents as agents_db
 from . import clip_pacing
@@ -71,15 +72,17 @@ def synth_one(*,
               stream: Any | None = None,
               herald: Any | None = None,
               broker: Any | None = None,
-              delivery: ClipDelivery | None = None) -> bool:
+              delivery: ClipDelivery | None = None,
+              claim: Callable[[], dict[str, Any] | None] | None = None) -> bool:
     """Claim and process one queued row. Returns True if work was done,
-    False if the queue was empty.
+    False if the queue was empty. The pool passes `claim`, which skips
+    agents it already has in flight.
 
     Idempotent at the row level: synthesis happens under SYNTHESIZING
     status, success advances to DONE, failure to FAILED. Either way the
     row is no longer reclaimable.
     """
-    row = tts_queue.claim_next()
+    row = (claim or tts_queue.claim_next)()
     if row is None:
         return False
 
@@ -111,9 +114,11 @@ def synth_one(*,
                 active_delivery = delivery or ChunkedFileDelivery(broker=broker)
                 clip_route = tts_mode.route(voice_config, agent)
                 # Raw PCM is Cartesia's live stream; any other provider's
-                # clip is an MP3 that every client plays from its URL.
-                if (clip_route.provider != CARTESIA
-                        and getattr(active_delivery, "name", "") == "raw-pcm"):
+                # clip, or a Cartesia one with no key or voice, is an MP3
+                # that every client plays from its URL and that can fall
+                # back to the configured provider (VP-02).
+                if (getattr(active_delivery, "name", "") == "raw-pcm"
+                        and not _cartesia_can_stream(voice_config, row, agent, clip_route)):
                     active_delivery = ChunkedFileDelivery(broker=broker)
                 refusal = _google_collision_refusal(voice_config, clip_route)
                 if refusal:
@@ -246,6 +251,15 @@ def _google_collision_refusal(cfg, clip_route) -> str | None:
     return google_tts.collision_code(cfg)
 
 
+def _cartesia_can_stream(cfg, row: dict, agent: dict | None, clip_route) -> bool:
+    """Whether raw-pcm can stream this clip: Cartesia is the routed provider
+    and has a key and a voice for it (as ``_synthesize`` resolves them)."""
+    if clip_route.provider != CARTESIA or not cfg.cartesia_key():
+        return False
+    voice = clip_route.voice or resolve_voice(row["voice_id"], CARTESIA)
+    return bool(voice or cfg.cartesia_voice_for((agent or {}).get("persona", "")))
+
+
 def _route_has_voice(cfg, row: dict, agent: dict | None, clip_route) -> bool:
     """False only when the routed provider certainly has no voice and no
     fallback could speak instead (Cartesia and Gemini; others decide later)."""
@@ -281,7 +295,8 @@ def _synthesize(*, cfg, row: dict, agent: dict,
 
     On a Cartesia failure (or a persona with no Cartesia voice / no key)
     we transparently fall back to ElevenLabs. The exception only escapes
-    when the fallback also fails, so the caller surfaces a real outage.
+    when the fallback also fails, so the caller surfaces a real outage, or
+    when the primary already sent audio to the live stream.
     """
     raw_voice = row["voice_id"]
     persona = (agent or {}).get("persona", "")
@@ -322,6 +337,16 @@ def _synthesize(*, cfg, row: dict, agent: dict,
             encoding=getattr(cfg, "raw_pcm_encoding", "pcm_f32le"),
             sample_rate=getattr(cfg, "raw_pcm_sample_rate", 44100),
         )
+
+    # A fallback restarts the reply from the top, so it may only run while the
+    # live stream is still empty; after that it would play a second clip (VP-01).
+    fed: list[bool] = []
+    if on_chunk is not None:
+        live_feed = on_chunk
+
+        def on_chunk(index, chunk):
+            fed[:] = [True]
+            live_feed(index, chunk)
 
     spoke: dict[str, str | None] = {}   # the voice the provider that ran actually used
 
@@ -393,6 +418,12 @@ def _synthesize(*, cfg, row: dict, agent: dict,
     except Exception as primary_error:
         fallback = clip_route.fallback
         if fallback in {"", "none", provider}:
+            raise
+        if fed:
+            _emit("tts_worker", "providerFallbackSkipped",
+                  context=_event_context(row, agent), level="warn",
+                  detail={"provider": provider, "error": str(primary_error)[:200],
+                          "fallback": fallback, "reason": "audio_streamed"})
             raise
         _emit("tts_worker", "providerFallback",
               context=_event_context(row, agent), level="warn",
@@ -620,6 +651,24 @@ def _publish_clip_event(*, stream: Any | None, herald: Any | None,
         ))
 
 
+
+# A clip claimed this long before a restart is not spoken again (VP-05).
+STALE_IN_FLIGHT_MS = 2 * 60 * 1000
+
+
+def recover_in_flight(*, now_ms: int | None = None) -> dict[str, int]:
+    """At start, before the worker claims anything: speech claimed long ago
+    fails instead of being spoken again, recent speech re-queues, and clips
+    left streaming by the dead process fail (their producer is gone)."""
+    from . import clip_store, db
+    now = db.now_ms() if now_ms is None else now_ms
+    return {
+        "failed": tts_queue.fail_stale_in_flight(now - STALE_IN_FLIGHT_MS),
+        "requeued": tts_queue.reset_in_flight(),
+        "clips_failed": clip_store.fail_streaming_clips("producer ended with a restart"),
+    }
+
+
 class TTSWorker:
     """Daemon thread that drains tts_queue at a fixed interval.
 
@@ -627,8 +676,13 @@ class TTSWorker:
     enqueue→synthesize handoff IS the user-perceptible audio latency.
     The worker spends most of its time sleeping; when work arrives it
     runs flat-out (back-to-back synth_one calls) until the queue drains.
+
+    A pool of POOL_SIZE threads (VP-06) so one slow provider call delays
+    only its own agent. An agent has at most one row in flight, which keeps
+    its chunks in order; `_busy` (under `_busy_lock`) is that set.
     """
     DEFAULT_INTERVAL_SEC = 0.1
+    POOL_SIZE = 3
 
     def __init__(self, *,
                  audio_dir: pathlib.Path,
@@ -648,45 +702,69 @@ class TTSWorker:
         # config knob actually controls anything.
         self.delivery = delivery or ChunkedFileDelivery(broker=broker)
         self._stop = threading.Event()
-        self._thread: threading.Thread | None = None
+        self._threads: list[threading.Thread] = []
+        self._busy: set[str] = set()
+        self._busy_lock = threading.Lock()
 
     def start(self) -> None:
-        if self._thread and self._thread.is_alive():
+        if any(t.is_alive() for t in self._threads):
             return
         # Reset any rows stuck in 'synthesizing' from a previous run that
         # died mid-claim. Idempotent + cheap.
         try:
-            stranded = tts_queue.reset_in_flight()
-            if stranded:
+            recovered = recover_in_flight()
+            if recovered["requeued"]:
                 _emit("tts_worker", "resetInFlight",
-                      detail={"count": stranded})
+                      detail={"count": recovered["requeued"]})
+            if recovered["failed"] or recovered["clips_failed"]:
+                _emit("tts_worker", "staleInFlightFailed",
+                      detail={"count": recovered["failed"],
+                              "clips": recovered["clips_failed"]})
         except Exception as e:  # noqa: BLE001
             log_exception("ttsWorkerResetFail", e)
-        self._thread = threading.Thread(target=self._loop, daemon=True,
-                                         name="tts-worker")
-        self._thread.start()
+        # Once, before any lane runs: a lane's own claim is never reset.
+        self._threads = [
+            threading.Thread(target=self._loop, daemon=True, name=f"tts-worker-{n}")
+            for n in range(self.POOL_SIZE)]
+        for thread in self._threads:
+            thread.start()
 
     def stop(self, timeout: float = 2.0) -> None:
         self._stop.set()
-        if self._thread and self._thread.is_alive():
-            self._thread.join(timeout=timeout)
+        deadline = time.monotonic() + timeout
+        for thread in self._threads:
+            if thread.is_alive():
+                thread.join(timeout=max(0.0, deadline - time.monotonic()))
+
+    def _claim(self, claimed: list[str]) -> dict[str, Any] | None:
+        with self._busy_lock:
+            row = tts_queue.claim_next(frozenset(self._busy))
+            if row is not None:
+                self._busy.add(row["agent_id"])
+                claimed.append(row["agent_id"])
+            return row
 
     def _loop(self) -> None:
         # Tight inner loop while there's work, sleep when empty. Beats a
         # fixed-rate poll when there's a burst of clips (a long Claude
         # turn that emits 4 chunks).
         while not self._stop.is_set():
+            claimed: list[str] = []
             try:
                 worked = synth_one(audio_dir=self.audio_dir,
                                    stream=self.stream,
                                    herald=self.herald,
                                    broker=self.broker,
-                                   delivery=self.delivery)
+                                   delivery=self.delivery,
+                                   claim=lambda: self._claim(claimed))
                 health.mark_success("tts_worker")
             except Exception as e:  # noqa: BLE001
                 health.mark_error("tts_worker", e)
                 log_exception("ttsWorkerLoopFail", e)
                 worked = False
+            finally:
+                with self._busy_lock:
+                    self._busy.difference_update(claimed)
             if worked:
                 continue       # drain back-to-back
             # Sleep with stop-event short-circuit.

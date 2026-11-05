@@ -172,7 +172,15 @@ def receipt(row) -> dict:
 
 
 def pending() -> list[dict]:
-    return [dict(r) for r in db.conn().execute("SELECT * FROM form_submissions WHERE status='pending' ORDER BY created_at LIMIT 100").fetchall()]
+    # Only for an agent that still exists: a deleted or archived agent's
+    # submission is not dispatched (and refused) every pass, and never holds
+    # back a live agent's (AUT-08). It stays pending, so an unarchived agent
+    # still gets it.
+    return [dict(r) for r in db.conn().execute(
+        "SELECT f.* FROM form_submissions f WHERE f.status='pending' AND EXISTS ("
+        "SELECT 1 FROM agents a WHERE a.session=f.session"
+        " AND a.deleted_at IS NULL AND a.archived_at IS NULL)"
+        " ORDER BY f.created_at LIMIT 100").fetchall()]
 
 
 def mark_delivered(submission_id: str) -> None:

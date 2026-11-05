@@ -75,17 +75,34 @@ class DispatchAdapters:
             return None
         return agent
 
+    @staticmethod
+    def _queue_holds(agent_id: str) -> bool:
+        """A Stop paused the agent's queue, or work already waits in it: the
+        janitor's rule (janitor_autonomy) for staying out with automation."""
+        from . import db, turn_queue
+        return turn_queue.is_paused(agent_id) or db.conn().execute(
+            "SELECT 1 FROM queued_turns WHERE agent_id = ?"
+            " AND status IN ('queued', 'claimed')", (agent_id,)).fetchone() is not None
+
     # -- scheduler callbacks --------------------------------------------------
+    # A tick's idle check cannot be atomic with the dispatch, so heartbeat and
+    # leader ticks queue behind a turn that started in between: they never
+    # steer into or preempt the user's turn (AUT-05). A janitor wake is bound
+    # to the snapshot it was decided on and keeps its own path (AUT-05b).
 
     def leader_tick(self, session: str, text: str) -> None:
         """TeamLeaderScheduler: nudge an idle team leader."""
-        self._dispatch(session, text, origin=ORIGIN_LEADER_TICK)
+        agent = agents_db.get_by_session(session)
+        if agent and self._queue_holds(agent["agent_id"]):
+            return
+        self._dispatch(session, text, origin=ORIGIN_LEADER_TICK, queue_if_busy=True)
 
     def heartbeat(self, session: str, text: str) -> None:
         """HeartbeatScheduler: hidden heartbeat prompt, idle agents only."""
-        if self._idle_agent(session) is None:
+        agent = self._idle_agent(session)
+        if agent is None or self._queue_holds(agent["agent_id"]):
             return
-        self._dispatch(session, text, origin=ORIGIN_HEARTBEAT)
+        self._dispatch(session, text, origin=ORIGIN_HEARTBEAT, queue_if_busy=True)
 
     def decided_heartbeat(self, session: str, text: str, request_id: str) -> bool:
         """AutonomyJanitors: a decided wake-up keyed by its request id, never

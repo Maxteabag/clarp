@@ -54,7 +54,8 @@ from ..process_registry import TurnHandle
 from ..turn_lifecycle import TurnEvent
 from ..voice_preamble import apply_voice_preamble
 from .base import BackendBrand, CompactionStrategy, resolve
-from .stream_json import StreamJsonBackend
+from .stream_json import StreamJsonBackend, stop_after_drain_failure
+from .long_prompt import PromptFile, fits_argv
 
 
 @dataclass
@@ -306,12 +307,16 @@ class CodexBackend(StreamJsonBackend):
         # when this is a spoken turn.
         agent = agents_db.get_by_agent_id(agent_id) if agent_id else None
         persona = (agent or {}).get("persona") or ""
-        cmd.append(apply_voice_preamble(
+        prompt = apply_voice_preamble(
             text,
             voice=voice_preamble,
             persona=persona,
             session=session,
-        ))
+        )
+        stdin: Any = subprocess.DEVNULL
+        prompt_file = None
+        # Past one argv string, `-` reads the prompt from stdin (BACKENDS-08).
+        cmd.append(prompt if fits_argv(prompt) else "-")
         flag = "resume" if (backend_session_id and not is_new_session) else "new"
         log("codexSpawn", f"cwd={cwd} {flag}={backend_session_id or '∅'} "
                           f"text_len={len(text)} trace={trace_id or '∅'} "
@@ -319,7 +324,17 @@ class CodexBackend(StreamJsonBackend):
         runtime_agent_id = "" if isolated else agent_id
         from .. import provider_background_jobs as provider_jobs
         turn_token, identity = provider_jobs.identity_env(runtime_agent_id)
-        proc, handle = self.launch(cmd, cwd=cwd, session=session, env_extra=identity)
+        try:
+            if cmd[-1] == "-":
+                prompt_file = PromptFile(prompt)
+                stdin = prompt_file.open()
+            proc, handle = self.launch(cmd, cwd=cwd, session=session, stdin=stdin,
+                                       env_extra=identity)
+        finally:
+            if prompt_file is not None:
+                if stdin is not subprocess.DEVNULL:
+                    stdin.close()       # the child holds its own descriptor
+                prompt_file.remove()
         provider_jobs.record_identity(turn_token, agent_id=runtime_agent_id,
                                       provider=self.id, pid=proc.pid)
         self.register_handle(runtime_agent_id, handle)
@@ -356,6 +371,7 @@ class CodexBackend(StreamJsonBackend):
         Swallows every exception per-line — a drainer crash must never take
         down a server thread."""
         st = TurnState(live_backend_session_id=backend_session_id)
+        reported = False        # a terminal outcome reached on_result/on_error
         try:
             if proc.stdout is None:
                 return
@@ -386,6 +402,7 @@ class CodexBackend(StreamJsonBackend):
                 log("codexExitErr", f"rc={rc} trace={trace_id or '∅'} "
                                     f"stderr={(err or '')[:500]!r}")
                 if on_error is not None and not st.failed_error:
+                    reported = True
                     try:
                         on_error(err or f"codex exited rc={rc}")
                     except Exception as e:         # noqa: BLE001
@@ -401,6 +418,7 @@ class CodexBackend(StreamJsonBackend):
                         },
                         "last_agent_message": st.last_agent_message,
                     }
+                    reported = True
                     try:
                         on_result(result)
                     except Exception as e:         # noqa: BLE001
@@ -411,6 +429,13 @@ class CodexBackend(StreamJsonBackend):
                     f"session_meta; history binding may be missing")
         except Exception as e:                     # noqa: BLE001
             log_exception("codexDrainFail", e, detail=trace_id)
+            # Nothing reads this CLI any more: stop it and end the turn once.
+            stop_after_drain_failure(proc, handle)
+            if not (reported or st.failed_error) and on_error is not None:
+                try:
+                    on_error(f"codex drain failed: {str(e)[:300]}")
+                except Exception as cb:            # noqa: BLE001
+                    log_exception("codexOnErrorFail", cb, detail=trace_id)
         finally:
             if agent_id:
                 self.unregister_handle(agent_id, handle)

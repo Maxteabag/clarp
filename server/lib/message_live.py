@@ -11,7 +11,7 @@ from typing import Any
 
 from .clock import iso_from_ms as _iso_from_ms, now_ms
 from .db import conn
-from . import dreaming, heartbeat, team_leader, team_store
+from . import dreaming, heartbeat, origins, team_leader, team_store
 from .voice_markup import strip_hidden_blocks
 from .message_writes import _facade, _latest_user_provenance, _next_revision
 
@@ -76,13 +76,24 @@ def upsert_live_assistant_message(*, agent_id: str, backend_session_id: str,
         # first showed it as a real bubble on every account-recovery resume.
         return None
     leader_noop_text = text
-    skip, text = heartbeat.strip_heartbeat_ack(text)
+    database = conn()
+    # Each token counts only in its own automation's turn (AUT-07).
+    turn_origin = ""
+    if any(token in text for token in (
+            heartbeat.HEARTBEAT_OK, dreaming.DREAMING_OK, team_leader.LEADER_NOOP)):
+        _key, turn_origin, _sender = _latest_user_provenance(
+            database, agent_id, backend_session_id)
+    skip, text = origins.ack_for_origin(
+        heartbeat.strip_heartbeat_ack(text), text, token=heartbeat.HEARTBEAT_OK,
+        origin=turn_origin, own="heartbeat")
     if not skip:
-        skip, text = dreaming.process_assistant_text(agent_id, text, live=True)
+        skip, text = dreaming.process_assistant_text(
+            agent_id, text, live=True, origin=turn_origin)
     if not skip:
         leader_noop_text = text
-        skip, text = team_leader.strip_leader_noop(text)
-    database = conn()
+        skip, text = origins.ack_for_origin(
+            team_leader.strip_leader_noop(text), text, token=team_leader.LEADER_NOOP,
+            origin=turn_origin, own="leader_tick")
     if trace_id:
         active = database.execute(
             """SELECT trace_id FROM turns
@@ -105,7 +116,7 @@ def upsert_live_assistant_message(*, agent_id: str, backend_session_id: str,
             text = "Leader check: no action needed."
         else:
             text = "Automated check: no action needed."
-        if team_leader.contains_leader_noop(leader_noop_text):
+        if origin == "leader_tick" and team_leader.contains_leader_noop(leader_noop_text):
             team_leader.record_leader_noop(agent_id)
     timestamp_ms = now_ms()
     timestamp = _iso_from_ms(timestamp_ms)
@@ -426,7 +437,7 @@ def finalize_live_assistant_message(*, agent_id: str, backend_session_id: str,
             heartbeat.record_heartbeat_noop_once(agent_id, user_key)
         elif not heartbeat.is_neutral_heartbeat_status(final_text):
             heartbeat.record_heartbeat_activity_once(agent_id, user_key)
-    dreaming.process_assistant_text(agent_id, text, live=False)
+    dreaming.process_assistant_text(agent_id, text, live=False, origin=origin)
     team_store.capture_assistant_message(
         agent_id=agent_id, source_message_id=str(row["id"]),
         trace_id=trace_id, text=final_text)
@@ -702,7 +713,7 @@ def apply_final_assistant_side_effects(*, agent_id: str,
             heartbeat.record_heartbeat_noop_once(agent_id, user_key)
         elif not heartbeat.is_neutral_heartbeat_status(final_text):
             heartbeat.record_heartbeat_activity_once(agent_id, user_key)
-    dreaming.process_assistant_text(agent_id, final_text, live=False)
+    dreaming.process_assistant_text(agent_id, final_text, live=False, origin=origin)
     team_store.capture_assistant_message(
         agent_id=agent_id, source_message_id=str(row["id"]),
         trace_id=trace_id, text=final_text)

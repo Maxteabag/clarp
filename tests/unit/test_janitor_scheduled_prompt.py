@@ -6,6 +6,7 @@ from __future__ import annotations
 import pytest
 
 from lib import agents, backends, db, janitors
+from lib import janitor_runner
 from lib.janitor_runner import JanitorRunner, SQLiteSource
 
 INSTRUCTIONS = "Run the testflight-feedback-monitor skill.\nMONITOR_CONFIG_JSON\n{\"version\": 1}"
@@ -123,6 +124,22 @@ def test_no_second_run_while_one_is_still_working(lane):
     tick(); tick()
     assert len(calls) == 1
     assert len({r["run_id"] for r in janitors.list_runs("feedback")}) == 1
+
+
+def test_a_scheduled_run_whose_turn_never_ends_expires_as_an_error(lane):
+    # AUT-15: no terminal ever arrives (the queued turn was removed). The run
+    # must not hold the schedule forever.
+    source, calls, clock, tick = lane
+    tick()
+    clock[0] = _next_run()
+    assert tick() == 1
+    run = calls[-1][0]
+    clock[0] = run["created_at"] + janitor_runner.RUN_TTL_MS
+    tick()
+    expired = janitors.get_run(run["run_id"])
+    assert expired["status"] == "failed" and "expired" in expired["error"]
+    clock[0] = _next_run()
+    assert tick() == 1 and calls[-1][0]["run_id"] != run["run_id"]
 
 
 def test_enabling_needs_instructions_and_scheduled_tasks_never_overlap(monkeypatch):

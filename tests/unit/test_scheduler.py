@@ -190,3 +190,108 @@ def test_archiving_maintenance_contact_preserves_scheduled_work(tmp_path):
     assert scheduler.AgentScheduleRunner(dispatch_turn=lambda *args: calls.append(args)).tick() == 1
     assert calls == [('maintenance', 'Check quietly')]
     assert scheduler.get_schedule(task['schedule_id'])['enabled']
+
+
+def _due_schedule(tmp_path):
+    from lib.agent_store import load_agents, save_agents
+    save_agents({"worker": {"name": "Worker", "voice_id": "V2", "cwd": str(tmp_path), "backend": "claude"}})
+    agent = load_agents()["worker"]
+    sched = scheduler.create_schedule(
+        session=agent["session"], name="Tick Task", cron_expression="* * * * *",
+        prompt="Run periodic check")
+    with db.conn() as c:
+        c.execute("UPDATE agent_schedules SET next_run_at = ? WHERE schedule_id = ?",
+                  (db.now_ms() - 1000, sched["schedule_id"]))
+    return agent
+
+
+def test_a_raising_goal_tick_does_not_stop_the_cron_schedules(tmp_path, monkeypatch):
+    """AUT-09: one bad goal must not starve every agent's cron schedules."""
+    from lib import task_goal_recovery
+    agent = _due_schedule(tmp_path)
+
+    def broken(*_args, **_kwargs):
+        raise RuntimeError("database is locked")
+    monkeypatch.setattr(task_goal_recovery, "tick", broken)
+    dispatched = []
+    runner = scheduler.AgentScheduleRunner(
+        dispatch_turn=lambda session, prompt: dispatched.append((session, prompt)),
+        dispatch_goal=lambda *_args: None)
+    assert runner.tick() == 1
+    assert dispatched == [(agent["session"], "Run periodic check")]
+
+
+def test_a_plan_that_cannot_be_claimed_does_not_stop_the_others(tmp_path, monkeypatch):
+    """AUT-09: a plan whose claim raises is skipped; the next plan still wakes."""
+    from lib import task_goal_recovery
+    agent_id = agents.create_agent(persona="Mike", voice_id="V", cwd=str(tmp_path), session="mike")
+    now = db.now_ms()
+    with db.conn() as c:
+        for plan_id in ("plan-a", "plan-b"):
+            c.execute(
+                "INSERT INTO task_plans (plan_id, agent_id, session, title, recovery_enabled,"
+                " status, created_at, updated_at) VALUES (?, ?, 'mike', ?, 1, 'active', ?, ?)",
+                (plan_id, agent_id, plan_id, now, now))
+
+    def claim(plan_id, _now):
+        if plan_id == "plan-a":
+            raise RuntimeError("database is locked")
+        return {"session": "mike"}, {"continuation": {"request_id": "goal-wake-b"}}
+    monkeypatch.setattr(task_goal_recovery, "_claim", claim)
+    monkeypatch.setattr(task_goal_recovery, "_prompt", lambda plan, goal: "wake")
+    results = []
+    monkeypatch.setattr(task_goal_recovery, "_result",
+                        lambda plan_id, request, _now, status, _reason: results.append((plan_id, status)))
+    woken = []
+    count = task_goal_recovery.tick(
+        lambda session, prompt, request: woken.append(request) or {"queued": False}, now=now)
+    assert count == 1 and woken == ["goal-wake-b"] and results == [("plan-b", "admitted")]
+
+
+def test_a_plan_that_keeps_failing_is_logged_once_then_hourly(monkeypatch):
+    """AUT-09: never swallowed, never spammed: the first failure per plan and
+    error type with its traceback, then at most one line an hour."""
+    from lib import task_goal_recovery
+    monkeypatch.setattr(task_goal_recovery, "_FAILURE_LOGGED", {}, raising=False)
+    traced, lines = [], []
+    monkeypatch.setattr(task_goal_recovery, "log_exception",
+                        lambda event, exc, detail="": traced.append((event, detail)))
+    monkeypatch.setattr(task_goal_recovery, "log",
+                        lambda event, detail="": lines.append(event), raising=False)
+    error = RuntimeError("database is locked")
+    start = 1_000_000_000
+    for minutes in (0, 1, 2, 59):
+        task_goal_recovery.log_failure_throttled(
+            "goalRecoveryClaimFail", ("plan-a",), error, start + minutes * 60_000, detail="plan-a")
+    assert traced == [("goalRecoveryClaimFail", "plan-a")] and lines == []
+    task_goal_recovery.log_failure_throttled(
+        "goalRecoveryClaimFail", ("plan-a",), error, start + 61 * 60_000, detail="plan-a")
+    assert len(traced) == 1 and lines == ["goalRecoveryClaimFail"]
+    task_goal_recovery.log_failure_throttled(
+        "goalRecoveryClaimFail", ("plan-a",), ValueError("bad goal"), start + 62 * 60_000,
+        detail="plan-a")
+    assert len(traced) == 2                     # a new error type is traced again
+
+
+def test_many_repeating_failures_are_not_traced_again_when_the_memory_is_full(monkeypatch):
+    """AUT-09 (reviewer C's control on 41258db9): with more failing keys than
+    the bounded memory holds, a key still failing is never traced again within
+    the hour; the overflow is one aggregate line an hour, not a traceback each."""
+    from lib import task_goal_recovery
+    monkeypatch.setattr(task_goal_recovery, "_FAILURE_LOGGED", {}, raising=False)
+    monkeypatch.setattr(task_goal_recovery, "_FAILURE_LOG_KEYS", 3, raising=False)
+    traced, lines = [], []
+    monkeypatch.setattr(task_goal_recovery, "log_exception",
+                        lambda event, exc, detail="": traced.append(detail))
+    monkeypatch.setattr(task_goal_recovery, "log",
+                        lambda event, detail="": lines.append(detail), raising=False)
+    error = RuntimeError("database is locked")
+    for minute in (0, 3):
+        for index in range(5):
+            task_goal_recovery.log_failure_throttled(
+                "goalRecoveryClaimFail", (f"plan-{index}",), error,
+                1_000_000_000 + minute * 60_000, detail=f"plan-{index}")
+    # Three slots: two failures tracked, one kept for the overflow marker.
+    assert traced == ["plan-0", "plan-1"]
+    assert len(lines) == 1 and "not tracked" in lines[0]
+    assert len(task_goal_recovery._FAILURE_LOGGED) <= 3

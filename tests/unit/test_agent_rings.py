@@ -14,6 +14,7 @@ import threading
 
 import pytest
 
+from tests.patching import patch_shared
 from lib import agent_rings as rings
 from lib import db, group_calls as calls
 
@@ -76,7 +77,7 @@ def env(tmp_path, monkeypatch):
     _agent("a-jan", "Janitor", "janitor-0000", janitor=True)
     _agent("a-mute", "Quiet", "quiet-0000", muted=True)
     stream, tts, clock, pushes = Stream(), FakeTTS(tmp_path), Clock(), []
-    monkeypatch.setattr(rings, "now_ms", clock)
+    patch_shared(monkeypatch, rings, "now_ms", clock)
     monkeypatch.setattr(rings, "_push", lambda ring, kind: pushes.append((kind, dict(ring))) or {"sent": 1})
     monkeypatch.setattr(rings, "_schedule_expiry", lambda ring: None)
     monkeypatch.setattr(rings, "_push_voip", lambda ring: {"sent": 0})

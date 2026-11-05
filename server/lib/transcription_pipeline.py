@@ -20,7 +20,8 @@ from . import eventlog, health
 from . import trace as _trace
 from .log import log, log_exception
 from .paths import RuntimePaths
-from .stt import STTBusyError, STTModelLoadingError, STTUnknownModelError
+from .stt import (STTBusyError, STTEngineReplacedError, STTModelLoadingError,
+                  STTUnknownModelError, bounded_selection_wait)
 from .focus import current_focus_session
 
 RecordVoice = Callable[..., None]
@@ -49,6 +50,34 @@ def _cache_dir() -> pathlib.Path:
     return RuntimePaths.from_home(pathlib.Path.home()).cache_dir
 
 
+class _SwapRetry:
+    """The engine a request started with. A transcription that finds it
+    closed by a model swap runs once more on the engine published now, so a
+    swap never fails the user's dictation (VP-07)."""
+
+    _RETRIED = ("transcribe_bytes", "transcribe_model_bytes")
+
+    def __init__(self, ctx):
+        self._ctx = ctx
+        self._engine = ctx.stt
+
+    def __getattr__(self, name):
+        value = getattr(self._engine, name)
+        if name not in self._RETRIED or not callable(value):
+            return value
+
+        def call(*args, **kwargs):
+            try:
+                return value(*args, **kwargs)
+            except STTEngineReplacedError:
+                current = self._ctx.stt
+                if current is self._engine:
+                    raise
+                log("sttEngineReplacedRetry", name)
+                return getattr(current, name)(*args, **kwargs)
+        return call
+
+
 def transcribe(ctx, *, audio_bytes: bytes, ctype: str, hands_free: bool,
                requested_model: str, transcription_id: str, fingerprint: str,
                utterance_id: str = "", client_ts: int | None = None,
@@ -72,7 +101,7 @@ def transcribe(ctx, *, audio_bytes: bytes, ctype: str, hands_free: bool,
 
     # One request sees one engine: `_activate_transcription_if_default` may
     # swap ctx.stt on another thread while this request runs.
-    stt = ctx.stt
+    stt = _SwapRetry(ctx)
     if getattr(stt, "available", True) is False:
         return TranscriptionOutcome.error(503, "server transcription disabled")
     call_stt = None
@@ -202,13 +231,15 @@ def transcribe(ctx, *, audio_bytes: bytes, ctype: str, hands_free: bool,
                 # first engine fails, so one provider outage does not lose
                 # the user's recording.
                 for index, engine in enumerate([requested_model, *agent_fallbacks]):
+                    # Only an engine with a fallback after it gives up on a
+                    # variant another request is warming (VP-08).
+                    selection_wait = 10.0 if index < len(agent_fallbacks) else None
                     try:
-                        text, ends_terminal, _dur = model_transcribe(
-                            engine, audio_bytes, ctype, prompt, wait=10.0)
+                        with bounded_selection_wait(selection_wait):
+                            text, ends_terminal, _dur = model_transcribe(
+                                engine, audio_bytes, ctype, prompt, wait=10.0)
                         break
-                    except (STTUnknownModelError, STTModelLoadingError, STTBusyError):
-                        raise
-                    except Exception as e:  # noqa: BLE001
+                    except Exception as e:  # noqa: BLE001 - busy, loading or missing too (VP-09)
                         if index == len(agent_fallbacks):
                             raise
                         log_exception("sttAgentEngineFallback", e, detail=engine)
@@ -364,7 +395,9 @@ def _run_call_steps(stt, steps: list[dict], call_stt: dict, *, focus: str, audio
         # (null when it was unobserved); nothing carries over to a fallback.
         handed: dict = {}
         try:
-            with bound_session(focus), bound_language(step["language"]), capturing_handed() as handed:
+            selection_wait = None if step is runnable[-1] else 10.0  # VP-08, as above
+            with bound_session(focus), bound_language(step["language"]), capturing_handed() as handed, \
+                    bounded_selection_wait(selection_wait):
                 if step.get("local_default"):
                     if not stt.ready.is_set():
                         raise STTModelLoadingError("whisper model loading")
@@ -377,11 +410,7 @@ def _run_call_steps(stt, steps: list[dict], call_stt: dict, *, focus: str, audio
                 else:
                     raise STTUnknownModelError(
                         f"transcription model not installed: {step.get('model', step['engine'])}")
-        except (STTUnknownModelError, STTModelLoadingError, STTBusyError) as e:
-            attempts.append({"engine": step["engine"], "outcome": "error", "language": handed.get("language"),
-                             "ms": int((time.monotonic() - started) * 1000), "reason": str(e)[:200]})
-            raise
-        except Exception as e:  # noqa: BLE001 - the next engine, or the caller's error
+        except Exception as e:  # noqa: BLE001 - the next engine, or the caller's error (VP-09)
             attempts.append({"engine": step["engine"], "outcome": "error", "language": handed.get("language"),
                              "ms": int((time.monotonic() - started) * 1000), "reason": str(e)[:200]})
             if step is runnable[-1]:

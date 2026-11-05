@@ -1,0 +1,255 @@
+diff --git i/server/server.py w/server/server.py
+index f92408a2..12757e27 100644
+--- i/server/server.py
++++ w/server/server.py
+@@ -51,6 +51,7 @@ from lib.outdated_clients import _note_outdated_client  # noqa: E402
+ from lib import audio_metrics, voice_events  # noqa: E402
+ from lib import health  # noqa: E402
+ from lib import agents as agents_db  # noqa: E402
++from lib.routes import registry as route_registry  # noqa: E402
+ from lib import backends  # noqa: E402
+ from lib import backend_usage  # noqa: E402
+ from lib import media_store  # noqa: E402
+@@ -1173,137 +1174,7 @@ class Handler(BaseHTTPRequestHandler):
+             return self._json_error(401, "Oracle requires authenticated full-device access")
+         if self._device_forbidden(path, "GET"):
+             return self._json_error(403, "full device access required")
+-        from lib import janitor_http
+-        if janitor_http.handles(path):
+-            return janitor_http.handle(self, "GET")
+-        from lib import controller_actions_http
+-        if controller_actions_http.handles(path):
+-            return controller_actions_http.handle(self, "GET")
+-        if path in self._ROOT_STATIC:
+-            return self._send_root_static(path)
+-        if path == "/podcast-history" or path.startswith("/podcast-history/"):
+-            from lib import podcast_history_http
+-            return podcast_history_http.handle(self, "GET")
+-        if self._dispatch_exact(self._GET_ROUTES, path):
+-            return
+-        if path.startswith("/teams/") and path.endswith("/messages"):
+-            team_id = path[len("/teams/"):-len("/messages")].strip("/")
+-            return self._handle_team_messages(team_id)
+-        if path.startswith("/background-jobs/"):
+-            return self._handle_background_job_detail(
+-                path[len("/background-jobs/"):].strip("/"))
+-        if path.startswith("/artifacts/") and path.endswith("/html"):
+-            return self._handle_artifact_html(unquote(path[len("/artifacts/"):-len("/html")].strip("/")))
+-        if path.startswith("/artifacts/") and path.endswith("/events-config"):
+-            return self._handle_artifact_events_config(unquote(path[len("/artifacts/"):-len("/events-config")].strip("/")), write=False)
+-        if path.startswith("/artifacts/") and path.endswith("/events"):
+-            return self._handle_artifact_events(unquote(path[len("/artifacts/"):-len("/events")].strip("/")), write=False)
+-        if path.startswith("/artifacts/") and path.endswith("/revisions"):
+-            from lib import html_report_revisions
+-            artifact_id = unquote(path[len("/artifacts/"):-len("/revisions")].strip("/"))
+-            try:
+-                query = parse_qs(urlparse(self.path).query)
+-                version = query.get("version", [None])[0]
+-                value = html_report_revisions.revisions(artifact_id, version,
+-                    limit=int(query.get("limit", [50])[0]), offset=int(query.get("offset", [0])[0]))
+-            except (ValueError, TypeError) as exc:
+-                return self._json_error(404, str(exc))
+-            return self._json_ok({"revision" if version is not None else "revisions": value})
+-        if path.startswith("/artifacts/"):
+-            return self._handle_artifact_get(unquote(path[len("/artifacts/"):].strip("/")))
+-        if path.startswith("/static/"):
+-            rel = path[len("/static/"):]
+-            target = (self.ctx.static / rel).resolve()
+-            if self.ctx.static.resolve() in target.parents or target == self.ctx.static.resolve():
+-                return self._send_app_asset(target)
+-            return self._send(403, b"forbidden")
+-        if path.startswith("/media/"):
+-            asset_id = path[len("/media/"):].strip("/")
+-            return self._handle_media_content(asset_id)
+-        if path.startswith("/agent-portraits/") and path.endswith("/content"):
+-            portrait_id = path[len("/agent-portraits/"):-len("/content")].strip("/")
+-            return self._handle_agent_portrait_content(portrait_id)
+-        if path.startswith("/notification-avatars/"):
+-            return self._handle_notification_avatar(
+-                path[len("/notification-avatars/"):].strip("/"))
+-        if path.startswith("/viz/owner-avatar/"):
+-            from lib.viz_owner_avatar import portrait
+-            result=portrait(unquote(path[len("/viz/owner-avatar/"):]))
+-            return self._send(200,*result) if result else self._send(404,b"not found")
+-        if path.startswith("/avatars/"):
+-            return self._handle_agent_avatar(path[len("/avatars/"):].strip("/"))
+-        if path.startswith("/persona-avatars/"):
+-            return self._handle_persona_avatar(path[len("/persona-avatars/"):].strip("/"))
+-        if path.startswith("/audio/"):
+-            name = path[len("/audio/"):]
+-            target = (self.ctx.audio_dir / name).resolve()
+-            if self.ctx.audio_dir.resolve() in target.parents:
+-                # If the worker is still streaming bytes to this clip
+-                # (sidecar present, streamable=true, no `bytes` field yet),
+-                # serve with Transfer-Encoding: chunked so we don't send a
+-                # truncating Content-Length. iOS Safari falls back to
+-                # plain HTTP for audio/mpeg (MSE unsupported), and the
+-                # static handler's Content-Length=<partial> would stop
+-                # playback after the first few words.
+-                from lib.audio_growing import is_in_progress, serve_growing
+-                if target.is_file() and is_in_progress(target):
+-                    return serve_growing(self, target)
+-                return self._send_file(target)
+-            return self._send(403, b"forbidden")
+-        if path.startswith("/stt/stream"):
+-            # Provider-owned turn taking: the phone streams PCM, the relay
+-            # forwards it to the chosen recogniser and returns its turn events.
+-            from lib.stt_stream import serve_stt_stream
+-            parsed = self._query()
+-            return serve_stt_stream(
+-                self, {k: (v[0] if v else "") for k, v in parsed.items()})
+-        if path == "/server-terminal":
+-            if not getattr(self, "_request_auth_validated", False):
+-                return self._json_error(401, "Server terminal requires authenticated full-device access")
+-            if os.name != "posix":
+-                return self._json_error(501, "Server terminal is unavailable on this platform")
+-            from lib.terminal_ws import serve_server_terminal
+-            return serve_server_terminal(self)
+-        if path.startswith("/terminal/"):
+-            # Interactive terminal WS: spawns the agent's CLI in a PTY resumed
+-            # on the same session id and bridges raw bytes both ways.
+-            from lib.terminal_ws import serve_terminal
+-            session = path[len("/terminal/"):].strip("/")
+-            return serve_terminal(self, session)
+-        if path.startswith("/clips/") and path.endswith("/stream"):
+-            raw = path[len("/clips/"):-len("/stream")].strip("/")
+-            try:
+-                clip_id = int(raw)
+-            except ValueError:
+-                return self._send(400, b"bad clip id")
+-            from lib.clip_stream import serve_clip_stream
+-            return serve_clip_stream(
+-                self, self.ctx.clip_broker, clip_id, self.ctx.audio_dir
+-            )
+-        if path.startswith("/clips/") and path.endswith("/complete.mp3"):
+-            raw = path[len("/clips/"):-len("/complete.mp3")].strip("/")
+-            try:
+-                clip_id = int(raw)
+-            except ValueError:
+-                return self._send(400, b"bad clip id")
+-            return self._send_complete_clip(clip_id)
+-        # HLS artifact routes: /clips/<id>/playlist.m3u8 and
+-        # /clips/<id>/segment-N.aac. Only present when HlsDelivery is the
+-        # active delivery; otherwise the dir just doesn't exist and we 404.
+-        if path.startswith("/clips/") and "/" in path[len("/clips/"):]:
+-            rest = path[len("/clips/"):]
+-            parts = rest.split("/", 1)
+-            if len(parts) == 2:
+-                try:
+-                    clip_id = int(parts[0])
+-                except ValueError:
+-                    return self._send(400, b"bad clip id")
+-                filename = parts[1]
+-                from lib.clip_delivery.hls import serve_hls_artifact
+-                return serve_hls_artifact(
+-                    self, self.ctx.audio_dir, clip_id, filename,
+-                )
+-        return self._send(404, b"not found")
++        return route_registry.dispatch(self, "GET", path)
+ 
+     def _handle_remote_action_get(self):
+         """GET variant for iOS Shortcuts that use 'Open URL' rather than
+@@ -3418,44 +3289,7 @@ class Handler(BaseHTTPRequestHandler):
+             return self._json_error(401, "Oracle requires authenticated full-device access")
+         if self._device_forbidden(path, "POST"):
+             return self._json_error(403, "full device access required")
+-        from lib import janitor_http
+-        if janitor_http.handles(path):
+-            return janitor_http.handle(self, "POST")
+-        from lib import controller_actions_http
+-        if controller_actions_http.handles(path):
+-            return controller_actions_http.handle(self, "POST")
+-        if self._dispatch_exact(self._POST_ROUTES, path):
+-            return
+-        if path.startswith("/turn-queue/") and path.endswith("/send"):
+-            queue_id = path[len("/turn-queue/"):-len("/send")].strip("/")
+-            return self._handle_turn_queue_send(queue_id)
+-        if path.startswith("/agents/") and path.endswith("/fork"):
+-            return self._handle_agent_fork(
+-                unquote(path[len("/agents/"):-len("/fork")].strip("/")))
+-        if path == "/turn-queue/resume":
+-            return self._handle_turn_queue_resume()
+-        if path.startswith("/teams/"):
+-            rest = path[len("/teams/"):].strip("/")
+-            if rest.endswith("/members"):
+-                return self._handle_team_add_member(rest[:-len("/members")].strip("/"))
+-            return self._handle_team_update(rest)
+-        if path.startswith("/decisions/"):
+-            for action in ("resolve", "dismiss", "withdraw"):
+-                suffix = "/" + action
+-                if path.endswith(suffix):
+-                    decision_id = unquote(path[len("/decisions/"):-len(suffix)].strip("/"))
+-                    return getattr(self, "_handle_decision_" + action)(decision_id)
+-        if path.startswith("/podcast-history/"):
+-            from lib import podcast_history_http
+-            return podcast_history_http.handle(self, "POST")
+-        if path.startswith("/artifacts/"):
+-            for action in ("archive", "discard", "submit", "pin", "events", "events-config"):
+-                suffix = "/" + action
+-                if path.endswith(suffix):
+-                    artifact_id = unquote(path[len("/artifacts/"):-len(suffix)].strip("/"))
+-                    return getattr(self, "_handle_artifact_" + action.replace("-", "_"))(artifact_id)
+-            return self._handle_artifact_update(unquote(path[len("/artifacts/"):].strip("/")))
+-        return self._send(404, b"not found")
++        return route_registry.dispatch(self, "POST", path)
+ 
+     def do_PUT(self):
+         if not self._authorized():
+@@ -3463,11 +3297,7 @@ class Handler(BaseHTTPRequestHandler):
+         path = self.path.split("?", 1)[0]
+         if self._device_forbidden(path, "PUT"):
+             return self._json_error(403, "full device access required")
+-        if self._dispatch_exact(self._PUT_ROUTES, path):
+-            return
+-        if path.startswith("/turn-queue/"):
+-            return self._handle_turn_queue_update(path[len("/turn-queue/"):].strip("/"))
+-        return self._send(404, b"not found")
++        return route_registry.dispatch(self, "PUT", path)
+ 
+     def _handle_focus(self):
+         """Client tells us which agent view the user is looking at. Drives the
+@@ -5363,32 +5193,7 @@ class Handler(BaseHTTPRequestHandler):
+         path = self.path.split("?", 1)[0]
+         if self._device_forbidden(path, "DELETE"):
+             return self._json_error(403, "full device access required")
+-        from lib import janitor_http
+-        if janitor_http.handles(path):
+-            return janitor_http.handle(self, "DELETE")
+-        if path.startswith("/teams/") and "/members/" in path:
+-            rest = path[len("/teams/"):]
+-            team_id, agent_id = rest.split("/members/", 1)
+-            return self._handle_team_remove_member(team_id.strip("/"), agent_id.strip("/"))
+-        if path.startswith("/teams/"):
+-            return self._handle_team_delete(path[len("/teams/"):].strip("/"))
+-        if path.startswith("/background-jobs/"):
+-            return self._handle_background_job_cancel(
+-                path[len("/background-jobs/"):].strip("/"))
+-        if path.startswith("/turn-queue/"):
+-            return self._handle_turn_queue_delete(path[len("/turn-queue/"):].strip("/"))
+-        if path.startswith("/transcription-results/"):
+-            return self._handle_transcription_result_delete(
+-                path[len("/transcription-results/"):].strip("/"))
+-        if path.startswith("/schedules/"):
+-            return self._handle_schedule_delete(path[len("/schedules/"):].strip("/"))
+-        if path == "/devices/live-activity":
+-            return self._handle_live_activity_delete()
+-        if path.startswith("/agents/"):
+-            return self._handle_delete_agent(path[len("/agents/"):])
+-        if path.startswith("/personas/"):
+-            return self._handle_delete_persona(path[len("/personas/"):].strip("/"))
+-        return self._send(404, b"not found")
++        return route_registry.dispatch(self, "DELETE", path)
+ 
+     def do_PATCH(self):
+         if not self._authorized():
+@@ -5397,9 +5202,7 @@ class Handler(BaseHTTPRequestHandler):
+         if path.startswith("/schedules/") and self._device_forbidden(path, "PATCH"):
+             # Only the route: an unmatched PATCH keeps its 404 (HTTP-02).
+             return self._json_error(403, "full device access required")
+-        if path.startswith("/schedules/"):
+-            return self._handle_schedule_patch(path[len("/schedules/"):].strip("/"))
+-        return self._send(404, b"not found")
++        return route_registry.dispatch(self, "PATCH", path)
+ 
+     def _handle_transcription_result_delete(self, job_id: str):
+         from lib import transcription_results

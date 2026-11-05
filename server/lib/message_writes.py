@@ -61,10 +61,34 @@ def client_message_trace(client_msg_id: str) -> str:
 
 
 def relink_client_message(client_msg_id: str, *, trace_id: str) -> None:
-    """Hand an admitted-but-never-launched user row to a new attempt."""
-    conn().execute(
-        "UPDATE messages SET trace_id = ? WHERE message_id = ? AND role = 'user'",
-        ((trace_id or "").strip() or None, _client_message_id(client_msg_id)),
+    """Hand an admitted-but-never-launched user row to a new attempt.
+
+    The row gets a new revision and its conversation head moves with it, in
+    the caller's transaction, so delta clients see the new trace (RM-N5)."""
+    database = conn()
+    new_trace = (trace_id or "").strip() or None
+    row = database.execute(
+        "SELECT agent_id, backend_session_id, trace_id FROM messages"
+        " WHERE message_id = ? AND role = 'user'",
+        (_client_message_id(client_msg_id),),
+    ).fetchone()
+    if row is None or row["trace_id"] == new_trace:
+        return
+    revision = _next_revision(database)
+    # updated_at stays: it is the row's send order, by which the import links
+    # transcript copies to client rows.
+    database.execute(
+        "UPDATE messages SET trace_id = ?, revision = ?"
+        " WHERE message_id = ? AND role = 'user'",
+        (new_trace, revision, _client_message_id(client_msg_id)),
+    )
+    database.execute(
+        """INSERT INTO conversation_heads (
+               agent_id, backend_session_id, revision, replace_revision
+           ) VALUES (?, ?, ?, 0)
+           ON CONFLICT(agent_id, backend_session_id) DO UPDATE SET
+               revision = MAX(conversation_heads.revision, excluded.revision)""",
+        (row["agent_id"], row["backend_session_id"], revision),
     )
 
 
@@ -882,6 +906,106 @@ def _is_retry_echo(native_timestamp: Any, next_client_timestamp: Any) -> bool:
             and (next_at - native_at).total_seconds() > _RETRY_ECHO_SLACK_S)
 
 
+# Out of the transcript's range: a parked row is found again by its turn's
+# later-slot twin search, or removed as stale when the import ends (RM-N1b).
+_PARKED_SEQ_BASE = 10 ** 12
+
+
+def _park_adopted_occupant(database, agent_id: str, backend_session_id: str,
+                           source_file: str, seq: int, msg_id: str) -> bool:
+    """Move an adopted reply (its id is not its slot's hash) out of the slot
+    another turn is about to take: a record appeared earlier and turns shifted
+    up. Its own turn, later in this import, adopts it again in place."""
+    occupant = database.execute(
+        """SELECT message_id FROM messages
+            WHERE agent_id = ? AND backend_session_id = ? AND seq = ?
+              AND source_file = ? AND message_id <> ?""",
+        (agent_id, backend_session_id, seq, source_file, msg_id)).fetchone()
+    if occupant is None or occupant["message_id"] == _message_id(
+            agent_id, backend_session_id, source_file, seq):
+        return False
+    database.execute("UPDATE messages SET seq = ? WHERE message_id = ?",
+                     (_PARKED_SEQ_BASE + seq, occupant["message_id"]))
+    return True
+
+
+def _seq_taken(database, agent_id: str, backend_session_id: str, seq: int) -> bool:
+    return database.execute(
+        "SELECT 1 FROM messages WHERE agent_id = ? AND backend_session_id = ? AND seq = ?",
+        (agent_id, backend_session_id, seq)).fetchone() is not None
+
+
+def _restore_unadopted_parked(database, agent_id: str, backend_session_id: str,
+                              source_file: str) -> int:
+    """A parked reply no turn re-adopted belongs to a request that left the
+    transcript: it goes back to its final:<trace> row, as a fresh import would
+    leave it, instead of the stale cleanup deleting a reply the user saw
+    (RM-N1c). Its seq is the one a live final row takes (-800000 + the turn's
+    id), or the next free one below everything the conversation holds. Without a trace it cannot be named, and the
+    stale cleanup takes it as before."""
+    restored = 0
+    for row in database.execute(
+            """SELECT message_id, seq, trace_id FROM messages
+                WHERE agent_id = ? AND backend_session_id = ? AND source_file = ?
+                  AND seq >= ?""",
+            (agent_id, backend_session_id, source_file, _PARKED_SEQ_BASE)).fetchall():
+        trace = row["trace_id"] or ""
+        if not trace:
+            continue
+        turn = database.execute(
+            """SELECT turn_id FROM turns WHERE agent_id = ? AND trace_id = ?
+                ORDER BY turn_id DESC LIMIT 1""", (agent_id, trace)).fetchone()
+        seq = -800000 + int(turn["turn_id"]) if turn is not None else None
+        if seq is None or _seq_taken(database, agent_id, backend_session_id, seq):
+            # Below everything the conversation holds: free by construction,
+            # also for a reply an earlier import restored the same way.
+            lowest = database.execute(
+                "SELECT MIN(seq) FROM messages WHERE agent_id = ? AND backend_session_id = ?",
+                (agent_id, backend_session_id)).fetchone()[0]
+            seq = min(-_PARKED_SEQ_BASE, int(lowest if lowest is not None else 0)) - 1
+        database.execute(
+            # As a final row is written: no transcript phase, no empty sender.
+            "UPDATE messages SET source_file = ?, seq = ?, revision = ?, phase = NULL,"
+            " sender_agent_id = NULLIF(sender_agent_id, '') WHERE message_id = ?",
+            (f"final:{trace}", seq, _next_revision(database), row["message_id"]))
+        restored += 1
+    return restored
+
+
+def _parked_twin(database, agent_id: str, backend_session_id: str,
+                 source_file: str, visible: str, *, exclude: set[str]):
+    """(message_id, seq) of the one parked reply with this visible text."""
+    found = [
+        (row["message_id"], int(row["seq"])) for row in database.execute(
+            """SELECT message_id, seq, text FROM messages
+                WHERE agent_id = ? AND backend_session_id = ? AND source_file = ?
+                  AND role = 'assistant' AND seq >= ?""",
+            (agent_id, backend_session_id, source_file, _PARKED_SEQ_BASE))
+        if row["message_id"] not in exclude
+        and _strip_voice_markup(row["text"]) == visible]
+    return found[0] if len(found) == 1 else None
+
+
+def _shifted_twin(database, agent_id: str, backend_session_id: str,
+                  source_file: str, request_trace: str, visible: str, seq: int,
+                  *, exclude: set[str]):
+    """(message_id, seq) of the one reply to ``request_trace`` that an earlier
+    import adopted (its id is not its slot's hash) and that sits at a later
+    slot of this transcript, with this visible text; else None. A shift moves
+    turns down, so only a later slot means this reply moved (RM-N1)."""
+    found = [
+        (row["message_id"], int(row["seq"])) for row in database.execute(
+            """SELECT message_id, seq, text FROM messages
+                WHERE trace_id = ? AND agent_id = ? AND backend_session_id = ?
+                  AND source_file = ? AND role = 'assistant' AND seq > ?""",
+            (request_trace, agent_id, backend_session_id, source_file, seq))
+        if row["message_id"] not in exclude
+        and row["message_id"] != _message_id(agent_id, backend_session_id,
+                                             source_file, row["seq"])
+        and _strip_voice_markup(row["text"]) == visible]
+    return found[0] if len(found) == 1 else None
+
+
 class _FinalRows:
     """Finalized live rows of one conversation, read once per write batch.
 
@@ -1160,6 +1284,8 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
     adopted_final_ids: set[str] = set()
     skipped_slot_removed = False
     final_rows = _FinalRows(database, agent_id, backend_session_id)
+    # Rows this import already wrote: never moved again (RM-N1).
+    placed_ids: set[str] = set()
     if carry is not None:
         agy.resume(carry)
         unanswered_key = carry["unanswered_key"]
@@ -1239,6 +1365,11 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
                 # Its text, that is: the tool calls the transcript records for
                 # the turn are carried onto that row below.
                 agy.collect(authority, turn)
+                # Nothing is written at this position: whatever an earlier
+                # import left here would outlive a shift (RM-N1).
+                removed = _delete_slot(database, agent_id, backend_session_id,
+                                       source_file, seq)
+                skipped_slot_removed = skipped_slot_removed or removed > 0
                 continue
         text = str(turn.get("text") or "")
         origin = "user"
@@ -1270,19 +1401,24 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
         elif role == "assistant":
             text = strip_hidden_blocks(text)
             heartbeat_accounting = ""
-            skip, text = heartbeat.strip_heartbeat_ack(text)
+            # Each token counts only in its own automation's turn (AUT-07).
+            skip, text = origins.ack_for_origin(
+                heartbeat.strip_heartbeat_ack(text), text, token=heartbeat.HEARTBEAT_OK,
+                origin=current_origin, own="heartbeat")
             if skip:
                 if current_origin == "heartbeat":
                     heartbeat_accounting = "noop"
                 text = "Heartbeat check: no action needed."
             # The probe only transforms; the locked pass records, once.
             skip, text = dreaming.process_assistant_text(
-                agent_id, text, live=not database.locked)
+                agent_id, text, live=not database.locked, origin=current_origin)
             if skip:
                 text = "Dreaming check: no action needed."
-            skip, text = team_leader.strip_leader_noop(text)
+            skip, text = origins.ack_for_origin(
+                team_leader.strip_leader_noop(text), text, token=team_leader.LEADER_NOOP,
+                origin=current_origin, own="leader_tick")
             if skip:
-                if database.locked:
+                if database.locked and current_origin == "leader_tick":
                     team_leader.record_leader_noop(agent_id)
                 text = "Leader check: no action needed."
             if (
@@ -1337,9 +1473,44 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
             # Keep the already visible completion identity when its exact
             # authored request and final text identify this transcript reply.
             # Never deduplicate equal replies belonging to different requests.
-            slot = database.execute("SELECT message_id FROM messages WHERE agent_id=? AND backend_session_id=? AND source_file=? AND seq=? AND role='assistant'",
+            slot = database.execute("SELECT message_id, trace_id FROM messages WHERE agent_id=? AND backend_session_id=? AND source_file=? AND seq=? AND role='assistant'",
                 (agent_id, backend_session_id, source_file, seq)).fetchone()
-            if slot:
+            if (slot and current_request_trace
+                    and slot["message_id"] != _message_id(
+                        agent_id, backend_session_id, source_file, seq)
+                    and (slot["trace_id"] or "") != current_request_trace
+                    and _park_adopted_occupant(database, agent_id, backend_session_id,
+                                               source_file, seq, msg_id="")):
+                # Another request's adopted reply holds this slot (its turn left
+                # the transcript): it never lends its id to this reply (RM-N1b).
+                skipped_slot_removed = True
+                slot = None
+            moved = None
+            if current_request_trace and not (
+                    slot and slot["message_id"] != _message_id(
+                        agent_id, backend_session_id, source_file, seq)):
+                # An earlier import adopted this reply's final row (its
+                # source_file is this transcript's now) and the turns have
+                # shifted since: it moves with its turn, where a fresh import
+                # would place it, and the slot's old occupant goes (RM-N1).
+                moved = _shifted_twin(database, agent_id, backend_session_id,
+                                      source_file, current_request_trace,
+                                      _strip_voice_markup(text), seq,
+                                      exclude=adopted_final_ids | placed_ids)
+            elif not slot:
+                # A reply this import parked (RM-N1b) whose request could not
+                # be linked: found again by its visible text, as a fresh
+                # import adopts an unlinked reply's final row.
+                moved = _parked_twin(database, agent_id, backend_session_id,
+                                     source_file, _strip_voice_markup(text),
+                                     exclude=adopted_final_ids | placed_ids)
+            if moved is not None:
+                msg_id = moved[0]
+                adopted_final_ids.add(msg_id)
+                _delete_slot(database, agent_id, backend_session_id, source_file, seq)
+                skipped_slot_removed = True
+                slot = None
+            elif slot:
                 msg_id = slot["message_id"]
             elif current_request_trace:
                 request_source = "final:" + current_request_trace
@@ -1419,6 +1590,9 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
         # skip it when every column it sets already holds that value.
         rewrite = not unchanged or existing["source_file"] != source_file \
             or existing["seq"] != seq
+        if rewrite and _park_adopted_occupant(database, agent_id, backend_session_id,
+                                              source_file, seq, msg_id):
+            skipped_slot_removed = True
         if rewrite:
             database.execute(
                 """INSERT INTO messages (
@@ -1470,6 +1644,7 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
             from . import oracle_delegations
             oracle_delegations.complete_for_trace(
                 trace_id=trace_id, message_id=msg_id, text=text)
+        placed_ids.add(msg_id)
         out.append({
             **turn,
             "id": msg_id,
@@ -1494,6 +1669,7 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
         latest_revision = max(latest_revision, stamp_turn(
             database, agent_id, trace, _next_revision))
     _finish_import(database, agent_id, backend_session_id,
+                   source_file=source_file,
                    batch_finals=batch_finals, total_turns=total_turns,
                    skipped_slot_removed=skipped_slot_removed,
                    latest_revision=latest_revision, authority_tools=agy.tools)
@@ -1503,11 +1679,13 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
 # --- turn summaries (docs/live-items.md §9; helpers in lib.message_turns) ---
 
 def _finish_import(database, agent_id: str, backend_session_id: str, *,
+                   source_file: str,
                    batch_finals: list[tuple[str, str]], total_turns: int,
                    skipped_slot_removed: bool, latest_revision: int,
                    authority_tools: dict[str, tuple[str, list, list]]) -> None:
-    """The import's work after its rows: leftover live twins, the stale tail,
-    the replace revision, stream-owned agy tools and the conversation head."""
+    """The import's work after its rows: leftover live twins, parked replies
+    nothing re-adopted (RM-N1c), the stale tail, the replace revision,
+    stream-owned agy tools and the conversation head."""
     # Compare markup-normalized so a streamed live row (with <speak>/<vox>/…)
     # still matches its durable copy (markup stripped); raw startswith missed it.
     live_replace_revision = 0
@@ -1533,6 +1711,8 @@ def _finish_import(database, agent_id: str, backend_session_id: str, *,
                 "DELETE FROM messages WHERE message_id = ?",
                 (live["message_id"],),
             )
+    if _restore_unadopted_parked(database, agent_id, backend_session_id, source_file):
+        skipped_slot_removed = True
     stale = database.execute(
         """SELECT 1 FROM messages
             WHERE agent_id = ? AND backend_session_id = ? AND seq >= ?

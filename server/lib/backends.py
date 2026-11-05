@@ -245,6 +245,11 @@ def spawn_turn(backend: str, **kwargs: Any):
     return by_id(backend).spawn_turn(**kwargs)
 
 
+def prompt_limit_bytes(backend: str) -> int | None:
+    """See Backend.prompt_limit_bytes (BACKENDS-08)."""
+    return by_id(backend).prompt_limit_bytes()
+
+
 def interrupt(backend: str, agent_id: str) -> int:
     if _RUNTIME_CLIENT is not None:
         return int(_RUNTIME_CLIENT.interrupt(normalize(backend), agent_id))

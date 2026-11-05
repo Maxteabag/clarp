@@ -441,6 +441,10 @@ SCENARIOS = [
             # Join the clip's live stream while it is produced: it carries every chunk the
             # adapter hands the delivery through on_chunk(index, bytes), via the clip broker.
             {'op': 'wait_sql', 'sql': "SELECT count(*) FROM clips WHERE producer_status = 'streaming'"},
+            # The row is committed before the broker opens the clip's stream, so a GET in
+            # between finds neither stream nor file (404; G2 noise, 5 Nov). Clients learn
+            # the stream URL from the audio event, sent after the broker opens: wait for it.
+            {'op': 'wait_sse', 'match': {'type': 'audio', 'streamable': True}},
             {'op': 'save_sql', 'var': 'clip', 'sql': 'SELECT clip_id FROM clips ORDER BY clip_id LIMIT 1'},
             {'op': 'get', 'path': '/clips/{clip}/stream', 'name': 'clip live stream'},
             {'op': 'wait_settled', 'message_id': 'u-xray'},
@@ -481,10 +485,12 @@ SCENARIOS = [
     {
         'id': 'stop-at-admission',
         'what': 'a Stop between the two thinking rows of a turn start (pins TP-N1)',
-        # Known bug: the late thinking row overwrites the stop and the agent stays busy,
-        # so this scenario fails (in most runs) until the fix lands. It runs and is
-        # reported, but never counts in the zero or the exit code.
-        'known_bug': 'TP-N1',
+        # Before TP-N1's fix (a307bbd9) the late thinking row overwrote the stop and the
+        # agent stayed busy, and quiesce timed out (10/10 runs at dfc558ba). Since the
+        # fix, whether the Stop lands before or after the second thinking row is timing
+        # (both are correct; 2/10 runs differ), so its run error counts, its captures
+        # are not compared.
+        'errors_only': 'TP-N1 race: either order of Stop and the second thinking row is correct',
         'steps': [
             _send('rachel', '[qa-slow] synthetic task stopped at once', 'november'),
             {'op': 'wait_open', 'message_id': 'u-november'},

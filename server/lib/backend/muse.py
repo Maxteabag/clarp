@@ -23,7 +23,8 @@ from ..process_registry import TurnHandle
 from ..turn_lifecycle import TurnEvent
 from ..voice_preamble import apply_voice_preamble
 from .base import BackendBrand
-from .stream_json import StreamJsonBackend, iter_json_dicts
+from .stream_json import StreamJsonBackend, iter_json_dicts, stop_after_drain_failure
+from .long_prompt import PromptFile, fits_argv, removing
 
 # Terminal states that end a run without an answer. A stop (Clarp's own, or
 # the user's) is not a failure: like Codex and Claude it leaves no error row.
@@ -159,26 +160,39 @@ class MuseBackend(StreamJsonBackend):
         agent = agents_db.get_by_agent_id(agent_id) if agent_id else None
         persona = (agent or {}).get("persona") or ""
         prompt = apply_voice_preamble(text, voice=voice_preamble, persona=persona, session=session)
-        cmd = self.build_cmd(backend_session_id, model=model, effort=effort) + ["--", prompt]
+        cmd = self.build_cmd(backend_session_id, model=model, effort=effort)
+        prompt_file = None
         flag = "new" if minted else "resume"
         log("museSpawn", f"cwd={cwd} {flag}={backend_session_id} text_len={len(text)} "
                          f"trace={trace_id or '∅'} agent={agent_id or '∅'}")
         runtime_agent_id = "" if isolated else agent_id
         from .. import provider_background_jobs as provider_jobs
         turn_token, identity = provider_jobs.identity_env(runtime_agent_id)
-        proc, handle = self.launch(cmd, cwd=cwd, session=session, env_extra=identity)
-        provider_jobs.record_identity(turn_token, agent_id=runtime_agent_id,
-                                      provider=self.id, pid=proc.pid)
-        self.register_handle(runtime_agent_id, handle)
-        self.start_drain(
-            handle, self._drain_stdout,
-            proc=proc, agent_id=runtime_agent_id, session=session,
-            trace_id=trace_id, handle=handle,
-            backend_session_id=backend_session_id, minted=bool(minted),
-            on_session_init=on_session_init, on_result=on_result,
-            on_error=on_error, stream=stream,
-            enqueue=enqueue or tts_queue.enqueue,
-        )
+        try:
+            if fits_argv(prompt):
+                cmd += ["--", prompt]
+            else:
+                # Past one argv string (BACKENDS-08); removed when the turn ends.
+                prompt_file = PromptFile(prompt)
+                cmd += ["--prompt-file", prompt_file.path]
+            proc, handle = self.launch(cmd, cwd=cwd, session=session, env_extra=identity)
+            provider_jobs.record_identity(turn_token, agent_id=runtime_agent_id,
+                                          provider=self.id, pid=proc.pid)
+            self.register_handle(runtime_agent_id, handle)
+            self.start_drain(
+                handle, removing(self._drain_stdout, prompt_file),
+                proc=proc, agent_id=runtime_agent_id, session=session,
+                trace_id=trace_id, handle=handle,
+                backend_session_id=backend_session_id, minted=bool(minted),
+                on_session_init=on_session_init, on_result=on_result,
+                on_error=on_error, stream=stream,
+                enqueue=enqueue or tts_queue.enqueue,
+            )
+        except BaseException:
+            # Until the drain owns it, nothing else removes the prompt file.
+            if prompt_file is not None:
+                prompt_file.remove()
+            raise
         return handle
 
     def _drain_stdout(
@@ -187,6 +201,7 @@ class MuseBackend(StreamJsonBackend):
         on_session_init, on_result, on_error, stream, enqueue,
     ) -> None:
         st = _TurnState(session_id=backend_session_id)
+        reported = False        # a terminal outcome reached on_result/on_error
         try:
             # The id is Clarp's own, so the agent is bound to it before Muse
             # writes a line: a crash mid-run still resumes the same session.
@@ -213,6 +228,7 @@ class MuseBackend(StreamJsonBackend):
                 err = stderr_text(proc) or f"muse exited rc={rc}"
                 log("museExitErr", f"rc={rc} trace={trace_id or '∅'} stderr={(err or '')[:500]!r}")
                 if on_error is not None:
+                    reported = True
                     on_error(err)
             elif on_result is not None and not st.failed_error:
                 self._persist_live_text(st, agent_id=agent_id, session=session,
@@ -220,11 +236,14 @@ class MuseBackend(StreamJsonBackend):
                 self._broadcast(stream, agent_id, session)
                 usage = ({"input_tokens": st.tokens_in, "output_tokens": st.tokens_out}
                          if (st.tokens_in or st.tokens_out) else {})
+                reported = True
                 on_result({"last_agent_message": st.last_agent_message or st.turn_text,
                            "usage": usage})
         except Exception as error:  # noqa: BLE001
             log_exception("museDrainFail", error, detail=trace_id)
-            if on_error is not None and not st.failed_error:
+            # Nothing reads this CLI any more: stop it, and end the turn once.
+            stop_after_drain_failure(proc, handle)
+            if on_error is not None and not st.failed_error and not reported:
                 try:
                     on_error(str(error)[:300])
                 except Exception:  # noqa: BLE001

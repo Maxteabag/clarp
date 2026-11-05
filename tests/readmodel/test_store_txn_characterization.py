@@ -399,21 +399,129 @@ def test_a_shorter_transcript_removes_the_stale_tail_and_bumps_replace(clock):
     assert head()[1] > before[1]
 
 
-def test_a_shifted_transcript_fails_on_an_adopted_row_in_the_shifted_range(clock):
-    """Pre-existing fault found by the S5 corpus: when an earlier record
-    disappears, later turns move down one slot; a slot still held by an
-    adopted twin (its id is not the slot hash) makes the upsert of a user
-    turn violate UNIQUE(agent_id, backend_session_id, seq). The import fails
-    every time and the rows stay as they were."""
+def test_a_shifted_transcript_moves_an_adopted_row_with_its_turn(clock):
+    """RM-N1 (fixed; was pinned as a fault): when an earlier record
+    disappears, later turns move down one slot. The adopted twin (its id is
+    not the slot hash) moves with the turn it answers, as a fresh import of
+    the shorter transcript would place it, instead of the next user turn's
+    upsert hitting UNIQUE(agent_id, backend_session_id, seq) for ever."""
     client("c0", "ask", at=0, trace="tr-0")
     assistant_row("final-0", "final:tr-0", "answer", at=4, trace="tr-0")
     store([u("hello", -10), a("hi", -9), u("ask", 0.2), a("answer", 5), u("next", 60), a("ok", 61)])
     assert {r["message_id"]: r["seq"] for r in rows()}["final-0"] == 3
-    before = rows()
-    import sqlite3
-    with pytest.raises(sqlite3.IntegrityError):
-        store([u("hello", -10), u("ask", 0.2), a("answer", 5), u("next", 60), a("ok", 61)])
-    assert rows() == before
+    before = head()
+
+    store([u("hello", -10), u("ask", 0.2), a("answer", 5), u("next", 60), a("ok", 61)])
+
+    moved = view(transcript_rows(), "seq", "message_id", "text")
+    slot = lambda seq: message_writes._message_id(AGENT, SESSION, SOURCE, seq)
+    assert moved == [(0, slot(0), "hello"), (2, "final-0", "answer"),
+                     (3, slot(3), "next"), (4, slot(4), "ok")]
+    assert head()[1] > before[1], "delta clients reload the moved slots"
+
+
+def test_two_equal_replies_to_one_request_reimport_without_change(clock):
+    """RM-N1 review (rf-readmodel): one request answered twice with the same
+    visible text, one reply adopted. Moving adopted rows with a shift must not
+    make an unchanged transcript ping-pong that row between the two slots."""
+    client("c0", "ask", at=0, trace="tr-0")
+    assistant_row("final-0", "final:tr-0", "OK", at=4, trace="tr-0")
+    turns = [u("ask", 0.2), a("OK", 3), a("OK", 5)]
+    store(turns)
+    first = rows()
+    clock_revision = db.conn().execute("SELECT revision FROM message_clock").fetchone()[0]
+    for _ in range(3):
+        store(turns)
+        assert rows() == first
+        assert db.conn().execute("SELECT revision FROM message_clock").fetchone()[0] == clock_revision
+
+
+def test_a_shift_up_moves_an_adopted_row_with_its_turn(clock):
+    """RM-N1b: a record appears earlier (a parser change un-hides one) and an
+    unlinked user turn lands on the slot an adopted reply holds. The adopted
+    reply moves to its turn, as a fresh import would place it, instead of the
+    user turn's upsert hitting UNIQUE(agent_id, backend_session_id, seq)."""
+    client("c0", "ask", at=0, trace="tr-0")
+    assistant_row("final-0", "final:tr-0", "answer", at=4, trace="tr-0")
+    store([u("ask", 0.2), a("answer", 5)])
+    assert {r["message_id"]: r["seq"] for r in rows()}["final-0"] == 1
+    before = head()
+
+    store([u("ask", 0.2), u("typed in the terminal", 1), a("answer", 5)])
+
+    slot = lambda seq: message_writes._message_id(AGENT, SESSION, SOURCE, seq)
+    assert view(transcript_rows(), "seq", "message_id", "text") == [
+        (1, slot(1), "typed in the terminal"), (2, "final-0", "answer")]
+    assert head()[1] > before[1], "delta clients reload the moved slots"
+
+
+def test_a_removed_request_does_not_lend_its_adopted_row_to_the_next(clock, tmp_path):
+    """RM-N1c (reviewer C's control; the lead's bar): the first request and its
+    reply disappear, so the next reply's turn lands on the slot holding the
+    removed request's adopted row. The surviving reply keeps its own adopted
+    id, the removed request's reply goes back to its final: row, and the end
+    state equals a fresh import of the shortened transcript from the same seed."""
+    def seed():
+        client("c0", "ask0", at=0, trace="tr-0")
+        client("c1", "ask1", at=60, trace="tr-1")
+        assistant_row("final-0", "final:tr-0", "answer0", at=4, trace="tr-0", seq=-1000)
+        assistant_row("final-1", "final:tr-1", "answer1", at=64, trace="tr-1", seq=-1001)
+
+    def state():
+        # Everything a client renders; the restored final row's seq is the
+        # one live final rows take, as its seed seq is gone after adoption.
+        return [(r["message_id"], r["source_file"], r["seq"] if r["seq"] >= 0 or
+                 r["source_file"].startswith("client:") else "final-band",
+                 r["role"], r["text"], r["origin"], r["sender_agent_id"],
+                 r["trace_id"], r["phase"], r["tools_json"]) for r in rows()]
+
+    seed()
+    store([u("ask0", .2), a("answer0", 5), u("ask1", 60.2), a("answer1", 65)])
+    assert view(transcript_rows(), "message_id", "seq") == [("final-0", 1), ("final-1", 3)]
+    store([u("ask1", 60.2), a("answer1", 65)])
+    shifted = state()
+    after = rows()
+    store([u("ask1", 60.2), a("answer1", 65)])
+    assert rows() == after, "re-importing the shortened transcript changes nothing"
+
+    db.reset_for_tests(tmp_path / "fresh.sqlite")
+    for agent in (AGENT, SENDER):
+        db.conn().execute("INSERT INTO agents(agent_id, persona, voice_id, cwd, session, created_at, backend)"
+                          " VALUES (?,?,?,?,?,?,'claude')", (agent, agent, "v", "/redacted", agent, 1))
+    db.conn().commit()
+    seed()
+    store([u("ask1", 60.2), a("answer1", 65)])
+
+    assert shifted == state()
+    assert [r[:3] for r in shifted if r[0].startswith("final-")] == [
+        ("final-0", "final:tr-0", "final-band"), ("final-1", SOURCE, 1)]
+
+
+def test_requests_removed_one_import_after_another_all_return_to_the_final_band(clock):
+    """RM-N1c review (reviewer C's control): with no turn rows to name a seq,
+    each restored final row still gets a seq of its own; the second restore
+    never collides with the first."""
+    for i in range(3):
+        client(f"c{i}", f"ask{i}", at=60 * i, trace=f"tr-{i}")
+    for i in range(3):
+        assistant_row(f"final-{i}", f"final:tr-{i}", f"answer{i}", at=60 * i + 4,
+                      trace=f"tr-{i}", seq=-1000 - i)
+
+    def turns(start):
+        out = []
+        for i in range(start, 3):
+            out.extend([u(f"ask{i}", 60 * i + .2), a(f"answer{i}", 60 * i + 5)])
+        return out
+
+    store(turns(0))
+    store(turns(1))
+    store(turns(2))
+    kept = {r["message_id"]: r for r in rows()}
+    assert (kept["final-0"]["source_file"], kept["final-1"]["source_file"]) == (
+        "final:tr-0", "final:tr-1")
+    assert kept["final-0"]["seq"] < 0 and kept["final-1"]["seq"] < 0
+    assert kept["final-0"]["seq"] != kept["final-1"]["seq"]
+    assert (kept["final-2"]["source_file"], kept["final-2"]["seq"]) == (SOURCE, 1)
 
 
 # ---- agy turn authority ------------------------------------------------------

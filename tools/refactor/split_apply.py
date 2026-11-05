@@ -242,6 +242,9 @@ def old_module_rebinds(root: pathlib.Path, old: str, names: set[str], skip: set[
                             add(node.lineno, name, f"{func}({target!r})")
                     elif named(attr) in names and obj is not None and is_old(obj):
                         add(node.lineno, named(attr), f"{func}({ast.unparse(obj)}, {named(attr)!r})")
+                    elif attr is not None and named(attr) is None and obj is not None and is_old(obj):
+                        # A computed name (a loop over names) cannot be checked: fail closed.
+                        add(node.lineno, "*", f"{func}({ast.unparse(obj)}, {ast.unparse(attr)}): computed name")
                 elif func.endswith("patch"):
                     target = named(_call_arg(node, 0, "target"))
                     if target:

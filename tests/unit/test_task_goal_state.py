@@ -11,9 +11,10 @@ from lib import (
 )
 
 
-def make_goal(tmp_path, **options):
+def make_goal(tmp_path, backend=None, **options):
     agent = agents.create_agent(
-        persona="Goal", voice_id="v", cwd=str(tmp_path), session="goal-owner"
+        persona="Goal", voice_id="v", cwd=str(tmp_path), session="goal-owner",
+        **({"backend": backend} if backend else {}),
     )
     agent = agents.get_by_session("goal-owner")
     agents.start_runtime(agent["agent_id"], agent["session"])
@@ -240,7 +241,7 @@ def test_wrong_native_owner_suppresses_wake(tmp_path):
 def test_native_provider_loop_never_competes(tmp_path):
     from lib import agent_goals
 
-    p = make_goal(tmp_path)
+    p = make_goal(tmp_path, backend="codex")
     agent_goals.upsert(
         p["agent_id"],
         session=p["session"],
@@ -253,6 +254,44 @@ def test_native_provider_loop_never_competes(tmp_path):
         )
         == 0
     )
+    assert (
+        task_plans.get(p["plan_id"])["goal"]["continuation"]["observed_state"]
+        == "native_owned"
+    )
+
+
+def test_a_native_goal_of_a_backend_the_agent_left_does_not_park_host_goals(tmp_path):
+    """AUT-20: the native row is cleared only by a Codex notification; after a
+    switch to Claude it must not park the Host goals for ever."""
+    from lib import agent_goals
+
+    p = make_goal(tmp_path, backend="claude")
+    agent_goals.upsert(
+        p["agent_id"],
+        session=p["session"],
+        backend="codex",
+        goal={"objective": "Native objective", "status": "paused"},
+    )
+    recovery.tick(lambda *args: {"queued": False}, now=db.now_ms() + 999999)
+    assert (
+        task_plans.get(p["plan_id"])["goal"]["continuation"]["observed_state"]
+        != "native_owned"
+    )
+
+
+def test_an_active_native_goal_of_a_left_backend_still_parks_host_goals(tmp_path):
+    """The shared Codex app-server may still continue an active native goal
+    after the switch: never run the Host goal beside it."""
+    from lib import agent_goals
+
+    p = make_goal(tmp_path, backend="claude")
+    agent_goals.upsert(
+        p["agent_id"],
+        session=p["session"],
+        backend="codex",
+        goal={"objective": "Native objective", "status": "active"},
+    )
+    recovery.tick(lambda *args: pytest.fail("a second driver"), now=db.now_ms() + 999999)
     assert (
         task_plans.get(p["plan_id"])["goal"]["continuation"]["observed_state"]
         == "native_owned"
@@ -922,3 +961,42 @@ def test_a_goal_changed_after_the_snapshot_is_not_overwritten_by_a_claim(tmp_pat
     goal = task_plans.get(p["plan_id"])["goal"]
     assert goal["continuation"]["state"] != "dispatching"
     assert goal["history"][-1]["kind"] == "checkpoint"
+
+
+def _replan(p, reason, steps):
+    return act(p, "replan", {"reason": reason, "steps": steps})
+
+
+def _item(p, stable_id):
+    return next(i for i in p["items"] if i["item_id"].endswith(stable_id))
+
+
+def test_replan_restores_a_retired_step_it_proposes_again(tmp_path):
+    # AUT-14 (a): a removed step counts as resolved, so a restored required
+    # step that stayed removed would let the goal finish without it.
+    p = make_goal(tmp_path)
+    p = _replan(p, "Probe says the method is not needed", [])
+    assert _item(p, "method")["status"] == "removed"
+    p = _replan(p, "Second probe says it is needed after all",
+                [{"id": "method", "title": "Initial method"}])
+    restored = _item(p, "method")
+    assert restored["status"] == "pending"
+    assert p["counts"].get("removed", 0) == 0
+
+
+def test_replan_keeps_the_reason_and_time_of_already_retired_steps(tmp_path):
+    # AUT-14 (b): later replans must not re-stamp a retired step.
+    p = make_goal(tmp_path)
+    p = _replan(p, "First reason", [{"id": "other", "title": "Other method"}])
+    first = _item(p, "method")
+    p = _replan(p, "Second reason", [{"id": "third", "title": "Third method"}])
+    again = _item(p, "method")
+    assert again["status"] == "removed"
+    assert again["detail"] == "First reason" == first["detail"]
+    assert again["completed_at"] == first["completed_at"]
+
+
+def test_replan_caps_a_kept_step_title_like_a_new_one(tmp_path):
+    p = make_goal(tmp_path)
+    p = _replan(p, "Longer title", [{"id": "method", "title": "x" * 600}])
+    assert len(_item(p, "method")["title"]) == 500

@@ -26,7 +26,8 @@ from ..voice_preamble import apply_voice_preamble
 from .base import BackendBrand
 from . import opencode_serve
 from .opencode_serve import OpenCodeTurnHandle, ServeClient, ServeError
-from .stream_json import StreamJsonBackend, iter_json_dicts, popen_turn
+from .stream_json import StreamJsonBackend, iter_json_dicts, popen_turn, stop_after_drain_failure
+from .long_prompt import ARGV_TEXT_LIMIT
 
 
 @dataclass
@@ -235,6 +236,13 @@ class OpenCodeBackend(StreamJsonBackend):
     #: in the runtime's environment forces the ``opencode run`` path.
     live = True
 
+    def prompt_limit_bytes(self) -> int | None:
+        """``opencode run`` takes the prompt only in argv; a live turn sends it
+        in an HTTP body (BACKENDS-08)."""
+        if self.live and os.environ.get("CLARP_OPENCODE_LIVE", "1") != "0":
+            return None
+        return ARGV_TEXT_LIMIT
+
     @staticmethod
     def turn_env() -> dict[str, str]:
         """Deny OpenCode's own ``question`` tool. ``opencode run`` has nobody to
@@ -350,6 +358,7 @@ class OpenCodeBackend(StreamJsonBackend):
         on_session_init, on_result, on_error, stream, enqueue,
     ) -> None:
         st = _TurnState(session_id=backend_session_id)
+        reported = False        # a terminal outcome reached on_result/on_error
         if backend_session_id:
             self._bind(st, backend_session_id, on_session_init=on_session_init,
                        on_error=on_error, trace_id=trace_id)
@@ -409,6 +418,7 @@ class OpenCodeBackend(StreamJsonBackend):
                                or str(ev.get("message") or "opencode error"))
                         st.failed_error = err
                         if on_error is not None:
+                            reported = True
                             on_error(err)
                         continue
                     if etype in {"text", "message", "assistant", "output"}:
@@ -435,16 +445,20 @@ class OpenCodeBackend(StreamJsonBackend):
                 log("opencodeExitErr", f"rc={rc} trace={trace_id or '∅'} "
                                        f"stderr={(err or '')[:500]!r}")
                 if on_error is not None:
+                    reported = True
                     on_error(err)
             elif on_result is not None and not st.failed_error:
                 result: dict[str, Any] = {"last_agent_message": st.last_agent_message,
                                           "usage": dict(st.usage)}
                 if st.cost is not None:
                     result["total_cost_usd"] = st.cost
+                reported = True
                 on_result(result)
         except Exception as error:  # noqa: BLE001
             log_exception("opencodeDrainFail", error, detail=trace_id)
-            if on_error is not None and not st.failed_error:
+            # Nothing reads this CLI any more: stop it, and end the turn once.
+            stop_after_drain_failure(proc, handle)
+            if on_error is not None and not st.failed_error and not reported:
                 try:
                     on_error(str(error)[:300])
                 except Exception:  # noqa: BLE001

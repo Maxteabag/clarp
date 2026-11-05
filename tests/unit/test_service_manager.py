@@ -315,6 +315,20 @@ def test_macos_failed_fresh_install_only_unloads_job(monkeypatch):
     assert recorder.calls[0][0][:2] == ["launchctl", "bootout"]
 
 
+def test_linux_failed_install_clears_the_start_limit_before_restarting(monkeypatch):
+    """OPS-N2: a release that crash-looped into systemd's start limit makes a
+    plain restart of the restored release fail (start-limit-hit), leaving the
+    Host down. The failed state is reset first."""
+    monkeypatch.setenv("CLARP_PLATFORM_OVERRIDE", "linux")
+    recorder = Recorder()
+    service_manager.restore_after_failed_install(had_previous=True, runner=recorder)
+    commands = [call[0] for call in recorder.calls]
+    reset = ["systemctl", "--user", "reset-failed", "clarp.service"]
+    restart = ["systemctl", "--user", "restart", "clarp.service"]
+    assert reset in commands and restart in commands
+    assert commands.index(reset) < commands.index(restart)
+
+
 def test_wait_until_ready_uses_configured_token(tmp_path):
     seen = []
 

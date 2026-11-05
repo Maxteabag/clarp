@@ -52,7 +52,7 @@ from ..proc_util import stderr_text
 from ..process_registry import TurnHandle
 from ..voice_preamble import persona_identity_instruction
 from .base import BackendBrand, Backend, CompactionStrategy, resolve
-from .stream_json import launch, start_drain
+from .stream_json import launch, start_drain, stop_after_drain_failure
 
 
 def _projects_root(home: pathlib.Path | None) -> pathlib.Path | None:
@@ -597,6 +597,7 @@ class ClaudeBackend(Backend):
             pacer.cancel()
         isolated_texts: list[str] = []
         live_backend_session_id = backend_session_id
+        reported = False        # a terminal outcome reached on_result/on_error
         try:
             if proc.stdout is None:
                 return
@@ -704,6 +705,7 @@ class ClaudeBackend(Backend):
                     isolated_texts = []
             rc = proc.wait()
             if final_result is not None and on_result is not None:
+                reported = True
                 try:
                     on_result(final_result)
                 except Exception as e:                    # noqa: BLE001
@@ -714,6 +716,7 @@ class ClaudeBackend(Backend):
                 log("clarpExitErr", f"rc={rc} trace={trace_id or '∅'} "
                                     f"stderr={(err or '')[:500]!r}")
                 if on_error is not None:
+                    reported = True
                     try:
                         on_error(err or f"clarp exited rc={rc}")
                     except Exception as e:                # noqa: BLE001
@@ -725,6 +728,7 @@ class ClaudeBackend(Backend):
                 log("clarpNoResult", f"trace={trace_id or '∅'} "
                                       f"stderr={(err or '')[:500]!r}")
                 if on_error is not None:
+                    reported = True
                     try:
                         on_error(msg)
                     except Exception as e:                # noqa: BLE001
@@ -736,6 +740,13 @@ class ClaudeBackend(Backend):
                     f"have missed the session binding")
         except Exception as e:                            # noqa: BLE001
             log_exception("clarpRunnerDrainFail", e, detail=trace_id)
+            # Nothing reads this CLI any more: stop it and end the turn once.
+            stop_after_drain_failure(proc, handle)
+            if not reported and on_error is not None:
+                try:
+                    on_error(f"clarp drain failed: {str(e)[:300]}")
+                except Exception as cb:                   # noqa: BLE001
+                    log_exception("clarpRunnerErrCbFail", cb, detail=trace_id)
         finally:
             if not isolated and not saw_result and message["text"]:
                 pacer.offer(message["text"], final=True)

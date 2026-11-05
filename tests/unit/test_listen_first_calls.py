@@ -19,6 +19,7 @@ import threading
 
 import pytest
 
+from tests.patching import patch_shared
 from lib import agent_rings as rings
 from lib import db, group_calls as calls, settings_store, turn_queue
 
@@ -72,12 +73,12 @@ def env(tmp_path, monkeypatch):
     _agent("a-theo", "Theo", "theo-97e5")
     _agent("a-mike", "Mike", "mike-86db")
     stream, tts, clock, pushes, kicks = Stream(), FakeTTS(tmp_path), Clock(), [], []
-    monkeypatch.setattr(rings, "now_ms", clock)
+    patch_shared(monkeypatch, rings, "now_ms", clock)
     monkeypatch.setattr(rings, "_push", lambda ring, kind: pushes.append((kind, dict(ring))) or {"sent": 1})
     monkeypatch.setattr(rings, "_schedule_expiry", lambda ring: None)
     monkeypatch.setattr(rings, "_push_voip", lambda ring: {"sent": 0})
-    monkeypatch.setattr(rings, "_server_id", lambda: SERVER)
-    monkeypatch.setattr(rings, "_kick_queue", lambda: kicks.append(1))
+    patch_shared(monkeypatch, rings, "_server_id", lambda: SERVER)
+    patch_shared(monkeypatch, rings, "_kick_queue", lambda: kicks.append(1))
     ctx = type("Ctx", (), {"stream": stream, "tts": tts})()
     rings.bind(ctx)
     calls.bind(ctx)
@@ -156,7 +157,7 @@ def _refused(call, status, error):
 
 def _no_crash_after_resolve(env):
     """The Host dies right after the resolve transaction: nobody admits."""
-    env.monkeypatch.setattr(rings, "_admit_after_resolve", lambda ring_id: None)
+    patch_shared(env.monkeypatch, rings, "_admit_after_resolve", lambda ring_id: None)
 
 
 # ---- capability -------------------------------------------------------------------
@@ -697,7 +698,7 @@ def test_revoking_the_device_retires_its_opening(env):
 
 def test_a_host_instance_change_retires_the_opening(env, monkeypatch):
     ring, op = _answered()
-    monkeypatch.setattr(rings, "_server_id", lambda: "srv-another-host")
+    patch_shared(monkeypatch, rings, "_server_id", lambda: "srv-another-host")
     err = _refused(lambda: _claim(op, "silence"), 409, "opening retired")
     assert err.extra["reason"] == "host_changed"
     assert _queue(ring["ring_id"]) == []
@@ -1345,7 +1346,7 @@ def test_L5_a_failure_while_opening_rolls_the_answer_back(env, monkeypatch):
         if broken["on"]:
             raise RuntimeError("the Host died while recording the opening")
         return real(principal)
-    monkeypatch.setattr(rings, "_auth_proof", dies)
+    patch_shared(monkeypatch, rings, "_auth_proof", dies)
     with pytest.raises(RuntimeError):
         rings.answer(PHONE, ring["ring_id"], opening_mode="listen_first")
     broken["on"] = False
@@ -1367,7 +1368,7 @@ BREACHES = [(REBOOTED, "host_rebooted"), (RESTORED, "db_restored"), (UNPROVABLE,
 
 
 def _host(env, read):
-    env.monkeypatch.setattr(rings, "_generation", lambda: read)
+    patch_shared(env.monkeypatch, rings, "_generation", lambda: read)
 
 
 def _stored_ring(ring_id):
@@ -1471,7 +1472,7 @@ def test_an_identity_change_inside_the_transaction_is_unprovable(env):
     """P-b7 (N2): the read before BEGIN and the read inside differ → unprovable."""
     ring, op = _answered()
     reads = itertools.chain([host_generation.GenerationRead(_PIN)], itertools.repeat(RESTORED))
-    env.monkeypatch.setattr(rings, "_generation", lambda: next(reads))
+    patch_shared(env.monkeypatch, rings, "_generation", lambda: next(reads))
     _refused(lambda: _claim(op, "listening"), 409, "opening retired")
     assert _state(ring["ring_id"])["identity_breach"]["cause"] == "host_identity_unprovable"
 
@@ -1511,7 +1512,7 @@ def test_identity_reads_inside_a_site_are_read_only(env, tmp_path):
     boot = tmp_path / "boot_id"
     boot.write_text("11111111-1111-4111-8111-111111111111\n")
     host_generation.ensure_instance_generation(backups_dir=backups)
-    env.monkeypatch.setattr(rings, "_generation", lambda: host_generation.read_host_generation(
+    patch_shared(env.monkeypatch, rings, "_generation", lambda: host_generation.read_host_generation(
         backups_dir=backups, boot_id_path=boot))
     ring, op = _answered()
     writes = ("link", "replace", "fsync", "mkdir", "unlink", "rename")
@@ -1571,7 +1572,7 @@ def _calls_of(principal=PHONE):
 def _reads(env, *sequence):
     """The identity seam returns ``sequence`` in order, then its last value."""
     reads = itertools.chain(sequence, itertools.repeat(sequence[-1]))
-    env.monkeypatch.setattr(rings, "_generation", lambda: next(reads))
+    patch_shared(env.monkeypatch, rings, "_generation", lambda: next(reads))
 
 
 def test_identity_moving_before_the_call_starts_starts_no_call(env):
@@ -1610,7 +1611,7 @@ def test_identity_moving_after_the_call_started_ends_it_and_mints_nothing(env):
 def test_say_rings_never_read_the_host_identity(env):
     """D-4: a say ring, its answer and a say-shaped replay of a listen-first
     ring need no identity, so the seam is never called."""
-    env.monkeypatch.setattr(rings, "_generation",
+    patch_shared(env.monkeypatch, rings, "_generation",
                             lambda: pytest.fail("a say path read the host identity"))
     ring = _ring()["ring"]
     rings.answer(PHONE, ring["ring_id"])
@@ -1619,7 +1620,7 @@ def test_say_rings_never_read_the_host_identity(env):
 
 def test_a_say_shaped_replay_of_a_listen_first_ring_reads_no_identity(env):
     ring, _op = _answered()
-    env.monkeypatch.setattr(rings, "_generation",
+    patch_shared(env.monkeypatch, rings, "_generation",
                             lambda: pytest.fail("a say-shaped replay read the host identity"))
     out = rings.answer(PHONE, ring["ring_id"])
     assert out["opening"]["text"] == ring["opening_line"]
@@ -1693,7 +1694,7 @@ def _audit_raising(env, outcome):
             raise RuntimeError(f"audit {outcome} failed")
         return original(entry)
 
-    env.monkeypatch.setattr(rings, "_audit", audit)
+    patch_shared(env.monkeypatch, rings, "_audit", audit)
 
 
 def test_compensation_lf_failure_before_commit_ends_the_call_and_keeps_the_ring_ringing(env):
@@ -1728,7 +1729,7 @@ def test_compensation_lf_audit_failure_after_commit_retires_the_opening(env, out
     assert ends == [call["call_id"]] and call["state"] == "ended"
     assert _stored_ring(ring["ring_id"])["state"] == "answered"
     assert _state(ring["ring_id"])["retired"]["reason"].startswith("call_")
-    env.monkeypatch.setattr(rings, "_audit", lambda entry: None)
+    patch_shared(env.monkeypatch, rings, "_audit", lambda entry: None)
     _refused(lambda: rings.answer(PHONE, ring["ring_id"], opening_mode="listen_first"),
              409, "the call is over")
 
@@ -1748,7 +1749,7 @@ def test_compensation_end_failure_after_commit_is_the_reported_residual(env):
     assert call["state"] == "live"                                   # observed: end never ran
     op = _state(ring["ring_id"])
     assert op["state"] == "pending" and not op.get("retired")
-    env.monkeypatch.setattr(rings, "_audit", lambda entry: None)
+    patch_shared(env.monkeypatch, rings, "_audit", lambda entry: None)
     replay = rings.answer(PHONE, ring["ring_id"], opening_mode="listen_first")
     assert replay["opening"]["token"] == op["token"]
 
@@ -1802,12 +1803,12 @@ def test_compensation_never_replaces_the_original_exception(env):
         # earlier, the call start's own log line would raise first and no
         # compensation would run at all.
         if entry.get("outcome") == "opening":
-            env.monkeypatch.setattr(rings, "log_exception", broken_log)
+            patch_shared(env.monkeypatch, rings, "log_exception", broken_log)
             env.monkeypatch.setattr(builtins, "print", broken_log)
             raise RuntimeError("audit opening failed")
         return original(entry)
 
-    env.monkeypatch.setattr(rings, "_audit", audit)
+    patch_shared(env.monkeypatch, rings, "_audit", audit)
     with pytest.raises(RuntimeError, match="audit opening failed"):
         rings.answer(PHONE, ring["ring_id"], opening_mode="listen_first")
     assert len(ends) == 1                                           # exactly one attempt
