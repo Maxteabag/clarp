@@ -239,6 +239,113 @@ conversion that first needs it.
 **Behaviour changes to register:** none intended. If commit 4 changes the
 order of rows with equal positions, that is registered.
 
+### Design delta (5 Nov 2026), from the G0 matrix
+
+The G0 matrix (`tests/unit/test_queue_receipt_matrix.py`, on main at `28973509`)
+gives today's exact transitions. Writing the declaration against it changes
+four things in the plan above. No change touches behaviour, the schema or a
+stored value.
+
+1. **Per-state entry times (kit change 5).** `queued_turns` has no single
+   "entered at" column, so the kit's one `entered_column` does not fit.
+   - Today only two states record their entry time: claiming sets
+     `claimed_at`, and starting sets `started_at`. Releasing a claim clears
+     `claimed_at`, and no other transition stamps a time.
+   - The kit therefore gains `entered_columns`, a mapping such as
+     `{"claimed": "claimed_at", "started": "started_at"}`. It is used
+     instead of `entered_column`, never together with it.
+   - A transition stamps `now` only into its target state's column, if that
+     state has one. Clearing `claimed_at` on release stays an explicit value,
+     as today.
+   - The reaper reads the source state's column. Validation requires a
+     column for every state with a `Deadline`.
+   - The alternative was a migration adding a `status_at` column. That would
+     write a new stored value on every transition, which raises the
+     reader-first and rollback questions. The mapping avoids both.
+2. **Settlement events, ordinary and correcting.**
+   - `settle_receipt` moves a `started` receipt to done, failed,
+     interrupted or ended (an ordinary edge). It also moves one settled
+     outcome to another (the newest settlement wins), which is a correction.
+     Today one SQL statement does both.
+   - Since kit review A2 (`228a4454`), an event cannot be both. So each
+     outcome gets two events: `settle_<outcome>` from `started`, and
+     `resettle_<outcome>` from the three other settled outcomes.
+   - The correction pairs are exactly those the matrix shows. A `cancelled`,
+     `withdrawn` or `unknown` receipt is never resettled.
+3. **Set-based writers keep their single statement (kit change 6).** Many
+   writers move every matching row in one statement:
+   - `requeue_rows`, `requeue_parked`, `settle_receipt`, `cancel_for_traces`,
+     `reset_stale_claims` and the terminalizing sweeps;
+   - in each, `WHERE status IN (...)` is already a compare-and-set over a set
+     of rows.
+
+   Rewriting them as one kit call per row would change their statement count
+   and their cost under the writer lock. Instead the kit gains
+   `compare_and_set_where(con, lc, events, where, params, values=)`, which
+   runs:
+
+   ```sql
+   UPDATE t SET state = <target>, ... WHERE state IN (<declared sources>) AND <where>
+   ```
+
+   - The sources come from the declaration, never from the caller.
+   - It runs once per target state, inside the caller's transaction.
+   - It returns the count, or the rows changed if `RETURNING` is asked for.
+4. **What stays outside the kit, named in the declaration's comment.**
+   - **Inserts** (`enqueue`, `park`, `park_at_head`) create a row directly in
+     `queued` or `parked`. An insert cannot race a status, and the kit's
+     `create` knows one initial state. Declaring `parked` as a second entry
+     state would be a seventh kit change, for no safety gain.
+   - **Deletes** (`remove`, `remove_taken_over`, `unpark`, `discard_parked`,
+     `remove_for_agent`) take a row out of the lifecycle with their own
+     status predicates, as today.
+   - **`allow_paused` and `allow_paused_for`** write a flag, not the state.
+
+**A gap in G0.** The matrix never exercises
+`mark_launched_call_open_unknown`'s effect, because it acts only on
+`call-open:` ids. A tests-only commit on main adds a `call-open:` target row
+first, before any conversion commit.
+
+**Declaration** (`QUEUE_RECEIPT`, in `turn_queue.py`). Event names follow the
+functions:
+
+- **Initial and final states.** The initial state is `queued`. The final
+  states are done, failed, interrupted, ended, unknown, cancelled and
+  withdrawn.
+- **Edges:**
+  - `claim`: queued → claimed (also `claim_for_dispatch`);
+  - `release`: claimed → queued;
+  - `start`: queued or claimed → started;
+  - `park`: queued → parked (`take_over_at_head`);
+  - `requeue`: parked → queued;
+  - `cancel`: queued, claimed or parked → cancelled (`cancel_for_traces`
+    leaves out parked);
+  - `withdraw`: queued or parked → withdrawn;
+  - `withdraw_claimed`: claimed → withdrawn;
+  - `mark_unknown`: queued, claimed or parked → unknown;
+  - `call_open_unknown`: claimed or started → unknown;
+  - `settle_<o>`: started → done, failed, interrupted or ended;
+  - `resettle_<o>`: corrections among done, failed, interrupted and ended,
+    matching the matrix;
+  - `idle_settle` and `ended_settle` (the sweeps): started → ended, or to the
+    settled outcome.
+- **Waits:**
+  - claimed: `Deadline(30 s, expire_to=queued)`;
+  - started, queued and parked: `WaitForever`, as in the waits above.
+
+**Commits, revised** (on refactor/integration):
+1. Kit changes 5 and 6, on main (they have no production caller).
+2. The G0 top-up for `call-open:` rows, on main.
+3. Activate `QUEUE_RECEIPT`.
+4. Route the single-row writers through `lk.transition`.
+5. Route the set-based writers through `compare_and_set_where`.
+6. `_move_behind`.
+7. The bounded reaper with the claim-reset `exclude` and the idle sweep's
+   gates.
+
+Each commit keeps the G0 matrix byte-identical, and G2 between main and
+integration stays at zero.
+
 ## 2. Dream runs
 
 **Today** (`dreaming.py`).
