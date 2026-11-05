@@ -93,7 +93,7 @@ BASELINE: dict[str, int] = {
     'lib/vocab_store.py': 1,
     'lib/voice_humanness.py': 1,
     'lib/voice_preamble.py': 2,
-    'server.py': 6,
+    'server.py': 5,
 }
 
 
