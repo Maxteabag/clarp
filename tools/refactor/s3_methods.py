@@ -45,11 +45,16 @@ def recipes(root: pathlib.Path) -> list[tuple[pathlib.Path, list[dict]]]:
     source_paths = {source for source, _ in sources}
     if outputs & source_paths:
         raise s3_apply.Refusal('method output is also a method source')
-    splits, _ = split_apply.load_recipes(root / 'tools/refactor/splits')
+    splits, repoints = split_apply.load_recipes(root / 'tools/refactor/splits')
     split_paths = {entry['module'] for entry in splits}
     split_paths |= {part['module'] for entry in splits for part in entry['part']}
     if outputs & split_paths:
         raise s3_apply.Refusal('method output collides with a module split')
+    touched = source_paths | {p for entry in splits
+        if source_paths & {entry['module'], *(v['module'] for v in entry['part'])}
+        for p in [entry['module'], *(v['module'] for v in entry['part'])]}
+    if any(entry['file'] in touched for entry in repoints):
+        raise s3_apply.Refusal('method family has a repoint; explicit reconstruction required')
     return found
 
 
