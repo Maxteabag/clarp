@@ -194,7 +194,10 @@ def _clear_transaction_owner(connection: sqlite3.Connection) -> None:
 def thread_holds_transaction() -> bool:
     """Whether this thread's connection is inside a transaction now."""
     connection = getattr(_LOCAL, "conn", None)
-    return connection is not None and connection.in_transaction
+    try:
+        return connection is not None and connection.in_transaction
+    except sqlite3.ProgrammingError:  # the tracked close has released the transaction
+        return False
 
 
 def _report_database_locked(waiting_sql: object) -> None:
@@ -399,13 +402,13 @@ class _TrackedConnection(sqlite3.Connection):
             super().execute(f"PRAGMA busy_timeout = {deadline_ms}")
             waited = time.monotonic() - started
             if waited > _LONG_WRITE_WAIT_SECONDS:
-                from .log import log
-                log("sqliteWriteWait",
+                from .log import sqlite_write_wait
+                sqlite_write_wait(
                     f"waited_ms={round(waited * 1000)} "
                     f"outcome={'admitted' if admitted else 'gave_up'} "
                     f"import_in_process={saw_import} "
                     f"thread={threading.current_thread().name!r} sql={template[:60]!r} "
-                    f"process={_process_name()!r}")
+                    f"process={_process_name()!r}", self)
 
     def execute(self, sql, parameters=(), /):  # type: ignore[override]
         template = _sql_template(sql)
@@ -499,8 +502,10 @@ class _TrackedConnection(sqlite3.Connection):
                 _clear_transaction_owner(self)
 
     def close(self):  # type: ignore[override]
-        _clear_transaction_owner(self)
-        return super().close()
+        try:
+            return super().close()
+        finally:
+            _clear_transaction_owner(self)
 
 
 def _open_connection() -> sqlite3.Connection:
