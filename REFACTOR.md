@@ -227,6 +227,7 @@ Order rule (5 Nov): on a file that a regenerated split owns (S3, S4, S6, S9), th
 | 5 Nov 07:1x | S7 (`rf-fix2-56f3`) | step 1e on `refactor/integration` only: `server/lib/tts_queue.py` (delete `recent_synth_count`, zero callers; VP-18 dead code); rf-merge's forward-port watch stops a merge if main touches or calls it | the big release |
 | 5 Nov 07:1x | Phase 3 (`rf-contract-80af`) | the goals lifecycle conversion on `refactor/integration` only: `server/lib/task_plans.py`; hand-written, so its converted functions join rf-merge's forward-port watch | the big release |
 | 5 Nov 07:2x | Phase 3 (`rf-contract-80af`) | the queue lifecycle conversion on `refactor/integration` only: `server/lib/turn_queue.py` (S4 does not split it); hand-written, so its converted functions join rf-merge's forward-port watch, and TP-N3's later change to turn_queue.py on main is forward-ported | the big release |
+| 5 Nov 07:2x | S6 (`rf-s6-8970`) | cut 1 on `refactor/integration` only: `server/lib/backend_usage.py` split into a facade plus store, claude, agy and codex parts (S9's split_apply), regenerated from main's text at every merge | the big release |
 | 3 Nov 12:17 | S5 (`rf-readmodel-12f8`) | `server/lib/message_writes.py` import section (`store_transcript_turns`, `_ImportWriter`, `_store_transcript_turns_txn` and its helpers, `_attach_authority_tools`, `stamp_turn`); `server/lib/message_store.py` facade re-exports; `tests/readmodel/` | the S5 extraction commits land; `rf-fix-c4ab`'s RM-N1 commit may edit the upsert and twin path |
 
 ## 7. How to work
