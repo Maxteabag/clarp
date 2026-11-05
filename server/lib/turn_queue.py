@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Callable
 
 from . import db, prompt_admissions
+from . import lifecycle as lk
 from .lifecycle import Deadline, Edge, Lifecycle, WaitForever
 from .log import log
 
@@ -28,6 +29,7 @@ QUEUE_RECEIPT = Lifecycle(
         Edge("park", frozenset({"queued"}), "parked"),
         Edge("requeue", frozenset({"parked"}), "queued"),
         Edge("cancel", frozenset({"queued", "claimed", "parked"}), "cancelled"),
+        Edge("cancel_pending", frozenset({"queued", "claimed"}), "cancelled"),
         Edge("withdraw", frozenset({"queued", "parked"}), "withdrawn"),
         Edge("withdraw_claimed", frozenset({"claimed"}), "withdrawn"),
         Edge("mark_unknown", frozenset({"queued", "claimed", "parked"}), "unknown"),
@@ -45,6 +47,15 @@ QUEUE_RECEIPT = Lifecycle(
         "started": WaitForever("its turn's settlement ends it; the idle and ended sweeps repair a missed one"),
     },
 )
+
+
+def _cas(events, where: str, params=(), *, values=None, returning: str = "", con=None):
+    """Every status write: one compare-and-set statement per target, sources
+    from QUEUE_RECEIPT. It joins the caller's open transaction, and runs in
+    autocommit otherwise, as each writer did."""
+    return lk.compare_and_set_where(con or db.conn(), QUEUE_RECEIPT, events, where=where,
+                                    params=params, now=db.now_ms(), values=values,
+                                    returning=returning)
 
 def enqueue(*, queue_id: str, agent_id: str, session: str, text: str,
             trace_id: str, client_msg_id: str, synthesize_audio: bool,
@@ -175,9 +186,7 @@ def take_over_at_head(queue_id: str, *, agent_id: str, trace_id: str,
     if not queued_row_matches(queue_id, agent_id=agent_id, trace_id=trace_id,
                               prompt_admission_id=prompt_admission_id):
         raise RuntimeError(f"queued row {queue_id} is not this work's")
-    db.conn().execute(
-        "UPDATE queued_turns SET status = 'parked' WHERE queue_id = ? AND status = 'queued'",
-        (queue_id,))
+    _cas("park", "queue_id = ?", (queue_id,))
     _move_behind(agent_id, queue_id)
 
 
@@ -202,9 +211,7 @@ def requeue_rows(queue_ids) -> int:
     """Turn the given parked rows back into queued work (a lifted fence)."""
     count = 0
     for queue_id in queue_ids:
-        count += db.conn().execute(
-            "UPDATE queued_turns SET status = 'queued' WHERE queue_id = ? AND status = 'parked'",
-            (queue_id,)).rowcount or 0
+        count += _cas("requeue", "queue_id = ?", (queue_id,))
     return count
 
 
@@ -274,14 +281,9 @@ def parked(agent_id: str = "") -> list[dict]:
 def requeue_parked(agent_id: str = "") -> int:
     """Turn parked rows back into visible queued work (after a restart)."""
     if agent_id:
-        rows = db.conn().execute(
-            """UPDATE queued_turns SET status = 'queued'
-                WHERE status = 'parked' AND agent_id = ? RETURNING agent_id""",
-            (agent_id,)).fetchall()
+        rows = _cas("requeue", "agent_id = ?", (agent_id,), returning="agent_id")
     else:
-        rows = db.conn().execute(
-            """UPDATE queued_turns SET status = 'queued'
-                WHERE status = 'parked' RETURNING agent_id""").fetchall()
+        rows = _cas("requeue", "1", returning="agent_id")
     for owner in {str(row["agent_id"]) for row in rows}:
         _bump_revision(owner)
     return len(rows)
@@ -325,12 +327,10 @@ def settle_receipt(agent_id: str, trace_id: str, outcome: str) -> int:
     if not trace_id:
         return 0
     status = _RECEIPT_STATUS.get(outcome, "ended")
-    cursor = db.conn().execute(
-        f"""UPDATE queued_turns SET status = ?
-              WHERE agent_id = ? AND trace_id = ? AND status <> ?
-                AND status IN ({','.join('?' * len(_SETTLEABLE))})""",
-        (status, agent_id, trace_id, status, *_SETTLEABLE))
-    return int(cursor.rowcount or 0)
+    # From started (settle) or from another settled outcome (resettle): the
+    # union is today's ``status <> target AND status IN _SETTLEABLE``.
+    return int(_cas((f"settle_{status}", f"resettle_{status}"),
+                    "agent_id = ? AND trace_id = ?", (agent_id, trace_id)))
 
 
 def terminalize_ended_receipts(live_traces: frozenset[str] | set[str] = frozenset()
@@ -375,10 +375,8 @@ def terminalize_ended_receipts(live_traces: frozenset[str] | set[str] = frozense
         counts = {}
         for status, queue_ids in updates.items():
             counts[status] = sum(
-                con.execute(
-                    """UPDATE queued_turns SET status = ?
-                        WHERE queue_id = ? AND status = 'started'""",
-                    (status, queue_id)).rowcount for queue_id in queue_ids)
+                _cas(f"ended_settle_{status}", "queue_id = ?", (queue_id,), con=con)
+                for queue_id in queue_ids)
         con.execute("COMMIT")
     except BaseException:
         con.execute("ROLLBACK")
@@ -450,11 +448,8 @@ def terminalize_idle_agent_receipts(
         return {}
     con.execute("BEGIN IMMEDIATE")
     try:
-        ended = sum(
-            con.execute(
-                """UPDATE queued_turns SET status = 'ended'
-                    WHERE queue_id = ? AND status = 'started'""",
-                (queue_id,)).rowcount for queue_id in queue_ids)
+        ended = sum(_cas("idle_settle", "queue_id = ?", (queue_id,), con=con)
+                    for queue_id in queue_ids)
         con.execute("COMMIT")
     except BaseException:
         con.execute("ROLLBACK")
@@ -473,10 +468,7 @@ def mark_launched_call_open_unknown(queue_id: str) -> bool:
     queue_id = str(queue_id or "")
     if not queue_id.startswith("call-open:"):
         return False
-    cursor = db.conn().execute(
-        """UPDATE queued_turns SET status = 'unknown', text = ''
-            WHERE queue_id = ? AND status IN ('claimed', 'started')""", (queue_id,))
-    return cursor.rowcount == 1
+    return _cas("call_open_unknown", "queue_id = ?", (queue_id,), values={"text": ""}) == 1
 
 
 def mark_started(queue_id: str) -> None:
@@ -492,13 +484,9 @@ def mark_started(queue_id: str) -> None:
             "SELECT agent_id, origin, trace_id FROM queued_turns WHERE queue_id = ? AND status IN ('queued', 'claimed')",
             (queue_id,),
         ).fetchone()
-        cursor = db.conn().execute(
-            """UPDATE queued_turns
-                  SET status = 'started', text = '', sender_agent_id = '',
-                      started_at = ?
-                WHERE queue_id = ? AND status IN ('queued', 'claimed')""",
-            (db.now_ms(), queue_id))
-        if cursor.rowcount and row:
+        started = _cas("start", "queue_id = ?", (queue_id,),
+                       values={"text": "", "sender_agent_id": ""})  # stamps started_at
+        if started and row:
             _bump_revision(str(row["agent_id"]))
             # A fast backend may settle its turn before the dispatcher gets
             # here; the receipt then ends at once.
@@ -562,14 +550,10 @@ def cancel(queue_id: str) -> bool:
             "SELECT prompt_admission_id FROM queued_turns WHERE queue_id=?",
             (queue_id,),
         ).fetchone()
-        row = con.execute(
-            """UPDATE queued_turns
-                  SET status='cancelled', text='', sender_agent_id='',
-                      prompt_admission_id='', claimed_at=NULL
-                WHERE queue_id=? AND status IN ('queued','claimed','parked')
-                RETURNING agent_id""",
-            (queue_id,),
-        ).fetchone()
+        moved = _cas("cancel", "queue_id = ?", (queue_id,), con=con, returning="agent_id",
+                     values={"text": "", "sender_agent_id": "", "prompt_admission_id": "",
+                             "claimed_at": None})
+        row = moved[0] if moved else None
         if row:
             prompt_admissions.delete_unmaterialized(
                 str(original["prompt_admission_id"] or ""))
@@ -624,36 +608,24 @@ def update_text(queue_id: str, text: str) -> bool:
 
 def withdraw_unclaimed(queue_id: str) -> bool:
     """A waiting (queued or Stop-held), unclaimed row that must never run."""
-    cursor = db.conn().execute(
-        """UPDATE queued_turns SET status = 'withdrawn', text = ''
-            WHERE queue_id = ? AND status IN ('queued', 'parked') AND claimed_at IS NULL""",
-        (queue_id,))
-    return cursor.rowcount == 1
+    return _cas("withdraw", "queue_id = ? AND claimed_at IS NULL", (queue_id,),
+                values={"text": ""}) == 1
 
 
 def claim_for_dispatch(queue_id: str) -> bool:
     """The dispatcher's claim of an opening row before it spawns (once)."""
-    cursor = db.conn().execute(
-        """UPDATE queued_turns SET status = 'claimed', claimed_at = ?
-            WHERE queue_id = ? AND status = 'queued'""", (db.now_ms(), queue_id))
-    return cursor.rowcount == 1
+    return _cas("claim", "queue_id = ?", (queue_id,)) == 1  # stamps claimed_at
 
 
 def mark_unknown(queue_id: str) -> bool:
     """An opening row whose launch can never be known (agent_rings, P4): not
     pending, claimed, settleable or a success, and nothing moves it back."""
-    cursor = db.conn().execute(
-        """UPDATE queued_turns SET status = 'unknown', text = ''
-            WHERE queue_id = ? AND status IN ('queued', 'claimed', 'parked')""", (queue_id,))
-    return cursor.rowcount == 1
+    return _cas("mark_unknown", "queue_id = ?", (queue_id,), values={"text": ""}) == 1
 
 
 def withdraw_claimed(queue_id: str) -> bool:
     """A claimed opening row that provably never passed the dispatcher's gate."""
-    cursor = db.conn().execute(
-        "UPDATE queued_turns SET status = 'withdrawn', text = '' WHERE queue_id = ? AND status = 'claimed'",
-        (queue_id,))
-    return cursor.rowcount == 1
+    return _cas("withdraw_claimed", "queue_id = ?", (queue_id,), values={"text": ""}) == 1
 
 
 def allow_paused_for(queue_id: str) -> None:
@@ -663,24 +635,17 @@ def allow_paused_for(queue_id: str) -> None:
 
 def claim(queue_id: str) -> dict | None:
     """Atomically reserve one queued item for an explicit manual send."""
-    row = db.conn().execute(
-        """UPDATE queued_turns SET status = 'claimed', claimed_at = ?
-              WHERE queue_id = ? AND status = 'queued'
-          RETURNING *""",
-        (db.now_ms(), queue_id),
-    ).fetchone()
+    moved = _cas("claim", "queue_id = ?", (queue_id,), returning="*")  # stamps claimed_at
+    row = moved[0] if moved else None
     if row:
         _bump_revision(str(row["agent_id"]))
     return dict(row) if row else None
 
 
 def release_claim(queue_id: str) -> bool:
-    row = db.conn().execute(
-        """UPDATE queued_turns SET status = 'queued', claimed_at = NULL
-              WHERE queue_id = ? AND status = 'claimed'
-          RETURNING agent_id""",
-        (queue_id,),
-    ).fetchone()
+    moved = _cas("release", "queue_id = ?", (queue_id,), returning="agent_id",
+                 values={"claimed_at": None})
+    row = moved[0] if moved else None
     if row:
         _bump_revision(str(row["agent_id"]))
     return row is not None
@@ -691,13 +656,11 @@ def reset_stale_claims(max_age_ms: int = 30_000, *, exclude=()) -> int:
     ``exclude``: rows another owner already settled (agent_rings openings)."""
     cutoff = db.now_ms() - max(0, max_age_ms)
     excluded = tuple(exclude)
-    rows = db.conn().execute(
-        f"""UPDATE queued_turns SET status = 'queued', claimed_at = NULL
-              WHERE status = 'claimed' AND COALESCE(claimed_at, 0) <= ?
-                {"AND queue_id NOT IN (" + ",".join("?" * len(excluded)) + ")" if excluded else ""}
-          RETURNING agent_id""",
-        (cutoff, *excluded),
-    ).fetchall()
+    rows = _cas(
+        "release",
+        "COALESCE(claimed_at, 0) <= ?"
+        + (" AND queue_id NOT IN (" + ",".join("?" * len(excluded)) + ")" if excluded else ""),
+        (cutoff, *excluded), returning="agent_id", values={"claimed_at": None})
     for agent_id in {str(row["agent_id"]) for row in rows}:
         _bump_revision(agent_id)
     return len(rows)
@@ -903,6 +866,5 @@ def cancel_for_traces(c, agent_id: str, trace_ids: list[str]) -> None:
     """Cancel an agent's pending rows for ``trace_ids`` inside the caller's
     transaction (the janitor fence commits them with its own rows)."""
     for trace in trace_ids:
-        c.execute("UPDATE queued_turns SET status='cancelled',text='' "
-                  "WHERE agent_id=? AND trace_id=? AND status IN ('queued','claimed')",
-                  (agent_id, trace))
+        _cas("cancel_pending", "agent_id = ? AND trace_id = ?", (agent_id, trace),
+             values={"text": ""}, con=c)
