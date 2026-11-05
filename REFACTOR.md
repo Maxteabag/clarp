@@ -188,7 +188,7 @@ continue as before.
 | Merge captain | `rf-merge-f870` | Claude | landing on main, the gate script, the flake quarantine list, the parked-branch manifest |
 | Release owner | `rf-release-d188` | Claude | windows, tags, backup, deploy, health check, rollback, break-glass, the canary node |
 | Harness owner | `rf-harness-eeb2` | Claude | `tests/replay/` (new), the corpus tools, planted changes, diff report |
-| Contract owner | `rf-contract-80af` | Claude | `server/lib/db_schema.py`, `server/lib/db_migrations.py`, `contract/`, `server/lib/server_identity.py` contract constants, the lifecycle kit (`server/lib/lifecycle.py`, `docs/architecture/lifecycles.md`), schema goldens |
+| Contract owner | `rf-contractc-be17` (was `rf-contract-80af`) | Codex | `server/lib/db_schema.py`, `server/lib/db_migrations.py`, `contract/`, `server/lib/server_identity.py` contract constants, the lifecycle kit (`server/lib/lifecycle.py`, `docs/architecture/lifecycles.md`), schema goldens |
 | Fix-lane owner | `rf-fix-c4ab` | Claude | one fix per commit, in the files the lead names per fix |
 | Fix-lane author 2 | `rf-fix2-56f3` | Claude | one fix per commit (voice, Oracle, autonomy findings), in the files the lead names |
 | Fix-lane author 3 | `rf-fix3-9875` | Claude | one fix per commit, pulled from `registers/backlog.md` (B and C areas) |
