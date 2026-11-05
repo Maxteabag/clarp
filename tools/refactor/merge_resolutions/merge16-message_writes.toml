@@ -1,0 +1,12 @@
+# Merge 16: main 931dc422 into approved S5 integration fce16d7f.
+# RM-N10 final prelude on S5's provenance/authority/twin/upsert structure.
+# Supersedes merge13's entry: s3_merge rejects any stale entry for this path.
+# Keep integration's two conflict blocks and deduplicate dataclass's import.
+# Payload is byte-identical to approved fce16d7f's message_writes.py:
+# git blob 12d925dcd6e11121b379db6ff89e3cb1051d8e31.
+# Author rf-readmodelc-cb42; exact resolution review required before landing.
+path = "server/lib/message_writes.py"
+resolved = "merge16-message_writes.py.resolved"
+base_blob = "a09798072e7b15b057dc300e34188a0beaee5772"
+main_blob = "901739a198e7c83f6e9e28e861c0114c0ba7d0aa"
+integration_blob = "12d925dcd6e11121b379db6ff89e3cb1051d8e31"
