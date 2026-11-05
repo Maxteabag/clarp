@@ -268,3 +268,15 @@ def test_a_failed_call_open_launch_becomes_unknown_only_from_claimed_or_started(
         ["q2", AGENT, TRACE, status, "hello",
          NOW - 50_000 if status not in ("queued", "parked", "claimed") else None,
          NOW - 50_000 if status == "claimed" else None, 0]]
+
+
+def test_the_claim_reset_treats_a_missing_claim_time_as_stale(clock):
+    """Review A3 (queue design delta F2): claimed_at is nullable, and the reset
+    compares COALESCE(claimed_at, 0), so a claimed row without a claim time is
+    always stale; an exclusion still keeps it."""
+    db.conn().execute("DELETE FROM queued_turns")
+    _insert("q1", "queued", at=NOW - 60_000)
+    _insert("q2", "queued", at=NOW - 50_000)
+    db.conn().execute("UPDATE queued_turns SET status = 'claimed', claimed_at = NULL")
+    assert turn_queue.reset_stale_claims(30_000, exclude=("q2",)) == 1
+    assert [(r[0], r[3], r[6]) for r in _rows()] == [("q1", "queued", None), ("q2", "claimed", None)]
