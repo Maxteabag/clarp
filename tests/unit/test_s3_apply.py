@@ -8,6 +8,7 @@ from __future__ import annotations
 import importlib.util
 import pathlib
 import subprocess
+import sys
 
 import pytest
 
@@ -507,3 +508,79 @@ def test_an_acknowledgement_matches_the_patched_name_not_the_file_name(tmp_path,
     (root / "tests" / "json.py").write_text("import server\nserver.OTHER = None\n")
     assert _run(root, "--all") == 2
     assert "tests/json.py:2: assigns or deletes .OTHER" in capsys.readouterr().out
+
+
+def _named_tree(tmp_path, method='return json.dumps(VALUE)', imports='from .helper import VALUE'):
+    root = _tree(tmp_path)
+    (root / 'server/lib/engine.py').write_text(
+        'from __future__ import annotations\nimport json\n' + imports + '\n\n'
+        'class Engine:\n'
+        '    def __init__(self):\n        self.active = True\n\n'
+        '    # The comment and decorator move with the method.\n'
+        '    @staticmethod\n    def moved(value=1):\n        ' + method + '\n')
+    (root / 'recipe.toml').write_text(
+        'source_module = "lib/engine.py"\nsource_class = "Engine"\n'
+        '[[group]]\nname = "worker"\nmodule = "lib/worker.py"\n'
+        'class = "WorkerMixin"\nmembers = ["moved"]\n')
+    return root
+
+
+def test_named_class_move_executes_and_passes_method_identity(tmp_path, capsys):
+    root = _named_tree(tmp_path)
+    _git = lambda *args: subprocess.run(['git', '-C', str(root), *args],
+                                        check=True, capture_output=True, text=True)
+    _git('init', '-q')
+    _git('add', '.')
+    _git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'before')
+    base = _git('rev-parse', 'HEAD').stdout.strip()
+    original = (root / 'server/lib/engine.py').read_text()
+    assert _run(root, '--check', '--all') == 1
+    assert (root / 'server/lib/engine.py').read_text() == original
+    assert _run(root, '--all') == 0
+    _git('add', '.')
+    _git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'after')
+    head = _git('rev-parse', 'HEAD').stdout.strip()
+    assert gate.main(['--root', str(root), base, head,
+                      'lib/engine.py::Engine=lib/worker.py::WorkerMixin']) == 0
+    assert _run(root, '--all') == 0
+    result = subprocess.run([sys.executable, '-c',
+        'from lib.engine import Engine; assert Engine.moved() == \'{"k": 1}\'; '
+        'assert Engine().active'], cwd=root / 'server', capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    moved = (root / 'server/lib/worker.py').read_text()
+    assert original[original.index('    # The comment'):] in moved
+
+
+@pytest.mark.parametrize(('method', 'imports', 'reason'), [
+    ('return super()', '', 'zero-argument super'),
+    ('return __class__', '', '__class__'),
+    ('return value.__secret', '', 'private name'),
+    ('return engine.VALUE', 'from . import engine', 'source facade'),
+    ('from . import engine; return engine.VALUE', '', 'source facade'),
+    ('global VALUE; VALUE = 2', 'from .helper import VALUE', 'writes module globals'),
+    ('return VALUE', 'from .later import VALUE', 'later split part'),
+])
+def test_named_source_refuses_unsafe_moves(tmp_path, capsys, method, imports, reason):
+    root = _named_tree(tmp_path, method, imports)
+    recipes = root / 'tools/refactor/splits'
+    recipes.mkdir(parents=True)
+    (recipes / 'family.toml').write_text(
+        '[[split]]\nmodule = "lib/facade.py"\n'
+        '[[split.part]]\nmodule = "lib/engine.py"\n'
+        '[[split.part]]\nmodule = "lib/later.py"\n')
+    before = (root / 'server/lib/engine.py').read_text()
+    assert _run(root, '--all') == 2
+    assert reason in capsys.readouterr().out
+    assert (root / 'server/lib/engine.py').read_text() == before
+    assert not (root / 'server/lib/worker.py').exists()
+
+
+@pytest.mark.parametrize('shared', [False, True])
+def test_named_source_patch_audit_accepts_only_patch_shared(tmp_path, capsys, shared):
+    root = _named_tree(tmp_path)
+    write = ('patch_shared(monkeypatch, engine, "VALUE", 5)' if shared else 'engine.VALUE = 5')
+    (root / 'patch_site.py').write_text('from lib import engine\n' + write + '\n')
+    assert _run(root, '--all') == (0 if shared else 2)
+    if not shared:
+        assert 'patch_site.py:2' in capsys.readouterr().out
+    assert (root / 'server/lib/worker.py').exists() is shared

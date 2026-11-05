@@ -4,7 +4,7 @@ An S9 split (tools/refactor/split_apply.py) moves definitions out of a module
 into parts and leaves the old module as a facade. A moved definition then reads
 its names from its part's globals, so `monkeypatch.setattr(old, name, value)`
 no longer reaches it. `patch_shared` sets the name on the old module and on
-every part its split recipes list that exists and holds the same object, and
+every part its split and method recipes list that exists and holds the same object, and
 on nothing else: a shared helper such as `now_ms` stays untouched in modules
 outside the family. Where the split is not applied (main), the family is the
 module alone and this is exactly `monkeypatch.setattr(module, name, value)`.
@@ -23,7 +23,8 @@ _RECIPES = _REPO / "tools" / "refactor" / "splits"
 _MISSING = object()
 
 
-def split_family(module: types.ModuleType, recipes: pathlib.Path | None = None) -> list[types.ModuleType]:
+def split_family(module: types.ModuleType, recipes: pathlib.Path | None = None, *,
+                 methods: pathlib.Path | None = None) -> list[types.ModuleType]:
     """The parts the split recipes say came from `module`, as imported modules;
     parts whose file does not exist (the split is not applied) are left out."""
     recipes = recipes or _RECIPES
@@ -41,6 +42,20 @@ def split_family(module: types.ModuleType, recipes: pathlib.Path | None = None) 
                 if not (_REPO / "server" / rel).exists():
                     continue
                 parts.append(importlib.import_module(rel[:-3].replace("/", ".")))
+    # Named-class moves copy module imports into mixins. Include method
+    # consumers of both the original facade and its already applied parts.
+    reachable = {old, *(part.__name__.replace(".", "/") + ".py" for part in parts)}
+    methods = methods if methods is not None else recipes.parent / "methods"
+    for path in sorted(methods.glob("*.toml")) if methods.is_dir() else ():
+        data = tomllib.loads(path.read_text())
+        if data.get("source_module") not in reachable:
+            continue
+        for group in data.get("group", []):
+            rel = group["module"]
+            if (_REPO / "server" / rel).exists():
+                part = importlib.import_module(rel[:-3].replace("/", "."))
+                if part not in parts:
+                    parts.append(part)
     return parts
 
 
@@ -62,14 +77,15 @@ def split_origin(path: str, name: str | None = None, recipes: pathlib.Path | Non
 
 
 def patch_shared(monkeypatch, module: types.ModuleType, name: str, value,
-                 recipes: pathlib.Path | None = None, *, raising: bool = True) -> None:
+                 recipes: pathlib.Path | None = None, *, raising: bool = True,
+                 methods: pathlib.Path | None = None) -> None:
     """monkeypatch.setattr(module, name, value, raising=raising), and the same on
     each part of the module's split family that holds the object the module holds."""
     original = getattr(module, name, _MISSING)
     monkeypatch.setattr(module, name, value, raising=raising)
     if original is _MISSING:
         return
-    for part in split_family(module, recipes):
+    for part in split_family(module, recipes, methods=methods):
         if getattr(part, name, _MISSING) is original:
             monkeypatch.setattr(part, name, value)
 

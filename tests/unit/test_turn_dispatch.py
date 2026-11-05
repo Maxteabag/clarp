@@ -731,7 +731,7 @@ def test_a_stop_finishing_after_the_send_parked_leaves_one_durable_row(tmp_path,
             finished.append(True)
         return row
 
-    monkeypatch.setattr(_td, "_park", park_then_finish_stop)
+    patch_shared(monkeypatch, _td, "_park", park_then_finish_stop)
     result = service.dispatch(text="waiting", requested_session="mike", trace_id="tW",
                               client_msg_id="m-waiting", synthesize_audio=False)
 

@@ -31,6 +31,9 @@ from __future__ import annotations
 import ast
 import collections
 import pathlib
+import tomllib
+
+import pytest
 
 SERVER = pathlib.Path(__file__).resolve().parents[2] / "server"
 LAYERS = ("persistence", "core", "features", "http")
@@ -195,7 +198,16 @@ UPWARD_BASELINE = frozenset({
 def _logical_module(module: str) -> str:
     """Generated parts keep their declared source module's architectural owner."""
     from tests.patching import split_origin
-    path = split_origin(module.replace(".", "/") + ".py")
+    rel = module.replace(".", "/") + ".py"
+    # Method mixins inherit the source class's module owner. That source may
+    # itself be an S9 part, so resolve the module split after the method move.
+    methods = SERVER.parent / "tools/refactor/methods"
+    for recipe in sorted(methods.glob("*.toml")):
+        data = tomllib.loads(recipe.read_text())
+        if data.get("source_module") and any(g.get("module") == rel for g in data.get("group", [])):
+            rel = data["source_module"]
+            break
+    path = split_origin(rel)
     parts = list(pathlib.PurePosixPath(path).with_suffix("").parts)
     if len(parts) > 1 and parts[-1] == "__init__":
         parts.pop()
@@ -315,7 +327,8 @@ def test_an_alias_import_counts_as_its_new_module(tmp_path):
     assert layer("lib.persistence.schema") == layer("lib.persistence.migrations.v099") == 0
 
 
-def test_declared_split_preserves_layer_and_import_debt_but_not_new_edges(tmp_path, monkeypatch):
+@pytest.mark.parametrize("cut", ["split", "method", "method-part"])
+def test_declared_moves_preserve_layer_and_import_debt_but_not_new_edges(tmp_path, monkeypatch, cut):
     import sys
     from tests import patching
     root = tmp_path / 'server'
@@ -332,13 +345,32 @@ def test_declared_split_preserves_layer_and_import_debt_but_not_new_edges(tmp_pa
     monkeypatch.setattr(sys.modules[__name__], 'SERVER', root)
     before = upward()
     assert before == {'lib.turn_dispatch -> lib.dreaming'}
-    (recipes / 's4.toml').write_text(
-        '[[split]]\nmodule="lib/turn_dispatch.py"\n'
-        '[[split.part]]\nmodule="lib/turn_command.py"\nnames=["moved"]\n')
-    original.write_text('from .turn_command import moved\n')
-    part = root / 'lib/turn_command.py'
-    part.write_text(body)
-    assert layer('lib.turn_command') == layer('lib.turn_dispatch')
+    if cut == 'split':
+        (recipes / 's4.toml').write_text(
+            '[[split]]\nmodule="lib/turn_dispatch.py"\n'
+            '[[split.part]]\nmodule="lib/turn_command.py"\nnames=["moved"]\n')
+        original.write_text('from .turn_command import moved\n')
+        part = root / 'lib/turn_command.py'
+        part.write_text(body)
+    else:
+        source = 'lib/turn_command.py' if cut == 'method-part' else 'lib/turn_dispatch.py'
+        if cut == 'method-part':
+            (recipes / 's4.toml').write_text(
+                '[[split]]\nmodule="lib/turn_dispatch.py"\n'
+                '[[split.part]]\nmodule="lib/turn_command.py"\nnames=["Engine"]\n')
+            original.write_text('from .turn_command import Engine\n')
+        methods = root.parent / 'tools/refactor/methods'
+        methods.mkdir(parents=True)
+        (methods / 's4.toml').write_text(
+            f'source_module="{source}"\nsource_class="Engine"\n'
+            '[[group]]\nname="drain"\nmodule="lib/turn_drain.py"\n'
+            'class="DrainMixin"\nmembers=["moved"]\n')
+        (root / source).write_text('from .turn_drain import DrainMixin\n'
+                                  'class Engine(DrainMixin):\n    def stays(self): pass\n')
+        part = root / 'lib/turn_drain.py'
+        body = 'class DrainMixin:\n    def moved(self):\n        from . import dreaming\n'
+        part.write_text(body)
+    assert layer(_module_name(part)) == layer('lib.turn_dispatch')
     assert upward() == before
     (root / 'lib/new_feature.py').write_text('')
     part.write_text(body + '\ndef new():\n    from . import new_feature\n')
