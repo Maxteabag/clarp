@@ -414,17 +414,22 @@ def test_a_google_preview_of_a_voice_off_the_list_fails_and_never_plays_the_defa
     assert env.spoken() == []
 
 
-@pytest.mark.parametrize("requested, google_fails", [
-    ("nb-NO-Chirp3-HD-Nobody", False),              # an id off the list
-    ("nb-NO-Chirp3-HD-Aoede", True),                # a valid voice whose synthesis fails
-], ids=["invalid-voice", "provider-failure"])
-def test_a_google_preview_uses_its_configured_fallback_when_synthesis_fails(env, requested, google_fails):
-    """VP-10: invalid voice/provider failures use the explicit fallback; the Google default
-    never replaces the requested voice."""
+@pytest.mark.parametrize("requested", ["nb-NO-Chirp3-HD-Nobody"], ids=["invalid-voice"])
+def test_a_google_preview_never_falls_back_to_another_provider(env, requested):
+    """VP-10 clarification 2: an unusable requested voice refuses, even with a working fallback."""
     _record_google(env)
-    if google_fails:
-        env.fail.add("google")
     env.configure("google", fallback="elevenlabs")
+    answer = _preview(env, {"voice_id": requested, "text": "Hello"})
+    assert answer["status"] == 500
+    assert env.spoken() == []
+
+
+def test_a_google_preview_uses_its_configured_fallback_when_synthesis_fails(env):
+    """Quota/outage failures use the explicit fallback; invalid voices are a separate refusal."""
+    _record_google(env)
+    env.fail.add("google")
+    env.configure("google", fallback="elevenlabs")
+    requested = "nb-NO-Chirp3-HD-Aoede"
     answer = _preview(env, {"voice_id": requested, "text": "Hello"})
     assert answer["status"] == 200
     assert env.spoken() == [("elevenlabs", requested)]
