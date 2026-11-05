@@ -81,3 +81,33 @@ def test_cartesia_websocket_streams_raw_pcm_chunks(monkeypatch, tmp_path):
     assert total == len(b"pcm-apcm-b")
     assert fake.closed is True
 
+
+
+def test_connection_and_send_share_the_absolute_first_byte_budget(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    import pytest
+    now = [0.0]
+    class Socket:
+        closed = False
+        timeout = 10.0
+        def settimeout(self, value):self.timeout = value
+        def send(self, payload):
+            duration = 8.0
+            now[0] += min(duration, self.timeout)
+            if duration >= self.timeout:
+                raise cartesia_ws.websocket.WebSocketTimeoutException('send timed out')
+        def recv(self):pytest.fail('expired first-byte attempt reached recv')
+        def close(self):self.closed = True
+        def shutdown(self):self.closed = True
+    socket = Socket()
+    def opened(*args, **kwargs):
+        socket.timeout = kwargs['timeout']
+        now[0] += 8.0  # legitimate connection/setup cost below its timeout
+        return socket
+    monkeypatch.setattr(cartesia_ws, 'time', SimpleNamespace(perf_counter=lambda: now[0]))
+    monkeypatch.setattr(cartesia_ws, '_open_ws', opened)
+    with pytest.raises((cartesia_ws.CartesiaError, cartesia_ws.websocket.WebSocketTimeoutException)):
+        cartesia_ws.synthesize_raw_pcm(text='Synthetic', voice_id='v', api_key='key', out_path=tmp_path/'raw.pcm')
+    assert socket.closed
+    assert now[0] <= cartesia_ws.RAW_FIRST_BYTE_BUDGET_SEC, 'connect + send consumed separate budgets before fallback could begin'
+
