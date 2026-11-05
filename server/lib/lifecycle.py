@@ -339,6 +339,20 @@ def compare_and_set_where(con: sqlite3.Connection, lc: Lifecycle, events: str | 
     unknown = [e for e in events if not any(k[0] == e for k in lc._table)]
     if unknown:
         raise LifecycleError(f"{lc.name}: no edge for event(s) {unknown}")
+    # One statement per target is only the events' meaning when no row can
+    # match two of them: the source sets must not overlap (one source, two
+    # targets, would resolve to whichever ran first), and no target may be a
+    # source of the call (a row moved by one statement would match the next).
+    if len(by_target) > 1:
+        sources = [src for _, src in sorted(by_target.items())]
+        shared = sorted({s for i, a in enumerate(sources) for b in sources[i + 1:] for s in a & b})
+        chained = sorted(set(by_target) & set().union(*sources))
+        if shared or chained:
+            raise LifecycleError(
+                f"{lc.name}: events {list(events)} cannot run as one set-based write: "
+                + (f"sources {shared} have two targets" if shared else "")
+                + ("; " if shared and chained else "")
+                + (f"targets {chained} are also sources" if chained else ""))
     if returning and returning != "*" and not all(_IDENT.match(c.strip()) for c in returning.split(",")):
         raise LifecycleError(f"{lc.name}: bad returning columns {returning!r}")
     own = len(by_target) > 1 and not con.in_transaction

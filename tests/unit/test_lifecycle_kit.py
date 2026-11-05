@@ -604,21 +604,37 @@ def test_compare_and_set_where_outside_a_transaction_is_one_autocommit_statement
 
 def test_compare_and_set_where_wraps_several_targets_in_one_transaction(qcon):
     lc = _queue()
-    _rows_in(qcon, ("t1-a", "started"), ("t1-b", "failed"))
+    _rows_in(qcon, ("t1-a", "queued"), ("t1-b", "started"))
     seen = _traced(qcon)
-    lk.compare_and_set_where(qcon, lc, ("settle_failed", "resettle_done"), where="1", now=6)
+    lk.compare_and_set_where(qcon, lc, ("claim", "settle_done"), where="1", now=6)   # disjoint
     qcon.set_trace_callback(None)
     assert [x.split()[0] for x in seen] == ["BEGIN", "UPDATE", "UPDATE", "COMMIT"]
-    assert [_q(qcon, k)[0] for k in ("t1-a", "t1-b")] == ["failed", "done"]
+    assert [_q(qcon, k)[0] for k in ("t1-a", "t1-b")] == ["claimed", "done"]
 
 
 def test_compare_and_set_where_joins_the_callers_transaction(qcon):
     lc = _queue()
-    _rows_in(qcon, ("t1-a", "started"), ("t1-b", "failed"))
+    _rows_in(qcon, ("t1-a", "queued"), ("t1-b", "started"))
     qcon.execute("BEGIN IMMEDIATE")
     seen = _traced(qcon)
-    lk.compare_and_set_where(qcon, lc, ("settle_failed", "resettle_done"), where="1", now=6)
+    lk.compare_and_set_where(qcon, lc, ("claim", "settle_done"), where="1", now=6)
     qcon.set_trace_callback(None)
     assert [x.split()[0] for x in seen] == ["UPDATE", "UPDATE"]          # no nested BEGIN or COMMIT
     qcon.execute("ROLLBACK")                                             # the caller's rollback undoes both
-    assert [_q(qcon, k)[0] for k in ("t1-a", "t1-b")] == ["started", "failed"]
+    assert [_q(qcon, k)[0] for k in ("t1-a", "t1-b")] == ["queued", "started"]
+
+
+
+@pytest.mark.parametrize("events, problem", [
+    # Review A3 (kit-queue r1 F1): release's target queued is claim's source,
+    # so the second statement would move the row the first one just moved.
+    (("claim", "release"), "targets ['claimed', 'queued'] are also sources"),
+    # Review A3 (kit-queue r1 F2): queued -> claimed and queued -> cancelled.
+    (("claim", "cancel"), "sources ['queued'] have two targets"),
+])
+def test_compare_and_set_where_refuses_events_whose_statements_could_overlap(qcon, events, problem):
+    lc = _queue()
+    _rows_in(qcon, ("t1-a", "queued"), ("t1-b", "claimed"))
+    with pytest.raises(lk.LifecycleError, match=re.escape(problem)):
+        lk.compare_and_set_where(qcon, lc, events, where="1", now=5)
+    assert [_q(qcon, k)[0] for k in ("t1-a", "t1-b")] == ["queued", "claimed"]   # nothing written
