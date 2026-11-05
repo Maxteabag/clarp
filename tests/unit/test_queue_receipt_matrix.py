@@ -280,3 +280,20 @@ def test_the_claim_reset_treats_a_missing_claim_time_as_stale(clock):
     db.conn().execute("UPDATE queued_turns SET status = 'claimed', claimed_at = NULL")
     assert turn_queue.reset_stale_claims(30_000, exclude=("q2",)) == 1
     assert [(r[0], r[3], r[6]) for r in _rows()] == [("q1", "queued", None), ("q2", "claimed", None)]
+
+
+@pytest.mark.parametrize("status", ["queued", "parked"])
+def test_withdraw_unclaimed_keeps_a_waiting_row_with_a_claim_time(clock, status):
+    """A claim stamp fences withdrawal even while the row is queued or parked.
+    The ordinary unstamped neighbour can still be withdrawn."""
+    _insert("q1", status, at=NOW - 60_000)
+    _insert("q2", status, at=NOW - 50_000)
+    db.conn().execute("UPDATE queued_turns SET claimed_at = ? WHERE queue_id = 'q1'",
+                      (NOW - 60_000,))
+    before = _rows()[0]
+
+    assert turn_queue.withdraw_unclaimed("q1") is False
+    assert _rows()[0] == before
+    assert turn_queue.withdraw_unclaimed("q2") is True
+    assert [(r[0], r[3], r[4]) for r in _rows()] == [
+        ("q1", status, "hello"), ("q2", "withdrawn", "")]
