@@ -301,3 +301,35 @@ def test_a_legacy_non_google_preview_whose_fallback_is_the_refused_google_is_409
     assert boundaries["google"] == [] and credentials == []      # no Google synthesis, network or credentials
     assert not preview_host["sentinel"].exists()                 # the legacy adapter never ran
     assert list(preview_host["audio"].iterdir()) == []           # no completed clip
+
+
+@pytest.mark.parametrize("fallback_fails", [False, True], ids=["working-fallback-audio", "failing-fallback-primary-error"])
+def test_a_quota_preview_uses_its_fallback_or_keeps_the_primary_error(
+        preview_host, boundaries, adapters, monkeypatch, fallback_fails):
+    """VP-10: quota is retriable; a failed fallback must not replace the primary HTTP error."""
+    from dataclasses import replace
+    from lib import config, tts_registry
+    for child in (adapters / "legacy-google").iterdir():
+        child.unlink()
+    (adapters / "legacy-google").rmdir()
+    monkeypatch.setattr(config, "_CACHED", replace(
+        config.load(), tts_fallback="elevenlabs", eleven_api_key="fallback-key"))
+    calls = []
+
+    def fallback(*, out_path, **kwargs):
+        calls.append("elevenlabs")
+        if fallback_fails:
+            raise RuntimeError("fallback transport down")
+        pathlib.Path(out_path).write_bytes(b"ID3fallback-audio")
+        return len(b"ID3fallback-audio")
+    monkeypatch.setattr(tts_registry, "synthesize_streaming", fallback)
+    status, raw = _preview(preview_host)
+    assert boundaries["google"] == [AOEDE] and calls == ["elevenlabs"]
+    if fallback_fails:
+        assert status == 500 and json.loads(raw) == {"error": "google_quota"}
+        assert list(preview_host["audio"].iterdir()) == []
+        assert "providerFallbackFailed" in preview_host["events"]
+    else:
+        assert status == 200
+        audio_status, audio = _call(preview_host["base"], "GET", json.loads(raw)["url"])
+        assert audio_status == 200 and audio == b"ID3fallback-audio"
