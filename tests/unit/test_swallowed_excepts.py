@@ -189,3 +189,36 @@ def test_the_scanner_sees_every_silent_form():
         "    try: pass\n"
         "    except Exception: return frozenset\n")
     assert len(swallowed(tree)) == 8
+
+
+def test_declared_swallow_moves_with_its_source_but_new_code_stays_physical(tmp_path, monkeypatch):
+    import sys
+    import pytest
+    from tests import patching
+    root = tmp_path / 'server'
+    (root / 'lib').mkdir(parents=True)
+    (root / 'server.py').write_text('')
+    body = 'def moved():\n    try: pass\n    except Exception: pass\n'
+    original = root / 'lib/old.py'
+    original.write_text(body)
+    recipes = tmp_path / 'splits'
+    recipes.mkdir()
+    monkeypatch.setattr(patching, '_RECIPES', recipes)
+    monkeypatch.setattr(sys.modules[__name__], 'SERVER', root)
+    monkeypatch.setattr(sys.modules[__name__], 'BASELINE', {'lib/old.py': 1})
+    assert current() == {'lib/old.py': 1}
+    (recipes / 's4.toml').write_text(
+        '[[split]]\nmodule="lib/old.py"\n'
+        '[[split.part]]\nmodule="lib/part.py"\nnames=["moved"]\n')
+    original.write_text('from .part import moved\n')
+    part = root / 'lib/part.py'
+    part.write_text(body)
+    assert current() == {'lib/old.py': 1}
+    added = '\ndef new():\n    try: pass\n    except Exception: return None\n'
+    part.write_text(body + added)
+    assert current() == {'lib/old.py': 1, 'lib/part.py': 1}
+    with pytest.raises(AssertionError, match='lib/part.py'):
+        test_no_new_silently_swallowed_excepts()
+    part.write_text(body.replace('except Exception: pass', 'except Exception: raise') + added)
+    with pytest.raises(AssertionError, match='lib/old.py'):
+        test_baseline_only_shrinks()
