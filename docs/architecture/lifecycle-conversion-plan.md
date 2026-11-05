@@ -255,7 +255,7 @@ The transaction has one owner:
   rollback, including the revision bump.
 - `park_at_head` and `take_over_at_head` join their caller's existing write
   transaction. The dispatcher owns that transaction in `_park_at_head` and
-  `transfer_parked_recoveries_for_update`. It covers the new or parked head,
+  `TurnDispatchService.transfer_recovery_parks`. It covers the new or parked head,
   every other open row reinserted in their original sequence order, and the
   revision bump. For a recovery transfer it also covers turn settlement and
   the handoff projection.
