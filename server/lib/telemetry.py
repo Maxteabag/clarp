@@ -264,9 +264,13 @@ def rollup_and_prune(*, now_ms: int | None = None,
            VALUES (?,?,?,?,?,?,?)
            ON CONFLICT(bucket_ms,source,event,path,status,upper_ms) DO UPDATE SET
                samples=excluded.samples""", latency)
+    # Detail expires by whole hours (RM-N8c): a delete inside an hour left a
+    # partial bucket that the next rollup re-aggregated, overwriting its full
+    # count with the remainder. Rows now live 24 to 25 h.
+    detail_cutoff = (now - DETAIL_RETENTION_MS) - (now - DETAIL_RETENTION_MS) % hour
     details = batched_delete.prune(
         c, "DELETE FROM diagnostic_events WHERE ts < ?",
-        (now - DETAIL_RETENTION_MS,), indexed=True)
+        (detail_cutoff,), indexed=True)
     rollups = batched_delete.prune(
         c, "DELETE FROM hourly_metrics WHERE bucket_ms < ?",
         (now - ROLLUP_RETENTION_MS,), indexed=True)
