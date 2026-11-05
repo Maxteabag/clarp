@@ -22,7 +22,7 @@ def _commit(root, message):
     return _git(root, 'rev-parse', 'HEAD')
 
 
-def _tree(root, split):
+def _tree(root, split, two_groups=False):
     (root / 'server/lib').mkdir(parents=True)
     (root / 'server/lib/__init__.py').write_text('')
     source = 'lib/client.py' if split else 'lib/engine.py'
@@ -34,6 +34,8 @@ class Engine:
     def read(self):
         return VALUE + self.bias
 '''
+    if two_groups:
+        text += '\n    def twice(self):\n        return self.read() * 2\n'
     (root / 'server/lib/engine.py').write_text(text)
     if not split:
         (root / 'server/lib/values.py').write_text('VALUE = 5\n')
@@ -42,6 +44,9 @@ class Engine:
         f'source_module = "{source}"\nsource_class = "Engine"\n'
         '[[group]]\nname = "read"\nmodule = "lib/read.py"\n'
         'class = "ReadMixin"\nmembers = ["read"]\n')
+    if two_groups:
+        recipe = root / 'tools/refactor/methods/engine.toml'
+        recipe.write_text(recipe.read_text() + '\n[[group]]\nname = \"twice\"\nmodule = \"lib/twice.py\"\nclass = \"TwiceMixin\"\nmembers = [\"twice\"]\n')
     if split:
         (root / 'tools/refactor/splits').mkdir()
         (root / 'tools/refactor/splits/engine.toml').write_text(
@@ -59,7 +64,8 @@ def _apply(root, split):
         methods.write(root, methods.split_apply.apply_split(root, entries[0]))
     found = methods.recipes(root)
     for _, groups in found:
-        methods.write(root, methods.s3_apply.apply(root, groups))
+        for count in range(1, len(groups) + 1):
+            methods.write(root, methods.s3_apply.apply(root, groups[:count]))
     return _commit(root, 'generated integration')
 
 
@@ -119,3 +125,12 @@ def test_old_module_of_an_unstarted_split_is_not_a_method_source(tmp_path):
     recipe.write_text(recipe.read_text().replace('lib/client.py', 'lib/engine.py'))
     with pytest.raises(methods.s3_apply.Refusal, match='unstarted split old module'):
         methods.validate(tmp_path, base, base, methods.recipes(tmp_path))
+
+
+@pytest.mark.parametrize('split', [False, True])
+def test_two_group_sequential_stage_output_validates(tmp_path, split):
+    # Real stage E writes each successive prefix, rather than one all-group move.
+    # The validator must accept exactly that output for original and split sources.
+    base, _ = _tree(tmp_path, split, two_groups=True)
+    head = _apply(tmp_path, split)
+    methods.validate(tmp_path, base, head, methods.recipes(tmp_path))
