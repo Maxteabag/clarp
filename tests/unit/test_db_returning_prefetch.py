@@ -22,17 +22,22 @@ def test_waited_returning_releases_writer_before_wait_sinks(tmp_path, monkeypatc
             polls.append(True)
             blocker.rollback()
         ticks = iter([100.0, 100.01, 100.5])
-        monkeypatch.setattr(db, "time", SimpleNamespace(monotonic=lambda: next(ticks), sleep=release))
+        monkeypatch.setattr(db, "time", SimpleNamespace(monotonic=lambda: next(ticks, 100.5), sleep=release))
         sink_admissions = []
         def sink(_detail, connection):
             assert not connection.in_transaction
-            contender.execute("BEGIN IMMEDIATE")
-            sink_admissions.append(True)
-            contender.rollback()
+            try:
+                contender.execute("BEGIN IMMEDIATE")
+            except sqlite3.OperationalError as error:
+                sink_admissions.append(error.sqlite_errorcode)
+            else:
+                sink_admissions.append(None)
+            finally:
+                contender.rollback()
         monkeypatch.setattr(log, "sqlite_write_wait", sink)
         cursor = writer.execute("INSERT INTO sample VALUES(7),(8) RETURNING value")
         assert polls == [True]  # the first real admission attempt was BUSY
-        assert sink_admissions == [True]
+        assert sink_admissions == [None]
         assert cursor.fetchone() == (7,)
         assert cursor.fetchall() == [(8,)]
         assert cursor.fetchone() is None
