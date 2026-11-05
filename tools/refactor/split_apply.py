@@ -47,6 +47,9 @@ reads through the old module (`setattr`, `monkeypatch.setattr`, `patch(...)`,
 attribute assignment), because after the move that patch would no longer
 reach the moved code. Retarget the patch to the new module in the same commit,
 or acknowledge it with evidence (`acknowledged_patches`, as in s3_moves.toml).
+Repeated plain top-level imports of the same root (``import X`` / ``import X.Y``)
+are allowed and emitted in source order. Aliases, from-imports and other
+rebindings of that root remain refused.
 
 Verification is separate (the merge script runs it per commit):
 `scripts/refactor/ast_identity.py BASE HEAD <old>=<old>,<part>,...` proves the
@@ -69,7 +72,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from s3_apply import (  # noqa: E402  - shared S3 machinery, unchanged
     Refusal, _acknowledged, _ast_identity, _call_arg, _file_bindings, _futures,
     _import_lines, _span, _top_definitions, _tracked_python, _unacknowledged,
-    module_bindings, rebound_imports, refuse_dynamic_globals, refuse_wildcards,
+    module_bindings, rebound_imports as _rebound_imports, refuse_dynamic_globals, refuse_wildcards,
 )
 
 RECIPES = "tools/refactor/splits"
@@ -255,6 +258,27 @@ def old_module_rebinds(root: pathlib.Path, old: str, names: set[str], skip: set[
 
 
 # ---- one split -----------------------------------------------------------------
+
+def rebound_imports(tree: ast.Module, tool=None) -> dict[str, str]:
+    """Keep ambiguous bindings refused, allowing repeated plain root imports.
+
+    ``import X`` and ``import X.Y`` both bind the root module X. Only
+    unconditional top-level imports without aliases qualify: all bindings of
+    that name must be such imports. _import_lines emits them in source order.
+    S3's shared checker keeps its existing, stricter rule.
+    """
+    rebound = _rebound_imports(tree, tool)
+    plain: dict[str, list[tuple[str, int]]] = {}
+    for stmt in tree.body:
+        if isinstance(stmt, ast.Import):
+            for alias in stmt.names:
+                if alias.asname is None:
+                    plain.setdefault(alias.name.split(".")[0], []).append(("import", stmt.lineno))
+    for name, sites in module_bindings(tree).items():
+        if name in rebound and sites == plain.get(name):
+            del rebound[name]
+    return rebound
+
 
 def _stmt_reads(tool, stmt: ast.stmt) -> set[str]:
     # ast_identity's reads for assignments too: a comprehension's own

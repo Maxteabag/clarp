@@ -246,8 +246,9 @@ def test_a_moved_definition_that_rebinds_a_staying_global_is_refused(tmp_path):
     ("import xml.dom\nimport xml.etree\n", "(xml.dom.__name__, xml.etree.__name__)",
      ("xml.dom", "xml.etree")),
 ])
-def test_plain_imports_of_the_same_root_move_in_source_order(tmp_path, imports, expression, expected):
-    root = _tree(tmp_path, old=imports + "\n\ndef run():\n    return " + expression + "\n")
+def test_plain_imports_of_the_same_root_move_in_source_order(tmp_path, monkeypatch, imports, expression, expected):
+    old = imports + "\n\ndef run():\n    return " + expression + "\n"
+    root = _tree(tmp_path, old=old)
     changes = split_apply.apply_split(root, _split([("lib/old_part.py", ["run"])]))
     part = changes["server/lib/old_part.py"]
     emitted = [ast.unparse(node) for node in ast.parse(part).body if isinstance(node, ast.Import)]
@@ -255,6 +256,12 @@ def test_plain_imports_of_the_same_root_move_in_source_order(tmp_path, imports, 
     namespace = {}
     exec(compile(part, "old_part.py", "exec"), namespace)
     assert namespace["run"]() == expected
+    identity = split_apply._ast_identity()
+    monkeypatch.setattr(identity, "_source", lambda ref, path: old if ref == "base" else changes["server/" + path])
+    problems, pairs = identity.compare("base", "head", "lib/old.py",
+                                      [path.removeprefix("server/") for path in changes])
+    assert problems == [] and all(before == after for _label, before, after in pairs), \
+        "the move must preserve AST and import identities"
 
 
 @pytest.mark.parametrize("bindings", [
