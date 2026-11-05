@@ -67,6 +67,11 @@ def synth(text, route, sink: AudioSink, purpose, *, cfg, raw_voice, agent, emit,
     try:
         written = selected.synthesize(spoken if provider == GEMINI else plain, sink)
     except Exception as primary_error:
+        preserve_primary = purpose in {"preview", "narration"}
+        if preserve_primary:
+            from .google_tts import GoogleIdCollision
+            if isinstance(primary_error, GoogleIdCollision):
+                raise  # a voice-id guard refusal, never a provider outage
         fallback = route.fallback
         if fallback in {"", "none", provider}:
             raise
@@ -75,10 +80,23 @@ def synth(text, route, sink: AudioSink, purpose, *, cfg, raw_voice, agent, emit,
                  detail={"provider": provider, "error": str(primary_error)[:200],
                          "fallback": fallback, "reason": "audio_streamed"})
             raise
+        selected = registry.get(fallback)
+        if preserve_primary and not selected.available:
+            emit("tts_worker", "providerFallbackFailed", context=context(), level="warn",
+                 detail={"provider": provider, "fallback": fallback, "reason": "not_configured"})
+            raise
         emit("tts_worker", "providerFallback", context=context(), level="warn",
              detail={"provider": provider, "error": str(primary_error)[:200], "fallback": fallback})
-        selected = registry.get(fallback)
-        written = selected.synthesize(spoken if fallback == GEMINI else plain, sink)
+        try:
+            written = selected.synthesize(spoken if fallback == GEMINI else plain, sink)
+        except Exception as fallback_error:
+            if not preserve_primary:
+                raise
+            emit("tts_worker", "providerFallbackFailed", context=context(), level="warn",
+                 detail={"provider": provider, "fallback": fallback, "error": str(fallback_error)[:200]})
+            if isinstance(fallback_error, GoogleIdCollision):
+                raise  # guard codes remain hard refusals, even on a fallback
+            raise primary_error from fallback_error
         emit("tts_worker", "spoke", context=context(),
              detail={"provider": fallback, "voice": selected.voice, "fallback_for": provider})
         return written

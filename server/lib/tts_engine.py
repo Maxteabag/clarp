@@ -43,6 +43,10 @@ class _FileElevenLabsProvider:
         self.engine = engine
         self.voice = resolve_voice(raw_voice, ELEVENLABS) or raw_voice
 
+    @property
+    def available(self):
+        return bool(self.engine.api_key and self.voice)
+
     def synthesize(self, text, sink):
         return synthesize_to_file(
             text, self.voice, sink.out_path, api_key=self.engine.api_key,
