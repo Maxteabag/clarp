@@ -202,7 +202,7 @@ UNVERIFIABLE = "google_id_unverifiable"
 def preview_host(tmp_path, adapters, config_file, boundaries, monkeypatch):
     """The real engine and handler with a global Google primary and a configured fallback, so a
     hidden fallback would show; the legacy adapter would leave a sentinel if it were ever run."""
-    from lib import config, tts_worker
+    from lib import config, tts_service
     from lib.tts_engine import ElevenLabsEngine
     sentinel = tmp_path / "adapter-ran"
     (adapters / "legacy-google" / "adapter").write_text(f"#!/bin/sh\ntouch '{sentinel}'\nexit 1\n")
@@ -211,8 +211,8 @@ def preview_host(tmp_path, adapters, config_file, boundaries, monkeypatch):
                            f'[google_tts]\ncredentials = "{placeholder}"\nproject = "fixture-project"\n')
     config.reset_cache()
     events = []
-    real_emit = tts_worker._emit
-    monkeypatch.setattr(tts_worker, "_emit", lambda *a, **kw: (events.append(a[1] if len(a) > 1 else kw.get("event")),
+    real_emit = tts_service.emit_event
+    monkeypatch.setattr(tts_service, "emit_event", lambda *a, **kw: (events.append(a[1] if len(a) > 1 else kw.get("event")),
                                                                  real_emit(*a, **kw)))
     audio = tmp_path / "preview-audio"
     audio.mkdir()
