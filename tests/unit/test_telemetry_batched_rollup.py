@@ -148,3 +148,34 @@ def test_an_emit_gets_the_lock_between_batches(monkeypatch):
     finally:
         other.close()
     assert len(admitted) >= 4, admitted
+
+
+def _hour_counts(c) -> dict[int, int]:
+    return {r[0]: r[1] for r in c.execute(
+        "SELECT bucket_ms, sum(samples) FROM hourly_metrics GROUP BY bucket_ms")}
+
+
+def _seed_minutes(start: int, minutes: int) -> None:
+    for minute in range(minutes):
+        telemetry.conn().execute(
+            """INSERT INTO diagnostic_events (ts,ts_iso,source,event,level,duration_ms)
+               VALUES (?, 't', 'server', 'httpRequest', 'info', 5)""", (start + minute * 60_000,))
+
+
+def test_a_rollup_keeps_every_hour_whole_across_runs_boot_passes_and_downtime():
+    """RM-N8c: the detail delete cut inside an hour; the next rollup
+    re-aggregated that hour from what was left and overwrote its full count.
+    Detail now expires by whole hours, so every hour's count stays whole."""
+    base = 200 * HOUR
+    _seed_minutes(base, 60 * 6)                         # six full hours, one row a minute
+    first = base + 24 * HOUR + 17 * 60_000              # cutoff 17 min into the first hour
+    for at in (first, first + 45_000, first + HOUR, first + 2 * HOUR + 5 * 60_000):
+        telemetry.rollup_and_prune(now_ms=at, checkpoint=False)
+        assert set(_hour_counts(telemetry.conn()).values()) == {60}, at
+    # A Host down for two days rolls up its last hours at the first run back.
+    telemetry.conn().execute("DELETE FROM hourly_metrics")
+    _seed_minutes(base + 10 * HOUR, 60 * 2)
+    telemetry.rollup_and_prune(now_ms=base + 60 * HOUR, checkpoint=False)
+    counts = _hour_counts(telemetry.conn())
+    assert counts[base + 10 * HOUR] == counts[base + 11 * HOUR] == 60
+    assert set(counts.values()) == {60}
