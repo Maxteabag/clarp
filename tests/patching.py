@@ -59,8 +59,7 @@ def split_family(module: types.ModuleType, recipes: pathlib.Path | None = None, 
     return parts
 
 
-def split_origin(path: str, name: str | None = None, recipes: pathlib.Path | None = None, *,
-                 methods: pathlib.Path | None = None) -> str:
+def split_origin(path: str, name: str | None = None, recipes: pathlib.Path | None = None) -> str:
     """The old module a split part came from, in the same spelling as `path`
     ("server/lib/x.py" or "lib/x.py"); `path` itself when no recipe lists it.
     With `name`, only when the recipe moved exactly that name into this part:
@@ -69,18 +68,12 @@ def split_origin(path: str, name: str | None = None, recipes: pathlib.Path | Non
     recipes = recipes or _RECIPES
     prefix = "server/" if path.startswith("server/") else ""
     rel = path[len(prefix):]
-    methods = methods if methods is not None else recipes.parent / "methods"
-    for recipe in sorted(methods.glob("*.toml")) if methods.is_dir() else ():
-        data = tomllib.loads(recipe.read_text())
-        for group in data.get("group", []):
-            if group["module"] == rel and (name is None or name in group.get("members", [])):
-                rel = data["source_module"]
     for recipe in sorted(recipes.glob("*.toml")) if recipes.is_dir() else ():
         for split in tomllib.loads(recipe.read_text()).get("split", []):
             for part in split.get("part", []):
                 if part.get("module") == rel and (name is None or name in part.get("names", [])):
                     return prefix + str(split["module"])
-    return prefix + rel
+    return path
 
 
 def patch_shared(monkeypatch, module: types.ModuleType, name: str, value,
