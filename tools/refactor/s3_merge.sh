@@ -15,7 +15,7 @@
 #      the old modules were taken from main in A and the split parts removed; one commit
 #      per split ("split_apply: <name>") and per repoint ("split_apply: repoint <name>"),
 #      each verified: ast_identity <previous> <this> <old>=<old>,<part>,... (top-level mode)
-# then the local gates. It prints the G1 and G2 commands for the merge captain;
+# then the remote gates. It prints the G1 and G2 commands for the merge captain;
 # G2 compares main against D and must show zero differences. With no recipe in
 # tools/refactor/splits/ stage D does nothing and D is C.
 #
@@ -349,14 +349,16 @@ for path in $generated $split_old $split_generated $method_sources $method_gener
 $stray"
 git merge-base --is-ancestor "$main" HEAD || die 3 "the result does not contain $main"
 
-# Local gates: in-process tests only (one file each; no test servers or subprocesses
-# on the laptop; test_s3_apply.py runs git, so it is a buildbox gate below).
-heavy=/var/tmp/clarp-refactor-program/bin/heavy
+# Every test runs on the buildbox, including these single-file gates (Peter's
+# laptop RAM order, 5 Nov). Keep separate pytest processes as before. The local
+# $PY is only for the Git/AST transformation above; the VM uses its own Python.
+heavy=/var/tmp/clarp-refactor-program/bin/heavy-remote
 for test in tests/integration/test_route_goldens.py tests/unit/test_import_layers.py \
             tests/unit/test_handler_boundary.py tests/integration/test_s3_helpers_identity.py \
             tests/unit/test_swallowed_excepts.py tests/unit/test_split_apply.py; do
   [ -f "$test" ] || continue
-  "$heavy" "$PY" -m pytest -n 0 -q -p no:cacheprovider "$test" >/dev/null 2>&1 || die 7 "local gate failed: $test"
+  "$heavy" uv run --frozen --group dev python -m pytest -n 0 -q -p no:cacheprovider "$test" \
+    || die 7 "remote gate failed: $test"
   echo "s3_merge: gate ok: $test"
 done
 

@@ -6,6 +6,7 @@ with a tiny server.py; the local gates skip because their test files are absent.
 from __future__ import annotations
 
 import os
+import json
 import pathlib
 import shutil
 import subprocess
@@ -93,14 +94,49 @@ def repo(tmp_path):
     return root
 
 
-def _merge(root, work="work"):
+def _merge(root, work="work", remote=None):
     _git(root, "switch", "-q", "integration")
     env = dict(os.environ, S3_PYTHON=sys.executable)
     script = root.parent / "s3_merge.sh"           # run a copy: the merge rewrites the tree
     shutil.copy(root / "tools" / "refactor" / "s3_merge.sh", script)
+    if remote is not None:
+        script.write_text(script.read_text().replace(
+            "/var/tmp/clarp-refactor-program/bin/heavy-remote", str(remote)))
     result = subprocess.run(["bash", str(script), "main", "integration", work], cwd=root,
                             capture_output=True, text=True, env=env)
     return result.returncode, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("remote_exit", [0, 19])
+def test_file_gates_run_remotely_and_stop_on_failure(repo, remote_exit):
+    gates = ["tests/integration/test_route_goldens.py", "tests/unit/test_import_layers.py",
+             "tests/unit/test_handler_boundary.py", "tests/integration/test_s3_helpers_identity.py",
+             "tests/unit/test_swallowed_excepts.py", "tests/unit/test_split_apply.py"]
+    for name in gates:
+        path = repo / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("raise AssertionError('gate must never execute locally')\n")
+    _commit(repo, "gate inputs")
+    calls = repo.parent / "remote-calls.jsonl"
+    remote = repo.parent / "heavy-remote"
+    remote.write_text(
+        f"#!{sys.executable}\nimport json, os, sys\n"
+        f"with open({str(calls)!r}, 'a') as f:\n"
+        "    f.write(json.dumps({'args': sys.argv[1:], 'cwd': os.getcwd()}) + '\\n')\n"
+        "print('remote gate output retained', flush=True)\n"
+        f"sys.exit({remote_exit})\n")
+    remote.chmod(0o700)
+    code, output = _merge(repo, remote=remote)
+    assert code == (0 if remote_exit == 0 else 7), output
+    actual = [json.loads(line) for line in calls.read_text().splitlines()]
+    expected = gates if remote_exit == 0 else gates[:1]
+    assert [call['args'] for call in actual] == [
+        ["uv", "run", "--frozen", "--group", "dev", "python", "-m", "pytest",
+         "-n", "0", "-q", "-p", "no:cacheprovider", gate] for gate in expected]
+    assert all(call['cwd'] == str(repo) for call in actual)
+    assert "remote gate output retained" in output
+    if remote_exit:
+        assert "remote gate failed: " + gates[0] in output
 
 
 def test_a_main_edit_to_a_moved_member_reaches_the_mixin(repo):

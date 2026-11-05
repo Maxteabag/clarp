@@ -3,6 +3,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from tests.patching import patch_shared
+
 from lib import agents, db, janitors, message_store, turn_queue
 from lib import compaction, oracle_delegations, turn_dispatch as td
 from lib.agent_lifecycle import AgentLifecycleService, AgentLifecycleError
@@ -104,7 +106,7 @@ def test_direct_and_forged_origins_rejected_before_side_effects(setup, monkeypat
 
 def test_spoken_name_cannot_grant_run_permission(setup, monkeypatch):
     s = setup
-    monkeypatch.setattr(td, "resolve_send_target", lambda **kw: td.SendTarget("sam", "hello", True))
+    patch_shared(monkeypatch, td, "resolve_send_target", lambda **kw: td.SendTarget("sam", "hello", True))
     with pytest.raises(td.DispatchError):
         dispatch(s, forced_session="", requested_session="worker", janitor_run_id="")
     assert not s.backend.spawned

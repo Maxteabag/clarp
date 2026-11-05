@@ -129,13 +129,16 @@ def record_goal_save(con, plan_id: str, old_goal: dict, new_goal: dict) -> None:
     new = {f: new_goal.get(f) for f in prior}
     owner = new_goal.get("owner_agent_id", "")
     actor = _attribute(_actor.get(), owner)
-    status = _last_status(con, plan_id)
     entries = []
     for index in range(start, new_end):
         kind = str(new_history[index - new_offset].get("kind") or "change")
         system = kind in SYSTEM_KINDS or (
             kind == "dependency_result" and actor["kind"] == "unattributed")
         entries.append((index, kind, system))
+    # Scheduler history cannot change status. Avoid scanning old ledger JSON
+    # under the writer lock unless a new entry actually needs its prior status.
+    status = _last_status(con, plan_id) if any(
+        kind in STATUS_KINDS for _, kind, _ in entries) else None
     if prior or any(not system for _, _, system in entries):
         guard_principal_goal(con, owner, actor)
     for index, kind, system in entries:

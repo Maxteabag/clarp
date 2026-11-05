@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import pytest
 
+from tests.patching import patch_shared
+
 from lib import turn_queue
 from lib import turn_dispatch as td
 
@@ -238,7 +240,7 @@ def test_a_second_stop_while_holding_also_holds_the_kept_sends(tmp_path, monkeyp
             world.stop()                      # Stop 2, inside the window
         return result
 
-    monkeypatch.setattr(td, "_stop_holds", holds_then_stop_again)
+    patch_shared(monkeypatch, td, "_stop_holds", holds_then_stop_again)
     _stop_with_arrivals(world, [("u_mid", "user", False)])
     assert fired == ["u_mid"]
     world.service.start_held_work()
