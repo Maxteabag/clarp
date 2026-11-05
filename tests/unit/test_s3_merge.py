@@ -547,3 +547,27 @@ def test_method_identity_difference_stops_with_12(repo):
     code, out = _merge(repo)
     assert code == 12, out
     assert 'method identity failed for read' in out
+
+
+@pytest.mark.parametrize('cleanup_exit', [0, 1])
+def test_failed_method_recipe_cleanup_stops_before_discovery(repo, monkeypatch, cleanup_exit):
+    _git(repo, 'switch', '-q', 'integration')
+    (repo / 'tools/refactor/methods').mkdir()
+    (repo / 'tools/refactor/methods/injected.toml').write_text('invalid TOML !!!')
+    _commit(repo, 'integration method injection')
+    _git(repo, 'switch', '-q', 'main')
+    (repo / 'README').write_text('main advances\n')
+    _commit(repo, 'main advances')
+    shim_dir = repo.parent / 'method-cleanup-shim'
+    shim_dir.mkdir()
+    shim = shim_dir / 'rm'
+    shim.write_text('#!/bin/sh\nif [ "$*" = "-rf -- tools/refactor/methods" ]; then\n'
+                    '  echo "synthetic method cleanup refusal" >&2\n'
+                    f'  exit {cleanup_exit}\nfi\nexec /bin/rm "$@"\n')
+    shim.chmod(0o755)
+    monkeypatch.setenv('PATH', str(shim_dir) + os.pathsep + os.environ['PATH'])
+    code, out = _merge(repo)
+    assert code == 11, out
+    assert 'synthetic method cleanup refusal' in out
+    assert 'TOMLDecodeError' not in out
+    assert (repo / 'tools/refactor/methods/injected.toml').exists()
