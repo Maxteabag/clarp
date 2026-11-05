@@ -15,6 +15,8 @@ from __future__ import annotations
 import datetime as _dt
 import hashlib
 import json
+import sqlite3
+from dataclasses import dataclass
 import time
 from typing import Any
 
@@ -619,9 +621,9 @@ class _ImportWriter:
     one snapshot (a deferred BEGIN) without the write lock and stops at the
     first write it would make; it records nothing, so an unchanged transcript
     writes nothing at all. Otherwise the import runs again as the locked
-    pass: every statement inside BEGIN IMMEDIATE, as before, so a decision
-    read from a live row cannot go stale before the write that acts on it,
-    committed in budgeted batches. Only the locked pass runs the recording
+    pass: the prepared prelude is revalidated inside BEGIN IMMEDIATE, before
+    any row decision can act on it. Remaining row reads and writes stay in
+    that transaction, committed in budgeted batches. Only the locked pass runs the recording
     helpers (team messages, Oracle delegations, Dreaming, heartbeats), once.
     """
 
@@ -705,30 +707,59 @@ def store_transcript_turns(*, agent_id: str, backend_session_id: str,
     # before taking SQLite's single writer lock, once per assistant message.
     visible_replies = _visible_replies(turns)
     database = _facade().conn()
-    for locked in (False, True):
-        writer = _ImportWriter(database, locked=locked)
+    # The marker precedes the snapshot's first read. Any other connection's
+    # commit after it invalidates the prepared reads, even if it occurs before
+    # the probe acquires its snapshot. Revalidation happens under the writer,
+    # before any prepared decision can cause a write (RM-N2 / RM-N10).
+    for _attempt in range(3):
+        marker = database.execute("PRAGMA data_version").fetchone()[0]
+        writer = _ImportWriter(database, locked=False)
         try:
+            prelude = _prepare_import_prelude(
+                writer, agent_id, backend_session_id, turns)
             out = _store_transcript_turns_txn(
                 writer, agent_id=agent_id,
                 backend_session_id=backend_session_id,
                 source_file=source_file, turns=turns,
                 capture_at=capture_at, captured=captured, out_seqs=out_seqs,
-                visible_replies=visible_replies)
+                visible_replies=visible_replies, prelude=prelude.for_pass())
             if on_stored is not None:
                 _write_checkpoint(writer, database, on_stored, captured)
-            writer.commit()
-            if not locked and database.in_transaction:
-                database.execute("COMMIT")  # the probe's read snapshot
+            if database.in_transaction:
+                database.execute("COMMIT")
             return out
         except _WriteNeeded:
             if database.in_transaction:
-                database.execute("ROLLBACK")  # end the probe's read snapshot
-            continue
+                database.execute("ROLLBACK")
         except Exception:
             if database.in_transaction:
                 database.execute("ROLLBACK")
             raise
-    raise AssertionError("the locked import pass cannot need a write")
+        # Copy the consumable client lists before taking the writer, too.
+        prepared = prelude.for_pass()
+        writer = _ImportWriter(database, locked=True)
+        try:
+            observed = writer.execute("PRAGMA data_version").fetchone()[0]
+            if observed != marker:
+                database.execute("ROLLBACK")
+                continue
+            out = _store_transcript_turns_txn(
+                writer, agent_id=agent_id,
+                backend_session_id=backend_session_id,
+                source_file=source_file, turns=turns,
+                capture_at=capture_at, captured=captured, out_seqs=out_seqs,
+                visible_replies=visible_replies, prelude=prepared)
+            if on_stored is not None:
+                _write_checkpoint(writer, database, on_stored, captured)
+            writer.commit()
+            return out
+        except Exception:
+            if database.in_transaction:
+                database.execute("ROLLBACK")
+            raise
+    # Use the existing importer's bounded SQLITE_BUSY retry/defer path. No
+    # rows or recording helpers ran for a rejected prepared snapshot.
+    raise sqlite3.OperationalError("database is locked: transcript prelude changed")
 
 
 def _visible_replies(turns: list[dict[str, Any]]) -> list[str]:
@@ -1131,35 +1162,26 @@ def _delete_slot(database, agent_id: str, backend_session_id: str,
         (agent_id, backend_session_id, source_file, seq)).rowcount
 
 
-def _store_transcript_turns_txn(database, *, agent_id: str,
-                                backend_session_id: str, source_file: str,
-                                turns: list[dict[str, Any]],
-                                start_seq: int = 0,
-                                carry: dict[str, Any] | None = None,
-                                capture_at: int | None = None,
-                                captured: dict[str, Any] | None = None,
-                                out_seqs: list[int] | None = None,
-                                visible_replies: list[str] | None = None,
-                                ) -> list[dict[str, Any]]:
-    """Import ``turns`` as transcript rows ``start_seq`` onward.
+@dataclass(frozen=True)
+class _ImportPrelude:
+    turn_index: Any
+    phases: list[str | None]
+    client_user_provenance: dict[str, list[tuple[str, str, str, str]]]
+    user_provenance: tuple[str, str, str]
 
-    A full import passes every turn (``start_seq`` 0, no ``carry``). The
-    incremental import passes the turns from a checkpointed turn on and the
-    state this loop carried when it reached that turn (``carry``, as
-    ``captured`` recorded it at ``capture_at``); the transcript then holds
-    ``start_seq + len(turns)`` turns in all.
-    """
-    out: list[dict[str, Any]] = []
-    if out_seqs is not None:
-        out_seqs.clear()
-    latest_revision = 0
+    def for_pass(self) -> _ImportPrelude:
+        return _ImportPrelude(
+            self.turn_index, self.phases,
+            {key: list(rows) for key, rows in self.client_user_provenance.items()},
+            self.user_provenance)
+
+
+def _prepare_import_prelude(database, agent_id, backend_session_id, turns) -> _ImportPrelude:
     from . import message_turns
     # Which turn wrote each row, how that turn ended, and each text row's
     # phase (docs/live-items.md §9).
     turn_index = message_turns.TurnIndex(database, agent_id)
     phases = _row_phases(turns)
-    touched_traces: set[str] = set()
-    newest_trace = ""
     # User turns the client already recorded durably (keyed by client_msg_id).
     # Claude's transcript carries its own copy of each; we link those back to
     # the client rows by text in send order rather than inserting a duplicate.
@@ -1178,11 +1200,43 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
             r["sender_agent_id"] or "",
             r["timestamp"],
         ))
+    return _ImportPrelude(turn_index, phases, client_user_provenance,
+                          _latest_user_provenance(database, agent_id, backend_session_id))
+
+
+def _store_transcript_turns_txn(database, *, agent_id: str,
+                                backend_session_id: str, source_file: str,
+                                turns: list[dict[str, Any]],
+                                start_seq: int = 0,
+                                carry: dict[str, Any] | None = None,
+                                capture_at: int | None = None,
+                                captured: dict[str, Any] | None = None,
+                                out_seqs: list[int] | None = None,
+                                visible_replies: list[str] | None = None,
+                                prelude: _ImportPrelude | None = None,
+                                ) -> list[dict[str, Any]]:
+    """Import ``turns`` as transcript rows ``start_seq`` onward.
+
+    A full import passes every turn (``start_seq`` 0, no ``carry``). The
+    incremental import passes the turns from a checkpointed turn on and the
+    state this loop carried when it reached that turn (``carry``, as
+    ``captured`` recorded it at ``capture_at``); the transcript then holds
+    ``start_seq + len(turns)`` turns in all.
+    """
+    out: list[dict[str, Any]] = []
+    if out_seqs is not None:
+        out_seqs.clear()
+    latest_revision = 0
+    from . import message_turns
+    prelude = prelude or _prepare_import_prelude(database, agent_id, backend_session_id, turns)
+    turn_index, phases = prelude.turn_index, prelude.phases
+    client_user_provenance = prelude.client_user_provenance
+    touched_traces: set[str] = set()
+    newest_trace = ""
     # Client rows this import linked to transcript turns, in match order.
     consumed_client_ids: list[str] = []
     if carry is None:
-        latest_user_key, current_origin, current_sender_agent_id = _latest_user_provenance(
-            database, agent_id, backend_session_id)
+        latest_user_key, current_origin, current_sender_agent_id = prelude.user_provenance
         # Incremental transcript reads may begin with assistant-only deltas. Carry
         # the durable heartbeat user key across those reads so every partial update
         # is still accounted once per heartbeat turn, never once per delta.
