@@ -16,7 +16,7 @@ import datetime as _dt
 import hashlib
 import json
 import time
-from typing import Any
+from typing import Any, NamedTuple
 
 from .clock import iso_from_ms as _iso_from_ms, now_ms
 from .db import conn, note_import_holds_lock
@@ -1327,6 +1327,106 @@ def _resolve_reply_id(database, *, agent_id: str, backend_session_id: str,
     return msg_id, changed
 
 
+class _Upserted(NamedTuple):
+    timestamp: Any
+    tools: list
+    display_cells: list
+    row_trace: str
+    unchanged: bool
+    revision: int
+    changed: bool          # an adopted occupant was parked out of the slot
+
+
+def _upsert_row(database, *, agent_id: str, backend_session_id: str,
+                source_file: str, seq: int, msg_id: str, turn: dict[str, Any],
+                role: str, text: str, origin: str, sender_agent_id: str,
+                request_trace: str, phase: str | None, turn_index,
+                final_rows: "_FinalRows") -> _Upserted:
+    """Write one transcript row at its slot (S5 step 5).
+
+    Its trace is the request's (a reply) or its own, else the turn its time
+    falls in, else what the row already had; tool statuses settle by that
+    turn's outcome. An identical row keeps its revision and is not rewritten
+    unless it moves; a moving row first parks an adopted occupant out of the
+    slot (RM-N1b)."""
+    from . import message_turns
+    changed = False
+    timestamp = turn.get("timestamp")
+    kind = turn.get("kind")
+    tool_name = turn.get("tool_name")
+    tools = turn.get("tools") if isinstance(turn.get("tools"), list) else []
+    display_cells = (
+        turn.get("display_cells")
+        if isinstance(turn.get("display_cells"), list)
+        else []
+    )
+    existing = database.execute(
+        """SELECT role, timestamp, text, kind, tool_name, tools_json,
+                  display_cells_json, updated_at, revision,
+                  origin, sender_agent_id, trace_id, phase, source_file, seq
+             FROM messages WHERE message_id = ?""",
+        (msg_id,),
+    ).fetchone()
+    row_trace = (request_trace if role == "assistant" else str(turn.get("trace_id") or "")) \
+        or turn_index.trace_at(timestamp) or ((existing["trace_id"] or "") if existing else "")
+    outcome = turn_index.outcomes.get(row_trace)
+    tools = message_turns.settle_statuses(tools, outcome)
+    display_cells = message_turns.settle_statuses(display_cells, outcome)
+    phase = phase
+    tools_json = json.dumps(tools, separators=(",", ":"))
+    display_cells_json = json.dumps(display_cells, separators=(",", ":"))
+    payload = (
+        role, timestamp, text, kind, tool_name,
+        tools_json, display_cells_json, origin, sender_agent_id,
+    )
+    unchanged = existing is not None and _row_payload(existing) == payload \
+        and (existing["trace_id"] or "") == row_trace and existing["phase"] == phase
+    revision = int(existing["revision"]) if unchanged else _next_revision(database)
+    updated_at = int(existing["updated_at"]) if unchanged else now_ms()
+    # The upsert of an identical row still rewrites its pages into the WAL;
+    # skip it when every column it sets already holds that value.
+    rewrite = not unchanged or existing["source_file"] != source_file \
+        or existing["seq"] != seq
+    if rewrite and _park_adopted_occupant(database, agent_id, backend_session_id,
+                                          source_file, seq, msg_id):
+        changed = True
+    if rewrite:
+        database.execute(
+            """INSERT INTO messages (
+               message_id, agent_id, backend_session_id, source_file, seq,
+               role, timestamp, text, kind, tool_name, tools_json,
+               display_cells_json, updated_at, revision, origin,
+               sender_agent_id, trace_id, phase
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(message_id) DO UPDATE SET
+               trace_id = COALESCE(excluded.trace_id, messages.trace_id),
+               phase = excluded.phase,
+               source_file = excluded.source_file,
+               seq = excluded.seq,
+               role = excluded.role,
+               timestamp = excluded.timestamp,
+               text = excluded.text,
+               kind = excluded.kind,
+               tool_name = excluded.tool_name,
+               tools_json = excluded.tools_json,
+               display_cells_json = excluded.display_cells_json,
+               updated_at = excluded.updated_at,
+               revision = excluded.revision,
+               origin = excluded.origin,
+               sender_agent_id = excluded.sender_agent_id""",
+        (msg_id, agent_id, backend_session_id, source_file, seq,
+             role, timestamp, text, kind, tool_name, tools_json,
+             display_cells_json, updated_at,
+             revision, origin, sender_agent_id, row_trace or None, phase),
+        )
+    if source_file.lower().startswith("final:"):
+        final_rows.invalidate()
+    else:
+        # The row now carries this transcript's source_file, not final:.
+        final_rows.discard((msg_id,))
+    return _Upserted(timestamp, tools, display_cells, row_trace, unchanged, revision, changed)
+
+
 def _store_transcript_turns_txn(database, *, agent_id: str,
                                 backend_session_id: str, source_file: str,
                                 turns: list[dict[str, Any]],
@@ -1573,85 +1673,22 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
                 reply_trace=reply_trace, final_rows=final_rows,
                 adopted_final_ids=adopted_final_ids, placed_ids=placed_ids)
             skipped_slot_removed = skipped_slot_removed or changed
-        timestamp = turn.get("timestamp")
-        kind = turn.get("kind")
-        tool_name = turn.get("tool_name")
-        tools = turn.get("tools") if isinstance(turn.get("tools"), list) else []
-        display_cells = (
-            turn.get("display_cells")
-            if isinstance(turn.get("display_cells"), list)
-            else []
-        )
-        existing = database.execute(
-            """SELECT role, timestamp, text, kind, tool_name, tools_json,
-                      display_cells_json, updated_at, revision,
-                      origin, sender_agent_id, trace_id, phase, source_file, seq
-                 FROM messages WHERE message_id = ?""",
-            (msg_id,),
-        ).fetchone()
-        row_trace = (current_request_trace if role == "assistant" else str(turn.get("trace_id") or "")) \
-            or turn_index.trace_at(timestamp) or ((existing["trace_id"] or "") if existing else "")
-        outcome = turn_index.outcomes.get(row_trace)
-        tools = message_turns.settle_statuses(tools, outcome)
-        display_cells = message_turns.settle_statuses(display_cells, outcome)
-        phase = phases[index] if role == "assistant" else None
-        newest_trace = row_trace or newest_trace
-        tools_json = json.dumps(tools, separators=(",", ":"))
-        display_cells_json = json.dumps(display_cells, separators=(",", ":"))
-        payload = (
-            role, timestamp, text, kind, tool_name,
-            tools_json, display_cells_json, origin, sender_agent_id,
-        )
-        unchanged = existing is not None and _row_payload(existing) == payload \
-            and (existing["trace_id"] or "") == row_trace and existing["phase"] == phase
-        if row_trace and not unchanged:
+        row = _upsert_row(
+            database, agent_id=agent_id, backend_session_id=backend_session_id,
+            source_file=source_file, seq=seq, msg_id=msg_id, turn=turn, role=role,
+            text=text, origin=origin, sender_agent_id=sender_agent_id,
+            request_trace=current_request_trace,
+            phase=phases[index] if role == "assistant" else None,
+            turn_index=turn_index, final_rows=final_rows)
+        timestamp, tools, display_cells = row.timestamp, row.tools, row.display_cells
+        unchanged, revision = row.unchanged, row.revision
+        skipped_slot_removed = skipped_slot_removed or row.changed
+        newest_trace = row.row_trace or newest_trace
+        if row.row_trace and not unchanged:
             # Only turns whose rows changed are re-stamped: an import re-reads
             # the whole transcript, and an untouched turn's summary stands.
-            touched_traces.add(row_trace)
-        revision = int(existing["revision"]) if unchanged else _next_revision(database)
-        updated_at = int(existing["updated_at"]) if unchanged else now_ms()
+            touched_traces.add(row.row_trace)
         latest_revision = max(latest_revision, revision)
-        # The upsert of an identical row still rewrites its pages into the WAL;
-        # skip it when every column it sets already holds that value.
-        rewrite = not unchanged or existing["source_file"] != source_file \
-            or existing["seq"] != seq
-        if rewrite and _park_adopted_occupant(database, agent_id, backend_session_id,
-                                              source_file, seq, msg_id):
-            skipped_slot_removed = True
-        if rewrite:
-            database.execute(
-                """INSERT INTO messages (
-                   message_id, agent_id, backend_session_id, source_file, seq,
-                   role, timestamp, text, kind, tool_name, tools_json,
-                   display_cells_json, updated_at, revision, origin,
-                   sender_agent_id, trace_id, phase
-               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-               ON CONFLICT(message_id) DO UPDATE SET
-                   trace_id = COALESCE(excluded.trace_id, messages.trace_id),
-                   phase = excluded.phase,
-                   source_file = excluded.source_file,
-                   seq = excluded.seq,
-                   role = excluded.role,
-                   timestamp = excluded.timestamp,
-                   text = excluded.text,
-                   kind = excluded.kind,
-                   tool_name = excluded.tool_name,
-                   tools_json = excluded.tools_json,
-                   display_cells_json = excluded.display_cells_json,
-                   updated_at = excluded.updated_at,
-                   revision = excluded.revision,
-                   origin = excluded.origin,
-                   sender_agent_id = excluded.sender_agent_id""",
-            (msg_id, agent_id, backend_session_id, source_file, seq,
-                 role, timestamp, text, kind, tool_name, tools_json,
-                 display_cells_json, updated_at,
-                 revision, origin, sender_agent_id, row_trace or None, phase),
-            )
-        if source_file.lower().startswith("final:"):
-            final_rows.invalidate()
-        else:
-            # The row now carries this transcript's source_file, not final:.
-            final_rows.discard((msg_id,))
         if role == "assistant" and not unchanged and database.locked:
             if heartbeat_accounting == "noop":
                 heartbeat.record_heartbeat_noop_once(agent_id, current_heartbeat_key)
