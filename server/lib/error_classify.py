@@ -55,11 +55,12 @@ ACCOUNT_PLAN = "account_plan"     # the account's plan lacks the model; account 
 RUNNER_EXIT = "runner_exit"
 TIMEOUT = "timeout"
 UNKNOWN = "unknown"
+MUSE_SESSION_LOCKED = "muse_session_locked"
 
 # Categories that should flip the agent to the INTERRUPTED badge once we
 # stop trying (connection errors only reach here after retries are spent).
 NOTIFY = frozenset({CONNECTION, TRANSIENT, INTERRUPTED, USAGE_LIMIT, AUTH, ACCOUNT_PLAN,
-                    RUNNER_EXIT, TIMEOUT})
+                    RUNNER_EXIT, TIMEOUT, MUSE_SESSION_LOCKED})
 
 # Order matters: INTERRUPTED is checked before CONNECTION because a SIGTERM'd
 # turn often *also* prints a broken-pipe message as it dies, and we must not
@@ -201,6 +202,8 @@ def classify_error(message: str | None) -> str:
     text = (message or "").strip()
     if not text:
         return UNKNOWN
+    if text.startswith(MUSE_SESSION_LOCKED + ":"):
+        return MUSE_SESSION_LOCKED
     # Checked before INTERRUPTED: a watchdog kill is a SIGTERM, so its death
     # message can also match the interrupt patterns — but it's a timeout, not
     # a user-initiated stop, and should be reported as such.

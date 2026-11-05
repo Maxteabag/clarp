@@ -6,6 +6,12 @@ session id is minted and continued, and where the transcript lives.
 from __future__ import annotations
 
 import json
+import hashlib
+import re
+import signal
+import socket
+import threading
+import time
 import os
 import pathlib
 import shutil
@@ -79,6 +85,112 @@ def _tool_name(payload: dict) -> str:
     facts = payload.get("correlation_facts")
     facts = facts if isinstance(facts, dict) else {}
     return str(facts.get("tool_name") or payload.get("tool_name") or "tool")[:80]
+
+
+# Serialize Muse spawn/registration with orphan verification. An in-progress
+# spawn must never look like a forgotten handle between launch and register.
+_RECOVERY_LOCK = threading.RLock()
+_RECLAIM_GRACE = 2.0
+
+
+class _MuseHandle(TurnHandle):
+    """One caller-visible turn, including its single lock-recovery attempt."""
+
+    def __init__(self, original: TurnHandle):
+        super().__init__(original.proc, original.drain_thread, original.process_group)
+        self._replacement_lock = threading.RLock()
+        self._stop_requested = False
+
+    def wait(self, timeout=None):
+        deadline = None if timeout is None else time.monotonic() + timeout
+        drain = self.drain_thread
+        if drain is not None and drain is not threading.current_thread():
+            drain.join(timeout=timeout)
+            if drain.is_alive():
+                raise subprocess.TimeoutExpired(self.proc.args, timeout)
+        remaining = None if deadline is None else max(0, deadline - time.monotonic())
+        return self.proc.wait(timeout=remaining)
+
+    def is_alive(self):
+        return (super().is_alive()
+                or self.drain_thread is not None and self.drain_thread.is_alive())
+
+    def terminate(self):
+        with self._replacement_lock:
+            self._stop_requested = True
+            return super().terminate()
+
+    def kill(self):
+        with self._replacement_lock:
+            self._stop_requested = True
+            super().kill()
+
+    def replace(self, spawn):
+        with self._replacement_lock, _RECOVERY_LOCK:
+            if self._stop_requested:
+                return None
+            proc, replacement = spawn()
+            self.proc, self.process_group = proc, replacement.process_group
+            return proc
+
+
+def _kernel_lock_holder(lock, pid):
+    """The file's informational pid is insufficient: require the actual flock."""
+    info = lock.stat()
+    device = (os.major(info.st_dev), os.minor(info.st_dev), info.st_ino)
+    for line in pathlib.Path('/proc/locks').read_text().splitlines():
+        fields = line.split()
+        if len(fields) < 6 or fields[1:4] != ['FLOCK', 'ADVISORY', 'WRITE']:
+            continue
+        major, minor, inode = fields[5].split(':')
+        if (int(major, 16), int(minor, 16), int(inode)) == device:
+            return int(fields[4]) == pid
+    return False
+
+
+def _owned_holder(pid, *, agent_id, session, session_id, provider):
+    """Fail closed unless this exact child is a Clarp-issued headless turn."""
+    from .. import db, provider_background_jobs
+    root = pathlib.Path(f'/proc/{pid}')
+    stat = root.joinpath('stat').read_text().rsplit(')', 1)[1].split()
+    if (root.stat().st_uid != os.getuid() or int(stat[1]) != os.getpid()
+            or int(stat[2]) != pid or int(stat[3]) != pid):
+        return 'foreign'
+    argv = root.joinpath('cmdline').read_bytes().decode().rstrip('\0').split('\0')
+    # Script stand-ins run under Python; the executable token still has to be
+    # the Muse command, followed immediately by exec (never TUI resume).
+    if argv and re.fullmatch(r'python(?:[0-9.]+)?', pathlib.Path(argv[0]).name):
+        argv = argv[1:]
+    options = argv[:argv.index('--')] if '--' in argv else argv
+    if (len(options) < 3 or not re.fullmatch(r'muse(?:-bin(?:-[0-9.]+)?)?',
+                                           pathlib.Path(options[0]).name)
+            or options[1] != 'exec' or '--json' not in options or '--yolo' not in options
+            or options.count('--session-id') != 1):
+        return 'foreign'
+    pos = options.index('--session-id')
+    if pos + 1 >= len(options) or options[pos + 1] != session_id:
+        return 'foreign'
+    env = dict(part.split('=', 1) for part in root.joinpath('environ').read_text().split('\0')
+               if '=' in part)
+    if not agent_id or not session or env.get('CLAUDE_PWA_SESSION') != session:
+        return 'foreign'
+    token = env.get(provider_background_jobs.TURN_ENV, '')
+    if not provider_background_jobs._TOKEN.fullmatch(token):
+        return 'unverifiable'
+    row = db.conn().execute('''SELECT agent_id,provider,pid,start_token FROM provider_turns
+                              WHERE turn_token=?''', (token,)).fetchone()
+    # Match the recorded Linux boot/start identity using this verification's
+    # existing stat snapshot; no feature-layer process observer is needed.
+    boot = pathlib.Path('/proc/sys/kernel/random/boot_id').read_text().strip()
+    start = f'{boot}:{stat[19]}'
+    if (not row or row['agent_id'] != agent_id or row['provider'] != provider
+            or row['pid'] != pid or not start or row['start_token'] != start):
+        return 'unverifiable'
+    # WNOWAIT verifies this is still our waitable child without freeing the
+    # pid. Do not reap until all process-group signals have been sent.
+    if os.waitid(os.P_PID, pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) is not None:
+        return 'unverifiable'
+    return ''
 
 
 class MuseBackend(StreamJsonBackend):
@@ -175,10 +287,20 @@ class MuseBackend(StreamJsonBackend):
                 # Past one argv string (BACKENDS-08); removed when the turn ends.
                 prompt_file = PromptFile(prompt)
                 cmd += ["--prompt-file", prompt_file.path]
-            proc, handle = self.launch(cmd, cwd=cwd, session=session, env_extra=identity)
-            provider_jobs.record_identity(turn_token, agent_id=runtime_agent_id,
-                                          provider=self.id, pid=proc.pid)
-            self.register_handle(runtime_agent_id, handle)
+            with _RECOVERY_LOCK:
+                proc, original = self.launch(cmd, cwd=cwd, session=session, env_extra=identity)
+                handle = _MuseHandle(original)
+                provider_jobs.record_identity(turn_token, agent_id=runtime_agent_id,
+                                              provider=self.id, pid=proc.pid)
+                self.register_handle(runtime_agent_id, handle)
+
+            def retry_spawn():
+                token, retry_identity = provider_jobs.identity_env(runtime_agent_id)
+                with _RECOVERY_LOCK:
+                    replacement = self.launch(cmd, cwd=cwd, session=session, env_extra=retry_identity)
+                    provider_jobs.record_identity(token, agent_id=runtime_agent_id,
+                                                  provider=self.id, pid=replacement[0].pid)
+                    return replacement
             self.start_drain(
                 handle, removing(self._drain_stdout, prompt_file),
                 proc=proc, agent_id=runtime_agent_id, session=session,
@@ -186,7 +308,7 @@ class MuseBackend(StreamJsonBackend):
                 backend_session_id=backend_session_id, minted=bool(minted),
                 on_session_init=on_session_init, on_result=on_result,
                 on_error=on_error, stream=stream,
-                enqueue=enqueue or tts_queue.enqueue,
+                enqueue=enqueue or tts_queue.enqueue, retry_spawn=retry_spawn,
             )
         except BaseException:
             # Until the drain owns it, nothing else removes the prompt file.
@@ -198,7 +320,7 @@ class MuseBackend(StreamJsonBackend):
     def _drain_stdout(
         self, *, proc: subprocess.Popen, agent_id: str, session: str, trace_id: str,
         handle: TurnHandle, backend_session_id: str, minted: bool,
-        on_session_init, on_result, on_error, stream, enqueue,
+        on_session_init, on_result, on_error, stream, enqueue, retry_spawn=None,
     ) -> None:
         st = _TurnState(session_id=backend_session_id)
         reported = False        # a terminal outcome reached on_result/on_error
@@ -210,22 +332,30 @@ class MuseBackend(StreamJsonBackend):
             if minted:
                 self._transition(agent_id, TurnEvent.SPAWN_STARTED,
                                  {"dispatch": self.runner, "trace_id": trace_id})
-            if proc.stdout is not None:
-                for raw in proc.stdout:
-                    line = raw.strip()
-                    if not line or st.failed_error:
-                        continue
-                    try:
-                        ev = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    if isinstance(ev, dict):
-                        self._handle_event(ev, st, agent_id=agent_id, session=session,
-                                           trace_id=trace_id, on_error=on_error,
-                                           stream=stream, enqueue=enqueue)
-            rc = proc.wait()
+            for attempt in range(2):
+                rc, saw_output = self._read_attempt(
+                    proc, st, agent_id=agent_id, session=session, trace_id=trace_id,
+                    on_error=on_error, stream=stream, enqueue=enqueue)
+                err = stderr_text(proc) if rc else ''
+                locked = (rc != 0 and not saw_output and not st.failed_error and not st.stopped
+                          and err.strip() == f"session {backend_session_id} is already in use")
+                if not locked:
+                    break
+                detail = 'retry_exhausted'
+                if attempt == 0 and retry_spawn is not None:
+                    detail = self._reclaim_session(backend_session_id, agent_id=agent_id,
+                                                   session=session)
+                    if not detail:
+                        replacement = handle.replace(retry_spawn)
+                        if replacement is not None:
+                            proc = replacement
+                            continue
+                        detail = 'stopped'
+                err = ("muse_session_locked: Muse session is held or could not be reclaimed; "
+                       f"{detail}. Close the other Muse process and resend.")
+                break
             if rc != 0 and not st.failed_error and not st.stopped:
-                err = stderr_text(proc) or f"muse exited rc={rc}"
+                err = err or f"muse exited rc={rc}"
                 log("museExitErr", f"rc={rc} trace={trace_id or '∅'} stderr={(err or '')[:500]!r}")
                 if on_error is not None:
                     reported = True
@@ -252,6 +382,106 @@ class MuseBackend(StreamJsonBackend):
             self.cancel_live_text(st)
             if agent_id:
                 self.unregister_handle(agent_id, handle)
+
+    def register_handle(self, agent_id, handle):
+        with _RECOVERY_LOCK:
+            super().register_handle(agent_id, handle)
+
+    def _read_attempt(self, proc, st, **callbacks):
+        saw_output = False
+        if proc.stdout is not None:
+            for raw in proc.stdout:
+                line = raw.strip()
+                if not line:
+                    continue
+                saw_output = True
+                if st.failed_error:
+                    continue
+                try:
+                    ev = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(ev, dict):
+                    self._handle_event(ev, st, **callbacks)
+        return proc.wait(), saw_output
+
+    def _reclaim_session(self, session_id, *, agent_id, session):
+        """Return an empty refusal only after a verified owned holder exits."""
+        pid, signals, outcome = 0, [], 'unverifiable'
+        digest = hashlib.sha256(session_id.encode()).hexdigest()[:12]
+        try:
+            if not re.fullmatch(r'[0-9a-fA-F-]{8,64}', session_id):
+                return outcome
+            paths = list(muse_transcript.sessions_root().glob(
+                f'[0-9][0-9][0-9][0-9]/[0-9][0-9]/[0-9][0-9]/{session_id}/.session.lock'))
+            if len(paths) != 1:
+                return outcome
+            lock = paths[0]
+            fields = dict(line.split('=', 1) for line in lock.read_text()[:4096].splitlines()
+                          if '=' in line)
+            pid = int(fields.get('pid', '0'))
+            if pid <= 1 or fields.get('host') != socket.gethostname():
+                return outcome
+            with _RECOVERY_LOCK:
+                def verify():
+                    reason = _owned_holder(pid, agent_id=agent_id, session=session,
+                                           session_id=session_id, provider=self.id)
+                    if reason:
+                        return reason
+                    # A handle under ANY agent protects the holder, even if
+                    # its registry key disagrees with the turn's stored owner.
+                    if self._registry is None:
+                        return 'unverifiable'
+                    with self._registry._lock:
+                        handles = [h for group in self._registry._active.values() for h in group]
+                    if any((h.pid == pid or h.process_group == pid) and h.is_alive()
+                           for h in handles):
+                        return 'live'
+                    if not _kernel_lock_holder(lock, pid):
+                        return 'unverifiable'
+                    return ''
+
+                outcome = verify()
+                if outcome:
+                    return f'{outcome} holder pid {pid}'
+                # The un-reaped child reserves its pid/group through escalation.
+                os.killpg(pid, signal.SIGTERM)
+                signals.append('TERM')
+                deadline = time.monotonic() + _RECLAIM_GRACE
+                while time.monotonic() < deadline:
+                    exited = os.waitid(os.P_PID, pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+                    if exited is not None:
+                        os.waitpid(pid, 0)
+                        outcome = 'reclaimed'
+                        return ''
+                    time.sleep(0.05)
+                # No process identity or live ownership assumption is carried
+                # across the grace interval. Unknown means no further signal.
+                outcome = verify()
+                if outcome:
+                    return f'{outcome} holder pid {pid}'
+                os.killpg(pid, signal.SIGKILL)
+                signals.append('KILL')
+                deadline = time.monotonic() + _RECLAIM_GRACE
+                while time.monotonic() < deadline:
+                    if os.waitid(os.P_PID, pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) is not None:
+                        os.waitpid(pid, 0)
+                        outcome = 'reclaimed'
+                        return ''
+                    time.sleep(0.05)
+                outcome = 'still_running'
+                return f'{outcome} holder pid {pid}'
+        except (OSError, ValueError, IndexError, UnicodeError) as error:
+            outcome = 'unverifiable'
+            log_exception('museReclaimVerificationFail', error, detail=f'pid={pid} session_hash={digest}')
+            return f'{outcome} holder pid {pid}'
+        except Exception as error:  # noqa: BLE001
+            outcome = 'unverifiable'
+            log_exception('museReclaimFail', error, detail=f'pid={pid} session_hash={digest}')
+            return f'{outcome} holder pid {pid}'
+        finally:
+            log('museSessionReclaim', f'pid={pid} session_hash={digest} '
+                f'signals={",".join(signals) or "none"} outcome={outcome}')
 
     def _handle_event(
         self, ev: dict, st: _TurnState, *, agent_id: str, session: str, trace_id: str,
