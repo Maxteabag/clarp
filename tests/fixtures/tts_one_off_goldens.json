@@ -18,7 +18,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -44,7 +44,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -63,7 +63,7 @@
     },
     "text": "plain",
     "transport": "direct",
-    "voice": "eleven-ada"
+    "voice": "cart-ada"
    }
   ],
   "internal_filename": null,
@@ -88,7 +88,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -114,7 +114,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -140,7 +140,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -165,7 +165,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -191,7 +191,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -217,7 +217,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -243,7 +243,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -287,7 +287,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -313,7 +313,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -339,7 +339,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -365,7 +365,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -391,7 +391,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -417,7 +417,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -443,7 +443,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -457,7 +457,7 @@
     "settings": {},
     "text": "plain",
     "transport": "stream",
-    "voice": "{\"cartesia\": \"cart-ada\", \"elevenlabs\": \"eleven-ada\", \"gemini\": \"Kore\", \"google\": \"nb-NO-Chirp3-HD-Aoede\"}"
+    "voice": "nb-NO-Chirp3-HD-Aoede"
    }
   ],
   "internal_filename": null,
@@ -482,7 +482,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -508,7 +508,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -534,7 +534,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -550,7 +550,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "direct",
+    "transport": "http",
     "voice": "cart-ada"
    },
    {
@@ -563,7 +563,7 @@
     },
     "text": "plain",
     "transport": "direct",
-    "voice": "eleven-ada"
+    "voice": "cart-ada"
    }
   ],
   "internal_filename": null,
@@ -588,7 +588,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -614,7 +614,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -640,7 +640,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -665,7 +665,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -691,7 +691,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -717,7 +717,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -743,7 +743,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -787,7 +787,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -813,7 +813,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -839,7 +839,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -865,7 +865,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -891,7 +891,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -917,7 +917,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -943,7 +943,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -957,7 +957,7 @@
     "settings": {},
     "text": "plain",
     "transport": "stream",
-    "voice": "{\"cartesia\": \"cart-ada\", \"elevenlabs\": \"eleven-ada\", \"gemini\": \"Kore\", \"google\": \"nb-NO-Chirp3-HD-Aoede\"}"
+    "voice": "nb-NO-Chirp3-HD-Aoede"
    }
   ],
   "internal_filename": null,
@@ -982,7 +982,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -1037,7 +1037,7 @@
     },
     "text": "plain",
     "transport": "direct",
-    "voice": "eleven-ada"
+    "voice": "cart-ada"
    }
   ],
   "internal_filename": null,
@@ -1070,7 +1070,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "flux-haley-en"
+    "voice": "aura-asteria-en"
    },
    {
     "provider": "cartesia",
@@ -1079,7 +1079,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -1095,7 +1095,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "flux-haley-en"
+    "voice": "aura-asteria-en"
    },
    {
     "provider": "cartesia",
@@ -1104,7 +1104,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -1129,7 +1129,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -1145,7 +1145,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "flux-haley-en"
+    "voice": "aura-asteria-en"
    },
    {
     "provider": "cartesia",
@@ -1154,7 +1154,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -1252,7 +1252,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -1278,7 +1278,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -1288,23 +1288,13 @@
  "failure=both-fail|fallback=cartesia|override=none|primary_key=False|provider=gemini|purpose=preview": {
   "calls": [
    {
-    "provider": "gemini",
-    "settings": {
-     "api_key": "",
-     "model": "gemini-3.8-flash-tts"
-    },
-    "text": "spoken",
-    "transport": "stream",
-    "voice": "Kore"
-   },
-   {
     "provider": "cartesia",
     "settings": {
      "api_key": "ck",
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -1330,7 +1320,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -1353,7 +1343,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -1376,7 +1366,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -1390,7 +1380,7 @@
     "settings": {},
     "text": "plain",
     "transport": "stream",
-    "voice": "{\"cartesia\": \"cart-ada\", \"elevenlabs\": \"eleven-ada\", \"gemini\": \"Kore\", \"google\": \"nb-NO-Chirp3-HD-Aoede\"}"
+    "voice": "nb-NO-Chirp3-HD-Aoede"
    }
   ],
   "internal_filename": null,
@@ -1412,7 +1402,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -1428,7 +1418,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "direct",
+    "transport": "http",
     "voice": "cart-ada"
    },
    {
@@ -1456,7 +1446,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "direct",
+    "transport": "http",
     "voice": "cart-ada"
    },
    {
@@ -1484,7 +1474,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "direct",
+    "transport": "http",
     "voice": "cart-ada"
    },
    {
@@ -1497,7 +1487,7 @@
     },
     "text": "plain",
     "transport": "direct",
-    "voice": "eleven-ada"
+    "voice": "cart-ada"
    }
   ],
   "internal_filename": null,
@@ -1512,7 +1502,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "direct",
+    "transport": "http",
     "voice": "cart-ada"
    },
    {
@@ -1540,7 +1530,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "flux-haley-en"
+    "voice": "aura-asteria-en"
    },
    {
     "provider": "cartesia",
@@ -1549,7 +1539,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -1565,7 +1555,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "flux-haley-en"
+    "voice": "aura-asteria-en"
    },
    {
     "provider": "cartesia",
@@ -1574,7 +1564,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -1599,7 +1589,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -1615,7 +1605,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "flux-haley-en"
+    "voice": "aura-asteria-en"
    },
    {
     "provider": "cartesia",
@@ -1624,7 +1614,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -1722,7 +1712,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -1748,7 +1738,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -1758,23 +1748,13 @@
  "failure=both-fail|fallback=cartesia|override=none|primary_key=True|provider=gemini|purpose=preview": {
   "calls": [
    {
-    "provider": "gemini",
-    "settings": {
-     "api_key": "gk",
-     "model": "gemini-3.8-flash-tts"
-    },
-    "text": "spoken",
-    "transport": "stream",
-    "voice": "Kore"
-   },
-   {
     "provider": "cartesia",
     "settings": {
      "api_key": "ck",
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -1800,7 +1780,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -1823,7 +1803,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -1846,7 +1826,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -1860,7 +1840,7 @@
     "settings": {},
     "text": "plain",
     "transport": "stream",
-    "voice": "{\"cartesia\": \"cart-ada\", \"elevenlabs\": \"eleven-ada\", \"gemini\": \"Kore\", \"google\": \"nb-NO-Chirp3-HD-Aoede\"}"
+    "voice": "nb-NO-Chirp3-HD-Aoede"
    }
   ],
   "internal_filename": null,
@@ -1882,7 +1862,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -1955,7 +1935,7 @@
     },
     "text": "plain",
     "transport": "direct",
-    "voice": "eleven-ada"
+    "voice": "cart-ada"
    }
   ],
   "internal_filename": null,
@@ -2062,7 +2042,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "eleven-ada"
+    "voice": "aura-asteria-en"
    }
   ],
   "internal_filename": null,
@@ -2269,7 +2249,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "eleven-ada"
+    "voice": "Kore"
    }
   ],
   "internal_filename": null,
@@ -2363,7 +2343,7 @@
     "settings": {},
     "text": "plain",
     "transport": "stream",
-    "voice": "{\"cartesia\": \"cart-ada\", \"elevenlabs\": \"eleven-ada\", \"gemini\": \"Kore\", \"google\": \"nb-NO-Chirp3-HD-Aoede\"}"
+    "voice": "nb-NO-Chirp3-HD-Aoede"
    }
   ],
   "internal_filename": null,
@@ -2459,7 +2439,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "direct",
+    "transport": "http",
     "voice": "cart-ada"
    },
    {
@@ -2472,7 +2452,7 @@
     },
     "text": "plain",
     "transport": "direct",
-    "voice": "eleven-ada"
+    "voice": "cart-ada"
    }
   ],
   "internal_filename": null,
@@ -2579,7 +2559,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "eleven-ada"
+    "voice": "aura-asteria-en"
    }
   ],
   "internal_filename": null,
@@ -2786,7 +2766,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "eleven-ada"
+    "voice": "Kore"
    }
   ],
   "internal_filename": null,
@@ -2880,7 +2860,7 @@
     "settings": {},
     "text": "plain",
     "transport": "stream",
-    "voice": "{\"cartesia\": \"cart-ada\", \"elevenlabs\": \"eleven-ada\", \"gemini\": \"Kore\", \"google\": \"nb-NO-Chirp3-HD-Aoede\"}"
+    "voice": "nb-NO-Chirp3-HD-Aoede"
    }
   ],
   "internal_filename": null,
@@ -2961,7 +2941,7 @@
     },
     "text": "plain",
     "transport": "direct",
-    "voice": "eleven-ada"
+    "voice": "cart-ada"
    }
   ],
   "internal_filename": null,
@@ -2994,7 +2974,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "flux-haley-en"
+    "voice": "aura-asteria-en"
    },
    {
     "provider": "elevenlabs",
@@ -3020,7 +3000,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "flux-haley-en"
+    "voice": "aura-asteria-en"
    },
    {
     "provider": "elevenlabs",
@@ -3057,7 +3037,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "eleven-ada"
+    "voice": "aura-asteria-en"
    }
   ],
   "internal_filename": null,
@@ -3072,7 +3052,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "flux-haley-en"
+    "voice": "aura-asteria-en"
    },
    {
     "provider": "elevenlabs",
@@ -3218,16 +3198,6 @@
  "failure=both-fail|fallback=elevenlabs|override=none|primary_key=False|provider=gemini|purpose=preview": {
   "calls": [
    {
-    "provider": "gemini",
-    "settings": {
-     "api_key": "",
-     "model": "gemini-3.8-flash-tts"
-    },
-    "text": "spoken",
-    "transport": "stream",
-    "voice": "Kore"
-   },
-   {
     "provider": "elevenlabs",
     "settings": {
      "api_key": "ek",
@@ -3236,7 +3206,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "eleven-ada"
+    "voice": "Kore"
    }
   ],
   "internal_filename": null,
@@ -3324,7 +3294,7 @@
     "settings": {},
     "text": "plain",
     "transport": "stream",
-    "voice": "{\"cartesia\": \"cart-ada\", \"elevenlabs\": \"eleven-ada\", \"gemini\": \"Kore\", \"google\": \"nb-NO-Chirp3-HD-Aoede\"}"
+    "voice": "nb-NO-Chirp3-HD-Aoede"
    }
   ],
   "internal_filename": null,
@@ -3363,7 +3333,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "direct",
+    "transport": "http",
     "voice": "cart-ada"
    },
    {
@@ -3391,7 +3361,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "direct",
+    "transport": "http",
     "voice": "cart-ada"
    },
    {
@@ -3419,7 +3389,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "direct",
+    "transport": "http",
     "voice": "cart-ada"
    },
    {
@@ -3432,7 +3402,7 @@
     },
     "text": "plain",
     "transport": "direct",
-    "voice": "eleven-ada"
+    "voice": "cart-ada"
    }
   ],
   "internal_filename": null,
@@ -3447,7 +3417,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "direct",
+    "transport": "http",
     "voice": "cart-ada"
    },
    {
@@ -3475,7 +3445,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "flux-haley-en"
+    "voice": "aura-asteria-en"
    },
    {
     "provider": "elevenlabs",
@@ -3501,7 +3471,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "flux-haley-en"
+    "voice": "aura-asteria-en"
    },
    {
     "provider": "elevenlabs",
@@ -3538,7 +3508,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "eleven-ada"
+    "voice": "aura-asteria-en"
    }
   ],
   "internal_filename": null,
@@ -3553,7 +3523,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "flux-haley-en"
+    "voice": "aura-asteria-en"
    },
    {
     "provider": "elevenlabs",
@@ -3699,16 +3669,6 @@
  "failure=both-fail|fallback=elevenlabs|override=none|primary_key=True|provider=gemini|purpose=preview": {
   "calls": [
    {
-    "provider": "gemini",
-    "settings": {
-     "api_key": "gk",
-     "model": "gemini-3.8-flash-tts"
-    },
-    "text": "spoken",
-    "transport": "stream",
-    "voice": "Kore"
-   },
-   {
     "provider": "elevenlabs",
     "settings": {
      "api_key": "ek",
@@ -3717,7 +3677,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "eleven-ada"
+    "voice": "Kore"
    }
   ],
   "internal_filename": null,
@@ -3805,7 +3765,7 @@
     "settings": {},
     "text": "plain",
     "transport": "stream",
-    "voice": "{\"cartesia\": \"cart-ada\", \"elevenlabs\": \"eleven-ada\", \"gemini\": \"Kore\", \"google\": \"nb-NO-Chirp3-HD-Aoede\"}"
+    "voice": "nb-NO-Chirp3-HD-Aoede"
    }
   ],
   "internal_filename": null,
@@ -3879,7 +3839,7 @@
     },
     "text": "plain",
     "transport": "direct",
-    "voice": "eleven-ada"
+    "voice": "cart-ada"
    }
   ],
   "internal_filename": null,
@@ -4133,7 +4093,7 @@
     "settings": {},
     "text": "plain",
     "transport": "stream",
-    "voice": "{\"cartesia\": \"cart-ada\", \"elevenlabs\": \"eleven-ada\", \"gemini\": \"Kore\", \"google\": \"nb-NO-Chirp3-HD-Aoede\"}"
+    "voice": "nb-NO-Chirp3-HD-Aoede"
    }
   ],
   "internal_filename": null,
@@ -4196,7 +4156,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "direct",
+    "transport": "http",
     "voice": "cart-ada"
    },
    {
@@ -4209,7 +4169,7 @@
     },
     "text": "plain",
     "transport": "direct",
-    "voice": "eleven-ada"
+    "voice": "cart-ada"
    }
   ],
   "internal_filename": null,
@@ -4463,7 +4423,7 @@
     "settings": {},
     "text": "plain",
     "transport": "stream",
-    "voice": "{\"cartesia\": \"cart-ada\", \"elevenlabs\": \"eleven-ada\", \"gemini\": \"Kore\", \"google\": \"nb-NO-Chirp3-HD-Aoede\"}"
+    "voice": "nb-NO-Chirp3-HD-Aoede"
    }
   ],
   "internal_filename": null,
@@ -4533,7 +4493,7 @@
     },
     "text": "plain",
     "transport": "direct",
-    "voice": "eleven-ada"
+    "voice": "cart-ada"
    }
   ],
   "internal_filename": null,
@@ -4566,7 +4526,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "flux-haley-en"
+    "voice": "aura-asteria-en"
    }
   ],
   "internal_filename": null,
@@ -4581,7 +4541,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "flux-haley-en"
+    "voice": "aura-asteria-en"
    }
   ],
   "internal_filename": null,
@@ -4611,7 +4571,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "flux-haley-en"
+    "voice": "aura-asteria-en"
    }
   ],
   "internal_filename": null,
@@ -4722,20 +4682,9 @@
   "result": "RuntimeError: gemini failed"
  },
  "failure=both-fail|fallback=none|override=none|primary_key=False|provider=gemini|purpose=preview": {
-  "calls": [
-   {
-    "provider": "gemini",
-    "settings": {
-     "api_key": "",
-     "model": "gemini-3.8-flash-tts"
-    },
-    "text": "spoken",
-    "transport": "stream",
-    "voice": "Kore"
-   }
-  ],
+  "calls": [],
   "internal_filename": null,
-  "result": "RuntimeError: gemini failed"
+  "result": "GeminiTTSError: no Gemini voice configured for 'Ada'"
  },
  "failure=both-fail|fallback=none|override=none|primary_key=False|provider=gemini|purpose=ring": {
   "calls": [
@@ -4786,7 +4735,7 @@
     "settings": {},
     "text": "plain",
     "transport": "stream",
-    "voice": "{\"cartesia\": \"cart-ada\", \"elevenlabs\": \"eleven-ada\", \"gemini\": \"Kore\", \"google\": \"nb-NO-Chirp3-HD-Aoede\"}"
+    "voice": "nb-NO-Chirp3-HD-Aoede"
    }
   ],
   "internal_filename": null,
@@ -4814,7 +4763,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "direct",
+    "transport": "http",
     "voice": "cart-ada"
    },
    {
@@ -4842,7 +4791,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "direct",
+    "transport": "http",
     "voice": "cart-ada"
    },
    {
@@ -4870,7 +4819,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "direct",
+    "transport": "http",
     "voice": "cart-ada"
    },
    {
@@ -4883,7 +4832,7 @@
     },
     "text": "plain",
     "transport": "direct",
-    "voice": "eleven-ada"
+    "voice": "cart-ada"
    }
   ],
   "internal_filename": null,
@@ -4898,7 +4847,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "direct",
+    "transport": "http",
     "voice": "cart-ada"
    },
    {
@@ -4926,7 +4875,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "flux-haley-en"
+    "voice": "aura-asteria-en"
    }
   ],
   "internal_filename": null,
@@ -4941,7 +4890,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "flux-haley-en"
+    "voice": "aura-asteria-en"
    }
   ],
   "internal_filename": null,
@@ -4971,7 +4920,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "flux-haley-en"
+    "voice": "aura-asteria-en"
    }
   ],
   "internal_filename": null,
@@ -5082,20 +5031,9 @@
   "result": "RuntimeError: gemini failed"
  },
  "failure=both-fail|fallback=none|override=none|primary_key=True|provider=gemini|purpose=preview": {
-  "calls": [
-   {
-    "provider": "gemini",
-    "settings": {
-     "api_key": "gk",
-     "model": "gemini-3.8-flash-tts"
-    },
-    "text": "spoken",
-    "transport": "stream",
-    "voice": "Kore"
-   }
-  ],
+  "calls": [],
   "internal_filename": null,
-  "result": "RuntimeError: gemini failed"
+  "result": "GeminiTTSError: no Gemini voice configured for 'Ada'"
  },
  "failure=both-fail|fallback=none|override=none|primary_key=True|provider=gemini|purpose=ring": {
   "calls": [
@@ -5146,7 +5084,7 @@
     "settings": {},
     "text": "plain",
     "transport": "stream",
-    "voice": "{\"cartesia\": \"cart-ada\", \"elevenlabs\": \"eleven-ada\", \"gemini\": \"Kore\", \"google\": \"nb-NO-Chirp3-HD-Aoede\"}"
+    "voice": "nb-NO-Chirp3-HD-Aoede"
    }
   ],
   "internal_filename": null,
@@ -5209,7 +5147,7 @@
     },
     "text": "plain",
     "transport": "direct",
-    "voice": "eleven-ada"
+    "voice": "cart-ada"
    }
   ],
   "internal_filename": false,
@@ -5463,7 +5401,7 @@
     "settings": {},
     "text": "plain",
     "transport": "stream",
-    "voice": "{\"cartesia\": \"cart-ada\", \"elevenlabs\": \"eleven-ada\", \"gemini\": \"Kore\", \"google\": \"nb-NO-Chirp3-HD-Aoede\"}"
+    "voice": "nb-NO-Chirp3-HD-Aoede"
    }
   ],
   "internal_filename": false,
@@ -5526,7 +5464,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "direct",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -5781,7 +5719,7 @@
     "settings": {},
     "text": "plain",
     "transport": "stream",
-    "voice": "{\"cartesia\": \"cart-ada\", \"elevenlabs\": \"eleven-ada\", \"gemini\": \"Kore\", \"google\": \"nb-NO-Chirp3-HD-Aoede\"}"
+    "voice": "nb-NO-Chirp3-HD-Aoede"
    }
   ],
   "internal_filename": false,
@@ -5851,7 +5789,7 @@
     },
     "text": "plain",
     "transport": "direct",
-    "voice": "eleven-ada"
+    "voice": "cart-ada"
    }
   ],
   "internal_filename": false,
@@ -5884,7 +5822,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "flux-haley-en"
+    "voice": "aura-asteria-en"
    }
   ],
   "internal_filename": false,
@@ -5899,7 +5837,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "flux-haley-en"
+    "voice": "aura-asteria-en"
    }
   ],
   "internal_filename": true,
@@ -5929,7 +5867,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "flux-haley-en"
+    "voice": "aura-asteria-en"
    }
   ],
   "internal_filename": false,
@@ -6042,18 +5980,18 @@
  "failure=ok|fallback=cartesia|override=none|primary_key=False|provider=gemini|purpose=preview": {
   "calls": [
    {
-    "provider": "gemini",
+    "provider": "cartesia",
     "settings": {
-     "api_key": "",
-     "model": "gemini-3.8-flash-tts"
+     "api_key": "ck",
+     "model": "sonic-3.5"
     },
-    "text": "spoken",
-    "transport": "stream",
-    "voice": "Kore"
+    "text": "plain",
+    "transport": "http",
+    "voice": "cart-ada"
    }
   ],
   "internal_filename": false,
-  "result": "ok:ID3gemini"
+  "result": "ok:ID3cartesia"
  },
  "failure=ok|fallback=cartesia|override=none|primary_key=False|provider=gemini|purpose=ring": {
   "calls": [
@@ -6104,7 +6042,7 @@
     "settings": {},
     "text": "plain",
     "transport": "stream",
-    "voice": "{\"cartesia\": \"cart-ada\", \"elevenlabs\": \"eleven-ada\", \"gemini\": \"Kore\", \"google\": \"nb-NO-Chirp3-HD-Aoede\"}"
+    "voice": "nb-NO-Chirp3-HD-Aoede"
    }
   ],
   "internal_filename": false,
@@ -6132,7 +6070,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "direct",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -6148,7 +6086,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "direct",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -6164,7 +6102,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "direct",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -6180,7 +6118,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "direct",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -6196,7 +6134,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "flux-haley-en"
+    "voice": "aura-asteria-en"
    }
   ],
   "internal_filename": false,
@@ -6211,7 +6149,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "flux-haley-en"
+    "voice": "aura-asteria-en"
    }
   ],
   "internal_filename": true,
@@ -6241,7 +6179,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "flux-haley-en"
+    "voice": "aura-asteria-en"
    }
   ],
   "internal_filename": false,
@@ -6354,18 +6292,18 @@
  "failure=ok|fallback=cartesia|override=none|primary_key=True|provider=gemini|purpose=preview": {
   "calls": [
    {
-    "provider": "gemini",
+    "provider": "cartesia",
     "settings": {
-     "api_key": "gk",
-     "model": "gemini-3.8-flash-tts"
+     "api_key": "ck",
+     "model": "sonic-3.5"
     },
-    "text": "spoken",
-    "transport": "stream",
-    "voice": "Kore"
+    "text": "plain",
+    "transport": "http",
+    "voice": "cart-ada"
    }
   ],
   "internal_filename": false,
-  "result": "ok:ID3gemini"
+  "result": "ok:ID3cartesia"
  },
  "failure=ok|fallback=cartesia|override=none|primary_key=True|provider=gemini|purpose=ring": {
   "calls": [
@@ -6416,7 +6354,7 @@
     "settings": {},
     "text": "plain",
     "transport": "stream",
-    "voice": "{\"cartesia\": \"cart-ada\", \"elevenlabs\": \"eleven-ada\", \"gemini\": \"Kore\", \"google\": \"nb-NO-Chirp3-HD-Aoede\"}"
+    "voice": "nb-NO-Chirp3-HD-Aoede"
    }
   ],
   "internal_filename": false,
@@ -6479,7 +6417,7 @@
     },
     "text": "plain",
     "transport": "direct",
-    "voice": "eleven-ada"
+    "voice": "cart-ada"
    }
   ],
   "internal_filename": false,
@@ -6733,7 +6671,7 @@
     "settings": {},
     "text": "plain",
     "transport": "stream",
-    "voice": "{\"cartesia\": \"cart-ada\", \"elevenlabs\": \"eleven-ada\", \"gemini\": \"Kore\", \"google\": \"nb-NO-Chirp3-HD-Aoede\"}"
+    "voice": "nb-NO-Chirp3-HD-Aoede"
    }
   ],
   "internal_filename": false,
@@ -6796,7 +6734,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "direct",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -7051,7 +6989,7 @@
     "settings": {},
     "text": "plain",
     "transport": "stream",
-    "voice": "{\"cartesia\": \"cart-ada\", \"elevenlabs\": \"eleven-ada\", \"gemini\": \"Kore\", \"google\": \"nb-NO-Chirp3-HD-Aoede\"}"
+    "voice": "nb-NO-Chirp3-HD-Aoede"
    }
   ],
   "internal_filename": false,
@@ -7121,7 +7059,7 @@
     },
     "text": "plain",
     "transport": "direct",
-    "voice": "eleven-ada"
+    "voice": "cart-ada"
    }
   ],
   "internal_filename": false,
@@ -7154,7 +7092,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "flux-haley-en"
+    "voice": "aura-asteria-en"
    }
   ],
   "internal_filename": false,
@@ -7169,7 +7107,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "flux-haley-en"
+    "voice": "aura-asteria-en"
    }
   ],
   "internal_filename": true,
@@ -7199,7 +7137,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "flux-haley-en"
+    "voice": "aura-asteria-en"
    }
   ],
   "internal_filename": false,
@@ -7312,18 +7250,19 @@
  "failure=ok|fallback=elevenlabs|override=none|primary_key=False|provider=gemini|purpose=preview": {
   "calls": [
    {
-    "provider": "gemini",
+    "provider": "elevenlabs",
     "settings": {
-     "api_key": "",
-     "model": "gemini-3.8-flash-tts"
+     "api_key": "ek",
+     "model": "eleven_flash_v2_5",
+     "speed": 1.2
     },
-    "text": "spoken",
+    "text": "plain",
     "transport": "stream",
     "voice": "Kore"
    }
   ],
   "internal_filename": false,
-  "result": "ok:ID3gemini"
+  "result": "ok:ID3elevenlabs"
  },
  "failure=ok|fallback=elevenlabs|override=none|primary_key=False|provider=gemini|purpose=ring": {
   "calls": [
@@ -7374,7 +7313,7 @@
     "settings": {},
     "text": "plain",
     "transport": "stream",
-    "voice": "{\"cartesia\": \"cart-ada\", \"elevenlabs\": \"eleven-ada\", \"gemini\": \"Kore\", \"google\": \"nb-NO-Chirp3-HD-Aoede\"}"
+    "voice": "nb-NO-Chirp3-HD-Aoede"
    }
   ],
   "internal_filename": false,
@@ -7402,7 +7341,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "direct",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -7418,7 +7357,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "direct",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -7434,7 +7373,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "direct",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -7450,7 +7389,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "direct",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -7466,7 +7405,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "flux-haley-en"
+    "voice": "aura-asteria-en"
    }
   ],
   "internal_filename": false,
@@ -7481,7 +7420,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "flux-haley-en"
+    "voice": "aura-asteria-en"
    }
   ],
   "internal_filename": true,
@@ -7511,7 +7450,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "flux-haley-en"
+    "voice": "aura-asteria-en"
    }
   ],
   "internal_filename": false,
@@ -7624,18 +7563,19 @@
  "failure=ok|fallback=elevenlabs|override=none|primary_key=True|provider=gemini|purpose=preview": {
   "calls": [
    {
-    "provider": "gemini",
+    "provider": "elevenlabs",
     "settings": {
-     "api_key": "gk",
-     "model": "gemini-3.8-flash-tts"
+     "api_key": "ek",
+     "model": "eleven_flash_v2_5",
+     "speed": 1.2
     },
-    "text": "spoken",
+    "text": "plain",
     "transport": "stream",
     "voice": "Kore"
    }
   ],
   "internal_filename": false,
-  "result": "ok:ID3gemini"
+  "result": "ok:ID3elevenlabs"
  },
  "failure=ok|fallback=elevenlabs|override=none|primary_key=True|provider=gemini|purpose=ring": {
   "calls": [
@@ -7686,7 +7626,7 @@
     "settings": {},
     "text": "plain",
     "transport": "stream",
-    "voice": "{\"cartesia\": \"cart-ada\", \"elevenlabs\": \"eleven-ada\", \"gemini\": \"Kore\", \"google\": \"nb-NO-Chirp3-HD-Aoede\"}"
+    "voice": "nb-NO-Chirp3-HD-Aoede"
    }
   ],
   "internal_filename": false,
@@ -7749,7 +7689,7 @@
     },
     "text": "plain",
     "transport": "direct",
-    "voice": "eleven-ada"
+    "voice": "cart-ada"
    }
   ],
   "internal_filename": false,
@@ -8003,7 +7943,7 @@
     "settings": {},
     "text": "plain",
     "transport": "stream",
-    "voice": "{\"cartesia\": \"cart-ada\", \"elevenlabs\": \"eleven-ada\", \"gemini\": \"Kore\", \"google\": \"nb-NO-Chirp3-HD-Aoede\"}"
+    "voice": "nb-NO-Chirp3-HD-Aoede"
    }
   ],
   "internal_filename": false,
@@ -8066,7 +8006,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "direct",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -8321,7 +8261,7 @@
     "settings": {},
     "text": "plain",
     "transport": "stream",
-    "voice": "{\"cartesia\": \"cart-ada\", \"elevenlabs\": \"eleven-ada\", \"gemini\": \"Kore\", \"google\": \"nb-NO-Chirp3-HD-Aoede\"}"
+    "voice": "nb-NO-Chirp3-HD-Aoede"
    }
   ],
   "internal_filename": false,
@@ -8391,7 +8331,7 @@
     },
     "text": "plain",
     "transport": "direct",
-    "voice": "eleven-ada"
+    "voice": "cart-ada"
    }
   ],
   "internal_filename": false,
@@ -8424,7 +8364,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "flux-haley-en"
+    "voice": "aura-asteria-en"
    }
   ],
   "internal_filename": false,
@@ -8439,7 +8379,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "flux-haley-en"
+    "voice": "aura-asteria-en"
    }
   ],
   "internal_filename": true,
@@ -8469,7 +8409,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "flux-haley-en"
+    "voice": "aura-asteria-en"
    }
   ],
   "internal_filename": false,
@@ -8580,20 +8520,9 @@
   "result": "ok:ID3gemini"
  },
  "failure=ok|fallback=none|override=none|primary_key=False|provider=gemini|purpose=preview": {
-  "calls": [
-   {
-    "provider": "gemini",
-    "settings": {
-     "api_key": "",
-     "model": "gemini-3.8-flash-tts"
-    },
-    "text": "spoken",
-    "transport": "stream",
-    "voice": "Kore"
-   }
-  ],
-  "internal_filename": false,
-  "result": "ok:ID3gemini"
+  "calls": [],
+  "internal_filename": null,
+  "result": "GeminiTTSError: no Gemini voice configured for 'Ada'"
  },
  "failure=ok|fallback=none|override=none|primary_key=False|provider=gemini|purpose=ring": {
   "calls": [
@@ -8644,7 +8573,7 @@
     "settings": {},
     "text": "plain",
     "transport": "stream",
-    "voice": "{\"cartesia\": \"cart-ada\", \"elevenlabs\": \"eleven-ada\", \"gemini\": \"Kore\", \"google\": \"nb-NO-Chirp3-HD-Aoede\"}"
+    "voice": "nb-NO-Chirp3-HD-Aoede"
    }
   ],
   "internal_filename": false,
@@ -8672,7 +8601,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "direct",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -8688,7 +8617,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "direct",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -8704,7 +8633,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "direct",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -8720,7 +8649,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "direct",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -8736,7 +8665,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "flux-haley-en"
+    "voice": "aura-asteria-en"
    }
   ],
   "internal_filename": false,
@@ -8751,7 +8680,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "flux-haley-en"
+    "voice": "aura-asteria-en"
    }
   ],
   "internal_filename": true,
@@ -8781,7 +8710,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "flux-haley-en"
+    "voice": "aura-asteria-en"
    }
   ],
   "internal_filename": false,
@@ -8892,20 +8821,9 @@
   "result": "ok:ID3gemini"
  },
  "failure=ok|fallback=none|override=none|primary_key=True|provider=gemini|purpose=preview": {
-  "calls": [
-   {
-    "provider": "gemini",
-    "settings": {
-     "api_key": "gk",
-     "model": "gemini-3.8-flash-tts"
-    },
-    "text": "spoken",
-    "transport": "stream",
-    "voice": "Kore"
-   }
-  ],
-  "internal_filename": false,
-  "result": "ok:ID3gemini"
+  "calls": [],
+  "internal_filename": null,
+  "result": "GeminiTTSError: no Gemini voice configured for 'Ada'"
  },
  "failure=ok|fallback=none|override=none|primary_key=True|provider=gemini|purpose=ring": {
   "calls": [
@@ -8956,7 +8874,7 @@
     "settings": {},
     "text": "plain",
     "transport": "stream",
-    "voice": "{\"cartesia\": \"cart-ada\", \"elevenlabs\": \"eleven-ada\", \"gemini\": \"Kore\", \"google\": \"nb-NO-Chirp3-HD-Aoede\"}"
+    "voice": "nb-NO-Chirp3-HD-Aoede"
    }
   ],
   "internal_filename": false,
@@ -8994,7 +8912,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -9020,7 +8938,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -9039,7 +8957,7 @@
     },
     "text": "plain",
     "transport": "direct",
-    "voice": "eleven-ada"
+    "voice": "cart-ada"
    }
   ],
   "internal_filename": false,
@@ -9064,7 +8982,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -9090,7 +9008,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -9116,7 +9034,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -9141,7 +9059,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -9167,7 +9085,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -9193,7 +9111,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -9219,7 +9137,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -9263,7 +9181,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -9289,7 +9207,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -9315,7 +9233,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -9341,7 +9259,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -9367,7 +9285,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -9393,7 +9311,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -9419,7 +9337,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -9433,7 +9351,7 @@
     "settings": {},
     "text": "plain",
     "transport": "stream",
-    "voice": "{\"cartesia\": \"cart-ada\", \"elevenlabs\": \"eleven-ada\", \"gemini\": \"Kore\", \"google\": \"nb-NO-Chirp3-HD-Aoede\"}"
+    "voice": "nb-NO-Chirp3-HD-Aoede"
    }
   ],
   "internal_filename": null,
@@ -9458,7 +9376,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -9484,7 +9402,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -9510,7 +9428,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -9526,7 +9444,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "direct",
+    "transport": "http",
     "voice": "cart-ada"
    },
    {
@@ -9539,7 +9457,7 @@
     },
     "text": "plain",
     "transport": "direct",
-    "voice": "eleven-ada"
+    "voice": "cart-ada"
    }
   ],
   "internal_filename": false,
@@ -9564,7 +9482,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -9590,7 +9508,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -9616,7 +9534,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -9641,7 +9559,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -9667,7 +9585,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -9693,7 +9611,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -9719,7 +9637,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -9763,7 +9681,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -9789,7 +9707,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -9815,7 +9733,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -9841,7 +9759,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -9867,7 +9785,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -9893,7 +9811,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -9919,7 +9837,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -9933,7 +9851,7 @@
     "settings": {},
     "text": "plain",
     "transport": "stream",
-    "voice": "{\"cartesia\": \"cart-ada\", \"elevenlabs\": \"eleven-ada\", \"gemini\": \"Kore\", \"google\": \"nb-NO-Chirp3-HD-Aoede\"}"
+    "voice": "nb-NO-Chirp3-HD-Aoede"
    }
   ],
   "internal_filename": null,
@@ -9958,7 +9876,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -10013,7 +9931,7 @@
     },
     "text": "plain",
     "transport": "direct",
-    "voice": "eleven-ada"
+    "voice": "cart-ada"
    }
   ],
   "internal_filename": false,
@@ -10046,7 +9964,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "flux-haley-en"
+    "voice": "aura-asteria-en"
    },
    {
     "provider": "cartesia",
@@ -10055,7 +9973,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -10071,7 +9989,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "flux-haley-en"
+    "voice": "aura-asteria-en"
    },
    {
     "provider": "cartesia",
@@ -10080,7 +9998,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -10105,7 +10023,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -10121,7 +10039,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "flux-haley-en"
+    "voice": "aura-asteria-en"
    },
    {
     "provider": "cartesia",
@@ -10130,7 +10048,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -10228,7 +10146,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -10254,7 +10172,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -10264,23 +10182,13 @@
  "failure=primary-fails|fallback=cartesia|override=none|primary_key=False|provider=gemini|purpose=preview": {
   "calls": [
    {
-    "provider": "gemini",
-    "settings": {
-     "api_key": "",
-     "model": "gemini-3.8-flash-tts"
-    },
-    "text": "spoken",
-    "transport": "stream",
-    "voice": "Kore"
-   },
-   {
     "provider": "cartesia",
     "settings": {
      "api_key": "ck",
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -10306,7 +10214,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -10329,7 +10237,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -10352,7 +10260,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -10366,7 +10274,7 @@
     "settings": {},
     "text": "plain",
     "transport": "stream",
-    "voice": "{\"cartesia\": \"cart-ada\", \"elevenlabs\": \"eleven-ada\", \"gemini\": \"Kore\", \"google\": \"nb-NO-Chirp3-HD-Aoede\"}"
+    "voice": "nb-NO-Chirp3-HD-Aoede"
    }
   ],
   "internal_filename": null,
@@ -10388,7 +10296,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -10404,7 +10312,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "direct",
+    "transport": "http",
     "voice": "cart-ada"
    },
    {
@@ -10432,7 +10340,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "direct",
+    "transport": "http",
     "voice": "cart-ada"
    },
    {
@@ -10460,7 +10368,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "direct",
+    "transport": "http",
     "voice": "cart-ada"
    },
    {
@@ -10473,7 +10381,7 @@
     },
     "text": "plain",
     "transport": "direct",
-    "voice": "eleven-ada"
+    "voice": "cart-ada"
    }
   ],
   "internal_filename": false,
@@ -10488,7 +10396,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "direct",
+    "transport": "http",
     "voice": "cart-ada"
    },
    {
@@ -10516,7 +10424,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "flux-haley-en"
+    "voice": "aura-asteria-en"
    },
    {
     "provider": "cartesia",
@@ -10525,7 +10433,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -10541,7 +10449,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "flux-haley-en"
+    "voice": "aura-asteria-en"
    },
    {
     "provider": "cartesia",
@@ -10550,7 +10458,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -10575,7 +10483,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -10591,7 +10499,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "flux-haley-en"
+    "voice": "aura-asteria-en"
    },
    {
     "provider": "cartesia",
@@ -10600,7 +10508,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -10698,7 +10606,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -10724,7 +10632,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -10734,23 +10642,13 @@
  "failure=primary-fails|fallback=cartesia|override=none|primary_key=True|provider=gemini|purpose=preview": {
   "calls": [
    {
-    "provider": "gemini",
-    "settings": {
-     "api_key": "gk",
-     "model": "gemini-3.8-flash-tts"
-    },
-    "text": "spoken",
-    "transport": "stream",
-    "voice": "Kore"
-   },
-   {
     "provider": "cartesia",
     "settings": {
      "api_key": "ck",
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -10776,7 +10674,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -10799,7 +10697,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -10822,7 +10720,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -10836,7 +10734,7 @@
     "settings": {},
     "text": "plain",
     "transport": "stream",
-    "voice": "{\"cartesia\": \"cart-ada\", \"elevenlabs\": \"eleven-ada\", \"gemini\": \"Kore\", \"google\": \"nb-NO-Chirp3-HD-Aoede\"}"
+    "voice": "nb-NO-Chirp3-HD-Aoede"
    }
   ],
   "internal_filename": null,
@@ -10858,7 +10756,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "stream",
+    "transport": "http",
     "voice": "cart-ada"
    }
   ],
@@ -10931,7 +10829,7 @@
     },
     "text": "plain",
     "transport": "direct",
-    "voice": "eleven-ada"
+    "voice": "cart-ada"
    }
   ],
   "internal_filename": false,
@@ -11038,7 +10936,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "eleven-ada"
+    "voice": "aura-asteria-en"
    }
   ],
   "internal_filename": false,
@@ -11245,7 +11143,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "eleven-ada"
+    "voice": "Kore"
    }
   ],
   "internal_filename": false,
@@ -11339,7 +11237,7 @@
     "settings": {},
     "text": "plain",
     "transport": "stream",
-    "voice": "{\"cartesia\": \"cart-ada\", \"elevenlabs\": \"eleven-ada\", \"gemini\": \"Kore\", \"google\": \"nb-NO-Chirp3-HD-Aoede\"}"
+    "voice": "nb-NO-Chirp3-HD-Aoede"
    }
   ],
   "internal_filename": null,
@@ -11435,7 +11333,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "direct",
+    "transport": "http",
     "voice": "cart-ada"
    },
    {
@@ -11448,7 +11346,7 @@
     },
     "text": "plain",
     "transport": "direct",
-    "voice": "eleven-ada"
+    "voice": "cart-ada"
    }
   ],
   "internal_filename": false,
@@ -11555,7 +11453,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "eleven-ada"
+    "voice": "aura-asteria-en"
    }
   ],
   "internal_filename": false,
@@ -11762,7 +11660,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "eleven-ada"
+    "voice": "Kore"
    }
   ],
   "internal_filename": false,
@@ -11856,7 +11754,7 @@
     "settings": {},
     "text": "plain",
     "transport": "stream",
-    "voice": "{\"cartesia\": \"cart-ada\", \"elevenlabs\": \"eleven-ada\", \"gemini\": \"Kore\", \"google\": \"nb-NO-Chirp3-HD-Aoede\"}"
+    "voice": "nb-NO-Chirp3-HD-Aoede"
    }
   ],
   "internal_filename": null,
@@ -11937,7 +11835,7 @@
     },
     "text": "plain",
     "transport": "direct",
-    "voice": "eleven-ada"
+    "voice": "cart-ada"
    }
   ],
   "internal_filename": false,
@@ -11970,7 +11868,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "flux-haley-en"
+    "voice": "aura-asteria-en"
    },
    {
     "provider": "elevenlabs",
@@ -11996,7 +11894,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "flux-haley-en"
+    "voice": "aura-asteria-en"
    },
    {
     "provider": "elevenlabs",
@@ -12033,7 +11931,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "eleven-ada"
+    "voice": "aura-asteria-en"
    }
   ],
   "internal_filename": false,
@@ -12048,7 +11946,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "flux-haley-en"
+    "voice": "aura-asteria-en"
    },
    {
     "provider": "elevenlabs",
@@ -12194,16 +12092,6 @@
  "failure=primary-fails|fallback=elevenlabs|override=none|primary_key=False|provider=gemini|purpose=preview": {
   "calls": [
    {
-    "provider": "gemini",
-    "settings": {
-     "api_key": "",
-     "model": "gemini-3.8-flash-tts"
-    },
-    "text": "spoken",
-    "transport": "stream",
-    "voice": "Kore"
-   },
-   {
     "provider": "elevenlabs",
     "settings": {
      "api_key": "ek",
@@ -12212,7 +12100,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "eleven-ada"
+    "voice": "Kore"
    }
   ],
   "internal_filename": false,
@@ -12300,7 +12188,7 @@
     "settings": {},
     "text": "plain",
     "transport": "stream",
-    "voice": "{\"cartesia\": \"cart-ada\", \"elevenlabs\": \"eleven-ada\", \"gemini\": \"Kore\", \"google\": \"nb-NO-Chirp3-HD-Aoede\"}"
+    "voice": "nb-NO-Chirp3-HD-Aoede"
    }
   ],
   "internal_filename": null,
@@ -12339,7 +12227,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "direct",
+    "transport": "http",
     "voice": "cart-ada"
    },
    {
@@ -12367,7 +12255,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "direct",
+    "transport": "http",
     "voice": "cart-ada"
    },
    {
@@ -12395,7 +12283,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "direct",
+    "transport": "http",
     "voice": "cart-ada"
    },
    {
@@ -12408,7 +12296,7 @@
     },
     "text": "plain",
     "transport": "direct",
-    "voice": "eleven-ada"
+    "voice": "cart-ada"
    }
   ],
   "internal_filename": false,
@@ -12423,7 +12311,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "direct",
+    "transport": "http",
     "voice": "cart-ada"
    },
    {
@@ -12451,7 +12339,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "flux-haley-en"
+    "voice": "aura-asteria-en"
    },
    {
     "provider": "elevenlabs",
@@ -12477,7 +12365,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "flux-haley-en"
+    "voice": "aura-asteria-en"
    },
    {
     "provider": "elevenlabs",
@@ -12514,7 +12402,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "eleven-ada"
+    "voice": "aura-asteria-en"
    }
   ],
   "internal_filename": false,
@@ -12529,7 +12417,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "flux-haley-en"
+    "voice": "aura-asteria-en"
    },
    {
     "provider": "elevenlabs",
@@ -12675,16 +12563,6 @@
  "failure=primary-fails|fallback=elevenlabs|override=none|primary_key=True|provider=gemini|purpose=preview": {
   "calls": [
    {
-    "provider": "gemini",
-    "settings": {
-     "api_key": "gk",
-     "model": "gemini-3.8-flash-tts"
-    },
-    "text": "spoken",
-    "transport": "stream",
-    "voice": "Kore"
-   },
-   {
     "provider": "elevenlabs",
     "settings": {
      "api_key": "ek",
@@ -12693,7 +12571,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "eleven-ada"
+    "voice": "Kore"
    }
   ],
   "internal_filename": false,
@@ -12781,7 +12659,7 @@
     "settings": {},
     "text": "plain",
     "transport": "stream",
-    "voice": "{\"cartesia\": \"cart-ada\", \"elevenlabs\": \"eleven-ada\", \"gemini\": \"Kore\", \"google\": \"nb-NO-Chirp3-HD-Aoede\"}"
+    "voice": "nb-NO-Chirp3-HD-Aoede"
    }
   ],
   "internal_filename": null,
@@ -12855,7 +12733,7 @@
     },
     "text": "plain",
     "transport": "direct",
-    "voice": "eleven-ada"
+    "voice": "cart-ada"
    }
   ],
   "internal_filename": false,
@@ -13109,7 +12987,7 @@
     "settings": {},
     "text": "plain",
     "transport": "stream",
-    "voice": "{\"cartesia\": \"cart-ada\", \"elevenlabs\": \"eleven-ada\", \"gemini\": \"Kore\", \"google\": \"nb-NO-Chirp3-HD-Aoede\"}"
+    "voice": "nb-NO-Chirp3-HD-Aoede"
    }
   ],
   "internal_filename": null,
@@ -13172,7 +13050,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "direct",
+    "transport": "http",
     "voice": "cart-ada"
    },
    {
@@ -13185,7 +13063,7 @@
     },
     "text": "plain",
     "transport": "direct",
-    "voice": "eleven-ada"
+    "voice": "cart-ada"
    }
   ],
   "internal_filename": false,
@@ -13439,7 +13317,7 @@
     "settings": {},
     "text": "plain",
     "transport": "stream",
-    "voice": "{\"cartesia\": \"cart-ada\", \"elevenlabs\": \"eleven-ada\", \"gemini\": \"Kore\", \"google\": \"nb-NO-Chirp3-HD-Aoede\"}"
+    "voice": "nb-NO-Chirp3-HD-Aoede"
    }
   ],
   "internal_filename": null,
@@ -13509,7 +13387,7 @@
     },
     "text": "plain",
     "transport": "direct",
-    "voice": "eleven-ada"
+    "voice": "cart-ada"
    }
   ],
   "internal_filename": false,
@@ -13542,7 +13420,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "flux-haley-en"
+    "voice": "aura-asteria-en"
    }
   ],
   "internal_filename": null,
@@ -13557,7 +13435,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "flux-haley-en"
+    "voice": "aura-asteria-en"
    }
   ],
   "internal_filename": null,
@@ -13587,7 +13465,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "flux-haley-en"
+    "voice": "aura-asteria-en"
    }
   ],
   "internal_filename": null,
@@ -13698,20 +13576,9 @@
   "result": "RuntimeError: gemini failed"
  },
  "failure=primary-fails|fallback=none|override=none|primary_key=False|provider=gemini|purpose=preview": {
-  "calls": [
-   {
-    "provider": "gemini",
-    "settings": {
-     "api_key": "",
-     "model": "gemini-3.8-flash-tts"
-    },
-    "text": "spoken",
-    "transport": "stream",
-    "voice": "Kore"
-   }
-  ],
+  "calls": [],
   "internal_filename": null,
-  "result": "RuntimeError: gemini failed"
+  "result": "GeminiTTSError: no Gemini voice configured for 'Ada'"
  },
  "failure=primary-fails|fallback=none|override=none|primary_key=False|provider=gemini|purpose=ring": {
   "calls": [
@@ -13762,7 +13629,7 @@
     "settings": {},
     "text": "plain",
     "transport": "stream",
-    "voice": "{\"cartesia\": \"cart-ada\", \"elevenlabs\": \"eleven-ada\", \"gemini\": \"Kore\", \"google\": \"nb-NO-Chirp3-HD-Aoede\"}"
+    "voice": "nb-NO-Chirp3-HD-Aoede"
    }
   ],
   "internal_filename": null,
@@ -13790,7 +13657,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "direct",
+    "transport": "http",
     "voice": "cart-ada"
    },
    {
@@ -13818,7 +13685,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "direct",
+    "transport": "http",
     "voice": "cart-ada"
    },
    {
@@ -13846,7 +13713,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "direct",
+    "transport": "http",
     "voice": "cart-ada"
    },
    {
@@ -13859,7 +13726,7 @@
     },
     "text": "plain",
     "transport": "direct",
-    "voice": "eleven-ada"
+    "voice": "cart-ada"
    }
   ],
   "internal_filename": false,
@@ -13874,7 +13741,7 @@
      "model": "sonic-3.5"
     },
     "text": "plain",
-    "transport": "direct",
+    "transport": "http",
     "voice": "cart-ada"
    },
    {
@@ -13902,7 +13769,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "flux-haley-en"
+    "voice": "aura-asteria-en"
    }
   ],
   "internal_filename": null,
@@ -13917,7 +13784,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "flux-haley-en"
+    "voice": "aura-asteria-en"
    }
   ],
   "internal_filename": null,
@@ -13947,7 +13814,7 @@
     },
     "text": "plain",
     "transport": "stream",
-    "voice": "flux-haley-en"
+    "voice": "aura-asteria-en"
    }
   ],
   "internal_filename": null,
@@ -14058,20 +13925,9 @@
   "result": "RuntimeError: gemini failed"
  },
  "failure=primary-fails|fallback=none|override=none|primary_key=True|provider=gemini|purpose=preview": {
-  "calls": [
-   {
-    "provider": "gemini",
-    "settings": {
-     "api_key": "gk",
-     "model": "gemini-3.8-flash-tts"
-    },
-    "text": "spoken",
-    "transport": "stream",
-    "voice": "Kore"
-   }
-  ],
+  "calls": [],
   "internal_filename": null,
-  "result": "RuntimeError: gemini failed"
+  "result": "GeminiTTSError: no Gemini voice configured for 'Ada'"
  },
  "failure=primary-fails|fallback=none|override=none|primary_key=True|provider=gemini|purpose=ring": {
   "calls": [
@@ -14122,7 +13978,7 @@
     "settings": {},
     "text": "plain",
     "transport": "stream",
-    "voice": "{\"cartesia\": \"cart-ada\", \"elevenlabs\": \"eleven-ada\", \"gemini\": \"Kore\", \"google\": \"nb-NO-Chirp3-HD-Aoede\"}"
+    "voice": "nb-NO-Chirp3-HD-Aoede"
    }
   ],
   "internal_filename": null,

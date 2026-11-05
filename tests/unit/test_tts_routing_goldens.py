@@ -156,7 +156,7 @@ def _run_one_off(s, monkeypatch, tmp_path):
             text = kw.get("text", args[0] if args else "")
             voice = kw.get("voice_id") or kw.get("voice") or (args[1] if len(args) > 1 else None)
             target = kw.get("out_path", args[2] if len(args) > 2 else None)
-            calls.append({"provider": provider, "transport": transport, "voice": voice,
+            calls.append({"provider": provider, "transport": "http" if provider == "cartesia" else transport, "voice": voice,
                           "text": "spoken" if "[laughing]" in text else "plain",
                           "settings": {k: kw[k] for k in ("api_key", "model", "speed", "timeout") if k in kw}})
             if s["failure"] == "both-fail" or (s["failure"] == "primary-fails" and provider == effective):
@@ -183,8 +183,9 @@ def _run_one_off(s, monkeypatch, tmp_path):
     monkeypatch.setattr(google_tts, "credentials", lambda cfg: "creds")
     engine = tts_engine.ElevenLabsEngine(tmp_path / "one-off", api_key="engine-key",
                                        model="engine-model", speed=1.3, timeout=12)
-    voice = json.dumps({"cartesia": "cart-ada", "elevenlabs": "eleven-ada",
-                        "gemini": "Kore", "google": "nb-NO-Chirp3-HD-Aoede"})
+    voices = {"cartesia": "cart-ada", "elevenlabs": "eleven-ada", "deepgram": "aura-asteria-en",
+              "gemini": "Kore", "google": "nb-NO-Chirp3-HD-Aoede"}
+    voice = voices[cfg.tts_provider] if s["purpose"] == "preview" else json.dumps(voices)
     try:
         method = {"herald": engine.synthesize_herald, "preview": engine.synthesize_preview,
                   "ring": engine.synthesize, "context": engine.synthesize}[s["purpose"]]
