@@ -10,6 +10,7 @@ import base64
 import binascii
 import json
 import pathlib
+import threading
 import time
 import uuid
 from typing import Callable
@@ -34,6 +35,66 @@ _SAMPLE_RATE = 44100
 _ENCODING = "pcm_f32le"
 # Leave the live broker's unchanged 30 s empty wait room for fallback.
 RAW_FIRST_BYTE_BUDGET_SEC = 10.0
+
+
+class _FirstByteBudget:
+    """Interrupt SDK-internal control-frame reads at the original deadline."""
+
+    def __init__(self, ws, deadline, trace_id):
+        self.ws, self.deadline, self.trace_id = ws, deadline, trace_id
+        self._lock = threading.Lock()
+        self._timer = None
+        self._done = False
+        self._expired = False
+
+    def _remaining_locked(self):
+        remaining = self.deadline - time.perf_counter()
+        if self._expired or remaining <= 0:
+            raise CartesiaError("cartesia_raw_first_byte_timeout")
+        return remaining
+
+    def remaining_timeout(self, timeout):
+        with self._lock:
+            return min(timeout, self._remaining_locked())
+
+    def start(self):
+        self._timer = threading.Timer(self.remaining_timeout(RAW_FIRST_BYTE_BUDGET_SEC), self._expire)
+        self._timer.daemon = True
+        self._timer.start()
+
+    def _expire(self):
+        failures = []
+        with self._lock:
+            if self._done:
+                return
+            self._expired = True
+            # abort() wakes a blocking recv/send; close() alone need not wake
+            # another thread's blocking socket read on every platform.
+            try:
+                self.ws.abort()
+            except Exception:
+                failures.append("cartesia_raw_deadline_abort_failed")
+            try:
+                self.ws.shutdown()
+            except Exception:
+                failures.append("cartesia_raw_deadline_shutdown_failed")
+        # Diagnostics must not delay the waiting synthesis thread's cleanup.
+        for code in failures:
+            _emit("cartesia_ws", "deadlineCleanupFail", level="warn",
+                  trace_id=self.trace_id, detail={"code": code})
+
+    def complete(self):
+        with self._lock:
+            self._remaining_locked()
+            self._done = True
+        if self._timer is not None:
+            self._timer.cancel()
+
+    def stop(self):
+        if self._timer is not None:
+            self._timer.cancel()
+        with self._lock:
+            self._done = True
 
 
 def _open_ws(url: str, **kw) -> websocket.WebSocket:
@@ -78,7 +139,9 @@ def synthesize_raw_pcm(*,
     bytes_written = 0
     chunk_count = 0
     t_first_chunk: float | None = None
+    budget = _FirstByteBudget(ws, t_start + RAW_FIRST_BYTE_BUDGET_SEC, trace_id)
     try:
+        budget.start()
         request = json.dumps({
             "model_id": model,
             "transcript": text,
@@ -94,10 +157,7 @@ def synthesize_raw_pcm(*,
             },
         })
         # Connection/setup already spent part of this same absolute budget.
-        remaining = RAW_FIRST_BYTE_BUDGET_SEC - (time.perf_counter() - t_start)
-        if remaining <= 0:
-            raise CartesiaError("cartesia_raw_first_byte_timeout")
-        ws.settimeout(min(timeout, remaining))
+        ws.settimeout(budget.remaining_timeout(timeout))
         try:
             ws.send(request)
         except (websocket.WebSocketTimeoutException,
@@ -115,10 +175,7 @@ def synthesize_raw_pcm(*,
             while not saw_done:
                 try:
                     if t_first_chunk is None:
-                        remaining = RAW_FIRST_BYTE_BUDGET_SEC - (time.perf_counter() - t_start)
-                        if remaining <= 0:
-                            raise CartesiaError("cartesia_raw_first_byte_timeout")
-                        ws.settimeout(min(timeout, remaining))
+                        ws.settimeout(budget.remaining_timeout(timeout))
                     raw = ws.recv()
                     # A transport may return a late frame despite its timeout.
                     # Fence it before parsing or feeding any bytes to the broker.
@@ -159,8 +216,7 @@ def synthesize_raw_pcm(*,
                     if not decoded:
                         continue
                     if t_first_chunk is None:
-                        if time.perf_counter() - t_start >= RAW_FIRST_BYTE_BUDGET_SEC:
-                            raise CartesiaError("cartesia_raw_first_byte_timeout")
+                        budget.complete()
                         ws.settimeout(timeout)
                         t_first_chunk = time.perf_counter()
                         _emit("cartesia_ws", "firstChunk", trace_id=trace_id,
@@ -182,6 +238,7 @@ def synthesize_raw_pcm(*,
                     chunk_count += 1
                 saw_done = bool(msg.get("done"))
     finally:
+        budget.stop()
         try:
             if t_first_chunk is None:
                 # No close handshake may spend another 3 s after the budget.
