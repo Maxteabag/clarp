@@ -1,0 +1,129 @@
+diff --git a/server/server.py b/server/server.py
+index f92408a25fd4c1c11babc761c20294d2096898fa..f70beaada42f5a45c679d666e982e430a8ac7607 100644
+--- a/server/server.py
++++ b/server/server.py
+@@ -1432,48 +1432,18 @@
+         ).hexdigest()
+         path = cache / f"{key}.mp3"
+         if not path.is_file():
+-            temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
++            temporary = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+             try:
+-                if provider == "cartesia":
+-                    from lib.cartesia_tts import synthesize
+-                    synthesize(text=prompt, voice_id=voice_id,
+-                               out_path=temporary, api_key=cfg.cartesia_key(),
+-                               model=cfg.cartesia_model)
+-                elif provider == "elevenlabs":
+-                    from lib.eleven_ws import synthesize_streaming
+-                    from lib.voice_catalog import (
+-                        ELEVEN_PREVIEW_MODEL, ELEVEN_PREVIEW_SPEED,
+-                    )
+-                    synthesize_streaming(
+-                        text=prompt, voice_id=voice_id, out_path=temporary,
+-                        api_key=cfg.eleven_key(),
+-                        model=ELEVEN_PREVIEW_MODEL,
+-                        speed=ELEVEN_PREVIEW_SPEED)
+-                elif provider == "deepgram":
+-                    from lib.deepgram_tts import synthesize
+-                    synthesize(text=prompt, voice_id=voice_id,
+-                               out_path=temporary, api_key=cfg.deepgram_key())
+-                elif provider == "gemini":
+-                    from lib.gemini_tts import synthesize
+-                    synthesize(text=prompt, voice=cfg.gemini_tts_voice(voice_id),
+-                               out_path=temporary, api_key=cfg.gemini_tts_key(),
+-                               backend=cfg.gemini_backend, model=cfg.gemini_model)
+-                elif provider == "google":
+-                    # The requested voice through the shared google backend, never an agent route.
+-                    from lib import google_tts
+-                    google_tts.synthesize(text=prompt, voice=voice_id, out_path=temporary,
+-                                          creds=google_tts.credentials(cfg))
+-
+-                else:
+-                    from lib.custom_tts_adapters import preview as custom_preview
+-                    from lib.tts_providers import synthesize
+-                    if custom_manifest is not None:
+-                        custom_preview(
+-                            custom_manifest, text=prompt, voice=voice_id,
+-                            out_path=temporary)
+-                    else:
+-                        synthesize(provider, text=prompt, voice=voice_id,
+-                                   out_path=temporary)
++                from lib.tts_service import synth_preview
++                cache_primary = synth_preview(prompt, provider, voice_id, temporary, cfg=cfg, manifest=custom_manifest)
++                if not cache_primary:
++                    try:
++                        return self._send_file(temporary, content_type="audio/mpeg")
++                    finally:
++                        try:
++                            temporary.unlink(missing_ok=True)
++                        except OSError as cleanup_error:
++                            log_exception("voicePreviewCleanupFail", cleanup_error, detail=voice_id)
+                 temporary.replace(path)
+             except Exception as exc:
+                 temporary.unlink(missing_ok=True)
+@@ -1485,12 +1455,12 @@
+     def _handle_controller_narration(self):
+         """One spoken line for the iOS Flic tutorial, in the Host's voice.
+ 
+-        Synthesized once per text and cached; a phone rehearsing the same
+-        gesture twice costs one Cartesia call. Feature `controller_narration`.
++        Primary voice is cached per text. A fallback is served temporarily
++        so a different voice cannot enter the primary voice cache. Feature `controller_narration`.
+         """
+         from lib import config as app_config
+         from lib import controller_narration
+-        from lib.cartesia_tts import synthesize, CartesiaError
++        from lib.cartesia_tts import CartesiaError
+         text = controller_narration.normalize_text(
+             _raw_query_value(self.path, "text"))
+         if not text:
+@@ -1521,8 +1491,16 @@
+                 temporary = path.with_name(
+                     f".{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+                 try:
+-                    synthesize(text=text, voice_id=voice, out_path=temporary,
+-                               api_key=cfg.cartesia_key(), model=cfg.cartesia_model)
++                    from lib.tts_service import synth_preview
++                    cache_primary = synth_preview(text, "cartesia", voice, temporary, cfg=cfg, purpose="narration", agent={"persona": controller_narration.NARRATION_PERSONA})
++                    if not cache_primary:
++                        try:
++                            return self._send_file(temporary, content_type="audio/mpeg")
++                        finally:
++                            try:
++                                temporary.unlink(missing_ok=True)
++                            except OSError as cleanup_error:
++                                log_exception("controllerNarrationCleanupFail", cleanup_error, detail=voice)
+                     temporary.replace(path)
+                 except (CartesiaError, OSError) as exc:
+                     try: temporary.unlink()
+@@ -1535,7 +1513,7 @@
+         import hashlib
+         from lib.cartesia_voices import (
+             cached_english_voice, english_voices, has_cached_catalog)
+-        from lib.cartesia_tts import synthesize, CartesiaError
++        from lib.cartesia_tts import CartesiaError
+         from lib import config as app_config
+         query = self._query()
+         voice_id = (query.get("id", [""])[0] or "").strip()
+@@ -1575,10 +1553,16 @@
+                 temporary = path.with_name(
+                     f".{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+                 try:
+-                    synthesize(
+-                        text=prompt,
+-                        voice_id=voice_id, out_path=temporary,
+-                        api_key=cfg.cartesia_key(), model=cfg.cartesia_model)
++                    from lib.tts_service import synth_preview
++                    cache_primary = synth_preview(prompt, "cartesia", voice_id, temporary, cfg=cfg)
++                    if not cache_primary:
++                        try:
++                            return self._send_file(temporary, content_type="audio/mpeg")
++                        finally:
++                            try:
++                                temporary.unlink(missing_ok=True)
++                            except OSError as cleanup_error:
++                                log_exception("cartesiaPreviewCleanupFail", cleanup_error, detail=voice_id)
+                     temporary.replace(path)
+                 except (CartesiaError, OSError) as exc:
+                     try: temporary.unlink()

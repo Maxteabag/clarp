@@ -28,20 +28,266 @@ from .account_failover import Attempt as FailoverAttempt, AccountFailover
 from . import prompt_admissions
 from .send_service import SendTarget, resolve_send_target
 
-from .turn_dispatch_state import (  # noqa: E402,F401  (split_apply: turn-dispatch-module)
-    MAX_ATTEMPTS, BACKOFF_BASE_SEC, _TURN_LOCK, _SLOTS, _FAILOVERS, _pool_backend, account_failover,
-    account_selector, _INFLIGHT, _QUEUED, _CLAIMED_AT, _RECOVERY_LOCK, _RECOVERY_BACKOFF,
-    _RECOVERY_RESUMING_ORIGINS, _NO_LOCK, _JANITOR_SPAWN_LOCKS, _TERMINAL_SENTINEL,
-    _STOPPING_SENTINEL, _PROCESS_OWNER_PREFIX, _PROCESS_EXIT_POLL_S, LEAKED_SLOT_GRACE_MS,
-    ORPHAN_SPAWN_GRACE_S, REPAIR_SPAWN_GRACE_S, _launching, _launch_running, runtime_status,
-    held_order, log_held_order, RECOVERY_PARK_PREFIX, _transfer_refusal, account_recovery_carry,
-    resume_account_recovery, unpersisted_held, provider_turns, UPDATE_HOLD_HEADLINE,
-    refresh_hold_headlines, _ADMISSION, live_work, reset_for_tests, _terminal_live,
-)
+# A turn gets this many attempts total before we give up and flip the agent
+# to INTERRUPTED. Only connection-class failures consume retries; transient
+# API errors and deliberate aborts notify immediately.
+MAX_ATTEMPTS = 3
+# Exponential backoff between attempts: 1s, then 2s.
+BACKOFF_BASE_SEC = 1.0
+
+# Per-agent turn serialization. A normal send to an agent that already has an
+# in-flight turn QUEUES behind it and runs when that turn finishes — it does
+# NOT SIGTERM the running turn (that lost the new message if its turn hadn't
+# started, and abandoned the agent's work). Turns for one agent run strictly in
+# arrival order. Only an explicit stop / barge-in (backends.interrupt, a
+# separate path) preempts a running turn.
+# The slots live in lib.turn_slots.TurnSlots behind one OwnershipLock; the
+# module names below are views of that one object:
+#   _INFLIGHT: agent_id -> trace_id of the turn currently running
+#   _QUEUED:   agent_id -> list of _TurnSpec waiting to run, in order
+# Under _TURN_LOCK only ownership is decided. SQLite writes, eventlog rows and
+# backend spawns that follow from a decision are deferred with
+# ``_TURN_LOCK.defer`` and run after the outermost release.
+_TURN_LOCK = OwnershipLock()
+_SLOTS = turn_slots.TurnSlots(lock=_TURN_LOCK)
+# Each account-failover coordinator has its own lock. Lock order is always
+# _TURN_LOCK -> coordinator: the coordinator never takes _TURN_LOCK while it
+# holds its own; the callbacks it runs (owned, pause, resume) read slots
+# without the lock or defer their work past the coordinator's release.
+# One coordinator per account pool, keyed by ``backend.account_pool()``.
+_FAILOVERS: dict[str, AccountFailover] = {
+    pool: AccountFailover(OwnershipLock())
+    for pool in dict.fromkeys(backends.by_id(b).account_pool() for b in backends.ids())
+    if pool
+}
+
+def _pool_backend(backend):
+    """The backend whose pool runs ``backend``'s failover. Backends without
+    a pool of their own book-keep in the default backend's, as they always
+    have."""
+    owner = backends.by_id(backend)
+    return owner if owner.account_pool() else backends.by_id(backends.DEFAULT)
+
+def account_failover(backend):
+    return _FAILOVERS[_pool_backend(backend).account_pool()]
+
+def account_selector(backend):
+    return getattr(config.load(), _pool_backend(backend).config_account_switch_field)
+
+_INFLIGHT: dict[str, str] = _SLOTS.inflight
+_QUEUED: dict[str, list] = _SLOTS.queued
+_CLAIMED_AT: dict[str, float] = _SLOTS.claimed_at
+_RECOVERY_LOCK = threading.Lock()
+_RECOVERY_BACKOFF = recovery_backoff.RecoveryBackoff()
+# A fresh send from these asks for the agent again and clears a parked or
+# backing-off queued recovery (lib.recovery_backoff); automation does not.
+_RECOVERY_RESUMING_ORIGINS = frozenset({"user", "agent", "oracle"})
+_NO_LOCK = contextlib.nullcontext()
 _RUNTIME_CLIENT: Any | None = None
+# Weak values: a lock lives only while a caller holds it (`with` keeps a strong
+# reference for the duration), so the map cannot grow with every Janitor ever
+# seen. Concurrent callers still receive the same object while it is in use.
+_JANITOR_SPAWN_LOCKS: "weakref.WeakValueDictionary[str, Any]" = weakref.WeakValueDictionary()
+
+# Placeholder trace owning the in-flight slot while an interactive terminal is
+# attached to an agent. A normal turn routed to that agent queues behind it
+# (two processes resuming one session would corrupt the transcript); the queue
+# drains via drain_after_terminal() when the terminal closes.
+_TERMINAL_SENTINEL = turn_slots.TERMINAL_SENTINEL
+_STOPPING_SENTINEL = turn_slots.STOPPING_SENTINEL
+# Slot owner while a turn process the Host already finished is still running;
+# sends wait behind it (see _claim_or_queue).
+_PROCESS_OWNER_PREFIX = "process:"
+_PROCESS_EXIT_POLL_S = 0.25
+# A settled turn whose slot is still held this long after it settled leaked
+# (see TurnDispatchService.release_leaked_slots).
+LEAKED_SLOT_GRACE_MS = 60_000
+# A slot still "spawning" this long after its claim, with no launch running
+# and no account recovery holding it, was left by a launch that failed without
+# giving it back (Pebble, 2026-10-10: "database is locked" in a queued
+# handoff stranded the slot for 41 minutes).
+ORPHAN_SPAWN_GRACE_S = 300.0
+# An explicit repair trusts a younger claim: a launch that is really running
+# is in _SLOTS.launches, and the claim-to-launch window is well under this.
+REPAIR_SPAWN_GRACE_S = 30.0
+_launching = _SLOTS.launching
+_launch_running = _SLOTS.launch_running
+
+
 def configure_runtime_client(client: Any | None) -> None:
     global _RUNTIME_CLIENT
     _RUNTIME_CLIENT = client
+
+
+def runtime_status() -> dict[str, Any]:
+    """Serializable ownership snapshot served to replaceable HTTP processes."""
+    from . import compaction
+    status = _SLOTS.snapshot()
+    from . import live_hub
+    hub = live_hub.current()
+    status.update({
+        # The release drain (runtime_release): agents whose next turn waits on
+        # the admission fence, and held work not yet durable.
+        "held": _SLOTS.held(),
+        "held_order": held_order(),
+        "unpersisted": unpersisted_held(),
+        "provider_turns": provider_turns(),
+        "compactions": compaction.active_sessions(),
+        # Sends being admitted: a reconciler must leave their sessions bound
+        # (TP-05b); the release drain does not read it.
+        "admitting": _SLOTS.admitting_agents(),
+        # The status line per agent (docs/live-items.md §1.3), for the
+        # HTTP process's /agents/snapshot.
+        "live_activities": hub.activities() if hub is not None else {},
+        **{f"{pool}_account_recovery": coordinator.status()
+           for pool, coordinator in _FAILOVERS.items()},
+    })
+    return status
+
+
+def held_order() -> dict[str, list[dict[str, str]]]:
+    """While fenced, every agent's held work in FIFO order by stable ids:
+    the durable row (queue or park id; "" until the drain persists it), the
+    trace and the origin. Never message text."""
+    if not _SLOTS.fenced:
+        return {}
+    return {agent_id: [{"row": spec.queue_id or spec.park_id,
+                        "trace": spec.trace_id, "origin": spec.origin}
+                       for spec in specs]
+            for agent_id, specs in _SLOTS.queued_specs().items()}
+
+
+def log_held_order(event: str) -> None:
+    """Journal the held order at a seal or revert: the evidence that the work
+    recovered or started afterwards kept it (``queuedRecoveredOrder``)."""
+    for agent_id, entries in sorted(held_order().items()):
+        rows = ",".join(entry["row"] or f"memory:{entry['trace']}"
+                        for entry in entries)
+        log("drainHeldOrder", f"event={event} agent={agent_id} "
+                              f"n={len(entries)} rows={rows}")
+
+
+RECOVERY_PARK_PREFIX = "recovery-park"
+
+
+def _transfer_refusal(spec: "_TurnSpec", number: int, facts: dict) -> str:
+    """Why parked account-recovery work cannot become durable held work, or
+    "" when it can. Anything uncertain refuses; the work then keeps blocking
+    the handoff exactly as before (Solu re7d614160304)."""
+    if number != 1:
+        return "retried"
+    if spec.recovery_text or spec.recovery_attempted:
+        return "continuation"
+    if spec.janitor_run_id:
+        return "maintenance"
+    if spec.unheard_audio:
+        return "unheard_audio"
+    if spec.is_new_session or not spec.backend_session_id:
+        return "new_session"
+    if facts.get("binding") != spec.backend_session_id:
+        return "binding_changed"
+    if facts.get("paused"):
+        return "queue_paused"
+    if spec.queue_id and not facts.get("queued_row"):
+        return "queued_row_uncertain"
+    if facts.get("excluded"):
+        return str(facts["excluded"])
+    if _SLOTS.get(spec.agent_id) != spec.trace_id:
+        return "not_slot_owner"
+    if _launch_running(spec.agent_id):
+        return "launching"
+    return ""
+
+
+def account_recovery_carry(wall: float | None = None,
+                           handed_over: dict[str, set[str]] | None = None
+                           ) -> dict[str, dict]:
+    """Per account pool in recovery, when its work was first parked and
+    whose parked work the drain handed over."""
+    wall = time.time() if wall is None else wall
+    carry = {}
+    for pool, coordinator in _FAILOVERS.items():
+        value = coordinator.carry_over(wall, (handed_over or {}).get(pool, ()))
+        if value is not None:
+            carry[pool] = value
+    return carry
+
+
+def resume_account_recovery(carry: dict, wall: float | None = None) -> list[str]:
+    """At boot after a handoff, continue the pools that were recovering with
+    their original start (the park bound does not restart). Returns pools."""
+    wall = time.time() if wall is None else wall
+    resumed = []
+    for pool, value in (carry or {}).items():
+        coordinator = _FAILOVERS.get(pool)
+        if coordinator is None or not isinstance(value, dict):
+            continue
+        backend = next((b for b in backends.ids()
+                        if backends.by_id(b).account_pool() == pool), "")
+        command = account_selector(backend) if backend else None
+        try:
+            since = int(value.get("parked_since_ms") or 0)
+        except (TypeError, ValueError):
+            continue
+        agents = value.get("agents") or ()
+        if not isinstance(agents, (list, tuple)):
+            agents = ()
+        if since and coordinator.resume_recovery(command, since, wall, agents):
+            resumed.append(pool)
+            log("accountRecoveryCarried",
+                f"pool={pool} parked_for={max(0.0, wall - since / 1000):.0f}s")
+    return resumed
+
+
+def unpersisted_held() -> list[str]:
+    """Agents with queued work that would not survive a runtime handoff:
+    no durable queue row and no park row."""
+    return sorted(agent_id for agent_id, specs in _SLOTS.queued_specs().items()
+                  if any(not spec.queue_id and not spec.park_id for spec in specs))
+
+
+def provider_turns() -> list[str]:
+    """Agents with a turn a shared provider runs without a Clarp slot (a Codex
+    app-server goal continuation). A handoff would end it with the process."""
+    try:
+        from . import codex_app_server
+        return sorted(codex_app_server.busy_agents())
+    except Exception as exc:  # noqa: BLE001 - unknown is reported, not idle
+        log_exception("providerTurnsCheckFail", exc)
+        return ["<unknown>"]
+
+
+UPDATE_HOLD_HEADLINE = "Waiting for the Clarp update"
+
+
+def refresh_hold_headlines() -> None:
+    """Say why an agent with work does not start: its next turn waits for the
+    update (live state ``limited``). Cleared when the fence is lifted, at the
+    handoff seal, or when the agent's next turn begins."""
+    from . import live_hub
+    hub = live_hub.current()
+    if hub is not None:
+        hub.set_update_holds(set(_SLOTS.held()), UPDATE_HOLD_HEADLINE)
+
+
+# The admission in progress on this thread (TurnDispatchService.submit), so
+# the agent can be marked as admitting once it is known (TP-05b).
+_ADMISSION = threading.local()
+
+
+def live_work(agent_id: str, *, session: str = "") -> turn_slots.LiveWork:
+    """Every busy fact for one agent: slot, queue, terminal, compaction."""
+    return _SLOTS.live_work(agent_id, session=session)
+
+
+def reset_for_tests() -> None:
+    _SLOTS.reset_for_tests()
+    _RECOVERY_BACKOFF.reset_for_tests()
+    launch_receipts.reset_for_tests()
+
+
+def _terminal_live(agent_id: str) -> bool:
+    return _SLOTS.live_work(agent_id).terminal
 
 
 def _slot_is_spawning(agent_id: str) -> bool:
@@ -70,19 +316,245 @@ def free_stale_slot(agent_id: str) -> str | None:
     return _SLOTS.free_stale(agent_id)
 
 
-from .turn_command import (  # noqa: E402,F401  (split_apply: turn-dispatch-module)
-    DispatchResult, _with_delivery, _resolve_llm, _TurnSpec, _pause_exempt_on_arrival, _stop_holds,
-    _park, _park_at_head, DispatchError, _refuse_oversized, JanitorDispatchError,
-    _LaunchReceiptUnrecorded, UNCONFIRMED_DELIVERY, _LaunchReceiptRefused, DELIVERY_HINT_BUSY_MS,
-    _record_launch_attempt, GoalWakeDispatchError, _validate_goal_dispatch, _janitor_run_active,
-    _admission_facts, _admit, _validate_janitor_target, _recovered_janitor_run, _janitor_spawn_lock,
-    _REGENERATED_ORIGINS, _UNLAUNCHED_MARKER_RETRY_SEC, _unlaunched_marked, _remove_queued_run,
-    _default_retry_scheduler, OPENING_NOT_CONFIRMED, OPENING_WITHDRAWN, _AdmissionRefused,
-    _ADMISSION_REFUSED, _is_call_opening, _mark_backend_invoked, _backend_invoked,
-    _with_team_context, _with_delivery_context, _REQUEST_LOCKS, _REQUEST_LOCKS_GUARD,
-    DispatchCommand, _serialize_client_retry,
-)
+@dataclass(frozen=True)
+class DispatchResult:
+    session: str
+    backend: str
+    queued: bool = False
+    queue_depth: int = 0
+    queue_revision: int = 0
+    # F4 S1: the user send's delivery object (launch_receipts.delivery_for_send),
+    # read after the dispatch decided; None = unknown. Never retry authority.
+    delivery: dict | None = None
+    # F4 E2-S1: the identity of the runtime that computed ``delivery``, in the
+    # same RPC result (runtime_bridge); None when computed in-process.
+    delivery_runtime: dict | None = None
+
+
+def _with_delivery(command: "DispatchCommand", result: DispatchResult) -> DispatchResult:
+    """F4 S1, computed where turns are owned, after the decision: never from an
+    exception and never authority. A bookkeeping failure leaves it unknown."""
+    if not (command.client_msg_id and launch_receipts.eligible(
+            origin=command.origin, client_msg_id=command.client_msg_id, call_opening=False)):
+        return result
+    try:
+        agent = agents_db.get_by_session(result.session) if result.session else None
+        if not agent:
+            return result
+        shown = launch_receipts.delivery_for_send(
+            command.client_msg_id, agent_id=agent["agent_id"], origin=command.origin,
+            sender_agent_id=command.sender_agent_id or "")
+    except Exception as e:  # noqa: BLE001 - delivery state is a projection, never a failure
+        log_exception("deliveryStateReadFail", e, detail=result.session)
+        return result
+    return replace(result, delivery=shown) if shown is not None else result
+
+
+def _resolve_llm(agent: dict, backend: str) -> tuple[str, str]:
+    """Effective (model, effort) for a turn: the per-agent override wins, else
+    the global [agents] config default, else the CLI's own default ("").
+    Effort is validated against what the backend's CLI accepts."""
+    cfg = config.load()
+    if agent.get("is_janitor"):
+        from .janitor_design_policy import effective_chain
+        chain = effective_chain(agent["session"])
+        if chain["source"] == "global" and chain["chain"]:
+            primary = chain["chain"][0]
+            if primary["provider"] == backend:
+                return primary["model"], agent.get("effort") or ""
+    model = (agent.get("model") or "").strip()
+    effort = (agent.get("effort") or "").strip()
+    default_model, default_effort = backends.default_model_effort(backend, cfg)
+    model = model or default_model
+    effort = effort or default_effort
+    return model.strip(), backends.clean_effort(backend, effort)
+
+
+@dataclass(frozen=True)
+class _TurnSpec:
+    """Everything needed to (re)spawn one turn — captured once so a retry
+    fires the identical dispatch from a timer thread."""
+    backend: str
+    text: str
+    cwd: pathlib.Path
+    backend_session_id: str
+    is_new_session: bool
+    session: str
+    agent_id: str
+    trace_id: str
+    context: Any
+    synthesize_audio: bool
+    model: str = ""
+    effort: str = ""
+    client_msg_id: str = ""
+    team_digest: str = ""
+    team_inbox_ids: tuple[str, ...] = ()
+    team_protocol: str = ""
+    origin: str = "user"
+    sender_agent_id: str = ""
+    prompt_admission_id: str = ""
+    queue_id: str = ""
+    unheard_audio: bool = False
+    # Provider-only continuation; the admitted user message keeps its original
+    # text and client ID across an account change.
+    recovery_text: str = ""
+    recovery_attempted: bool = False
+    # Private runtime capability; never sourced from an ordinary send payload.
+    janitor_run_id: str = ""
+    # queued_turns row (status 'parked') holding a send admitted behind the
+    # Stop barrier, so it survives a runtime restart; "" when not parked.
+    park_id: str = ""
+    # Held behind a Stop barrier as newer work (``_claim_or_queue``): Stop has
+    # already decided it runs, so its launch receipt may not refuse it.
+    after_stop: bool = False
+    # Launches of this spec that failed before the backend started; spaces
+    # out the retries of a queued handoff (see _requeue_failed_handoff).
+    handoff_failures: int = 0
+    # Whether a Stop pause could not hold this request when it arrived (a
+    # normal send, fresh user intent, an explicit send-now). The release drain
+    # writes it to the durable row so the next runtime honours it too.
+    bypass_pause: bool = False
+    # The release drain already made this held spec durable.
+    drain_persisted: bool = False
+    # The release drain's hand-over parked this spec's own queue row
+    # (``queue_id``) in place: a cancel ends that exact row, and lifting
+    # the fence queues it again.
+    taken_over: bool = False
+    # The agent's state generation read just before this turn set its live trace (call-open end:
+    # hook prompt admissions after it refuse the end's visible write). In memory only.
+    s_open: int | None = None
+
+
+def _pause_exempt_on_arrival(command: "DispatchCommand", effective) -> bool:
+    """Whether a Stop pause could not hold this request when it arrived, so
+    the release drain may persist that right (``queued_turns.allow_paused``).
+    The same reading admission makes: a normal send and a peer message are
+    never paused; fresh user intent bypasses; an explicit send-now is allowed.
+    A goal wake is left out: recovery re-checks its right each time."""
+    from . import task_goal_recovery
+    if str(effective.client_msg_id or "").startswith(task_goal_recovery.PREFIX):
+        return False
+    peer_waits = effective.protected_peer and not command.queue_if_busy
+    return bool(not effective.queue_if_busy or peer_waits
+                or command.allow_paused_queue or effective.paused_bypass)
+
+
+def _stop_holds(spec: _TurnSpec) -> bool:
+    """Whether the agent's Stop pause holds this queued spec from starting.
+
+    The in-memory handover (a turn's end, the end of a Stop, a retried or
+    ownerless head, a lifted drain fence, a closed terminal) applies the same
+    rule as admission and durable recovery: work the pause could not hold on
+    arrival (``bypass_pause``), a row the release drain kept that right on
+    (``allow_paused``) and an allowed goal wake run; everything else waits for
+    Resume. A Stop takes the arrival right back from work already queued
+    (``prepare_queued_for_finish``), as ``turn_queue.set_paused`` does for rows.
+    """
+    if spec.bypass_pause or not turn_queue.is_paused(spec.agent_id):
+        return False
+    from . import task_goal_recovery
+    if (spec.client_msg_id.startswith(task_goal_recovery.PREFIX)
+            and task_goal_recovery.allows_paused_queue(spec.client_msg_id)):
+        return False
+    row = turn_queue.get(spec.queue_id) if spec.queue_id else None
+    return not (row and row.get("allow_paused"))
+
+
+def _park(spec: _TurnSpec, *, prefix: str = "stop-park") -> str:
+    """Persist a send that is about to wait behind the Stop barrier (or, with
+    ``prefix="drain-park"``, behind the release drain's admission fence)."""
+    park_id = f"{prefix}-{spec.trace_id}"
+    try:
+        turn_queue.park(
+            queue_id=park_id, agent_id=spec.agent_id, session=spec.session,
+            text=spec.text, trace_id=spec.trace_id,
+            client_msg_id=spec.client_msg_id,
+            synthesize_audio=spec.synthesize_audio, origin=spec.origin,
+            sender_agent_id=spec.sender_agent_id,
+            prompt_admission_id=spec.prompt_admission_id,
+            allow_paused=(prefix in {"drain-park", "preempt-park"}
+                          and spec.bypass_pause))
+    except Exception as exc:  # noqa: BLE001 - memory still holds the send
+        log_exception(f"{prefix.split('-')[0]}ParkPersistFail",
+                      exc, detail=spec.agent_id)
+        return ""
+    return park_id
+
+
+def _park_at_head(spec: _TurnSpec) -> str:
+    """Persist a preempting send ahead of everything its agent has open, as
+    it runs before the work already queued (TP-01)."""
+    park_id = f"preempt-park-{spec.trace_id}"
+    con = db.conn()
+    try:
+        con.execute("BEGIN IMMEDIATE")
+        try:
+            turn_queue.park_at_head(
+                queue_id=park_id, agent_id=spec.agent_id, session=spec.session,
+                text=spec.text, trace_id=spec.trace_id,
+                client_msg_id=spec.client_msg_id,
+                synthesize_audio=spec.synthesize_audio, origin=spec.origin,
+                sender_agent_id=spec.sender_agent_id,
+                prompt_admission_id=spec.prompt_admission_id)
+            if spec.bypass_pause:
+                turn_queue.allow_paused_for(park_id)
+            con.execute("COMMIT")
+        except BaseException:
+            con.execute("ROLLBACK")
+            raise
+    except Exception as exc:  # noqa: BLE001 - the caller refuses the send
+        log_exception("preemptParkPersistFail", exc, detail=spec.agent_id)
+        return ""
+    return park_id
+
+
+class DispatchError(RuntimeError):
+    def __init__(self, status: int, message: str):
+        self.status = status
+        super().__init__(message)
+
+
+def _refuse_oversized(registry, backend: str, text: str) -> None:
+    """Before admission, so nothing is stored: a message longer than the
+    backend's CLI can take is refused with 413 (BACKENDS-08)."""
+    limit_of = getattr(registry, "prompt_limit_bytes", None)
+    limit = limit_of(backend) if limit_of is not None else None
+    size = len((text or "").encode())
+    if limit is not None and size > limit:
+        raise DispatchError(
+            413, f"This message is {size // 1024} KiB, more than the {limit // 1024} KiB "
+                 "this agent can take in one message. Shorten it or split it into "
+                 "several messages.")
+
+
+class JanitorDispatchError(DispatchError):
+    """A maintenance run lost authorization; retrying cannot restore it."""
+
+
+class _LaunchReceiptUnrecorded(DispatchError):
+    """The launch receipt could not leave ``pending``, so the backend was never
+    handed the prompt: a same-id retry may still launch it exactly once."""
+
+
+UNCONFIRMED_DELIVERY = "message is saved but delivery is unconfirmed; reconciliation required"
+
+
+class _LaunchReceiptRefused(DispatchError):
+    """The receipt was fenced by Stop or superseded by a relaunch: this prompt
+    is never handed to a backend. Clients get the existing unconfirmed 503:
+    a superseded send may still run under its newer attempt, and a stopped one
+    is not something this response can name until the delivery contract does.
+    ``reason`` stays internal, for diagnostics."""
+
+    def __init__(self, reason: str):
+        self.reason = reason
+        super().__init__(503, UNCONFIRMED_DELIVERY)
+
+
 _DELIVERY_STREAM = None   # the turn owner's stream (set by TurnDispatchService)
+
+
+DELIVERY_HINT_BUSY_MS = 50   # N4 B: a hint never waits longer for the writer lock
 
 
 def _announce_delivery(trace_id: str) -> None:
@@ -129,6 +601,343 @@ def _announce_delivery_locked(stream, trace_id: str) -> None:
     events.broadcast(stream, events.delivery_updated(
         session=str(agent.get("session") or ""), agent_id=agent_id,
         message_id=message_writes._client_message_id(receipt["client_msg_id"])))
+
+
+def _record_launch_attempt(spec: "_TurnSpec") -> None:
+    """Fail closed immediately before a backend receives a user prompt."""
+    if not launch_receipts.eligible(origin=spec.origin, client_msg_id=spec.client_msg_id,
+                                    call_opening=_is_call_opening(spec)):
+        return
+    # A spec launched from a durable queue or park row, or held behind Stop as
+    # newer work, is governed by that decision, not by a racing fence.
+    decided = bool(spec.queue_id or spec.park_id or spec.after_stop)
+    try:
+        launch_receipts.mark_attempted(spec.trace_id, override_fence=decided)
+    except launch_receipts.HandoffRefused as e:
+        log("launchReceiptRefused",
+            f"agent={spec.agent_id} trace={spec.trace_id or '∅'} state={e.state}")
+        raise _LaunchReceiptRefused(e.state) from e
+    except Exception as e:  # noqa: BLE001
+        log_exception("launchReceiptAttemptFail", e, detail=spec.session)
+        raise _LaunchReceiptUnrecorded(
+            503, "could not record the launch; the message was not sent") from e
+
+
+class GoalWakeDispatchError(DispatchError):
+    def __init__(self, rejection):
+        self.permanent = rejection.permanent
+        self.code = rejection.code
+        super().__init__(409, str(rejection))
+
+
+def _validate_goal_dispatch(agent, request_id, *, native_session_id=None):
+    from . import task_goal_recovery
+
+    try:
+        task_goal_recovery.validate_dispatch(
+            agent, request_id, native_session_id=native_session_id)
+    except task_goal_recovery.WakeRejected as exc:
+        raise GoalWakeDispatchError(exc) from exc
+
+
+def _janitor_run_active(agent: dict, run_id: str, trace_id: str) -> bool | None:
+    """The one lookup the Janitor rules need; None when they do not apply."""
+    if not run_id or admission_policy.can_chat(agent):
+        return None
+    from . import janitors
+    return bool(janitors.validate_dispatch(agent["session"], run_id, trace_id))
+
+
+def _admission_facts(origin: str) -> tuple["admission_policy.HostSettings", list]:
+    """The host facts admission needs, read only for the origins that use them."""
+    origin = (origin or "").strip()
+    settings = admission_policy.HostSettings()
+    if origin == "heartbeat":
+        from . import heartbeat
+        settings = admission_policy.HostSettings(
+            heartbeats_disabled=bool(heartbeat.globally_disabled()))
+    teams = team_store.list_teams() if origin == "leader_tick" else []
+    return settings, teams
+
+
+def _admit(origin: str, agent: dict, request: "admission_policy.LiveWork", *,
+           facts: tuple, queue_paused: bool,
+           ) -> "admission_policy.Allow | admission_policy.Queue":
+    """Ask the admission policy; raise the matching error on a refusal."""
+    settings, teams = facts
+    decision = admission_policy.admission(
+        origin, agent, teams, settings, request,
+        admission_policy.QueueState(paused=queue_paused))
+    if isinstance(decision, admission_policy.Reject):
+        error = JanitorDispatchError if decision.janitor else DispatchError
+        raise error(decision.status, decision.reason)
+    return decision
+
+
+def _validate_janitor_target(agent: dict, run_id: str, trace_id: str) -> None:
+    """The Janitor half of admission, re-checked before every later attempt
+    (queue drains, retries, recovery) of a turn admitted earlier."""
+    request = admission_policy.LiveWork(
+        client_msg_id=run_id, janitor_run_id=run_id,
+        janitor_run_active=_janitor_run_active(agent, run_id, trace_id))
+    decision = admission_policy.admission(
+        "janitor" if run_id else "", agent, (), admission_policy.HostSettings(),
+        request, admission_policy.QueueState())
+    if isinstance(decision, admission_policy.Reject):
+        raise JanitorDispatchError(decision.status, decision.reason)
+
+
+def _recovered_janitor_run(row: dict) -> str:
+    """Recover capability from both durable records, never from an origin."""
+    agent = agents_db.get_by_agent_id(str(row["agent_id"]))
+    if not agent or agents_db.interaction_capabilities(agent)["can_chat"]:
+        return ""
+    from . import janitors
+    trace_id = str(row["trace_id"])
+    run = janitors.get_run_for_trace(trace_id)
+    if (not run or run["run_id"] != trace_id
+            or str(row["queue_id"]) != run["run_id"]
+            or str(row["client_msg_id"]) != run["run_id"]
+            or str(row["session"]) != run["session"]
+            or str(row["agent_id"]) != run["agent_id"]):
+        raise JanitorDispatchError(409, "Queued message has no matching maintenance run")
+    _validate_janitor_target(agent, run["run_id"], trace_id)
+    return run["run_id"]
+
+
+def _janitor_spawn_lock(agent_id: str):
+    # Separate from the global turn lock: Codex's blocking start RPC needs its
+    # read-thread callbacks to take _TURN_LOCK before the response arrives.
+    with _TURN_LOCK:
+        lock = _JANITOR_SPAWN_LOCKS.get(agent_id)
+        if lock is None:
+            lock = threading.RLock()
+            _JANITOR_SPAWN_LOCKS[agent_id] = lock
+        return lock
+
+
+# Background ticks their schedulers regenerate: never readmitted by recovery.
+_REGENERATED_ORIGINS = frozenset({"heartbeat", "leader_tick"})
+
+# Background retries of an unlaunched spawn's marker: waits before each.
+_UNLAUNCHED_MARKER_RETRY_SEC = (1.0, 5.0)
+
+
+def _unlaunched_marked(agent_id: str, trace_id: str) -> bool:
+    return db.conn().execute(
+        """SELECT 1 FROM state_log WHERE agent_id = ?
+              AND json_extract(detail, '$.trace_id') = ?
+              AND json_extract(detail, '$.dispatch_not_started')
+            LIMIT 1""", (agent_id, trace_id)).fetchone() is not None
+
+
+def _remove_queued_run(queue_id: str) -> None:
+    # Use the queue API to preserve revisions and unmaterialized admissions.
+    turn_queue.release_claim(queue_id)
+    turn_queue.remove(queue_id)
+
+
+def _default_retry_scheduler(delay: float, fn: Callable[[], None]) -> None:
+    """Run `fn` after `delay` seconds on a daemon timer thread."""
+    timer = threading.Timer(delay, fn)
+    timer.daemon = True
+    timer.start()
+
+
+OPENING_NOT_CONFIRMED = "The call opening could not be confirmed and will not be sent again"
+OPENING_WITHDRAWN = "The call opening was withdrawn before it was sent"
+
+
+class _AdmissionRefused:
+    """What a spawn attempt reports when the final call-open check refused the launch before the
+    spawn flag (L2 r4). The refusal has already settled the turn: "cancelled" wrote the withdrawn
+    receipt and finished it; "unknown" ended it visibly interrupted. A caller must neither mark
+    it spawned nor read it as superseded (409, D2 release, unlaunched receipt).
+
+    It is neither True nor False. A caller compares it by identity before any truth test, and
+    bool() raises, so a caller that was never taught about it fails loudly instead of reading a
+    refused opening as launched or superseded."""
+    __slots__ = ()
+
+    def __bool__(self) -> bool:
+        raise TypeError("compare _ADMISSION_REFUSED by identity, not truth")
+
+    def __repr__(self) -> str:
+        return "_ADMISSION_REFUSED"
+
+
+_ADMISSION_REFUSED = _AdmissionRefused()
+
+
+def _is_call_opening(spec) -> bool:
+    """A listen-first initiative (agent_rings): its own turn, never a user row.
+    Identified by its Host-issued admission, not the client-suppliable id."""
+    queue_id = str(getattr(spec, "queue_id", "") or getattr(spec, "client_msg_id", "") or "")
+    if not queue_id.startswith("call-open:"):
+        return False
+    from . import agent_rings
+    # Only positive evidence (a non-call prompt admission) makes it someone's
+    # own message; otherwise the opening's gate decides.
+    return not agent_rings.is_foreign_message(str(getattr(spec, "prompt_admission_id", "") or ""))
+
+
+def _mark_backend_invoked(exc: BaseException) -> None:
+    """The launch had already handed the turn to the backend when ``exc``
+    escaped: no longer evidence that nothing was sent (agent_rings, D2)."""
+    try:
+        exc.clarp_backend_invoked = True
+    except Exception:  # noqa: BLE001 - an exception that takes no attributes
+        pass
+
+
+def _backend_invoked(exc: BaseException | None) -> bool:
+    while exc is not None:
+        if getattr(exc, "clarp_backend_invoked", False):
+            return True
+        exc = exc.__cause__ or exc.__context__
+    return False
+
+
+def _with_team_context(text: str, *, digest: str = "", protocol: str = "") -> str:
+    """Wrap a turn's prompt with team context.
+
+    Keep the stable protocol before per-turn user text and digest so provider
+    prompt caching can reuse the repeated leader/team brief.
+    """
+    from .message_store import TEAM_CONTEXT_CLOSE, TEAM_CONTEXT_OPEN
+    digest = (digest or "").strip()
+    protocol = (protocol or "").strip()
+    if not digest and not protocol:
+        return text
+    parts = [TEAM_CONTEXT_OPEN]
+    if protocol:
+        parts.append(protocol)
+    if digest:
+        if protocol:
+            parts.append("")
+        parts.append(digest)
+    parts.append(TEAM_CONTEXT_CLOSE)
+    parts.extend(["", text])
+    return "\n".join(parts)
+
+
+def _with_delivery_context(text: str, *, unheard_audio: bool = False) -> str:
+    """Tell the agent what the transport delivered without altering chat text.
+
+    The canonical user row remains exactly what the user said. This notice is
+    injected only into the provider prompt so an agent does not assume that a
+    synthesized reply was heard merely because it exists in its transcript.
+    """
+    if not unheard_audio:
+        return text
+    return (
+        "<clarp-delivery-context>\n"
+        "The user began a new spoken turn before hearing one or more of your "
+        "previous synthesized replies. Treat those replies as unheard. Carry "
+        "forward anything still important, but answer the user's newest message "
+        "naturally instead of blindly repeating the old response.\n"
+        "</clarp-delivery-context>\n\n"
+        + text
+    )
+
+
+_REQUEST_LOCKS = weakref.WeakValueDictionary()
+_REQUEST_LOCKS_GUARD = threading.Lock()
+
+
+@dataclass(frozen=True)
+class DispatchCommand:
+    """One send, built once where it enters (``TurnDispatchService.submit``,
+    the HTTP send handler, a scheduler adapter) and serialized once across the
+    runtime RPC. Admission — the Janitor-demand authority check, the
+    leader-tick gate, the durable write — runs on the side that owns turns,
+    exactly once per command."""
+    text: str
+    requested_session: str = ""
+    trace_id: str = ""
+    synthesize_audio: bool = True
+    forced_session: str = ""
+    routed_by_orchestrator: bool = False
+    client_msg_id: str = ""
+    origin: str = "user"
+    sender_agent_id: str = ""
+    prompt_admission: PromptAdmission | None = None
+    prompt_admission_id: str = ""
+    queue_if_busy: bool = False
+    skip_admission: bool = False
+    durable_queue_id: str = ""
+    unheard_audio_sessions: tuple[str, ...] = ()
+    allow_paused_queue: bool = False
+    janitor_run_id: str = ""
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.unheard_audio_sessions, tuple):
+            object.__setattr__(self, "unheard_audio_sessions",
+                               tuple(str(item) for item in self.unheard_audio_sessions))
+
+    def as_kwargs(self) -> dict[str, Any]:
+        """The historical ``dispatch(**kwargs)`` shape. ``janitor_run_id`` is
+        present only when set, so an older runtime keeps accepting ordinary
+        work from a newer HTTP server."""
+        values = {field.name: getattr(self, field.name)
+                  for field in dataclasses.fields(self)}
+        if not self.janitor_run_id:
+            values.pop("janitor_run_id")
+        return values
+
+    def to_wire(self) -> dict[str, Any]:
+        values = self.as_kwargs()
+        if self.prompt_admission is not None:
+            values["prompt_admission"] = dataclasses.asdict(self.prompt_admission)
+        values["unheard_audio_sessions"] = list(self.unheard_audio_sessions)
+        return values
+
+    @classmethod
+    def from_wire(cls, params: dict[str, Any]) -> "DispatchCommand":
+        """Parse an RPC payload; ValueError for anything this side cannot run."""
+        names = {field.name for field in dataclasses.fields(cls)}
+        unknown = sorted(set(params) - names)
+        if unknown:
+            raise ValueError(f"unknown dispatch fields: {', '.join(unknown)}")
+        values = dict(params)
+        admission = values.get("prompt_admission")
+        if isinstance(admission, (dict, str)):
+            raw = admission if isinstance(admission, str) else json.dumps(admission)
+            values["prompt_admission"] = PromptAdmission.from_json(raw)
+            if values["prompt_admission"] is None:
+                raise ValueError("invalid prompt admission")
+        elif admission is not None and not isinstance(admission, PromptAdmission):
+            raise ValueError("invalid prompt admission")
+        if "text" not in values:
+            raise ValueError("dispatch text is required")
+        values["unheard_audio_sessions"] = tuple(
+            str(item) for item in values.get("unheard_audio_sessions") or ())
+        return cls(**values)
+
+
+def _serialize_client_retry(method):
+    """Keep one client's concurrent retries together through admission/launch.
+
+    SQLite admission alone ends before the runtime claims the turn. A second
+    request must not reclaim that first request in the intervening gap.
+    Weak entries disappear when the last waiting request finishes.
+    """
+    # Applied to the owning half only; the forwarding half never holds this
+    # lock across the RPC (an embedded runtime can execute the same request
+    # on another thread).
+    @functools.wraps(method)
+    def dispatch(self, command):
+        key = command.client_msg_id or command.trace_id
+        if not key:
+            return method(self, command)
+        with _REQUEST_LOCKS_GUARD:
+            lock = _REQUEST_LOCKS.get(key)
+            if lock is None:
+                lock = threading.RLock()
+                _REQUEST_LOCKS[key] = lock
+        with lock:
+            return method(self, command)
+    return dispatch
 
 
 class TurnDispatchService:
@@ -2950,11 +3759,65 @@ class TurnDispatchService:
             log_exception("turnPreemptFail", e, detail=context.session or "")
 
 
-from .turn_stop import (  # noqa: E402,F401  (split_apply: turn-dispatch-module)
-    _existing_cwd, _result_error_text, _result_detail, _result_assistant_text,
-    _record_dreaming_result, _FENCE_RETRY_DELAYS, _record_janitor_cancelled, _recovery_parked,
-    snapshot_stop_state, begin_stop, restore_stop_state, prepare_queued_for_finish,
-)
+def _existing_cwd(raw: Any) -> pathlib.Path:
+    from .launch_paths import existing_workspace_path
+    return existing_workspace_path(raw)
+
+
+def _result_error_text(event: Any) -> str:
+    """Best-effort human-readable error text out of an error-result event."""
+    if not isinstance(event, dict):
+        return ""
+    for k in ("result", "error", "message", "subtype"):
+        v = event.get(k)
+        if v:
+            return str(v)
+    return "error result"
+
+
+def _result_detail(event: dict, *, trace_id: str) -> dict:
+    usage = (event.get("usage") or {}) if isinstance(event, dict) else {}
+    detail: dict = {"dispatch": "clarp", "trace_id": trace_id}
+    if usage:
+        detail["tokens_in"] = int(
+            (usage.get("input_tokens") or 0)
+            + (usage.get("cache_creation_input_tokens") or 0)
+            + (usage.get("cache_read_input_tokens") or 0)
+        )
+        detail["tokens_out"] = int(usage.get("output_tokens") or 0)
+    cost = event.get("total_cost_usd") if isinstance(event, dict) else None
+    if cost is not None:
+        detail["cost_usd"] = float(cost)
+    duration = event.get("duration_ms") if isinstance(event, dict) else None
+    if duration is not None:
+        detail["duration_ms"] = int(duration)
+    return detail
+
+
+def _result_assistant_text(event: dict) -> str:
+    return str(
+        event.get("_assistant_text")
+        or event.get("last_agent_message")
+        or event.get("result")
+        or event.get("message")
+        or ""
+    ).strip()
+
+
+def _record_dreaming_result(agent_id: str, event: dict) -> None:
+    text = _result_assistant_text(event)
+    if not text.strip():
+        return
+    try:
+        from . import dreaming
+        dreaming.process_assistant_text(agent_id, text, live=False, origin="dreaming")
+    except Exception as e:  # noqa: BLE001
+        log_exception("dreamingResultParseFail", e, detail=agent_id)
+
+
+_FENCE_RETRY_DELAYS = (1.0, 5.0, 15.0)
+
+
 def _fence_launch_receipts(agent_id: str, attempt: int = 0) -> None:
     """Stop's fence. The in-process epoch lands first and holds on its own;
     a failed durable write is retried, never allowed to fail Stop."""
@@ -3018,6 +3881,20 @@ def owns_inflight_trace(agent_id: str, trace_id: str) -> bool:
     return _SLOTS.owns(agent_id, trace_id)
 
 
+def _record_janitor_cancelled(ctx, agent_id: str, session: str, trace_id: str) -> None:
+    """Publish a truthful terminal state only for this agent's current trace."""
+    if agents_db.get_trace(agent_id) != trace_id:
+        return
+    turn_lifecycle.try_transition(agent_id, TurnEvent.STOP_REQUESTED, {
+        "source": "janitor_pause", "origin": "janitor", "trace_id": trace_id,
+        "message": "Maintenance run cancelled"})
+    turn_lifecycle.close_turns_for_trace(agent_id, trace_id)
+    if getattr(ctx, "stream", None) is not None:
+        events.broadcast(ctx.stream, events.agent_state(
+            session=session, agent_id=agent_id, kind=AgentState.INTERRUPTED,
+            origin="janitor"))
+
+
 def cancel_janitor_run(ctx, run_id: str, *, backend_registry=backends) -> dict:
     """Cancel only a fenced run, in the process that owns its exact trace.
 
@@ -3074,6 +3951,79 @@ def _cancel_fenced_janitor_run(ctx, run: dict, agent: dict, backend_registry) ->
     finally:
         complete_stop(ctx, agent_id, snapshot, {run_id}, backend_registry=backend_registry)
     return {"cancelled": True, "interrupted": bool(terminated), "run_id": run_id}
+
+
+def _recovery_parked(agent_id: str, trace_id: str | None) -> bool:
+    return any(coordinator.parked(agent_id, trace_id)
+               for coordinator in _FAILOVERS.values())
+
+
+def snapshot_stop_state(agent_id: str) -> dict:
+    with _TURN_LOCK:
+        snapshot = _SLOTS.stop_snapshot(agent_id).as_dict()
+        snapshot["account_recovery_parked"] = _recovery_parked(
+            agent_id, _SLOTS.get(agent_id) or None)
+        return snapshot
+
+
+def begin_stop(agent_id: str, *, user_stop: bool = False) -> tuple[dict, int, bool]:
+    """Atomically install the Stop barrier in the process that owns turns.
+    ``user_stop`` marks the user's Stop: its pause also moves the durable user
+    stop generation in the same transaction. A maintenance cancel uses the same
+    barrier without it and never withdraws the user's own sends (see also
+    fence_user_stop)."""
+    stop = None
+    try:
+        with _TURN_LOCK:
+            value = _SLOTS.get(agent_id) or None
+            recovery_parked = _recovery_parked(agent_id, value)
+            queue_was_paused = bool(turn_queue.state(agent_id)["paused"])
+            # As in clear_for_agent: the barrier keeps Stop atomic with
+            # _finish_turn(); the pause flag lands right after the release.
+            stop, dropped = _SLOTS.begin_stop(agent_id)
+            if user_stop:
+                _TURN_LOCK.defer(lambda: turn_queue.set_paused(agent_id, True, user_stop=True))
+            else:
+                _TURN_LOCK.defer(lambda: turn_queue.set_paused(agent_id, True))
+    except Exception:
+        # The pause could not be written ('database is locked'): the Stop
+        # fails, and its barrier must not outlive it, or every later send
+        # waits behind it for a finish_stop that never comes (QUEUE-N1).
+        if stop is not None:
+            _SLOTS.restore_stop(agent_id, stop.as_dict())
+        raise
+    snapshot = stop.as_dict()
+    snapshot["account_recovery_parked"] = recovery_parked
+    return snapshot, dropped, queue_was_paused
+
+
+def restore_stop_state(agent_id: str, snapshot: dict) -> None:
+    """Roll back every process-local Stop mutation after interrupt failure."""
+    _SLOTS.restore_stop(agent_id, snapshot)
+
+
+def prepare_queued_for_finish(
+    agent_id: str, snapshot: dict, cancelled_trace_ids: set[str]
+) -> None:
+    """Restore preserved/new specs except cancelled ones under the barrier."""
+    # Work queued before this Stop loses the right to run past its pause
+    # that it had on arrival; work admitted during the Stop keeps it.
+    snapshot = {**snapshot, "queued": [
+        replace(spec, bypass_pause=False)
+        for spec in snapshot.get("queued") or ()]}
+    with _TURN_LOCK:
+        cancelled = [
+            spec for spec in list(snapshot.get("queued") or [])
+            + list(_QUEUED.get(agent_id) or [])
+            if spec.trace_id in cancelled_trace_ids]
+        _SLOTS.restore_queue(agent_id, snapshot, cancelled_trace_ids)
+    for spec in cancelled:
+        if getattr(spec, "park_id", ""):
+            turn_queue.unpark(spec.park_id)
+        if getattr(spec, "taken_over", False) and spec.queue_id:
+            # Exactly the row the hand-over parked for this work (by id);
+            # other parked rows (held arrivals) stay held across the Stop.
+            turn_queue.remove_taken_over(spec.queue_id)
 
 
 def complete_stop(
