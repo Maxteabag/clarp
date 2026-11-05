@@ -1,0 +1,16 @@
+# S9 cut 1d: keep the durable registry in background_jobs.py and move its
+# process identity, argv, worker-adoption and termination helpers together.
+# Regenerated from main's source at each main -> integration merge.
+
+[[split]]
+name = "background-jobs"
+module = "lib/background_jobs.py"
+
+[[split.part]]
+module = "lib/background_job_process.py"
+names = [
+    "WORKER_TERM_TIMEOUT_SEC", "WORKER_KILL_TIMEOUT_SEC",
+    "process_start_token", "current_worker_identity", "process_command",
+    "process_argv", "_parse_macos_procargs", "_macos_procargs",
+    "adopted_worker_job_ids", "worker_is_alive", "terminate_worker",
+]
