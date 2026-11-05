@@ -2,7 +2,8 @@
 # Applied by tools/refactor/split_apply.py; parts in dependency order. Stays in dreaming.py:
 # DreamingScheduler, dispatch_isolated_dream, the Google time-zone chain (urllib is imported
 # twice, a rebinding), ResolvedTimeZone and its helpers (ast_identity reads its field `location`
-# as a use of the location import), and the advance-request callback with its readers.
+# as a use of the location import), the advance-request callback with its readers, and
+# set_advance_request_callback and reset_for_tests (they rebind it with `global`).
 
 [[split]]
 name = "dreaming"
@@ -52,16 +53,16 @@ names = [
 # Runs, rounds, threads, digests, abandonment and dream-worker cleanup.
 module = "lib/dreaming_store.py"
 names = [
-    "_advance_request_lock", "dreaming_enabled", "reset_for_tests", "set_advance_request_callback", "should_skip_dream_prompt",
-    "strip_dreaming_ack", "mark_dream_started", "dream_runs_for_agent_date", "active_run_for_agent", "active_runs",
-    "ActiveDreamRunExists", "create_dream_run", "_gather_seed_material", "list_dream_runs", "next_round_for_run",
-    "claim_round", "release_round", "mark_round_sent", "record_final_digest", "_AlreadyPublished",
-    "_deliver_digest", "abandon_run", "_CLEANUP_PREFIX", "_CLEANUP_BATCH", "_harvest_abandoned",
-    "_WORKERS_PREFIX", "_process_start", "_claim_worker", "_fill_worker", "_worker_claims",
-    "_forget_workers", "_workers_gone", "_cleanup_quiet", "_harvest_abandoned_runs", "mark_active_noop",
-    "_record_thread_evidence", "_parse_thread_metadata", "_normalize_altitude", "_skip_busy_reason", "_recover_stale_sent_round",
-    "_env_int", "_routine_self_activity_busy", "_resolve_dream_llm", "_assistant_text_from_result", "_dose_snapshot",
-    "_with_isolated_context_snapshot", "_recent_real_context_snapshot", "_insert_round", "_ensure_next_rounds", "_rounds",
-    "_threads", "_stage_exists", "_incomplete_stages", "_next_round_index", "_create_threads_from_seed",
-    "_create_fanout_rounds", "_create_iteration_rounds", "_sync_run_progress",
+    "_advance_request_lock", "dreaming_enabled", "should_skip_dream_prompt", "strip_dreaming_ack", "mark_dream_started",
+    "dream_runs_for_agent_date", "active_run_for_agent", "active_runs", "ActiveDreamRunExists", "create_dream_run",
+    "_gather_seed_material", "list_dream_runs", "next_round_for_run", "claim_round", "release_round",
+    "mark_round_sent", "record_final_digest", "_AlreadyPublished", "_deliver_digest", "abandon_run",
+    "_CLEANUP_PREFIX", "_CLEANUP_BATCH", "_harvest_abandoned", "_WORKERS_PREFIX", "_process_start",
+    "_claim_worker", "_fill_worker", "_worker_claims", "_forget_workers", "_workers_gone",
+    "_cleanup_quiet", "_harvest_abandoned_runs", "mark_active_noop", "_record_thread_evidence", "_parse_thread_metadata",
+    "_normalize_altitude", "_skip_busy_reason", "_recover_stale_sent_round", "_env_int", "_routine_self_activity_busy",
+    "_resolve_dream_llm", "_assistant_text_from_result", "_dose_snapshot", "_with_isolated_context_snapshot", "_recent_real_context_snapshot",
+    "_insert_round", "_ensure_next_rounds", "_rounds", "_threads", "_stage_exists",
+    "_incomplete_stages", "_next_round_index", "_create_threads_from_seed", "_create_fanout_rounds", "_create_iteration_rounds",
+    "_sync_run_progress",
 ]
