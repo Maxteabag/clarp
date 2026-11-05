@@ -1,0 +1,10 @@
+# Merge 15: preserve the reviewed S7 3c integration outcomes.
+# Main retains the old-handler baseline; integration has the signed 32 fallback rows.
+# Payload is copied byte-for-byte from runtime f8c9626a (C SOURCE YES).
+# An absent merge-base path is represented by the empty string in s3_merge.sh.
+# Resolved blob b2afccc7d3f83aaa6688865ee81abd02983091bd; SHA256 e818de450ca6bbdb5aea69e7f62cec45ddd66b2fd90ca887c936629ab978d7b5.
+path = "tests/fixtures/voice_preview_goldens.json"
+resolved = "merge15-s7-preview-goldens.json.resolved"
+base_blob = ""
+main_blob = "edb115c2da50f4ade8be44a3c7c438778532f44a"
+integration_blob = "b2afccc7d3f83aaa6688865ee81abd02983091bd"
