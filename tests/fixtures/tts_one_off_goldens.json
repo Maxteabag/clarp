@@ -157,7 +157,7 @@
    }
   ],
   "internal_filename": null,
-  "result": "CartesiaError: cartesia failed"
+  "result": "RuntimeError: deepgram failed"
  },
  "failure=both-fail|fallback=cartesia|override=gemini:Kore|primary_key=False|provider=deepgram|purpose=ring": {
   "calls": [
@@ -263,7 +263,7 @@
    }
   ],
   "internal_filename": null,
-  "result": "CartesiaError: cartesia failed"
+  "result": "ElevenWSError: elevenlabs failed"
  },
  "failure=both-fail|fallback=cartesia|override=gemini:Kore|primary_key=False|provider=elevenlabs|purpose=ring": {
   "calls": [
@@ -367,7 +367,7 @@
    }
   ],
   "internal_filename": null,
-  "result": "CartesiaError: cartesia failed"
+  "result": "RuntimeError: gemini failed"
  },
  "failure=both-fail|fallback=cartesia|override=gemini:Kore|primary_key=False|provider=gemini|purpose=ring": {
   "calls": [
@@ -468,7 +468,7 @@
    }
   ],
   "internal_filename": null,
-  "result": "CartesiaError: cartesia failed"
+  "result": "RuntimeError: google failed"
  },
  "failure=both-fail|fallback=cartesia|override=gemini:Kore|primary_key=False|provider=google|purpose=ring": {
   "calls": [
@@ -665,7 +665,7 @@
    }
   ],
   "internal_filename": null,
-  "result": "CartesiaError: cartesia failed"
+  "result": "RuntimeError: deepgram failed"
  },
  "failure=both-fail|fallback=cartesia|override=gemini:Kore|primary_key=True|provider=deepgram|purpose=ring": {
   "calls": [
@@ -771,7 +771,7 @@
    }
   ],
   "internal_filename": null,
-  "result": "CartesiaError: cartesia failed"
+  "result": "ElevenWSError: elevenlabs failed"
  },
  "failure=both-fail|fallback=cartesia|override=gemini:Kore|primary_key=True|provider=elevenlabs|purpose=ring": {
   "calls": [
@@ -875,7 +875,7 @@
    }
   ],
   "internal_filename": null,
-  "result": "CartesiaError: cartesia failed"
+  "result": "RuntimeError: gemini failed"
  },
  "failure=both-fail|fallback=cartesia|override=gemini:Kore|primary_key=True|provider=gemini|purpose=ring": {
   "calls": [
@@ -976,7 +976,7 @@
    }
   ],
   "internal_filename": null,
-  "result": "CartesiaError: cartesia failed"
+  "result": "RuntimeError: google failed"
  },
  "failure=both-fail|fallback=cartesia|override=gemini:Kore|primary_key=True|provider=google|purpose=ring": {
   "calls": [
@@ -1136,7 +1136,7 @@
    }
   ],
   "internal_filename": null,
-  "result": "CartesiaError: cartesia failed"
+  "result": "RuntimeError: deepgram failed"
  },
  "failure=both-fail|fallback=cartesia|override=none|primary_key=False|provider=deepgram|purpose=ring": {
   "calls": [
@@ -1225,7 +1225,7 @@
    }
   ],
   "internal_filename": null,
-  "result": "CartesiaError: cartesia failed"
+  "result": "ElevenWSError: elevenlabs failed"
  },
  "failure=both-fail|fallback=cartesia|override=none|primary_key=False|provider=elevenlabs|purpose=ring": {
   "calls": [
@@ -1311,7 +1311,7 @@
    }
   ],
   "internal_filename": null,
-  "result": "CartesiaError: cartesia failed"
+  "result": "GeminiTTSError: no Gemini voice configured for 'Ada'"
  },
  "failure=both-fail|fallback=cartesia|override=none|primary_key=False|provider=gemini|purpose=ring": {
   "calls": [
@@ -1406,7 +1406,7 @@
    }
   ],
   "internal_filename": null,
-  "result": "CartesiaError: cartesia failed"
+  "result": "RuntimeError: google failed"
  },
  "failure=both-fail|fallback=cartesia|override=none|primary_key=False|provider=google|purpose=ring": {
   "calls": [
@@ -1604,7 +1604,7 @@
    }
   ],
   "internal_filename": null,
-  "result": "CartesiaError: cartesia failed"
+  "result": "RuntimeError: deepgram failed"
  },
  "failure=both-fail|fallback=cartesia|override=none|primary_key=True|provider=deepgram|purpose=ring": {
   "calls": [
@@ -1693,7 +1693,7 @@
    }
   ],
   "internal_filename": null,
-  "result": "CartesiaError: cartesia failed"
+  "result": "ElevenWSError: elevenlabs failed"
  },
  "failure=both-fail|fallback=cartesia|override=none|primary_key=True|provider=elevenlabs|purpose=ring": {
   "calls": [
@@ -1779,7 +1779,7 @@
    }
   ],
   "internal_filename": null,
-  "result": "CartesiaError: cartesia failed"
+  "result": "GeminiTTSError: no Gemini voice configured for 'Ada'"
  },
  "failure=both-fail|fallback=cartesia|override=none|primary_key=True|provider=gemini|purpose=ring": {
   "calls": [
@@ -1874,7 +1874,7 @@
    }
   ],
   "internal_filename": null,
-  "result": "CartesiaError: cartesia failed"
+  "result": "RuntimeError: google failed"
  },
  "failure=both-fail|fallback=cartesia|override=none|primary_key=True|provider=google|purpose=ring": {
   "calls": [
@@ -1969,7 +1969,7 @@
    }
   ],
   "internal_filename": null,
-  "result": "ElevenWSError: elevenlabs failed"
+  "result": "CartesiaError: Cartesia key or voice is not configured"
  },
  "failure=both-fail|fallback=elevenlabs|override=gemini:Kore|primary_key=False|provider=cartesia|purpose=ring": {
   "calls": [
@@ -2076,7 +2076,7 @@
    }
   ],
   "internal_filename": null,
-  "result": "ElevenWSError: elevenlabs failed"
+  "result": "RuntimeError: deepgram failed"
  },
  "failure=both-fail|fallback=elevenlabs|override=gemini:Kore|primary_key=False|provider=deepgram|purpose=ring": {
   "calls": [
@@ -2283,7 +2283,7 @@
    }
   ],
   "internal_filename": null,
-  "result": "ElevenWSError: elevenlabs failed"
+  "result": "RuntimeError: gemini failed"
  },
  "failure=both-fail|fallback=elevenlabs|override=gemini:Kore|primary_key=False|provider=gemini|purpose=ring": {
   "calls": [
@@ -2388,7 +2388,7 @@
    }
   ],
   "internal_filename": null,
-  "result": "ElevenWSError: elevenlabs failed"
+  "result": "RuntimeError: google failed"
  },
  "failure=both-fail|fallback=elevenlabs|override=gemini:Kore|primary_key=False|provider=google|purpose=ring": {
   "calls": [
@@ -2497,7 +2497,7 @@
    }
   ],
   "internal_filename": null,
-  "result": "ElevenWSError: elevenlabs failed"
+  "result": "CartesiaError: cartesia failed"
  },
  "failure=both-fail|fallback=elevenlabs|override=gemini:Kore|primary_key=True|provider=cartesia|purpose=ring": {
   "calls": [
@@ -2604,7 +2604,7 @@
    }
   ],
   "internal_filename": null,
-  "result": "ElevenWSError: elevenlabs failed"
+  "result": "RuntimeError: deepgram failed"
  },
  "failure=both-fail|fallback=elevenlabs|override=gemini:Kore|primary_key=True|provider=deepgram|purpose=ring": {
   "calls": [
@@ -2811,7 +2811,7 @@
    }
   ],
   "internal_filename": null,
-  "result": "ElevenWSError: elevenlabs failed"
+  "result": "RuntimeError: gemini failed"
  },
  "failure=both-fail|fallback=elevenlabs|override=gemini:Kore|primary_key=True|provider=gemini|purpose=ring": {
   "calls": [
@@ -2916,7 +2916,7 @@
    }
   ],
   "internal_filename": null,
-  "result": "ElevenWSError: elevenlabs failed"
+  "result": "RuntimeError: google failed"
  },
  "failure=both-fail|fallback=elevenlabs|override=gemini:Kore|primary_key=True|provider=google|purpose=ring": {
   "calls": [
@@ -2997,7 +2997,7 @@
    }
   ],
   "internal_filename": null,
-  "result": "ElevenWSError: elevenlabs failed"
+  "result": "CartesiaError: Cartesia key or voice is not configured"
  },
  "failure=both-fail|fallback=elevenlabs|override=none|primary_key=False|provider=cartesia|purpose=ring": {
   "calls": [
@@ -3093,7 +3093,7 @@
    }
   ],
   "internal_filename": null,
-  "result": "ElevenWSError: elevenlabs failed"
+  "result": "RuntimeError: deepgram failed"
  },
  "failure=both-fail|fallback=elevenlabs|override=none|primary_key=False|provider=deepgram|purpose=ring": {
   "calls": [
@@ -3262,7 +3262,7 @@
    }
   ],
   "internal_filename": null,
-  "result": "ElevenWSError: elevenlabs failed"
+  "result": "GeminiTTSError: no Gemini voice configured for 'Ada'"
  },
  "failure=both-fail|fallback=elevenlabs|override=none|primary_key=False|provider=gemini|purpose=ring": {
   "calls": [
@@ -3361,7 +3361,7 @@
    }
   ],
   "internal_filename": null,
-  "result": "ElevenWSError: elevenlabs failed"
+  "result": "RuntimeError: google failed"
  },
  "failure=both-fail|fallback=elevenlabs|override=none|primary_key=False|provider=google|purpose=ring": {
   "calls": [
@@ -3469,7 +3469,7 @@
    }
   ],
   "internal_filename": null,
-  "result": "ElevenWSError: elevenlabs failed"
+  "result": "CartesiaError: cartesia failed"
  },
  "failure=both-fail|fallback=elevenlabs|override=none|primary_key=True|provider=cartesia|purpose=ring": {
   "calls": [
@@ -3575,7 +3575,7 @@
    }
   ],
   "internal_filename": null,
-  "result": "ElevenWSError: elevenlabs failed"
+  "result": "RuntimeError: deepgram failed"
  },
  "failure=both-fail|fallback=elevenlabs|override=none|primary_key=True|provider=deepgram|purpose=ring": {
   "calls": [
@@ -3744,7 +3744,7 @@
    }
   ],
   "internal_filename": null,
-  "result": "ElevenWSError: elevenlabs failed"
+  "result": "GeminiTTSError: no Gemini voice configured for 'Ada'"
  },
  "failure=both-fail|fallback=elevenlabs|override=none|primary_key=True|provider=gemini|purpose=ring": {
   "calls": [
@@ -3843,7 +3843,7 @@
    }
   ],
   "internal_filename": null,
-  "result": "ElevenWSError: elevenlabs failed"
+  "result": "RuntimeError: google failed"
  },
  "failure=both-fail|fallback=elevenlabs|override=none|primary_key=True|provider=google|purpose=ring": {
   "calls": [
