@@ -1,5 +1,5 @@
 diff --git a/server/server.py b/server/server.py
-index f92408a25fd4c1c11babc761c20294d2096898fa..d22804eb654894d972fe7bb579289084475db22a 100644
+index f92408a25fd4c1c11babc761c20294d2096898fa..f70beaada42f5a45c679d666e982e430a8ac7607 100644
 --- a/server/server.py
 +++ b/server/server.py
 @@ -1432,48 +1432,18 @@
@@ -53,7 +53,7 @@ index f92408a25fd4c1c11babc761c20294d2096898fa..d22804eb654894d972fe7bb579289084
 +                cache_primary = synth_preview(prompt, provider, voice_id, temporary, cfg=cfg, manifest=custom_manifest)
 +                if not cache_primary:
 +                    try:
-+                        return self._send_file(temporary)
++                        return self._send_file(temporary, content_type="audio/mpeg")
 +                    finally:
 +                        try:
 +                            temporary.unlink(missing_ok=True)
@@ -88,7 +88,7 @@ index f92408a25fd4c1c11babc761c20294d2096898fa..d22804eb654894d972fe7bb579289084
 +                    cache_primary = synth_preview(text, "cartesia", voice, temporary, cfg=cfg, purpose="narration", agent={"persona": controller_narration.NARRATION_PERSONA})
 +                    if not cache_primary:
 +                        try:
-+                            return self._send_file(temporary)
++                            return self._send_file(temporary, content_type="audio/mpeg")
 +                        finally:
 +                            try:
 +                                temporary.unlink(missing_ok=True)
@@ -118,7 +118,7 @@ index f92408a25fd4c1c11babc761c20294d2096898fa..d22804eb654894d972fe7bb579289084
 +                    cache_primary = synth_preview(prompt, "cartesia", voice_id, temporary, cfg=cfg)
 +                    if not cache_primary:
 +                        try:
-+                            return self._send_file(temporary)
++                            return self._send_file(temporary, content_type="audio/mpeg")
 +                        finally:
 +                            try:
 +                                temporary.unlink(missing_ok=True)
