@@ -280,3 +280,269 @@ def test_primary_streams_its_indexed_chunks_to_the_live_sink(env, monkeypatch):
     assert run() == 20
     assert live == [(0, b"CARTESIA-1"), (1, b"CARTESIA-2")]
     assert not fallback_ran
+
+
+
+def _fallback_wav(seconds=.1):
+    import io
+    import math
+    import struct
+    import wave
+    output = io.BytesIO()
+    samples = b''.join(struct.pack('<hh', value, value) for value in (
+        int(10000 * math.sin(2 * math.pi * 1000 * frame / 22050))
+        for frame in range(int(22050 * seconds))))
+    with wave.open(output, 'wb') as wav:
+        wav.setnchannels(2)
+        wav.setsampwidth(2)
+        wav.setframerate(22050)
+        wav.writeframes(samples)
+    return output.getvalue()
+
+
+@pytest.mark.parametrize('mode,fallback,outcome', [
+    pytest.param('before', 'elevenlabs', 'ok', id='before-f32'),
+    ('before', 'elevenlabs', 'provider-error'),
+    ('before', 'none', 'ok'),
+    ('after', 'elevenlabs', 'ok'),
+    ('success', 'elevenlabs', 'ok'),
+    ('stall', 'elevenlabs', 'ok'),
+    ('late', 'elevenlabs', 'ok'),
+    ('near-budget', 'elevenlabs', 'ok'),
+    ('before', 'elevenlabs', 'stop-resume'),
+    ('before', 'elevenlabs', 'barge'),
+    ('before', 'elevenlabs', 'primary-stop'),
+    ('success', 'elevenlabs', 'primary-stop'),
+    ('before', 'elevenlabs', 'feed-stop'),
+    ('before', 'elevenlabs', 's16'),
+    ('before', 'elevenlabs', 'decode-error'),
+    ('before', 'elevenlabs', 'decode-timeout'),
+])
+def test_raw_pcm_outage_restarts_only_before_audio(env, monkeypatch, mode, fallback, outcome):
+    """641: one early raw event/session; fallback is decoded to its exact PCM."""
+    import base64
+    import json
+    import math
+    import struct
+    import subprocess
+    import types
+    from lib import cartesia_ws, config, db, tts_worker, turn_queue
+    from lib.clip_delivery.raw_pcm import RawPcmDelivery
+    from lib.clip_stream import ClipStreamBroker
+
+    encoding, rate = ('pcm_s16le', 24000) if outcome == 's16' else ('pcm_f32le', 44100)
+    monkeypatch.setattr(config, '_CACHED', config.Config(
+        tts_provider='cartesia', tts_fallback=fallback,
+        cartesia_api_key='cartesia-key', eleven_api_key='eleven-key',
+        cartesia_voices={'Mike': 'cartesia-voice'},
+        raw_pcm_encoding=encoding, raw_pcm_sample_rate=rate))
+    clock = [0.0]
+    if mode in ('stall', 'late', 'near-budget'):
+        monkeypatch.setattr(cartesia_ws, 'time', types.SimpleNamespace(perf_counter=lambda: clock[0]))
+    primary_audio = b'PCM-FIRST'
+    frames = []
+    if mode in ('after', 'success', 'late', 'near-budget'):
+        frames.append(json.dumps({'type': 'chunk',
+                                  'data': base64.b64encode(primary_audio).decode()}))
+    frames.append(json.dumps({'type': 'done'}) if mode in ('success', 'near-budget', 'late')
+                  else OSError('Cartesia outage'))
+    sent, backup_calls, recorded, emitted, timeouts = [], [], [], [], []
+
+    def interrupt():
+        if outcome == 'barge':
+            agents_db.set_trace(env['agent_id'], 'new-user-turn')
+        else:
+            turn_queue.set_paused(env['agent_id'], True, user_stop=True)
+            turn_queue.set_paused(env['agent_id'], False)
+
+    monkeypatch.setattr(tts_worker, '_emit',
+                        lambda _src, name, **kw: emitted.append((name, kw)))
+
+    class Socket:
+        closed = False
+        timeout = 30.0
+        def settimeout(self, timeout):
+            self.timeout = timeout
+        def send(self, raw):
+            # Announcement stays BEFORE Cartesia warms up, including success.
+            assert len([e for e in recorded if e['type'] == 'audio']) == 1
+            sent.append(json.loads(raw))
+        def recv(self):
+            if mode in ('stall', 'late', 'near-budget') and clock[0] == 0:
+                clock[0] = self.timeout if mode == 'stall' else (12.0 if mode == 'late' else 9.999)
+                if mode == 'stall':
+                    raise cartesia_ws.websocket.WebSocketTimeoutException('first byte stalled')
+            if outcome == 'primary-stop' and len(frames) == (2 if mode == 'success' else 1):
+                interrupt()
+            frame = frames.pop(0)
+            if isinstance(frame, Exception):
+                raise frame
+            return frame
+        def close(self):
+            self.closed = True
+
+    socket = Socket()
+    monkeypatch.setattr(cartesia_ws, '_open_ws', lambda *_, **__: socket)
+    monkeypatch.setattr(tts_worker, 'cartesia_synthesize',
+                        lambda **_: pytest.fail('failed Cartesia must not be retried as MP3'))
+
+    def backup(*, text, voice_id, out_path, on_chunk, **_):
+        backup_calls.append((text, voice_id))
+        assert on_chunk is None, 'compressed fallback bytes must never enter the raw broker'
+        if outcome == 'provider-error':
+            raise tts_worker.ElevenWSError('backup outage')
+        data = b'not audio' if outcome == 'decode-error' else _fallback_wav(2 if outcome == 'feed-stop' else .1)
+        pathlib.Path(out_path).write_bytes(data)
+        if outcome in ('stop-resume', 'barge'):
+            interrupt()
+        return len(data)
+
+    monkeypatch.setattr(tts_worker, 'synthesize_streaming', backup)
+    if outcome == 'decode-timeout':
+        run = subprocess.run
+        def bounded_timeout(command, *args, **kwargs):
+            if pathlib.Path(command[0]).name == 'ffmpeg':
+                timeouts.append(kwargs.get('timeout'))
+                assert 0 < kwargs['timeout'] <= 20
+                raise subprocess.TimeoutExpired(command, kwargs['timeout'])
+            return run(command, *args, **kwargs)
+        monkeypatch.setattr(subprocess, 'run', bounded_timeout)
+
+    class Stream:
+        def broadcast(self, event):
+            recorded.append(event)
+
+    broker = ClipStreamBroker()
+    append = broker.append
+    def append_then_stop(clip_id, chunk):
+        if mode in ('stall', 'late', 'near-budget'):
+            assert clock[0] < 30, 'client empty wait expired before PCM arrived'
+        append(clip_id, chunk)
+        if outcome == 'feed-stop':
+            interrupt()
+    monkeypatch.setattr(broker, 'append', append_then_stop)
+    qid = tts_queue.enqueue(agent_id=env['agent_id'], text='Fallback speech.',
+                            voice_id='eleven-voice', session='claude',
+                            source=TurnSource.PWA, trace_id='vp02b-trace')
+    assert tts_worker.synth_one(audio_dir=env['audio_dir'], broker=broker,
+                                delivery=RawPcmDelivery(broker=broker, encoding=encoding, sample_rate=rate),
+                                stream=Stream())
+    queue = tts_queue.recent(limit=1)[0]
+    clips = [dict(r) for r in db.conn().execute(
+        'SELECT clip_id,path,producer_status FROM clips ORDER BY clip_id')]
+    should_fallback = mode in ('before', 'stall', 'late') and fallback == 'elevenlabs' and outcome != 'primary-stop'
+    assert len(backup_calls) == int(should_fallback)
+    assert socket.closed and len(sent) == 1
+    assert sent[0]['voice']['id'] == 'cartesia-voice'
+    assert sent[0]['output_format'] == {'container': 'raw', 'encoding': encoding, 'sample_rate': rate}
+    assert len(clips) == 1, 'fallback must retain the original clip identity'
+    raw = clips[0]
+    raw_stream = broker.get(raw['clip_id'])
+    audio = [e for e in recorded if e['type'] == 'audio']
+    assert len(audio) == 1 and audio[0]['delivery'] == 'raw-pcm'
+    assert audio[0]['clip_id'] == raw['clip_id'] and audio[0]['trace_id'] == 'vp02b-trace'
+    assert audio[0]['audio_format'] == {
+        'container': 'raw', 'encoding': encoding, 'sample_rate': rate, 'channels': 1}
+    cancelled = outcome in ('stop-resume', 'barge', 'primary-stop', 'feed-stop')
+    succeeded = (mode in ('success', 'near-budget') or should_fallback and outcome in ('ok', 's16')) and not cancelled
+    if succeeded:
+        assert queue['status'] == tts_queue.DONE and queue['clip_id'] == raw['clip_id']
+        assert raw['producer_status'] == 'complete' and raw_stream.finished
+        data = pathlib.Path(raw['path']).read_bytes()
+        assert b''.join(raw_stream.chunks) == data
+        if mode in ('success', 'near-budget'):
+            if mode == 'near-budget':
+                assert clock[0] == 9.999
+            assert data == primary_audio
+        else:
+            assert backup_calls == [('Fallback speech.', 'eleven-voice')]
+            sample_bytes, code = (2, '<h') if encoding == 'pcm_s16le' else (4, '<f')
+            assert len(data) == rate // 10 * sample_bytes, 'decoded rate/channel/sample width differs from audio_format'
+            values = [sample[0] for sample in struct.iter_unpack(code, data)]
+            assert all(math.isfinite(value) for value in values)
+            peak = max(abs(value) for value in values)
+            assert (9000 < peak < 11000) if sample_bytes == 2 else (.25 < peak < .4)
+        assert not [e for e in recorded if e['type'] == 'tts-error']
+    else:
+        assert queue['status'] == tts_queue.FAILED
+        assert raw['producer_status'] == 'failed' and raw_stream.failed
+        assert not pathlib.Path(raw['path']).exists()
+        assert not pathlib.Path(raw['path'] + '.json').exists()
+        expected = [primary_audio] if mode == 'after' else []
+        if outcome == 'feed-stop':
+            assert len(raw_stream.chunks) == 1, 'bytes continued after Stop during PCM feeding'
+        else:
+            assert raw_stream.chunks == expected
+        errors = [e for e in recorded if e['type'] == 'tts-error']
+        if cancelled:
+            assert queue['error'].startswith(tts_queue.CANCELLED_PREFIX)
+            assert errors == []
+        else:
+            assert len(errors) == 1
+            if outcome.startswith('decode-'):
+                assert 'decode' in queue['error'].lower()
+    if outcome == 'decode-timeout':
+        assert len(timeouts) == 1
+    transitions = [kw['detail'] for name, kw in emitted if name == 'providerFallback']
+    assert len(transitions) == int(should_fallback)
+    if transitions:
+        assert transitions[0]['provider'] == 'cartesia' and transitions[0]['fallback'] == 'elevenlabs'
+        assert transitions[0]['error_code'] == 'cartesia_raw_before_audio'
+        assert 'Fallback speech.' not in json.dumps(transitions[0])
+    assert qid == queue['queue_id']
+
+def test_a_queued_utterance_cannot_overtake_its_raw_fallback(env, monkeypatch):
+    import threading
+    from lib import config, tts_worker
+    from lib.clip_delivery.raw_pcm import RawPcmDelivery
+    from lib.clip_stream import ClipStreamBroker
+    entered, release, blocked, done = (threading.Event() for _ in range(4))
+    calls = []
+    monkeypatch.setattr(config, '_CACHED', config.Config(
+        tts_provider='cartesia', tts_fallback='elevenlabs', cartesia_api_key='cartesia-key',
+        eleven_api_key='eleven-key', cartesia_voices={'Mike': 'cartesia-voice'}))
+    def raw(**_):
+        raise tts_worker.CartesiaError('outage')
+    monkeypatch.setattr(tts_worker, 'cartesia_synthesize_raw_pcm', raw)
+    def backup(*, text, out_path, on_chunk, **_):
+        calls.append(text)
+        if text == 'first':
+            blocked.clear()
+            entered.set()
+            assert release.wait(10), 'fallback release timed out'
+        data = _fallback_wav()
+        pathlib.Path(out_path).write_bytes(data)
+        assert on_chunk is None
+        return len(data)
+    monkeypatch.setattr(tts_worker, 'synthesize_streaming', backup)
+    ids = [tts_queue.enqueue(agent_id=env['agent_id'], text=text, voice_id='eleven-voice',
+                              session='claude', source=TurnSource.PWA) for text in ('first', 'second')]
+    claim, mark_done = tts_queue.claim_next, tts_queue.mark_done
+    def observe_claim(skip=frozenset()):
+        row = claim(skip)
+        if row is None and env['agent_id'] in skip:
+            blocked.set()
+        return row
+    def observe_done(qid, **kwargs):
+        mark_done(qid, **kwargs)
+        if qid == ids[1]:
+            done.set()
+    monkeypatch.setattr(tts_queue, 'claim_next', observe_claim)
+    monkeypatch.setattr(tts_queue, 'mark_done', observe_done)
+    broker = ClipStreamBroker()
+    worker = tts_worker.TTSWorker(audio_dir=env['audio_dir'], interval_sec=.01,
+                                  broker=broker, delivery=RawPcmDelivery(broker=broker))
+    try:
+        worker.start()
+        assert entered.wait(5), 'first fallback never started'
+        assert blocked.wait(5), 'another pool lane never checked the busy agent'
+        assert calls == ['first']
+        assert tts_queue.recent(limit=2)[0]['status'] == tts_queue.QUEUED
+        release.set()
+        assert done.wait(10), 'second utterance never completed after fallback'
+        assert calls == ['first', 'second']
+        assert all(r['status'] == tts_queue.DONE for r in tts_queue.recent(limit=2))
+    finally:
+        release.set()
+        worker.stop(timeout=5)
+        assert all(not thread.is_alive() for thread in worker._threads)
