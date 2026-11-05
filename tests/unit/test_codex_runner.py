@@ -340,6 +340,47 @@ def test_command_execution_keeps_input_beyond_display_label(fake_codex, tmp_path
     assert detail["input"]["command"] == command
 
 
+def test_legacy_events_preserve_tool_compaction_usage_and_assistant_speech(fake_codex, tmp_path):
+    """The fallback event_msg stream has the same observable runner duties."""
+    agent_id = _make_codex_agent(persona="Legacy", session="legacy-events")
+    fake_codex([
+        {"type": "session_meta", "payload": {"id": "legacy-thread"}},
+        {"type": "event_msg", "payload": {"type": "task_started"}},
+        {"type": "event_msg", "payload": {"type": "function_call", "name": "search"}},
+        {"type": "event_msg", "payload": {"type": "exec_command_end"}},
+        {"type": "event_msg", "payload": {"type": "context_compacted"}},
+        {"type": "event_msg", "payload": {
+            "type": "token_count", "info": {"total_input_tokens": 37, "total_output_tokens": 11}}},
+        {"type": "event_msg", "payload": {
+            "type": "message", "role": "user", "message": "<speak>User text</speak>"}},
+        {"type": "event_msg", "payload": {
+            "type": "message", "role": "assistant", "message": "<speak>Legacy answer</speak>"}},
+        {"type": "event_msg", "payload": {
+            "type": "task_complete", "last_agent_message": "<speak>Legacy answer</speak>"}},
+    ])
+    results, errors, sessions = [], [], []
+    handle = CODEX.start_turn(
+        text="search", cwd=tmp_path, agent_id=agent_id, session="legacy-events",
+        trace_id="legacy-trace", on_session_init=sessions.append,
+        on_result=results.append, on_error=errors.append)
+    handle.wait(timeout=5)
+    handle.drain_thread.join(timeout=5)
+    assert not handle.drain_thread.is_alive()
+    assert errors == []
+    assert sessions == ["legacy-thread"]
+    assert len(results) == 1
+    assert results[0]["usage"] == {"input_tokens": 37, "output_tokens": 11}
+    assert results[0]["last_agent_message"] == "<speak>Legacy answer</speak>"
+    assert _queued_texts(agent_id) == ["Legacy answer"]
+    rows = agents_db.conn().execute(
+        "SELECT kind, detail FROM state_log WHERE agent_id=? ORDER BY state_id", (agent_id,)
+    ).fetchall()
+    assert AgentState.THINKING in [r["kind"] for r in rows]
+    stages = [r for r in rows if r["kind"] in (AgentState.TOOL, AgentState.COMPACTING)]
+    assert [r["kind"] for r in stages] == [AgentState.TOOL, AgentState.COMPACTING]
+    assert json.loads(stages[0]["detail"])["tool"] == "search"
+
+
 def test_spawn_turn_expands_tilde_cwd(fake_codex):
     """An agent whose cwd is the literal "~" must still spawn — Popen won't
     expand the tilde, so the runner must. Regression for the /send 500 that
