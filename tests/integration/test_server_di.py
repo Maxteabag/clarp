@@ -3740,8 +3740,17 @@ def test_agent_assignment_endpoint_keeps_existing_session(running_server):
 def test_anonymous_creation_returns_its_agent_without_a_fleet_query(running_server, monkeypatch):
     base, _ctx, _srv = running_server
     from lib import agents as agents_db
-    monkeypatch.setattr(agents_db, "dashboard_states", lambda: pytest.fail("creation must not build the fleet"))
+    # Only the request path is in question. The Host's own background sweep (stale_work)
+    # may build the fleet meanwhile; a plain AssertionError there is caught and logged by
+    # its loop, where pytest.fail (a BaseException) killed the thread and warned in G1.
+    callers = []
+
+    def no_fleet():
+        callers.append(threading.current_thread().name)
+        raise AssertionError("creation must not build the fleet")
+    monkeypatch.setattr(agents_db, "dashboard_states", no_fleet)
     status, body = _post(base + "/agents", {"anonymous": True, "backend": "codex", "cwd": "/tmp"})
+    assert not [name for name in callers if "process_request" in name], "creation built the fleet"
     response = json.loads(body)
     assert status == 200
     assert response["agent"]["session"] == response["session"]
