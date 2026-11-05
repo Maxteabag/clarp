@@ -32,7 +32,7 @@ SERVER = pathlib.Path(__file__).resolve().parents[2] / "server"
 LAYERS = ("persistence", "core", "features", "http")
 
 PERSISTENCE = frozenset({
-    "lib", "lib.clock", "lib.db", "lib.db_migrations", "lib.db_schema",
+    "lib", "lib.batched_delete", "lib.clock", "lib.db", "lib.db_migrations", "lib.db_schema",
     "lib.lifecycle", "lib.paths", "lib.revisioned_cache", "lib.timing", "lib.xdg",
 })
 PERSISTENCE_PACKAGES = ("lib.persistence",)
