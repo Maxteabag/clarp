@@ -24,7 +24,8 @@ jobs:
           node-version: 22
           cache: npm
       - name: Native audio test dependency
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+        timeout-minutes: 12
+        run: bash .github/scripts/install-test-ffmpeg.sh
       - run: uv sync --frozen --group dev
       - name: Prepare JavaScript dependencies and the web bundle (with network, before the contained tests)
         run: npm ci --ignore-scripts --no-audit --no-fund && npm run build
