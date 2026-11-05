@@ -543,10 +543,28 @@ def _synth_pwa_via_delivery(row: dict, agent: dict,
         log_exception("clipDeliveryBeginFail", e, detail=delivery.name)
         return _PwaStreamResult(False, error=f"delivery begin failed: {e}")
 
+    raw_broker = getattr(session, "_broker", None) if raw else None
+    stream_failure_reported = False
+
     def check_active():
+        nonlocal stream_failure_reported
         if raw and (turn_queue.user_stop_generation(row["agent_id"]) != stop_generation
                     or (trace_id and agents_db.get_trace(row["agent_id"], max_age_ms=None) != trace_id)):
             raise _RawCancelled(tts_queue.CANCELLED_PREFIX + "raw clip authority changed")
+        if raw_broker is not None:
+            live = raw_broker.get(session.clip_id)
+            code = "raw_stream_unavailable" if live is None else ""
+            if live is not None:
+                with live.cond:
+                    if live.failed:
+                        code = ("raw_stream_wait_timeout" if live.error == "stream wait timeout"
+                                else "raw_stream_failed")
+            if code:
+                if not stream_failure_reported:
+                    _emit("tts_worker", "rawStreamFailed", context=_event_context(row, agent),
+                          level="warn", detail={"code": code, "clip_id": session.clip_id})
+                    stream_failure_reported = True
+                raise RuntimeError(code)
 
     # Some deliveries broadcast at begin (ChunkedFile — client subscribes
     # to a live stream that grows). Others must wait until finalize (HLS —
@@ -570,6 +588,7 @@ def _synth_pwa_via_delivery(row: dict, agent: dict,
     def feed(index, chunk):
         check_active()
         session.feed(index, chunk)
+        check_active()
 
     paced_feed, finish_pacing = clip_pacing.track(
         feed if raw else session.feed,
@@ -591,12 +610,18 @@ def _synth_pwa_via_delivery(row: dict, agent: dict,
             **({"check_active": check_active} if raw else {}),
         )
         check_active()
+        if raw:
+            final = session.finalize(total_bytes=bytes_written)
+            # finish() makes the normal writer outcome stable. If it expired
+            # just before finish, its failed bit remains set: never report DONE.
+            check_active()
     except Exception as e:  # provider adapters normalize failures to queue state
         session.fail(str(e))
         finish_pacing("failed")
         return _PwaStreamResult(False, error=str(e), cancelled=isinstance(e, _RawCancelled))
 
-    final = session.finalize(total_bytes=bytes_written)
+    if not raw:
+        final = session.finalize(total_bytes=bytes_written)
     finish_pacing("complete")
 
     if publish_late:
