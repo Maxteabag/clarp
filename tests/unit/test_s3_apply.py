@@ -575,8 +575,12 @@ def test_named_source_refuses_unsafe_moves(tmp_path, capsys, method, imports, re
     assert not (root / 'server/lib/worker.py').exists()
 
 
-def test_named_source_refuses_a_facade_patch_of_a_moved_global(tmp_path, capsys):
+@pytest.mark.parametrize('shared', [False, True])
+def test_named_source_patch_audit_accepts_only_patch_shared(tmp_path, capsys, shared):
     root = _named_tree(tmp_path)
-    (root / 'patch_site.py').write_text('from lib import engine\nengine.VALUE = 5\n')
-    assert _run(root, '--all') == 2
-    assert 'patch_site.py:2' in capsys.readouterr().out
+    write = ('patch_shared(monkeypatch, engine, "VALUE", 5)' if shared else 'engine.VALUE = 5')
+    (root / 'patch_site.py').write_text('from lib import engine\n' + write + '\n')
+    assert _run(root, '--all') == (0 if shared else 2)
+    if not shared:
+        assert 'patch_site.py:2' in capsys.readouterr().out
+    assert (root / 'server/lib/worker.py').exists() is shared
