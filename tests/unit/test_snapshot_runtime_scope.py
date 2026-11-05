@@ -150,7 +150,7 @@ def test_snapshot_ghost_candidates_share_one_fresh_bounded_read(fleet, monkeypat
     for aid in candidates:
         agents.bind_backend_session(aid, f"ghost-{aid}")
     # Resume-target lookup is a filesystem dependency; no real transcripts.
-    monkeypatch.setattr(type(backends.by_id("claude")), "resume_target",
+    monkeypatch.setattr(backends.by_id("claude"), "resume_target",
                         lambda *args: None)
 
     class AdmissionRuntime(Runtime):
@@ -190,12 +190,12 @@ def test_snapshot_admission_after_first_fresh_sample_keeps_second_binding(fleet,
             return dict(self.sample, admitting=[second] if self.admitted else [])
 
     runtime = RacingRuntime(status)
-    def missing_resume_target(self, bsid, *args):
+    def missing_resume_target(bsid, *args):
         if bsid == f"ghost-{second}":
             assert runtime.timeouts == [2.0, 2.0]
             runtime.admitted = True
         return None
-    monkeypatch.setattr(type(backends.by_id("claude")), "resume_target", missing_resume_target)
+    monkeypatch.setattr(backends.by_id("claude"), "resume_target", missing_resume_target)
     backends.configure_runtime_client(runtime)
     snapshot.build_agent_snapshot(ctx)
     assert runtime.admitted
