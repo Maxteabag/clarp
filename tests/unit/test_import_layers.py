@@ -297,3 +297,39 @@ def test_an_alias_import_counts_as_its_new_module(tmp_path):
     # Before the target exists the old module is a real module and stays itself.
     assert imports_of("lib.probe", probe, {"lib": None, "lib.db_schema": None}) == {"lib.db_schema"}
     assert layer("lib.persistence.schema") == layer("lib.persistence.migrations.v099") == 0
+
+
+def test_declared_split_preserves_layer_and_import_debt_but_not_new_edges(tmp_path, monkeypatch):
+    import sys
+    from tests import patching
+    root = tmp_path / 'server'
+    (root / 'lib').mkdir(parents=True)
+    (root / 'server.py').write_text('')
+    (root / 'lib/__init__.py').write_text('')
+    (root / 'lib/dreaming.py').write_text('')
+    original = root / 'lib/turn_dispatch.py'
+    body = 'def moved():\n    from . import dreaming\n'
+    original.write_text(body)
+    recipes = tmp_path / 'splits'
+    recipes.mkdir()
+    monkeypatch.setattr(patching, '_RECIPES', recipes)
+    monkeypatch.setattr(sys.modules[__name__], 'SERVER', root)
+    before = upward()
+    assert before == {'lib.turn_dispatch -> lib.dreaming'}
+    (recipes / 's4.toml').write_text(
+        '[[split]]\nmodule="lib/turn_dispatch.py"\n'
+        '[[split.part]]\nmodule="lib/turn_command.py"\nnames=["moved"]\n')
+    original.write_text('from .turn_command import moved\n')
+    part = root / 'lib/turn_command.py'
+    part.write_text(body)
+    assert layer('lib.turn_command') == layer('lib.turn_dispatch')
+    assert upward() == before
+    (root / 'lib/new_feature.py').write_text('')
+    part.write_text(body + '\ndef new():\n    from . import new_feature\n')
+    assert 'lib.turn_dispatch -> lib.new_feature' in upward() - UPWARD_BASELINE - set(NAMED_EXCEPTIONS)
+    (root / 'lib/routes').mkdir()
+    (root / 'lib/routes/__init__.py').write_text('')
+    part.write_text(body + '\nfrom . import routes\n')
+    import pytest
+    with pytest.raises(AssertionError, match='server/lib must not import lib.routes'):
+        test_only_the_route_layer_imports_routes()
