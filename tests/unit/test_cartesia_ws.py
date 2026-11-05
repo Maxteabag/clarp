@@ -204,3 +204,77 @@ def test_protocol_pings_cannot_extend_the_first_byte_deadline(monkeypatch, tmp_p
         assert 30.0 in wire.timeouts
         assert wire.closed == ['close']
     assert wire.closed
+
+
+@pytest.mark.parametrize('phase_seconds', [2.0, 8.0], ids=['within-budget', 'setup-over-budget'])
+def test_connection_and_upgrade_share_the_first_byte_deadline(monkeypatch, tmp_path, phase_seconds):
+    from types import SimpleNamespace
+    import threading
+    now, timers, closed, calls = [0.0], [], [False], []
+    class Timer:
+        daemon = False
+        def __init__(self, interval, callback):
+            self.when, self.callback, self.cancelled = now[0]+interval, callback, False
+        def start(self):timers.append(self)
+        def cancel(self):self.cancelled=True
+    def advance(seconds):
+        target = now[0]+seconds
+        while True:
+            pending=[t for t in timers if not t.cancelled and t.when<=target]
+            if not pending:break
+            t=min(pending,key=lambda t:t.when)
+            now[0]=t.when;t.cancelled=True;t.callback()
+            if closed[0]:return
+        now[0]=target
+    class Socket:
+        timeout=10.0
+        def gettimeout(self):return self.timeout
+        def settimeout(self,value):self.timeout=value
+        def shutdown(self,*args):closed[0]=True
+        def close(self):closed[0]=True
+        def send(self,data):return len(data)
+        def recv(self,size):
+            advance(self.timeout)
+            raise cartesia_ws.websocket.WebSocketTimeoutException('read timeout')
+    sock=Socket()
+    def connect(url, options, *args, **kwargs):
+        calls.append('connect')
+        assert options.timeout == 10.0
+        advance(phase_seconds)
+        if closed[0]:raise cartesia_ws.websocket.WebSocketTimeoutException('setup aborted')
+        return sock, ('api.cartesia.ai',443,'/tts/websocket')
+    def handshake(*args, **kwargs):
+        calls.append('upgrade')
+        assert sock.gettimeout()==10.0
+        advance(phase_seconds)
+        if closed[0]:raise cartesia_ws.websocket.WebSocketTimeoutException('upgrade aborted')
+        return SimpleNamespace(status=101,headers={})
+    core=cartesia_ws.websocket.WebSocket.connect.__globals__
+    assert 'connect' in core and 'handshake' in core
+    monkeypatch.setitem(core,'connect',connect)
+    monkeypatch.setitem(core,'handshake',handshake)
+    monkeypatch.setattr(cartesia_ws,'time',SimpleNamespace(perf_counter=lambda:now[0]))
+    monkeypatch.setattr(cartesia_ws,'threading',SimpleNamespace(Timer=Timer,Lock=threading.Lock))
+    with pytest.raises(cartesia_ws.CartesiaError):
+        cartesia_ws.synthesize_raw_pcm(text='Synthetic',voice_id='v',api_key='key',out_path=tmp_path/'raw.pcm')
+    assert calls==['connect','upgrade'] and closed[0]
+    assert now[0]<=cartesia_ws.RAW_FIRST_BYTE_BUDGET_SEC, 'watchdog was armed only after TCP/TLS and HTTP Upgrade consumed separate budgets'
+
+
+@pytest.mark.parametrize('finish', ['complete','stop'])
+def test_a_queued_deadline_callback_after_finish_cannot_abort_the_stream(monkeypatch, finish):
+    import threading
+    from types import SimpleNamespace
+    callbacks, closed = [], []
+    class Timer:
+        daemon = False
+        def __init__(self, interval, callback):self.callback=callback
+        def start(self):callbacks.append(self.callback)
+        def cancel(self):pass  # model callback already queued when cancel was called
+    monkeypatch.setattr(cartesia_ws,'threading',SimpleNamespace(Timer=Timer,Lock=threading.Lock))
+    ws=SimpleNamespace(abort=lambda:closed.append('abort'),shutdown=lambda:closed.append('shutdown'))
+    budget=cartesia_ws._FirstByteBudget(ws,cartesia_ws.time.perf_counter()+100,None)
+    budget.start()
+    getattr(budget,finish)()
+    callbacks[0]()
+    assert closed==[]
