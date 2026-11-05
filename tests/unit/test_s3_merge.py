@@ -498,7 +498,8 @@ def test_named_methods_follow_splits_and_main_edits_reach_the_mixin(repo, split)
         cwd=repo / 'server', capture_output=True, text=True)
     assert check.returncode == 0, check.stderr
     log = _git(repo, 'log', '--format=%s')
-    assert log.index('s3_apply: method read') < log.index('split_apply: engine') if split else True
+    if split:
+        assert log.index('s3_apply: method read') < log.index('split_apply: engine')
 
 
 @pytest.mark.parametrize('where', ['source', 'mixin'])
@@ -529,3 +530,20 @@ def test_an_integration_only_method_recipe_and_tool_never_execute(repo):
     assert code == 0, out
     assert 'INJECTED TOOL' not in out
     assert not (repo / 'tools/refactor/methods/injected.toml').exists()
+
+
+def test_method_identity_difference_stops_with_12(repo):
+    _method_family(repo, False)
+    _git(repo, 'switch', '-q', 'integration')
+    _git(repo, 'checkout', 'main', '--', 'server/lib/engine.py')
+    _git(repo, 'rm', 'server/lib/read.py')
+    _commit(repo, 'integration has not applied the method recipe yet')
+    _git(repo, 'switch', '-q', 'main')
+    tool = repo / 'tools/refactor/s3_apply.py'
+    tool.write_text(tool.read_text().replace(
+        '.write_text(changes[path])',
+        '.write_text(changes[path].replace("return VALUE + self.bias", "return VALUE - self.bias"))'))
+    _commit(repo, 'plant a method mover body change')
+    code, out = _merge(repo)
+    assert code == 12, out
+    assert 'method identity failed for read' in out

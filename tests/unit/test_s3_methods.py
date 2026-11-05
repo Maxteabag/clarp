@@ -85,7 +85,7 @@ def test_integration_edits_in_source_or_mixin_stop_before_regeneration(tmp_path,
         methods.validate(tmp_path, base, head, methods.recipes(tmp_path))
 
 
-def test_partial_split_and_missing_mixin_are_refused(tmp_path):
+def test_partial_split_is_refused(tmp_path):
     base, _ = _tree(tmp_path, True)
     _apply(tmp_path, True)
     (tmp_path / 'server/lib/values.py').unlink()
@@ -101,3 +101,21 @@ def test_unstarted_unsplit_source_edit_is_not_silently_replaced(tmp_path):
     head = _commit(tmp_path, 'edit before method move')
     with pytest.raises(methods.s3_apply.Refusal, match='integration-only edit'):
         methods.validate(tmp_path, base, head, methods.recipes(tmp_path))
+
+
+@pytest.mark.parametrize('split', [False, True])
+def test_missing_mixin_with_a_rewritten_source_is_refused(tmp_path, split):
+    base, _ = _tree(tmp_path, split)
+    _apply(tmp_path, split)
+    (tmp_path / 'server/lib/read.py').unlink()
+    head = _commit(tmp_path, 'lost generated mixin')
+    with pytest.raises(methods.s3_apply.Refusal, match='integration-only edit'):
+        methods.validate(tmp_path, base, head, methods.recipes(tmp_path))
+
+
+def test_old_module_of_an_unstarted_split_is_not_a_method_source(tmp_path):
+    base, _ = _tree(tmp_path, True)
+    recipe = tmp_path / 'tools/refactor/methods/engine.toml'
+    recipe.write_text(recipe.read_text().replace('lib/client.py', 'lib/engine.py'))
+    with pytest.raises(methods.s3_apply.Refusal, match='unstarted split old module'):
+        methods.validate(tmp_path, base, base, methods.recipes(tmp_path))
