@@ -22,7 +22,10 @@ DETAIL_RETENTION_MS = 24 * 60 * 60 * 1000
 ROLLUP_RETENTION_MS = 30 * DETAIL_RETENTION_MS
 _LOCAL = threading.local()
 _SCHEMA_LOCK = threading.Lock()
-_SCHEMA_READY = False
+# The files the schema has been made in (TEL-N1): a connection to one file never
+# marks another ready, so a thread still holding a previous path cannot leave the
+# current one without tables.
+_SCHEMA_READY_PATHS: set[str] = set()
 
 
 SCHEMA = """
@@ -161,16 +164,16 @@ def _open(path: pathlib.Path) -> sqlite3.Connection:
 
 
 def conn() -> sqlite3.Connection:
-    global _SCHEMA_READY
     current = getattr(_LOCAL, "conn", None)
     if current is not None:
         return current
-    current = _open(TELEMETRY_PATH)
+    path = TELEMETRY_PATH
+    current = _open(path)
     with _SCHEMA_LOCK:
-        if not _SCHEMA_READY:
+        if str(path) not in _SCHEMA_READY_PATHS:
             current.execute("PRAGMA journal_mode=WAL")
             current.executescript(SCHEMA)
-            _SCHEMA_READY = True
+            _SCHEMA_READY_PATHS.add(str(path))
     _LOCAL.conn = current
     return current
 
@@ -183,11 +186,12 @@ def close_local() -> None:
 
 
 def reset_for_tests(path: pathlib.Path | None = None) -> None:
-    global TELEMETRY_PATH, _SCHEMA_READY
+    global TELEMETRY_PATH
     close_local()
-    if path is not None:
-        TELEMETRY_PATH = pathlib.Path(path)
-    _SCHEMA_READY = False
+    with _SCHEMA_LOCK:
+        if path is not None:
+            TELEMETRY_PATH = pathlib.Path(path)
+        _SCHEMA_READY_PATHS.clear()
 
 
 UPSERT_BATCH = 500        # rollup rows per write transaction
