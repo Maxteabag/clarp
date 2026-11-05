@@ -221,6 +221,12 @@ def test_fallback_audio_never_poisons_the_requested_voice_cache(fallback_preview
         assert response.headers.get_content_type() == "audio/mpeg"
         assert response.read() == b"ID3fallback"
     assert not list(cache.rglob("*.mp3")), "fallback bytes must not enter a primary voice cache"
+    # Reading Content-Length bytes can finish before the handler returns from
+    # _send_file and unlinks its temporary in finally.
+    import time
+    cleanup_deadline = time.monotonic() + 5
+    while list(cache.rglob("*.tmp")) and time.monotonic() < cleanup_deadline:
+        time.sleep(0.01)
     assert not list(cache.rglob("*.tmp")), "served fallback temporary is removed"
     state["primary_down"] = False
     assert _request(base, "GET", path) == (200, b"ID3primary")
