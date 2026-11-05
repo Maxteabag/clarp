@@ -279,11 +279,9 @@ def test_without_a_collision_a_post_preview_failure_keeps_its_previous_status(pr
     assert "providerFallback" not in preview_host["events"]
 
 
-def test_a_legacy_non_google_preview_whose_fallback_is_the_refused_google_is_409(preview_host, boundaries,
+def test_a_preview_whose_google_fallback_is_refused_keeps_the_primary_error(preview_host, boundaries,
                                                                                  monkeypatch):
-    """Control: a non-Google primary keeps its PRE-EXISTING fallback preview path (not the strict Google
-    audition; this repair neither adds nor fixes it). When that fallback is the refused built-in Google,
-    only the status of the already-refused Google changes: 409 with the bare code, never a clip."""
+    """VP-10: a guard refusal ends the fallback ladder but cannot replace the primary error."""
     from lib import config, gemini_tts, google_tts
     tried, credentials = [], []
     monkeypatch.setattr(google_tts, "credentials", lambda *a, **kw: credentials.append(1))
@@ -295,8 +293,10 @@ def test_a_legacy_non_google_preview_whose_fallback_is_the_refused_google_is_409
     preview_host["config"].write_text('[tts]\nprovider = "gemini"\nfallback = "google"\n\n'
                                       '[gemini_tts]\nvoice = "Kore"\n')
     config.reset_cache()
-    status, raw = _preview(preview_host, voice="Kore")
-    assert status == 409 and json.loads(raw) == {"error": COLLISION}
+    status, raw = _preview(preview_host, voice=json.dumps({"gemini": "Kore"}))
+    assert tried == ["Kore"]
+    assert status == 500 and json.loads(raw) == {"error": "gemini_unavailable"}
+    assert "providerFallbackFailed" in preview_host["events"]
     assert "providerFallback" in preview_host["events"]         # the failed primary fell back (legacy path)
     assert boundaries["google"] == [] and credentials == []      # no Google synthesis, network or credentials
     assert not preview_host["sentinel"].exists()                 # the legacy adapter never ran
