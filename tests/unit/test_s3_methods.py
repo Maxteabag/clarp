@@ -136,7 +136,8 @@ def test_two_group_sequential_stage_output_validates(tmp_path, split):
     methods.validate(tmp_path, base, head, methods.recipes(tmp_path))
 
 
-def test_unstarted_split_with_a_part_repoint_keeps_its_baseline_valid(tmp_path):
+@pytest.mark.parametrize('applied', [False, True])
+def test_unstarted_split_with_a_part_repoint_keeps_its_baseline_valid(tmp_path, applied):
     _tree(tmp_path, True)
     recipe = tmp_path / 'tools/refactor/splits/engine.toml'
     recipe.write_text(recipe.read_text() + (
@@ -146,4 +147,13 @@ def test_unstarted_split_with_a_part_repoint_keeps_its_baseline_valid(tmp_path):
     base = _commit(tmp_path, 'baseline includes split and following part repoint')
     # Nothing has moved on integration yet. D will create the part before its
     # repoint runs; preflight must preserve today's original source meanwhile.
-    methods.validate(tmp_path, base, base, methods.recipes(tmp_path))
+    head = base
+    if applied:
+        entries, repoints = methods.split_apply.load_recipes(tmp_path / 'tools/refactor/splits')
+        methods.write(tmp_path, methods.split_apply.apply_split(tmp_path, entries[0]))
+        methods.write(tmp_path, methods.split_apply.apply_repoint(tmp_path, repoints[0]))
+        for _, groups in methods.recipes(tmp_path):
+            for count in range(1, len(groups) + 1):
+                methods.write(tmp_path, methods.s3_apply.apply(tmp_path, groups[:count]))
+        head = _commit(tmp_path, 'applied split then repoint then methods')
+    methods.validate(tmp_path, base, head, methods.recipes(tmp_path))

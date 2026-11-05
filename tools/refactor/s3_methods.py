@@ -126,7 +126,10 @@ def _baseline_repoints(root, base, work, repoints, unavailable):
     for entry in repoints:
         rel = 'server/' + entry['file']
         if rel in unavailable:
-            raise s3_apply.Refusal(f'repoint requires an unstarted split part: {rel}')
+            # Integration has not applied this split yet. Its original text
+            # and absent parts are checked above; D will create the part before
+            # executing its repoint, so there is no part text to compare now.
+            continue
         if not (work / rel).exists():
             text = show(root, base, rel)
             if text is None:
