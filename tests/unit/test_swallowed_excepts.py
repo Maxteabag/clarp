@@ -131,13 +131,15 @@ def swallowed(tree: ast.AST) -> list[int]:
 
 
 def current() -> dict[str, int]:
+    from tests.patching import logical_split_tree_map
     counts: collections.Counter[str] = collections.Counter()
-    for path in sorted(SERVER.rglob("*.py")):
-        if "tests" in path.parts:
-            continue
-        found = swallowed(ast.parse(path.read_text(), filename=str(path)))
+    paths = [path for path in sorted(SERVER.rglob("*.py")) if "tests" not in path.parts]
+    # Only exact recipe-declared definitions keep their original module's
+    # debt. Undeclared code in a generated part remains a physical owner.
+    for origin, tree in logical_split_tree_map(paths, SERVER).items():
+        found = swallowed(tree)
         if found:
-            counts[path.relative_to(SERVER).as_posix()] = len(found)
+            counts[origin] = len(found)
     return dict(counts)
 
 
