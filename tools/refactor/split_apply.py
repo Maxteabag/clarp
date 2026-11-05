@@ -311,6 +311,14 @@ def apply_split(root: pathlib.Path, split: dict) -> dict[str, str]:
             if bound != {name}:
                 raise Refusal(f"split {split['name']!r}: {name} is assigned together with "
                               f"{sorted(bound - {name})}; ast_identity cannot prove a multi-name assignment")
+        # A `global X` write inside a moved definition would rebind X in the part,
+        # while code left in the old module keeps reading the facade's X: the
+        # state splits. X must move into the same part, or the writer stays.
+        rebinds = sorted({g for node in ast.walk(stmt) if isinstance(node, ast.Global) for g in node.names}
+                         - {n for n in part_of if part_of[n] == part_of[name]})
+        if rebinds:
+            raise Refusal(f"split {split['name']!r}: {name} rebinds module global(s) {', '.join(rebinds)} "
+                          "with `global`, which do not move into its part; keep it in the old module")
         identity = sorted({n.id for n in ast.walk(stmt) if isinstance(n, ast.Name)} & _MODULE_IDENTITY)
         if identity:
             raise Refusal(f"split {split['name']!r}: {name} reads {', '.join(identity)}, which differ in its "

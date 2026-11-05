@@ -6,6 +6,7 @@ may gain a second writer only through ALLOWED, with a reason; an entry that no
 longer matches a real writer fails too, so the list only shrinks.
 """
 from __future__ import annotations
+from tests.patching import split_origin
 
 import ast
 import collections
@@ -85,6 +86,7 @@ def writers() -> dict[str, set[str]]:
         rel = path.relative_to(ROOT).as_posix()
         if "/tests/" in rel:
             continue
+        rel = split_origin(rel)   # an S9 split part writes as its old module
         tree = ast.parse(path.read_text(), filename=str(path))
         for text in _sql_strings(tree):
             for match in _WRITE.finditer(text):
@@ -244,6 +246,7 @@ def status_writers() -> dict[tuple[str, str], set[str]]:
         rel = path.relative_to(ROOT).as_posix()
         if "/tests/" in rel:
             continue
+        rel = split_origin(rel)   # an S9 split part writes as its old module
         for text in _sql_texts(ast.parse(path.read_text(), filename=str(path))):
             for key in status_writes(text, by_table):
                 found[key].add(rel)
