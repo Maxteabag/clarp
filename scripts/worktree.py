@@ -85,8 +85,10 @@ def dependencies(path: Path, notes: list[str] | None = None) -> list[str]:
             units.update(line.split()[0] for line in run(
                 'systemctl', *scope, 'list-units', '--all', '--plain', '--no-legend', '--no-pager').splitlines() if line)
             if units:
-                details = run('systemctl', *scope, 'show', *sorted(unit for unit in units if '@.' not in unit), '--no-pager',
-                              '--property=Id,WorkingDirectory,ExecStart,ExecStartPre,ExecStartPost,ExecStop,FragmentPath')
+                # '--' before the units: '-.mount' and '-.slice' would read as options.
+                details = run('systemctl', *scope, 'show', '--no-pager',
+                              '--property=Id,WorkingDirectory,ExecStart,ExecStartPre,ExecStartPost,ExecStop,FragmentPath',
+                              '--', *sorted(unit for unit in units if '@.' not in unit))
                 for block in details.split('\n\n'):
                     if needle in block:
                         found.append('systemd ' + next((s for s in block.splitlines() if s.startswith('Id=')), 'unit'))

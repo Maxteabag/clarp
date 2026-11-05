@@ -89,3 +89,26 @@ def test_other_users_unreadable_processes_are_counted_and_their_command_lines_ch
     assert worktree.dependencies(target, notes) == ['process 201']
     assert notes == ['2 processes of other users: working directory not readable (their command lines were checked)',
                      '1 processes could not be inspected at all']
+
+
+def test_systemd_units_whose_names_start_with_a_dash_are_inspected(monkeypatch, tmp_path):
+    # '-.mount' and '-.slice' exist on every systemd host; systemctl reads an
+    # argument starting with '-' before '--' as an option and exits 1.
+    target = tmp_path / 'tree'
+    def run(*args):
+        if args[:1] != ('systemctl',):
+            return ''
+        if 'list-unit-files' in args:
+            return '-.mount generated\napp.service enabled'
+        if 'list-units' in args:
+            return '-.slice loaded active active Root Slice'
+        if 'show' in args:
+            units = args[args.index('--') + 1:] if '--' in args else []
+            if any(a.startswith('-') and not a.startswith('--') for a in args[:args.index('--') if '--' in args else len(args)]):
+                raise subprocess.CalledProcessError(1, args)
+            return '\n\n'.join(f'Id={u}\nWorkingDirectory={target if u == "app.service" else "/"}' for u in units)
+        return ''
+    monkeypatch.setattr(worktree, 'run', run)
+    blockers = worktree.dependencies(target)
+    assert 'systemd Id=app.service' in blockers
+    assert not any('cannot inspect systemd' in b for b in blockers)
