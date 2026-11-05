@@ -168,3 +168,8 @@ def test_snapshot_ghost_candidates_share_one_fresh_bounded_read(fleet, monkeypat
     assert runtime.timeouts == [2.0, 2.0]
     for aid in candidates:
         assert bool(agents.live_backend_session(aid)) == (fresh != "clear")
+    if fresh == "timeout":
+        runtime.timeouts.clear()
+        snapshot.build_agent_snapshot(ctx)
+        assert runtime.timeouts == [2.0, 2.0]
+        assert all(agents.live_backend_session(aid) for aid in candidates)
