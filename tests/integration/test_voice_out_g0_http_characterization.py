@@ -216,7 +216,10 @@ def fallback_preview(running_server, monkeypatch, tmp_path):
 ])
 def test_fallback_audio_never_poisons_the_requested_voice_cache(fallback_preview, path):
     base, cache, state = fallback_preview
-    assert _request(base, "GET", path) == (200, b"ID3fallback")
+    with urllib.request.urlopen(base + path, timeout=10) as response:
+        assert response.status == 200
+        assert response.headers.get_content_type() == "audio/mpeg"
+        assert response.read() == b"ID3fallback"
     assert not list(cache.rglob("*.mp3")), "fallback bytes must not enter a primary voice cache"
     assert not list(cache.rglob("*.tmp")), "served fallback temporary is removed"
     state["primary_down"] = False
