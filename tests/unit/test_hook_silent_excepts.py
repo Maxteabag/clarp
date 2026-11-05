@@ -99,3 +99,42 @@ def test_when_the_event_log_fails_the_report_goes_to_the_hook_log(monkeypatch, t
     assert "toolstart_hook" in line and "recordFail OperationalError SQLITE_BUSY" in line
     assert "event log unavailable: OperationalError" in line
     assert "SECRET" not in line and "disk I/O" not in line
+
+
+def _homeless(monkeypatch):
+    # A minimal container: HOME unset and no passwd entry, so Path.home()
+    # raises RuntimeError (review A2 F1/F2).
+    def no_home(cls):
+        raise RuntimeError("Could not determine home directory.")
+    monkeypatch.delenv("HOME", raising=False)
+    monkeypatch.setattr(pathlib.Path, "home", classmethod(no_home))
+    monkeypatch.setattr("os.path.expanduser", lambda path: path)
+    for name in ("_clarp_lib", "_hook_report"):
+        monkeypatch.delitem(__import__("sys").modules, name, raising=False)
+
+
+def test_report_never_raises_when_the_event_log_and_the_home_lookup_both_fail(monkeypatch, capsys):
+    report = _load("_hook_report", monkeypatch)
+    _homeless(monkeypatch)
+
+    def broken(*a, **kw):
+        raise sqlite3.OperationalError("disk I/O error")
+    monkeypatch.setattr(eventlog, "emit", broken)
+
+    assert report.report("toolstart_hook", "recordFail", _locked()) is None
+    out = capsys.readouterr()
+    assert (out.out, out.err) == ("", "")
+
+
+def test_agy_state_stays_fail_open_without_a_home(monkeypatch, capsys):
+    import runpy
+    _homeless(monkeypatch)
+    monkeypatch.syspath_prepend(str(HOOKS))
+    monkeypatch.delenv("CLAUDE_PWA_DB", raising=False)
+    monkeypatch.delenv("CLARP_AGY_MANAGED_TURN", raising=False)
+    monkeypatch.setattr("sys.argv", ["agy_state.py", "PreModel"])
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"conversationId": "c1"})))
+
+    runpy.run_path(str(HOOKS / "agy_state.py"), run_name="__main__")
+
+    assert capsys.readouterr().out == "{}\n"
