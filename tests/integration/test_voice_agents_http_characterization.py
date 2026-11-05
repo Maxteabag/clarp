@@ -33,19 +33,23 @@ def _call(base, method, path, body=None, raw=None):
 
 @pytest.fixture
 def cartesia(monkeypatch):
-    from lib import cartesia_tts, cartesia_voices
+    from dataclasses import replace
+    from lib import cartesia_tts, cartesia_voices, config, tts_registry
+    cfg = replace(config.load(), cartesia_api_key="fixture-cartesia-key", tts_fallback="none")
+    monkeypatch.setattr(config, "load", lambda *a, **kw: cfg)
     calls = []
     state = {"fail": False}
     monkeypatch.setattr(cartesia_voices, "cached_english_voice",
                         lambda voice_id: {"id": voice_id, "name": "Ada"} if voice_id == "v1" else None)
     monkeypatch.setattr(cartesia_voices, "has_cached_catalog", lambda: True)
 
-    def synthesize(*, text, voice_id, out_path, api_key, model):
+    def synthesize(*, text, voice_id, out_path, api_key, model, **_kw):
         calls.append((text, voice_id))
         if state["fail"]:
             raise cartesia_tts.CartesiaError("quota")
         out_path.write_bytes(b"ID3fake-mp3")
     monkeypatch.setattr(cartesia_tts, "synthesize", synthesize)
+    monkeypatch.setattr(tts_registry, "cartesia_synthesize", synthesize)
     return calls, state
 
 
