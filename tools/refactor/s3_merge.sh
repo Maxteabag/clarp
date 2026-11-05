@@ -47,8 +47,12 @@ export PYTHONDONTWRITEBYTECODE=1   # the stages' Python must leave no untracked 
 
 git switch -q -c "$work" "$integration" || die 2 "cannot create $work"
 echo "s3_merge: merging $main into $integration on $work"
-merge_out=$(git merge --no-commit --no-ff "$main" 2>&1)
+# rerere off: a resolution recorded on this machine must never resolve a conflict
+# silently; only a reviewed merge_resolutions entry may (below).
+merge_out=$(git -c rerere.enabled=false merge --no-commit --no-ff "$main" 2>&1)
 merge_rc=$?
+# Always shown, so the log records what git merged and which paths conflicted.
+printf '%s\n' "$merge_out" | sed 's/^/s3_merge: git merge: /'
 git rev-parse -q --verify MERGE_HEAD >/dev/null || die 3 "git merge did not start a merge (exit $merge_rc):
 $merge_out"
 [ "$(git rev-parse MERGE_HEAD)" = "$main" ] || die 3 "MERGE_HEAD is not $main"
