@@ -381,3 +381,16 @@ def test_a_stale_resolution_stops_with_10(repo):
     code, out = _merge(repo)
     assert code == 10, out
     assert "STALE other.toml server/lib/other.py" in out
+
+
+def test_an_entry_only_on_integration_never_applies(repo):
+    """Review B (9cae916f) P1: entries and payloads come from main's tree only.
+    A matching entry committed on integration alone must not resolve anything."""
+    _conflict_in_other_module(repo)
+    blobs = _blobs(repo)
+    _git(repo, "switch", "-q", "integration")
+    _resolution(repo, blobs)            # committed on integration, not on main
+    _git(repo, "switch", "-q", "main")
+    code, out = _merge(repo)
+    assert code == 3, out
+    assert "merge_resolution" not in out and "conflict outside server.py" in out
