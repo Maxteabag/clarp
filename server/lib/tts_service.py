@@ -94,8 +94,6 @@ def synth(text, route, sink: AudioSink, purpose, *, cfg, raw_voice, agent, emit,
                 raise
             emit("tts_worker", "providerFallbackFailed", context=context(), level="warn",
                  detail={"provider": provider, "fallback": fallback, "error": str(fallback_error)[:200]})
-            if isinstance(fallback_error, GoogleIdCollision):
-                raise  # guard codes remain hard refusals, even on a fallback
             raise primary_error from fallback_error
         emit("tts_worker", "spoke", context=context(),
              detail={"provider": fallback, "voice": selected.voice, "fallback_for": provider})
