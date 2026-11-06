@@ -406,4 +406,4 @@ def test_watcher_suppresses_synthetic_voice_text_but_advances_to_genuine_record(
     watcher.tick()
     watcher.tick()
     assert received == ['<speak>Genuine spoken output</speak>']
-    assert watcher.offset == path.stat().st_size
+    assert watcher.byte_offset == path.stat().st_size
