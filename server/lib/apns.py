@@ -20,6 +20,7 @@ HTTP/2, so we use httpx with the h2 backend.
 from __future__ import annotations
 
 import pathlib
+import math
 import json
 import re
 import hashlib
@@ -1340,11 +1341,17 @@ class _LiveActivityGate:
         return min(burst, value + (now - at) / refill)
 
     def rate_limited(self, retry_after: float) -> None:
+        # The public relay has no day/minute discriminator (lead 759). Longer
+        # than an hour conservatively means day exhaustion. Never shorten the
+        # advertised wait, even if it extends beyond the next UTC reset.
+        wait = retry_after if math.isfinite(retry_after) and retry_after > 0 else 0.0
+        if wait > 3600:
+            wait = max(wait, 86400 - time.time() % 86400)
         with self._lock:
             self.floor = (self.FLOOR_MIN_SEC if not self.floor
                           else min(self.floor * 2, self.FLOOR_MAX_SEC))
             self._paused_until = max(self._paused_until,
-                                     self._clock() + max(float(retry_after or 0), self.floor))
+                                     self._clock() + max(wait, self.floor))
 
     def delivered(self) -> None:
         with self._lock:
@@ -1416,10 +1423,24 @@ _LA_SEND_LOCK = threading.Lock()
 
 
 def _retry_after(resp) -> float:
+    """Public relay uses an integer Retry-After HEADER, not a JSON field.
+
+    Keep compatibility with older internal JSON responses without shortening
+    either valid wait. Invalid/nonfinite input leaves the bounded floor in use.
+    """
+    waits = [0.0]
     try:
-        return float((resp.json() or {}).get("retryAfter") or 0)
-    except (ValueError, TypeError, AttributeError):  # no usable body: the floor applies
-        return 0.0
+        headers = getattr(resp, "headers", {})
+        raw = str(headers.get("Retry-After") or headers.get("retry-after") or "").strip()
+        if raw.isascii() and raw.isdecimal():
+            waits.append(float(raw))
+    except (ValueError, OverflowError, TypeError, AttributeError):
+        pass  # No valid header; the legacy body or floor still applies.
+    try:
+        waits.append(float((resp.json() or {}).get("retryAfter") or 0))
+    except (ValueError, OverflowError, TypeError, AttributeError):
+        pass  # No usable body; the header or floor still applies.
+    return max(value for value in waits if math.isfinite(value) and value >= 0)
 
 
 def send_live_activity(payload: dict, priority: str = "5") -> dict:
@@ -1470,6 +1491,7 @@ def _flush_live_activity_locked() -> dict:
             if status == 200:
                 _LA_GATE.delivered()
                 sent += 1
+                log("apnsLiveActivityAccepted", "status=200 count=1")
             elif status == 410 or reason in _DEAD_REASONS:
                 live_activity.unregister(token=token)
                 disabled += 1
