@@ -519,6 +519,49 @@ def test_connection_drop_is_silently_retried(tmp_path):
     assert agents_db.latest_state(agent_id)["kind"] == AgentState.DONE
 
 
+@pytest.mark.parametrize("steer_result", [None, False, "error"])
+def test_user_followup_queues_without_killing_a_nonsteerable_turn(tmp_path, monkeypatch, steer_result):
+    service, backend, agent_id = _make_service(tmp_path)
+    service.dispatch(text="first", requested_session="mike", trace_id="tA",
+                     client_msg_id="u-first", synthesize_audio=False)
+    first = backend.spawned[0][1]
+    if steer_result is not None:
+        def decline(*args, **kwargs):
+            if steer_result == "error":
+                raise RuntimeError("synthetic steer failure")
+            return False
+        backend.steer_turn = decline
+    cancelled = []
+    monkeypatch.setattr(tts_queue, "cancel", lambda *a, **kw: cancelled.append((a, kw)))
+    followup = service.dispatch(text="second", requested_session="mike", trace_id="tB",
+                                client_msg_id="u-second", synthesize_audio=False)
+    assert backend.interrupted == [] and cancelled == []
+    assert followup.queued and len(backend.spawned) == 1
+    assert _td._INFLIGHT[agent_id] == "tA"
+    assert turn_queue.get("u-second")["text"] == "second"
+    first["on_result"]({"duration_ms": 5})
+    assert [call["trace_id"] for _, call in backend.spawned] == ["tA", "tB"]
+    assert backend.spawned[1][1]["text"] == "second"
+
+
+def test_user_queue_handoff_survives_completion_during_persistence(tmp_path, monkeypatch):
+    service, backend, agent_id = _make_service(tmp_path)
+    service.dispatch(text="first", requested_session="mike", trace_id="tA")
+    enqueue = turn_queue.enqueue
+    def finish_during_enqueue(**kwargs):
+        result = enqueue(**kwargs)
+        if kwargs["trace_id"] == "tB":
+            backend.spawned[0][1]["on_result"]({"duration_ms": 5})
+        return result
+    monkeypatch.setattr(turn_queue, "enqueue", finish_during_enqueue)
+    result = service.dispatch(text="second", requested_session="mike", trace_id="tB",
+                              client_msg_id="u-second")
+    assert result.queued and backend.interrupted == []
+    assert [call["trace_id"] for _, call in backend.spawned] == ["tA", "tB"]
+    assert _td._INFLIGHT[agent_id] == "tB"
+    assert turn_queue.status("u-second") == "started"
+
+
 def test_busy_agent_send_preempts_inflight_turn(tmp_path):
     service, backends, agent_id = _make_service(tmp_path)
     service.dispatch(text="first", requested_session="mike", trace_id="tA",
@@ -526,8 +569,8 @@ def test_busy_agent_send_preempts_inflight_turn(tmp_path):
     assert len(backends.spawned) == 1      # first turn is running
     assert backends.interrupted == []      # nothing killed yet
 
-    # A backend without steering retains legacy preemption.
-    service.dispatch(text="second", requested_session="mike", trace_id="tB",
+    # Non-user automation retains its existing legacy preemption path.
+    service.dispatch(text="second", requested_session="mike", trace_id="tB", origin="automation",
                      synthesize_audio=False)
     assert len(backends.interrupted) == 1
     assert len(backends.spawned) == 2
@@ -581,7 +624,7 @@ def test_preemption_does_not_spawn_until_the_old_process_exits(tmp_path, monkeyp
                      synthesize_audio=False)
     assert len(slow.spawned) == 1
 
-    service.dispatch(text="second", requested_session="mike", trace_id="tB",
+    service.dispatch(text="second", requested_session="mike", trace_id="tB", origin="automation",
                      synthesize_audio=False)
     assert slow.interrupted == [("claude", agent_id)], "the old turn is preempted"
     assert len(slow.spawned) == 1, "a second CLI started while the first still runs"
@@ -608,7 +651,7 @@ def test_a_send_waiting_for_a_preempted_process_survives_a_restart(tmp_path, mon
     service.backends = slow
     service.dispatch(text="first", requested_session="mike", trace_id="tA",
                      client_msg_id="m-first", synthesize_audio=False)
-    result = service.dispatch(text="second", requested_session="mike", trace_id="tB",
+    result = service.dispatch(text="second", requested_session="mike", trace_id="tB", origin="automation",
                               client_msg_id="m-second", synthesize_audio=False)
 
     assert result.queued is True
@@ -643,7 +686,7 @@ def test_a_follow_up_behind_a_preempted_process_is_durable_too(tmp_path, monkeyp
     service.backends = slow
     service.dispatch(text="first", requested_session="mike", trace_id="tA",
                      client_msg_id="m-first", synthesize_audio=False)
-    second = service.dispatch(text="second", requested_session="mike", trace_id="tB",
+    second = service.dispatch(text="second", requested_session="mike", trace_id="tB", origin="automation",
                               client_msg_id="m-second", synthesize_audio=False)
     third = service.dispatch(text="third", requested_session="mike", trace_id="tC",
                              client_msg_id="m-third", synthesize_audio=False)
@@ -673,7 +716,7 @@ def test_the_preempting_send_keeps_its_place_ahead_of_queued_work(tmp_path, monk
                      client_msg_id="m-first", synthesize_audio=False)
     service.dispatch(text="queued", requested_session="mike", trace_id="tC",
                      client_msg_id="m-queued", synthesize_audio=False, queue_if_busy=True)
-    service.dispatch(text="second", requested_session="mike", trace_id="tB",
+    service.dispatch(text="second", requested_session="mike", trace_id="tB", origin="automation",
                      client_msg_id="m-second", synthesize_audio=False)
 
     assert [spec.trace_id for spec in _td._SLOTS.queued.get(agent_id, [])] == ["tB", "tC"]
@@ -757,6 +800,7 @@ def test_a_send_that_cannot_wait_durably_is_refused(tmp_path, monkeypatch):
 
     monkeypatch.setattr(_td.turn_queue, "park", locked)
     monkeypatch.setattr(_td.turn_queue, "park_at_head", locked)
+    monkeypatch.setattr(_td.turn_queue, "enqueue", locked)
     with pytest.raises(_td.DispatchError) as refused:
         service.dispatch(text="second", requested_session="mike", trace_id="tB",
                          synthesize_audio=False)
@@ -1144,7 +1188,7 @@ def test_preempted_turn_failure_is_ignored(tmp_path):
     service, backends, agent_id = _make_service(tmp_path, retry_scheduler=_run_now)
     service.dispatch(text="first", requested_session="mike", trace_id="tA",
                      synthesize_audio=False)
-    service.dispatch(text="second", requested_session="mike", trace_id="tB",
+    service.dispatch(text="second", requested_session="mike", trace_id="tB", origin="automation",
                      synthesize_audio=False)
     assert len(backends.spawned) == 2
     _, first_call = backends.spawned[0]
