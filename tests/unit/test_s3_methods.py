@@ -365,3 +365,28 @@ def test_unprovable_history_refuses_instead_of_claiming_absence(tmp_path, monkey
         monkeypatch.setattr(methods.subprocess, 'run', fail_catalogue)
         with pytest.raises(methods.s3_apply.Refusal, match='Git data read failed.*catalogue'):
             methods.validate(tmp_path, base, base, found)
+
+
+@pytest.mark.parametrize('kind', ['split', 'repoint'])
+def test_historical_recipe_filename_rename_requires_explicit_migration(tmp_path, kind):
+    if kind == 'split':
+        base, _ = _tree(tmp_path, True)
+        integration = _apply(tmp_path, True)
+        old_path = tmp_path / 'tools/refactor/splits/engine.toml'
+    else:
+        _tree(tmp_path, False)
+        folder = tmp_path / 'tools/refactor/splits'
+        folder.mkdir()
+        old_path = folder / 'edge.toml'
+        old_path.write_text('[[repoint]]\nname = "values-edge"\nfile = "lib/engine.py"\n'
+                            'from_module = ".values"\nto_module = ".replacement"\nnames = ["VALUE"]\n')
+        (tmp_path / 'server/lib/replacement.py').write_text('from .values import VALUE\n')
+        base = _commit(tmp_path, 'historical repoint recipe')
+        _, repoints = methods.split_apply.load_recipes(folder)
+        methods.write(tmp_path, methods.split_apply.apply_repoint(tmp_path, repoints[0]))
+        integration = _apply(tmp_path, False)
+    _git(tmp_path, 'switch', '-qc', 'new-main', base)
+    old_path.rename(old_path.with_name('renamed.toml'))
+    _commit(tmp_path, 'unsupported recipe file rename')
+    with pytest.raises(methods.s3_apply.Refusal, match='historical.*recipe|topology'):
+        methods.validate(tmp_path, base, integration, methods.recipes(tmp_path))
