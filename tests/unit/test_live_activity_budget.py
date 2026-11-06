@@ -314,3 +314,59 @@ def test_invalid_retry_after_never_enters_a_nonfinite_or_negative_pause(value):
     response = _Response(429, {"retryAfter": value})
     response.headers = {}
     assert apns._retry_after(response) == 0
+
+
+@pytest.mark.parametrize("kind", ["relay", "grant"])
+def test_header_only_day_refusal_from_any_transport_holds_la_to_utc_reset(world, monkeypatch, kind):
+    clock, transport = world
+    start = clock.now
+    monkeypatch.setattr(apns.time, "time", lambda: 1793923200 + 43200 + clock.now - start)
+    class Relay:
+        def request(self, method, url, **kwargs):
+            if url.endswith("/v1/push/devices"):
+                return _Response(200, {})
+            response = _Response(429, {"error": {"code": "push_rate_limited"}})
+            # 759: no JSON retryAfter and no day/minute discriminator. >1h
+            # conservatively holds until midnight even if this header is shorter.
+            response.headers = {"Retry-After": "3601"}
+            return response
+    monkeypatch.setattr(apns, "_relay_client", lambda: Relay())
+    apns._reset_relay_state()
+    cfg = SimpleNamespace(audio_central_url="https://central.example", audio_central_credential="cred")
+    relay = apns._RelayTransport(cfg) if kind == "relay" else apns._GrantTransport(cfg)
+    send = (lambda: relay.send(TOKENS[0], "production", {"aps": {}})) if kind == "relay" else (lambda: relay.send("synthetic-grant", {"aps": {}}))
+    assert send()[0] == 429
+    _register(TOKENS[1])
+    apns.send_live_activity({"n": 1})
+    clock.advance(3602)
+    assert transport.sent == []
+    apns.send_live_activity({"n": 2})
+    clock.advance(43200 - 3602 - 1)
+    assert transport.sent == []
+    clock.advance(1)
+    assert len(transport.sent) == 1 and transport.sent[0][1] == {"n": 2}
+
+
+@pytest.mark.parametrize("seconds", [60, 3600])
+def test_retry_at_or_below_one_hour_remains_a_normal_pause(world, monkeypatch, seconds):
+    clock, transport = world
+    start = clock.now
+    monkeypatch.setattr(apns.time, "time", lambda: 1793923200 + 43200 + clock.now - start)
+    _register(TOKENS[0])
+    apns._LA_GATE.rate_limited(seconds)
+    apns.send_live_activity({"n": 1})
+    clock.advance(seconds - 1)
+    assert transport.sent == []
+    clock.advance(1)
+    assert len(transport.sent) == 1
+
+
+@pytest.mark.parametrize("header,body,expected", [
+    ("43200", {}, 43200), ("60", {"retryAfter": 120}, 120),
+    ("bad", {"retryAfter": 120}, 120), ("-1", {}, 0),
+    ("nan", {}, 0), ("inf", {}, 0), ("", {}, 0),
+])
+def test_retry_after_keeps_the_longest_valid_advertised_wait(header, body, expected):
+    response = _Response(429, body)
+    response.headers = {"Retry-After": header}
+    assert apns._retry_after(response) == expected
