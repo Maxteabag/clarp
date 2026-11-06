@@ -541,13 +541,11 @@ def test_day_refusal_with_existing_timer_requeues_only_latest_multitoken_state(w
     assert all(item[1] == {"n": 99} for item in sender.sent[-3:])
 
 
-@pytest.mark.parametrize("kind", ["relay", "grant", "direct"])
-def test_mixed_la_results_count_only_successful_physical_sends(world, monkeypatch, kind):
+def test_mixed_la_results_count_only_successful_physical_sends(world, monkeypatch):
     _, _ = world
     _register(*TOKENS, THIRD)
     records, calls = [], []
     class Sender(Transport):
-        name = kind
         def send(self, token, *args, **kwargs):
             calls.append(token)
             if len(calls) == 2:
@@ -561,3 +559,62 @@ def test_mixed_la_results_count_only_successful_physical_sends(world, monkeypatc
     assert accepted == ["status=200 count=1"]
     assert all("DO_NOT_LOG" not in detail and all(token not in detail for token in (*TOKENS, THIRD))
                for _, detail in records)
+
+
+@pytest.mark.parametrize("kind", ["relay", "direct"])
+def test_actual_la_transport_success_counts_each_recipient_once(world, monkeypatch, kind):
+    _, _ = world
+    _register(*TOKENS)
+    calls, logs = [], []
+    cfg = SimpleNamespace(audio_central_url="https://central.example", audio_central_credential="cred", apns_bundle_id="test.bundle")
+    class Client:
+        def request(self, method, url, **kwargs):
+            if url.endswith("/v1/push/devices"):
+                return _Response(200, {})
+            calls.append(url)
+            return _Response(200, {"results": [{"status": 200, "apnsId": "synthetic"}]})
+        def post(self, url, **kwargs):
+            calls.append(url)
+            response = _Response(200, {})
+            response.headers = {"apns-id": "synthetic"}
+            return response
+    client = Client()
+    monkeypatch.setattr(apns, "_relay_client", lambda: client)
+    monkeypatch.setattr(apns, "_pooled_client", lambda: client)
+    monkeypatch.setattr(apns, "_auth_jwt", lambda cfg: "synthetic")
+    apns._reset_relay_state()
+    transport = apns._RelayTransport(cfg) if kind == "relay" else apns._DirectTransport(cfg)
+    monkeypatch.setattr(apns, "_transport", lambda cfg: transport)
+    monkeypatch.setattr(apns, "log", lambda code, detail="": logs.append((code, detail)))
+    result = apns.send_live_activity({"n": 1})
+    assert result["sent"] == len(calls) == 2
+    assert [detail for code, detail in logs if code == "apnsLiveActivityAccepted"] == ["status=200 count=1"] * 2
+
+
+def test_diagnostic_failure_does_not_resend_an_accepted_la(world, monkeypatch):
+    clock, sender = world
+    _register(TOKENS[0])
+    def log_failure(*args):
+        raise RuntimeError("synthetic diagnostic error")
+    monkeypatch.setattr(apns, "log", log_failure)
+    result = apns.send_live_activity({"n": 1})
+    clock.advance(1000)
+    assert result["sent"] == len(sender.sent) == 1
+
+
+def test_malformed_json_retains_header_and_active_pause(world, monkeypatch):
+    clock, sender = world
+    response = _Response(429, {})
+    response.headers = {"Retry-After": "3600"}
+    def broken():
+        raise ValueError("synthetic malformed JSON")
+    response.json = broken
+    assert apns._retry_after(response) == 3600
+    apns._LA_GATE.rate_limited(3600)
+    apns._LA_GATE.rate_limited(0)
+    _register(TOKENS[0])
+    apns.send_live_activity({"n": 1})
+    clock.advance(3599)
+    assert not sender.sent
+    clock.advance(1)
+    assert len(sender.sent) == 1
