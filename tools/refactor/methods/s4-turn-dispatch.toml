@@ -54,6 +54,8 @@ members = [
     "_enqueue_if_busy",
     "_hold_for_drain",
     "_running_processes",
+    "_session_holds",
+    "_session_held",
     "_wait_for_process_exit",
     "_preempt_for",
     "_call_opening_claimed",

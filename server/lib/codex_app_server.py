@@ -12,13 +12,15 @@ import hashlib
 import os
 import pathlib
 import shutil
+import signal
 import subprocess
 import sys
 import threading
+import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from . import agent_goals, agents as agents_db, backend_usage, eventlog, tts_queue
+from . import agent_goals, agents as agents_db, backend_usage, eventlog, settings_store, tts_queue
 from .backend.codex import CodexBackend, TurnState
 from .backend.registry import by_id
 from .log import log, log_exception
@@ -70,6 +72,17 @@ class _ActiveTurn:
     steer_ready: threading.Event = field(default_factory=threading.Event)
 
 
+# A stopped Codex turn the app-server has not ended this long after its
+# turn/interrupt is detached (BACKENDS-07b); the same 10 s as a CLI turn's
+# stop deadline (process_registry.STOP_KILL_DEADLINE_SEC, BACKENDS-07).
+STOP_DETACH_SEC = 10.0
+
+
+class CodexSessionStuck(RuntimeError):
+    """The agent's thread is held by a stuck app-server process that is
+    recycled once no other live turn runs on it."""
+
+
 class AppTurnHandle:
     """ProcessRegistry-compatible logical handle for one app-server turn."""
     def __init__(self, client: "_Client", agent_id: str = ""):
@@ -98,15 +111,53 @@ class AppTurnHandle:
         # slot during the handoff) must not reach the agent's next turn (TP-N1).
         if self._done.is_set():
             return
+        timer = threading.Timer(STOP_DETACH_SEC, self._detach_if_running)
+        timer.daemon = True
+        timer.start()
         self.client.interrupt_active(self.agent_id, handle=self)
+
+    def _detach_if_running(self) -> None:
+        """The server never ended this stopped turn: detach it (BACKENDS-07b).
+        It no longer counts as busy; the shared process is recycled once no
+        live turn runs on it, and until then this agent gets no new turn."""
+        client = self.client
+        with client._lock:
+            if self._done.is_set():
+                return
+            actives = getattr(client, "_actives", {})
+            mine = [turn for turn in (actives.get(self.agent_id), client.active)
+                    if turn is not None and turn.handle is self]
+            detached = getattr(client, "detached_agents", None)
+            if detached is None:
+                detached = client.detached_agents = set()
+            detached.add(self.agent_id)
+            # Its execution may still announce itself: never adopt it again.
+            client.detached_executions = getattr(client, "detached_executions", set()) | {
+                value for turn in mine for value in (turn.thread_id, turn.turn_id) if value}
+            if actives.get(self.agent_id) is not None and actives[self.agent_id].handle is self:
+                actives.pop(self.agent_id, None)
+            if client.active is not None and client.active.handle is self:
+                client.active = None
+            self._done.set()
+        log("codexTurnDetached", f"agent={self.agent_id} after={STOP_DETACH_SEC:g}s")
+        client.recycle_if_quiet()
 
 
 class _Client:
+    # Guards each client's goal-state marks. Taken after self._lock,
+    # never before it; the goal mirror takes only this one.
+    _goal_state_lock = threading.Lock()
+
     def __init__(self, agent_id: str, session: str, stream=None):
         argv = _codex_argv()
         self.agent_id = agent_id
         self.auth_fingerprint = _auth_fingerprint()
         self.refresh_requested = False
+        # Agents whose stopped turn was detached here, and that turn's thread
+        # and turn ids (BACKENDS-07b); set once this process is being killed.
+        self.detached_agents: set[str] = set()
+        self.detached_executions: set[str] = set()
+        self.recycled = False
         self.rate_limits = {}
         # One shared server serves every Codex agent: it has no turn identity
         # and no agent identity. Naming the agent that started it would let a
@@ -115,11 +166,16 @@ class _Client:
         env = dict(os.environ)
         env.pop("CLARP_PROVIDER_TURN", None)
         env.pop("CLAUDE_PWA_SESSION", None)
+        # Its own process group, so a recycle (BACKENDS-07b) kills the server
+        # and the helpers in its group. Codex starts each shell tool command
+        # in its own session with SIGTERM as its parent-death signal, so those
+        # get SIGTERM when the server dies and what they started can survive.
+        self.process_group = os.name == "posix"
         self.proc = subprocess.Popen(
             argv,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, text=True, errors="replace", bufsize=1,
-            env=env,
+            env=env, start_new_session=self.process_group,
         )
         self._write_lock = threading.Lock()
         self._lock = threading.Lock()
@@ -285,6 +341,8 @@ class _Client:
         return self.active
 
     def _notification(self, method: str, params: dict) -> None:
+        if self._suppressed(method, params):
+            return
         active = self._pick_active(params)
         if method == "account/rateLimits/updated":
             self.rate_limits = params
@@ -302,6 +360,11 @@ class _Client:
         if method in ("thread/goal/updated", "thread/goal/cleared"):
             self._mirror_goal(str(params.get("threadId") or ""),
                               params.get("goal") if method.endswith("updated") else None)
+            return
+        if active is None and method == "turn/started" and self._detached_execution(params):
+            # The detached turn (or a continuation on its stuck thread) must
+            # not count as busy again: that would keep the stuck process alive.
+            log("codexDetachedTurnIgnored", "a turn on a detached thread started late")
             return
         if active is None and method == "turn/started":
             # Codex starts continuation turns for an active goal on its own.
@@ -383,6 +446,11 @@ class _Client:
             if self.active is active:
                 self.active = None
             active.handle._done.set()
+            if getattr(self, "detached_agents", None):
+                # Not on the reader: a send may hold the pool lock while it
+                # waits for this reader to deliver its turn/start reply.
+                threading.Thread(target=self.recycle_if_quiet, daemon=True,
+                                 name="codex-recycle").start()
             if status == "failed":
                 message = str(error.get("message") or "codex turn failed")
                 if active.on_error:
@@ -403,6 +471,10 @@ class _Client:
         """Keep Clarp's goal table and clients in step with the app-server."""
         if not thread_id:
             return
+        recorded = False
+        with self._goal_state_lock:
+            # Marks set after this point are newer than what this write saw.
+            started_at = getattr(self, "goal_mark_seq", 0)
         try:
             agent = agents_db.get_by_backend_session(thread_id)
             if not agent:
@@ -415,11 +487,76 @@ class _Client:
             else:
                 agent_goals.clear(agent["agent_id"])
                 row = None
+            recorded = True
+            with self._goal_state_lock:
+                mark = self._goal_marks().get(thread_id)
+                # Only a failed write it began after can this write resolve.
+                if mark and mark[0] == "write" and mark[1] <= started_at:
+                    del self._goal_marks()[thread_id]
             stream = getattr(self, "stream", None)
             if stream is not None:
                 events.broadcast(stream, events.as_event(agent_goals.event(agent, row)))
         except Exception as exc:  # noqa: BLE001 - a mirror failure must not stop the reader
+            if not recorded:
+                # The mirror may now be stale: the recycle treats this
+                # goal as possibly active until a later write records it.
+                self._mark_goal_unknown(thread_id, "write")
             log_exception("codexGoalMirrorFail", exc, detail=thread_id)
+
+    def _goal_answer_begin(self, thread_id: str) -> None:
+        with self._goal_state_lock:
+            inflight = self._goal_activations()
+            inflight[thread_id] = inflight.get(thread_id, 0) + 1
+
+    def _goal_answer_end(self, thread_id: str) -> None:
+        with self._goal_state_lock:
+            inflight = self._goal_activations()
+            inflight[thread_id] -= 1
+            if not inflight[thread_id]:
+                del inflight[thread_id]
+        if getattr(self, "detached_agents", None):
+            # An outstanding answer may be all that held a stuck process.
+            threading.Thread(target=self.recycle_if_quiet, daemon=True,
+                             name="codex-recycle").start()
+
+    def _goal_activations(self) -> dict[str, int]:
+        """Threads with a goal request whose answer is outstanding, and how
+        many (call under _goal_state_lock)."""
+        inflight = getattr(self, "goal_activations_inflight", None)
+        if inflight is None:
+            inflight = self.goal_activations_inflight = {}
+        return inflight
+
+    def _goal_marks(self) -> dict[str, tuple[str, int]]:
+        """Threads whose goal state is unknown: (kind, sequence). "write": a
+        failed mirror write, resolved by a successful write that began after
+        it. "unanswered": a start/resume whose answer was lost; nothing proves
+        which state codex settled on, so it lasts for this process (call
+        under _goal_state_lock)."""
+        marks = getattr(self, "goal_state_marks", None)
+        if marks is None:
+            marks = self.goal_state_marks = {}
+        return marks
+
+    def _mark_goal_unknown(self, thread_id: str, kind: str) -> None:
+        with self._goal_state_lock:
+            self.goal_mark_seq = getattr(self, "goal_mark_seq", 0) + 1
+            marks = self._goal_marks()
+            if (marks.get(thread_id) or ("",))[0] != "unanswered":
+                marks[thread_id] = (kind, self.goal_mark_seq)
+
+    def _goal_unknown(self) -> set[str]:
+        """Threads whose goal state is unknown (call under _goal_state_lock)."""
+        return set(self._goal_marks())
+
+    def _detached_execution(self, params: dict) -> bool:
+        detached = getattr(self, "detached_executions", None)
+        if not detached:
+            return False
+        turn = params.get("turn") if isinstance(params.get("turn"), dict) else {}
+        thread_id = str(params.get("threadId") or turn.get("threadId") or "")
+        turn_id = str(turn.get("id") or params.get("turnId") or "")
+        return bool({thread_id, turn_id} & detached)
 
     def _adopt_server_turn(self, params: dict) -> _ActiveTurn | None:
         turn = params.get("turn") if isinstance(params.get("turn"), dict) else {}
@@ -486,6 +623,30 @@ class _Client:
             raise ValueError("objective required")
         if action not in ("start", "pause", "resume", "clear", "get"):
             raise ValueError(f"unknown goal action: {action}")
+        activating = action in ("start", "resume")
+        # Every goal request is an outstanding answer until its own answer is
+        # mirrored; no recycle while one is (BACKENDS-07b, the lead's coarse
+        # rule). No goal request of any kind starts on a process the recycle
+        # has marked: this check and the mark share self._lock.
+        with self._lock:
+            if getattr(self, "recycled", False):
+                raise RuntimeError("Codex is restarting a stuck session; try again in a moment")
+            self._goal_answer_begin(thread_id)
+        try:
+            try:
+                result = self._goal_request(agent, action, thread_id, objective)
+            except Exception:
+                if activating:
+                    # It may have reached codex: possibly active from now on.
+                    self._mark_goal_unknown(thread_id, "unanswered")
+                raise
+            goal = result.get("goal") if isinstance(result, dict) else None
+            self._mirror_goal(thread_id, goal if isinstance(goal, dict) else None)
+        finally:
+            self._goal_answer_end(thread_id)
+        return agent_goals.public(agent_goals.get(agent_id))
+
+    def _goal_request(self, agent: dict, action: str, thread_id: str, objective: str) -> dict:
         if action == "get":
             result = self.request("thread/goal/get", {"threadId": thread_id})
         else:
@@ -499,9 +660,93 @@ class _Client:
                 if action == "start":
                     params["objective"] = objective.strip()
                 result = self.request("thread/goal/set", params)
-        goal = result.get("goal") if isinstance(result, dict) else None
-        self._mirror_goal(thread_id, goal if isinstance(goal, dict) else None)
-        return agent_goals.public(agent_goals.get(agent_id))
+        return result
+
+    def _suppressed(self, method: str, params: dict) -> bool:
+        """A continuation codex starts while a stopped goal is being paused
+        after a resume is the user's Stop being undone: it is interrupted at
+        turn/started and nothing of it is taken for a Clarp turn."""
+        turn = params.get("turn") if isinstance(params.get("turn"), dict) else {}
+        turn_id = str(turn.get("id") or params.get("turnId") or "")
+        dropped = getattr(self, "suppressed_turns", set())
+        if turn_id and turn_id in dropped:
+            return True
+        thread_id = str(params.get("threadId") or turn.get("threadId") or "")
+        if method != "turn/started" or not thread_id:
+            return False
+        # The fence lasts as long as the durable marker: until the goal's
+        # pause is established, even after a refused launch (round 11).
+        if (thread_id not in getattr(self, "pausing_stopped", set())
+                and _stop_pause_get(thread_id) is None):
+            return False
+        self.suppressed_turns = dropped | {turn_id}
+        log("codexStoppedGoalContinuationInterrupted", f"thread={thread_id[:8]} turn={turn_id[:8]}")
+        threading.Thread(target=self._interrupt_and_repause, args=(thread_id, turn_id),
+                         daemon=True, name="codex-stop-continuation").start()
+        return True
+
+    def _interrupt_and_repause(self, thread_id: str, turn_id: str) -> None:
+        """Interrupt the continuation, then try the pause again (one try at a
+        time per thread): codex restarts an active goal after an interrupt, so
+        only the pause ends the fence. Success clears the marker."""
+        self._interrupt_quietly(thread_id, turn_id)
+        with self._goal_state_lock:
+            trying = getattr(self, "repausing", set())
+            if thread_id in trying or thread_id in getattr(self, "pausing_stopped", set()):
+                return
+            self.repausing = trying | {thread_id}
+        try:
+            self._goal_answer_begin(thread_id)
+            try:
+                answer = self.request("thread/goal/set", {"threadId": thread_id, "status": "paused"},
+                                      timeout=10)
+                goal = answer.get("goal") if isinstance(answer, dict) else None
+                self._mirror_goal(thread_id, goal if isinstance(goal, dict) else None)
+                _stop_pause_forget(thread_id)
+                log("codexStoppedGoalPausedOnResume", f"thread={thread_id[:8]} retry=True")
+            except Exception as exc:  # noqa: BLE001 - the fence stays; the next start tries again
+                log_exception("codexStoppedGoalPauseFail", exc, detail=thread_id[:8])
+            finally:
+                self._goal_answer_end(thread_id)
+        finally:
+            with self._goal_state_lock:
+                self.repausing = getattr(self, "repausing", set()) - {thread_id}
+
+    def _interrupt_quietly(self, thread_id: str, turn_id: str) -> None:
+        try:
+            self.request("turn/interrupt", {"threadId": thread_id, "turnId": turn_id}, timeout=10)
+        except Exception as exc:  # noqa: BLE001
+            log_exception("codexStoppedGoalInterruptFail", exc, detail=thread_id[:8])
+
+    def _resume_stopped_safely(self, thread_id: str, resume) -> dict:
+        """Resume ``thread_id``; if its Stop-pause never applied (the stuck
+        process did not answer it), pause the goal right after the resume,
+        before anything else runs, and interrupt any continuation codex
+        starts first (BACKENDS-07b, lead round 8)."""
+        if not _stop_pause_get(thread_id):
+            return resume()
+        self.pausing_stopped = getattr(self, "pausing_stopped", set()) | {thread_id}
+        try:
+            result = resume()
+            self._goal_answer_begin(thread_id)
+            try:
+                answer = self.request("thread/goal/set", {"threadId": thread_id, "status": "paused"},
+                                      timeout=10)
+                goal = answer.get("goal") if isinstance(answer, dict) else None
+                self._mirror_goal(thread_id, goal if isinstance(goal, dict) else None)
+                _stop_pause_forget(thread_id)
+                log("codexStoppedGoalPausedOnResume", f"thread={thread_id[:8]}")
+            except Exception as exc:
+                # The goal the user stopped may still run: admit nothing on
+                # this thread. The marker stays for the next resume.
+                log_exception("codexStoppedGoalPauseFail", exc, detail=thread_id[:8])
+                raise RuntimeError("Could not pause the stopped Codex goal; "
+                                   "the message waits for the next try") from exc
+            finally:
+                self._goal_answer_end(thread_id)
+            return result
+        finally:
+            self.pausing_stopped = getattr(self, "pausing_stopped", set()) - {thread_id}
 
     def _ensure_loaded(self, agent: dict, thread_id: str) -> None:
         """A goal call needs the thread open in this process; a live turn or an
@@ -513,14 +758,14 @@ class _Client:
                 self._loaded_threads.add(thread_id)
                 return
         cwd = pathlib.Path(os.path.expanduser(str(agent.get("cwd") or "~"))).resolve()
-        self.request("thread/resume", {
+        self._resume_stopped_safely(thread_id, lambda: self.request("thread/resume", {
             "threadId": thread_id, "cwd": str(cwd),
             "approvalPolicy": "never", "sandbox": "danger-full-access",
             "developerInstructions": persona_identity_instruction(
                 str(agent.get("persona") or ""), agent["session"]),
             **({"model": agent["model"]} if agent.get("model") else {}),
             **_thread_identity(agent["session"]),
-        })
+        }))
         self._loaded_threads.add(thread_id)
 
     def start(self, *, text: str, cwd: pathlib.Path, backend_session_id: str,
@@ -546,13 +791,14 @@ class _Client:
         self._actives[owner] = active
         try:
             if backend_session_id and not is_new_session:
-                result = self.request("thread/resume", {
-                    "threadId": backend_session_id, "cwd": str(cwd),
-                    "approvalPolicy": "never", "sandbox": "danger-full-access",
-                    "developerInstructions": developer_instructions,
-                    **({"model": model} if model else {}),
-                    **_thread_identity(session),
-                })
+                result = self._resume_stopped_safely(backend_session_id, lambda: self.request(
+                    "thread/resume", {
+                        "threadId": backend_session_id, "cwd": str(cwd),
+                        "approvalPolicy": "never", "sandbox": "danger-full-access",
+                        "developerInstructions": developer_instructions,
+                        **({"model": model} if model else {}),
+                        **_thread_identity(session),
+                    }))
             else:
                 result = self.request("thread/start", {
                     "cwd": str(cwd), "approvalPolicy": "never",
@@ -646,12 +892,98 @@ class _Client:
             row = agent_goals.get(active.agent_id)
             if not row or row.get("status") != agent_goals.ACTIVE or not active.thread_id:
                 return
-            result = self.request("thread/goal/set", {
-                "threadId": active.thread_id, "status": "paused"}, timeout=10)
-            goal = result.get("goal") if isinstance(result, dict) else None
-            self._mirror_goal(active.thread_id, goal if isinstance(goal, dict) else None)
+            self._goal_answer_begin(active.thread_id)
+            try:
+                try:
+                    result = self.request("thread/goal/set", {
+                        "threadId": active.thread_id, "status": "paused"}, timeout=10)
+                except Exception:
+                    # A stuck process may never apply it: the next resume of
+                    # this thread pauses the goal first (Stop means stop).
+                    _stop_pause_put(active.thread_id)
+                    raise
+                goal = result.get("goal") if isinstance(result, dict) else None
+                self._mirror_goal(active.thread_id, goal if isinstance(goal, dict) else None)
+            finally:
+                self._goal_answer_end(active.thread_id)
         except Exception as exc:  # noqa: BLE001 - the interrupt itself must still go out
             log_exception("codexGoalPauseFail", exc, detail=active.agent_id)
+
+    def recycle_if_quiet(self) -> None:
+        """A process holding a detached (stuck) turn is killed once no live turn
+        runs on it: the kill releases the stuck thread's writer lock, and a new
+        process serves the next turns (BACKENDS-07b). Never while another
+        agent's turn still runs here. The quiet check and the retirement share
+        the pool lock with admission (spawn_turn), so no turn is admitted
+        between them."""
+        with _LOCK:
+            with self._lock:
+                with self._goal_state_lock:
+                    detached = set(getattr(self, "detached_executions", ()))
+                    # Other agents' threads only: the stopped agent's own
+                    # Stop-pause may never be answered by a stuck process.
+                    unknown = bool((set(self._goal_activations()) | self._goal_unknown()) - detached)
+                if (not getattr(self, "detached_agents", None)
+                        or getattr(self, "recycled", False) or _busy(self) or unknown):
+                    return
+                self.recycled = True
+            # After the mark no goal activation starts here (goal() refuses).
+            # Recheck what codex may have started on its own: a turn adopted
+            # before the mark is busy now, and an active goal on a thread
+            # loaded here can start a continuation at any moment.
+            if _busy(self) or self._goal_may_continue():
+                with self._lock:
+                    self.recycled = False
+                return
+            if _CLIENTS.get(_SHARED_KEY) is self:
+                _CLIENTS.clear()
+            # Its thread stays held (turn_holders) until the process is gone.
+            _RETIRING[id(self)] = self
+            log("codexStuckProcessRecycled",
+                f"detached={len(self.detached_agents)}")
+            try:
+                if getattr(self, "process_group", False):
+                    os.killpg(self.proc.pid, signal.SIGKILL)
+                else:
+                    self.proc.kill()
+            except (OSError, ValueError):
+                try:
+                    self.proc.kill()
+                except (OSError, ValueError):
+                    pass
+            try:
+                # Dead before the next process resumes the stuck thread.
+                self.proc.wait(timeout=5)
+            except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
+                # No exit evidence: the stopped agent's thread stays held and
+                # its send keeps waiting until proc.poll() reports the exit.
+                log("codexRecycleUnconfirmed", f"type={type(exc).__name__}")
+
+    def _goal_may_continue(self) -> bool:
+        """Could codex start a turn here by itself? The lead's coarse rule: yes
+        while any goal answer is outstanding, while a goal's state is unknown
+        (a failed mirror write or an unanswered activation), and for any goal
+        on a thread loaded here (not a detached one, which dies with it) that
+        is not known to be complete or paused. Unknown means yes."""
+        detached = getattr(self, "detached_executions", set())
+        with self._goal_state_lock:
+            # Any outstanding goal answer on another agent's thread holds the
+            # process (each request is bounded by its timeout).
+            if (set(self._goal_activations()) | self._goal_unknown()) - set(detached):
+                return True
+        try:
+            for thread_id in set(getattr(self, "_loaded_threads", ())) - set(detached):
+                agent = agents_db.get_by_backend_session(thread_id)
+                row = agent_goals.get(agent["agent_id"]) if agent else None
+                # Coarse rule (lead): only a goal known to be complete or
+                # paused lets the process go; blocked and limited ones may
+                # still continue.
+                if row and row.get("status") not in (agent_goals.COMPLETE, agent_goals.PAUSED):
+                    return True
+        except Exception as exc:  # noqa: BLE001 - fail closed: keep the process
+            log_exception("codexRecycleGoalCheckFail", exc, detail=self.agent_id)
+            return True
+        return False
 
     def shutdown(self) -> None:
         """EOF stdin so the stdio app-server exits and drops its writer lock."""
@@ -709,6 +1041,8 @@ def _normalize_item(item: dict) -> dict:
 
 
 _CLIENTS: dict[str, _Client] = {}
+# Recycled clients whose process has not been seen to exit (BACKENDS-07b).
+_RETIRING: dict[int, _Client] = {}
 _LOCK = threading.RLock()
 _SHARED_KEY = "__shared__"
 
@@ -721,12 +1055,83 @@ def _auth_fingerprint() -> bytes:
         return b""
 
 
+_STOP_PAUSE_PREFIX = "codex.stop_pause."
+
+
+def _stop_pause_get(thread_id: str) -> int | None:
+    """A Stop-pause the app-server never answered for ``thread_id`` (when it
+    was recorded), a small marker kept through settings_store."""
+    if not thread_id:
+        return None
+    value = settings_store.get(_STOP_PAUSE_PREFIX + thread_id)
+    try:
+        return int(value) if value is not None else None
+    except ValueError:
+        return 0
+
+
+def _stop_pause_put(thread_id: str) -> None:
+    if thread_id:
+        settings_store.set_text(_STOP_PAUSE_PREFIX + thread_id, str(int(time.time() * 1000)))
+
+
+def _stop_pause_forget(thread_id: str) -> None:
+    if thread_id:
+        settings_store.delete(_STOP_PAUSE_PREFIX + thread_id)
+
+
 def _busy(client) -> bool:
     turns = list(getattr(client, "_actives", {}).values())
     active = getattr(client, "active", None)
     if active is not None:
         turns.append(active)
     return any(not turn.handle._done.is_set() for turn in turns)
+
+
+def credential_switch_pending(message) -> bool:
+    """A Codex failure from a client still running credentials older than
+    auth.json: the account was switched, but the shared process is busy and
+    keeps the old ones until it is idle (BACKENDS-06 (c))."""
+    if not isinstance(message, CodexTurnFailure):
+        return False
+    held = getattr(message.client, "auth_fingerprint", None)
+    return held is not None and held != _auth_fingerprint()
+
+
+def admit_turn(client, agent_id: str) -> None:
+    """Refuse a turn for an agent whose stopped turn is detached on this
+    (stuck) process: its thread is still held there until it is recycled."""
+    if agent_id and agent_id in (getattr(client, "detached_agents", None) or ()):
+        raise CodexSessionStuck(
+            "Waiting for a stuck Codex session to end; it restarts as soon as "
+            "the other Codex agents finish their turns")
+
+
+class _StuckSessionHold:
+    """The agent's stopped turn is detached on a process that still runs and
+    holds its thread; its next send waits until that process is gone."""
+
+    def __init__(self, client: "_Client", agent_id: str):
+        self.client, self.agent_id = client, agent_id
+
+    def is_alive(self) -> bool:
+        # Only process-exit evidence releases the thread, not the kill.
+        client = self.client
+        return (self.agent_id in (getattr(client, "detached_agents", None) or ())
+                and client.proc.poll() is None)
+
+
+def turn_holders(agent_id: str) -> list[_StuckSessionHold]:
+    """Processes that still hold ``agent_id``'s thread outside any turn
+    (BACKENDS-07b): a send waits behind them instead of failing."""
+    with _LOCK:
+        for key, client in list(_RETIRING.items()):
+            if client.proc.poll() is not None:
+                del _RETIRING[key]
+        clients = list({id(client): client for client in
+                        [*_CLIENTS.values(), *_RETIRING.values()]}.values())
+    holds = [_StuckSessionHold(client, agent_id) for client in clients]
+    return [hold for hold in holds if hold.is_alive()]
 
 
 class CodexTurnFailure(str):
@@ -851,6 +1256,7 @@ def spawn_turn(*, text: str, cwd: pathlib.Path, backend_session_id: str = "",
         )
     with _LOCK:
         client = _client(agent_id, session, stream=stream)
+        admit_turn(client, agent_id)   # before turn/start: nothing is sent
         handle = AppTurnHandle(client, agent_id=agent_id)
         agent = agents_db.get_by_agent_id(agent_id) if agent_id else None
         persona = (agent or {}).get("persona") or ""
@@ -896,6 +1302,9 @@ def goal(agent_id: str, action: str, *, objective: str = "", stream=None) -> dic
         raise ValueError("no such agent")
     with _LOCK:
         client = _client(agent_id, agent["session"], stream=stream)
+    if action != "get":
+        # The user's own word on the goal replaces a pending Stop-pause.
+        _stop_pause_forget(agents_db.live_backend_session(agent_id))
     return client.goal(agent, action, objective)
 
 

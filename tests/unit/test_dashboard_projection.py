@@ -231,6 +231,9 @@ def test_snapshot_reads_the_external_runtime_status_once_per_roster(monkeypatch)
     class Runtime:
         calls = 0
 
+        def status_within(self, total_s):
+            return self.status()
+
         def status(self):
             Runtime.calls += 1
             return {"active": {}, "spawning": [spawning], "terminals": [],
@@ -262,7 +265,7 @@ def test_snapshot_compacting_falls_back_to_persisted_state_when_runtime_is_down(
     from lib.runtime_bridge import RuntimeUnavailable
 
     class Offline:
-        def status(self):
+        def status_within(self, total_s):
             raise RuntimeUnavailable("down")
 
     quiet = agents.create_agent(persona='Quiet', voice_id='', cwd='/tmp', session='quiet')

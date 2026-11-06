@@ -8,16 +8,26 @@ watch events or process startup.
 from __future__ import annotations
 
 import pathlib
+import sys
 import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+
+from .revisioned_cache import RevisionedCache
 
 _guard = threading.Lock()
 # Waits for admitted direct imports to finish (test reset); releases _guard while waiting.
 _cond = threading.Condition(_guard)
 _path_locks: dict[str, threading.Lock] = {}
 _imported: dict[str, tuple[int, ...]] = {}
+# When an import last chose its source version, including unchanged checks.
+_validated_at: RevisionedCache[str, float] = RevisionedCache(
+    "transcript-import-validation", max_entries=1024)
+# Last actual worker import cost for this owner/path, excluding queue time.
+# Unchanged version checks do not erase a previously measured slow import.
+_last_import_duration: RevisionedCache[str, float] = RevisionedCache(
+    "transcript-import-duration", max_entries=1024)
 
 
 def source_path(path: pathlib.Path) -> pathlib.Path:
@@ -64,9 +74,13 @@ def _import_admitted(path: pathlib.Path, importer: Callable[[], None], owner: st
     with _guard:
         path_lock = _path_locks.setdefault(key, threading.Lock())
     with path_lock:
+        observed_at = time.monotonic()
         before = _signature(path)
         with _guard:
             if _imported.get(key) == before:
+                if _epoch == epoch:
+                    _validated_at.put(key, epoch, observed_at)
+                    _cond.notify_all()
                 return False
         # A busy writer must not cost the whole import; imports are idempotent.
         from . import db
@@ -78,6 +92,8 @@ def _import_admitted(path: pathlib.Path, importer: Callable[[], None], owner: st
             # trailing bytes as covered.
             if _epoch == epoch:
                 _imported[key] = before
+                _validated_at.put(key, epoch, observed_at)
+                _cond.notify_all()
         return True
 
 
@@ -158,6 +174,7 @@ def reset_for_tests(deadline_s: float = 5.0) -> bool:
             _drain = DrainRecord(_epoch, tuple(t for t in _threads if t.is_alive()))
             _deferred.clear()
             _pending.clear()
+            _cond.notify_all()
         drain = _drain
     try:
         end = time.monotonic() + deadline_s
@@ -172,6 +189,8 @@ def reset_for_tests(deadline_s: float = 5.0) -> bool:
             if quiet:
                 _path_locks.clear()
                 _imported.clear()
+                _validated_at.reset()
+                _last_import_duration.reset()
                 _last_started.clear()
                 _deferred.clear()
                 _pending.clear()
@@ -236,11 +255,14 @@ def _ensure_worker() -> bool:
 
 
 def schedule_import(path: pathlib.Path, importer: Callable[[], None], *, owner: str = '',
-                    after: Callable[[], None] | None = None) -> bool:
+                    after: Callable[[], None] | None = None,
+                    urgent: bool = False) -> bool:
     """Import ``path`` for ``owner`` on the background worker. With ``after``,
     the request is queued even when this version is already imported, so
     ``after`` still runs once the worker's import returns; never after a failed
-    import. False when refused (queue full, or a test reset in progress)."""
+    import. ``urgent`` bypasses the coalescing window, retaining queued watcher
+    callbacks and the same serialized worker. False when refused (queue full,
+    or a test reset in progress)."""
     key = f'{owner}\0{path}'
     signature = _signature(path)
     full = start_failed = False
@@ -254,7 +276,8 @@ def schedule_import(path: pathlib.Path, importer: Callable[[], None], *, owner: 
             after = _queued_after(key)
         request = (path, importer, owner, after)
         last = _last_started.get(key)
-        wait = _BACKGROUND_MIN_INTERVAL - (time.monotonic() - last) if last is not None else 0.0
+        wait = (_BACKGROUND_MIN_INTERVAL - (time.monotonic() - last)
+                if last is not None and not urgent else 0.0)
         if wait > 0 and key not in _pending:
             if key in _deferred:
                 _, timer, epoch = _deferred[key]
@@ -273,6 +296,9 @@ def schedule_import(path: pathlib.Path, importer: Callable[[], None], *, owner: 
             # The next request/watcher can retry; never create unbounded threads.
             full = True
         else:
+            if urgent and key in _deferred:
+                _, timer, _ = _deferred.pop(key)
+                timer.cancel()
             _pending[key] = (request, _epoch)
             if not _ensure_worker():
                 del _pending[key]           # no worker owns it: refuse instead
@@ -287,6 +313,56 @@ def schedule_import(path: pathlib.Path, importer: Callable[[], None], *, owner: 
             log("transcriptImportQueueFull", f"owner={owner}")
         return False
     return True
+
+
+def import_for_snapshot(path: pathlib.Path, importer: Callable[[], None], *,
+                        owner: str, timeout: float) -> bool:
+    """Give this owner's observed source version a bounded chance to land.
+
+    Called outside SQLite transactions. The condition releases _guard while
+    waiting; the worker keeps its per-path lock, batching and writer fairness.
+    A newer import chosen after this request also covers its observed bytes.
+    Failure or a busy worker falls back without joining unrelated owners.
+    """
+    started = time.monotonic()
+    deadline = started + timeout
+    signature = _signature(path)
+    key = f'{owner}\0{path}'
+    with _guard:
+        epoch = _epoch
+        if not _resetting and _imported.get(key) == signature:
+            return True
+        _, recent_duration = _last_import_duration.get(key, epoch)
+    if recent_duration is not None and recent_duration > timeout:
+        # Known slow histories retain today's asynchronous/coalesced refresh.
+        # Waiting the whole bound again would add latency without fresh rows.
+        schedule_import(path, importer, owner=owner)
+        print(f"snapshotImportSkip code=recent_slow "
+              f"duration_ms={round(recent_duration * 1000)} "
+              f"bound_ms={round(timeout * 1000)} source_bytes={signature[1]}",
+              file=sys.stderr, flush=True)
+        return False
+    admitted = schedule_import(path, importer, owner=owner, urgent=True)
+    code = "unavailable"
+    with _cond:
+        while epoch == _epoch and not _resetting:
+            _, validated_at = _validated_at.get(key, epoch)
+            if (_imported.get(key) == signature
+                    or (validated_at is not None and validated_at >= started)):
+                return True
+            if not admitted:
+                break
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                code = "deadline"
+                break
+            _cond.wait(remaining)
+    # Journal only: synchronous telemetry writes can themselves wait on SQLite
+    # and extend the deadline precisely when the importer is under contention.
+    elapsed_ms = round((time.monotonic() - started) * 1000)
+    print(f"snapshotImportTimeout code={code} wait_ms={elapsed_ms} "
+          f"source_bytes={signature[1]}", file=sys.stderr, flush=True)
+    return False
 
 
 def _schedule_deferred(key: str, epoch: int, token: threading.Timer) -> None:
@@ -369,12 +445,15 @@ def _drain_background():
             started = time.monotonic()
             try:
                 try:
-                    _import_admitted(path, importer, owner, item_epoch)
+                    imported = _import_admitted(path, importer, owner, item_epoch)
+                    duration = time.monotonic() - started
                     with _guard:
                         # Only a completed import opens the window: a failed one
                         # stays retryable at once.
                         if _epoch == item_epoch:
                             _last_started[key] = started
+                            if imported:
+                                _last_import_duration.put(key, item_epoch, duration)
                             if len(_last_started) > 4 * _BACKGROUND_LIMIT:
                                 _last_started.pop(next(iter(_last_started)))
                 except Exception as exc:

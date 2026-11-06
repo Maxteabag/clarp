@@ -85,6 +85,9 @@ ALLOWED: dict[tuple[str, str], str] = {
     ("lib/reconcile.py", "_LEAK_CHECK_ASKED"): THROTTLE,
     ("lib/cartesia_voices.py", "_cache"): CACHE,
     ("lib/codex_app_server.py", "_CLIENTS"): CLIENT,
+    # Recycled app-server clients whose process has not been seen to exit;
+    # their threads stay held until it has (BACKENDS-07b).
+    ("lib/codex_app_server.py", "_RETIRING"): JOBS,
     ("lib/compaction.py", "_active"): JOBS,
     ("lib/compaction.py", "_runtime_client"): CLIENT,
     ("lib/config.py", "PERSONA_PERSONALITIES"): IMPORT,

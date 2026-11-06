@@ -15,6 +15,8 @@ from . import transcript_import_cache
 from . import transcript_incremental
 from . import eventlog
 
+ACTIVE_SNAPSHOT_IMPORT_TIMEOUT_SECONDS = 2.25
+
 
 def _compact_text(value: Any, limit: int = 240) -> Any:
     if not isinstance(value, str) or len(value) <= limit:
@@ -117,10 +119,16 @@ def load_conversation(*, session: str, after_revision: int = 0,
         has_stored_history = agents_db.conn().execute(
             "SELECT 1 FROM messages WHERE agent_id=? AND backend_session_id=? AND seq>=0 LIMIT 1",
             (agent_id, backend_session_id)).fetchone() is not None
-        importing = (transcript_import_cache.schedule_import
-                     if background_import and has_stored_history
-                     else transcript_import_cache.import_if_changed)
-        importing(latest, import_latest, owner=agent_id)
+        if (background_import and has_stored_history and not after_revision
+                and not before_message_id and agents_db.is_busy(agent_id)):
+            transcript_import_cache.import_for_snapshot(
+                latest, import_latest, owner=agent_id,
+                timeout=ACTIVE_SNAPSHOT_IMPORT_TIMEOUT_SECONDS)
+        else:
+            importing = (transcript_import_cache.schedule_import
+                         if background_import and has_stored_history
+                         else transcript_import_cache.import_if_changed)
+            importing(latest, import_latest, owner=agent_id)
 
     # SQLite is the app-facing source of truth. Backend transcript files are
     # importer inputs only; every client sees one canonical read model.
