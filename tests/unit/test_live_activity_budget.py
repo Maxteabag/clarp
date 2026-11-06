@@ -267,3 +267,50 @@ def test_a_timer_retry_never_finishes_an_old_state_after_a_newer_one(world, monk
             newest.join(5)
     assert not retry.is_alive() and not newest.is_alive()
     assert delivered[-1] == 2, delivered
+
+
+# APNS-N3 step1: counted acceptance and correct relay backoff.
+def test_each_accepted_la_send_has_a_content_free_counted_log(world, monkeypatch):
+    _, transport = world
+    records = []
+    monkeypatch.setattr(apns, "log", lambda code, detail="": records.append((code, detail)))
+    _register(*TOKENS)
+    apns.send_live_activity({"aps": {"content-state": {"private": "DO_NOT_LOG"}}})
+    accepted = [detail for code, detail in records if code == "apnsLiveActivityAccepted"]
+    assert len(accepted) == len(transport.sent) == 2
+    assert all("status=200" in detail for detail in accepted)
+    assert all("DO_NOT_LOG" not in detail and all(token not in detail for token in TOKENS)
+               for _, detail in records)
+
+
+def test_alert_day_remainder_header_holds_la_until_reset_without_holding_alerts(world, monkeypatch):
+    clock, transport = world
+    calls = []
+    class Relay:
+        def request(self, method, url, headers=None, json=None):
+            calls.append(url)
+            if url.endswith("/v1/push/devices"):
+                return _Response(200, {})
+            response = _Response(429, {"error": {"code": "push_rate_limited"}})
+            response.headers = {"Retry-After": "43200"}
+            return response
+    monkeypatch.setattr(apns, "_relay_client", lambda: Relay())
+    apns._reset_relay_state()
+    relay = apns._RelayTransport(SimpleNamespace(
+        audio_central_url="https://central.example", audio_central_credential="cred"))
+    assert relay.send(TOKENS[0], "production", {"aps": {}})[0] == 429
+    _register(TOKENS[1])
+    apns.send_live_activity({"n": 1})
+    clock.advance(43199)
+    assert transport.sent == []
+    # A second user alert still reaches the transport while LA is held.
+    before = len(calls)
+    assert relay.send(TOKENS[0], "production", {"aps": {}})[0] == 429
+    assert len(calls) > before
+
+
+@pytest.mark.parametrize("value", ["nan", "inf", "-10", float("nan"), None])
+def test_invalid_retry_after_never_enters_a_nonfinite_or_negative_pause(value):
+    response = _Response(429, {"retryAfter": value})
+    response.headers = {}
+    assert apns._retry_after(response) == 0
