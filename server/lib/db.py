@@ -614,8 +614,11 @@ def close_local() -> None:
         return
     try:
         c.close()
-    except sqlite3.Error:
-        pass
+    except sqlite3.Error as exc:
+        # Preserve close_local's non-raising contract, but report uncertain
+        # release without a recursive eventlog/telemetry connection or payload.
+        print(f"dbCloseFail store=state code={type(exc).__name__}",
+              file=sys.stderr, flush=True)
     _LOCAL.conn = None
 
 
