@@ -190,6 +190,7 @@ def paused_idle(native):
 
 def soak(native):
     seconds=native.m['soak_seconds']
+    soaked_db=native.inside('stat','-c','%d:%i','/home/canary/.local/share/clarp/state.sqlite').strip()
     native.command(['docker','cp',str(ROOT/'workload.py'),native.container+':/home/canary/soak-workload.py'])
     native.command(['docker','exec',native.container,'chown','canary','/home/canary/soak-workload.py'])
     args=['docker','exec','-d','-u','canary','-e','HOME=/home/canary',native.container,'python3','/home/canary/soak-workload.py','run','--state','/home/canary/soak-state.json','--seconds',str(seconds)]
@@ -202,6 +203,8 @@ def soak(native):
         result=json.loads(exists)
         if result is not None:
             if result.get('result')!='PASS' or result.get('elapsed_seconds',0)<seconds: raise RuntimeError('soak incomplete/failed; no compressed receipt')
+            after=native.inside('stat','-c','%d:%i','/home/canary/.local/share/clarp/state.sqlite').strip()
+            if result.get('same_db_device_inode')!=soaked_db or after!=soaked_db:raise RuntimeError('same DB before/after soak not proven')
             atomic(native.output/'soak-result.json',result);break
         # A vanished driver without terminal receipt is unknown, never six-hour proof.
         native.inside('bash','-c','if test -f /home/canary/soak-state.started.json; then pid=$(python3 -c '"'"'import json;print(json.load(open("/home/canary/soak-state.started.json"))["pid"])'"'"'); test -f /home/canary/soak-state.result.json || kill -0 "$pid"; fi',timeout=15)
@@ -230,6 +233,8 @@ def soak(native):
 def compatibility(native, base_release, base_runtime):
     started=time.monotonic();started_up_ns=time.clock_gettime_ns(time.CLOCK_BOOTTIME)
     before=native.inside('stat','-c','%d:%i','/home/canary/.local/share/clarp/state.sqlite').strip()
+    soaked=json.loads((native.output/'soak-result.json').read_text())
+    if before!=soaked.get('same_db_device_inode'):raise RuntimeError('compatibility DB differs from actual soaked DB')
     checks=[{'phase':'D_F_soaked_read','result':json.loads(workload(native,'verify'))}]
     native.inside('bash','-c','old="$HOME/.local/share/clarp/releases/$1"; py=$(cat "$old/SERVICE_PYTHON"); CLARP_CODE_ROOT="$old" "$py" "$old/bin/clarp-admin.py" rollback "$1"','bash',base_release,timeout=120)
     native.runtime_restart(base_runtime)
