@@ -312,7 +312,10 @@ def test_added_part_and_group_preserve_historical_relative_order(tmp_path):
     methods.validate(tmp_path, base, integration, methods.recipes(tmp_path))
     _apply(tmp_path, True)
     assert 'def helper' in (tmp_path / 'server/lib/helpers.py').read_text()
-    assert 'from .helpers import helper' in (tmp_path / 'server/lib/extra.py').read_text()
+    result = subprocess.run([sys.executable, '-c',
+                             'from lib.engine import Engine; assert Engine().extra()==8'],
+                            cwd=tmp_path / 'server', capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
 
 
 def test_required_new_name_is_not_optional_during_current_generation(tmp_path):
