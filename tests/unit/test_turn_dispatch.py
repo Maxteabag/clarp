@@ -880,6 +880,62 @@ def test_identified_notification_uses_its_own_backend_binding(tmp_path, monkeypa
         "SELECT COUNT(*) FROM user_notifications WHERE agent_id=?", (other,)).fetchone()[0] == 0
 
 
+
+@pytest.mark.parametrize("other_owner", ["queue", "queue-tombstone", "turn"])
+def test_notification_rejects_another_owner_with_only_one_durable_ledger(
+        tmp_path, monkeypatch, other_owner):
+    """Each ownership ledger protects a cause even without the other ledger.
+
+    A delayed queue handoff has no turn yet; an idle next send has no queue
+    receipt. Equal timestamps must not make either request the prior cause.
+    """
+    from lib import db, message_live, message_store, message_writes
+    from lib import turn_lifecycle, user_notifications
+
+    clock = [1800000000000]
+    for module in (db, agents_db, message_live, message_writes, turn_lifecycle):
+        patch_shared(monkeypatch, module, "now_ms", lambda: clock[0])
+    monkeypatch.setattr(user_notifications, "SETTLE_TIMEOUT_S", 0)
+    service, backend, aid = _make_service(tmp_path)
+    service.dispatch(text="original", requested_session="mike", trace_id="ledger-A",
+                     client_msg_id="u-ledger-A", synthesize_audio=False)
+    source = message_store.upsert_live_assistant_message(
+        agent_id=aid, backend_session_id="backend-session-1", trace_id="ledger-A",
+        text="Original answer.")
+    assert source is not None
+    if other_owner != "turn":
+        service.dispatch(text="next request", requested_session="mike", trace_id="ledger-B",
+                         client_msg_id="u-ledger-B", synthesize_audio=False)
+        # Model the real asynchronous handoff gap after A's DONE, before B's
+        # backend launch. No second turn is manufactured by the fixture.
+        monkeypatch.setattr(service, "_spawn_next", lambda *args: None)
+        if other_owner == "queue-tombstone":
+            turn_queue.mark_started("u-ledger-B")
+            turn_queue.settle_receipt(aid, "ledger-B", "completed")
+            assert turn_queue.status("u-ledger-B") == "done"
+    backend.spawned[0][1]["on_result"]({"duration_ms": 10})
+    if other_owner == "turn":
+        transcript = tmp_path / ".claude" / "projects" / "-ledger" / "backend-session-1.jsonl"
+        transcript.parent.mkdir(parents=True)
+        transcript.write_text("{}\n")
+        service.dispatch(text="next request", requested_session="mike", trace_id="ledger-B",
+                         client_msg_id="u-ledger-B", synthesize_audio=False)
+        assert not turn_queue.status("u-ledger-B")
+    owners = db.conn().execute(
+        "SELECT trace_id FROM turns WHERE agent_id=? ORDER BY turn_id", (aid,)).fetchall()
+    assert [r["trace_id"] for r in owners] == (
+        ["ledger-A", "ledger-B"] if other_owner == "turn" else ["ledger-A"])
+    done = db.conn().execute(
+        "SELECT ts FROM state_log WHERE agent_id=? AND kind='done' "
+        "AND json_extract(detail,'$.trace_id')='ledger-A'", (aid,)).fetchone()
+    notification = user_notifications.classify_completed_turn(
+        agent_id=aid, session="mike", persona="Mike", trace_id="ledger-A",
+        backend_session_id="backend-session-1", done_ts=done["ts"])
+    assert notification["cause_message_id"] == "u-ledger-A"
+    assert notification["source_message_id"] == source["id"]
+    assert tuple(notification[k] for k in ("notify", "push", "badge", "unread")) == (True,) * 4
+
+
 def test_user_queue_handoff_survives_completion_during_persistence(tmp_path, monkeypatch):
     service, backend, agent_id = _make_service(tmp_path)
     service.dispatch(text="first", requested_session="mike", trace_id="tA")
