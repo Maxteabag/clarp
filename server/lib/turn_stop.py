@@ -52,6 +52,9 @@ def _result_detail(event: dict, *, trace_id: str) -> dict:
 
 
 def _result_assistant_text(event: dict) -> str:
+    from .claude_reply_evidence import suppresses_result_fallback
+    if suppresses_result_fallback(event):
+        return ""
     return str(
         event.get("_assistant_text")
         or event.get("last_agent_message")

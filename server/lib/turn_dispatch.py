@@ -188,7 +188,8 @@ class TurnDispatchService(AdmissionMixin, LauncherMixin, HandoffMixin, ClaimMixi
                            or self._has_live_turn(spec))
 
     def _claim_or_queue(self, spec: _TurnSpec, *, queue_if_busy: bool,
-                        park_id: str, preempt: list | None = None) -> tuple[bool, bool]:
+                        park_id: str, queue_user: list,
+                        preempt: list | None = None) -> tuple[bool, bool]:
         """The decision half of _enqueue_if_busy; the caller holds _TURN_LOCK.
         Returns (parked behind Stop, send waits)."""
         agent_id = spec.agent_id
@@ -262,6 +263,11 @@ class TurnDispatchService(AdmissionMixin, LauncherMixin, HandoffMixin, ClaimMixi
             if _SLOTS.fenced:
                 # The release drain waits for this turn; never preempt it.
                 return self._hold_for_drain(spec, "behind a live turn")
+            if spec.origin == "user":
+                # Leave the live owner intact. The caller persists a normal
+                # queue receipt outside this lock, then rechecks ownership.
+                queue_user.append(spec.trace_id)
+                return False, True
             # Take the slot first so the preempted turn's dying callback is
             # already superseded, then interrupt once the lock is released
             # (the caller does, see ``preempt``).
