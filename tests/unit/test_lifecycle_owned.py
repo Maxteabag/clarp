@@ -189,7 +189,9 @@ def test_at_write_owner_fence_refuses_without_success(replace):
 
 def test_exceptional_illegal_pair_counts_and_emits_after_release():
     owner, rules = MemoryOwner(), policy()
+    report_attempts = []
     def report(notice):
+        report_attempts.append(owner.lock.locked())
         assert not owner.lock.locked()
         owner.trace.append(("notice", notice.reason))
     sink = sink_for(rules, owner.trace, report=report)
@@ -197,6 +199,7 @@ def test_exceptional_illegal_pair_counts_and_emits_after_release():
         lk.apply_owned(rules, owner.event("finish"), owner.attempt(), sink)
     assert owner.writes == 0
     assert owner.trace == ["enter", "release", ("notice", "illegal")]
+    assert report_attempts == [False]
     assert sum(sink.counts.values()) == 1
 
 
