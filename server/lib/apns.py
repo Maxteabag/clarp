@@ -1500,7 +1500,10 @@ def _flush_live_activity_locked() -> dict:
             if status == 200:
                 _LA_GATE.delivered()
                 sent += 1
-                log("apnsLiveActivityAccepted", "status=200 count=1")
+                try:
+                    log("apnsLiveActivityAccepted", "status=200 count=1")
+                except Exception as e:  # noqa: BLE001 - diagnostics never abort a reserved batch
+                    log_exception("apnsLiveActivityDiagnosticFail", e)
             elif status == 410 or reason in _DEAD_REASONS:
                 live_activity.unregister(token=token)
                 disabled += 1
@@ -1510,7 +1513,7 @@ def _flush_live_activity_locked() -> dict:
                 if status == 429:
                     # The relay's 429 already backed off (its transport); Apple's
                     # own TooManyRequests does too. The state is kept, not lost.
-                    if reason != "push_rate_limited":
+                    if not _LA_GATE.paused():
                         _LA_GATE.rate_limited(0)
                     held.append((row, payload, priority))
         if held:
