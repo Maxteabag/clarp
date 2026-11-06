@@ -244,7 +244,7 @@ def test_git_read_failure_is_not_proven_path_absence(tmp_path, monkeypatch):
     real_run = methods.subprocess.run
     def failed_show(args, *a, **kw):
         if args[:3] == ['git', '-C', str(tmp_path)] and any(op in args for op in ('show', 'cat-file')):
-            return subprocess.CompletedProcess(args, 128, '', 'synthetic object read failure')
+            return subprocess.CompletedProcess(args, 128, b'', b'synthetic object read failure')
         return real_run(args, *a, **kw)
     monkeypatch.setattr(methods.subprocess, 'run', failed_show)
     with pytest.raises(methods.s3_apply.Refusal, match='read|Git|git'):
@@ -360,7 +360,7 @@ def test_unprovable_history_refuses_instead_of_claiming_absence(tmp_path, monkey
         real_run = methods.subprocess.run
         def fail_catalogue(args, *a, **kw):
             if args[:3] == ['git', '-C', str(tmp_path)] and 'ls-tree' in args and '-r' in args:
-                return subprocess.CompletedProcess(args, 128, '', 'synthetic catalogue failure')
+                return subprocess.CompletedProcess(args, 128, b'', b'synthetic catalogue failure')
             return real_run(args, *a, **kw)
         monkeypatch.setattr(methods.subprocess, 'run', fail_catalogue)
         with pytest.raises(methods.s3_apply.Refusal, match='Git data read failed.*catalogue'):

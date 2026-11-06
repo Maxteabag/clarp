@@ -71,29 +71,36 @@ def affected(root: pathlib.Path, found: list) -> set[str]:
             if sources & {entry['module'], *(p['module'] for p in entry['part'])}}
 
 
-def _git(root: pathlib.Path, *args: str) -> str:
-    """Checked Git data access: an I/O/object error is never path absence."""
+def _git(root: pathlib.Path, *args: str) -> bytes:
+    """Raw Git bytes: object errors and line endings must stay distinguishable."""
     try:
-        result = subprocess.run(['git', '-C', str(root), *args],
-                                capture_output=True, text=True)
-    except (OSError, UnicodeError) as exc:
+        result = subprocess.run(['git', '-C', str(root), *args], capture_output=True)
+    except OSError as exc:
         raise s3_apply.Refusal(f'Git data read failed: {exc}') from exc
     if result.returncode:
-        raise s3_apply.Refusal(f'Git data read failed ({args[0]}): {result.stderr.strip()}')
+        detail = result.stderr.decode('utf-8', errors='replace').strip()
+        raise s3_apply.Refusal(f'Git data read failed ({args[0]}): {detail}')
     return result.stdout
 
 
+def _decode(data: bytes, label: str) -> str:
+    """Decode parser/metadata input strictly, without newline translation."""
+    try:
+        return data.decode('utf-8')
+    except UnicodeError as exc:
+        raise s3_apply.Refusal(f'invalid UTF-8 Git data for {label}') from exc
+
 def _pin(root: pathlib.Path, ref: str) -> str:
-    commit = _git(root, 'rev-parse', '--verify', f'{ref}^{{commit}}').strip()
+    commit = _decode(_git(root, 'rev-parse', '--verify', f'{ref}^{{commit}}'), ref).strip()
     if not re.fullmatch(r'[0-9a-f]{40}|[0-9a-f]{64}', commit):
         raise s3_apply.Refusal(f'Git did not resolve a full commit for {ref!r}')
     return commit
 
 
-def show(root: pathlib.Path, ref: str, rel: str) -> str | None:
+def show(root: pathlib.Path, ref: str, rel: str) -> bytes | None:
     if not split_apply._canonical(rel):
         raise s3_apply.Refusal(f'noncanonical Git data path {rel!r}')
-    listing = _git(root, 'ls-tree', '-z', ref, '--', rel)
+    listing = _decode(_git(root, 'ls-tree', '-z', ref, '--', rel), rel)
     if not listing:
         return None
     entries = listing.rstrip('\0').split('\0')
@@ -109,8 +116,8 @@ def show(root: pathlib.Path, ref: str, rel: str) -> str | None:
 def _historical(root: pathlib.Path, base: str, target: pathlib.Path):
     """Load only pinned recipe data, never historical Python/tooling."""
     folders = ('tools/refactor/splits', METHODS)
-    listing = _git(root, 'ls-tree', '-r', '-z', base, '--',
-                   *folders, 'tools/refactor/s3_moves.toml')
+    listing = _decode(_git(root, 'ls-tree', '-r', '-z', base, '--',
+                           *folders, 'tools/refactor/s3_moves.toml'), base)
     for entry in listing.rstrip('\0').split('\0') if listing else []:
         metadata, rel = entry.split('\t', 1)
         if not rel.endswith('.toml'):
@@ -188,11 +195,11 @@ def _paths(splits, repoints, found):
     outputs |= {'server/' + g['module'] for _, groups in found for g in groups}
     return originals, outputs
 
-def write(root: pathlib.Path, changes: dict[str, str]) -> None:
+def write(root: pathlib.Path, changes: dict[str, str | bytes]) -> None:
     for rel, text in changes.items():
         path = root / rel
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text)
+        path.write_bytes(text if isinstance(text, bytes) else text.encode('utf-8'))
 
 
 def applied_prefix(root: pathlib.Path, integration: str, groups: list[dict]) -> list[dict]:
@@ -246,7 +253,7 @@ def _baseline_repoints(root, base, work, repoints, unavailable):
             if text is None:
                 raise s3_apply.Refusal(f'no baseline text for repoint {rel}')
             write(work, {rel: text})
-        alternatives[rel] = (work / rel).read_text()
+        alternatives[rel] = (work / rel).read_bytes()
         write(work, split_apply.apply_repoint(work, entry))
     return alternatives
 
@@ -314,7 +321,7 @@ def validate(root: pathlib.Path, base: str, integration: str, found: list) -> No
             for rel in [entry['module'], *(p['module'] for p in entry['part'])]:
                 labels['server/' + rel] = label
         for rel in sorted(checked):
-            expected = (work / rel).read_text() if (work / rel).exists() else None
+            expected = (work / rel).read_bytes() if (work / rel).exists() else None
             actual = show(root, integration, rel)
             if rel not in rewritten and rel in alternatives and actual == alternatives[rel]:
                 continue
