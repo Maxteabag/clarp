@@ -225,13 +225,16 @@ def test_background_publication_never_exposes_empty_json(tmp_path, providers):
         (provider.gate / "release").touch()
     # A completion RPC proves the daemon publisher succeeded, rather than merely exiting.
     deadline = time.monotonic() + 4
-    while True:
+    completed = replied = False
+    while not (completed and replied):
         event = provider.events.get(timeout=max(.01, deadline - time.monotonic()))
         assert event is not None, provider.error()
         if event.get("method") == "turn/completed":
-            break
+            completed = True
+        if event.get("id") == competing:
+            assert "error" not in event
+            replied = True
         assert time.monotonic() < deadline
-    provider.response(competing)
     current = json.loads(target.read_text())
     assert current["other"] == previous["other"]
     assert current["background"]["status"] == "complete"
