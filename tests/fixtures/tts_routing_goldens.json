@@ -4746,64 +4746,214 @@
   "result": "RuntimeError: google failed"
  },
  "delivery=raw-pcm|failure=both-fail|fallback=cartesia|override=gemini:Kore|primary_key=False|provider=cartesia": {
-  "calls": [],
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
   "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "gemini"
+    }
+   ]
+  ],
+  "result": "RuntimeError: cartesia failed"
  },
  "delivery=raw-pcm|failure=both-fail|fallback=cartesia|override=gemini:Kore|primary_key=False|provider=deepgram": {
-  "calls": [],
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
   "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "gemini"
+    }
+   ]
+  ],
+  "result": "RuntimeError: cartesia failed"
  },
  "delivery=raw-pcm|failure=both-fail|fallback=cartesia|override=gemini:Kore|primary_key=False|provider=elevenlabs": {
-  "calls": [],
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
   "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "gemini"
+    }
+   ]
+  ],
+  "result": "RuntimeError: cartesia failed"
  },
  "delivery=raw-pcm|failure=both-fail|fallback=cartesia|override=gemini:Kore|primary_key=False|provider=gemini": {
-  "calls": [],
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
   "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "gemini"
+    }
+   ]
+  ],
+  "result": "RuntimeError: cartesia failed"
  },
  "delivery=raw-pcm|failure=both-fail|fallback=cartesia|override=gemini:Kore|primary_key=False|provider=google": {
-  "calls": [],
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
   "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "gemini"
+    }
+   ]
+  ],
+  "result": "RuntimeError: cartesia failed"
  },
  "delivery=raw-pcm|failure=both-fail|fallback=cartesia|override=gemini:Kore|primary_key=True|provider=cartesia": {
-  "calls": [],
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
   "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "gemini"
+    }
+   ]
+  ],
+  "result": "RuntimeError: cartesia failed"
  },
  "delivery=raw-pcm|failure=both-fail|fallback=cartesia|override=gemini:Kore|primary_key=True|provider=deepgram": {
-  "calls": [],
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
   "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "gemini"
+    }
+   ]
+  ],
+  "result": "RuntimeError: cartesia failed"
  },
  "delivery=raw-pcm|failure=both-fail|fallback=cartesia|override=gemini:Kore|primary_key=True|provider=elevenlabs": {
-  "calls": [],
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
   "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "gemini"
+    }
+   ]
+  ],
+  "result": "RuntimeError: cartesia failed"
  },
  "delivery=raw-pcm|failure=both-fail|fallback=cartesia|override=gemini:Kore|primary_key=True|provider=gemini": {
-  "calls": [],
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
   "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "gemini"
+    }
+   ]
+  ],
+  "result": "RuntimeError: cartesia failed"
  },
  "delivery=raw-pcm|failure=both-fail|fallback=cartesia|override=gemini:Kore|primary_key=True|provider=google": {
-  "calls": [],
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
   "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "gemini"
+    }
+   ]
+  ],
+  "result": "RuntimeError: cartesia failed"
  },
  "delivery=raw-pcm|failure=both-fail|fallback=cartesia|override=none|primary_key=False|provider=cartesia": {
   "calls": [],
@@ -4812,28 +4962,88 @@
   "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
  },
  "delivery=raw-pcm|failure=both-fail|fallback=cartesia|override=none|primary_key=False|provider=deepgram": {
-  "calls": [],
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
   "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "deepgram"
+    }
+   ]
+  ],
+  "result": "RuntimeError: cartesia failed"
  },
  "delivery=raw-pcm|failure=both-fail|fallback=cartesia|override=none|primary_key=False|provider=elevenlabs": {
-  "calls": [],
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
   "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "elevenlabs"
+    }
+   ]
+  ],
+  "result": "RuntimeError: cartesia failed"
  },
  "delivery=raw-pcm|failure=both-fail|fallback=cartesia|override=none|primary_key=False|provider=gemini": {
-  "calls": [],
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
   "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "gemini"
+    }
+   ]
+  ],
+  "result": "RuntimeError: cartesia failed"
  },
  "delivery=raw-pcm|failure=both-fail|fallback=cartesia|override=none|primary_key=False|provider=google": {
-  "calls": [],
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
   "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "google"
+    }
+   ]
+  ],
+  "result": "RuntimeError: cartesia failed"
  },
  "delivery=raw-pcm|failure=both-fail|fallback=cartesia|override=none|primary_key=True|provider=cartesia": {
   "calls": [
@@ -4848,100 +5058,340 @@
   "result": "RuntimeError: cartesia-raw failed"
  },
  "delivery=raw-pcm|failure=both-fail|fallback=cartesia|override=none|primary_key=True|provider=deepgram": {
-  "calls": [],
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
   "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "deepgram"
+    }
+   ]
+  ],
+  "result": "RuntimeError: cartesia failed"
  },
  "delivery=raw-pcm|failure=both-fail|fallback=cartesia|override=none|primary_key=True|provider=elevenlabs": {
-  "calls": [],
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
   "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "elevenlabs"
+    }
+   ]
+  ],
+  "result": "RuntimeError: cartesia failed"
  },
  "delivery=raw-pcm|failure=both-fail|fallback=cartesia|override=none|primary_key=True|provider=gemini": {
-  "calls": [],
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
   "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "gemini"
+    }
+   ]
+  ],
+  "result": "RuntimeError: cartesia failed"
  },
  "delivery=raw-pcm|failure=both-fail|fallback=cartesia|override=none|primary_key=True|provider=google": {
-  "calls": [],
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
   "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "google"
+    }
+   ]
+  ],
+  "result": "RuntimeError: cartesia failed"
  },
  "delivery=raw-pcm|failure=both-fail|fallback=elevenlabs|override=gemini:Kore|primary_key=False|provider=cartesia": {
-  "calls": [],
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
   "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "gemini"
+    }
+   ]
+  ],
+  "result": "RuntimeError: elevenlabs failed"
  },
  "delivery=raw-pcm|failure=both-fail|fallback=elevenlabs|override=gemini:Kore|primary_key=False|provider=deepgram": {
-  "calls": [],
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
   "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "gemini"
+    }
+   ]
+  ],
+  "result": "RuntimeError: elevenlabs failed"
  },
  "delivery=raw-pcm|failure=both-fail|fallback=elevenlabs|override=gemini:Kore|primary_key=False|provider=elevenlabs": {
-  "calls": [],
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
   "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "gemini"
+    }
+   ]
+  ],
+  "result": "RuntimeError: elevenlabs failed"
  },
  "delivery=raw-pcm|failure=both-fail|fallback=elevenlabs|override=gemini:Kore|primary_key=False|provider=gemini": {
-  "calls": [],
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
   "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "gemini"
+    }
+   ]
+  ],
+  "result": "RuntimeError: elevenlabs failed"
  },
  "delivery=raw-pcm|failure=both-fail|fallback=elevenlabs|override=gemini:Kore|primary_key=False|provider=google": {
-  "calls": [],
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
   "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "gemini"
+    }
+   ]
+  ],
+  "result": "RuntimeError: elevenlabs failed"
  },
  "delivery=raw-pcm|failure=both-fail|fallback=elevenlabs|override=gemini:Kore|primary_key=True|provider=cartesia": {
-  "calls": [],
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
   "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "gemini"
+    }
+   ]
+  ],
+  "result": "RuntimeError: elevenlabs failed"
  },
  "delivery=raw-pcm|failure=both-fail|fallback=elevenlabs|override=gemini:Kore|primary_key=True|provider=deepgram": {
-  "calls": [],
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
   "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "gemini"
+    }
+   ]
+  ],
+  "result": "RuntimeError: elevenlabs failed"
  },
  "delivery=raw-pcm|failure=both-fail|fallback=elevenlabs|override=gemini:Kore|primary_key=True|provider=elevenlabs": {
-  "calls": [],
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
   "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "gemini"
+    }
+   ]
+  ],
+  "result": "RuntimeError: elevenlabs failed"
  },
  "delivery=raw-pcm|failure=both-fail|fallback=elevenlabs|override=gemini:Kore|primary_key=True|provider=gemini": {
-  "calls": [],
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
   "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "gemini"
+    }
+   ]
+  ],
+  "result": "RuntimeError: elevenlabs failed"
  },
  "delivery=raw-pcm|failure=both-fail|fallback=elevenlabs|override=gemini:Kore|primary_key=True|provider=google": {
-  "calls": [],
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
   "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "gemini"
+    }
+   ]
+  ],
+  "result": "RuntimeError: elevenlabs failed"
  },
  "delivery=raw-pcm|failure=both-fail|fallback=elevenlabs|override=none|primary_key=False|provider=cartesia": {
-  "calls": [],
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
   "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "cartesia"
+    }
+   ]
+  ],
+  "result": "RuntimeError: elevenlabs failed"
  },
  "delivery=raw-pcm|failure=both-fail|fallback=elevenlabs|override=none|primary_key=False|provider=deepgram": {
-  "calls": [],
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
   "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "deepgram"
+    }
+   ]
+  ],
+  "result": "RuntimeError: elevenlabs failed"
  },
  "delivery=raw-pcm|failure=both-fail|fallback=elevenlabs|override=none|primary_key=False|provider=elevenlabs": {
   "calls": [],
@@ -4950,16 +5400,46 @@
   "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
  },
  "delivery=raw-pcm|failure=both-fail|fallback=elevenlabs|override=none|primary_key=False|provider=gemini": {
-  "calls": [],
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
   "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "gemini"
+    }
+   ]
+  ],
+  "result": "RuntimeError: elevenlabs failed"
  },
  "delivery=raw-pcm|failure=both-fail|fallback=elevenlabs|override=none|primary_key=False|provider=google": {
-  "calls": [],
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
   "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "google"
+    }
+   ]
+  ],
+  "result": "RuntimeError: elevenlabs failed"
  },
  "delivery=raw-pcm|failure=both-fail|fallback=elevenlabs|override=none|primary_key=True|provider=cartesia": {
   "calls": [
@@ -4967,17 +5447,46 @@
     "cartesia-raw",
     "cart-ada",
     "plain"
+   ],
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
    ]
   ],
   "chunks": 0,
-  "events": [],
-  "result": "RuntimeError: cartesia-raw failed"
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "cartesia"
+    }
+   ]
+  ],
+  "result": "RuntimeError: elevenlabs failed"
  },
  "delivery=raw-pcm|failure=both-fail|fallback=elevenlabs|override=none|primary_key=True|provider=deepgram": {
-  "calls": [],
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
   "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "deepgram"
+    }
+   ]
+  ],
+  "result": "RuntimeError: elevenlabs failed"
  },
  "delivery=raw-pcm|failure=both-fail|fallback=elevenlabs|override=none|primary_key=True|provider=elevenlabs": {
   "calls": [],
@@ -4986,16 +5495,46 @@
   "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
  },
  "delivery=raw-pcm|failure=both-fail|fallback=elevenlabs|override=none|primary_key=True|provider=gemini": {
-  "calls": [],
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
   "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "gemini"
+    }
+   ]
+  ],
+  "result": "RuntimeError: elevenlabs failed"
  },
  "delivery=raw-pcm|failure=both-fail|fallback=elevenlabs|override=none|primary_key=True|provider=google": {
-  "calls": [],
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
   "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "google"
+    }
+   ]
+  ],
+  "result": "RuntimeError: elevenlabs failed"
  },
  "delivery=raw-pcm|failure=both-fail|fallback=none|override=gemini:Kore|primary_key=False|provider=cartesia": {
   "calls": [],
@@ -5124,64 +5663,294 @@
   "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
  },
  "delivery=raw-pcm|failure=ok|fallback=cartesia|override=gemini:Kore|primary_key=False|provider=cartesia": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "cartesia",
+     "voice": "cart-ada"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=ok|fallback=cartesia|override=gemini:Kore|primary_key=False|provider=deepgram": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "cartesia",
+     "voice": "cart-ada"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=ok|fallback=cartesia|override=gemini:Kore|primary_key=False|provider=elevenlabs": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "cartesia",
+     "voice": "cart-ada"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=ok|fallback=cartesia|override=gemini:Kore|primary_key=False|provider=gemini": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "cartesia",
+     "voice": "cart-ada"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=ok|fallback=cartesia|override=gemini:Kore|primary_key=False|provider=google": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "cartesia",
+     "voice": "cart-ada"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=ok|fallback=cartesia|override=gemini:Kore|primary_key=True|provider=cartesia": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "cartesia",
+     "voice": "cart-ada"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=ok|fallback=cartesia|override=gemini:Kore|primary_key=True|provider=deepgram": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "cartesia",
+     "voice": "cart-ada"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=ok|fallback=cartesia|override=gemini:Kore|primary_key=True|provider=elevenlabs": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "cartesia",
+     "voice": "cart-ada"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=ok|fallback=cartesia|override=gemini:Kore|primary_key=True|provider=gemini": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "cartesia",
+     "voice": "cart-ada"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=ok|fallback=cartesia|override=gemini:Kore|primary_key=True|provider=google": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "cartesia",
+     "voice": "cart-ada"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=ok|fallback=cartesia|override=none|primary_key=False|provider=cartesia": {
   "calls": [],
@@ -5190,28 +5959,120 @@
   "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
  },
  "delivery=raw-pcm|failure=ok|fallback=cartesia|override=none|primary_key=False|provider=deepgram": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "deepgram"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "deepgram",
+     "provider": "cartesia",
+     "voice": "cart-ada"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=ok|fallback=cartesia|override=none|primary_key=False|provider=elevenlabs": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "elevenlabs"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "elevenlabs",
+     "provider": "cartesia",
+     "voice": "cart-ada"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=ok|fallback=cartesia|override=none|primary_key=False|provider=gemini": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "cartesia",
+     "voice": "cart-ada"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=ok|fallback=cartesia|override=none|primary_key=False|provider=google": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "google"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "google",
+     "provider": "cartesia",
+     "voice": "cart-ada"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=ok|fallback=cartesia|override=none|primary_key=True|provider=cartesia": {
   "calls": [
@@ -5226,100 +6087,468 @@
   "result": "ok:1"
  },
  "delivery=raw-pcm|failure=ok|fallback=cartesia|override=none|primary_key=True|provider=deepgram": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "deepgram"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "deepgram",
+     "provider": "cartesia",
+     "voice": "cart-ada"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=ok|fallback=cartesia|override=none|primary_key=True|provider=elevenlabs": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "elevenlabs"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "elevenlabs",
+     "provider": "cartesia",
+     "voice": "cart-ada"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=ok|fallback=cartesia|override=none|primary_key=True|provider=gemini": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "cartesia",
+     "voice": "cart-ada"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=ok|fallback=cartesia|override=none|primary_key=True|provider=google": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "google"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "google",
+     "provider": "cartesia",
+     "voice": "cart-ada"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=ok|fallback=elevenlabs|override=gemini:Kore|primary_key=False|provider=cartesia": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "elevenlabs",
+     "voice": "v-raw"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=ok|fallback=elevenlabs|override=gemini:Kore|primary_key=False|provider=deepgram": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "elevenlabs",
+     "voice": "v-raw"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=ok|fallback=elevenlabs|override=gemini:Kore|primary_key=False|provider=elevenlabs": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "elevenlabs",
+     "voice": "v-raw"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=ok|fallback=elevenlabs|override=gemini:Kore|primary_key=False|provider=gemini": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "elevenlabs",
+     "voice": "v-raw"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=ok|fallback=elevenlabs|override=gemini:Kore|primary_key=False|provider=google": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "elevenlabs",
+     "voice": "v-raw"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=ok|fallback=elevenlabs|override=gemini:Kore|primary_key=True|provider=cartesia": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "elevenlabs",
+     "voice": "v-raw"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=ok|fallback=elevenlabs|override=gemini:Kore|primary_key=True|provider=deepgram": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "elevenlabs",
+     "voice": "v-raw"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=ok|fallback=elevenlabs|override=gemini:Kore|primary_key=True|provider=elevenlabs": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "elevenlabs",
+     "voice": "v-raw"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=ok|fallback=elevenlabs|override=gemini:Kore|primary_key=True|provider=gemini": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "elevenlabs",
+     "voice": "v-raw"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=ok|fallback=elevenlabs|override=gemini:Kore|primary_key=True|provider=google": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "elevenlabs",
+     "voice": "v-raw"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=ok|fallback=elevenlabs|override=none|primary_key=False|provider=cartesia": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "cartesia"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "cartesia",
+     "provider": "elevenlabs",
+     "voice": "v-raw"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=ok|fallback=elevenlabs|override=none|primary_key=False|provider=deepgram": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "deepgram"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "deepgram",
+     "provider": "elevenlabs",
+     "voice": "v-raw"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=ok|fallback=elevenlabs|override=none|primary_key=False|provider=elevenlabs": {
   "calls": [],
@@ -5328,16 +6557,62 @@
   "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
  },
  "delivery=raw-pcm|failure=ok|fallback=elevenlabs|override=none|primary_key=False|provider=gemini": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "elevenlabs",
+     "voice": "v-raw"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=ok|fallback=elevenlabs|override=none|primary_key=False|provider=google": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "google"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "google",
+     "provider": "elevenlabs",
+     "voice": "v-raw"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=ok|fallback=elevenlabs|override=none|primary_key=True|provider=cartesia": {
   "calls": [
@@ -5352,10 +6627,33 @@
   "result": "ok:1"
  },
  "delivery=raw-pcm|failure=ok|fallback=elevenlabs|override=none|primary_key=True|provider=deepgram": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "deepgram"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "deepgram",
+     "provider": "elevenlabs",
+     "voice": "v-raw"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=ok|fallback=elevenlabs|override=none|primary_key=True|provider=elevenlabs": {
   "calls": [],
@@ -5364,16 +6662,62 @@
   "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
  },
  "delivery=raw-pcm|failure=ok|fallback=elevenlabs|override=none|primary_key=True|provider=gemini": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "elevenlabs",
+     "voice": "v-raw"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=ok|fallback=elevenlabs|override=none|primary_key=True|provider=google": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "google"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "google",
+     "provider": "elevenlabs",
+     "voice": "v-raw"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=ok|fallback=none|override=gemini:Kore|primary_key=False|provider=cartesia": {
   "calls": [],
@@ -5502,64 +6846,294 @@
   "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
  },
  "delivery=raw-pcm|failure=primary-fails-after-audio|fallback=cartesia|override=gemini:Kore|primary_key=False|provider=cartesia": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "cartesia",
+     "voice": "cart-ada"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-after-audio|fallback=cartesia|override=gemini:Kore|primary_key=False|provider=deepgram": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "cartesia",
+     "voice": "cart-ada"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-after-audio|fallback=cartesia|override=gemini:Kore|primary_key=False|provider=elevenlabs": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "cartesia",
+     "voice": "cart-ada"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-after-audio|fallback=cartesia|override=gemini:Kore|primary_key=False|provider=gemini": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "cartesia",
+     "voice": "cart-ada"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-after-audio|fallback=cartesia|override=gemini:Kore|primary_key=False|provider=google": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "cartesia",
+     "voice": "cart-ada"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-after-audio|fallback=cartesia|override=gemini:Kore|primary_key=True|provider=cartesia": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "cartesia",
+     "voice": "cart-ada"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-after-audio|fallback=cartesia|override=gemini:Kore|primary_key=True|provider=deepgram": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "cartesia",
+     "voice": "cart-ada"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-after-audio|fallback=cartesia|override=gemini:Kore|primary_key=True|provider=elevenlabs": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "cartesia",
+     "voice": "cart-ada"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-after-audio|fallback=cartesia|override=gemini:Kore|primary_key=True|provider=gemini": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "cartesia",
+     "voice": "cart-ada"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-after-audio|fallback=cartesia|override=gemini:Kore|primary_key=True|provider=google": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "cartesia",
+     "voice": "cart-ada"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-after-audio|fallback=cartesia|override=none|primary_key=False|provider=cartesia": {
   "calls": [],
@@ -5568,28 +7142,120 @@
   "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
  },
  "delivery=raw-pcm|failure=primary-fails-after-audio|fallback=cartesia|override=none|primary_key=False|provider=deepgram": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "deepgram"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "deepgram",
+     "provider": "cartesia",
+     "voice": "cart-ada"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-after-audio|fallback=cartesia|override=none|primary_key=False|provider=elevenlabs": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "elevenlabs"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "elevenlabs",
+     "provider": "cartesia",
+     "voice": "cart-ada"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-after-audio|fallback=cartesia|override=none|primary_key=False|provider=gemini": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "cartesia",
+     "voice": "cart-ada"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-after-audio|fallback=cartesia|override=none|primary_key=False|provider=google": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "google"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "google",
+     "provider": "cartesia",
+     "voice": "cart-ada"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-after-audio|fallback=cartesia|override=none|primary_key=True|provider=cartesia": {
   "calls": [
@@ -5604,100 +7270,468 @@
   "result": "RuntimeError: cartesia-raw failed"
  },
  "delivery=raw-pcm|failure=primary-fails-after-audio|fallback=cartesia|override=none|primary_key=True|provider=deepgram": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "deepgram"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "deepgram",
+     "provider": "cartesia",
+     "voice": "cart-ada"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-after-audio|fallback=cartesia|override=none|primary_key=True|provider=elevenlabs": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "elevenlabs"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "elevenlabs",
+     "provider": "cartesia",
+     "voice": "cart-ada"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-after-audio|fallback=cartesia|override=none|primary_key=True|provider=gemini": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "cartesia",
+     "voice": "cart-ada"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-after-audio|fallback=cartesia|override=none|primary_key=True|provider=google": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "google"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "google",
+     "provider": "cartesia",
+     "voice": "cart-ada"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-after-audio|fallback=elevenlabs|override=gemini:Kore|primary_key=False|provider=cartesia": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "elevenlabs",
+     "voice": "v-raw"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-after-audio|fallback=elevenlabs|override=gemini:Kore|primary_key=False|provider=deepgram": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "elevenlabs",
+     "voice": "v-raw"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-after-audio|fallback=elevenlabs|override=gemini:Kore|primary_key=False|provider=elevenlabs": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "elevenlabs",
+     "voice": "v-raw"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-after-audio|fallback=elevenlabs|override=gemini:Kore|primary_key=False|provider=gemini": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "elevenlabs",
+     "voice": "v-raw"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-after-audio|fallback=elevenlabs|override=gemini:Kore|primary_key=False|provider=google": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "elevenlabs",
+     "voice": "v-raw"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-after-audio|fallback=elevenlabs|override=gemini:Kore|primary_key=True|provider=cartesia": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "elevenlabs",
+     "voice": "v-raw"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-after-audio|fallback=elevenlabs|override=gemini:Kore|primary_key=True|provider=deepgram": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "elevenlabs",
+     "voice": "v-raw"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-after-audio|fallback=elevenlabs|override=gemini:Kore|primary_key=True|provider=elevenlabs": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "elevenlabs",
+     "voice": "v-raw"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-after-audio|fallback=elevenlabs|override=gemini:Kore|primary_key=True|provider=gemini": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "elevenlabs",
+     "voice": "v-raw"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-after-audio|fallback=elevenlabs|override=gemini:Kore|primary_key=True|provider=google": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "elevenlabs",
+     "voice": "v-raw"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-after-audio|fallback=elevenlabs|override=none|primary_key=False|provider=cartesia": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "cartesia"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "cartesia",
+     "provider": "elevenlabs",
+     "voice": "v-raw"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-after-audio|fallback=elevenlabs|override=none|primary_key=False|provider=deepgram": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "deepgram"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "deepgram",
+     "provider": "elevenlabs",
+     "voice": "v-raw"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-after-audio|fallback=elevenlabs|override=none|primary_key=False|provider=elevenlabs": {
   "calls": [],
@@ -5706,16 +7740,62 @@
   "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
  },
  "delivery=raw-pcm|failure=primary-fails-after-audio|fallback=elevenlabs|override=none|primary_key=False|provider=gemini": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "elevenlabs",
+     "voice": "v-raw"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-after-audio|fallback=elevenlabs|override=none|primary_key=False|provider=google": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "google"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "google",
+     "provider": "elevenlabs",
+     "voice": "v-raw"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-after-audio|fallback=elevenlabs|override=none|primary_key=True|provider=cartesia": {
   "calls": [
@@ -5726,14 +7806,47 @@
    ]
   ],
   "chunks": 1,
-  "events": [],
+  "events": [
+   [
+    "providerFallbackSkipped",
+    {
+     "error_code": "cartesia_raw_after_audio",
+     "fallback": "elevenlabs",
+     "provider": "cartesia",
+     "reason": "audio_streamed"
+    }
+   ]
+  ],
   "result": "RuntimeError: cartesia-raw failed"
  },
  "delivery=raw-pcm|failure=primary-fails-after-audio|fallback=elevenlabs|override=none|primary_key=True|provider=deepgram": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "deepgram"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "deepgram",
+     "provider": "elevenlabs",
+     "voice": "v-raw"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-after-audio|fallback=elevenlabs|override=none|primary_key=True|provider=elevenlabs": {
   "calls": [],
@@ -5742,16 +7855,62 @@
   "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
  },
  "delivery=raw-pcm|failure=primary-fails-after-audio|fallback=elevenlabs|override=none|primary_key=True|provider=gemini": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "elevenlabs",
+     "voice": "v-raw"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-after-audio|fallback=elevenlabs|override=none|primary_key=True|provider=google": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "google"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "google",
+     "provider": "elevenlabs",
+     "voice": "v-raw"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-after-audio|fallback=none|override=gemini:Kore|primary_key=False|provider=cartesia": {
   "calls": [],
@@ -5880,64 +8039,294 @@
   "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
  },
  "delivery=raw-pcm|failure=primary-fails-before-audio|fallback=cartesia|override=gemini:Kore|primary_key=False|provider=cartesia": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "cartesia",
+     "voice": "cart-ada"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-before-audio|fallback=cartesia|override=gemini:Kore|primary_key=False|provider=deepgram": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "cartesia",
+     "voice": "cart-ada"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-before-audio|fallback=cartesia|override=gemini:Kore|primary_key=False|provider=elevenlabs": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "cartesia",
+     "voice": "cart-ada"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-before-audio|fallback=cartesia|override=gemini:Kore|primary_key=False|provider=gemini": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "cartesia",
+     "voice": "cart-ada"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-before-audio|fallback=cartesia|override=gemini:Kore|primary_key=False|provider=google": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "cartesia",
+     "voice": "cart-ada"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-before-audio|fallback=cartesia|override=gemini:Kore|primary_key=True|provider=cartesia": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "cartesia",
+     "voice": "cart-ada"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-before-audio|fallback=cartesia|override=gemini:Kore|primary_key=True|provider=deepgram": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "cartesia",
+     "voice": "cart-ada"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-before-audio|fallback=cartesia|override=gemini:Kore|primary_key=True|provider=elevenlabs": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "cartesia",
+     "voice": "cart-ada"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-before-audio|fallback=cartesia|override=gemini:Kore|primary_key=True|provider=gemini": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "cartesia",
+     "voice": "cart-ada"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-before-audio|fallback=cartesia|override=gemini:Kore|primary_key=True|provider=google": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "cartesia",
+     "voice": "cart-ada"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-before-audio|fallback=cartesia|override=none|primary_key=False|provider=cartesia": {
   "calls": [],
@@ -5946,28 +8335,120 @@
   "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
  },
  "delivery=raw-pcm|failure=primary-fails-before-audio|fallback=cartesia|override=none|primary_key=False|provider=deepgram": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "deepgram"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "deepgram",
+     "provider": "cartesia",
+     "voice": "cart-ada"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-before-audio|fallback=cartesia|override=none|primary_key=False|provider=elevenlabs": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "elevenlabs"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "elevenlabs",
+     "provider": "cartesia",
+     "voice": "cart-ada"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-before-audio|fallback=cartesia|override=none|primary_key=False|provider=gemini": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "cartesia",
+     "voice": "cart-ada"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-before-audio|fallback=cartesia|override=none|primary_key=False|provider=google": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "google"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "google",
+     "provider": "cartesia",
+     "voice": "cart-ada"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-before-audio|fallback=cartesia|override=none|primary_key=True|provider=cartesia": {
   "calls": [
@@ -5982,100 +8463,468 @@
   "result": "RuntimeError: cartesia-raw failed"
  },
  "delivery=raw-pcm|failure=primary-fails-before-audio|fallback=cartesia|override=none|primary_key=True|provider=deepgram": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "deepgram"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "deepgram",
+     "provider": "cartesia",
+     "voice": "cart-ada"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-before-audio|fallback=cartesia|override=none|primary_key=True|provider=elevenlabs": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "elevenlabs"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "elevenlabs",
+     "provider": "cartesia",
+     "voice": "cart-ada"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-before-audio|fallback=cartesia|override=none|primary_key=True|provider=gemini": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "cartesia",
+     "voice": "cart-ada"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-before-audio|fallback=cartesia|override=none|primary_key=True|provider=google": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "cartesia",
+    "cart-ada",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "cartesia",
+     "provider": "google"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "google",
+     "provider": "cartesia",
+     "voice": "cart-ada"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-before-audio|fallback=elevenlabs|override=gemini:Kore|primary_key=False|provider=cartesia": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "elevenlabs",
+     "voice": "v-raw"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-before-audio|fallback=elevenlabs|override=gemini:Kore|primary_key=False|provider=deepgram": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "elevenlabs",
+     "voice": "v-raw"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-before-audio|fallback=elevenlabs|override=gemini:Kore|primary_key=False|provider=elevenlabs": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "elevenlabs",
+     "voice": "v-raw"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-before-audio|fallback=elevenlabs|override=gemini:Kore|primary_key=False|provider=gemini": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "elevenlabs",
+     "voice": "v-raw"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-before-audio|fallback=elevenlabs|override=gemini:Kore|primary_key=False|provider=google": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "elevenlabs",
+     "voice": "v-raw"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-before-audio|fallback=elevenlabs|override=gemini:Kore|primary_key=True|provider=cartesia": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "elevenlabs",
+     "voice": "v-raw"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-before-audio|fallback=elevenlabs|override=gemini:Kore|primary_key=True|provider=deepgram": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "elevenlabs",
+     "voice": "v-raw"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-before-audio|fallback=elevenlabs|override=gemini:Kore|primary_key=True|provider=elevenlabs": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "elevenlabs",
+     "voice": "v-raw"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-before-audio|fallback=elevenlabs|override=gemini:Kore|primary_key=True|provider=gemini": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "elevenlabs",
+     "voice": "v-raw"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-before-audio|fallback=elevenlabs|override=gemini:Kore|primary_key=True|provider=google": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "elevenlabs",
+     "voice": "v-raw"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-before-audio|fallback=elevenlabs|override=none|primary_key=False|provider=cartesia": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "cartesia"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "cartesia",
+     "provider": "elevenlabs",
+     "voice": "v-raw"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-before-audio|fallback=elevenlabs|override=none|primary_key=False|provider=deepgram": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "deepgram"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "deepgram",
+     "provider": "elevenlabs",
+     "voice": "v-raw"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-before-audio|fallback=elevenlabs|override=none|primary_key=False|provider=elevenlabs": {
   "calls": [],
@@ -6084,16 +8933,62 @@
   "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
  },
  "delivery=raw-pcm|failure=primary-fails-before-audio|fallback=elevenlabs|override=none|primary_key=False|provider=gemini": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "elevenlabs",
+     "voice": "v-raw"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-before-audio|fallback=elevenlabs|override=none|primary_key=False|provider=google": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "google"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "google",
+     "provider": "elevenlabs",
+     "voice": "v-raw"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-before-audio|fallback=elevenlabs|override=none|primary_key=True|provider=cartesia": {
   "calls": [
@@ -6101,17 +8996,62 @@
     "cartesia-raw",
     "cart-ada",
     "plain"
+   ],
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
    ]
   ],
-  "chunks": 0,
-  "events": [],
-  "result": "RuntimeError: cartesia-raw failed"
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "cartesia"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "cartesia",
+     "provider": "elevenlabs",
+     "voice": "v-raw"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-before-audio|fallback=elevenlabs|override=none|primary_key=True|provider=deepgram": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "deepgram"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "deepgram",
+     "provider": "elevenlabs",
+     "voice": "v-raw"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-before-audio|fallback=elevenlabs|override=none|primary_key=True|provider=elevenlabs": {
   "calls": [],
@@ -6120,16 +9060,62 @@
   "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
  },
  "delivery=raw-pcm|failure=primary-fails-before-audio|fallback=elevenlabs|override=none|primary_key=True|provider=gemini": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "gemini"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "gemini",
+     "provider": "elevenlabs",
+     "voice": "v-raw"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-before-audio|fallback=elevenlabs|override=none|primary_key=True|provider=google": {
-  "calls": [],
-  "chunks": 0,
-  "events": [],
-  "result": "CartesiaError: raw-pcm delivery requires Cartesia provider, key, and voice"
+  "calls": [
+   [
+    "elevenlabs",
+    "v-raw",
+    "plain"
+   ]
+  ],
+  "chunks": 1,
+  "events": [
+   [
+    "providerFallback",
+    {
+     "error_code": "cartesia_raw_before_audio",
+     "fallback": "elevenlabs",
+     "provider": "google"
+    }
+   ],
+   [
+    "spoke",
+    {
+     "fallback_for": "google",
+     "provider": "elevenlabs",
+     "voice": "v-raw"
+    }
+   ]
+  ],
+  "result": "ok:1"
  },
  "delivery=raw-pcm|failure=primary-fails-before-audio|fallback=none|override=gemini:Kore|primary_key=False|provider=cartesia": {
   "calls": [],
