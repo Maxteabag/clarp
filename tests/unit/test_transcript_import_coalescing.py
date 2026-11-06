@@ -147,7 +147,7 @@ def test_urgent_token_survives_later_normal_update_and_opens_next_window(tmp_pat
     assert cache.schedule_import(blocker, block, owner='another')
     try:
         assert held.wait(2)
-        path.write_text('v2')
+        path.write_text('v2 changed length')
         done, after = completed()
         assert cache.schedule_import(path, lambda: None, owner='agent', after=after)
         assert cache.schedule_import(path, lambda: None, owner='agent', urgent=True)
@@ -356,3 +356,59 @@ def test_hot_path_timer_order_cannot_starve_older_same_owner_path(tmp_path, cloc
     finally:
         repeat[0] = False
         assert cache.wait_for_background(2)
+
+
+def test_fast_urgent_completion_rearms_waiting_path_for_shorter_deadline(tmp_path, clock):
+    a, b = tmp_path / 'slow-a', tmp_path / 'waiting-b'
+    a.write_text('first')
+    b.write_text('waiting')
+    seed, seed_after = completed()
+
+    def slow():
+        clock.now = 20
+
+    assert cache.schedule_import(a, slow, owner='agent', after=seed_after)
+    assert seed.wait(2) and cache.wait_for_background(2)
+    seen = []
+    done, after = completed()
+    assert cache.schedule_import(b, lambda: seen.append(clock.now), owner='agent', after=after)
+    clock.now = 25
+    a.write_text('new fast import')
+    urgent, urgent_after = completed()
+
+    def fast():
+        clock.now = 26
+
+    assert cache.schedule_import(a, fast, owner='agent', urgent=True, after=urgent_after)
+    assert urgent.wait(2) and cache.wait_for_background(2)
+    clock.advance(35.999)
+    assert not done.is_set()
+    clock.advance(36)
+    assert done.wait(2)
+    assert seen == [36]
+
+
+def test_unchanged_validation_does_not_erase_last_expensive_import_cost(tmp_path, clock):
+    a, b = tmp_path / 'cost-a', tmp_path / 'cost-b'
+    a.write_text('unchanged input')
+    b.write_text('waiting input')
+    seed, seed_after = completed()
+
+    def slow():
+        clock.now = 20
+
+    assert cache.schedule_import(a, slow, owner='agent', after=seed_after)
+    assert seed.wait(2) and cache.wait_for_background(2)
+    clock.now = 25
+    checked, checked_after = completed()
+    assert cache.schedule_import(a, lambda: pytest.fail('unchanged source parsed'),
+                                 owner='agent', urgent=True, after=checked_after)
+    assert checked.wait(2) and cache.wait_for_background(2)
+    seen = []
+    done, after = completed()
+    assert cache.schedule_import(b, lambda: seen.append(clock.now), owner='agent', after=after)
+    clock.advance(64.999)
+    assert not done.is_set()
+    clock.advance(65)
+    assert done.wait(2)
+    assert seen == [65]

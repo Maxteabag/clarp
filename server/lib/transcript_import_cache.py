@@ -301,6 +301,26 @@ def _defer_locked(key: str, request: tuple, epoch: int, wait: float) -> bool:
     return True
 
 
+def _rearm_owner_locked(key: str, now: float) -> list[str]:
+    """A successful faster import can shorten every path's owner deadline."""
+    failures = []
+    owner = _owner_key(key)
+    for waiting_key, entry in list(_deferred.items()):
+        if _owner_key(waiting_key) != owner:
+            continue
+        request, timer, epoch = entry
+        del _deferred[waiting_key]
+        if _defer_locked(waiting_key, request, epoch,
+                         max(0.0, _owner_deadline(waiting_key) - now)):
+            timer.cancel()
+        else:
+            # Preserve the original retry/callback if a replacement timer
+            # cannot start; the dirty version is never marked covered here.
+            _deferred[waiting_key] = entry
+            failures.append(request[2])
+    return failures
+
+
 def schedule_import(path: pathlib.Path, importer: Callable[[], None], *, owner: str = '',
                     after: Callable[[], None] | None = None, urgent: bool = False) -> bool:
     """Coalesce normal work by agent; urgent RM-N12 requests bypass at drain.
@@ -481,15 +501,24 @@ def _drain_background():
                 try:
                     imported = _import_admitted(path, importer, owner, item_epoch)
                     completed = time.monotonic()
+                    rearm_failed = []
                     with _guard:
                         if _epoch == item_epoch and not _resetting:
-                            _last_started[_owner_key(key)] = (
-                                completed, max(0.0, completed - started))
+                            previous_deadline = _owner_deadline(key)
+                            previous_cost = _last_started.get(_owner_key(key), (None, 0.0))[1]
+                            # Unchanged validation opens a new window but is
+                            # not a new expensive import: retain its last cost.
+                            cost = max(0.0, completed - started) if imported else previous_cost
+                            _last_started[_owner_key(key)] = (completed, cost)
+                            if _owner_deadline(key) < previous_deadline:
+                                rearm_failed = _rearm_owner_locked(key, completed)
                             if imported:
                                 # RM-N12: unchanged callback-only validation
                                 # must not erase the last measured slow import.
                                 _last_import_duration.put(
                                     key, item_epoch, max(0.0, completed - started))
+                    for failed_owner in rearm_failed:
+                        log('transcriptImportThreadStartFail', f'owner={failed_owner}')
                 except Exception as exc:
                     log_exception('backgroundTranscriptImportFail', exc, detail=owner)
                 else:
