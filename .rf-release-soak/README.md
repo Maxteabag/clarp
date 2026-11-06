@@ -24,3 +24,19 @@ Live big-merge shipping is a separate release-owner operation under 803: after
 Host watch PASS, one deliberate runtime restart is needed because D_F restructures
 runtime code; target boot <=300s, preauthorized official BOTH rollback on failure,
 then journal/current-admission deduplicated continues. Host-only N1/APNS do NOT restart.
+
+Admission interop (805): real full runs require HEAVY_SOAK_ALLOWANCE=bigmerge1-800
+and wrapper-provided HEAVY_SOAK_NONCE, HEAVY_SOAK_REMOTE_JOB_ID,
+HEAVY_SOAK_BOOT_ID, HEAVY_SOAK_DEADLINE_UTC,
+HEAVY_SOAK_REMAINING_OWNED_SECONDS. Boot ID must equal the current VM boot;
+all deadlines are minimized and120 seconds of cleanup is inside the owned envelope.
+Containers carry owner/job/nonce; cleanup verifies all three and removes the
+immutable ID, retaining any same-name replacement. Every phase/terminal proof
+binds nonce/job/boot. Exit0 alone is not a soak gate; the wrapper validates
+canary-before, full21600 seconds, compatibility-after/sameDB and cleanup.
+
+Source exports are streamed to private source tar files, never buffered as a
+whole archive on the laptop. Packed capsules contain only Git source and the
+approved cached bundle/tool files; database/env/transcript-shaped test fixtures
+are omitted explicitly, with any data-shaped product path a refusal. Capsule
+hashes and per-file hashes bind the remote payload, independent of carrierHEAD.
