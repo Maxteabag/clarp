@@ -1079,7 +1079,7 @@ def test_reply_evidence_snapshots_are_copies_and_overflow_cannot_certify_an_answ
     assert evidence.finish_result() is None
 
 
-@pytest.mark.parametrize('noise', ['fragmented', 'meta-parent'])
+@pytest.mark.parametrize('noise', ['fragmented', 'meta-parent', 'multiblock', 'whitespace'])
 @pytest.mark.parametrize('followed_by_genuine', [False, True])
 def test_suppressed_message_output_cannot_reappear_through_the_terminal_result(
         fake_clarp, tmp_path, noise, followed_by_genuine):
@@ -1092,7 +1092,7 @@ def test_suppressed_message_output_cannot_reappear_through_the_terminal_result(
     from lib.turn_dispatch import _result_assistant_text
     phrase = 'No response requested.'
     records = [{'type': 'system', 'subtype': 'init', 'session_id': 'sid-noise'}]
-    if noise == 'fragmented':
+    if noise != 'meta-parent':
         records += [
             {'type': 'stream_event', 'event': {'type': 'message_start', 'message': {
                 'id': 'noise', 'role': 'assistant', 'model': '<synthetic>'}}},
@@ -1100,10 +1100,20 @@ def test_suppressed_message_output_cannot_reappear_through_the_terminal_result(
                 'index': 0, 'content_block': {'type': 'text', 'text': ''}}},
             *[{'type': 'stream_event', 'event': {'type': 'content_block_delta',
                 'index': 0, 'delta': {'type': 'text_delta', 'text': text}}}
-              for text in ['No response ', 'requested.']],
+              for text in ([' \tNo response ', 'requested.\n  '] if noise == 'whitespace'
+                           else ['No response ', 'requested.'])],
             {'type': 'stream_event', 'event': {'type': 'content_block_stop', 'index': 0}},
             {'type': 'stream_event', 'event': {'type': 'message_stop'}},
         ]
+        if noise == 'multiblock':
+            # Split the two text pieces into distinct, ordered text blocks.
+            records[4:4] = [
+                {'type': 'stream_event', 'event': {'type': 'content_block_stop', 'index': 0}},
+                {'type': 'stream_event', 'event': {'type': 'content_block_start', 'index': 1,
+                    'content_block': {'type': 'text', 'text': ''}}},
+            ]
+            records[6]['event']['index'] = 1
+            records[7]['event']['index'] = 1
     else:
         records += [
             {'type': 'user', 'isMeta': True, 'uuid': 'meta',
@@ -1134,5 +1144,58 @@ def test_suppressed_message_output_cannot_reappear_through_the_terminal_result(
     assert _result_assistant_text(results[0]) == (phrase if followed_by_genuine else '')
     facts = results[0]['_clarp_reply_evidence']
     assert facts['genuine_text_seen'] is followed_by_genuine
-    assert facts['synthetic_seen'] is (noise == 'fragmented' and not followed_by_genuine)
+    assert facts['synthetic_seen'] is (noise != 'meta-parent' and not followed_by_genuine)
     assert facts['unknown_assistant_seen'] is (noise == 'meta-parent' and not followed_by_genuine)
+
+
+@pytest.mark.parametrize('proof', [None, False, 1, 'true'])
+def test_meta_display_proof_must_be_present_and_exactly_boolean_true(proof):
+    from lib.turn_dispatch import _result_assistant_text
+    event = {'result': 'Uncertified fallback', '_assistant_text': None,
+             '_clarp_reply_provider': 'claude', '_clarp_reply_evidence': {
+                 'synthetic_seen': False, 'genuine_text_seen': False,
+                 'genuine_tool_seen': False, 'unknown_assistant_seen': True}}
+    if proof is not None:
+        event['_clarp_suppressed_reply'] = proof
+    assert _result_assistant_text(event) == 'Uncertified fallback'
+
+
+@pytest.mark.parametrize('uncertain', ['unknown-same-text', 'cross-message', 'overflow', 'truncated'])
+def test_incomplete_or_competing_message_evidence_cannot_create_display_proof(
+        fake_clarp, tmp_path, uncertain):
+    from lib.turn_dispatch import _result_assistant_text
+    phrase = 'No response requested.'
+    def assistant(mid, text, **extra):
+        return {'type': 'assistant', **extra, 'message': {
+            'id': mid, 'model': '<synthetic>', 'content': [{'type': 'text', 'text': text}]}}
+    records = [{'type': 'system', 'subtype': 'init', 'session_id': 'sid-uncertain'}]
+    if uncertain == 'unknown-same-text':
+        records += [{'type': 'user', 'isMeta': True, 'uuid': 'meta',
+                     'message': {'content': 'Injected input'}},
+                    assistant('meta-reply', phrase, parentUuid='meta')]
+        unknown = assistant('unknown', phrase)
+        unknown['message'].pop('model')
+        records += [unknown]
+    elif uncertain == 'cross-message':
+        records += [assistant('one', 'No response '), assistant('two', 'requested.')]
+    elif uncertain == 'overflow':
+        records += [assistant(f'noise-{i}', 'An unrelated SDK message') for i in range(257)]
+        records += [assistant('last', phrase)]
+    else:
+        records += [
+            {'type': 'stream_event', 'event': {'type': 'message_start', 'message': {
+                'id': 'incomplete', 'model': '<synthetic>', 'role': 'assistant'}}},
+            {'type': 'stream_event', 'event': {'type': 'content_block_start', 'index': 0,
+                'content_block': {'type': 'text', 'text': phrase}}},
+        ]  # no block_stop/message_stop: this is a prefix, not a complete reply
+    records += [{'type': 'result', 'subtype': 'success', 'result': phrase}]
+    fake_clarp(records)
+    results = []
+    handle = CLAUDE.start_turn(text='uncertain output fixture', cwd=tmp_path,
+        backend_session_id='sid-uncertain', on_result=results.append)
+    handle.wait(timeout=5)
+    handle.drain_thread.join(timeout=5)
+    assert len(results) == 1
+    assert _result_assistant_text(results[0]) == phrase
+    assert results[0].get('_clarp_suppressed_reply') is not True
+    assert results[0]['result'] == phrase
