@@ -220,3 +220,54 @@ def test_live_stream_keeps_its_handles_until_finish_and_preserves_other_thread(r
     assert id(other) in db._TRANSACTION_OWNERS
     other.commit()
     assert other.execute('SELECT count(*) FROM memory_other').fetchone()[0] == 1
+
+
+@pytest.mark.parametrize('failed_store', ['state', 'telemetry'])
+def test_underlying_sqlite_close_error_is_reported_without_reopening_or_retry(rpc, monkeypatch, capsys, failed_store):
+    original_connect = sqlite3.connect
+    retained, opens = [], []
+    class StateCloseError(db._TrackedConnection):
+        attempts = 0
+        def close(self):
+            self.attempts += 1
+            raise sqlite3.OperationalError('synthetic-private-close-detail')
+    class MetricCloseError(sqlite3.Connection):
+        attempts = 0
+        def close(self):
+            self.attempts += 1
+            raise sqlite3.OperationalError('synthetic-private-close-detail')
+    def connect(path, *args, **kwargs):
+        if threading.current_thread() is not threading.main_thread():
+            opens.append(str(path))
+            if failed_store == 'state' and str(path) == str(db.DB_PATH):
+                kwargs['factory'] = StateCloseError
+            if failed_store == 'telemetry' and str(path) == str(telemetry.TELEMETRY_PATH):
+                kwargs['factory'] = MetricCloseError
+        con = original_connect(path, *args, **kwargs)
+        if isinstance(con, (StateCloseError, MetricCloseError)):
+            retained.append(con)
+        return con
+    monkeypatch.setattr(sqlite3, 'connect', connect)
+    def work(*_):
+        open_stores()
+        return {'ok': True, 'result': 7}
+    path, _, finished = rpc(work)
+    try:
+        assert json.loads(request(path)) == {'ok': True, 'result': 7}
+        handles = finished.get(timeout=5)
+        failed = handles[0 if failed_store == 'state' else 1]
+        other = handles[1 if failed_store == 'state' else 0]
+        assert failed.attempts == 1, 'cleanup silently retried an uncertain close'
+        assert closed(other), 'failure prevented the other store cleanup'
+        assert not closed(failed), 'a failed close must not be claimed released'
+        assert len(opens) == 2, 'diagnostic reopened a store'
+        err = capsys.readouterr().err
+        code = 'dbCloseFail' if failed_store == 'state' else 'runtimeDbCloseFail'
+        assert code in err, 'underlying SQLite close error was silently swallowed'
+        assert int('synthetic-private-close-detail' in err) == 0
+    finally:
+        # Test-owned failed handles remain observable; dispose directly once,
+        # bypassing the injected method. Production never retries this close.
+        for con in retained:
+            db._clear_transaction_owner(con)
+            sqlite3.Connection.close(con)
