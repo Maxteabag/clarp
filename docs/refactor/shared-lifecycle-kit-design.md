@@ -193,6 +193,18 @@ port facade nor the notice/emission closure is shared. A stale S42 attempt may
 refuse its own replay; it must not retire/clear the legitimate or replacement
 issued slot. Only the admitting original dispatch owns that retirement.
 
+Owner refinement 727cd762 distinguishes two lifetimes: completing a diagnostic
+ATTEMPT is not retiring the original MIRROR OPERATION or signaling D. The
+attempt-local facade/after_boundary must have no operation-finalizer authority.
+Only the lexical original dispatch finally may retire its exact owned slot,
+including no-target/lookup/W/K/P/error-handling failures; a public issued
+reference alone does not convey that authority. Rejected X cannot clear A's
+slot/payload/waiter, and stale A cannot clear a later B. Original response D's
+existing finally guarantee survives diagnostics/cleanup failures; notifications
+gain no waiter. Independent controls must pause A, complete rejected X, finish
+A once, issue B, then reject stale A while B still completes once. These are
+UNEXECUTED owner controls; no actual composed-base/reentry proof is inferred.
+
 Legacy transaction/Outbox remain unchanged: BEGIN IMMEDIATE rejects nesting,
 rollback drops external effects, COMMIT precedes them, independent effects run
 in order even after one fails, and EffectsFailed leaves committed state intact.
