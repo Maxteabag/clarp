@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Deterministic provider process; the real dispatcher/runner own everything else."""
+import fcntl
 import json
 import sys
 import time
 import threading
+import tempfile
 import uuid
 import os
 from pathlib import Path
@@ -71,18 +73,39 @@ def app_server():
     def save_goal(thread_id):
         if goals_file is None:
             return
-        with state_lock:
+        # Lock the stable sidecar, not the inode that publication replaces.
+        # Read/merge must be inside both fences to preserve other processes' goals.
+        with state_lock, goals_file.with_suffix(".json.lock").open("a") as fence:
+            fcntl.flock(fence.fileno(), fcntl.LOCK_EX)
             stored = json.loads(goals_file.read_text()) if goals_file.exists() else {}
             if thread_id in goals:
                 stored[thread_id] = goals[thread_id]
             else:
                 stored.pop(thread_id, None)
-            goals_file.write_text(json.dumps(stored))
+            payload = json.dumps(stored)
+            temporary = None
+            try:
+                with tempfile.NamedTemporaryFile(
+                    mode="w", encoding="utf-8", dir=goals_file.parent,
+                    prefix=".fake-goals-", suffix=".tmp", delete=False,
+                ) as stream:
+                    temporary = Path(stream.name)
+                    stream.write(payload)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                os.replace(temporary, goals_file)
+            finally:
+                if temporary is not None:
+                    temporary.unlink(missing_ok=True)
 
     def load_goal(thread_id):
         if goals_file is None or not goals_file.exists():
             return
-        stored = json.loads(goals_file.read_text()).get(thread_id)
+        try:
+            stored = json.loads(goals_file.read_text()).get(thread_id)
+        except json.JSONDecodeError:
+            print("fake_codex: retrying goal-file JSON decode once", file=sys.stderr, flush=True)
+            stored = json.loads(goals_file.read_text()).get(thread_id)
         if stored is not None:
             goals[thread_id] = stored
         else:
