@@ -593,13 +593,13 @@ def test_actual_la_transport_success_counts_each_recipient_once(world, monkeypat
 
 def test_diagnostic_failure_does_not_resend_an_accepted_la(world, monkeypatch):
     clock, sender = world
-    _register(TOKENS[0])
+    _register(*TOKENS, THIRD)
     def log_failure(*args):
         raise RuntimeError("synthetic diagnostic error")
     monkeypatch.setattr(apns, "log", log_failure)
     result = apns.send_live_activity({"n": 1})
     clock.advance(1000)
-    assert result["sent"] == len(sender.sent) == 1
+    assert result["sent"] == len(sender.sent) == 3
 
 
 def test_malformed_json_retains_header_and_active_pause(world, monkeypatch):
@@ -618,3 +618,28 @@ def test_malformed_json_retains_header_and_active_pause(world, monkeypatch):
     assert not sender.sent
     clock.advance(1)
     assert len(sender.sent) == 1
+
+
+
+def test_per_recipient_la_refusal_applies_backoff_only_once(world, monkeypatch):
+    clock, _ = world
+    _register(TOKENS[0])
+    sends = []
+    class Relay:
+        def request(self, method, url, **kwargs):
+            if url.endswith("/v1/push/devices"):
+                return _Response(200, {})
+            sends.append(url)
+            response = _Response(200, {"results": [{"status": 429 if len(sends) == 1 else 200,
+                                                     "reason": "TooManyRequests" if len(sends) == 1 else ""}]})
+            response.headers = {"Retry-After": "60"}
+            return response
+    monkeypatch.setattr(apns, "_relay_client", lambda: Relay())
+    apns._reset_relay_state()
+    relay = apns._RelayTransport(SimpleNamespace(audio_central_url="https://central.example", audio_central_credential="cred"))
+    monkeypatch.setattr(apns, "_transport", lambda cfg: relay)
+    assert apns.send_live_activity({"n": 1})["failed"] == 1
+    assert apns._LA_GATE.floor == 60
+    clock.advance(60)
+    assert len(sends) == 2
+    assert apns._LA_GATE.floor == 0
