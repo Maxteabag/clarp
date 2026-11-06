@@ -936,6 +936,35 @@ def test_notification_rejects_another_owner_with_only_one_durable_ledger(
     assert tuple(notification[k] for k in ("notify", "push", "badge", "unread")) == (True,) * 4
 
 
+
+@pytest.mark.parametrize("completion_trace,supplied_backend,eligible", [
+    ("", "backend-session-1", True),
+    ("unrecognized-completion", "backend-session-1", True),
+    ("known-completion", "backend-session-1", True),
+    ("unrecognized-completion", "wrong-backend", False),
+])
+def test_unknown_completion_identity_retains_legacy_notification_selection(
+        tmp_path, monkeypatch, completion_trace, supplied_backend, eligible):
+    """Unknown identity cannot turn the legacy window into a foreign-owner veto."""
+    from lib import message_store, user_notifications
+    monkeypatch.setattr(user_notifications, "SETTLE_TIMEOUT_S", 0)
+    service, backend, aid = _make_service(tmp_path)
+    service.dispatch(text="Legacy-compatible request", requested_session="mike",
+                     trace_id="known-completion", client_msg_id="u-legacy-owner",
+                     synthesize_audio=False)
+    source = message_store.upsert_live_assistant_message(
+        agent_id=aid, backend_session_id="backend-session-1", trace_id="known-completion",
+        text="Legacy-compatible answer.")
+    assert source is not None
+    backend.spawned[0][1]["on_result"]({"duration_ms": 10})
+    notification = user_notifications.classify_completed_turn(
+        agent_id=aid, session="mike", persona="Mike", trace_id=completion_trace,
+        backend_session_id=supplied_backend, done_ts=agents_db.latest_state(aid)["ts"])
+    assert notification["cause_message_id"] == ("u-legacy-owner" if eligible else "")
+    assert notification["source_message_id"] == (source["id"] if eligible else "")
+    assert tuple(notification[k] for k in ("notify", "push", "badge", "unread")) == (eligible,) * 4
+
+
 def test_user_queue_handoff_survives_completion_during_persistence(tmp_path, monkeypatch):
     service, backend, agent_id = _make_service(tmp_path)
     service.dispatch(text="first", requested_session="mike", trace_id="tA")
