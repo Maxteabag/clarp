@@ -71,13 +71,12 @@ do not remove adapters merely because a static reference count becomes zero.
 
 ## Change rehearsal and evidence
 
-Rehearsal: a later optional dispatch-result value needs one default/legacy
-coercion rule. In a disposable branch, put that field and codec rule in ONE
-contract descriptor/value owner; both the existing client wrapper and server
-binding consume it without a second method-name switch/decoder edit. Prove
-old-runtime missing-field behavior and the producer's explicit value. This is
-a synthetic authoring rehearsal, not permission to ship a new frozen field.
-The real compatibility batch changes no fields.
+Rehearsal: change the default/encoding rule for one existing private method
+value in a disposable branch. Edit ONE contract descriptor/value owner; both
+the existing client wrapper and server binding consume it without a second
+method-name switch/decoder edit. Compare each side with independently specified
+expected values, not just a round trip. Revert the deliberate wire variation;
+the production compatibility batch changes no fields, defaults or bytes.
 
 Ask A2 to sign the cases before any implementation: exact old/new command and
 response corpus, malformed/unknown/version/size boundaries, missing/null/false/
@@ -98,11 +97,22 @@ Run change rehearsal, G0/G1/own-base G2 and exact required source review.
 
 ## Sequence and outstanding coordination
 
-A2 acceptance cases have been requested before code. Discovery lists sweep-c's
-_dispatch_request extraction as a prerequisite, while lead 678 now pauses
-sweeps inside U09. Resolve with A2/sweep-c which accepted extraction is already
-present and absorb only the still-required handler boundary into this design;
-never undo a landed pure move or add a second competing extraction.
+A2 criteria READ before implementation: reviews/U09-U10-A2-acceptance.md
+and reviews/U09-A2-wire-failure-matrix.md under the program directory. They
+pin source a733 and independently specify the current behavior, UNEXECUTED.
+The full matrix is binding, including encode trims/decode retains method
+whitespace, equality-based version checks, ignored extra envelope keys,
+unknown command fields before prompt parsing before missing text, truthy
+string unheard-audio iteration, per-method error/falsey/default distinctions,
+Stop sorting/omission and the existing four-method drain gate before decoding.
+Do not harden surprising coercions. A new round trip alone is insufficient.
+Cold import AND first parse must stay free of DB/execution dependencies.
+
+Lead 678 supersedes discovery's old sweep prerequisite for unstarted work:
+HOLD fresh sweep-c _dispatch_request extraction while U09 settles. Retain and
+pin any already accepted extraction/watch with its owner. At a733, the large
+method still exists in runtime_bridge; that observation alone does not decide
+whether an unlanded accepted sweep exists. Owner pin confirmation is pending.
 
 Docs branch starts from current integration. No code or landing before big
 merge #1. After it ships, rebase onto current MAIN and land small batches

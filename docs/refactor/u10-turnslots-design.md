@@ -62,7 +62,19 @@ owner whether the effect record carries a supplied opaque operation context,
 without making TurnSlots import RPC transport or the admission coordinator.
 Existing lease deadlines, original intent sequence, rollback ownership and
 Stop payload conservation remain TP-02's vocabulary, not fresh U10 generations.
-Reconciliation request has been sent; agreement is PENDING, not inferred.
+Joint ownership table for reconciliation:
+
+| Owner | Exclusive decision | Shared handoff |
+| --- | --- | --- |
+| U10 / TurnSlots | Bounded exact-owner slot/queue/sentinel commands and observations | Return the exact decision/trace and owned deferred effect; no transport/coordinator import. |
+| TP-02 coordinator | Initial ticket/USER cutoff, admission/effect reservation, release generation and seal proof | Supply opaque operation context and transfer child ownership before retirement. |
+| TP-02 Stop-chain owner | Lease completion claim, saved payload/cancellation conservation and original deadline | Consume slot barrier commands without retiring payload obligations when a map entry disappears. |
+| Existing account recovery | Pool failover decisions and exact parked run/queue owner | Remain below current turn-lock order; resume callbacks/deferred children keep their owner. |
+
+Reference lead 636/642 and A2 reports tp02-design-d536d64a677c.md and
+tp02-design-288e377fb8c2.md; both exact code review and required intended
+signatures remain outstanding. Reconciliation request has been sent;
+this table is a proposal, agreement is PENDING, not inferred.
 
 ## Frozen-surface check and change rehearsal
 
@@ -93,7 +105,12 @@ outputs, with exact source/script hashes: production map writes/aliases, mixin
 host dependencies, lock-order/effect sites, import backedges and special-case
 sites. Record all three obligations separately; fewer aliases alone cannot
 prove effect conservation. Runtime gates and own-base replay would be required.
-No tests or discovery re-execution occurred for this design document.
+A2 acceptance criteria READ in reviews/U09-U10-A2-acceptance.md. Add the
+existing-boundary/mutant matrix for stale callbacks, both Stop/dispatch orders,
+Q0/Q1/Q2 lease conservation within the original 30s deadline, user versus
+maintenance cutoff, pre-slot admission/seal, queued claim/remove/recovery and
+defer/reentry. Reuse TP-02 controls, do not duplicate whole suites. No tests or
+discovery re-execution occurred for this design document.
 
 ## Decision state and route
 
