@@ -642,8 +642,8 @@ def test_queued_completion_keeps_its_own_notification_provenance(
 
 
 @pytest.mark.parametrize("followup_origin", ["user", "agent"])
-def test_accepted_steer_notification_keeps_latest_client_policy(tmp_path, monkeypatch, followup_origin):
-    """One accepted native execution answers both sends; phone supersedes desktop.
+def test_accepted_steer_notification_keeps_user_client_policy(tmp_path, monkeypatch, followup_origin):
+    """One native execution: phone USER supersedes desktop, a peer does not.
 
     This characterizes the durable association before the queued provenance
     repair: the steered admission retains a distinct request trace.
@@ -702,12 +702,64 @@ def test_accepted_steer_notification_keeps_latest_client_policy(tmp_path, monkey
     notification = user_notifications.classify_completed_turn(
         agent_id=agent_id, session="mike", persona="Mike", trace_id="steer-1",
         backend_session_id="native-steer-session", done_ts=done["ts"])
-    assert notification["cause_message_id"] == "u-steer-2"
+    assert notification["cause_message_id"] == (
+        "u-steer-2" if followup_origin == "user" else "u-steer-1")
     assert notification["source_message_id"] == source["id"]
-    assert tuple(notification[k] for k in ("notify", "push", "badge", "unread")) == (followup_origin == "user",) * 4
+    assert tuple(notification[k] for k in ("notify", "push", "badge", "unread")) == (True, followup_origin == "user", True, True)
     assert db.conn().execute(
         "SELECT COUNT(*) FROM state_log WHERE agent_id=? AND kind='done'",
         (agent_id,)).fetchone()[0] == 1
+
+
+
+@pytest.mark.parametrize("later_user", [False, True])
+def test_identified_user_cause_precedes_an_unowned_peer(tmp_path, monkeypatch, later_user):
+    """Native/imported peer rows need not have a separate queue owner."""
+    from lib import db, message_live, message_store, message_writes
+    from lib import prompt_admissions, turn_lifecycle, user_notifications
+
+    clock = [1800000000000]
+    for module in (db, agents_db, message_live, message_writes, turn_lifecycle):
+        patch_shared(monkeypatch, module, "now_ms", lambda: clock[0])
+    monkeypatch.setattr(user_notifications, "SETTLE_TIMEOUT_S", 0)
+    service, backend, aid = _make_service(tmp_path)
+    admission = prompt_admissions.create(
+        authenticated_at_admission=True, origin="user", sender_agent_id="", channel="chat",
+        observed_at=clock[0], client_admission_id="u-original-user", trace_id="active-user",
+        original_text="Original request", client="desktop")
+    service.dispatch(text=admission.original_text, requested_session="mike",
+                     trace_id=admission.trace_id, client_msg_id=admission.client_admission_id,
+                     prompt_admission=admission, synthesize_audio=False)
+    clock[0] += 10
+    message_store.record_user_message(
+        agent_id=aid, backend_session_id="backend-session-1", client_msg_id="u-imported-peer",
+        trace_id="imported-peer", text="Peer collaboration", origin="agent",
+        sender_agent_id="peer")
+    if later_user:
+        clock[0] += 10
+        phone = prompt_admissions.create(
+            authenticated_at_admission=True, origin="user", sender_agent_id="", channel="chat",
+            observed_at=clock[0], client_admission_id="u-later-user", trace_id="later-user",
+            original_text="Latest user correction", client="")
+        prompt_admissions.record(phone, agent_id=aid, session="mike")
+        message_store.record_user_message(
+            agent_id=aid, backend_session_id="backend-session-1", client_msg_id=phone.client_admission_id,
+            trace_id=phone.trace_id, prompt_admission_id=phone.admission_id,
+            text=phone.original_text, origin="user")
+    clock[0] += 10
+    source = message_store.upsert_live_assistant_message(
+        agent_id=aid, backend_session_id="backend-session-1", trace_id="active-user",
+        text="Answer to the user.")
+    assert source is not None
+    clock[0] += 10
+    backend.spawned[0][1]["on_result"]({"duration_ms": 10})
+    notification = user_notifications.classify_completed_turn(
+        agent_id=aid, session="mike", persona="Mike", trace_id="active-user",
+        backend_session_id="backend-session-1", done_ts=agents_db.latest_state(aid)["ts"])
+    assert notification["cause_message_id"] == ("u-later-user" if later_user else "u-original-user")
+    assert notification["source_message_id"] == source["id"]
+    assert tuple(notification[k] for k in ("notify", "push", "badge", "unread")) == (
+        True, later_user, True, True)
 
 
 def test_user_queue_handoff_survives_completion_during_persistence(tmp_path, monkeypatch):
