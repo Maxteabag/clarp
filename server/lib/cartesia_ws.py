@@ -79,48 +79,60 @@ class _FirstByteBudget:
                 if all(transport is not known for known in self._sockets):
                     self._sockets.append(transport)
         except CartesiaError:
-            self._close_socket(transport)
+            self._report_cleanup(self._close_socket(transport))
             raise
 
     def _cleanup_failure(self, code):
         _emit("cartesia_ws", "deadlineCleanupFail", level="warn",
               trace_id=self.trace_id, detail={"code": code})
 
+    def _report_cleanup(self, codes):
+        for code in codes:
+            self._cleanup_failure(code)
+
     def _close_socket(self, transport):
+        codes = []
         try:
             transport.shutdown(socket.SHUT_RDWR)
         except Exception:
-            self._cleanup_failure("cartesia_raw_socket_shutdown_failed")
+            codes.append("cartesia_raw_socket_shutdown_failed")
         try:
             transport.close()
         except Exception:
-            self._cleanup_failure("cartesia_raw_socket_close_failed")
+            codes.append("cartesia_raw_socket_close_failed")
+        return codes
 
     def close_transports(self):
         with self._lock:
-            transports, ws = list(self._sockets), self.ws
+            transports, ws = self._sockets, self.ws
+            self._sockets, self.ws = [], None
+        codes = []
         for transport in transports:
-            self._close_socket(transport)
+            codes.extend(self._close_socket(transport))
         if ws is not None:
             if not transports:
                 try:
                     ws.abort()
                 except Exception:
-                    self._cleanup_failure("cartesia_raw_deadline_abort_failed")
+                    codes.append("cartesia_raw_deadline_abort_failed")
             try:
                 ws.shutdown()
             except Exception:
-                self._cleanup_failure("cartesia_raw_deadline_shutdown_failed")
+                codes.append("cartesia_raw_deadline_shutdown_failed")
+        return codes
 
     def _expire(self, *, force=False):
         with self._lock:
             if self._done and not force:
                 return
             self._expired = True
+        codes = []
         try:
-            self.close_transports()
+            codes = self.close_transports()
         finally:
             self.wake.set()
+        # Logging cannot hold the caller past its deadline.
+        self._report_cleanup(codes)
 
     def check_owned(self):
         with self._lock:
@@ -206,7 +218,7 @@ def synthesize_raw_pcm(*,
         finally:
             try:
                 if not budget.accepted:
-                    budget.close_transports()
+                    budget._report_cleanup(budget.close_transports())
             finally:
                 _RAW_ATTEMPT_SLOTS.release()
                 finished.set()
