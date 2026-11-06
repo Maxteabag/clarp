@@ -746,3 +746,97 @@ def test_refused_startup_source_is_retryable_without_new_bytes(tmp_path, startup
         assert not b_done.is_set()
         clock.advance(120)
     assert b_done.wait(2) and cache.wait_for_background(2)
+
+
+def test_failed_startup_exemption_rearm_keeps_old_wake_and_newest_intent(tmp_path, startup_clock, monkeypatch):
+    clock = startup_clock
+    path = _startup_source(tmp_path / 'rearm')
+    seed, after = completed()
+    assert cache.schedule_import(path, lambda: None, owner='a', urgent=True, after=after)
+    assert seed.wait(2) and cache.wait_for_background(2)
+    _startup_source(path, 50 * 1024 * 1024 + 1)
+    calls = []
+    assert cache.schedule_import(path, lambda: calls.append('obsolete'), owner='a',
+                                 after=lambda: calls.append('obsolete-after'))
+    done, latest_after = completed()
+    def fail(timer):
+        raise RuntimeError('synthetic earlier timer refusal')
+    with monkeypatch.context() as patch:
+        patch.setattr(clock.Timer, 'start', fail)
+        assert not cache.schedule_import(path, lambda: calls.append('latest'), owner='a',
+                                         startup_exempt=True, after=latest_after)
+    assert cache.is_active(path, owner='a')
+    clock.advance(10)
+    assert not done.is_set()
+    clock.advance(120)
+    assert done.wait(2)
+    assert calls == ['latest']
+    assert cache.wait_for_background(2)
+
+
+def test_reset_during_source_stat_cannot_publish_old_startup_intent(tmp_path, startup_clock, monkeypatch):
+    clock = startup_clock
+    block_path, path = tmp_path / 'block', tmp_path / 'source'
+    block_path.write_text('hold')
+    path.write_text('small')
+    held, release, stat_entered, stat_release = [threading.Event() for _ in range(4)]
+    def block():
+        held.set()
+        assert release.wait(3)
+    assert cache.schedule_import(block_path, block, owner='block')
+    assert held.wait(2)
+    calls = []
+    assert cache.schedule_import(path, lambda: calls.append('old'), owner='a',
+                                 after=lambda: calls.append('old-after'))
+    _startup_source(path)
+    real_size = cache.source_size
+    def stat(p):
+        if p == path and not stat_entered.is_set():
+            stat_entered.set()
+            assert stat_release.wait(3)
+        return real_size(p)
+    monkeypatch.setattr(cache, 'source_size', stat)
+    release.set()
+    try:
+        assert stat_entered.wait(2)
+        assert cache.reset_for_tests(deadline_s=.01) is False
+    finally:
+        stat_release.set()
+    assert cache.reset_for_tests(deadline_s=2)
+    assert calls == []
+    done, after = completed()
+    assert cache.schedule_import(path, lambda: calls.append('new'), owner='a', after=after)
+    clock.advance(119.999)
+    assert not done.is_set()
+    clock.advance(120)
+    assert done.wait(2) and cache.wait_for_background(2)
+    assert calls == ['new']
+
+
+def test_first_startup_failure_does_not_cover_source_or_call_after_and_success_keeps_786(tmp_path, startup_clock):
+    clock = startup_clock
+    path = _startup_source(tmp_path / 'failure')
+    failed = threading.Event()
+    callbacks = []
+    def fail():
+        failed.set()
+        raise OSError('synthetic first import failure')
+    assert cache.schedule_import(path, fail, owner='a', after=lambda: callbacks.append('wrong'))
+    clock.advance(120)
+    assert failed.wait(2) and cache.wait_for_background(2)
+    assert callbacks == []
+    seeded, after = completed()
+    calls = []
+    def callback():
+        seeded.set()
+        raise RuntimeError('synthetic callback failure after success')
+    assert cache.schedule_import(path, lambda: calls.append(clock.now), owner='a', after=callback)
+    assert seeded.wait(2) and cache.wait_for_background(2)
+    _startup_source(path, 50 * 1024 * 1024 + 1)
+    done, after = completed()
+    assert cache.schedule_import(path, lambda: calls.append(clock.now), owner='a', after=after)
+    clock.advance(129.999)
+    assert not done.is_set()
+    clock.advance(130)
+    assert done.wait(2) and cache.wait_for_background(2)
+    assert calls == [120, 130]
