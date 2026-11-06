@@ -1,3 +1,9 @@
+Lead711 implementation scope: kit work is AUTHORIZED now against the accepted
+f7d3d854 API, without S42-specific hooks. The former whole-kit S42 prerequisite
+below is superseded: S42 actual-base ingress/reentry/enforcement stays with S6
+as its OWN pre-code item. Later API needs are additive, A2-reviewed. No kit code
+lands before big merge #1; small main batches through captain afterward.
+
 # Step 0: shared declarations and owner-executed lifecycle writes
 
 DESIGN PROPOSAL, lead696; A2 policy and B infrastructure review required.
