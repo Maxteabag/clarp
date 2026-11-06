@@ -260,8 +260,10 @@ def last_message_preview(*, agent_id: str, max_len: int = 80) -> str:
 # Per-agent preview entries keyed by the agent's message revisions. A snapshot
 # during quiet minutes reuses every entry; while agents stream, only the
 # agents whose rows changed run their three indexed queries again.
+# Keep bounded headroom above the 1059-agent roster: an ordered scan larger
+# than the old 1024-entry LRU evicted every entry before its next read.
 _PREVIEW_CACHE: RevisionedCache[str, dict[str, Any]] = RevisionedCache(
-    "message_previews.dashboard", max_entries=1024)
+    "message_previews.dashboard", max_entries=4096)
 # The revision map below walks every message's index entry and row (~65 ms on
 # a 180k-message store) on each dashboard poll. It only moves on a committed
 # write, so polls between writes reuse the last map.
