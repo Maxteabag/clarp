@@ -414,7 +414,7 @@ def test_unchanged_validation_does_not_erase_last_expensive_import_cost(tmp_path
     assert seen == [145]
 
 
-@pytest.mark.parametrize('duration,next_admission', [(1, 11), (5, 15), (5.001, 35.007), (20, 140), (100, 400)])
+@pytest.mark.parametrize('duration,next_admission', [(1, 11), (5, 15), (5.001, 35.007), (20, 140), (50, 350), (50.001, 350.001), (100, 400)])
 def test_slow_source_backoff_is_measured_from_completion_with_threshold_and_cap(
         tmp_path, clock, duration, next_admission):
     first, follow = tmp_path / 'first', tmp_path / 'follow'
@@ -435,4 +435,37 @@ def test_slow_source_backoff_is_measured_from_completion_with_threshold_and_cap(
     clock.advance(next_admission)
     assert later.wait(2)
     assert observed == [next_admission]
+    assert cache.wait_for_background(2)
+
+
+def test_deadline_expiry_keeps_known_slow_skip_until_fast_import_recovers(tmp_path, clock, monkeypatch):
+    path = tmp_path / 'recover'
+    path.write_text('initial version')
+    entered, release = threading.Event(), threading.Event()
+    done, after = completed()
+    def slow():
+        entered.set()
+        assert release.wait(3)
+        clock.now = 20
+    assert cache.schedule_import(path, slow, owner='agent', after=after)
+    assert entered.wait(2)
+    def deadline_wait(timeout):
+        clock.now += timeout
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(cache._cond, 'wait', deadline_wait)
+            assert not cache.import_for_snapshot(path, slow, owner='agent', timeout=.05)
+    finally:
+        release.set()
+    assert done.wait(2) and cache.wait_for_background(2)
+    path.write_text('new dirty version after slow import')
+    clock.advance(120.05)
+    fast, fast_after = completed()
+    assert cache.schedule_import(path, lambda: None, owner='agent', after=fast_after)
+    assert not cache.import_for_snapshot(path, lambda: None, owner='agent', timeout=.05)
+    assert not fast.is_set()  # expiry is not permission to bypass recent_slow
+    clock.advance(140)
+    assert fast.wait(2) and cache.wait_for_background(2)
+    path.write_text('third version after fast measured import')
+    assert cache.import_for_snapshot(path, lambda: None, owner='agent', timeout=.5)
     assert cache.wait_for_background(2)

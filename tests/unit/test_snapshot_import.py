@@ -148,12 +148,15 @@ def test_deadline_cooldown_skips_repeated_waits_for_120s_without_losing_refresh(
             path.write_text('newest dirty source still needs import')
             assert not cache.import_for_snapshot(path, blocked, owner='owner', timeout=.05)
             assert len(waits) == 1, 'a repeat snapshot waited again during its cooldown'
+            # The same physical source under another owner gets its own bound.
+            assert not cache.import_for_snapshot(path, blocked, owner='other', timeout=.05)
+            assert len(waits) == 2
             clock[0] = 120.049
             assert not cache.import_for_snapshot(path, blocked, owner='owner', timeout=.05)
-            assert len(waits) == 1
+            assert len(waits) == 2
             clock[0] = 120.05
             assert not cache.import_for_snapshot(path, blocked, owner='owner', timeout=.05)
-            assert len(waits) == 2, 'waiting must become eligible at the fixed expiry'
+            assert len(waits) == 3, 'waiting must become eligible at the fixed expiry'
             captured = capsys.readouterr().err
             assert 'snapshotImportSkip code=deadline_cooldown' in captured
             assert 'private-canary' not in captured
@@ -162,3 +165,35 @@ def test_deadline_cooldown_skips_repeated_waits_for_120s_without_losing_refresh(
         assert cache.wait_for_background(2)
     # The refusal to wait is not source coverage: admitted work kept newest bytes.
     assert cache.import_for_snapshot(path, blocked, owner='owner', timeout=.05)
+
+
+def test_reset_retires_snapshot_waiter_without_poisoning_replacement(tmp_path, monkeypatch):
+    path = tmp_path / 'reset-source'
+    path.write_text('source bytes')
+    entered, release, waiting = threading.Event(), threading.Event(), threading.Event()
+    outcomes = []
+    def held():
+        entered.set()
+        assert release.wait(3)
+    assert cache.schedule_import(path, held, owner='agent')
+    assert entered.wait(1)
+    original_wait = cache._cond.wait
+    def observed_wait(timeout):
+        waiting.set()
+        return original_wait(timeout)
+    with monkeypatch.context() as patch:
+        patch.setattr(cache._cond, 'wait', observed_wait)
+        waiter = threading.Thread(target=lambda: outcomes.append(cache.import_for_snapshot(
+            path, held, owner='agent', timeout=1)))
+        waiter.start()
+        try:
+            assert waiting.wait(1)
+            assert cache.reset_for_tests(deadline_s=.01) is False
+            waiter.join(1)
+            assert outcomes == [False]
+        finally:
+            release.set()
+            waiter.join(2)
+    assert cache.reset_for_tests(deadline_s=2)
+    assert cache.import_for_snapshot(path, lambda: None, owner='agent', timeout=.5)
+    assert cache.wait_for_background(2)
