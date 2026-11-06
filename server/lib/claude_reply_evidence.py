@@ -25,6 +25,29 @@ def _texts(content) -> list[str]:
     return []
 
 
+class _OutputHash:
+    """Hash assembled text with strip() semantics and constant retained bytes."""
+    def __init__(self):
+        self._hash = hashlib.blake2b(digest_size=16)
+        self._trimmed = None
+        self._started = False
+
+    def append(self, text: str) -> None:
+        if not self._started:
+            text = text.lstrip()
+        if not text:
+            return
+        self._started = True
+        body = text.rstrip()
+        if body:
+            self._hash.update(body.encode('utf-8'))
+            self._trimmed = self._hash.copy()
+        self._hash.update(text[len(body):].encode('utf-8'))
+
+    def digest(self):
+        return self._trimmed.digest() if self._trimmed is not None else None
+
+
 def is_synthetic_assistant_record(record: dict) -> bool:
     message = record.get('message')
     message = message if isinstance(message, dict) else record
@@ -42,6 +65,11 @@ class ClaudeReplyEvidence:
         self._messages: OrderedDict[bytes, tuple[str, int]] = OrderedDict()
         self._meta: OrderedDict[bytes, bool] = OrderedDict()
         self._suppressed_texts: OrderedDict[bytes, bool] = OrderedDict()
+        self._output = None
+        self._output_block = None
+        self._output_invalid = False
+        self._output_lost = False
+        self._unknown_output_seen = False
         self._active: tuple[str, int] = ('unknown', 0)
         self._active_identified = False
         self._event_identified = False
@@ -86,6 +114,72 @@ class ClaudeReplyEvidence:
             self._overflow = True
         self._remember(self._messages, key, (kind, scope))
         return kind, scope
+
+    def _remember_output(self, digest) -> None:
+        if digest is None:
+            return
+        if digest not in self._suppressed_texts and len(self._suppressed_texts) >= _LIMIT:
+            # Losing any result-local association invalidates display proof.
+            self._output_lost = True
+            return
+        self._suppressed_texts[digest] = True
+
+    def _track_output(self, inner, message, *, snapshot: bool) -> None:
+        """Only complete, identified message output can match a raw result.
+
+        Text blocks concatenate in provider order, as Claude's output adapter
+        does. A hash is published at message_stop (or a complete snapshot),
+        never for an individual delta/prefix or across separate messages.
+        """
+        typ = inner.get('type')
+        if snapshot:
+            if self._event_identified and not self._overflow:
+                output = _OutputHash()
+                for text in _texts(message.get('content')):
+                    output.append(text)
+                self._remember_output(output.digest())
+            return
+        if typ == 'message_start':
+            self._output = _OutputHash() if self._event_identified and not self._overflow else None
+            self._output_block = None
+            self._output_invalid = False
+            return
+        if self._output is None:
+            return
+        index = inner.get('index')
+        if typ == 'content_block_start':
+            if self._output_block is not None or type(index) is not int or index < 0:
+                self._output_invalid = True
+                return
+            block = inner.get('content_block')
+            block = block if isinstance(block, dict) else {}
+            text_block = block.get('type') == 'text'
+            self._output_block = (index, text_block)
+            if text_block:
+                text = block.get('text')
+                if not isinstance(text, str):
+                    self._output_invalid = True
+                else:
+                    self._output.append(text)
+        elif typ == 'content_block_delta':
+            delta = inner.get('delta')
+            delta = delta if isinstance(delta, dict) else {}
+            if self._output_block is None or index != self._output_block[0]:
+                self._output_invalid = True
+            elif delta.get('type') == 'text_delta':
+                text = delta.get('text')
+                if not self._output_block[1] or not isinstance(text, str):
+                    self._output_invalid = True
+                else:
+                    self._output.append(text)
+        elif typ == 'content_block_stop':
+            if self._output_block is None or index != self._output_block[0]:
+                self._output_invalid = True
+            self._output_block = None
+        elif typ == 'message_stop':
+            if not self._output_invalid and self._output_block is None:
+                self._remember_output(self._output.digest())
+            self._output = None
 
     def suppress_event(self, event: dict) -> bool:
         self.current_is_genuine = False
@@ -134,21 +228,26 @@ class ClaudeReplyEvidence:
         tools = tools or (isinstance(delta, dict) and delta.get('type') == 'input_json_delta')
         if self._overflow:
             self._facts['unknown_assistant_seen'] = True
-        if kind == 'synthetic':
-            self._facts['synthetic_seen'] = True
-            for value in text:
-                self._remember(self._suppressed_texts, _digest(value.strip()), True)
+        if kind in {'synthetic', 'meta'}:
+            self._track_output(inner, message, snapshot=outer_assistant)
+            if kind == 'synthetic':
+                self._facts['synthetic_seen'] = True
+            else:
+                # Meta provenance is not a synthetic/final-answer fact.
+                self._facts['unknown_assistant_seen'] = True
         elif kind == 'genuine' and self._event_identified and not self._overflow:
             self._facts['genuine_text_seen'] |= any(t.strip() for t in text)
             self._facts['genuine_tool_seen'] |= bool(tools)
-        elif text or tools or kind == 'meta':
+        elif text or tools:
             self._facts['unknown_assistant_seen'] = True
+            self._unknown_output_seen = True
         return kind in {'synthetic', 'meta'}
 
     def suppresses_result_text(self, value) -> bool:
         """Exact association with this result's structurally suppressed text."""
         return (not self._facts['genuine_text_seen']
-                and not self._facts['unknown_assistant_seen']
+                and not self._unknown_output_seen
+                and not self._overflow and not self._output_lost
                 and isinstance(value, str)
                 and _digest(value.strip()) in self._suppressed_texts)
 
@@ -156,6 +255,11 @@ class ClaudeReplyEvidence:
         facts = self._facts.copy()
         self._facts = self._empty()
         self._suppressed_texts.clear()
+        self._output = None
+        self._output_block = None
+        self._output_invalid = False
+        self._output_lost = False
+        self._unknown_output_seen = False
         self._scope += 1
         if not self._active_identified:
             # Metadata-less legacy chunks cannot be assigned to the prior
@@ -174,9 +278,10 @@ def suppresses_result_fallback(event: dict) -> bool:
               'genuine_tool_seen', 'unknown_assistant_seen'}
     facts = event.get('_clarp_reply_evidence')
     return (event.get('_clarp_reply_provider') == 'claude'
+            and event.get('_clarp_suppressed_reply') is True
             and '_assistant_text' in event and event['_assistant_text'] is None
             and not event.get('last_agent_message') and not event.get('message')
             and isinstance(facts, dict) and set(facts) == fields
             and all(type(value) is bool for value in facts.values())
-            and facts['synthetic_seen'] and not facts['genuine_text_seen']
-            and not facts['unknown_assistant_seen'])
+            and (facts['synthetic_seen'] or facts['unknown_assistant_seen'])
+            and not facts['genuine_text_seen'])

@@ -716,7 +716,8 @@ class ClaudeBackend(Backend):
                             and evidence.suppresses_result_text(ev.get("result"))):
                         # Preserve raw provider diagnostics but prevent the
                         # text extractor from falling back to this SDK text.
-                        final_result = {**ev, "_assistant_text": None}
+                        final_result = {**ev, "_assistant_text": None,
+                                        "_clarp_suppressed_reply": True}
                     facts = evidence.finish_result()
                     if facts is not None:
                         final_result = {**final_result, "_clarp_reply_provider": "claude",
