@@ -106,7 +106,9 @@ def _shifted_twin(database, agent_id: str, backend_session_id: str,
     turns down, so only a later slot means this reply moved (RM-N1)."""
     found = [
         (row["message_id"], int(row["seq"])) for row in database.execute(
-            """SELECT message_id, seq, text FROM messages
+            # The existing trace index is required: the competing agent/seq
+            # range reads every later transcript row once per assistant turn.
+            """SELECT message_id, seq, text FROM messages INDEXED BY idx_messages_trace
                 WHERE trace_id = ? AND agent_id = ? AND backend_session_id = ?
                   AND source_file = ? AND role = 'assistant' AND seq > ?""",
             (request_trace, agent_id, backend_session_id, source_file, seq))
