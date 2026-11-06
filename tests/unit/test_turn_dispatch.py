@@ -545,10 +545,11 @@ def test_user_followup_queues_without_killing_a_nonsteerable_turn(tmp_path, monk
 
 
 
+@pytest.mark.parametrize("reply_count", [2, 3])
 @pytest.mark.parametrize("queued_origin", ["user", "agent"])
 @pytest.mark.parametrize("reverse_callbacks", [False, True])
 def test_queued_completion_keeps_its_own_notification_provenance(
-        tmp_path, monkeypatch, queued_origin, reverse_callbacks):
+        tmp_path, monkeypatch, queued_origin, reverse_callbacks, reply_count):
     """Both admissions precede DONE1; each completion owns its cause/reply.
 
     The peer case exercises the pre-existing explicit queue path and retains
@@ -566,15 +567,16 @@ def test_queued_completion_keeps_its_own_notification_provenance(
     pushed = []
     monkeypatch.setattr(apns, "on_user_notification", pushed.append)
     service, backend, agent_id = _make_service(tmp_path)
-    for index, origin in enumerate(("user", queued_origin), start=1):
+    for index in range(1, reply_count + 1):
+        origin = "user" if index == 1 else queued_origin
         admission = prompt_admissions.create(
             authenticated_at_admission=True, origin=origin,
             sender_agent_id="peer-sender" if origin == "agent" else "",
             channel="chat", observed_at=clock[0],
             client_admission_id=f"u-notify-{index}",
-            trace_id=f"notify-{index}", original_text=f"question {index}")
+            trace_id=f"notify-{index}", original_text="repeat question")
         result = service.dispatch(
-            text=f"question {index}", requested_session="mike",
+            text="repeat question", requested_session="mike",
             trace_id=admission.trace_id, client_msg_id=admission.client_admission_id,
             origin=origin, sender_agent_id=admission.sender_agent_id,
             prompt_admission=admission, queue_if_busy=origin == "agent",
@@ -586,11 +588,16 @@ def test_queued_completion_keeps_its_own_notification_provenance(
         "SELECT message_id,trace_id,prompt_admission_id FROM messages "
         "WHERE agent_id=? AND role='user' ORDER BY seq", (agent_id,)).fetchall()
     assert {r["trace_id"]: r["message_id"] for r in users} == {
-        "notify-1": "u-notify-1", "notify-2": "u-notify-2"}
+        f"notify-{i}": f"u-notify-{i}" for i in range(1, (reply_count if queued_origin == "user" else 1) + 1)}
     assert all(r["prompt_admission_id"] for r in users)
+    # Peer queue visibility is intentionally deferred until its actual launch.
+    # Its immutable admission/queue row already exists before DONE1.
+    assert db.conn().execute(
+        "SELECT COUNT(*) FROM prompt_admissions WHERE agent_id=?", (agent_id,)
+    ).fetchone()[0] == reply_count
 
     sources = {}
-    for index in (1, 2):
+    for index in range(1, reply_count + 1):
         clock[0] += 100
         call = backend.spawned[index - 1][1]
         row = message_store.upsert_live_assistant_message(
@@ -600,11 +607,18 @@ def test_queued_completion_keeps_its_own_notification_provenance(
         sources[f"notify-{index}"] = row["id"]
         clock[0] += 10
         call["on_result"]({"duration_ms": 10})
-    assert [c["trace_id"] for _, c in backend.spawned] == ["notify-1", "notify-2"]
+    assert [c["trace_id"] for _, c in backend.spawned] == [
+        f"notify-{i}" for i in range(1, reply_count + 1)]
+    users = db.conn().execute(
+        "SELECT message_id,trace_id,prompt_admission_id FROM messages "
+        "WHERE agent_id=? AND role='user'", (agent_id,)).fetchall()
+    assert {r["trace_id"]: r["message_id"] for r in users} == {
+        f"notify-{i}": f"u-notify-{i}" for i in range(1, reply_count + 1)}
+    assert all(r["prompt_admission_id"] for r in users)
     dones = db.conn().execute(
         "SELECT ts,detail FROM state_log WHERE agent_id=? AND kind='done' "
         "ORDER BY state_id", (agent_id,)).fetchall()
-    assert len(dones) == 2
+    assert len(dones) == reply_count
     stream = _Stream()
     watcher = StateLogWatcher(stream)
     for done in reversed(dones) if reverse_callbacks else dones:
@@ -614,20 +628,21 @@ def test_queued_completion_keeps_its_own_notification_provenance(
     notifications = db.conn().execute(
         "SELECT * FROM user_notifications WHERE agent_id=? ORDER BY done_ts",
         (agent_id,)).fetchall()
-    assert len(notifications) == 2
+    assert len(notifications) == reply_count
     for index, notification in enumerate(notifications, start=1):
         assert notification["trace_id"] == f"notify-{index}"
         assert notification["cause_message_id"] == f"u-notify-{index}"
         assert notification["source_message_id"] == sources[f"notify-{index}"]
         eligible = int(index == 1 or queued_origin == "user")
         assert tuple(notification[k] for k in ("notify", "push", "badge", "unread")) == (eligible,) * 4
-    expected = 2 if queued_origin == "user" else 1
+    expected = reply_count if queued_origin == "user" else 1
     assert len(pushed) == expected
     assert len([e for e in stream.events if e["type"] == "user-notification"]) == expected
 
 
 
-def test_accepted_steer_notification_keeps_latest_client_policy(tmp_path, monkeypatch):
+@pytest.mark.parametrize("followup_origin", ["user", "agent"])
+def test_accepted_steer_notification_keeps_latest_client_policy(tmp_path, monkeypatch, followup_origin):
     """One accepted native execution answers both sends; phone supersedes desktop.
 
     This characterizes the durable association before the queued provenance
@@ -651,16 +666,21 @@ def test_accepted_steer_notification_keeps_latest_client_policy(tmp_path, monkey
     for index, client in enumerate(("desktop", ""), start=1):
         clock[0] += 10
         admission = prompt_admissions.create(
-            authenticated_at_admission=True, origin="user", sender_agent_id="",
+            authenticated_at_admission=True,
+            origin="user" if index == 1 else followup_origin,
+            sender_agent_id="peer-sender" if index == 2 and followup_origin == "agent" else "",
             channel="chat", observed_at=clock[0], client_admission_id=f"u-steer-{index}",
             trace_id=f"steer-{index}", original_text=f"request {index}", client=client)
         service.dispatch(text=admission.original_text, requested_session="mike",
                          trace_id=admission.trace_id, client_msg_id=admission.client_admission_id,
-                         prompt_admission=admission, synthesize_audio=False)
+                         prompt_admission=admission, origin=admission.origin,
+                         sender_agent_id=admission.sender_agent_id, synthesize_audio=False)
         if index == 1:
             assert backend.spawned[0][1]["on_session_init"]("native-steer-session")
     assert len(backend.spawned) == 1 and len(backend.steered) == 1
     assert _td._INFLIGHT[agent_id] == "steer-1"
+    if followup_origin == "agent":
+        assert turn_queue.status("u-steer-2") == "started"
     users = db.conn().execute(
         "SELECT message_id,trace_id FROM messages WHERE agent_id=? AND role='user' "
         "ORDER BY updated_at", (agent_id,)).fetchall()
@@ -684,7 +704,7 @@ def test_accepted_steer_notification_keeps_latest_client_policy(tmp_path, monkey
         backend_session_id="native-steer-session", done_ts=done["ts"])
     assert notification["cause_message_id"] == "u-steer-2"
     assert notification["source_message_id"] == source["id"]
-    assert tuple(notification[k] for k in ("notify", "push", "badge", "unread")) == (True,) * 4
+    assert tuple(notification[k] for k in ("notify", "push", "badge", "unread")) == (followup_origin == "user",) * 4
     assert db.conn().execute(
         "SELECT COUNT(*) FROM state_log WHERE agent_id=? AND kind='done'",
         (agent_id,)).fetchone()[0] == 1
