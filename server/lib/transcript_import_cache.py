@@ -332,15 +332,21 @@ def _reserve_owner(key: str, now: float) -> bool:
 
 def _defer_locked(key: str, request: tuple, epoch: int, wait: float) -> bool:
     """Arm one tracked timer; replacing dirty work never moves its deadline."""
-    if key in _deferred:
-        _, timer, old_epoch = _deferred[key]
-        _deferred[key] = (request, timer, old_epoch)
+    old = _deferred.get(key)
+    if old is not None and _request_deadline(key, request) >= _request_deadline(key, old[0]):
+        _deferred[key] = (request, old[1], old[2])
         return True
+    # Explicit user provenance (or a source shrinking below the threshold)
+    # can remove a startup-only wait while preserving the786 owner deadline.
     timer = threading.Timer(wait, _schedule_deferred)
     timer.args = (key, epoch, timer)
     timer.daemon = True
     if not _start_tracked(timer):
+        if old is not None:
+            _deferred[key] = (request, old[1], old[2])  # newest intent, old live wake
         return False
+    if old is not None:
+        old[1].cancel()
     _deferred[key] = (request, timer, epoch)
     return True
 
