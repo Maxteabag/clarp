@@ -1,12 +1,12 @@
-# Lead800: main d84e9197 into certified S5/S6 prepared port2732b1eb.
-# Exact integration bytes retain approved S5 parser/store/ack source closure
-# and existing shadow witnesses; main classifier leaf appears in Claude+AGY.
+# Lead800: main d84e9197 into PRE-PORT integration D19e226f9.
+# Output unions main classifier leaf with the pre-port S5 source closure;
+# non-source-list code and existing shadow witnesses remain exact D19e.
 # RM14 owner agrees this exact payload; no P1/P1b/P12fb implementation added.
-# One raw-merge conflict: retain Codex tool cells in Codex+AGY source lists.
+# Output equals reviewed2732 incremental bytes, but2732 is NOT an input.
 # Author rf-readmodelc-cb42; NEW C source-choice/A2 metadata review required.
 # Captain must re-pin final actual-main triple; no blanket future resolution.
 path = "server/lib/transcript_incremental.py"
 resolved = "merge800-transcript_incremental.py.resolved"
 base_blob = "bf7fd40013f74a7793f289d4b89575f00f788a67"
 main_blob = "c6a0b1e2ea07e31f7aaf224b67dc4abc0a8944f3"
-integration_blob = "fbfc3457a422326130de64e4ec0060317bc18811"
+integration_blob = "7e8b798e8e7c5aece9b3f085b70b71f4ac0c5959"
