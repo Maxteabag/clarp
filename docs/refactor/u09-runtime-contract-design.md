@@ -108,11 +108,32 @@ Stop sorting/omission and the existing four-method drain gate before decoding.
 Do not harden surprising coercions. A new round trip alone is insufficient.
 Cold import AND first parse must stay free of DB/execution dependencies.
 
-Lead 678 supersedes discovery's old sweep prerequisite for unstarted work:
-HOLD fresh sweep-c _dispatch_request extraction while U09 settles. Retain and
-pin any already accepted extraction/watch with its owner. At a733, the large
-method still exists in runtime_bridge; that observation alone does not decide
-whether an unlanded accepted sweep exists. Owner pin confirmation is pending.
+Lead 681 resolves the prerequisite: accepted sweep-c extraction
+1108803b32da49f70c4608cb4868d3b6c3c56f2f MUST be retained. Reviewed delta
+f62c7bbc10242dbb54f70a57c76311926b8fc11a..1108803b, stable patch-id
+bcc90a6eba501a1a0efbbfe1484a79c52fe99fb7, D SOURCE YES in
+reviews/runtime-dispatch-extraction-1108803b32da.md. It is queued for merge17,
+not yet on a733; the captain activates fwdport-watch.txt:19 for all five
+methods when landing. Build U09 on its landed helper layout; do not copy,
+undo or re-extract them. _dispatch_request is 142 lines there, with these
+existing bindings:
+
+| Wire method | Accepted same-class helper to retain |
+| --- | --- |
+| begin_stop | _begin_stop_request(self, params) |
+| goal | _goal_request(self, params) |
+| dispatch | _submit_dispatch_request(self, params) |
+| finish_stop | _finish_stop_request(self, params) |
+
+The codec descriptors bind to these existing executor methods. Retain the
+capability prelude and outer dispatch_request lock/gate before binding
+selection/effects. Bind other existing branches through the unified U09
+boundary without rebuilding an independent name switch. This plan does not
+repeat extraction gates: D's accepted evidence remains attributed to its exact
+delta, and U09 will test its own changed codec/binding boundary on the actual
+then-current source. HOLD any fresh sweep of these methods under 678. No owner
+conflict remains after 681; exact post-landing base/watch readback is still
+required before U09 code.
 
 Docs branch starts from current integration. No code or landing before big
 merge #1. After it ships, rebase onto current MAIN and land small batches
