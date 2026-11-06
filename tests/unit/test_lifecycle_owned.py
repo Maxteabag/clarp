@@ -396,3 +396,75 @@ def test_diagnostic_reset_is_owner_local_and_does_not_change_authority():
     assert not sa.counts and not sa.recent and sum(sb.counts.values()) == 1
     assert isinstance(lk.apply_owned(rules, a.event(), a.attempt(), sa), lk.Applied)
     assert a.state == "busy" and b.state == "ready"
+
+
+@pytest.mark.parametrize("with_primary", [False, True])
+@pytest.mark.parametrize("outer_path", ["reject_again", "return_after_failure"])
+def test_failed_capture_is_not_retried_or_converted_to_success(with_primary, outer_path):
+    owner, rules = MemoryOwner(), policy()
+    capture_attempts, emissions = [], []
+    failure = RuntimeError("partial capture failure")
+    domain = lk.IllegalTransition("work", "ready", "finish") if with_primary else None
+    expected = domain if domain is not None else failure
+    class PartialSink(lk.RefusalSink):
+        def capture(self, *args, **kwargs):
+            capture_attempts.append("capture")
+            notice = super().capture(*args, **kwargs)
+            if len(capture_attempts) == 1:
+                raise failure  # Mutation happened; retry would double count.
+            return notice
+    class Port(lk.OwnerWritePort):
+        def write(self, policy, event, reject):
+            with owner.lock:
+                try:
+                    reject("illegal", "ready", lk.SafeIds(), primary=domain)
+                except BaseException as caught:
+                    assert caught is expected
+                if outer_path == "reject_again":
+                    # An existing outer rejection path may run after handling
+                    # the first fault; it does not gain another capture attempt.
+                    return reject("closed", "ready", lk.SafeIds())
+                return lk.Refused("illegal", "ready")
+    sink = PartialSink(family="work", events=rules.events, states=rules.states,
+                       refusal_codes=rules.refusal_codes, report=emissions.append)
+    with pytest.raises(type(expected)) as caught:
+        lk.apply_owned(rules, owner.event("finish"), Port(), sink)
+    assert caught.value is expected
+    if with_primary:
+        assert caught.value.__cause__ is failure
+    assert capture_attempts == ["capture"] and sum(sink.counts.values()) == 1
+    assert len(sink.recent) == 1 and not emissions and owner.writes == 0
+
+
+def test_repeated_successful_reject_captures_and_emits_once():
+    rules = policy()
+    emissions = []
+    sink = sink_for(rules, [], report=emissions.append)
+    class Port(lk.OwnerWritePort):
+        def write(self, policy, event, reject):
+            first = reject("closed", "ready", lk.SafeIds())
+            assert reject("closed", "ready", lk.SafeIds()) is first
+            return first
+    result = lk.apply_owned(rules, lk.OwnedEvent("start", "one", None, None), Port(), sink)
+    assert isinstance(result, lk.Refused) and result.code == "closed"
+    assert sum(sink.counts.values()) == 1 and len(sink.recent) == len(emissions) == 1
+
+
+def test_cyclic_transient_cannot_hide_absent_continuation():
+    with pytest.raises(lk.LifecycleError, match="transient.*continuation"):
+        lk.Rules(family="empty", owner="tests.empty", states={"ready"}, events=set(),
+                 initial="ready", final=set(), edges=(), transient={"ready"},
+                 waits={}, cyclic=True, refusal_codes={"illegal"})
+
+
+def test_immediate_transient_continuation_in_finite_and_cyclic_policies():
+    rules = policy(transient={"ready"}, waits={"busy": policy().waits["busy"]})
+    assert rules.decide("ready", "start") == "busy"
+    cyclic = lk.Rules(family="resource", owner="tests.resource", states={"ready", "busy"},
+                      events={"start", "release"}, initial="ready", final=set(), cyclic=True,
+                      edges=(lk.Edge("start", frozenset({"ready"}), "busy"),
+                             lk.Edge("release", frozenset({"busy"}), "ready")),
+                      transient={"ready"}, waits={"busy": lk.NamedWait(name="release", exits=(lk.WaitExit("event", "release"),))},
+                      refusal_codes={"illegal"})
+    assert cyclic.decide("ready", "start") == "busy"
+    assert cyclic.decide("busy", "release") == "ready"
