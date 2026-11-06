@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Buildbox-only, single-admission synthetic D_F canary/soak/compat supervisor."""
-import argparse, datetime, hashlib, json, os, shutil, signal, subprocess, sys, time, tarfile, secrets, selectors
+import argparse, datetime, hashlib, json, os, shutil, signal, subprocess, sys, time, tarfile, secrets, selectors, math
 from pathlib import Path
 
 OWNER = 'rf-releasec-29c5'
@@ -45,7 +45,9 @@ class Native:
             stamp = datetime.datetime.fromisoformat(os.environ['HEAVY_SOAK_DEADLINE_UTC'].replace('Z','+00:00'))
             if stamp.tzinfo is None:raise ValueError('absolute deadline needs timezone')
             absolute = stamp.timestamp()
-        budget = min(float(manifest['hard_total_seconds']), remaining, absolute-time.time())
+        raw_budgets=(float(manifest['hard_total_seconds']),remaining,absolute-time.time())
+        if any(not math.isfinite(v) or v<=0 for v in raw_budgets):raise ValueError('invalid admission budget/deadline')
+        budget = min(raw_budgets)
         if budget <= 120:raise ValueError('no owned envelope left after cleanup reserve')
         self.started_monotonic = now; self.hard_deadline = now+budget
         self.deadline = self.hard_deadline-120
@@ -155,6 +157,11 @@ def validate(manifest):
     if manifest['soak_seconds'] != 21600 and not (rehearsal and 1 <= manifest['soak_seconds'] <= 60): raise ValueError('six hours cannot compress')
     if not 21600 <= manifest['hard_total_seconds'] <= 30000 and not rehearsal: raise ValueError('invalid owned envelope')
     if manifest['tool_manifest_sha256'] != TOOL_DIGEST: raise ValueError('803 tool pin differs')
+    tool_manifest=Path(manifest['tool_manifest_payload']).resolve()
+    if ROOT.resolve() not in tool_manifest.parents or digest(tool_manifest)!=TOOL_DIGEST:raise ValueError('copied exact tool manifest missing/different')
+    for line in tool_manifest.read_text().splitlines():
+        h,name=line.split('  ',1)
+        if digest(tool_manifest.parent/name)!=h:raise ValueError('copied tool payload bytes changed')
     if not manifest['container'].startswith('clarp-soak-rf-releasec-'): raise ValueError('container not owned')
     for role in ('base','candidate'):
         sha = manifest['payloads'][role]['sha']
@@ -221,7 +228,7 @@ def soak(native):
     return result
 
 def compatibility(native, base_release, base_runtime):
-    started=time.monotonic()
+    started=time.monotonic();started_up_ns=time.clock_gettime_ns(time.CLOCK_BOOTTIME)
     before=native.inside('stat','-c','%d:%i','/home/canary/.local/share/clarp/state.sqlite').strip()
     checks=[{'phase':'D_F_soaked_read','result':json.loads(workload(native,'verify'))}]
     native.inside('bash','-c','old="$HOME/.local/share/clarp/releases/$1"; py=$(cat "$old/SERVICE_PYTHON"); CLARP_CODE_ROOT="$old" "$py" "$old/bin/clarp-admin.py" rollback "$1"','bash',base_release,timeout=120)
@@ -231,7 +238,7 @@ def compatibility(native, base_release, base_runtime):
     checks.append({'phase':'D_F_reads_base_and_writes','result':json.loads(workload(native,'compat-send'))})
     after=native.inside('stat','-c','%d:%i','/home/canary/.local/share/clarp/state.sqlite').strip()
     if before!=after or not all(c['result'].get('ok') is True for c in checks): raise RuntimeError('same-soaked-DB compatibility not proven')
-    atomic(native.output/'forward-back-D_F.json',{'same_db_device_inode':before,'checks':checks,'result':'PASS','started_monotonic':started,'finished_monotonic':time.monotonic(),'binding':native.binding})
+    atomic(native.output/'forward-back-D_F.json',{'same_db_device_inode':before,'checks':checks,'result':'PASS','start_up_ns':started_up_ns,'end_up_ns':time.clock_gettime_ns(time.CLOCK_BOOTTIME),'started_monotonic':started,'finished_monotonic':time.monotonic(),'binding':native.binding})
 
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('--manifest',type=Path,required=True);args=parser.parse_args();manifest=json.loads(args.manifest.read_text())
@@ -248,10 +255,10 @@ def main():
         if shutil.disk_usage('/').free<25_000_000_000:raise RuntimeError('fresh capacity below25GB')
         existing=native.command(['docker','container','ls','-aq','--filter','name=^/'+native.container+'$']).strip()
         if existing:raise RuntimeError('preexisting container: reconcile uncertain prior admission')
-        canary_started=time.monotonic()
+        canary_started=time.monotonic();canary_started_up_ns=time.clock_gettime_ns(time.CLOCK_BOOTTIME)
         for mode,flags,expected in [('release',[],(0,)),('handover-turns',[],(0,)),('release',['--plant-late-fail-lib'],(10,)),('release',['--plant-fail','--no-safety-net'],(12,))]:
             native.adapter('base','base');native.adapter('candidate',mode,*flags,expected=expected)
-        atomic(output/'canary-four-cases.json',{'result':'PASS','source':manifest['payloads']['candidate']['sha'],'all_four_cases':True,'started_monotonic':canary_started,'finished_monotonic':time.monotonic(),'binding':native.binding})
+        atomic(output/'canary-four-cases.json',{'result':'PASS','source':manifest['payloads']['candidate']['sha'],'all_four_cases':True,'start_up_ns':canary_started_up_ns,'end_up_ns':time.clock_gettime_ns(time.CLOCK_BOOTTIME),'started_monotonic':canary_started,'finished_monotonic':time.monotonic(),'binding':native.binding})
         native.adapter('base','base');base=native.status()['installed'];native.adapter('candidate','release')
         # Preserve enough envelope for all21600seconds, compatibility and cleanup.
         if not manifest.get('rehearsal') and native.deadline-time.monotonic()<21600+1800+660:raise RuntimeError('setup left insufficient full-soak/postcheck budget')
@@ -259,10 +266,27 @@ def main():
     except Exception as error:
         failure={'error_type':type(error).__name__,'reason':str(error)};print(json.dumps({'result':'FAIL',**failure}),flush=True)
     finally:
-        cleanup_status='PASS'
+        cleanup_status='PASS';cleanup_started_up_ns=time.clock_gettime_ns(time.CLOCK_BOOTTIME)
         try:native.cleanup()
         except Exception as error:
             cleanup_status='FAIL';status='FAIL';failure={'error_type':type(error).__name__,'reason':'owned cleanup unresolved: '+str(error)};print(json.dumps(failure),flush=True)
+        cleanup_ended_up_ns=time.clock_gettime_ns(time.CLOCK_BOOTTIME)
+        try:
+            canary=json.loads((output/'canary-four-cases.json').read_text())
+            soaked=json.loads((output/'soak-result.json').read_text())
+            compat=json.loads((output/'forward-back-D_F.json').read_text())
+            proof={'nonce':native.binding['nonce'],'remote_job':native.binding['remote_job_id'],'boot':native.binding['boot_id'],'cleanup':cleanup_status,'same_db_device_inode':compat['same_db_device_inode'],'phases':[
+                {'phase':'canary','start_up_ns':canary['start_up_ns'],'end_up_ns':canary['end_up_ns']},
+                {'phase':'soak','start_up_ns':soaked['start_up_ns'],'end_up_ns':soaked['end_up_ns']},
+                {'phase':'compatibility','start_up_ns':compat['start_up_ns'],'end_up_ns':compat['end_up_ns']},
+                {'phase':'cleanup','start_up_ns':cleanup_started_up_ns,'end_up_ns':cleanup_ended_up_ns}]}
+            for previous,current in zip(proof['phases'],proof['phases'][1:]):
+                if previous['end_up_ns']>current['start_up_ns']:raise RuntimeError('phase ordering violated')
+            if any(p['end_up_ns']<p['start_up_ns'] for p in proof['phases']):raise RuntimeError('phase clock moved backwards')
+            if soaked['end_up_ns']-soaked['start_up_ns']<manifest['soak_seconds']*10**9:raise RuntimeError('short soak phase proof')
+            atomic(output/'compute-phase-proof.json',proof)
+        except Exception as error:
+            status='FAIL';failure={'error_type':type(error).__name__,'reason':'complete ordered phase proof unavailable: '+str(error)};print(json.dumps(failure),flush=True)
         atomic(output/'terminal.json',{'result':status,'candidate':manifest['payloads']['candidate']['sha'],'base':manifest['payloads']['base']['sha'],'soak_seconds':manifest['soak_seconds'],'rehearsal':manifest.get('rehearsal',False),'failure':failure,'cleanup_status':cleanup_status,'finished_monotonic':time.monotonic(),'owned_started_monotonic':native.started_monotonic,'binding':native.binding})
     return 0 if status=='PASS' else 1
 if __name__=='__main__':raise SystemExit(main())
