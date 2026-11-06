@@ -98,7 +98,6 @@ def _previous_done(agent_id: str, done_ts: int) -> int:
     return int(row["previous_done"] or 0) if row else 0
 
 
-
 def _completion_scope(agent_id: str, trace_id: str, backend_session_id: str
                       ) -> tuple[bool, str, bool]:
     """Resolve only existing attempt identity; never use the current runtime.
@@ -149,6 +148,7 @@ _OTHER_OWNER_SQL = """
                                          THEN q.client_msg_id ELSE 'u-'||q.client_msg_id END)))))
 """
 
+
 def _causing_user_row(agent_id: str, backend_session_id: str,
                       lower_bound: int, upper_bound: int, *, trace_id: str = "",
                       identified: bool = False):
@@ -164,12 +164,17 @@ def _causing_user_row(agent_id: str, backend_session_id: str,
     if backend_session_id:
         where += " AND backend_session_id = ?"
         params.append(backend_session_id)
+    # A peer input does not replace the user's request that this execution
+    # answers. Keep legacy/unknown completion selection unchanged.
+    user_first = ("CASE WHEN COALESCE(NULLIF(TRIM(origin), ''), 'user')='user' "
+                  "AND COALESCE(sender_agent_id, '')='' THEN 0 ELSE 1 END, "
+                  if identified else "")
     return db.conn().execute(
         f"""SELECT message_id, origin, sender_agent_id, updated_at,
                    backend_session_id, text, prompt_admission_id
               FROM messages
              WHERE {where}
-             ORDER BY updated_at DESC, revision DESC, seq DESC
+             ORDER BY {user_first}updated_at DESC, revision DESC, seq DESC
              LIMIT 1""",
         tuple(params),
     ).fetchone()
