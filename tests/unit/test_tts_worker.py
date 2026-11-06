@@ -18,6 +18,7 @@ sys.path.insert(0, str(_SERVER_DIR))
 from lib import agents as agents_db                 # noqa: E402
 from lib import tts_queue                            # noqa: E402
 from lib.protocol import ClipStatus, TurnSource  # noqa: E402
+from tests.unit.test_cartesia_ws import _join_raw_attempts  # noqa: F401, E402
 
 
 @pytest.fixture

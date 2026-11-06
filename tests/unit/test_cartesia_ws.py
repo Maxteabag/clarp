@@ -4,6 +4,7 @@ import base64
 import json
 import pathlib
 import sys
+import threading
 
 import pytest
 
@@ -11,6 +12,21 @@ _SERVER_DIR = pathlib.Path(__file__).resolve().parents[2] / "server"
 sys.path.insert(0, str(_SERVER_DIR))
 
 from lib import cartesia_ws  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _join_raw_attempts(monkeypatch):
+    """Join every attempt created by SDK stand-ins before restoring patches."""
+    attempts = []
+    class AttemptThread(threading.Thread):
+        def start(self):
+            attempts.append(self)
+            super().start()
+    monkeypatch.setattr(cartesia_ws, '_AttemptThread', AttemptThread, raising=False)
+    yield
+    for attempt in attempts:
+        attempt.join(5)
+    assert all(not t.is_alive() for t in attempts), 'raw SDK stand-in leaked an attempt'
 
 
 class _FakeWS:
