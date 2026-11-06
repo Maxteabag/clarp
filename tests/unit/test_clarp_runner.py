@@ -976,3 +976,73 @@ def test_structurally_genuine_exact_placeholder_phrase_keeps_its_live_row(fake_c
     rows = agents_db.conn().execute(
         "SELECT text FROM messages WHERE agent_id=? AND role='assistant'", (agent_id,)).fetchall()
     assert [r['text'] for r in rows] == ['No response requested.']
+
+
+@pytest.mark.parametrize('last_kind', ['synthetic', 'genuine', 'tool', 'unknown-alternate', 'late-old'])
+def test_result_display_uses_only_its_own_structural_reply_evidence(fake_clarp, tmp_path, last_kind):
+    """Real CLI drain -> result callback -> display extractor, including reset.
+
+    The first result is deliberately the opposite provenance. A late snapshot
+    must not manufacture a genuine answer for the second result.
+    """
+    from lib.turn_dispatch import _result_assistant_text
+
+    def assistant(mid, model, text):
+        return {'type': 'assistant', 'message': {'id': mid, 'role': 'assistant',
+                'model': model, 'content': [{'type': 'text', 'text': text}]}}
+
+    synthetic = 'No response requested.'
+    genuine = 'A real answer quoting No response requested.'
+    first_genuine = last_kind in {'synthetic', 'tool', 'unknown-alternate', 'late-old'}
+    first = assistant('prior', 'claude-real' if first_genuine else '<synthetic>',
+                      genuine if first_genuine else synthetic)
+    records = [{'type': 'system', 'subtype': 'init', 'session_id': 'sid-results'}, first,
+               {'type': 'result', 'subtype': 'success', 'result': first['message']['content'][0]['text']}]
+    if last_kind == 'genuine':
+        records += [assistant('new', 'claude-real', genuine)]
+        terminal = {'type': 'result', 'subtype': 'success', 'result': genuine}
+        expected, synthetic_seen, genuine_seen, tool_seen = genuine, False, True, False
+    else:
+        records += [assistant('new', '<synthetic>', synthetic)]
+        terminal = {'type': 'result', 'subtype': 'success', 'result': synthetic,
+                    'usage': {'input_tokens': 0}}
+        expected, synthetic_seen, genuine_seen, tool_seen = '', True, False, False
+        if last_kind == 'tool':
+            records += [{'type': 'assistant', 'message': {'id': 'tool-new', 'model': 'claude-real',
+                         'content': [{'type': 'tool_use', 'id': 'call', 'name': 'Read', 'input': {}}]}}]
+            tool_seen = True
+        elif last_kind == 'unknown-alternate':
+            terminal['last_agent_message'] = 'An unclassified result field must survive.'
+            expected = terminal['last_agent_message']
+        elif last_kind == 'late-old':
+            records += [first]  # same ID from the completed previous result
+    records += [terminal]
+    fake_clarp(records)
+    results, errors = [], []
+    handle = CLAUDE.start_turn(text='result scope fixture', cwd=tmp_path,
+        backend_session_id='sid-results', on_result=results.append, on_error=errors.append)
+    handle.wait(timeout=5)
+    handle.drain_thread.join(timeout=5)
+    assert errors == []
+    assert len(results) == 1  # process terminal ownership remains unchanged
+    result = results[0]
+    assert result['result'] == terminal['result']
+    assert result.get('usage') == terminal.get('usage')
+    assert _result_assistant_text(result) == expected
+    assert result['_clarp_reply_evidence'] == {
+        'synthetic_seen': synthetic_seen, 'genuine_text_seen': genuine_seen,
+        'genuine_tool_seen': tool_seen, 'unknown_assistant_seen': False}
+
+
+@pytest.mark.parametrize('annotation', [
+    {}, {'_assistant_text': None}, {'_assistant_text': ''},
+    {'_assistant_text': None, '_clarp_reply_provider': 'codex', '_clarp_reply_evidence': {
+        'synthetic_seen': True, 'genuine_text_seen': False, 'genuine_tool_seen': False,
+        'unknown_assistant_seen': False}},
+    {'_assistant_text': None, '_clarp_reply_provider': 'claude', '_clarp_reply_evidence': {
+        'synthetic_seen': 'yes', 'genuine_text_seen': False, 'genuine_tool_seen': False,
+        'unknown_assistant_seen': False}},
+])
+def test_untrusted_or_absent_reply_annotation_preserves_result_fallback(annotation):
+    from lib.turn_dispatch import _result_assistant_text
+    assert _result_assistant_text({'result': 'Legacy provider answer', **annotation}) == 'Legacy provider answer'
