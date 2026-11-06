@@ -679,3 +679,70 @@ def test_startup_exemption_is_token_local_and_does_not_bypass_owner_backoff(tmp_
     assert later.wait(2)
     assert calls == [('latest-user', 10), ('other', 120), ('later', 130)]
     assert cache.wait_for_background(2)
+
+
+@pytest.mark.parametrize('mode', ['recent_slow', 'deadline_cooldown'])
+def test_snapshot_normal_refresh_shortens_only_startup_wait_and_keeps_786(
+        tmp_path, startup_clock, monkeypatch, mode):
+    clock = startup_clock
+    path = _startup_source(tmp_path / 'snapshot-normal')
+    entered, release, seeded = threading.Event(), threading.Event(), threading.Event()
+    def seed():
+        entered.set()
+        if mode == 'deadline_cooldown':
+            assert release.wait(3)
+        clock.now = .6
+    assert cache.schedule_import(path, seed, owner='agent', urgent=True, after=seeded.set)
+    assert entered.wait(2)
+    if mode == 'deadline_cooldown':
+        def elapse(timeout):
+            clock.now += timeout
+        try:
+            with monkeypatch.context() as patch:
+                patch.setattr(cache._cond, 'wait', elapse)
+                assert not cache.import_for_snapshot(path, seed, owner='agent', timeout=.05)
+        finally:
+            release.set()
+    assert seeded.wait(2) and cache.wait_for_background(2)
+    _startup_source(path, 50 * 1024 * 1024 + 1)
+    refreshed, after = completed()
+    observed = []
+    assert cache.schedule_import(path, lambda: observed.append(clock.now), owner='agent', after=after)
+    # Promote an already startup-deferred watcher token through the REAL
+    # snapshot's normal known-slow/cooldown refresh, keeping its callback.
+    assert not cache.import_for_snapshot(path, lambda: observed.append(clock.now), owner='agent', timeout=.05)
+    assert not refreshed.is_set()
+    clock.advance(10.599)
+    assert not refreshed.is_set()
+    clock.advance(10.6)
+    assert refreshed.wait(2), 'snapshot normal refresh retained the startup-only wait'
+    assert observed == [10.6]
+    assert cache.wait_for_background(2)
+
+
+@pytest.mark.parametrize('refusal', ['timer-start', 'capacity'])
+def test_refused_startup_source_is_retryable_without_new_bytes(tmp_path, startup_clock, monkeypatch, refusal):
+    clock = startup_clock
+    a, b = _startup_source(tmp_path / 'a'), _startup_source(tmp_path / 'b')
+    a_done, b_done = threading.Event(), threading.Event()
+    if refusal == 'capacity':
+        monkeypatch.setattr(cache, '_BACKGROUND_LIMIT', 1)
+        assert cache.schedule_import(a, lambda: None, owner='a', after=a_done.set)
+        assert not cache.schedule_import(b, lambda: None, owner='b', after=b_done.set)
+        clock.advance(120)
+        assert a_done.wait(2) and cache.wait_for_background(2)
+    else:
+        start = clock.Timer.start
+        def failed(timer):
+            raise RuntimeError('synthetic startup timer refusal')
+        with monkeypatch.context() as patch:
+            patch.setattr(clock.Timer, 'start', failed)
+            assert not cache.schedule_import(b, lambda: None, owner='b', after=b_done.set)
+        assert not cache.is_active(b, owner='b')
+    assert not b_done.is_set()
+    assert cache.schedule_import(b, lambda: None, owner='b', after=b_done.set)
+    if refusal == 'timer-start':
+        clock.advance(119.999)
+        assert not b_done.is_set()
+        clock.advance(120)
+    assert b_done.wait(2) and cache.wait_for_background(2)
