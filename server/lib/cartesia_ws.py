@@ -112,15 +112,20 @@ class _FirstByteBudget:
             except Exception:
                 self._cleanup_failure("cartesia_raw_deadline_shutdown_failed")
 
-    def _expire(self):
+    def _expire(self, *, force=False):
         with self._lock:
-            if self._done:
+            if self._done and not force:
                 return
             self._expired = True
         try:
             self.close_transports()
         finally:
             self.wake.set()
+
+    def check_owned(self):
+        with self._lock:
+            if self._expired or (self._done and not self.accepted):
+                raise CartesiaError("cartesia_raw_attempt_cancelled")
 
     def complete(self):
         with self._lock:
@@ -226,6 +231,10 @@ def synthesize_raw_pcm(*,
         if "error" in outcome:
             raise outcome["error"]
         return outcome["written"]
+    except BaseException:
+        if not finished.is_set():
+            budget._expire(force=True)
+        raise
     finally:
         budget.stop()
 
@@ -355,11 +364,13 @@ def _synthesize_attempt(*,
                                       "bytes": len(decoded),
                                       "ttfb_ms": int(
                                           (t_first_chunk - t_start) * 1000)})
+                    budget.check_owned()
                     if on_chunk is not None:
                         try:
                             on_chunk(chunk_count, decoded)
                         except Exception:
                             pass
+                    budget.check_owned()
                     if f is None and out_path is not None:
                         f = stack.enter_context(out_path.open("wb"))
                     if f is not None:
