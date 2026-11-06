@@ -66,7 +66,7 @@ def clock(monkeypatch):
     real_time = cache.time
     monkeypatch.setattr(cache, 'time', SimpleNamespace(monotonic=manual.monotonic))
     monkeypatch.setattr(cache, 'threading', SimpleNamespace(
-        Thread=threading.Thread, Timer=manual.Timer))
+        Thread=threading.Thread, Timer=manual.Timer, Lock=threading.Lock))
     monkeypatch.setattr(cache, '_BACKGROUND_MIN_INTERVAL', 10.0)
     try:
         yield manual
@@ -116,15 +116,15 @@ def test_held_import_followup_waits_until_completion_plus_window(tmp_path, clock
     # work must be deferred rather than sleeping/spinning in the only worker.
     assert other_done.wait(2)
     assert [x[0] for x in observed] == ['initial', 'other'], observed
-    clock.advance(29.999)
+    clock.advance(59.999)
     assert not follow_done.is_set()
     # Continuous dirty updates must retain the original earned deadline.
     follow.write_text('v3 newest bytes')
     assert cache.schedule_import(follow, lambda: observed.append(
         ('follow', clock.now, follow.read_text())), owner='agent', after=follow_after)
-    clock.advance(30.0)
+    clock.advance(60.0)
     assert follow_done.wait(2)
-    assert observed[-1] == ('follow', 30.0, 'v3 newest bytes')
+    assert observed[-1] == ('follow', 60.0, 'v3 newest bytes')
     assert cache.wait_for_background(2)
 
 
