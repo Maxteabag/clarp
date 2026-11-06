@@ -641,8 +641,18 @@ def test_queued_completion_keeps_its_own_notification_provenance(
 
 
 
-@pytest.mark.parametrize("followup_origin", ["user", "agent"])
-def test_accepted_steer_notification_keeps_user_client_policy(tmp_path, monkeypatch, followup_origin):
+@pytest.mark.parametrize("input_origins,expected_cause,expected_flags", [
+    pytest.param(("user", "user"), 2, (1, 1, 1, 1), id="phone-user"),
+    pytest.param(("user", "agent"), 1, (1, 0, 1, 1), id="peer-after-user"),
+    pytest.param(("user", "watcher"), 2, (1, 1, 1, 1), id="watcher-after-user"),
+    pytest.param(("user", "oracle"), 2, (1, 1, 1, 1), id="oracle-after-user"),
+    pytest.param(("user", "automation"), 2, (1, 1, 1, 1), id="automation-after-user"),
+    pytest.param(("user", "watcher", "agent"), 2, (1, 1, 1, 1), id="watcher-then-peer"),
+    pytest.param(("user", "agent", "watcher"), 3, (1, 1, 1, 1), id="peer-then-watcher"),
+    pytest.param(("agent", "agent"), 1, (0, 0, 0, 0), id="pure-peer"),
+])
+def test_accepted_steer_notification_keeps_user_client_policy(
+        tmp_path, monkeypatch, input_origins, expected_cause, expected_flags):
     """One native execution: phone USER supersedes desktop, a peer does not.
 
     This characterizes the durable association before the queued provenance
@@ -663,12 +673,13 @@ def test_accepted_steer_notification_keeps_user_client_policy(tmp_path, monkeypa
         SimpleNamespace(default_session="mike", agents_path=tmp_path / "unused.json",
                         stream=_Stream()), backend_registry=backend, home=tmp_path,
         uuid_factory=lambda: "backend-session-1")
-    for index, client in enumerate(("desktop", ""), start=1):
+    for index, input_origin in enumerate(input_origins, start=1):
+        client = "desktop" if index == 1 else ""
         clock[0] += 10
         admission = prompt_admissions.create(
             authenticated_at_admission=True,
-            origin="user" if index == 1 else followup_origin,
-            sender_agent_id="peer-sender" if index == 2 and followup_origin == "agent" else "",
+            origin=input_origin,
+            sender_agent_id="peer-sender" if input_origin == "agent" else "",
             channel="chat", observed_at=clock[0], client_admission_id=f"u-steer-{index}",
             trace_id=f"steer-{index}", original_text=f"request {index}", client=client)
         service.dispatch(text=admission.original_text, requested_session="mike",
@@ -677,18 +688,20 @@ def test_accepted_steer_notification_keeps_user_client_policy(tmp_path, monkeypa
                          sender_agent_id=admission.sender_agent_id, synthesize_audio=False)
         if index == 1:
             assert backend.spawned[0][1]["on_session_init"]("native-steer-session")
-    assert len(backend.spawned) == 1 and len(backend.steered) == 1
+    assert len(backend.spawned) == 1 and len(backend.steered) == len(input_origins) - 1
     assert _td._INFLIGHT[agent_id] == "steer-1"
-    if followup_origin == "agent":
-        assert turn_queue.status("u-steer-2") == "started"
+    for index, input_origin in enumerate(input_origins, start=1):
+        if input_origin == "agent":
+            assert turn_queue.status(f"u-steer-{index}") == "started"
     users = db.conn().execute(
         "SELECT message_id,trace_id FROM messages WHERE agent_id=? AND role='user' "
         "ORDER BY updated_at", (agent_id,)).fetchall()
     assert [(r["message_id"], r["trace_id"]) for r in users] == [
-        ("u-steer-1", "steer-1"), ("u-steer-2", "steer-2")]
+        (f"u-steer-{i}", f"steer-{i}") for i in range(1, len(input_origins) + 1)]
     assert [(r["trace_id"], r["client"]) for r in db.conn().execute(
         "SELECT trace_id,client FROM prompt_admissions WHERE agent_id=? ORDER BY observed_at",
-        (agent_id,))] == [("steer-1", "desktop"), ("steer-2", "")]
+        (agent_id,))] == [(f"steer-{i}", "desktop" if i == 1 else "")
+                           for i in range(1, len(input_origins) + 1)]
     call = backend.spawned[0][1]
     clock[0] += 100
     source = message_store.upsert_live_assistant_message(
@@ -702,10 +715,9 @@ def test_accepted_steer_notification_keeps_user_client_policy(tmp_path, monkeypa
     notification = user_notifications.classify_completed_turn(
         agent_id=agent_id, session="mike", persona="Mike", trace_id="steer-1",
         backend_session_id="native-steer-session", done_ts=done["ts"])
-    assert notification["cause_message_id"] == (
-        "u-steer-2" if followup_origin == "user" else "u-steer-1")
+    assert notification["cause_message_id"] == f"u-steer-{expected_cause}"
     assert notification["source_message_id"] == source["id"]
-    assert tuple(notification[k] for k in ("notify", "push", "badge", "unread")) == (True, followup_origin == "user", True, True)
+    assert tuple(notification[k] for k in ("notify", "push", "badge", "unread")) == expected_flags
     assert db.conn().execute(
         "SELECT COUNT(*) FROM state_log WHERE agent_id=? AND kind='done'",
         (agent_id,)).fetchone()[0] == 1
