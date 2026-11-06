@@ -243,7 +243,7 @@ def test_git_read_failure_is_not_proven_path_absence(tmp_path, monkeypatch):
     base, _ = _tree(tmp_path, False)
     real_run = methods.subprocess.run
     def failed_show(args, *a, **kw):
-        if args[:3] == ['git', '-C', str(tmp_path)] and 'show' in args:
+        if args[:3] == ['git', '-C', str(tmp_path)] and any(op in args for op in ('show', 'cat-file')):
             return subprocess.CompletedProcess(args, 128, '', 'synthetic object read failure')
         return real_run(args, *a, **kw)
     monkeypatch.setattr(methods.subprocess, 'run', failed_show)

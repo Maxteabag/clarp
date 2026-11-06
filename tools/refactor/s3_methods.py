@@ -71,11 +71,122 @@ def affected(root: pathlib.Path, found: list) -> set[str]:
             if sources & {entry['module'], *(p['module'] for p in entry['part'])}}
 
 
-def show(root: pathlib.Path, ref: str, rel: str) -> str | None:
-    result = subprocess.run(['git', '-C', str(root), 'show', f'{ref}:{rel}'],
-                            capture_output=True, text=True)
-    return result.stdout if result.returncode == 0 else None
+def _git(root: pathlib.Path, *args: str) -> str:
+    """Checked Git data access: an I/O/object error is never path absence."""
+    try:
+        result = subprocess.run(['git', '-C', str(root), *args],
+                                capture_output=True, text=True)
+    except (OSError, UnicodeError) as exc:
+        raise s3_apply.Refusal(f'Git data read failed: {exc}') from exc
+    if result.returncode:
+        raise s3_apply.Refusal(f'Git data read failed ({args[0]}): {result.stderr.strip()}')
+    return result.stdout
 
+
+def _pin(root: pathlib.Path, ref: str) -> str:
+    commit = _git(root, 'rev-parse', '--verify', f'{ref}^{{commit}}').strip()
+    if not re.fullmatch(r'[0-9a-f]{40}|[0-9a-f]{64}', commit):
+        raise s3_apply.Refusal(f'Git did not resolve a full commit for {ref!r}')
+    return commit
+
+
+def show(root: pathlib.Path, ref: str, rel: str) -> str | None:
+    if not split_apply._canonical(rel):
+        raise s3_apply.Refusal(f'noncanonical Git data path {rel!r}')
+    listing = _git(root, 'ls-tree', '-z', ref, '--', rel)
+    if not listing:
+        return None
+    entries = listing.rstrip('\0').split('\0')
+    if len(entries) != 1:
+        raise s3_apply.Refusal(f'ambiguous Git data path {rel!r}')
+    metadata, path = entries[0].split('\t', 1)
+    mode, kind, blob = metadata.split()
+    if path != rel or kind != 'blob' or mode not in {'100644', '100755'}:
+        raise s3_apply.Refusal(f'Git data path is not a plain file: {rel}')
+    return _git(root, 'cat-file', 'blob', blob)
+
+
+def _historical(root: pathlib.Path, base: str, target: pathlib.Path):
+    """Load only pinned recipe data, never historical Python/tooling."""
+    folders = ('tools/refactor/splits', METHODS)
+    listing = _git(root, 'ls-tree', '-r', '-z', base, '--',
+                   *folders, 'tools/refactor/s3_moves.toml')
+    for entry in listing.rstrip('\0').split('\0') if listing else []:
+        metadata, rel = entry.split('\t', 1)
+        if not rel.endswith('.toml'):
+            continue
+        mode, kind, blob = metadata.split()
+        if (not split_apply._canonical(rel) or kind != 'blob'
+                or mode not in {'100644', '100755'}
+                or pathlib.PurePosixPath(rel).parent.as_posix()
+                   not in {*folders, 'tools/refactor'}):
+            raise s3_apply.Refusal(f'noncanonical historical recipe {rel!r}')
+        write(target, {rel: _git(root, 'cat-file', 'blob', blob)})
+        print(f's3_methods: historical recipe {base} {rel} {blob}')
+    try:
+        found = recipes(target)
+        splits, repoints = split_apply.load_recipes(target / 'tools/refactor/splits')
+    except (KeyError, TypeError, ValueError) as exc:
+        raise s3_apply.Refusal(f'invalid historical recipe data at {base}: {exc}') from exc
+    return splits, repoints, found
+
+
+def _retained_order(old, new, label):
+    positions = {name: i for i, name in enumerate(new)}
+    if any(name not in positions for name in old):
+        raise s3_apply.Refusal(f'historical {label} retired or renamed')
+    indices = [positions[name] for name in old]
+    if indices != sorted(indices):
+        raise s3_apply.Refusal(f'historical {label} reordered')
+
+
+def _evolution(old_splits, old_repoints, old_found, splits, repoints, found):
+    _retained_order([e['name'] for e in old_splits],
+                    [e['name'] for e in splits], 'split order')
+    new_splits = {e['name']: e for e in splits}
+    for old in old_splits:
+        new = new_splits[old['name']]
+        if old['module'] != new['module']:
+            raise s3_apply.Refusal(f'historical split source topology changed: {old["name"]}')
+        _retained_order([p['module'] for p in old['part']],
+                        [p['module'] for p in new['part']], f'{old["name"]} parts')
+        parts = {p['module']: p for p in new['part']}
+        for part in old['part']:
+            _retained_order(part['names'], parts[part['module']]['names'],
+                            f'{old["name"]} members in {part["module"]}')
+    _retained_order([e['name'] for e in old_repoints],
+                    [e['name'] for e in repoints], 'repoint order')
+    new_repoints = {e['name']: e for e in repoints}
+    for old in old_repoints:
+        new = new_repoints[old['name']]
+        if any(old[k] != new[k] for k in ('file', 'from_module', 'to_module')):
+            raise s3_apply.Refusal(f'historical repoint topology changed: {old["name"]}')
+        _retained_order(old['names'], new['names'], f'{old["name"]} repoint members')
+    new_methods = {path.name: groups for path, groups in found}
+    _retained_order([p.name for p, _ in old_found],
+                    [p.name for p, _ in found], 'method recipe order')
+    for path, old in old_found:
+        new = new_methods[path.name]
+        if any(old[0][k] != new[0][k] for k in ('source_module', 'source_class')):
+            raise s3_apply.Refusal(f'historical method source topology changed: {path.name}')
+        _retained_order([g['name'] for g in old], [g['name'] for g in new],
+                        f'{path.name} group order')
+        groups = {g['name']: g for g in new}
+        for group in old:
+            after = groups[group['name']]
+            if any(group[k] != after[k] for k in ('module', 'class')):
+                raise s3_apply.Refusal(f'historical method output topology changed: {group["name"]}')
+            _retained_order(group['members'], after['members'],
+                            f'{group["name"]} members')
+
+
+def _paths(splits, repoints, found):
+    originals = {'server/' + e['module'] for e in splits}
+    originals |= {'server/' + e['file'] for e in repoints}
+    originals |= {'server/' + groups[0]['source_module'] for _, groups in found}
+    outputs = {'server/' + p['module'] for e in splits for p in e['part']}
+    outputs |= {'server/' + g['module'] for _, groups in found for g in groups}
+    return originals, outputs
 
 def write(root: pathlib.Path, changes: dict[str, str]) -> None:
     for rel, text in changes.items():
@@ -141,18 +252,28 @@ def _baseline_repoints(root, base, work, repoints, unavailable):
 
 
 def validate(root: pathlib.Path, base: str, integration: str, found: list) -> None:
-    """One reconstruction: all S9 splits, then repoints, then named methods."""
+    """Validate history with its own data; never weaken current generation."""
+    base, integration = _pin(root, base), _pin(root, integration)
     splits, repoints = split_apply.load_recipes(root / 'tools/refactor/splits')
+    for entry in splits:
+        old = entry['module']
+        present = [show(root, integration, 'server/' + p['module']) is not None
+                   for p in entry['part']]
+        if not any(present) and any(g[0]['source_module'] == old for _, g in found):
+            raise s3_apply.Refusal(f'method source is an unstarted split old module: {old}')
     with tempfile.TemporaryDirectory(prefix='s3-method-baseline-') as tmp:
-        work = pathlib.Path(tmp)
-        for directory in ('tools/refactor/splits', METHODS):
-            if (root / directory).exists():
-                shutil.copytree(root / directory, work / directory)
-        checked, unavailable = _baseline_splits(root, base, integration, work, splits, found)
-        alternatives = _baseline_repoints(root, base, work, repoints, unavailable)
+        data, work = pathlib.Path(tmp, 'recipes'), pathlib.Path(tmp, 'source')
+        data.mkdir()
+        old_splits, old_repoints, old_found = _historical(root, base, data)
+        _evolution(old_splits, old_repoints, old_found, splits, repoints, found)
+        shutil.copytree(data, work)
+        checked, unavailable = _baseline_splits(
+            root, base, integration, work, old_splits, old_found)
+        alternatives = _baseline_repoints(
+            root, base, work, old_repoints, unavailable)
         checked.update(alternatives)
         rewritten = set()
-        for _, groups in found:
+        for _, groups in old_found:
             source = 'server/' + groups[0]['source_module']
             prefix = applied_prefix(root, integration, groups)
             checked.add(source)
@@ -164,24 +285,42 @@ def validate(root: pathlib.Path, base: str, integration: str, found: list) -> No
             if not (work / source).exists():
                 text = show(root, base, source)
                 if text is None:
-                    raise s3_apply.Refusal(f'no baseline text for {source}')
+                    raise s3_apply.Refusal(f'no historical baseline text for {source}')
                 write(work, {source: text})
+            for count in range(1, len(prefix) + 1):
+                write(work, s3_apply.apply(work, prefix[:count]))
             if prefix:
-                # Stage E applies successive prefixes; the mover prepends each
-                # new mixin, so a one-shot application changes MRO/import order.
-                for count in range(1, len(prefix) + 1):
-                    write(work, s3_apply.apply(work, prefix[:count]))
                 rewritten.add(source)
+        old_originals, old_outputs = _paths(old_splits, old_repoints, old_found)
+        originals, outputs = _paths(splits, repoints, found)
+        checked.update(old_originals | old_outputs | originals | outputs)
+        # A newly declared output is historically absent, not an optional old
+        # output. Never bless an applied-looking family without its old recipe.
+        for rel in outputs - old_outputs:
+            if show(root, base, rel) is not None or (work / rel).exists():
+                raise s3_apply.Refusal(f'new output lacks proven historical absence: {rel}')
+        # First introductions retain any original historical source, including
+        # a source already reconstructed as a part of another historical split.
+        for rel in originals:
+            if not (work / rel).exists() and rel not in unavailable:
+                text = show(root, base, rel)
+                if text is not None:
+                    write(work, {rel: text})
+        labels = {}
+        for entry in splits:
+            applied = any(show(root, integration, 'server/' + p['module']) is not None
+                          for p in entry['part'])
+            label = f'split {entry["name"]}' + ('' if applied else ', not yet applied')
+            for rel in [entry['module'], *(p['module'] for p in entry['part'])]:
+                labels['server/' + rel] = label
         for rel in sorted(checked):
             expected = (work / rel).read_text() if (work / rel).exists() else None
             actual = show(root, integration, rel)
-            # D historically allows a repoint that has not yet been applied.
-            # Once methods rewrite its source, only the ordered D->E result is valid.
             if rel not in rewritten and rel in alternatives and actual == alternatives[rel]:
                 continue
             if actual != expected:
-                raise s3_apply.Refusal(f'integration-only edit in {rel}')
-
+                suffix = f' ({labels[rel]})' if rel in labels else ''
+                raise s3_apply.Refusal(f'integration-only edit in {rel}{suffix}')
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
