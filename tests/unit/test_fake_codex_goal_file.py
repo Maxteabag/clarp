@@ -103,6 +103,12 @@ if mode == 'fail-write':
         def write(self, data):
             raise OSError('injected temporary write failure')
     tempfile.NamedTemporaryFile = BrokenTemp
+def profile(frame, event, arg):
+    if (event == 'call' and frame.f_code.co_name == 'save_goal'
+            and mode == 'publication' and (gate / 'ready').exists()
+            and threading.current_thread() is threading.main_thread()):
+        mark('competing-writer')
+sys.setprofile(profile)
 sys.argv = [source, 'app-server']
 runpy.run_path(source, run_name='__main__')
 '''
@@ -213,6 +219,8 @@ def test_background_publication_never_exposes_empty_json(tmp_path, providers):
         )
         assert reader.returncode == 0, reader.stderr
         assert json.loads(reader.stdout) == before
+        competing = provider.send("thread/goal/set", threadId="competing", objective="synthetic", status="paused")
+        wait_file(provider.gate / "competing-writer")
     finally:
         (provider.gate / "release").touch()
     # A completion RPC proves the daemon publisher succeeded, rather than merely exiting.
@@ -223,10 +231,12 @@ def test_background_publication_never_exposes_empty_json(tmp_path, providers):
         if event.get("method") == "turn/completed":
             break
         assert time.monotonic() < deadline
+    provider.response(competing)
     current = json.loads(target.read_text())
     assert current["other"] == previous["other"]
     assert current["background"]["status"] == "complete"
     assert current["background"]["tokens"] == 7
+    assert current["competing"]["status"] == "paused"
     assert not list(home.glob(".fake-goals-*.tmp"))
     assert "Traceback" not in provider.error()
 
