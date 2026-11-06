@@ -9,6 +9,8 @@ from __future__ import annotations
 from collections import OrderedDict
 import hashlib
 
+# Private codec identity, not a backend registry/strategy selector.
+REPLY_CODEC = 'clarp.claude.reply-evidence.v1'
 _LIMIT = 256
 
 
@@ -282,7 +284,7 @@ def suppresses_result_fallback(event: dict) -> bool:
     fields = {'synthetic_seen', 'genuine_text_seen',
               'genuine_tool_seen', 'unknown_assistant_seen'}
     facts = event.get('_clarp_reply_evidence')
-    return (event.get('_clarp_reply_provider') == 'claude'
+    return (event.get('_clarp_reply_provider') == REPLY_CODEC
             and event.get('_clarp_suppressed_reply') is True
             and '_assistant_text' in event and event['_assistant_text'] is None
             and not event.get('last_agent_message') and not event.get('message')

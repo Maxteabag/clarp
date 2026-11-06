@@ -27,6 +27,7 @@ from lib import config                # noqa: E402
 from lib import agents as agents_db    # noqa: E402
 from lib.backend.registry import by_id  # noqa: E402
 from lib.protocol import SSEType       # noqa: E402
+from lib.claude_reply_evidence import REPLY_CODEC  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -522,7 +523,7 @@ def test_isolated_turn_delivers_only_the_last_results_assistant_text(fake_clarp,
     assert errors == []
     assert results == [{"type": "result", "subtype": "success",
                         "result": "requested", "_assistant_text": "Final answer",
-                        "_clarp_reply_provider": "claude", "_clarp_reply_evidence": {
+                        "_clarp_reply_provider": REPLY_CODEC, "_clarp_reply_evidence": {
                             "synthetic_seen": False, "genuine_text_seen": False,
                             "genuine_tool_seen": False, "unknown_assistant_seen": True}}]
 
@@ -1045,7 +1046,7 @@ def test_result_display_uses_only_its_own_structural_reply_evidence(fake_clarp, 
     {'_assistant_text': None, '_clarp_reply_provider': 'codex', '_clarp_reply_evidence': {
         'synthetic_seen': True, 'genuine_text_seen': False, 'genuine_tool_seen': False,
         'unknown_assistant_seen': False}},
-    {'_assistant_text': None, '_clarp_reply_provider': 'claude', '_clarp_reply_evidence': {
+    {'_assistant_text': None, '_clarp_reply_provider': REPLY_CODEC, '_clarp_reply_evidence': {
         'synthetic_seen': 'yes', 'genuine_text_seen': False, 'genuine_tool_seen': False,
         'unknown_assistant_seen': False}},
 ])
@@ -1152,7 +1153,7 @@ def test_suppressed_message_output_cannot_reappear_through_the_terminal_result(
 def test_meta_display_proof_must_be_present_and_exactly_boolean_true(proof):
     from lib.turn_dispatch import _result_assistant_text
     event = {'result': 'Uncertified fallback', '_assistant_text': None,
-             '_clarp_reply_provider': 'claude', '_clarp_reply_evidence': {
+             '_clarp_reply_provider': REPLY_CODEC, '_clarp_reply_evidence': {
                  'synthetic_seen': False, 'genuine_text_seen': False,
                  'genuine_tool_seen': False, 'unknown_assistant_seen': True}}
     if proof is not None:
@@ -1199,3 +1200,17 @@ def test_incomplete_or_competing_message_evidence_cannot_create_display_proof(
     assert _result_assistant_text(results[0]) == phrase
     assert results[0].get('_clarp_suppressed_reply') is not True
     assert results[0]['result'] == phrase
+
+
+@pytest.mark.parametrize('marker', [None, 'claude', 'codex',
+    'clarp.claude.reply-evidence.v2', 'clarp.claude.reply-evidence.v1.extra',
+    ' clarp.claude.reply-evidence.v1'])
+def test_unrecognised_reply_codec_cannot_authorize_a_display_sentinel(marker):
+    from lib.turn_dispatch import _result_assistant_text
+    event = {'result': 'Legacy fallback', '_assistant_text': None,
+             '_clarp_suppressed_reply': True, '_clarp_reply_evidence': {
+                 'synthetic_seen': True, 'genuine_text_seen': False,
+                 'genuine_tool_seen': False, 'unknown_assistant_seen': False}}
+    if marker is not None:
+        event['_clarp_reply_provider'] = marker
+    assert _result_assistant_text(event) == 'Legacy fallback'
