@@ -1,6 +1,8 @@
 # Big merge #1 synthetic release harness (800/803/805)
 
-WIP, UNEXECUTED. No D_F pin, allowance installation, slot or release GO is implied.
+WIP. The same-pin synthetic 15-second mechanism rehearsal passed on source7b30dced
+(raw worker0; four cases0/0/10/12; same original DB inode and owned cleanup).
+It is not a D_F or six-hour gate. No allowance installation, slot or release GO is implied.
 
 The compute admission binds one immutable manifest, source script hashes, exact
 D_F/base B exports, selected v8n2-r1 manifest cad642ea, owner rf-releasec-29c5 and
@@ -40,3 +42,15 @@ whole archive on the laptop. Packed capsules contain only Git source and the
 approved cached bundle/tool files; database/env/transcript-shaped test fixtures
 are omitted explicitly, with any data-shaped product path a refusal. Capsule
 hashes and per-file hashes bind the remote payload, independent of carrierHEAD.
+
+Rehearsal measurements: four cases465.36s, post-soak compatibility152.18s,
+owned total794.46s including final setup and15.012s workload. These measurements
+do not guarantee exactD_F performance. Real runs must include at least two
+verified two-hour runtime drills and five hourly maintenance receipts before
+soak-result PASS; the short labelled rehearsal is exempt. Focused remote tests
+retain the old missing-cadence negative and verify repair71fb7b69.
+
+815 changes the eventual selected tool to exacta99aac66/manifest7e079416 ONLY
+after B SOURCE YES. Current cad642 rehearsal is historical qualified evidence;
+real D_F capsules/manifest must be rebound to the actually approved/selected
+tool before admission. Stage2 and D_F never use the manual814 route.
