@@ -1063,6 +1063,7 @@ def record_user_message(*, agent_id: str, backend_session_id: str,
 
 def upsert_live_assistant_message(*, agent_id: str, backend_session_id: str,
                                   trace_id: str = "", text: str, item_key: str = "",
+                                  _provider_genuine: bool = False,
                                   ) -> dict[str, Any] | None:
     from .message_store import upsert_live_assistant_message as _upsert
     return _upsert(
@@ -1071,6 +1072,7 @@ def upsert_live_assistant_message(*, agent_id: str, backend_session_id: str,
         trace_id=trace_id,
         text=text,
         item_key=item_key,
+        **({"_provider_genuine": True} if _provider_genuine else {}),
     )
 
 
