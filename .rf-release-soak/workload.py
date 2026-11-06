@@ -7,41 +7,57 @@ def db_identity():
  stat=(Path.home()/'.local/share/clarp/state.sqlite').stat()
  return str(stat.st_dev)+':'+str(stat.st_ino)
 def binding():return {'nonce':os.environ['HEAVY_SOAK_NONCE'],'remote_job_id':os.environ['HEAVY_SOAK_REMOTE_JOB_ID'],'boot_id':os.environ['HEAVY_SOAK_BOOT_ID']}
-def write(path,data):
- tmp=path.with_suffix('.pending');tmp.write_text(json.dumps(data,sort_keys=True)+'\n');os.replace(tmp,path)
-def request(path,data=None):
+class Continuity:
+ def __init__(self):
+  self.start=time.monotonic();self.start_up_ns=time.clock_gettime_ns(time.CLOCK_BOOTTIME)
+  self.offset=self.start_up_ns/1e9-self.start;self.last_progress=self.start
+ def observe(self):
+  now=time.monotonic();up_ns=time.clock_gettime_ns(time.CLOCK_BOOTTIME)
+  if now-self.last_progress>45 or abs(up_ns/1e9-now-self.offset)>1:
+   raise RuntimeError('uninterrupted soak broken by pause/suspend; no resume')
+  self.last_progress=now
+  return now,up_ns
+
+def write(path,data,continuity=None):
+ if continuity:continuity.observe()
+ tmp=path.with_suffix('.pending');tmp.write_text(json.dumps(data,sort_keys=True)+'\n')
+ if continuity:continuity.observe()
+ os.replace(tmp,path)
+def request(path,data=None,continuity=None):
+ if continuity:continuity.observe()
  body=None if data is None else json.dumps(data).encode()
  req=urllib.request.Request(BASE+path,data=body,headers={'Content-Type':'application/json'})
  with urllib.request.urlopen(req,timeout=15) as response:
   result=json.load(response)
   if response.status not in (200,201,202):raise RuntimeError('unexpected HTTP code '+str(response.status))
+ if continuity:continuity.observe()
  return result
 
-def verify(state):
+def verify(state,continuity=None):
  counts={}
  for sent in state['sent']:
-  turns=request('/log?session='+sent['session']).get('turns') or []
+  turns=request('/log?session='+sent['session'],continuity=continuity).get('turns') or []
   u=sum(t.get('role')=='user' and t.get('text')==sent['text'] for t in turns)
   a=sum(t.get('role')=='assistant' and t.get('text')=='QA reply: '+sent['text'] for t in turns)
   counts[sent['mid']]={'users':u,'replies':a}
  return counts
 
-def batch(state,index):
+def batch(state,index,continuity=None):
  sent=[]
  for key,suffix in [('a','1'),('b','1'),('b','2')]:
   session=state['agents'][key];mid='soak-'+str(index)+'-'+key+suffix;text='synthetic '+mid
   if key=='b' and suffix=='2':
    until=time.monotonic()+15
-   while request('/status?session='+session).get('busy') is not True:
+   while request('/status?session='+session,continuity=continuity).get('busy') is not True:
     if time.monotonic()>=until:raise RuntimeError('queued-turn busy precondition unproven')
     time.sleep(.05)
-  result=request('/send',{'session':session,'text':text,'client_msg_id':mid,'queue_if_busy':True,'synthesize_audio':False})
+  result=request('/send',{'session':session,'text':text,'client_msg_id':mid,'queue_if_busy':True,'synthesize_audio':False},continuity=continuity)
   if key=='b' and suffix=='2' and result.get('queued') is not True:raise RuntimeError('synthetic followup was not queued')
   sent.append({'session':session,'mid':mid,'text':text})
  state['sent'].extend(sent)
  until=time.monotonic()+180
  while True:
-  counts=verify({'sent':sent})
+  counts=verify({'sent':sent},continuity)
   if all(v=={'users':1,'replies':1} for v in counts.values()):return counts
   if time.monotonic()>=until:raise RuntimeError('synthetic reply equality deadline exceeded')
   time.sleep(.25)
@@ -55,24 +71,24 @@ def main():
  if args.seconds!=21600 and not(args.rehearsal and 1<=args.seconds<=60):raise RuntimeError('full soak is exactly21600s; short mode requires labelled rehearsal')
  state={'agents':{},'sent':[],'binding':binding()}
  for key in ('a','b','c'):state['agents'][key]=request('/agents',{'name':'Synthetic soak '+key,'backend':'codex','cwd':'/home/canary'})['session']
- write(args.state,state);start=time.monotonic();deadline=start+args.seconds;next_batch=start;next_request=start;polls=0;batches=0;started=args.state.with_suffix('.started.json');result=args.state.with_suffix('.result.json')
+ write(args.state,state);continuity=Continuity();start=continuity.start;deadline=start+args.seconds;next_batch=start;next_request=start;polls=0;batches=0;started=args.state.with_suffix('.started.json');result=args.state.with_suffix('.result.json')
  soaked_db=db_identity()
- start_up_ns=time.clock_gettime_ns(time.CLOCK_BOOTTIME);clock_offset=start_up_ns/1e9-start;last_progress=start
+ start_up_ns=continuity.start_up_ns
  write(started,{'same_db_device_inode':soaked_db,'start_up_ns':start_up_ns,'pid':os.getpid(),'started_epoch':time.time(),'started_monotonic':start,'seconds_required':args.seconds,'synthetic_data_only':True,'rehearsal':args.rehearsal,'binding':binding()})
  try:
-  while time.monotonic()<deadline:
-   now=time.monotonic()
-   if now-last_progress>45 or abs(time.clock_gettime_ns(time.CLOCK_BOOTTIME)/1e9-now-clock_offset)>1:raise RuntimeError('uninterrupted soak broken by pause/suspend; no resume')
-   last_progress=now
+  while True:
+   now,_up_ns=continuity.observe()
+   if now>=deadline:break
    if now>=next_batch and not Path('/home/canary/soak-pause-sends').exists():
-    batch(state,batches);batches+=1;write(args.state,state);next_batch=start+batches*900
+    batch(state,batches,continuity);continuity.observe();batches+=1;write(args.state,state,continuity);next_batch=start+batches*900
    if now>=next_request:
-    keys=('a','b','c');key=keys[polls%3];request('/log?session='+state['agents'][key]);polls+=1;next_request=time.monotonic()+1/3
+    keys=('a','b','c');key=keys[polls%3];request('/log?session='+state['agents'][key],continuity=continuity);polls+=1;next_request=time.monotonic()+1/3
    time.sleep(min(.05,max(0,deadline-time.monotonic())))
-  counts=verify(state);elapsed=time.monotonic()-start
+  counts=verify(state,continuity)
   if db_identity()!=soaked_db:raise RuntimeError('soaked DB identity changed during workload')
+  finished,end_up_ns=continuity.observe();elapsed=finished-start
   if elapsed<args.seconds or not all(v=={'users':1,'replies':1} for v in counts.values()):raise RuntimeError('full interval/equality not proven')
-  write(result,{'result':'PASS','same_db_device_inode':soaked_db,'start_up_ns':start_up_ns,'end_up_ns':time.clock_gettime_ns(time.CLOCK_BOOTTIME),'started_monotonic':start,'finished_monotonic':time.monotonic(),'elapsed_seconds':elapsed,'required_seconds':args.seconds,'batches':batches,'polls':polls,'messages':len(counts),'synthetic_data_only':True,'rehearsal':args.rehearsal,'binding':binding()});return 0
+  write(result,{'result':'PASS','same_db_device_inode':soaked_db,'start_up_ns':start_up_ns,'end_up_ns':end_up_ns,'started_monotonic':start,'finished_monotonic':finished,'elapsed_seconds':elapsed,'required_seconds':args.seconds,'batches':batches,'polls':polls,'messages':len(counts),'synthetic_data_only':True,'rehearsal':args.rehearsal,'binding':binding()},continuity);return 0
  except Exception as error:
   write(result,{'result':'FAIL','elapsed_seconds':time.monotonic()-start,'error_type':type(error).__name__,'reason':str(error),'batches':batches,'polls':polls,'rehearsal':args.rehearsal,'binding':binding()});raise
 if __name__=='__main__':raise SystemExit(main())
