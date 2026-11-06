@@ -2,7 +2,7 @@
 
 Design before code, lead 696/700. Tool owner S4; reviewer B for infrastructure,
 A3 for S4 preservation; S9 coordinated and will not edit these functions in
-parallel. No split_apply or s3_apply semantic change is proposed.
+parallel; its historical-loader/provenance constraints are incorporated below. No split_apply or s3_apply semantic change is proposed.
 
 Failure: prospective main 57d241ff, integration a7331017, common main
 55c37eaf71522dac8e46ae233892f525a7731f15. Reviewed recipe 0743d86b names
@@ -16,6 +16,14 @@ checks would hide unrelated integration edits and is forbidden.
 Historical validation gets split/repoint/method recipe DATA from the exact
 merge-base Git tree. It never reads historical metadata from integration,
 untracked files or the merged checkout, and never executes historical tools.
+Resolve the supplied baseline to a FULL immutable commit once before any
+history read. Enumerate recipes from that exact Git tree with checked exit
+status, canonical data paths and blob IDs; record the commit and recipe blobs
+in diagnostics. A successful empty listing can prove directory/path absence;
+a Git/object/read failure cannot. Source lookup must likewise distinguish a
+proven absent path from a failed read, rather than returning None for both.
+Historical split, method, collision and repoint checks run through the same
+strict current parsers. Capture data only, never checkout/import old Python.
 Use the current reviewed loaders/generators unchanged; incompatible historical
 schema or a refused historical reconstruction remains a hard refusal.
 
