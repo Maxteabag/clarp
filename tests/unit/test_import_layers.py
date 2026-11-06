@@ -44,6 +44,7 @@ PERSISTENCE = frozenset({
 })
 PERSISTENCE_PACKAGES = ("lib.persistence",)
 CORE = frozenset({f"lib.{m}" for m in (
+    "runtime_contract",  # inert values/codecs below RPC and execution (U09)
     "agent_lifecycle", "agent_store", "agents", "backends", "config", "config_writer",
     "conversation", "deployment", "error_classify", "eventlog", "events", "hook_runtime",
     "http_utils", "identity", "launch_receipts", "log", "message_live", "message_store", "message_turns",

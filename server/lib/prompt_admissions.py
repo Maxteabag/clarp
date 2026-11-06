@@ -6,56 +6,10 @@ import json
 import uuid
 
 from . import db
+from .runtime_contract import PromptAdmission
 
 
 ADMISSION_VERSION = 1
-
-
-@dataclasses.dataclass(frozen=True)
-class PromptAdmission:
-    admission_id: str
-    admission_version: int
-    authenticated_at_admission: bool
-    cooperative_principal: str
-    principal_id: str
-    origin: str
-    sender_agent_id: str
-    channel: str
-    observed_at: int
-    client_admission_id: str
-    trace_id: str
-    original_text: str
-    # The app that sent it (``"desktop"``), when it said; "" otherwise.
-    client: str = ""
-
-    def to_json(self) -> str:
-        return json.dumps(dataclasses.asdict(self), separators=(",", ":"))
-
-    @classmethod
-    def from_json(cls, raw: str | None) -> PromptAdmission | None:
-        try:
-            value = json.loads(raw or "")
-            if not isinstance(value, dict):
-                return None
-            return cls(
-                admission_id=str(value["admission_id"]),
-                admission_version=int(value["admission_version"]),
-                authenticated_at_admission=bool(
-                    value["authenticated_at_admission"]
-                ),
-                cooperative_principal=str(value["cooperative_principal"]),
-                principal_id=str(value.get("principal_id") or ""),
-                origin=str(value["origin"]),
-                sender_agent_id=str(value.get("sender_agent_id") or ""),
-                channel=str(value["channel"]),
-                observed_at=int(value["observed_at"]),
-                client_admission_id=str(value["client_admission_id"]),
-                trace_id=str(value["trace_id"]),
-                original_text=str(value["original_text"]),
-                client=str(value.get("client") or ""),
-            )
-        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
-            return None
 
 
 def create(

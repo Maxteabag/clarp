@@ -19,71 +19,10 @@ import time
 import uuid
 from typing import Any
 
-
-PROTOCOL_VERSION = 1
-MAX_MESSAGE_BYTES = 2 * 1024 * 1024
-
-
-class RuntimeProtocolError(RuntimeError):
-    pass
-
-
-class RuntimeUnavailable(RuntimeError):
-    pass
-
-
-@dataclasses.dataclass(frozen=True)
-class StopLease:
-    lease_id: str
-    trace_id: str
-    terminated: int
-    dropped: int
-
-
-def _json_value(value: Any) -> Any:
-    if dataclasses.is_dataclass(value):
-        return dataclasses.asdict(value)
-    if isinstance(value, pathlib.Path):
-        return str(value)
-    if isinstance(value, tuple):
-        return [_json_value(item) for item in value]
-    if isinstance(value, list):
-        return [_json_value(item) for item in value]
-    if isinstance(value, dict):
-        return {str(key): _json_value(item) for key, item in value.items()}
-    return value
-
-
-def encode_request(method: str, params: dict[str, Any] | None = None) -> bytes:
-    method = str(method or "").strip()
-    if not method:
-        raise RuntimeProtocolError("runtime method is required")
-    return (json.dumps({
-        "version": PROTOCOL_VERSION,
-        "method": method,
-        "params": _json_value(params or {}),
-    }, separators=(",", ":")) + "\n").encode()
-
-
-def decode_request(raw: bytes) -> dict[str, Any]:
-    if len(raw) > MAX_MESSAGE_BYTES:
-        raise RuntimeProtocolError("runtime request is too large")
-    try:
-        value = json.loads(raw)
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise RuntimeProtocolError("invalid runtime request") from exc
-    if not isinstance(value, dict):
-        raise RuntimeProtocolError("runtime request must be an object")
-    if value.get("version") != PROTOCOL_VERSION:
-        raise RuntimeProtocolError(
-            f"unsupported runtime protocol version: {value.get('version')!r}")
-    method = value.get("method")
-    params = value.get("params", {})
-    if not isinstance(method, str) or not method.strip():
-        raise RuntimeProtocolError("runtime method is required")
-    if not isinstance(params, dict):
-        raise RuntimeProtocolError("runtime params must be an object")
-    return {"version": PROTOCOL_VERSION, "method": method, "params": params}
+from .runtime_contract import (
+    PROTOCOL_VERSION, MAX_MESSAGE_BYTES, RuntimeProtocolError, RuntimeUnavailable,
+    StopLease, _json_value, encode_request, decode_request,
+)
 
 
 class RuntimeClient:

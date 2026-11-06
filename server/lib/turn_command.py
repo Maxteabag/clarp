@@ -17,23 +17,8 @@ from . import team_store, turn_queue
 from . import launch_receipts
 from .policies import admission as admission_policy
 from .log import log, log_exception
-from .prompt_admissions import PromptAdmission
+from .runtime_contract import PromptAdmission, DispatchResult, DispatchError, DispatchCommand
 from .turn_dispatch_state import _JANITOR_SPAWN_LOCKS, _TURN_LOCK
-
-
-@dataclass(frozen=True)
-class DispatchResult:
-    session: str
-    backend: str
-    queued: bool = False
-    queue_depth: int = 0
-    queue_revision: int = 0
-    # F4 S1: the user send's delivery object (launch_receipts.delivery_for_send),
-    # read after the dispatch decided; None = unknown. Never retry authority.
-    delivery: dict | None = None
-    # F4 E2-S1: the identity of the runtime that computed ``delivery``, in the
-    # same RPC result (runtime_bridge); None when computed in-process.
-    delivery_runtime: dict | None = None
 
 
 def _with_delivery(command: "DispatchCommand", result: DispatchResult) -> DispatchResult:
@@ -211,12 +196,6 @@ def _park_at_head(spec: _TurnSpec) -> str:
         log_exception("preemptParkPersistFail", exc, detail=spec.agent_id)
         return ""
     return park_id
-
-
-class DispatchError(RuntimeError):
-    def __init__(self, status: int, message: str):
-        self.status = status
-        super().__init__(message)
 
 
 def _refuse_oversized(registry, backend: str, text: str) -> None:
@@ -499,76 +478,6 @@ def _with_delivery_context(text: str, *, unheard_audio: bool = False) -> str:
 
 _REQUEST_LOCKS = weakref.WeakValueDictionary()
 _REQUEST_LOCKS_GUARD = threading.Lock()
-
-
-@dataclass(frozen=True)
-class DispatchCommand:
-    """One send, built once where it enters (``TurnDispatchService.submit``,
-    the HTTP send handler, a scheduler adapter) and serialized once across the
-    runtime RPC. Admission — the Janitor-demand authority check, the
-    leader-tick gate, the durable write — runs on the side that owns turns,
-    exactly once per command."""
-    text: str
-    requested_session: str = ""
-    trace_id: str = ""
-    synthesize_audio: bool = True
-    forced_session: str = ""
-    routed_by_orchestrator: bool = False
-    client_msg_id: str = ""
-    origin: str = "user"
-    sender_agent_id: str = ""
-    prompt_admission: PromptAdmission | None = None
-    prompt_admission_id: str = ""
-    queue_if_busy: bool = False
-    skip_admission: bool = False
-    durable_queue_id: str = ""
-    unheard_audio_sessions: tuple[str, ...] = ()
-    allow_paused_queue: bool = False
-    janitor_run_id: str = ""
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.unheard_audio_sessions, tuple):
-            object.__setattr__(self, "unheard_audio_sessions",
-                               tuple(str(item) for item in self.unheard_audio_sessions))
-
-    def as_kwargs(self) -> dict[str, Any]:
-        """The historical ``dispatch(**kwargs)`` shape. ``janitor_run_id`` is
-        present only when set, so an older runtime keeps accepting ordinary
-        work from a newer HTTP server."""
-        values = {field.name: getattr(self, field.name)
-                  for field in dataclasses.fields(self)}
-        if not self.janitor_run_id:
-            values.pop("janitor_run_id")
-        return values
-
-    def to_wire(self) -> dict[str, Any]:
-        values = self.as_kwargs()
-        if self.prompt_admission is not None:
-            values["prompt_admission"] = dataclasses.asdict(self.prompt_admission)
-        values["unheard_audio_sessions"] = list(self.unheard_audio_sessions)
-        return values
-
-    @classmethod
-    def from_wire(cls, params: dict[str, Any]) -> "DispatchCommand":
-        """Parse an RPC payload; ValueError for anything this side cannot run."""
-        names = {field.name for field in dataclasses.fields(cls)}
-        unknown = sorted(set(params) - names)
-        if unknown:
-            raise ValueError(f"unknown dispatch fields: {', '.join(unknown)}")
-        values = dict(params)
-        admission = values.get("prompt_admission")
-        if isinstance(admission, (dict, str)):
-            raw = admission if isinstance(admission, str) else json.dumps(admission)
-            values["prompt_admission"] = PromptAdmission.from_json(raw)
-            if values["prompt_admission"] is None:
-                raise ValueError("invalid prompt admission")
-        elif admission is not None and not isinstance(admission, PromptAdmission):
-            raise ValueError("invalid prompt admission")
-        if "text" not in values:
-            raise ValueError("dispatch text is required")
-        values["unheard_audio_sessions"] = tuple(
-            str(item) for item in values.get("unheard_audio_sessions") or ())
-        return cls(**values)
 
 
 def _serialize_client_retry(method):
