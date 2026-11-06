@@ -94,7 +94,7 @@ def test_real_connection_budget_reopen_and_existing_policies():
     assert telemetry.conn() is not metric and closed(metric)
 
 
-@pytest.mark.parametrize('outcome', ['success', 'protocol', 'exception', 'abandoned', 'write-fail'])
+@pytest.mark.parametrize('outcome', ['success', 'protocol', 'exception', 'abandoned', 'write-fail', 'flush-fail'])
 def test_handler_finish_closes_both_and_preserves_transaction_outcome(rpc, monkeypatch, outcome):
     captured = []
     def work(*_):
@@ -111,6 +111,19 @@ def test_handler_finish_closes_both_and_preserves_transaction_outcome(rpc, monke
         if outcome == 'exception':
             raise RuntimeError('synthetic failure')
         return {'ok': True, 'result': {'counter': 7}}
+    if outcome == 'flush-fail':
+        setup = bridge._RuntimeRequestHandler.setup
+        class FlushFailure:
+            def __init__(self, wrapped):
+                self.wrapped = wrapped
+            def __getattr__(self, key):
+                return getattr(self.wrapped, key)
+            def flush(self):
+                raise RuntimeError('synthetic finish flush failure')
+        def setup_with_failed_flush(handler):
+            setup(handler)
+            handler.wfile = FlushFailure(handler.wfile)
+        monkeypatch.setattr(bridge._RuntimeRequestHandler, 'setup', setup_with_failed_flush)
     if outcome == 'write-fail':
         def fail(*_):
             raise BrokenPipeError('synthetic disconnect')
@@ -123,9 +136,9 @@ def test_handler_finish_closes_both_and_preserves_transaction_outcome(rpc, monke
     count = state.execute('SELECT count(*) FROM memory_probe').fetchone()[0]
     assert count == (0 if outcome == 'abandoned' else 1)
     assert all(id(c) not in db._TRANSACTION_OWNERS for c in captured)
-    if outcome in ('success', 'protocol', 'exception', 'abandoned'):
+    if outcome in ('success', 'protocol', 'exception', 'abandoned', 'flush-fail'):
         result = json.loads(response)
-        assert result['ok'] is (outcome == 'success')
+        assert result['ok'] is (outcome in ('success', 'flush-fail'))
     else:
         assert not response
 
@@ -204,5 +217,6 @@ def test_live_stream_keeps_its_handles_until_finish_and_preserves_other_thread(r
     handles = finished.get(timeout=5)
     assert all(closed(c) for c in handles)
     assert not closed(other) and other.in_transaction
+    assert id(other) in db._TRANSACTION_OWNERS
     other.commit()
     assert other.execute('SELECT count(*) FROM memory_other').fetchone()[0] == 1
