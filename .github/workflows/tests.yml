@@ -24,7 +24,8 @@ jobs:
           node-version: 22
           cache: npm
       - name: Native audio test dependency
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+        # Skip the apt round trip (15-70 s, mostly `apt-get update`) when the runner image already has it.
+        run: command -v ffmpeg || { sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg; }
       - run: uv sync --frozen --group dev
       - name: Prepare JavaScript dependencies and the web bundle (with network, before the contained tests)
         run: npm ci --ignore-scripts --no-audit --no-fund && npm run build
@@ -38,7 +39,9 @@ jobs:
       - name: Python unit, integration and contract tests
         # Per-test phase timings stream into test-results/timing/ (flushed per line), so the
         # always() upload below keeps them even when the job is cancelled at its time limit.
-        run: bash scripts/ci_contained.sh .venv/bin/python -m pytest -n 2 --junitxml=test-results/python.xml --clarp-timing-dir=test-results/timing
+        # One worker per core (the runner has 4); worksteal rebalances so no worker idles while
+        # another still holds a queue of slow tests.
+        run: bash scripts/ci_contained.sh .venv/bin/python -m pytest -n auto --dist worksteal --junitxml=test-results/python.xml --clarp-timing-dir=test-results/timing
       - name: JavaScript behavior and contract tests
         if: ${{ !cancelled() }}
         run: bash scripts/ci_contained.sh npm test -- --reporter=default --reporter=junit --outputFile=test-results/javascript.xml
