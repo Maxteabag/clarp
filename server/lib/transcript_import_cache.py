@@ -209,7 +209,7 @@ def reset_for_tests(deadline_s: float = 5.0) -> bool:
 
 # One fallback importer per process; coalesce callers by owner/path. Watcher
 # imports share import_if_changed's version lock and remain authoritative.
-# A request is (path, importer, owner, after, urgent): ``after`` runs on the worker once
+# A request is (path, importer, owner, after, urgent, first_wait_rank): ``after`` runs on the worker once
 # the import returned normally, whether it imported or found the version current.
 _pending: dict[str, tuple[tuple, int]] = {}
 _worker: threading.Thread | None = None
@@ -323,8 +323,11 @@ def schedule_import(path: pathlib.Path, importer: Callable[[], None], *, owner: 
         # Once requested, urgency belongs to the queued token, not to whichever
         # normal request last supplied the newest importer/callback.
         urgent = urgent or bool(queued and queued[0][4])
-        request = (path, importer, owner, after, urgent)
         now = time.monotonic()
+        # Keep the first accepted wait rank through coalescing and timers.
+        # A hot path's new callback request goes behind an older waiting path.
+        rank = queued[0][5] if queued else now
+        request = (path, importer, owner, after, urgent, rank)
         if (key not in _pending and key not in _deferred
                 and len(set(_pending) | set(_deferred)) >= _BACKGROUND_LIMIT):
             full = True
@@ -438,7 +441,16 @@ def _drain_background():
             selected = None
             with _guard:
                 now = time.monotonic()
-                for key, (request, item_epoch) in list(_pending.items()):
+                # Due timer threads may get CPU in any order. Promote all due
+                # keys here so an older path cannot lose its place merely
+                # because its timer callback ran after a hotter path's.
+                for key, (request, timer, item_epoch) in list(_deferred.items()):
+                    if _owner_deadline(key) <= now:
+                        timer.cancel()
+                        del _deferred[key]
+                        _pending[key] = (request, item_epoch)
+                waiting = sorted(_pending.items(), key=lambda item: item[1][0][5])
+                for key, (request, item_epoch) in waiting:
                     if _resetting or item_epoch != _epoch:
                         del _pending[key]
                         continue
@@ -463,7 +475,7 @@ def _drain_background():
                         _worker = None
                         return
                 continue
-            key, (path, importer, owner, after, urgent), item_epoch = selected
+            key, (path, importer, owner, after, urgent, rank), item_epoch = selected
             started = time.monotonic()
             try:
                 try:
