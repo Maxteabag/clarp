@@ -173,7 +173,9 @@ def suppresses_result_fallback(event: dict) -> bool:
     fields = {'synthetic_seen', 'genuine_text_seen',
               'genuine_tool_seen', 'unknown_assistant_seen'}
     facts = event.get('_clarp_reply_evidence')
-    return ('_assistant_text' in event and event['_assistant_text'] is None
+    return (event.get('_clarp_reply_provider') == 'claude'
+            and '_assistant_text' in event and event['_assistant_text'] is None
+            and not event.get('last_agent_message') and not event.get('message')
             and isinstance(facts, dict) and set(facts) == fields
             and all(type(value) is bool for value in facts.values())
             and facts['synthetic_seen'] and not facts['genuine_text_seen']
