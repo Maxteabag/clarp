@@ -190,7 +190,7 @@ class Lifecycle:
 
     def decide(self, state: str | None, event: str) -> str:
         """Pure: the target of ``event`` from ``state``, or IllegalTransition."""
-        return _decide(self.name, self._table, self._settled, state, event)
+        return _decide(self.name, self._table, self.already_corrected, state, event)
 
     def already_corrected(self, state: str | None, event: str) -> bool:
         """``event`` is a correction whose target ``state`` already is: a no-op.
@@ -211,10 +211,10 @@ class Lifecycle:
         return due is not None and now >= due
 
 
-def _decide(name, table, settled, state, event):
+def _decide(name, table, already_corrected, state, event):
     """Shared pure lookup; declaration validation remains front-end specific."""
     target = table.get((event, state)) if state is not None else None
-    if target is None and (event, state) in settled and (event, state) not in table:
+    if target is None and already_corrected(state, event):
         return state
     if target is None:
         raise IllegalTransition(name, state, event)
@@ -613,7 +613,7 @@ class Rules:
                     raise LifecycleError("wait event is not legal from its state")
 
     def decide(self, state: str | None, event: str) -> str:
-        return _decide(self.family, self._table, self._settled, state, event)
+        return _decide(self.family, self._table, self.already_corrected, state, event)
 
     def already_corrected(self, state: str | None, event: str) -> bool:
         return (event, state) in self._settled and (event, state) not in self._table
