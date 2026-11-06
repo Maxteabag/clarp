@@ -301,3 +301,58 @@ def test_deferred_keys_occupy_capacity_and_refused_version_can_retry(tmp_path, c
                                  owner='second', after=retry_after)
     assert retry.wait(2)
     assert seen == ['retained without another append']
+
+
+def test_hot_path_timer_order_cannot_starve_older_same_owner_path(tmp_path, clock):
+    a, b = tmp_path / 'hot-a', tmp_path / 'waiting-b'
+    a.write_text('seed')
+    b.write_text('waiting version')
+    seed, seed_after = completed()
+    assert cache.schedule_import(a, lambda: None, owner='agent', after=seed_after)
+    assert seed.wait(2) and cache.wait_for_background(2)
+    a.write_text('hot first')
+    progressed = threading.Event()
+    seen = []
+    repeat = [True]
+
+    def after_a():
+        seen.append(('a', clock.now))
+        if repeat[0]:
+            a.write_text(f'hot next {clock.now}')
+            assert cache.schedule_import(a, lambda: None, owner='agent', after=after_a)
+        progressed.set()
+
+    def import_b():
+        seen.append(('b', clock.now))
+        progressed.set()
+
+    assert cache.schedule_import(a, lambda: None, owner='agent', after=after_a)
+    assert cache.schedule_import(b, import_b, owner='agent')
+    key_a, key_b = f'agent\0{a}', f'agent\0{b}'
+
+    def fire_if_waiting(key):
+        with cache._guard:
+            entry = cache._deferred.get(key)
+        if entry is not None:
+            timer = entry[1]
+            assert timer.due <= clock.now
+            timer.alive = False
+            timer.function(*timer.args, **timer.kwargs)
+
+    try:
+        # Valid adversarial scheduling: A's timer, worker and reentrant after
+        # complete before B's due timer gets CPU. All due callbacks are delivered.
+        for instant in (10., 20., 30.):
+            clock.now = instant
+            progressed.clear()
+            fire_if_waiting(key_a)
+            assert progressed.wait(2) and cache.wait_for_background(2)
+            fire_if_waiting(key_b)
+            assert cache.wait_for_background(2)
+            if any(path == 'b' for path, _ in seen):
+                break
+        assert any(path == 'b' for path, _ in seen), seen
+        assert len([x for x in seen if x[0] == 'a']) <= 2, seen
+    finally:
+        repeat[0] = False
+        assert cache.wait_for_background(2)
