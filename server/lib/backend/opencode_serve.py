@@ -99,20 +99,67 @@ class OpenCodeTurnHandle(TurnHandle):
         return super().terminate()
 
 
-def wait_for_url(proc: subprocess.Popen, timeout: float = STARTUP_TIMEOUT) -> str:
-    """The server's base URL from its stdout, or "" if it did not come up.
+# Bound both parser storage and the single startup notification. Ordinary
+# local serve URLs are short. Announcements over 8192 characters are ignored,
+# never truncated into a different URL; later ordinary announcements still work.
+_STDOUT_READ_CHARS = 4096
+_STARTUP_PARSE_CHARS = 16384
+_STARTUP_URL_CHARS = 8192
 
-    Keeps draining stdout afterwards so the server never blocks on a full pipe.
+
+def wait_for_url(proc: subprocess.Popen, timeout: float = STARTUP_TIMEOUT) -> str:
+    """Discover one bounded URL, then drain/drop stdout until EOF.
+
+    The producer owns parsing; its only queued value is URL or EOF. Both
+    pre-start noise and newline-free output are read in bounded pieces.
     """
-    lines: queue.Queue[str | None] = queue.Queue()
+    lines: queue.Queue[str | None] = queue.Queue(maxsize=1)
+    publication = threading.Lock()
+    consumer_done = threading.Event()
+
+    def publish(value):
+        with publication:
+            if consumer_done.is_set():
+                return False
+            # One producer, at most one publication; never block on a full
+            # slot after the startup consumer has returned.
+            lines.put_nowait(value)
+            return True
 
     def read() -> None:
+        pending = ""
+        searching = True
+        published = False
         try:
-            for line in proc.stdout or ():
-                lines.put(line)
+            stdout = proc.stdout
+            if stdout is not None:
+                while True:
+                    fragment = stdout.readline(_STDOUT_READ_CHARS)
+                    eof = not fragment
+                    if consumer_done.is_set() or not searching:
+                        pending = ""
+                    else:
+                        pending += fragment
+                        while match := _LISTENING_RE.search(pending):
+                            # A chunk boundary is not the end of a URL. Wait
+                            # for whitespace or EOF before publishing it.
+                            if match.end() == len(pending) and not eof:
+                                break
+                            url = match.group(1)
+                            if len(url) <= _STARTUP_URL_CHARS:
+                                published = publish(url.rstrip("/"))
+                                searching = False
+                                pending = ""
+                                break
+                            pending = pending[match.end():]
+                        pending = pending[-_STARTUP_PARSE_CHARS:]
+                    if eof:
+                        break
         except (OSError, ValueError):
             pass
-        lines.put(None)
+        finally:
+            if not published:
+                publish(None)
 
     threading.Thread(target=read, daemon=True,
                      name=f"opencode-serve-stdout-{proc.pid}").start()
@@ -123,17 +170,19 @@ def wait_for_url(proc: subprocess.Popen, timeout: float = STARTUP_TIMEOUT) -> st
     try:
         while not deadline.is_set():
             try:
-                line = lines.get(timeout=0.2)
+                url = lines.get(timeout=0.2)
             except queue.Empty:
                 continue
-            if line is None:
-                return ""
-            match = _LISTENING_RE.search(line)
-            if match:
-                return match.group(1).rstrip("/")
+            return url or ""
         return ""
     finally:
         timer.cancel()
+        with publication:
+            consumer_done.set()
+            # Serialize abandonment against publication, releasing any late
+            # result without leaving a queue or producer waiting for a reader.
+            if not lines.empty():
+                lines.get_nowait()
 
 
 class ServeError(RuntimeError):
