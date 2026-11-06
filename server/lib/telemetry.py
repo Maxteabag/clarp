@@ -154,6 +154,9 @@ def _open(path: pathlib.Path) -> sqlite3.Connection:
     con.row_factory = sqlite3.Row
     con.execute(f"PRAGMA busy_timeout={SQLITE_BUSY_TIMEOUT_MS}")
     con.execute("PRAGMA synchronous=NORMAL")
+    # Match the measured SQLite default (KiB), never enlarge each thread's
+    # private cache while reducing the state-store connection budget.
+    con.execute("PRAGMA cache_size=-2000")
     return con
 
 
