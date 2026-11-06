@@ -24,7 +24,7 @@ Proposed public signatures (types below are contracts, not implemented code):
     Rules(*, family: str, owner: str, states: frozenset[str],
           events: frozenset[str], initial: str, final: frozenset[str],
           edges: tuple[Edge, ...], waits: Mapping[str, NamedWait],
-          transient: frozenset[str] = frozenset(), cyclic: bool = False)
+          refusal_codes: frozenset[str], transient: frozenset[str] = frozenset(), cyclic: bool = False)
     Rules.decide(state: str, event: str) -> str
     NamedWait(*, name: str, exits: tuple[WaitExit, ...], reason: str = "")
     WaitExit(kind: ExitKind, name: str, deadline_source: str = "")
@@ -37,9 +37,18 @@ Proposed public signatures (types below are contracts, not implemented code):
                      ids: SafeIds) -> None
 
 Outcome is exactly Applied(value), NoOp(value), Refused(code, observed_state)
-or Conflict(code). Unexpected writer/storage errors propagate unchanged; they
+or WriteConflict(code). The existing Conflict exception is NOT shadowed. Unexpected writer/storage errors propagate unchanged; they
 are not reclassified as harmless refusal. Applied means the named owner
 mutation completed, NOT that every downstream effect or store binding is safe.
+
+ExitKind is the finite set event/deadline/user/refused/error/closed/superseded;
+each exit has its owner-declared stable name, and only deadline exits name an
+existing deadline_source. RefusalCode is a string from Rules.refusal_codes,
+never arbitrary payload text. SafeIds has only entity_id, trace_id, operation_id
+and generation scalar-id slots, with bounded diagnostic representation; it
+cannot contain an opaque proof object or payload. Unknown diagnostic values
+use fixed tags rather than unbounded counter labels. Domain guards retain
+their exact old reasons through owner translation.
 
 E is an owner-defined immutable expectation: captured scalars or an opaque
 issued reference plus separately captured phase/target facts. P is borrowed
@@ -71,7 +80,7 @@ each concrete port requires source review and independent at-write barriers.
 
 The owner projects state from existing rows/maps/fields; Rules holds policy
 only. No second mutable enum can disagree with the authority. A zero-row CAS
-is Conflict, an illegal pair is Refused, and writer failure is still writer
+is WriteConflict in the new outcome API (legacy Conflict stays unchanged), an illegal pair is Refused, and writer failure is still writer
 failure. The owner maps outcomes to its existing public returns/exceptions.
 
 after_boundary uses the owner's actual outermost release, COMMIT/rollback,
