@@ -53,10 +53,13 @@ def main():
  state={'agents':{},'sent':[],'binding':binding()}
  for key in ('a','b','c'):state['agents'][key]=request('/agents',{'name':'Synthetic soak '+key,'backend':'codex','cwd':'/home/canary'})['session']
  write(args.state,state);start=time.monotonic();deadline=start+args.seconds;next_batch=start;next_request=start;polls=0;batches=0;started=args.state.with_suffix('.started.json');result=args.state.with_suffix('.result.json')
- write(started,{'pid':os.getpid(),'started_epoch':time.time(),'started_monotonic':start,'seconds_required':args.seconds,'synthetic_data_only':True,'rehearsal':args.rehearsal,'binding':binding()})
+ start_up_ns=time.clock_gettime_ns(time.CLOCK_BOOTTIME);clock_offset=start_up_ns/1e9-start;last_progress=start
+ write(started,{'start_up_ns':start_up_ns,'pid':os.getpid(),'started_epoch':time.time(),'started_monotonic':start,'seconds_required':args.seconds,'synthetic_data_only':True,'rehearsal':args.rehearsal,'binding':binding()})
  try:
   while time.monotonic()<deadline:
    now=time.monotonic()
+   if now-last_progress>45 or abs(time.clock_gettime_ns(time.CLOCK_BOOTTIME)/1e9-now-clock_offset)>1:raise RuntimeError('uninterrupted soak broken by pause/suspend; no resume')
+   last_progress=now
    if now>=next_batch and not Path('/home/canary/soak-pause-sends').exists():
     batch(state,batches);batches+=1;write(args.state,state);next_batch=start+batches*900
    if now>=next_request:
@@ -64,7 +67,7 @@ def main():
    time.sleep(min(.05,max(0,deadline-time.monotonic())))
   counts=verify(state);elapsed=time.monotonic()-start
   if elapsed<args.seconds or not all(v=={'users':1,'replies':1} for v in counts.values()):raise RuntimeError('full interval/equality not proven')
-  write(result,{'result':'PASS','started_monotonic':start,'finished_monotonic':time.monotonic(),'elapsed_seconds':elapsed,'required_seconds':args.seconds,'batches':batches,'polls':polls,'messages':len(counts),'synthetic_data_only':True,'rehearsal':args.rehearsal,'binding':binding()});return 0
+  write(result,{'result':'PASS','start_up_ns':start_up_ns,'end_up_ns':time.clock_gettime_ns(time.CLOCK_BOOTTIME),'started_monotonic':start,'finished_monotonic':time.monotonic(),'elapsed_seconds':elapsed,'required_seconds':args.seconds,'batches':batches,'polls':polls,'messages':len(counts),'synthetic_data_only':True,'rehearsal':args.rehearsal,'binding':binding()});return 0
  except Exception as error:
   write(result,{'result':'FAIL','elapsed_seconds':time.monotonic()-start,'error_type':type(error).__name__,'reason':str(error),'batches':batches,'polls':polls,'rehearsal':args.rehearsal,'binding':binding()});raise
 if __name__=='__main__':raise SystemExit(main())
