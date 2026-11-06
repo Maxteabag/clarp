@@ -1052,3 +1052,28 @@ def test_result_display_uses_only_its_own_structural_reply_evidence(fake_clarp, 
 def test_untrusted_or_absent_reply_annotation_preserves_result_fallback(annotation):
     from lib.turn_dispatch import _result_assistant_text
     assert _result_assistant_text({'result': 'Legacy provider answer', **annotation}) == 'Legacy provider answer'
+
+
+def test_reply_evidence_snapshots_are_copies_and_overflow_cannot_certify_an_answer():
+    """Private attempt protocol: consumers may retain result facts after reset.
+
+    The bounded identity window may lose provenance, never turn it into a
+    positive answer fact. No lifecycle decision is asserted here.
+    """
+    from lib.claude_reply_evidence import ClaudeReplyEvidence
+    evidence = ClaudeReplyEvidence()
+    event = {'type': 'assistant', 'message': {'id': 'first', 'model': '<synthetic>',
+             'content': [{'type': 'text', 'text': 'SDK fixture'}]}}
+    assert evidence.suppress_event(event)
+    first = evidence.finish_result()
+    for i in range(300):
+        evidence.suppress_event({'type': 'assistant', 'message': {
+            'id': f'actual-{i}', 'model': 'claude-real',
+            'content': [{'type': 'text', 'text': 'real text'}]}})
+    second = evidence.finish_result()
+    assert first == {'synthetic_seen': True, 'genuine_text_seen': False,
+                     'genuine_tool_seen': False, 'unknown_assistant_seen': False}
+    assert second['unknown_assistant_seen'] is True
+    assert second['synthetic_seen'] is False
+    assert len(evidence._messages) <= 256  # accepted per-attempt resource ceiling
+    assert evidence.finish_result() is None
