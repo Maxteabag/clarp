@@ -111,7 +111,9 @@ def test_goal_binding_requires_a_unique_positive_join(fault):
         goals['ffffffff-1234-4567-89ab-123456789abc'] = copy.deepcopy(goals[key])
     else:
         goals.clear()
-    assert report(a, b)
+    items = report(a, b)
+    assert items
+    assert any(i['channel'] == 'files' for i in items)
 
 
 @pytest.mark.parametrize('fault', ['remove-turn', 'failed-turn', 'message-backend', 'message-agent',
@@ -130,6 +132,8 @@ def test_goal_adaptation_does_not_hide_turn_or_message_regressions(fault):
     items = report(a, b)
     assert any(i['channel'] == 'table' and i['locator'].startswith(
         'turns' if fault in ('remove-turn', 'failed-turn') else 'messages') for i in items)
+    if fault in ('message-backend', 'message-agent', 'message-trace'):
+        assert any(i['channel'] == 'files' for i in items)
 
 
 @pytest.mark.parametrize('path', ['elsewhere/fake-goals.json', 'provider/other.json'])

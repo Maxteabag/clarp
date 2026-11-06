@@ -315,6 +315,61 @@ class Normalizer:
         return value
 
 
+
+def fixture_goal_file(capture: dict, file: dict):
+    """812: join this synthetic file's UUID keys; leave uncertain bindings visible.
+
+    This is not a general goal/key/clock rule. No captured object is mutated.
+    The full payload, multiplicity and all other channels remain compared.
+    """
+    value = file.get('json')
+    if (file.get('path') != 'provider/fake-goals.json' or file.get('kind') != 'json'
+            or not isinstance(value, dict)):
+        return value
+    tables = capture['db']['tables']
+    out = {}
+    for thread, entry in value.items():
+        if not isinstance(thread, str) or not UUID.fullmatch(thread) or not isinstance(entry, dict):
+            return value
+        runtimes = [r for r in tables.get('runtimes', []) if r.get('backend_session_id') == thread]
+        if len(runtimes) != 1:
+            return value
+        runtime = runtimes[0]
+        agent = runtime.get('agent_id')
+        agents = [r for r in tables.get('agents', []) if r.get('agent_id') == agent]
+        goals = [r for r in tables.get('agent_goals', []) if r.get('agent_id') == agent]
+        if len(agents) != 1 or len(goals) != 1:
+            return value
+        goal = goals[0]
+        session = agents[0].get('session')
+        if (not isinstance(session, str) or not session or goal.get('session') != session
+                or not isinstance(goal.get('backend'), str) or not goal['backend']
+                or not isinstance(entry.get('objective'), str)
+                or entry['objective'] != goal.get('objective')):
+            return value
+        turns = [r for r in tables.get('turns', []) if r.get('runtime_id') == runtime.get('runtime_id')]
+        traces = {r.get('trace_id') for r in turns if r.get('agent_id') == agent}
+        messages = [r for r in tables.get('messages', [])
+                    if r.get('agent_id') == agent or r.get('backend_session_id') == thread]
+        if (runtime.get('runtime_id') is None or not turns or len(traces) != len(turns)
+                or not messages or any(r.get('agent_id') != agent
+                                      or r.get('backend_session_id') != thread
+                                      or not r.get('trace_id') or r['trace_id'] not in traces
+                                      for r in messages)):
+            return value
+        clocks = [entry.get(k) for k in ('created', 'updated')]
+        if (any(isinstance(v, bool) or not isinstance(v, (int, float))
+                or not 1.5e12 < v < 2.2e12 for v in clocks) or clocks[1] < clocks[0]):
+            return value
+        # Runtime PK is part of the captured owner, not a latest/ordinal selection.
+        binding = [session, goal['backend'], runtime['runtime_id'], entry['objective']]
+        key = 'goal:' + hashlib.sha256(json.dumps(binding, ensure_ascii=True).encode()).hexdigest()
+        if key in out:
+            return value
+        out[key] = {**entry, 'created': '<time>', 'updated': '<time>'}
+    return out
+
+
 def normalize(capture: dict, harness_root: str) -> dict:
     n = Normalizer({'<ROOT>': capture['root'], '<BUILD>': capture['build'], '<HARNESS>': harness_root})
     n.clips = generated_clips(capture['files'])
@@ -371,7 +426,7 @@ def normalize(capture: dict, harness_root: str) -> dict:
     # and are compared by their normalized content instead.
     out['files'] = [{'path': n.string(f['path'], 'path'), 'bytes': f['bytes'] if f.get('kind') == 'bytes' else None,
                      'digest': f['digest'] if f.get('kind') == 'bytes' else None,
-                     'json': n.value(f['json']) if f.get('kind') == 'json' else None,
+                     'json': n.value(fixture_goal_file(capture, f)) if f.get('kind') == 'json' else None,
                      # Small text files: compared as text with generated ids (UUIDs, hex
                      # tokens) as surrogates and epoch readings (the claude source
                      # markers: 'pwa-voice <session> <epoch> <trace> 0') as <time>.
