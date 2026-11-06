@@ -47,7 +47,7 @@ from .. import provider_capabilities
 from .. import turn_lifecycle
 from ..turn_lifecycle import TurnEvent
 from ..live_pacing import LivePacer
-from ..claude_reply_evidence import ClaudeReplyEvidence
+from ..claude_reply_evidence import ClaudeReplyEvidence, REPLY_CODEC
 from ..log import log, log_exception
 from ..proc_util import stderr_text
 from ..process_registry import TurnHandle
@@ -720,7 +720,7 @@ class ClaudeBackend(Backend):
                                         "_clarp_suppressed_reply": True}
                     facts = evidence.finish_result()
                     if facts is not None:
-                        final_result = {**final_result, "_clarp_reply_provider": "claude",
+                        final_result = {**final_result, "_clarp_reply_provider": REPLY_CODEC,
                                         "_clarp_reply_evidence": facts}
                     live_text = ""
                     isolated_texts = []
