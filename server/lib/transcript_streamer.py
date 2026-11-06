@@ -111,7 +111,7 @@ class TranscriptStreamer:
         for agent in live:
             agent_id = agent["agent_id"]
             live_ids.add(agent_id)
-            if not backends.capabilities(agent.get("backend")).supports_transcript_streaming:
+            if not backends.by_id(agent.get("backend")).supports_transcript_streaming:
                 self._unbind(agent_id)
                 continue
             backend_session_id = sessions.get(agent_id)
