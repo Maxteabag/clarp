@@ -132,6 +132,8 @@ def synth_one(*,
 
     if not result.ok:
         tts_queue.mark_failed(queue_id, result.error)
+        if result.cancelled:
+            return True
         health.mark_error("tts_worker", result.error)
         _emit("tts_worker", "synthFail",
               context=_event_context(row, agent),
@@ -178,6 +180,11 @@ class _PwaStreamResult:
     target: pathlib.Path | None = None
     error: str = ""
     clip_id: int | None = None
+    cancelled: bool = False
+
+
+class _RawCancelled(Exception):
+    """An announced raw clip lost its existing turn authority."""
 
 
 def _google_collision_refusal(cfg, clip_route) -> str | None:
@@ -224,14 +231,15 @@ def _route_has_voice(cfg, row: dict, agent: dict | None, clip_route) -> bool:
 def _synthesize(*, cfg, row: dict, agent: dict,
                 out_path, on_chunk, trace_id,
                 delivery_fields: dict | None = None,
-                clip_route: "tts_mode.Route | None" = None) -> int:
+                clip_route: "tts_mode.Route | None" = None,
+                check_active: Callable[[], None] | None = None) -> int:
     """Synthesize one queued clip through the shared provider service."""
     from .tts_provider import AudioSink
     from .tts_service import synth
     return synth(
         row["text"], clip_route, AudioSink(out_path, on_chunk, trace_id, delivery_fields),
         "queue", cfg=cfg, raw_voice=row["voice_id"], agent=agent,
-        emit=_emit, context=lambda: _event_context(row, agent))
+        emit=_emit, context=lambda: _event_context(row, agent), check_active=check_active)
 
 
 def _synth_pwa_via_delivery(row: dict, agent: dict,
@@ -252,6 +260,10 @@ def _synth_pwa_via_delivery(row: dict, agent: dict,
     """
     cfg = load_config()
     trace_id = row.get("trace_id")
+    raw = delivery.name == "raw-pcm"
+    if raw:
+        from . import turn_queue
+        stop_generation = turn_queue.user_stop_generation(row["agent_id"])
 
     try:
         session = delivery.begin(
@@ -267,11 +279,41 @@ def _synth_pwa_via_delivery(row: dict, agent: dict,
         log_exception("clipDeliveryBeginFail", e, detail=delivery.name)
         return _PwaStreamResult(False, error=f"delivery begin failed: {e}")
 
+    raw_broker = getattr(session, "_broker", None) if raw else None
+    stream_failure_reported = False
+
+    def check_active():
+        nonlocal stream_failure_reported
+        if raw and (turn_queue.user_stop_generation(row["agent_id"]) != stop_generation
+                    or (trace_id and agents_db.get_trace(row["agent_id"], max_age_ms=None) != trace_id)):
+            raise _RawCancelled(tts_queue.CANCELLED_PREFIX + "raw clip authority changed")
+        if raw_broker is not None:
+            live = raw_broker.get(session.clip_id)
+            code = "raw_stream_unavailable" if live is None else ""
+            if live is not None:
+                with live.cond:
+                    if live.failed:
+                        code = ("raw_stream_wait_timeout" if live.error == "stream wait timeout"
+                                else "raw_stream_failed")
+            if code:
+                if not stream_failure_reported:
+                    _emit("tts_worker", "rawStreamFailed", context=_event_context(row, agent),
+                          level="warn", detail={"code": code, "clip_id": session.clip_id})
+                    stream_failure_reported = True
+                raise RuntimeError(code)
+
     # Some deliveries broadcast at begin (ChunkedFile — client subscribes
     # to a live stream that grows). Others must wait until finalize (HLS —
     # the playlist must have #EXT-X-ENDLIST before iOS Safari can play it
     # reliably). Sessions advertise their preference via publish_after_finalize.
     publish_late = getattr(session, "publish_after_finalize", False)
+    if raw:
+        try:
+            check_active()
+        except (_RawCancelled, RuntimeError) as error:
+            session.fail(str(error))
+            return _PwaStreamResult(False, error=str(error),
+                                    cancelled=isinstance(error, _RawCancelled))
     if not publish_late:
         _publish_clip_event(
             stream=stream, herald=herald,
@@ -280,8 +322,13 @@ def _synth_pwa_via_delivery(row: dict, agent: dict,
 
     # Chunk pacing: a pause between provider chunks is the server-side
     # twin of a client stall, and the only way to tell the two apart later.
+    def feed(index, chunk):
+        check_active()
+        session.feed(index, chunk)
+        check_active()
+
     paced_feed, finish_pacing = clip_pacing.track(
-        session.feed,
+        feed if raw else session.feed,
         clip_id=getattr(session, "clip_id", None),
         delivery=getattr(delivery, "name", ""),
         emit=_emit,
@@ -297,13 +344,21 @@ def _synth_pwa_via_delivery(row: dict, agent: dict,
             trace_id=trace_id,
             delivery_fields=session.sse_fields,
             clip_route=clip_route,
+            **({"check_active": check_active} if raw else {}),
         )
+        check_active()
+        if raw:
+            final = session.finalize(total_bytes=bytes_written)
+            # finish() makes the normal writer outcome stable. If it expired
+            # just before finish, its failed bit remains set: never report DONE.
+            check_active()
     except Exception as e:  # provider adapters normalize failures to queue state
         session.fail(str(e))
         finish_pacing("failed")
-        return _PwaStreamResult(False, error=str(e))
+        return _PwaStreamResult(False, error=str(e), cancelled=isinstance(e, _RawCancelled))
 
-    final = session.finalize(total_bytes=bytes_written)
+    if not raw:
+        final = session.finalize(total_bytes=bytes_written)
     finish_pacing("complete")
 
     if publish_late:
@@ -432,17 +487,20 @@ def _publish_clip_event(*, stream: Any | None, herald: Any | None,
         except Exception as e:  # noqa: BLE001
             log_exception("ttsWorkerHeraldPublishFail", e, detail=url)
     if stream is not None:
-        events.broadcast(stream, events.audio(
-            url=url,
-            name=name,
-            session=row["session"],
-            clip_id=session.clip_id,
-            agent_id=agent["agent_id"],
-            persona=agent.get("persona"),
-            trace_id=trace_id,
+        # Merge once before the call: raw PCM already supplies the same url.
+        # Explicit keys keep their positions; delivery fields follow as before.
+        payload = {
+            "url": url,
+            "name": name,
+            "session": row["session"],
+            "clip_id": session.clip_id,
+            "agent_id": agent["agent_id"],
+            "persona": agent.get("persona"),
+            "trace_id": trace_id,
             **session.sse_fields,
             **tag,
-        ))
+        }
+        events.broadcast(stream, events.audio(**payload))
 
 
 

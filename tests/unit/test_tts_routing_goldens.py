@@ -91,7 +91,19 @@ def _run(s, monkeypatch, tmp_path):
     monkeypatch.setattr(google_tts, "credentials", lambda cfg: "creds")
     monkeypatch.setattr(tts_worker, "_emit", lambda source, name, **kw: events.append(
         [name, {k: v for k, v in (kw.get("detail") or {}).items() if k != "error"}]))
+    # This table isolates provider policy. Physical PCM decoding is exercised
+    # by test_tts_worker; keep this codec boundary deterministic like providers.
+    def decode(source, target, audio_format, feed, check_active):
+        check_active()
+        feed(0, b"a")
+        return 1
+    monkeypatch.setattr(tts_service, "_decode_raw_fallback", decode)
     cfg = _config(s)
+    fields = {"delivery": s["delivery"]}
+    if s["delivery"] == "raw-pcm":
+        fields["audio_format"] = {
+            "container": "raw", "encoding": cfg.raw_pcm_encoding,
+            "sample_rate": cfg.raw_pcm_sample_rate, "channels": 1}
     row = {"voice_id": "v-raw", "text": "Hello [laughing] there", "agent_id": "a1",
            "session": "ada", "trace_id": "t1", "queue_id": 1, "source": "pwa"}
     agent = {"persona": "Ada", "agent_id": "a1", "session": "ada"}
@@ -99,7 +111,7 @@ def _run(s, monkeypatch, tmp_path):
         written = tts_worker._synthesize(
             cfg=cfg, row=row, agent=agent, out_path=tmp_path / "clip.mp3",
             on_chunk=lambda i, b: chunks.append(i), trace_id="t1",
-            delivery_fields={"delivery": s["delivery"]}, clip_route=_route(cfg, s))
+            delivery_fields=fields, clip_route=_route(cfg, s))
         result = f"ok:{written}"
     except Exception as error:  # noqa: BLE001 - the golden records it
         result = f"{type(error).__name__}: {error}"
