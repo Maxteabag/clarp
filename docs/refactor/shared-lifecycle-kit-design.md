@@ -43,6 +43,8 @@ Outcome is exactly Applied(value), NoOp(value), Refused(code, observed_state)
 or WriteConflict(code). The existing Conflict exception is NOT shadowed. Unexpected writer/storage errors propagate unchanged; they
 are not reclassified as harmless refusal. Applied means the named owner
 mutation completed, NOT that every downstream effect or store binding is safe.
+Outcome kind is never inferred from value truthiness: Applied(None), false or0
+can be legitimate results; no-target, idempotent noop and conflict stay distinct.
 
 ExitKind is the finite set event/deadline/user/refused/error/closed/superseded;
 each exit has its owner-declared stable name, and only deadline exits name an
