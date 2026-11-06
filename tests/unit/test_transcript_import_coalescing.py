@@ -412,3 +412,27 @@ def test_unchanged_validation_does_not_erase_last_expensive_import_cost(tmp_path
     clock.advance(65)
     assert done.wait(2)
     assert seen == [65]
+
+
+@pytest.mark.parametrize('duration,next_admission', [(1, 11), (5, 15), (5.001, 35.007), (20, 140), (100, 400)])
+def test_slow_source_backoff_is_measured_from_completion_with_threshold_and_cap(
+        tmp_path, clock, duration, next_admission):
+    first, follow = tmp_path / 'first', tmp_path / 'follow'
+    first.write_text('initial bytes')
+    follow.write_text('new dirty source')
+    done, after = completed()
+    def importer():
+        clock.now = duration
+    assert cache.schedule_import(first, importer, owner='agent', after=after)
+    assert done.wait(2)
+    assert cache.wait_for_background(2)
+    later, later_after = completed()
+    observed = []
+    assert cache.schedule_import(follow, lambda: observed.append(clock.now),
+                                 owner='agent', after=later_after)
+    clock.advance(next_admission - .001)
+    assert not later.wait(.05), observed
+    clock.advance(next_admission)
+    assert later.wait(2)
+    assert observed == [next_admission]
+    assert cache.wait_for_background(2)

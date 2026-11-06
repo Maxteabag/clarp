@@ -122,3 +122,43 @@ def test_recent_slow_history_skips_wait_then_recovers_after_a_fast_import(tmp_pa
     assert cache.import_for_snapshot(path, importer, owner="private-canary-owner", timeout=0.5)
     assert cache.wait_for_background(2)
     assert imported == ["first", "second", "third"]
+
+
+def test_deadline_cooldown_skips_repeated_waits_for_120s_without_losing_refresh(
+        tmp_path, monkeypatch, capsys):
+    from types import SimpleNamespace
+    path = tmp_path / 'private-canary-source'
+    path.write_text('dirty source')
+    entered, release = threading.Event(), threading.Event()
+    def blocked():
+        entered.set()
+        assert release.wait(3)
+    assert cache.schedule_import(path, blocked, owner='owner')
+    assert entered.wait(1)
+    clock, waits = [0.0], []
+    def elapse_wait(timeout):
+        waits.append(timeout)
+        clock[0] += timeout
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(cache, 'time', SimpleNamespace(monotonic=lambda: clock[0]))
+            patch.setattr(cache._cond, 'wait', elapse_wait)
+            assert not cache.import_for_snapshot(path, blocked, owner='owner', timeout=.05)
+            assert len(waits) == 1
+            path.write_text('newest dirty source still needs import')
+            assert not cache.import_for_snapshot(path, blocked, owner='owner', timeout=.05)
+            assert len(waits) == 1, 'a repeat snapshot waited again during its cooldown'
+            clock[0] = 120.049
+            assert not cache.import_for_snapshot(path, blocked, owner='owner', timeout=.05)
+            assert len(waits) == 1
+            clock[0] = 120.05
+            assert not cache.import_for_snapshot(path, blocked, owner='owner', timeout=.05)
+            assert len(waits) == 2, 'waiting must become eligible at the fixed expiry'
+            captured = capsys.readouterr().err
+            assert 'snapshotImportSkip code=deadline_cooldown' in captured
+            assert 'private-canary' not in captured
+    finally:
+        release.set()
+        assert cache.wait_for_background(2)
+    # The refusal to wait is not source coverage: admitted work kept newest bytes.
+    assert cache.import_for_snapshot(path, blocked, owner='owner', timeout=.05)
