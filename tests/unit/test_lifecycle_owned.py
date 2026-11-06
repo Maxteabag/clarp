@@ -63,7 +63,7 @@ def test_invalid_new_declarations_refuse(change):
         policy(**change)
 
 
-@pytest.mark.parametrize("exit", [lk for lk in ("unbounded", "timer")])
+@pytest.mark.parametrize("exit", ["unbounded", "timer"])
 def test_unknown_wait_exit_kind_refuses(exit):
     with pytest.raises(lk.LifecycleError):
         policy(waits={"ready": lk.NamedWait(name="bad", exits=(lk.WaitExit(exit, "start"),))})
@@ -254,3 +254,138 @@ def test_diagnostics_inventory_is_immutable_bounded_and_has_no_caller_family():
     with pytest.raises(lk.LifecycleError):
         sink.capture("start", "ready", "unbounded-new-reason", lk.SafeIds())
     assert sum(sink.counts.values()) == 10
+
+
+def test_correction_noop_is_distinct_from_ordinary_self_loop():
+    rules = policy(states={"ready", "busy", "done", "corrected"}, final={"done", "corrected"},
+                   events={"start", "finish", "renew", "correct"},
+                   edges=policy().edges + (lk.Edge("correct", frozenset({"done"}), "corrected", correction=True),))
+    assert rules.decide("done", "correct") == "corrected"
+    assert rules.decide("corrected", "correct") == "corrected"
+    assert rules.already_corrected("corrected", "correct")
+    assert not rules.already_corrected("busy", "renew")
+
+
+def test_cyclic_resource_does_not_invent_a_final_or_escape_waits():
+    options = dict(states={"ready", "busy"}, events={"start", "release"}, final=set(), cyclic=True,
+                   edges=(lk.Edge("start", frozenset({"ready"}), "busy"),
+                          lk.Edge("release", frozenset({"busy"}), "ready")),
+                   waits={"ready": lk.NamedWait(name="admit", exits=(lk.WaitExit("event", "start"),)),
+                          "busy": lk.NamedWait(name="owner_release", exits=(lk.WaitExit("event", "release"),))})
+    rules = policy(**options)
+    assert rules.decide("busy", "release") == "ready"
+    with pytest.raises(lk.LifecycleError):
+        policy(**(options | {"waits": {}}))
+
+
+def test_independent_oracle_detects_valid_graph_mutants():
+    original = policy()
+    # All three graphs validate: structural walking alone cannot catch these.
+    mutants = [policy(edges=original.edges[:2]),
+               policy(edges=original.edges + (lk.Edge("finish", frozenset({"ready"}), "done"),)),
+               policy(edges=original.edges[:2] + (lk.Edge("renew", frozenset({"busy"}), "done"),))]
+    for rules, state, event, expected in [(mutants[0], "busy", "renew", "busy"),
+                                          (mutants[1], "ready", "finish", None),
+                                          (mutants[2], "busy", "renew", "busy")]:
+        with pytest.raises((AssertionError, lk.IllegalTransition)):
+            if expected is None:
+                # Independent owner contract forbids finishing before start.
+                try:
+                    rules.decide(state, event)
+                except lk.IllegalTransition:
+                    continue
+                raise AssertionError("finish was admitted before start")
+            assert rules.decide(state, event) == expected
+    wrong_exit = policy(waits={"ready": original.waits["ready"],
+                               "busy": lk.NamedWait(name="result", exits=(lk.WaitExit("event", "renew"),))})
+    assert wrong_exit.waits["busy"].exits != (lk.WaitExit("event", "finish"),)
+
+
+def test_interleaved_attempts_keep_their_own_notice_and_release_boundary():
+    a, b = MemoryOwner(), MemoryOwner()
+    ra, rb = policy(family="A"), policy(family="B")
+    notices = []
+    def report_a(notice):
+        assert not a.lock.locked()
+        notices.append((notice.family, notice.reason))
+    def report_b(notice):
+        assert a.lock.locked() and not b.lock.locked()
+        notices.append((notice.family, notice.reason))
+    sa, sb = sink_for(ra, [], report=report_a), sink_for(rb, [], report=report_b)
+    class PortA(lk.OwnerWritePort):
+        def write(self, rules, event, reject):
+            with a.lock:
+                result = reject("generation", a.state, lk.SafeIds())
+                b.generation += 1
+                stale_b = lk.OwnedEvent("start", "b", Fence(1, b.token), None)
+                assert isinstance(lk.apply_owned(rb, stale_b, b.attempt(), sb), lk.Refused)
+                return result
+    assert isinstance(lk.apply_owned(ra, a.event(), PortA(), sa), lk.Refused)
+    assert notices == [("B", "generation"), ("A", "generation")]
+    assert sum(sa.counts.values()) == sum(sb.counts.values()) == 1
+    assert a.writes == b.writes == 0
+
+
+@pytest.mark.parametrize("fault", ["capture", "emit", "same_primary"])
+def test_diagnostic_fault_retains_exact_primary_and_original_traceback(fault):
+    owner, rules = MemoryOwner(), policy()
+    primary = {}
+    secondary = RuntimeError("diagnostic fault")
+    class RecordingPolicy:
+        def decide(self, state, event):
+            try:
+                return rules.decide(state, event)
+            except lk.IllegalTransition as error:
+                primary["error"], primary["traceback"] = error, error.__traceback__
+                raise
+    class Sink(lk.RefusalSink):
+        def capture(self, *args, **kwargs):
+            if fault == "capture":
+                raise secondary
+            return super().capture(*args, **kwargs)
+    def report(notice):
+        raise primary["error"] if fault == "same_primary" else secondary
+    sink = Sink(family=rules.family, states=rules.states, events=rules.events,
+                refusal_codes=rules.refusal_codes, report=report)
+    with pytest.raises(lk.IllegalTransition) as caught:
+        lk.apply_owned(RecordingPolicy(), owner.event("finish"), owner.attempt(), sink)
+    assert caught.value is primary["error"]
+    tracebacks = []
+    current = caught.value.__traceback__
+    while current:
+        tracebacks.append(current)
+        current = current.tb_next
+    assert primary["traceback"] in tracebacks
+    if fault != "same_primary":
+        assert caught.value.__cause__ is secondary
+    else:
+        assert caught.value.__cause__ is not caught.value
+    assert owner.writes == 0 and not owner.lock.locked()
+
+
+def test_no_primary_reporter_error_propagates_without_repeating_write_or_report():
+    owner, rules = MemoryOwner(), policy()
+    event = owner.event()
+    owner.generation += 1
+    failure = RuntimeError("reporter fault")
+    attempts = []
+    def report(notice):
+        attempts.append(notice)
+        raise failure
+    with pytest.raises(RuntimeError) as caught:
+        lk.apply_owned(rules, event, owner.attempt(), sink_for(rules, [], report=report))
+    assert caught.value is failure and len(attempts) == 1 and owner.writes == 0
+
+
+def test_diagnostic_reset_is_owner_local_and_does_not_change_authority():
+    a, b = MemoryOwner(), MemoryOwner()
+    rules = policy()
+    sa, sb = sink_for(rules, []), sink_for(rules, [])
+    for owner, sink in ((a, sa), (b, sb)):
+        with pytest.raises(lk.IllegalTransition):
+            lk.apply_owned(rules, owner.event("finish"), owner.attempt(), sink)
+    with a.lock:
+        sa.reset()
+    assert not sa.counts and not sa.recent and sum(sb.counts.values()) == 1
+    assert isinstance(lk.apply_owned(rules, a.event(), a.attempt(), sa), lk.Applied)
+    assert a.state == "busy" and b.state == "ready"
