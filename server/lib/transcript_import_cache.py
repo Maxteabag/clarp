@@ -467,12 +467,17 @@ def _drain_background():
             started = time.monotonic()
             try:
                 try:
-                    _import_admitted(path, importer, owner, item_epoch)
+                    imported = _import_admitted(path, importer, owner, item_epoch)
                     completed = time.monotonic()
                     with _guard:
                         if _epoch == item_epoch and not _resetting:
                             _last_started[_owner_key(key)] = (
                                 completed, max(0.0, completed - started))
+                            if imported:
+                                # RM-N12: unchanged callback-only validation
+                                # must not erase the last measured slow import.
+                                _last_import_duration.put(
+                                    key, item_epoch, max(0.0, completed - started))
                 except Exception as exc:
                     log_exception('backgroundTranscriptImportFail', exc, detail=owner)
                 else:

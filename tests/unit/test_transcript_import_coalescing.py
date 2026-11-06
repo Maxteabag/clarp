@@ -257,3 +257,47 @@ def test_cooldown_capacity_never_evicts_hot_owner_and_refused_dirty_retries(tmp_
                                  owner='refused', after=admitted_after)
     assert admitted.wait(2)
     assert seen == ['owner zero still hot']
+
+
+def test_callback_duration_failure_and_reentrant_request_do_not_shift_window(tmp_path, clock):
+    first, second = tmp_path / 'callback-first', tmp_path / 'callback-second'
+    first.write_text('one')
+    second.write_text('two')
+    seen = []
+    done, after = completed()
+
+    def callback():
+        clock.now = 100  # callback cost is not import duration/completion
+        assert cache.schedule_import(second, lambda: seen.append(('two', clock.now)),
+                                     owner='agent', after=after)
+        raise RuntimeError('synthetic callback failure after reentrant admission')
+
+    assert cache.schedule_import(first, lambda: seen.append(('one', clock.now)),
+                                 owner='agent', after=callback)
+    assert done.wait(2)
+    assert cache.wait_for_background(2)
+    assert seen == [('one', 0), ('two', 100)]
+
+
+def test_deferred_keys_occupy_capacity_and_refused_version_can_retry(tmp_path, clock, monkeypatch):
+    monkeypatch.setattr(cache, '_BACKGROUND_LIMIT', 1)
+    first, second = tmp_path / 'deferred-first', tmp_path / 'refused-second'
+    first.write_text('v1')
+    second.write_text('retained without another append')
+    done, after = completed()
+    assert cache.schedule_import(first, lambda: None, owner='first', after=after)
+    assert done.wait(2)
+    assert cache.wait_for_background(2)
+    first.write_text('v2')
+    later, later_after = completed()
+    assert cache.schedule_import(first, lambda: None, owner='first', after=later_after)
+    seen = []
+    assert not cache.schedule_import(second, lambda: seen.append(second.read_text()), owner='second')
+    clock.advance(10)
+    assert later.wait(2)
+    assert cache.wait_for_background(2)
+    retry, retry_after = completed()
+    assert cache.schedule_import(second, lambda: seen.append(second.read_text()),
+                                 owner='second', after=retry_after)
+    assert retry.wait(2)
+    assert seen == ['retained without another append']
