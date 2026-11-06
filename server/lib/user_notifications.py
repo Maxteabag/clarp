@@ -158,7 +158,7 @@ def _causing_user_row(agent_id: str, backend_session_id: str,
         where += " OR trace_id = ?"
         params.append(trace_id)
     where += ")"
-    if trace_id:
+    if identified:
         where += " AND " + _OTHER_OWNER_SQL
         params.extend((trace_id, trace_id))
     if backend_session_id:
@@ -230,9 +230,6 @@ def _assistant_candidates(agent_id: str, backend_session_id: str, floor_ms: int,
     if identified:
         where += " AND trace_id = ?"
         params.append(trace_id)
-    elif trace_id:
-        where += " AND " + _OTHER_OWNER_SQL
-        params.extend((trace_id, trace_id))
     params.append(ASSISTANT_CANDIDATE_LIMIT)
     return db.conn().execute(
         f"""SELECT message_id, text, updated_at, origin, kind
