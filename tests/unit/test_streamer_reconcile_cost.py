@@ -101,7 +101,8 @@ def test_live_instance_and_class_support_overrides_are_not_cached(monkeypatch, t
     streamer = TranscriptStreamer()
     # Restore the singleton's exact instance dictionary, including whether
     # it inherited the flag, so later tests do not inherit an instance shadow.
-    original_instance = vars(runner).copy()
+    original_instance = vars(runner).get("supports_transcript_streaming")
+    inherited = "supports_transcript_streaming" not in vars(runner)
     try:
         streamer.reconcile_once()
         assert streamer.pool.agent_ids() == []
@@ -115,8 +116,10 @@ def test_live_instance_and_class_support_overrides_are_not_cached(monkeypatch, t
         streamer.reconcile_once()
         assert streamer.pool.agent_ids() == ["override"]
     finally:
-        vars(runner).clear()
-        vars(runner).update(original_instance)
+        if inherited:
+            vars(runner).pop("supports_transcript_streaming", None)
+        else:
+            runner.supports_transcript_streaming = original_instance
         streamer.stop()
 
 
