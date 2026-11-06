@@ -711,13 +711,16 @@ class ClaudeBackend(Backend):
                     final_result = (
                         {**ev, "_assistant_text": assistant_text}
                         if assistant_text else ev)
-                    if not assistant_text and evidence.suppresses_result_text(ev.get("result")):
+                    if (not assistant_text and not ev.get("last_agent_message")
+                            and not ev.get("message")
+                            and evidence.suppresses_result_text(ev.get("result"))):
                         # Preserve raw provider diagnostics but prevent the
                         # text extractor from falling back to this SDK text.
                         final_result = {**ev, "_assistant_text": None}
                     facts = evidence.finish_result()
                     if facts is not None:
-                        final_result = {**final_result, "_clarp_reply_evidence": facts}
+                        final_result = {**final_result, "_clarp_reply_provider": "claude",
+                                        "_clarp_reply_evidence": facts}
                     live_text = ""
                     isolated_texts = []
             rc = proc.wait()
