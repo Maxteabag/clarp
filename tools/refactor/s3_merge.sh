@@ -177,62 +177,13 @@ for path in $conflicts; do
   esac
 done
 
-# S9: integration may change a split module only through its recipe. Regenerating the
-# split from the merge base's text must give exactly integration's files; anything else
-# is an integration-only edit that taking main's text below would silently drop.
-if [ -n "$split_specs$method_specs" ]; then
-  base=$(git merge-base "$main" "$integration") || die 8 "no merge base"
-  "$PY" - "$root" "$base" "$integration" "$method_affected" <<'PYEOF' || die 8 "a split module differs on integration from its recipe applied to the merge base (see above): port the edit to main or into the recipe"
-import pathlib, subprocess, sys, tempfile
-root, base, integration, method_affected = sys.argv[1:5]
-method_affected = set(method_affected.splitlines())
-sys.path.insert(0, f"{root}/tools/refactor")
-import split_apply
-# With methods, extend this S9 validation block with one complete ordered
-# reconstruction. Do not also run split-only checks on the same files.
-if pathlib.Path(root, "tools/refactor/s3_methods.py").exists():
-    import s3_methods
-    method_recipes = s3_methods.recipes(pathlib.Path(root))
-    if method_recipes:
-        s3_methods.validate(pathlib.Path(root), base, integration, method_recipes)
-        sys.exit(0)
-def show(ref, rel):
-    out = subprocess.run(["git", "-C", root, "show", f"{ref}:{rel}"], capture_output=True, text=True)
-    return out.stdout if out.returncode == 0 else None
-splits, repoints = split_apply.load_recipes(pathlib.Path(root, "tools/refactor/splits"))
-bad = []
-with tempfile.TemporaryDirectory() as tmp:
-    for entry in splits:
-        rels = ["server/" + entry["module"]] + ["server/" + p["module"] for p in entry["part"]]
-        if show(integration, rels[1]) is None:
-            # Not applied on integration yet: stage A still takes main's text of
-            # the old module, so integration's copy must be the merge base's.
-            if show(integration, rels[0]) != show(base, rels[0]):
-                bad.append(f"{rels[0]} (split {entry['name']}, not yet applied)")
-            continue
-        work = pathlib.Path(tmp, entry["name"])
-        (work / "server" / entry["module"]).parent.mkdir(parents=True, exist_ok=True)
-        (work / "server" / entry["module"]).write_text(show(base, rels[0]) or "")
-        expected = split_apply.apply_split(work, entry) if show(base, rels[1]) is None else {}
-        for rel in rels:
-            want = expected.get(rel, show(base, rel))
-            if want != show(integration, rel):
-                bad.append(f"{rel} (split {entry['name']})")
-    for entry in repoints:
-        rel = "server/" + entry["file"]
-        work = pathlib.Path(tmp, "repoint-" + entry["name"])
-        (work / rel).parent.mkdir(parents=True, exist_ok=True)
-        (work / rel).write_text(show(base, rel) or "")
-        try:
-            repointed = split_apply.apply_repoint(work, entry).get(rel, show(base, rel))
-        except split_apply.Refusal:
-            repointed = None
-        if show(integration, rel) not in (show(base, rel), repointed):
-            bad.append(f"{rel} (repoint {entry['name']})")
-print("\n".join("s3_merge: integration-only edit in " + b for b in bad), file=sys.stderr)
-sys.exit(1 if bad else 0)
-PYEOF
-fi
+# One strict pre-A reconstruction uses merge-base recipe DATA for history.
+# Current pinned-main recipes still exclusively drive cleanup and D/E below.
+# Run even with no current entries: retired historical families must not vanish.
+base=$(git merge-base "$main" "$integration") || die 8 "no merge base"
+[ -f tools/refactor/s3_methods.py ] || die 8 "missing pinned-main historical validator"
+"$PY" tools/refactor/s3_methods.py --root "$root" --validate "$base" "$integration" \
+  || die 8 "a generated family differs from its historical recipe/source or has an unsupported recipe migration"
 
 # A: main's server.py + the replayed S3 diffs; generated files removed.
 git checkout "$main" -- server/server.py || die 4 "cannot take main's server.py"

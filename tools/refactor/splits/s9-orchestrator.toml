@@ -1,0 +1,93 @@
+# S9 cut 1e: retain service/settings/store/control in the facade.
+# Pure move, regenerated from main source at every integration merge.
+
+[[split]]
+name = "orchestrator"
+module = "lib/orchestrator.py"
+
+[[split.part]]
+module = "lib/orchestrator_types.py"
+names = [
+    "DEFAULT_PROVIDER",
+    "JANITOR_ROLE",
+    "POLICY_OPTION_KEYS",
+    "DEFAULT_MODEL",
+    "DEFAULT_EFFORT",
+    "OPENAI_PROVIDER",
+    "TYPESAFE_PROVIDER",
+    "OPENAI_CATALOG_BACKEND",
+    "OPENAI_EFFORTS",
+    "DEFAULT_TIMEOUT_MS",
+    "ORCHESTRATOR_VOICE_ID",
+    "KEY_ENABLED",
+    "KEY_HANDS_FREE_ONLY",
+    "KEY_FALLBACK_ONLY",
+    "KEY_CONFIDENCE_THRESHOLD",
+    "KEY_PROVIDER",
+    "KEY_MODEL",
+    "KEY_EFFORT",
+    "KEY_TIMEOUT_MS",
+    "KEY_VOICE_ID",
+    "HIGH_CONFIDENCE",
+    "STICKY_CONFIDENCE",
+    "CLARIFY_CONFIDENCE",
+    "PENDING_TTL_MS",
+    "RECENT_MESSAGES_PER_ROLE",
+    "MESSAGE_CONTEXT_CHARS",
+    "STATE_DETAIL_CONTEXT_CHARS",
+    "PENDING_CONTEXT_CHARS",
+    "RECENT_AGENT_WINDOW_MS",
+    "DECISION_AGENT_MESSAGE",
+    "DECISION_CONTROL",
+    "DECISION_STATUS",
+    "DECISION_AGENT_CONTROL",
+    "DECISION_CORRECTION",
+    "DECISION_CLARIFY",
+    "DECISION_AMBIGUOUS",
+    "DECISION_IGNORED",
+    "DECISION_ERROR",
+    "FINAL_ROUTE",
+    "FINAL_CLARIFY",
+    "FINAL_STATUS",
+    "FINAL_CONTROL",
+    "FINAL_IGNORED",
+    "FINAL_FALLBACK",
+    "FINAL_ERROR",
+    "DISPATCH_RETRYABLE",
+    "TYPESAFE_TARGET_MIN",
+    "TYPESAFE_DECISION_MIN",
+    "OrchestratorSettings",
+    "OrchestratorDecision",
+    "OrchestratorOutcome",
+]
+
+[[split.part]]
+module = "lib/orchestrator_context.py"
+names = [
+    "build_context_packet",
+    "_agent_context_activity",
+    "_recent_messages",
+    "_latest_state",
+    "_compact_state",
+    "_compact_text",
+    "_pending_utterances",
+    "_name_candidates",
+]
+
+[[split.part]]
+module = "lib/orchestrator_model.py"
+names = [
+    "normalize_provider",
+    "call_model",
+    "_call_openai",
+    "_model_prompt",
+    "_typesafe_questions",
+    "_typesafe_state",
+    "_call_typesafe",
+    "_extract_json",
+    "parse_decision",
+    "_public_decision",
+    "_OPENAI_ALIASES",
+    "_OPENAI_EFFORTS",
+    "_JSON_RE",
+]

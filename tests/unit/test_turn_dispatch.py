@@ -3783,3 +3783,111 @@ def test_an_agent_stop_then_resume_and_restart_keeps_the_pending_user_retry(tmp_
     turn_queue.set_paused(agent_id, False)                 # the user resumes
     _td.reset_for_tests()                                  # and the runtime restarts
     _assert_retry_delivers_once(service, backends, agent_id)
+
+
+def test_a_usage_limit_while_the_credential_switch_waits_fails_visibly_without_failover(
+        tmp_path, monkeypatch):
+    """BACKENDS-06 (c): the account was already switched, but the shared Codex
+    process still runs the old credentials because another agent is busy. A
+    usage limit then does not start another failover (which would loop and
+    mark accounts); the turn ends visibly, saying the switch waits."""
+    coordinator, scheduled = _enable_account_failover(monkeypatch)
+    service, backend, agent_id = _make_service(tmp_path)
+    claude = _td.backends.by_id("claude")
+    monkeypatch.setattr(claude, "credential_switch_pending", lambda message: True, raising=False)
+    service.dispatch(text="hello", requested_session="mike", trace_id="t-limit",
+                     synthesize_audio=False)
+    backend.live = False
+    backend.spawned[-1][1]["on_error"]("You've hit your usage limit. Try again at 3:29 PM.")
+
+    assert not coordinator.recovering and scheduled == []
+    state = agents_db.latest_state(agent_id)
+    assert state["kind"] == AgentState.INTERRUPTED
+    assert "switch" in state["detail"]["message"].lower()
+
+
+class _HeldSessionBackends(_ProcessBackends):
+    """A process outside any turn still holds the agent's native session (a
+    detached, stuck Codex turn: BACKENDS-07b)."""
+
+    def __init__(self):
+        super().__init__()
+        self.holders = []
+
+    def turn_holders(self, backend, agent_id):
+        return [h for h in self.holders if h.alive]
+
+
+def test_a_send_waits_behind_a_process_that_still_holds_the_session(tmp_path):
+    """Lead (stage 1): a send to an agent whose stopped turn is stuck in the
+    shared Codex process is queued until that process is recycled. Failing it
+    loses the composed text in the PWA and desktop, which clear the composer
+    before /send and turn the failed bubble into a normal row on the next sync."""
+    service, _, agent_id = _make_service(tmp_path)
+    backends = _HeldSessionBackends()
+    service.backends = backends
+    service.dispatch(text="first", requested_session="mike", trace_id="t1",
+                     synthesize_audio=False)
+    held = _Process()
+    backends.holders.append(held)
+    backends.processes[0].alive = False
+    backends.spawned[0][1]["on_result"]({"duration_ms": 9})
+
+    sent = service.dispatch(text="after the stop", requested_session="mike",
+                            trace_id="t2", synthesize_audio=False)
+    assert sent.queued is True and len(backends.spawned) == 1
+
+    held.alive = False
+    assert _wait_until(lambda: len(backends.spawned) == 2)
+    assert backends.spawned[1][1]["text"] == "after the stop"
+
+
+def test_a_wait_behind_a_stuck_session_has_its_own_log_line(tmp_path, capsys):
+    """Lead (stage 1): one log line counts the sends that wait behind a
+    stuck Codex session, apart from the ordinary wait behind a process."""
+    service, _, agent_id = _make_service(tmp_path)
+    backends = _HeldSessionBackends()
+    service.backends = backends
+    service.dispatch(text="first", requested_session="mike", trace_id="t1",
+                     synthesize_audio=False)
+    held = _Process()
+    backends.holders.append(held)
+    backends.processes[0].alive = False
+    backends.spawned[0][1]["on_result"]({"duration_ms": 9})
+    capsys.readouterr()
+    service.dispatch(text="after the stop", requested_session="mike",
+                     trace_id="t2", synthesize_audio=False)
+    assert "turnQueuedBehindStuckSession" in capsys.readouterr().err
+    held.alive = False
+    assert _wait_until(lambda: len(backends.spawned) == 2)
+
+
+def test_the_leak_release_leaves_a_send_waiting_behind_a_held_session(tmp_path):
+    """Reviewer A2's probe (Thursday combined pre-review): a send waiting
+    behind a stuck Codex session is not started by the leaked-slot release
+    while the session is still held, even once the stuck turn's terminal row
+    is older than the grace."""
+    from lib import db
+    service, _, agent_id = _make_service(tmp_path)
+    backends = _HeldSessionBackends()
+    service.backends = backends
+    service.dispatch(text="first", requested_session="mike", trace_id="t1",
+                     synthesize_audio=False)
+    held = _Process()
+    backends.holders.append(held)
+    backends.processes[0].alive = False
+    backends.spawned[0][1]["on_result"]({"duration_ms": 9})
+    sent = service.dispatch(text="after the stop", requested_session="mike",
+                            trace_id="t2", synthesize_audio=False)
+    assert sent.queued is True and len(backends.spawned) == 1
+    # The stuck process outlives the 60 s grace (its recycle waits for the
+    # other Codex agents to finish).
+    db.conn().execute("UPDATE state_log SET ts = ts - 600000 WHERE agent_id = ?",
+                      (agent_id,))
+
+    released = service.release_leaked_slots()
+
+    assert len(backends.spawned) == 1, ("started behind a held session", released)
+    assert released == {}
+    held.alive = False
+    assert _wait_until(lambda: len(backends.spawned) == 2)

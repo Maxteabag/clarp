@@ -46,8 +46,9 @@ the hot spots; every high finding fixed or explicitly accepted.
 ## 2. Hard rules
 
 1. **Only the release owner restarts, updates or deploys the live Host**, inside
-   the windows **12:00 and 18:00 Europe/Oslo**. Runtime-class releases only at
-   18:00, at most one a day. Longest downtime 5 minutes. A failed health check
+   the windows **07:00, 12:00 and 18:00 Europe/Oslo**. Runtime-class releases at
+   07:00 and 18:00, at most two a day (Peter, 6 Nov); the release owner holds
+   program agents from T-30 and resumes them after the ship. Longest downtime 5 minutes. A failed health check
    rolls back automatically. Never run `make deploy`, `install.sh`,
    `make deploy-static`, `clarp-admin update` or `systemctl ... clarp*` yourself.
 2. **Main and `refactor/integration` move through the merge captain** for
@@ -80,9 +81,9 @@ the hot spots; every high finding fixed or explicitly accepted.
    Full suites, coverage and replay runs go to the buildbox through
    `/var/tmp/clarp-refactor-program/bin/heavy-remote` (announced 3 Nov; four job
    slots of `-n 8`; `--status`, `--forget`). It holds the last 5 NOK of Peter's
-   daily cap for releases. The cap is 150 NOK until the big restructuring release ships
-   (Peter, 5 Nov; it was 100): other jobs stop at 145, while jobs from `release-src/`
-   worktrees or with `HEAVY_RELEASE=1` may use all 150. Only the release owner and the merge captain set `HEAVY_RELEASE=1`, for
+   daily cap for releases. The cap is 300 NOK until big merge #1 ships
+   (Peter, 5 Nov 21:02; it was 150, before that 100): other jobs stop at 290, while jobs from `release-src/`
+   worktrees or with `HEAVY_RELEASE=1` may use all 300. Only the release owner and the merge captain set `HEAVY_RELEASE=1`, for
    release canaries and release-candidate gates; nobody raises
    `CLARP_REMOTE_RESERVE_NOK` (4 Nov). The landing gate is the merge captain's
    GitHub Actions run on the exact commit. Never run `cargo` (repo rule).
@@ -101,6 +102,17 @@ the hot spots; every high finding fixed or explicitly accepted.
 10. **Fail safe.** Unknown, partial or contradictory means stop and report. Never
     retry a write that may have landed; read back first. Postpone rather than
     improvise.
+11. **Efficiency (Peter, 6 Nov, decision 673).** Review-first: for a behaviour
+    change the reviewer gives acceptance criteria and test cases before the
+    author implements, and the author fixes the whole class of problem; target
+    one round. Tool-verified pure moves (reviewed recipe, ast_identity 0
+    problems) get one light review. After big merge #1 ships there is no
+    integration branch: everything lands on main in small batches through the
+    captain with the same gates. The captain records R1 pins for exact pins
+    under an unchanged signed policy; R5 dispositions known flakes and
+    known-bug occurrences; compute applies the cache-cleanup rules. GitHub CI
+    runs only for SHAs that land on main or are release SHAs. Agents send the
+    lead only decisions, blockers, landed results and new findings.
 
 ## 3. Decisions already made (do not reopen)
 
@@ -238,6 +250,10 @@ Order rule (5 Nov): on a file that a regenerated split owns (S3, S4, S6, S9), th
 | 5 Nov 11:3x | S6 (`rf-s6c-0876`) | cut 2 on `refactor/integration` only: `server/lib/codex_app_server.py` split into `codex_app_types.py`, `codex_app_client.py` (`_Client` with the pool state) and `codex_app_rpc.py` (`CodexRpcMixin`: the 11 RPC and goal methods, by S4's named-source method stage), with `codex_app_server.py` as the facade (lead 517); regenerated from main's text at every merge, so stage 1/2, TP-N3 and BACKENDS-N2 flow through; lands after stage 2 is on main | the big release |
 | 5 Nov 11:5x | S9 (`rf-fix3c-7498`) | cut 1d on `refactor/integration` only: `server/lib/background_jobs.py` (1571 lines) split: the process identity, argv, adoption, liveness and termination helpers and their worker-timeout constants move to `background_job_process.py`; `background_jobs.py` stays the facade with the registry, clock, log and native-projection logic (under 1500 lines); recipe `tools/refactor/splits/s9-background-jobs.toml` on main; regenerated from main's text at every merge (lead 520) | the big release |
 | 5 Nov 12:4x | S6 (`rf-s6c-0876`) | cut 3a/3b on `refactor/integration` only: `ClaudeBackend._drain_stdout` (236 lines) in `server/lib/backend/claude.py` and `CodexBackend._handle_event` (160) in `server/lib/backend/codex.py`, each extracted into helper methods of the same class; hand-written and behaviour-preserving (G0 per method, G2 at zero, reviewer A), so these functions join rf-merge's forward-port watch (no file is regenerated); `_Client._notification` follows cut 2 as a replay patch (lead 528) | the big release |
+| 5 Nov 21:2x | S9 (`rf-fix3c-7498`) | cut 1e on `refactor/integration` only: `server/lib/orchestrator.py` (1811 lines) split into `orchestrator_types.py`, `orchestrator_context.py` and `orchestrator_model.py` (recipe `tools/refactor/splits/s9-orchestrator.toml`), the facade keeping `OrchestratorService`, settings, store and control; regenerated from main's text at every merge (lead 615/619) | big merge #1 |
+| 6 Nov 03:5x | Untangle families (lead 678/679, reports/untangle-discovery.md) | designs now, code on main after big merge #1: U07, U05 and U01 (`rf-readmodelc-cb42`, reviewer C); U02 (`rf-s6c-0876`, A2); U03 and U04 (`rf-fix3c-7498`, B); U09, with U10 as design only (`rf-s4c-8be3`, A2) | per family |
+| 6 Nov 05:1x | RT-MEM-N1 (lead 687/688/699) | `rf-fix2c-4f08`: `server/lib/db.py` connection cache and close, `server/lib/telemetry.py`, `server/lib/tool_explanation_commands.py`, `server/lib/backend/opencode_serve.py`; `rf-contain-d159`: agent memory scopes at `server/lib/backend/stream_json.py` (popen_turn), `server/lib/codex_app_server.py` (`_Client.__init__`) and the `systemd/clarp-runtime.service` template | released |
+| 6 Nov 07:1x | Explicit lifecycles (lead 695, reports/explicit-lifecycles-plan.md) | designs now, code on main after big merge #1: the shared lifecycle kit (`rf-s4c-8be3`); S03, S02 and S08 with TP-02 (`rf-fix3c-7498`); S26 with RM-01/02 (`rf-readmodelc-cb42`); S42 (`rf-s6c-0876`); S39, S43 and S34 (`rf-fix2c-4f08`); S15, S55 and desktop send disposition (new agents) | per family |
 | 5 Nov 14:2x | Sweep (`rf-sweep-a-0800`, `rf-sweep-b-5ed1`, `rf-sweep-c-6178`) | on `refactor/integration` only, hand-written and behaviour-preserving (G0 at least 85% as tests-only commits on main, G2 at zero, reviewer D): same-module helper extraction so each function ends at 150 lines or fewer. a: `oracle_live_stable.serve`, `oracle_live.serve`, `oracle_realtime.serve`, `eleven_ws.synthesize_streaming`; b: `policies/agent_spec._parse`, `config._parse_into_cache`, `transcription_models.start_install`, `provider_capabilities._discover_provider`; c: `runtime_bridge._dispatch_request`, `snapshot.build_agent_snapshot`, `tool_explanations._drain`, `task_goal_recovery._claim`. No file is regenerated; each touched function joins the forward-port watch when it lands (lead 543) | the big release |
 | 3 Nov 12:17 | S5 (`rf-readmodel-12f8`) | `server/lib/message_writes.py` import section (`store_transcript_turns`, `_ImportWriter`, `_store_transcript_turns_txn` and its helpers, `_attach_authority_tools`, `stamp_turn`); `server/lib/message_store.py` facade re-exports; `tests/readmodel/` | the S5 extraction commits land; `rf-fix-c4ab`'s RM-N1 commit may edit the upsert and twin path |
 

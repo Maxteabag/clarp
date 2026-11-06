@@ -636,3 +636,33 @@ def test_an_unrelated_existing_base_is_not_an_applied_method_output(repo):
     assert 'not a genuine applied group' in out
     assert not output
     assert 'def read(self)' in source
+
+
+def test_split_only_old_recipe_and_current_additions_share_strict_preflight(repo_with_split):
+    root = repo_with_split
+    source = root / 'server/lib/big.py'
+    source.write_text(source.read_text() + '\ndef newly_added():\n    return 7\n')
+    recipe = root / 'tools/refactor/splits/s9-test.toml'
+    recipe.write_text(recipe.read_text().replace('["helper"]', '["helper", "newly_added"]'))
+    _commit(root, 'new main definition and reviewed split membership')
+    code, out = _merge(root)
+    assert code == 0, out
+    assert 'def newly_added' in (root / 'server/lib/big_helpers.py').read_text()
+
+
+def test_retiring_all_current_splits_cannot_remove_historical_accounting(repo_with_split):
+    root = repo_with_split
+    (root / 'tools/refactor/splits/s9-test.toml').unlink()
+    _commit(root, 'unsupported retirement of the entire split catalogue')
+    code, out = _merge(root)
+    assert code == 8, out
+    assert 'historical split order retired or renamed' in out
+
+
+def test_missing_orchestrator_does_not_choose_a_weaker_split_only_validator(repo_with_split):
+    root = repo_with_split
+    (root / 'tools/refactor/s3_methods.py').unlink()
+    _commit(root, 'missing shared validator')
+    code, out = _merge(root)
+    assert code == 8, out
+    assert 'missing pinned-main historical validator' in out

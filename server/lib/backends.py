@@ -14,6 +14,8 @@ apps without an app release.
 from __future__ import annotations
 
 import pathlib
+from contextlib import contextmanager
+from contextvars import ContextVar
 import threading
 import time
 from dataclasses import dataclass
@@ -47,6 +49,51 @@ _clock = time.monotonic
 _STATUS_GENERATION = 0
 
 
+@dataclass
+class _ScopedRuntimeStatus:
+    client: Any
+    timeout: float
+    # Ordinary reads and destructive ownership revalidation each get one
+    # result (or one remembered failure) for this build, independent of TTL.
+    samples: dict[bool, tuple[dict | None, Exception | None]]
+
+    def read(self, *, fresh: bool) -> dict:
+        if fresh not in self.samples:
+            try:
+                # Unlike a per-socket timeout, status_within bounds connect,
+                # send and all response chunks by one deadline.
+                result = self.client.status_within(self.timeout)
+                self.samples[fresh] = (result if isinstance(result, dict) else {}, None)
+            except Exception as exc:  # noqa: BLE001 - remembered for the build
+                from .log import log_exception
+                log_exception("runtimeStatusUnavailable", exc,
+                              detail="snapshot-fresh" if fresh else "snapshot-status")
+                self.samples[fresh] = (None, exc)
+        result, error = self.samples[fresh]
+        if error is not None:
+            raise error
+        return result if result is not None else {}
+
+
+_STATUS_SCOPE: ContextVar[_ScopedRuntimeStatus | None] = ContextVar(
+    "runtime_status_scope", default=None)
+
+
+@contextmanager
+def runtime_status_scope(*, timeout: float):
+    """Pin snapshot reads, with one extra bounded read for the first repair.
+
+    No shared-cache lock is taken: another caller's default 10 s RPC must
+    not consume the snapshot's budget. Other threads and calls after exit
+    retain the ordinary shared TTL and timeout, including on build failure.
+    """
+    token = _STATUS_SCOPE.set(_ScopedRuntimeStatus(_RUNTIME_CLIENT, timeout, {}))
+    try:
+        yield
+    finally:
+        _STATUS_SCOPE.reset(token)
+
+
 def configure_runtime_client(client: Any | None) -> None:
     """Route process ownership calls to the external runtime when configured."""
     global _RUNTIME_CLIENT
@@ -72,6 +119,9 @@ def runtime_status(*, max_age: float | None = None) -> dict:
     global _STATUS_CACHE
     if _RUNTIME_CLIENT is None:
         raise RuntimeError("no external runtime client configured")
+    scope = _STATUS_SCOPE.get()
+    if scope is not None:
+        return scope.read(fresh=max_age == 0)
     ttl = RUNTIME_STATUS_TTL if max_age is None else max_age
     with _STATUS_LOCK:
         client, fetched_at, result, error = _STATUS_CACHE
@@ -87,6 +137,20 @@ def runtime_status(*, max_age: float | None = None) -> dict:
         if error is not None:
             raise error
         return result if isinstance(result, dict) else {}
+
+
+def runtime_status_for_repair() -> dict | None:
+    """Fresh ownership after this candidate's checks, or unknown (None).
+
+    A snapshot permits only one fresh RPC. Its result can authorize repair
+    only for the first candidate: later binding checks happen after that
+    sample and may race a new admission, so later candidates stay owned.
+    Outside a snapshot every candidate keeps its own fresh read.
+    """
+    scope = _STATUS_SCOPE.get()
+    if scope is not None and True in scope.samples:
+        return None
+    return runtime_status(max_age=0)
 
 
 def peek_runtime_status(*, max_age: float) -> tuple[str, dict | None, int]:
@@ -270,6 +334,11 @@ def interrupt_any(agent_id: str) -> int:
 
 def external_live_work(backend: str, agent_id: str) -> bool:
     return by_id(normalize(backend)).external_live_work(agent_id)
+
+
+def turn_holders(backend: str, agent_id: str) -> list:
+    """See Backend.turn_holders; held in this process, so never via the runtime."""
+    return by_id(normalize(backend)).turn_holders(agent_id)
 
 
 def active_handles(backend: str, agent_id: str) -> list:
