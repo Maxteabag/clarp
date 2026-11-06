@@ -32,6 +32,7 @@ def policy(**updates):
 
 def test_independent_policy_pairs_and_structural_registration():
     rules = policy()
+    assert [(exit.kind, exit.name) for exit in rules.waits["busy"].exits] == [("event", "finish")]
     expected = {(state, event): None for state in (None, "ready", "busy", "done")
                 for event in ("start", "finish", "renew")}
     expected.update({("ready", "start"): "busy", ("busy", "finish"): "done",
@@ -188,7 +189,10 @@ def test_at_write_owner_fence_refuses_without_success(replace):
 
 def test_exceptional_illegal_pair_counts_and_emits_after_release():
     owner, rules = MemoryOwner(), policy()
-    sink = sink_for(rules, owner.trace)
+    def report(notice):
+        assert not owner.lock.locked()
+        owner.trace.append(("notice", notice.reason))
+    sink = sink_for(rules, owner.trace, report=report)
     with pytest.raises(lk.IllegalTransition):
         lk.apply_owned(rules, owner.event("finish"), owner.attempt(), sink)
     assert owner.writes == 0
