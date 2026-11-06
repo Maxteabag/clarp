@@ -521,7 +521,10 @@ def test_isolated_turn_delivers_only_the_last_results_assistant_text(fake_clarp,
     assert not handle.drain_thread.is_alive()
     assert errors == []
     assert results == [{"type": "result", "subtype": "success",
-                        "result": "requested", "_assistant_text": "Final answer"}]
+                        "result": "requested", "_assistant_text": "Final answer",
+                        "_clarp_reply_provider": "claude", "_clarp_reply_evidence": {
+                            "synthetic_seen": False, "genuine_text_seen": False,
+                            "genuine_tool_seen": False, "unknown_assistant_seen": True}}]
 
 
 def test_spawn_turn_callback_exception_is_isolated(fake_clarp, tmp_path):
@@ -1036,6 +1039,9 @@ def test_result_display_uses_only_its_own_structural_reply_evidence(fake_clarp, 
 
 @pytest.mark.parametrize('annotation', [
     {}, {'_assistant_text': None}, {'_assistant_text': ''},
+    {'_assistant_text': None, '_clarp_reply_evidence': {
+        'synthetic_seen': True, 'genuine_text_seen': False, 'genuine_tool_seen': False,
+        'unknown_assistant_seen': False}},
     {'_assistant_text': None, '_clarp_reply_provider': 'codex', '_clarp_reply_evidence': {
         'synthetic_seen': True, 'genuine_text_seen': False, 'genuine_tool_seen': False,
         'unknown_assistant_seen': False}},

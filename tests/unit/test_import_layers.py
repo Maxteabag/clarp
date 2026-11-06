@@ -43,7 +43,7 @@ PERSISTENCE = frozenset({
 PERSISTENCE_PACKAGES = ("lib.persistence",)
 CORE = frozenset({f"lib.{m}" for m in (
     "agent_lifecycle", "agent_store", "agents", "backends", "config", "config_writer",
-    "conversation", "deployment", "error_classify", "eventlog", "events", "hook_runtime",
+    "conversation", "claude_reply_evidence", "deployment", "error_classify", "eventlog", "events", "hook_runtime",
     "http_utils", "identity", "launch_receipts", "log", "message_live", "message_store", "message_turns",
     "message_writes", "origins", "proc_util", "process_registry", "prompt_admissions",
     "protocol", "roster", "roster_seed", "runtime_bridge", "runtime_events", "server_identity",
