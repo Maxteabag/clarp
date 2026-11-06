@@ -205,7 +205,7 @@ def soak(native):
             if result.get('result')!='PASS' or result.get('elapsed_seconds',0)<seconds: raise RuntimeError('soak incomplete/failed; no compressed receipt')
             after=native.inside('stat','-c','%d:%i','/home/canary/.local/share/clarp/state.sqlite').strip()
             if result.get('same_db_device_inode')!=soaked_db or after!=soaked_db:raise RuntimeError('same DB before/after soak not proven')
-            atomic(native.output/'soak-result.json',result);break
+            break
         # A vanished driver without terminal receipt is unknown, never six-hour proof.
         native.inside('bash','-c','if test -f /home/canary/soak-state.started.json; then pid=$(python3 -c '"'"'import json;print(json.load(open("/home/canary/soak-state.started.json"))["pid"])'"'"'); test -f /home/canary/soak-state.result.json || kill -0 "$pid"; fi',timeout=15)
         now=time.monotonic()
@@ -228,6 +228,9 @@ def soak(native):
             native.inside('rm','/home/canary/soak-pause-sends');next_restart+=7200
         time.sleep(5)
     atomic(native.output/'soak-drills.json',{'runtime_boots':boots,'maintenance':maintenance,'seconds_required':seconds})
+    if not native.m.get('rehearsal') and (len(boots)<2 or len(maintenance)<5):
+        raise RuntimeError('required two-hour runtime/five hourly maintenance receipts missing')
+    atomic(native.output/'soak-result.json',result)
     return result
 
 def compatibility(native, base_release, base_runtime):
