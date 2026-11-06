@@ -155,9 +155,12 @@ def _leftover(fake, tmp_path, monkeypatch, name):
     agent = _agent(tmp_path, name)
     done, _, thread = _turn(tmp_path, agent, name, "hello")
     assert done.wait(8)
-    cas.goal(agent, "start", objective="keep going", stream=_NullStream())
-    cas.goal(agent, "pause", stream=_NullStream())
     client = cas._client(agent, name)
+    # This fixture represents an already paused native leftover, not an active
+    # goal whose delayed continuation can revive on the test's later resume.
+    client.request("thread/goal/set", {
+        "threadId": thread[0], "objective": "keep going", "status": "paused"})
+    assert cas.goal(agent, "get", stream=_NullStream())["status"] == "paused"
     goal = client.request("thread/goal/get", {"threadId": thread[0]})["goal"]
     return agent, thread[0], goal
 
