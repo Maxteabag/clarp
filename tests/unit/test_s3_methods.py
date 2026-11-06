@@ -157,3 +157,95 @@ def test_unstarted_split_with_a_part_repoint_keeps_its_baseline_valid(tmp_path, 
                 methods.write(tmp_path, methods.s3_apply.apply(tmp_path, groups[:count]))
         head = _commit(tmp_path, 'applied split then repoint then methods')
     methods.validate(tmp_path, base, head, methods.recipes(tmp_path))
+
+
+def _evolve_family(root, split=True):
+    """Old integration and new main have different, independently pinned recipes."""
+    base, source = _tree(root, split, two_groups=True)
+    integration = _apply(root, split)
+    _git(root, 'switch', '-qc', 'new-main', base)
+    original = root / 'server/lib/engine.py'
+    original.write_text(original.read_text().replace('VALUE + self.bias', 'VALUE * self.bias')
+                        + '\n    def extra(self):\n        return helper()\n\ndef helper():\n    return 8\n')
+    if split:
+        recipe = root / 'tools/refactor/splits/engine.toml'
+        recipe.write_text(recipe.read_text().replace('["VALUE"]', '["VALUE", "helper"]'))
+    else:
+        # A named move must import a module helper from below its source, not
+        # accidentally depend on a new name that the facade retains.
+        original.write_text(original.read_text().replace('\ndef helper():\n    return 8\n', ''))
+        values = root / 'server/lib/values.py'
+        values.write_text(values.read_text() + '\ndef helper():\n    return 8\n')
+        original.write_text(original.read_text().replace('import VALUE', 'import VALUE, helper'))
+    recipe = root / 'tools/refactor/methods/engine.toml'
+    extra = ('[[group]]\nname = "extra"\nmodule = "lib/extra.py"\n'
+             'class = "ExtraMixin"\nmembers = ["extra"]\n\n')
+    recipe.write_text(recipe.read_text().replace('[[group]]\nname = "twice"', extra + '[[group]]\nname = "twice"'))
+    _commit(root, 'new source and recipe additions')
+    return base, integration, source
+
+
+@pytest.mark.parametrize('split', [False, True])
+def test_recipe_evolution_preserves_old_family_and_generates_new_requirements(tmp_path, split):
+    base, integration, source = _evolve_family(tmp_path, split)
+    methods.validate(tmp_path, base, integration, methods.recipes(tmp_path))
+    # New generation still sees every new requirement and the latest old body.
+    head = _apply(tmp_path, split)
+    program = ('from lib.engine import Engine; obj=Engine(); '
+               'assert obj.read()==10; assert obj.extra()==8; assert obj.twice()==20')
+    result = subprocess.run([sys.executable, '-c', program], cwd=tmp_path / 'server',
+                            capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    assert 'return VALUE * self.bias' in (tmp_path / 'server/lib/read.py').read_text()
+    assert (tmp_path / 'server/lib/extra.py').exists()
+    assert head != integration
+
+
+def test_split_only_recipe_evolution_uses_historical_data(tmp_path):
+    _tree(tmp_path, True)
+    (tmp_path / 'tools/refactor/methods/engine.toml').unlink()
+    base = _commit(tmp_path, 'split only baseline')
+    entries, _ = methods.split_apply.load_recipes(tmp_path / 'tools/refactor/splits')
+    methods.write(tmp_path, methods.split_apply.apply_split(tmp_path, entries[0]))
+    integration = _commit(tmp_path, 'old split')
+    _git(tmp_path, 'switch', '-qc', 'new-main', base)
+    source = tmp_path / 'server/lib/engine.py'
+    source.write_text(source.read_text() + '\ndef helper():\n    return 8\n')
+    recipe = tmp_path / 'tools/refactor/splits/engine.toml'
+    recipe.write_text(recipe.read_text().replace('["VALUE"]', '["VALUE", "helper"]'))
+    _commit(tmp_path, 'new source and split recipe')
+    methods.validate(tmp_path, base, integration, methods.recipes(tmp_path))
+
+
+@pytest.mark.parametrize('edit', ['retire_member', 'rename_output', 'reorder_groups', 'retire_recipe'])
+def test_historical_obligations_cannot_disappear_from_current_accounting(tmp_path, edit):
+    base, integration, _ = _evolve_family(tmp_path)
+    recipe = tmp_path / 'tools/refactor/methods/engine.toml'
+    text = recipe.read_text()
+    if edit == 'retire_member':
+        text = text.replace('members = ["read"]', 'members = ["__init__"]')
+    elif edit == 'rename_output':
+        text = text.replace('lib/read.py', 'lib/renamed.py')
+    elif edit == 'reorder_groups':
+        first, rest = text.split('[[group]]', 1)
+        groups = ['[[group]]' + x for x in rest.split('[[group]]')]
+        text = first + ''.join(reversed(groups))
+    else:
+        recipe.unlink()
+    if recipe.exists():
+        recipe.write_text(text)
+    _commit(tmp_path, 'unsupported history migration')
+    with pytest.raises(methods.s3_apply.Refusal, match='historical|topology|retir|order'):
+        methods.validate(tmp_path, base, integration, methods.recipes(tmp_path))
+
+
+def test_git_read_failure_is_not_proven_path_absence(tmp_path, monkeypatch):
+    base, _ = _tree(tmp_path, False)
+    real_run = methods.subprocess.run
+    def failed_show(args, *a, **kw):
+        if args[:3] == ['git', '-C', str(tmp_path)] and 'show' in args:
+            return subprocess.CompletedProcess(args, 128, '', 'synthetic object read failure')
+        return real_run(args, *a, **kw)
+    monkeypatch.setattr(methods.subprocess, 'run', failed_show)
+    with pytest.raises(methods.s3_apply.Refusal, match='read|Git|git'):
+        methods.show(tmp_path, base, 'server/lib/engine.py')
