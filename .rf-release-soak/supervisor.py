@@ -4,7 +4,7 @@ import argparse, datetime, hashlib, json, os, shutil, signal, subprocess, sys, t
 from pathlib import Path
 
 OWNER = 'rf-releasec-29c5'
-TOOL_DIGEST = '996924a48acfc5598c689eaa2a5ad35598740864a8d766604cb02ec1e168efff'
+TOOL_DIGEST = '2aaa9246637a6057959262f7fdf9b5a40d6271596547945a22aad8d5d4b9e5ef'
 ROOT = Path(__file__).resolve().parent
 
 def digest(path):

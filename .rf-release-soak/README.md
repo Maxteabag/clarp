@@ -5,7 +5,7 @@ WIP. The same-pin synthetic 15-second mechanism rehearsal passed on source7b30dc
 It is not a D_F or six-hour gate. No allowance installation, slot or release GO is implied.
 
 The compute admission binds one immutable manifest, source script hashes, exact
-D_F/base B exports, selected v8n2-814-rc5 manifest996924a4 under818, owner rf-releasec-29c5 and
+D_F/base B exports, selected supervised v8n2-supervised-r3 manifest2aaa9246 under827, owner rf-releasec-29c5 and
 job rf-releasec-bigmerge1-soak-800. Maximum owned envelope 30000 seconds plus
 660 seconds tail in the cumulative 70 NOK pool. No retry/resume or normal-pool spill.
 
@@ -58,3 +58,19 @@ now bind this selected artifact. Historical cad642/bff rehearsal remains qualifi
 as originally executed; it is not a new-tool or exactD_F run. FinalactualD_F/base
 capsules/manifest/gates still need latebinding, source/admission review and full
 21600s execution. Stage2 and D_F never use the manual814 route.
+
+827 late binding: B exact SOURCE YES5a5b96d1 and explicit ONLY per-record repair
+scope verified; helper selected in logs/releases/tooling-selection-827.json.
+The immutable r3 artifact carries the byte-identical approved rc5 checker/deploy/
+canary; four command links remain rc5 while an owned native canary is active.
+This harness now copies and binds r3/2aaa9246, including its supervised helper.
+The live supervised caller must pass --supervised-restart plus positively verified
+--expected-runtime-invocation and --expected-runtime-pid after target boot health.
+Historical cad642 rehearsal and rc5 constants validation remain qualified on their
+original pins. No exact D_F export/admission or new six-hour receipt exists.
+
+828 amends805 accounting: EVERY soak-caused cost, including wake/setup/margins
+and pre-attestation time, must be funded from the separate soak allocation.
+Ordinary jobs retain their own300/290 guards and costs. The full bounded run must
+be covered before any admission effect. Compute's reviewed implementation/install
+is still pending; this source cannot grant itself the70NOK pool or reserve a slot.

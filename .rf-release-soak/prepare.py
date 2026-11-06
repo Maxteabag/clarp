@@ -5,8 +5,8 @@ from pathlib import Path
 
 ROOT=Path(__file__).resolve().parent
 PROGRAM=Path('/var/tmp/clarp-refactor-program')
-TOOL=PROGRAM/'release-tooling/v8n2-814-rc5'
-DIGEST='996924a48acfc5598c689eaa2a5ad35598740864a8d766604cb02ec1e168efff'
+TOOL=PROGRAM/'release-tooling/v8n2-supervised-r3'
+DIGEST='2aaa9246637a6057959262f7fdf9b5a40d6271596547945a22aad8d5d4b9e5ef'
 
 def sha(path):
  h=hashlib.sha256()
@@ -73,13 +73,13 @@ def main():
  for line in (TOOL/'SHA256SUMS').read_text().splitlines():
   h,path=line.split('  ',1)
   if sha(TOOL/path)!=h:raise RuntimeError('tool hash mismatch')
- frozen_tool=ROOT/'tooling/v8n2-814-rc5'
+ frozen_tool=ROOT/'tooling/v8n2-supervised-r3'
  if not frozen_tool.exists():shutil.copytree(TOOL,frozen_tool)
  if sha(frozen_tool/'SHA256SUMS')!=DIGEST:raise RuntimeError('copied tool manifest differs')
  gates=json.loads(a.gates.read_text()) if a.gates else {}
  if not a.rehearsal and not gates:raise RuntimeError('freeze/gate/admission receipts required; no invented approval')
  capsule=ROOT/'capsules/staging'
- result={'phase':'full','job_id':'rf-releasec-bigmerge1-'+('rehearsal' if a.rehearsal else 'soak-800'),'owner_session':'rf-releasec-29c5','synthetic_data_only':True,'rehearsal':a.rehearsal,'tool_manifest_sha256':DIGEST,'tool_manifest_payload':'.rf-release-soak/tooling/v8n2-814-rc5/SHA256SUMS','soak_seconds':15 if a.rehearsal else 21600,'hard_total_seconds':7200 if a.rehearsal else 30000,'output':str(Path('.rf-release-soak')/'results'/('rehearsal' if a.rehearsal else 'bigmerge1')),'container':'clarp-soak-rf-releasec-'+('rehearsal' if a.rehearsal else '800'),'gate_receipts':gates,'payloads':{}}
+ result={'phase':'full','job_id':'rf-releasec-bigmerge1-'+('rehearsal' if a.rehearsal else 'soak-800'),'owner_session':'rf-releasec-29c5','synthetic_data_only':True,'rehearsal':a.rehearsal,'tool_manifest_sha256':DIGEST,'tool_manifest_payload':'.rf-release-soak/tooling/v8n2-supervised-r3/SHA256SUMS','soak_seconds':15 if a.rehearsal else 21600,'hard_total_seconds':7200 if a.rehearsal else 30000,'output':str(Path('.rf-release-soak')/'results'/('rehearsal' if a.rehearsal else 'bigmerge1')),'container':'clarp-soak-rf-releasec-'+('rehearsal' if a.rehearsal else '800'),'gate_receipts':gates,'payloads':{}}
  for role,pin in [('base',a.base),('candidate',a.candidate)]:result['payloads'][role]=export(pin,capsule/role)
  result['harness_sha256']={path.name:sha(path) for path in sorted(ROOT.iterdir()) if path.is_file() and path.suffix in ('.py','.sh')}
  with a.manifest.open('x') as f:json.dump(result,f,indent=2);f.write('\n')
