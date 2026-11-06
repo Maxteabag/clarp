@@ -370,3 +370,194 @@ def test_retry_after_keeps_the_longest_valid_advertised_wait(header, body, expec
     response = _Response(429, body)
     response.headers = {"Retry-After": header}
     assert apns._retry_after(response) == expected
+
+
+def _wire_refusal(monkeypatch, *, kind="relay", outer=429, header="3601", body=None):
+    import httpx
+    class Relay:
+        def request(self, method, url, **kwargs):
+            if url.endswith("/v1/push/devices"):
+                return _Response(200, {})
+            response = _Response(outer, body if body is not None else {"error": {"code": "push_rate_limited"}})
+            response.headers = httpx.Headers({"rEtRy-AfTeR": header})
+            return response
+    monkeypatch.setattr(apns, "_relay_client", lambda: Relay())
+    apns._reset_relay_state()
+    cfg = SimpleNamespace(audio_central_url="https://central.example", audio_central_credential="cred")
+    if kind == "grant":
+        return apns._GrantTransport(cfg).send("synthetic-grant", {"aps": {}})
+    return apns._RelayTransport(cfg).send(TOKENS[0], "production", {"aps": {}})
+
+
+@pytest.mark.parametrize("kind", ["relay", "grant"])
+def test_per_recipient_429_pauses_la_but_is_not_invented_as_day_refusal(world, monkeypatch, kind):
+    clock, transport = world
+    result = _wire_refusal(monkeypatch, kind=kind, outer=200, header="60",
+                           body={"results": [{"status": 429, "reason": "TooManyRequests", "apnsId": "synthetic"}]})
+    assert result == (429, "TooManyRequests", "synthetic")
+    _register(TOKENS[0])
+    apns.send_live_activity({"n": 1})
+    clock.advance(59)
+    assert transport.sent == []
+    clock.advance(1)
+    assert len(transport.sent) == 1
+
+
+@pytest.mark.parametrize("wall,header,wait", [
+    (86399.75, "3601", 3601), (.25, "3601", 86399.75), (43200, "50000", 50000),
+])
+def test_day_pause_preserves_fractional_midnight_and_longer_header(world, monkeypatch, wall, header, wait):
+    import os
+    import time
+    clock, transport = world
+    start = clock.now
+    previous_tz = os.environ.get("TZ")
+    monkeypatch.setenv("TZ", "Europe/Oslo")  # including the DST change day
+    if hasattr(time, "tzset"):
+        time.tzset()
+    try:
+        monkeypatch.setattr(apns.time, "time", lambda: 1774742400 + wall + clock.now - start)
+        assert _wire_refusal(monkeypatch, header=header)[0] == 429
+        _register(TOKENS[0])
+        apns.send_live_activity({"n": 1})
+        clock.advance(wait - .125)
+        apns._LA_GATE.delivered()  # a concurrent successful send cannot clear this hold
+        assert transport.sent == []
+        clock.advance(.125)
+        assert len(transport.sent) == 1
+    finally:
+        if previous_tz is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = previous_tz
+        if hasattr(time, "tzset"):
+            time.tzset()
+
+
+@pytest.mark.parametrize("header", ["", "-1", "0", "1.5", "nan", "inf", "Fri, 06 Nov 2026 20:00:00 GMT", "9" * 400])
+def test_unusable_wait_cannot_shorten_active_day_pause_or_overflow_timers(world, monkeypatch, header):
+    import threading
+    clock, transport = world
+    start = clock.now
+    monkeypatch.setattr(apns.time, "time", lambda: 1793923200 + 43200 + clock.now - start)
+    original_schedule = clock.schedule
+    def bounded_schedule(delay, callback):
+        assert 0 < delay <= threading.TIMEOUT_MAX
+        return original_schedule(delay, callback)
+    apns._LA_GATE._schedule = bounded_schedule
+    assert _wire_refusal(monkeypatch, header="43200")[0] == 429
+    _register(TOKENS[0])
+    apns.send_live_activity({"n": 1})
+    _wire_refusal(monkeypatch, header=header)
+    apns._LA_GATE.delivered()
+    clock.advance(43199)
+    assert transport.sent == []
+    clock.advance(1)
+    assert len(transport.sent) == 1
+
+
+def test_huge_finite_header_arms_a_bounded_wakeup_without_shortening_pause(world, monkeypatch):
+    import threading
+    clock, transport = world
+    original_schedule = clock.schedule
+    delays = []
+    def bounded_schedule(delay, callback):
+        assert 0 < delay <= threading.TIMEOUT_MAX
+        delays.append(delay)
+        return original_schedule(delay, callback)
+    apns._LA_GATE._schedule = bounded_schedule
+    assert _wire_refusal(monkeypatch, header="9" * 30)[0] == 429
+    _register(TOKENS[0])
+    apns.send_live_activity({"n": 1})
+    assert len(delays) == 1
+    assert not transport.sent
+
+
+def test_legacy_json_wait_is_respected_but_not_a_day_discriminator(world, monkeypatch):
+    clock, transport = world
+    start = clock.now
+    monkeypatch.setattr(apns.time, "time", lambda: 1793923200 + 43200 + clock.now - start)
+    _wire_refusal(monkeypatch, header="", body={"error": {"code": "push_rate_limited"}, "retryAfter": 3601})
+    _register(TOKENS[0])
+    apns.send_live_activity({"n": 1})
+    clock.advance(3601)
+    assert len(transport.sent) == 1
+
+
+def test_alert_completes_while_la_network_send_is_held(world, monkeypatch):
+    import threading
+    _, _ = world
+    entered, release, alert_done = (threading.Event() for _ in range(3))
+    outcomes = []
+    class Held(Transport):
+        def send(self, *args, **kwargs):
+            entered.set()
+            assert release.wait(5), "LA test barrier not released"
+            return super().send(*args, **kwargs)
+    sender = Held()
+    monkeypatch.setattr(apns, "_transport", lambda cfg: sender)
+    _register(TOKENS[0])
+    worker = threading.Thread(target=lambda: apns.send_live_activity({"n": 1}))
+    def alert():
+        try:
+            outcomes.append(_wire_refusal(monkeypatch, header="43200"))
+        finally:
+            alert_done.set()
+    second = threading.Thread(target=alert)
+    worker.start()
+    try:
+        assert entered.wait(3), "LA send did not enter barrier"
+        second.start()
+        assert alert_done.wait(3), "alert waited on LA's network/send lock"
+        assert outcomes[0][0] == 429
+    finally:
+        release.set()
+        worker.join(5)
+        if second.ident is not None:
+            second.join(5)
+    assert not worker.is_alive() and not second.is_alive()
+    assert apns._LA_GATE.paused()  # the in-flight LA200 must not erase the alert's day hold
+
+
+def test_day_refusal_with_existing_timer_requeues_only_latest_multitoken_state(world, monkeypatch):
+    clock, sender = world
+    start = clock.now
+    monkeypatch.setattr(apns.time, "time", lambda: 1793923200 + 43200 + clock.now - start)
+    _register(*TOKENS, THIRD)
+    for n in range(4):
+        apns.send_live_activity({"n": n})
+    assert len(sender.sent) == 10  # a timer already owns the two remaining recipients
+    sender.status, sender.reason = 429, "push_rate_limited"
+    sender.on_send = lambda: _wire_refusal(monkeypatch, header="3601")
+    clock.advance(288)
+    assert len(sender.sent) == 11
+    sender.status, sender.reason, sender.on_send = 200, "", None
+    apns.send_live_activity({"n": 99})
+    clock.advance(43200 - 288 - 1)
+    assert len(sender.sent) == 11
+    assert len([timer for timer in clock.timers if not timer[2]]) == 1
+    clock.advance(1)
+    assert len(sender.sent) == 14
+    assert all(item[1] == {"n": 99} for item in sender.sent[-3:])
+
+
+@pytest.mark.parametrize("kind", ["relay", "grant", "direct"])
+def test_mixed_la_results_count_only_successful_physical_sends(world, monkeypatch, kind):
+    _, _ = world
+    _register(*TOKENS, THIRD)
+    records, calls = [], []
+    class Sender(Transport):
+        name = kind
+        def send(self, token, *args, **kwargs):
+            calls.append(token)
+            if len(calls) == 2:
+                raise RuntimeError("synthetic transport failure")
+            return (200, "", "synthetic") if len(calls) == 1 else (410, "Unregistered", "")
+    monkeypatch.setattr(apns, "_transport", lambda cfg: Sender())
+    monkeypatch.setattr(apns, "log", lambda code, detail="": records.append((code, detail)))
+    apns.send_live_activity({"private": "DO_NOT_LOG"})
+    assert len(calls) == 3
+    accepted = [detail for code, detail in records if code == "apnsLiveActivityAccepted"]
+    assert accepted == ["status=200 count=1"]
+    assert all("DO_NOT_LOG" not in detail and all(token not in detail for token in (*TOKENS, THIRD))
+               for _, detail in records)
