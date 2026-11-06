@@ -139,3 +139,49 @@ def test_goal_adaptation_does_not_hide_turn_or_message_regressions(fault):
 @pytest.mark.parametrize('path', ['elsewhere/fake-goals.json', 'provider/other.json'])
 def test_fixture_adaptation_does_not_normalize_other_paths(path):
     assert any(i['channel'] == 'files' for i in report(capture(path=path), capture(100, path=path)))
+
+
+@pytest.mark.parametrize('channel', ['files', 'http', 'table', 'sse'])
+def test_created_updated_clocks_outside_fixture_entry_remain_content(channel):
+    a, b = capture(), capture()
+    if channel == 'files':
+        a['files'][0]['path'] = b['files'][0]['path'] = 'provider/other.json'
+        next(iter(b['files'][0]['json'].values()))['created'] += 1000
+    elif channel == 'http':
+        a['http'] = [{'step': 'read', 'method': 'GET', 'path': '/goal', 'status': 200,
+                      'body': {'created': 1793990000000}, 'headers': {}}]
+        b['http'] = copy.deepcopy(a['http'])
+        b['http'][0]['body']['created'] += 1000
+    elif channel == 'table':
+        a['db']['tables']['agent_goals'][0]['created'] = 1793990000000
+        b['db']['tables']['agent_goals'][0]['created'] = 1793990001000
+    else:
+        a['sse'] = [{'event': None, 'id': None,
+                     'data': {'type': 'goal-test', 'created': 1793990000000}}]
+        b['sse'] = copy.deepcopy(a['sse'])
+        b['sse'][0]['data']['created'] += 1000
+    assert any(i['channel'] == channel for i in report(a, b))
+
+
+def test_nested_unexpected_clock_and_arbitrary_map_keys_are_not_rewritten():
+    a, b = capture(), capture()
+    for raw, clock in ((a, 1793990000000), (b, 1793990001000)):
+        next(iter(raw['files'][0]['json'].values()))['extra'] = {'created': clock}
+    assert any(i['channel'] == 'files' for i in report(a, b))
+    a, b = capture(), capture()
+    a['files'][0].update(path='provider/other.json', json={'12345678-1234-4567-89ab-123456789abc': 1})
+    b['files'][0].update(path='provider/other.json', json={'87654321-1234-4567-89ab-123456789abc': 1})
+    assert any(i['channel'] == 'files' for i in report(a, b))
+
+
+def test_two_existing_threads_cannot_be_swapped_or_collapsed_by_goal_objective():
+    a, b = capture(two=True), capture(two=True)
+    runtimes = b['db']['tables']['runtimes']
+    runtimes[0]['backend_session_id'], runtimes[1]['backend_session_id'] = (
+        runtimes[1]['backend_session_id'], runtimes[0]['backend_session_id'])
+    assert any(i['channel'] == 'files' for i in report(a, b))
+    a, b = capture(two=True), capture(two=True)
+    # A UUID alias cannot overwrite a valid canonical owner.
+    key = next(iter(b['files'][0]['json']))
+    b['files'][0]['json'][key.upper()] = copy.deepcopy(b['files'][0]['json'][key])
+    assert any(i['channel'] == 'files' for i in report(a, b))
