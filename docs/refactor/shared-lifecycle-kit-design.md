@@ -29,12 +29,15 @@ Proposed public signatures (types below are contracts, not implemented code):
     NamedWait(*, name: str, exits: tuple[WaitExit, ...], reason: str = "")
     WaitExit(kind: ExitKind, name: str, deadline_source: str = "")
     OwnedEvent[E, P](name: str, entity_id: str, expected: E, payload: P)
-    OwnerWritePort[E, P, T].write(rules: Rules, event: OwnedEvent[E, P]) -> Outcome[T]
+    OwnerWritePort[E, P, T].write(rules: Rules, event: OwnedEvent[E, P],
+                               reject: RejectAtWrite) -> Outcome[T]
     OwnerWritePort.after_boundary(report: Callable[[], None]) -> None
     apply_owned(rules: Rules, event: OwnedEvent[E, P],
                 owner: OwnerWritePort[E, P, T], refusals: RefusalSink) -> Outcome[T]
-    RefusalSink.note(family: str, event: str, state: str, reason: RefusalCode,
-                     ids: SafeIds) -> None
+    RejectAtWrite(reason: RefusalCode, state: str, ids: SafeIds) -> Refused
+    RefusalSink.capture(family: str, event: str, state: str,
+                        reason: RefusalCode, ids: SafeIds) -> RefusalNotice
+    RefusalSink.emit(notice: RefusalNotice) -> None
 
 Outcome is exactly Applied(value), NoOp(value), Refused(code, observed_state)
 or WriteConflict(code). The existing Conflict exception is NOT shadowed. Unexpected writer/storage errors propagate unchanged; they
@@ -82,6 +85,17 @@ The owner projects state from existing rows/maps/fields; Rules holds policy
 only. No second mutable enum can disagree with the authority. A zero-row CAS
 is WriteConflict in the new outcome API (legacy Conflict stays unchanged), an illegal pair is Refused, and writer failure is still writer
 failure. The owner maps outcomes to its existing public returns/exceptions.
+
+reject is the attempt's diagnostic-only helper, not a guard or writer. The
+owner invokes it AFTER rejecting the actual at-write facts. It captures one
+bounded notice/count for this attempt without logging, SQL or external effects;
+apply_owned arranges emit through after_boundary. Re-entering reject in one
+attempt does not double count; a distinct attempted event gets its own notice.
+The owner supplies the existing synchronization for capture/snapshot/reset:
+the turn machine's existing diagnostic lock, a memory owner's existing lock,
+or an exclusive original reader context. No mutex is constructed by the kit.
+A logger/DB-writing callback is not permitted in capture. If the selected
+owner cannot supply that boundary, its port stays unapproved, not unlocked.
 
 after_boundary uses the owner's actual outermost release, COMMIT/rollback,
 or reader-inline completion boundary. It introduces no timer/executor/registry.
