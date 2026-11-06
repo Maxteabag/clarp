@@ -508,3 +508,174 @@ def test_large_user_import_paths_are_not_delayed_by_startup_stagger(tmp_path, cl
         assert cache.import_for_snapshot(path, importer, owner='agent', timeout=.5)
     assert observed == [0]
     assert cache.wait_for_background(2)
+
+
+def _startup_source(path, size=50 * 1024 * 1024):
+    with path.open('wb') as stream:
+        stream.truncate(size)
+    return path
+
+
+@pytest.fixture
+def startup_clock(clock, monkeypatch):
+    monkeypatch.setattr(cache, '_host_started_at', None)
+    assert cache.note_host_started(0)
+    return clock
+
+
+@pytest.mark.parametrize('discovered', [70, 120.001])
+def test_startup_grace_is_not_renewed_by_late_discovery_or_cache_reset(tmp_path, startup_clock, discovered):
+    clock = startup_clock
+    clock.advance(discovered)
+    assert cache.reset_for_tests()
+    assert not cache.note_host_started(discovered)
+    path = _startup_source(tmp_path / 'late', 50 * 1024 * 1024 + 1)
+    done, after = completed()
+    observed = []
+    assert cache.schedule_import(path, lambda: observed.append(clock.now), owner='agent', after=after)
+    if discovered < 120:
+        clock.advance(119.999)
+        assert not done.wait(.05)
+        clock.advance(120)
+    assert done.wait(2)
+    assert observed == [max(discovered, 120)]
+    assert cache.wait_for_background(2)
+
+
+@pytest.mark.parametrize('owners', [('a', 'b'), ('a', 'a'), ('', '')])
+def test_first_large_sources_are_serial_without_holding_small_work_during_grace(
+        tmp_path, startup_clock, owners):
+    clock = startup_clock
+    a, b = _startup_source(tmp_path / 'large-a'), _startup_source(tmp_path / 'large-b')
+    small = tmp_path / 'small'
+    small.write_text('small')
+    entered, release, first, second, small_done = [threading.Event() for _ in range(5)]
+    order = []
+    def held():
+        order.append(('a-start', clock.now))
+        entered.set()
+        assert release.wait(3)
+        order.append(('a-end', clock.now))
+    assert cache.schedule_import(a, held, owner=owners[0], after=first.set)
+    assert cache.schedule_import(b, lambda: order.append(('b', clock.now)), owner=owners[1], after=second.set)
+    assert cache.schedule_import(small, lambda: order.append(('small', clock.now)), owner='small', after=small_done.set)
+    assert small_done.wait(2)
+    assert order == [('small', 0)]
+    clock.advance(120)
+    try:
+        assert entered.wait(2)
+        assert not second.is_set()
+        clock.now = 140
+    finally:
+        release.set()
+    assert first.wait(2)
+    if owners == ('a', 'a'):
+        assert not second.wait(.05)  # first catch-up does NOT bypass786 owner window
+        clock.advance(260)
+    assert second.wait(2)
+    assert order == [('small', 0), ('a-start', 120), ('a-end', 140),
+                     ('b', 260 if owners == ('a', 'a') else 140)]
+    assert cache.wait_for_background(2)
+
+
+@pytest.mark.parametrize('change', ['growth', 'rotation', 'missing'])
+def test_startup_worker_rechecks_source_before_admission_without_blocking_small_paths(
+        tmp_path, startup_clock, change):
+    clock = startup_clock
+    blocker, path, small = [tmp_path / name for name in ('blocker', 'growing', 'other-small')]
+    for p in (blocker, path, small):
+        p.write_text('small')
+    entered, release, done, small_done = [threading.Event() for _ in range(4)]
+    calls = []
+    def held():
+        entered.set()
+        assert release.wait(3)
+    assert cache.schedule_import(blocker, held, owner='blocker')
+    assert entered.wait(2)
+    assert cache.schedule_import(path, lambda: calls.append(clock.now), owner='growing', after=done.set)
+    if change == 'rotation':
+        replacement = _startup_source(tmp_path / 'replacement')
+        replacement.replace(path)
+    elif change == 'growth':
+        _startup_source(path)
+    else:
+        path.unlink()
+    assert cache.schedule_import(small, lambda: None, owner='other', after=small_done.set)
+    clock.now = 1
+    release.set()
+    assert small_done.wait(2)
+    assert not done.is_set() and calls == []
+    if change == 'missing':
+        _startup_source(path)
+        assert cache.schedule_import(path, lambda: calls.append(clock.now), owner='growing', after=done.set)
+    clock.advance(120)
+    assert done.wait(2)
+    assert calls == [120]
+    assert cache.wait_for_background(2)
+
+
+def test_source_stat_cannot_consume_a_replaced_request_or_its_exemption(tmp_path, startup_clock, monkeypatch):
+    clock = startup_clock
+    blocker, path = tmp_path / 'blocker', tmp_path / 'changing'
+    blocker.write_text('hold')
+    path.write_text('small')
+    held, release, stat_entered, stat_release, done = [threading.Event() for _ in range(5)]
+    def block():
+        held.set()
+        assert release.wait(3)
+    assert cache.schedule_import(blocker, block, owner='blocker')
+    assert held.wait(2)
+    calls = []
+    assert cache.schedule_import(path, lambda: calls.append('obsolete'), owner='agent')
+    _startup_source(path)
+    original_size = cache.source_size
+    def slow_stat(p):
+        if p == path and not stat_entered.is_set():
+            stat_entered.set()
+            assert stat_release.wait(3)
+        return original_size(p)
+    monkeypatch.setattr(cache, 'source_size', slow_stat)
+    release.set()
+    try:
+        assert stat_entered.wait(2)
+        assert cache.schedule_import(path, lambda: calls.append('newest'), owner='agent',
+                                     startup_exempt=True, after=done.set)
+    finally:
+        stat_release.set()
+    assert done.wait(2)
+    assert calls == ['newest'] and clock.now == 0
+    assert cache.wait_for_background(2)
+
+
+def test_startup_exemption_is_token_local_and_does_not_bypass_owner_backoff(tmp_path, startup_clock):
+    clock = startup_clock
+    path, other = _startup_source(tmp_path / 'user'), _startup_source(tmp_path / 'other')
+    seed, after = completed()
+    assert cache.schedule_import(path, lambda: None, owner='a', urgent=True, after=after)
+    assert seed.wait(2) and cache.wait_for_background(2)
+    _startup_source(path, 50 * 1024 * 1024 + 1)
+    clock.now = 1
+    user, user_after = completed()
+    calls = []
+    assert cache.schedule_import(path, lambda: calls.append(('user', clock.now)), owner='a',
+                                 startup_exempt=True, after=user_after)
+    assert cache.schedule_import(path, lambda: calls.append(('latest-user', clock.now)), owner='a')
+    background, background_after = completed()
+    assert cache.schedule_import(other, lambda: calls.append(('other', clock.now)), owner='a', after=background_after)
+    clock.advance(9.999)
+    assert not user.is_set()
+    clock.advance(10)
+    assert user.wait(2) and cache.wait_for_background(2)
+    assert calls == [('latest-user', 10)]
+    assert not background.is_set()
+    _startup_source(path, 50 * 1024 * 1024 + 2)
+    later, later_after = completed()
+    assert cache.schedule_import(path, lambda: calls.append(('later', clock.now)), owner='a', after=later_after)
+    clock.advance(119.999)
+    assert not background.is_set() and not later.is_set()
+    clock.advance(120)
+    assert background.wait(2)
+    clock.advance(130)
+    assert later.wait(2)
+    assert calls == [('latest-user', 10), ('other', 120), ('later', 130)]
+    assert cache.wait_for_background(2)
