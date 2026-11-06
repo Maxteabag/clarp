@@ -67,6 +67,7 @@ class ClaudeReplyEvidence:
         self._suppressed_texts: OrderedDict[bytes, bool] = OrderedDict()
         self._output = None
         self._output_block = None
+        self._output_next_block = 0
         self._output_invalid = False
         self._output_lost = False
         self._unknown_output_seen = False
@@ -142,13 +143,15 @@ class ClaudeReplyEvidence:
         if typ == 'message_start':
             self._output = _OutputHash() if self._event_identified and not self._overflow else None
             self._output_block = None
+            self._output_next_block = 0
             self._output_invalid = False
             return
         if self._output is None:
             return
         index = inner.get('index')
         if typ == 'content_block_start':
-            if self._output_block is not None or type(index) is not int or index < 0:
+            if (self._output_block is not None or type(index) is not int
+                    or index != self._output_next_block):
                 self._output_invalid = True
                 return
             block = inner.get('content_block')
@@ -176,6 +179,7 @@ class ClaudeReplyEvidence:
             if self._output_block is None or index != self._output_block[0]:
                 self._output_invalid = True
             self._output_block = None
+            self._output_next_block += 1
         elif typ == 'message_stop':
             if not self._output_invalid and self._output_block is None:
                 self._remember_output(self._output.digest())
@@ -257,6 +261,7 @@ class ClaudeReplyEvidence:
         self._suppressed_texts.clear()
         self._output = None
         self._output_block = None
+        self._output_next_block = 0
         self._output_invalid = False
         self._output_lost = False
         self._unknown_output_seen = False
