@@ -390,3 +390,57 @@ def test_historical_recipe_filename_rename_requires_explicit_migration(tmp_path,
     _commit(tmp_path, 'unsupported recipe file rename')
     with pytest.raises(methods.s3_apply.Refusal, match='historical.*recipe|topology'):
         methods.validate(tmp_path, base, integration, methods.recipes(tmp_path))
+
+
+@pytest.mark.parametrize(('split', 'rel'), [
+    (False, 'lib/engine.py'),
+    (False, 'lib/read.py'),
+    (True, 'lib/engine.py'),
+    (True, 'lib/client.py'),
+    (True, 'lib/values.py'),
+    (True, 'lib/read.py'),
+])
+def test_newline_only_committed_family_edit_is_still_byte_drift(tmp_path, split, rel):
+    base, _ = _tree(tmp_path, split)
+    integration = _apply(tmp_path, split)
+    methods.validate(tmp_path, base, integration, methods.recipes(tmp_path))
+    path = tmp_path / 'server' / rel
+    original = path.read_bytes()
+    changed = original.replace(b'\n', b'\r\n')
+    assert changed != original and changed.replace(b'\r\n', b'\n') == original
+    path.write_bytes(changed)
+    integration = _commit(tmp_path, 'newline-only integration byte edit')
+    with pytest.raises(methods.s3_apply.Refusal, match='integration-only edit') as error:
+        methods.validate(tmp_path, base, integration, methods.recipes(tmp_path))
+    assert rel in str(error.value)
+
+
+@pytest.mark.parametrize('applied', [False, True])
+def test_newline_only_repoint_edit_matches_neither_exact_alternative(tmp_path, applied):
+    _tree(tmp_path, False)
+    folder = tmp_path / 'tools/refactor/splits'
+    folder.mkdir()
+    (folder / 'edge.toml').write_text(
+        '[[repoint]]\nname = "aux-edge"\nfile = "lib/aux.py"\n'
+        'from_module = ".values"\nto_module = ".replacement"\nnames = ["VALUE"]\n')
+    aux = tmp_path / 'server/lib/aux.py'
+    aux.write_text('from .values import VALUE\n')
+    (tmp_path / 'server/lib/replacement.py').write_text('VALUE = 5\n')
+    base = _commit(tmp_path, 'historical repoint with an unapplied alternative')
+    if applied:
+        _, repoints = methods.split_apply.load_recipes(folder)
+        methods.write(tmp_path, methods.split_apply.apply_repoint(tmp_path, repoints[0]))
+    original = aux.read_bytes()
+    aux.write_bytes(original.replace(b'\n', b'\r\n'))
+    assert aux.read_bytes() != original
+    integration = _commit(tmp_path, 'newline-only repoint edit')
+    with pytest.raises(methods.s3_apply.Refusal, match='integration-only edit.*aux.py'):
+        methods.validate(tmp_path, base, integration, methods.recipes(tmp_path))
+
+
+def test_unchanged_historical_crlf_source_is_not_rejected_as_a_policy(tmp_path):
+    _tree(tmp_path, False)
+    source = tmp_path / 'server/lib/engine.py'
+    source.write_bytes(source.read_bytes().replace(b'\n', b'\r\n'))
+    base = _commit(tmp_path, 'legitimate unchanged CRLF historical source')
+    methods.validate(tmp_path, base, base, methods.recipes(tmp_path))
