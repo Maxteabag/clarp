@@ -899,3 +899,80 @@ def test_a_resumed_session_that_runs_queued_notifications_first_ends_its_turn_on
     assert results[0]["duration_ms"] == 9000
     assert results[0]["_assistant_text"] == "the real answer"
     assert errs == []
+
+
+@pytest.mark.parametrize('wrapped', [False, True])
+def test_synthetic_provider_message_never_reaches_live_items_rows_or_result(fake_clarp, tmp_path, wrapped):
+    from lib import live_hub, turn_lifecycle
+    from lib.turn_lifecycle import TurnEvent
+    agent_id = agents_db.create_agent(persona='Synthetic fixture', voice_id='V',
+                                      cwd=str(tmp_path), session='synthetic-fixture')
+    agents_db.start_runtime(agent_id, 'synthetic-fixture')
+    hub = live_hub.LiveHub(sink=lambda _event: None)
+    live_hub.install(hub)
+    synthetic = '<speak>This is SDK synthetic content.</speak>'
+    real = 'A genuine final answer.'
+
+    def streamed(message_id, model, text):
+        return [
+            {'type': 'stream_event', 'event': {'type': 'message_start',
+             'message': {'id': message_id, 'role': 'assistant', 'model': model}}},
+            {'type': 'stream_event', 'event': {'type': 'content_block_start', 'index': 0,
+             'content_block': {'type': 'text', 'text': text}}},
+            {'type': 'stream_event', 'event': {'type': 'content_block_stop', 'index': 0}},
+            {'type': 'stream_event', 'event': {'type': 'message_stop'}},
+        ]
+
+    records = [{'type': 'system', 'subtype': 'init', 'session_id': 'sid-synthetic'}]
+    if wrapped:
+        records += streamed('sdk-synthetic', '<synthetic>', synthetic)
+    else:
+        records += [{'type': 'assistant', 'message': {'id': 'sdk-synthetic',
+                     'role': 'assistant', 'model': '<synthetic>',
+                     'content': [{'type': 'text', 'text': synthetic}],
+                     'usage': {'input_tokens': 0}}}]
+    records += streamed('actual-answer', 'claude-genuine', real)
+    records += [{'type': 'result', 'subtype': 'success', 'result': real}]
+    fake_clarp(records)
+    results = []
+    try:
+        agents_db.open_turn(agent_id=agent_id, source='pwa', trace_id='trace-synthetic')
+        turn_lifecycle.transition(agent_id, TurnEvent.SPAWN_STARTED, {'trace_id': 'trace-synthetic'})
+        handle = CLAUDE.start_turn(text='synthetic fixture input', cwd=tmp_path,
+            backend_session_id='sid-synthetic', session='synthetic-fixture',
+            agent_id=agent_id, trace_id='trace-synthetic', on_result=results.append)
+        handle.wait(timeout=5)
+        handle.drain_thread.join(timeout=5)
+        rows = agents_db.conn().execute(
+            "SELECT text FROM messages WHERE agent_id=? AND role='assistant' ORDER BY timestamp,seq",
+            (agent_id,)).fetchall()
+        assert [r['text'] for r in rows] == [real]
+        items = hub.snapshot(session='synthetic-fixture')['items']
+        assert [item['id'] for item in items] == ['cl:actual-answer:0']
+        assert results[0]['_assistant_text'] == real
+        assert results[0]['_clarp_reply_evidence'] == {
+            'synthetic_seen': True, 'genuine_text_seen': True,
+            'genuine_tool_seen': False, 'unknown_assistant_seen': False}
+    finally:
+        live_hub.install(None)
+
+
+def test_structurally_genuine_exact_placeholder_phrase_keeps_its_live_row(fake_clarp, tmp_path):
+    agent_id = agents_db.create_agent(persona='Genuine fixture', voice_id='V',
+                                      cwd=str(tmp_path), session='genuine-fixture')
+    fake_clarp([
+        {'type': 'system', 'subtype': 'init', 'session_id': 'sid-genuine'},
+        {'type': 'assistant', 'message': {'id': 'actual-answer', 'role': 'assistant',
+            'model': 'claude-genuine', 'content': [{'type': 'text', 'text': 'No response requested.'}],
+            'usage': {'input_tokens': 0}}},
+        {'type': 'result', 'subtype': 'success', 'result': 'No response requested.'},
+    ])
+    agents_db.open_turn(agent_id=agent_id, source='pwa', trace_id='trace-genuine')
+    handle = CLAUDE.start_turn(text='synthetic positive control', cwd=tmp_path,
+        backend_session_id='sid-genuine', session='genuine-fixture',
+        agent_id=agent_id, trace_id='trace-genuine')
+    handle.wait(timeout=5)
+    handle.drain_thread.join(timeout=5)
+    rows = agents_db.conn().execute(
+        "SELECT text FROM messages WHERE agent_id=? AND role='assistant'", (agent_id,)).fetchall()
+    assert [r['text'] for r in rows] == ['No response requested.']
