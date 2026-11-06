@@ -249,3 +249,116 @@ def test_git_read_failure_is_not_proven_path_absence(tmp_path, monkeypatch):
     monkeypatch.setattr(methods.subprocess, 'run', failed_show)
     with pytest.raises(methods.s3_apply.Refusal, match='read|Git|git'):
         methods.show(tmp_path, base, 'server/lib/engine.py')
+
+
+@pytest.mark.parametrize('changed', [None, 'source', 'output'])
+def test_first_method_recipe_on_a_historical_split_part_needs_proven_absence(tmp_path, changed):
+    _tree(tmp_path, True)
+    recipe = tmp_path / 'tools/refactor/methods/engine.toml'
+    text = recipe.read_text()
+    recipe.unlink()
+    base = _commit(tmp_path, 'module split predates first method recipe')
+    entries, _ = methods.split_apply.load_recipes(tmp_path / 'tools/refactor/splits')
+    methods.write(tmp_path, methods.split_apply.apply_split(tmp_path, entries[0]))
+    if changed == 'source':
+        source = tmp_path / 'server/lib/client.py'
+        source.write_text(source.read_text().replace('VALUE + self.bias', 'VALUE - self.bias'))
+    elif changed == 'output':
+        (tmp_path / 'server/lib/read.py').write_text('class ReadMixin:\n    pass\n')
+    integration = _commit(tmp_path, 'historical split, before methods')
+    _git(tmp_path, 'switch', '-qc', 'new-main', base)
+    recipe.write_text(text)
+    _commit(tmp_path, 'first method recipe')
+    found = methods.recipes(tmp_path)
+    if changed:
+        with pytest.raises(methods.s3_apply.Refusal, match='integration-only edit'):
+            methods.validate(tmp_path, base, integration, found)
+    else:
+        methods.validate(tmp_path, base, integration, found)
+
+
+@pytest.mark.parametrize('changed', [False, True])
+def test_first_recipe_without_historical_directory_preserves_the_old_source(tmp_path, changed):
+    _tree(tmp_path, False)
+    recipe = tmp_path / 'tools/refactor/methods/engine.toml'
+    text = recipe.read_text()
+    recipe.unlink()
+    base = _commit(tmp_path, 'no historical recipe directory')
+    if changed:
+        source = tmp_path / 'server/lib/engine.py'
+        source.write_text(source.read_text().replace('VALUE + self.bias', 'VALUE - self.bias'))
+        integration = _commit(tmp_path, 'unrecorded original edit')
+    else:
+        integration = base
+    _git(tmp_path, 'switch', '-qc', 'new-main', base)
+    recipe.write_text(text)
+    _commit(tmp_path, 'first reviewed recipe')
+    if changed:
+        with pytest.raises(methods.s3_apply.Refusal, match='integration-only edit'):
+            methods.validate(tmp_path, base, integration, methods.recipes(tmp_path))
+    else:
+        methods.validate(tmp_path, base, integration, methods.recipes(tmp_path))
+
+
+def test_added_part_and_group_preserve_historical_relative_order(tmp_path):
+    base, integration, _ = _evolve_family(tmp_path)
+    recipe = tmp_path / 'tools/refactor/splits/engine.toml'
+    text = recipe.read_text().replace('["VALUE", "helper"]', '["VALUE"]')
+    text = text.replace('[[split.part]]\nmodule = "lib/client.py"',
+                        '[[split.part]]\nmodule = "lib/helpers.py"\nnames = ["helper"]\n\n'
+                        '[[split.part]]\nmodule = "lib/client.py"')
+    recipe.write_text(text)
+    _commit(tmp_path, 'new helper has its own earlier part')
+    methods.validate(tmp_path, base, integration, methods.recipes(tmp_path))
+    _apply(tmp_path, True)
+    assert 'def helper' in (tmp_path / 'server/lib/helpers.py').read_text()
+    assert 'from .helpers import helper' in (tmp_path / 'server/lib/extra.py').read_text()
+
+
+def test_required_new_name_is_not_optional_during_current_generation(tmp_path):
+    base, integration, _ = _evolve_family(tmp_path)
+    methods.validate(tmp_path, base, integration, methods.recipes(tmp_path))
+    source = tmp_path / 'server/lib/engine.py'
+    source.write_text(source.read_text().replace('\ndef helper():\n    return 8\n', ''))
+    entries, _ = methods.split_apply.load_recipes(tmp_path / 'tools/refactor/splits')
+    with pytest.raises(methods.s3_apply.Refusal, match='helper is not a single plain'):
+        methods.split_apply.apply_split(tmp_path, entries[0])
+
+
+def test_historical_python_tool_is_data_never_executed(tmp_path):
+    _tree(tmp_path, True)
+    (tmp_path / 'tools/refactor/s3_apply.py').write_text("raise RuntimeError('HISTORICAL TOOL EXECUTED')\n")
+    base = _commit(tmp_path, 'historical tool execution sentinel')
+    integration = _apply(tmp_path, True)
+    methods.validate(tmp_path, base, integration, methods.recipes(tmp_path))
+
+
+def test_malformed_historical_metadata_is_not_an_empty_recipe_set(tmp_path):
+    base, _ = _tree(tmp_path, True)
+    integration = _apply(tmp_path, True)
+    _git(tmp_path, 'switch', '-qc', 'malformed-history', base)
+    recipe = tmp_path / 'tools/refactor/splits/engine.toml'
+    good = recipe.read_text()
+    recipe.write_text('invalid TOML !!!\n')
+    malformed = _commit(tmp_path, 'malformed historical recipe')
+    recipe.write_text(good)
+    with pytest.raises(methods.s3_apply.Refusal, match='invalid historical recipe'):
+        methods.validate(tmp_path, malformed, integration, methods.recipes(tmp_path))
+
+
+@pytest.mark.parametrize('failure', ['invalid-ref', 'catalogue-read'])
+def test_unprovable_history_refuses_instead_of_claiming_absence(tmp_path, monkeypatch, failure):
+    base, _ = _tree(tmp_path, False)
+    found = methods.recipes(tmp_path)
+    if failure == 'invalid-ref':
+        with pytest.raises(methods.s3_apply.Refusal, match='Git data read failed'):
+            methods.validate(tmp_path, 'no-such-baseline', base, found)
+    else:
+        real_run = methods.subprocess.run
+        def fail_catalogue(args, *a, **kw):
+            if args[:3] == ['git', '-C', str(tmp_path)] and 'ls-tree' in args and '-r' in args:
+                return subprocess.CompletedProcess(args, 128, '', 'synthetic catalogue failure')
+            return real_run(args, *a, **kw)
+        monkeypatch.setattr(methods.subprocess, 'run', fail_catalogue)
+        with pytest.raises(methods.s3_apply.Refusal, match='Git data read failed.*catalogue'):
+            methods.validate(tmp_path, base, base, found)
