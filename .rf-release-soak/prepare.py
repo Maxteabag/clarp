@@ -60,6 +60,9 @@ def export(pin,path):
  if packed.exists():raise ValueError('packed capsule exists; reconcile before replacement')
  with tarfile.open(packed,'w') as archive:archive.add(path,arcname='.')
  archive_hash=sha(packed)
+ # Unlock only directories of this owned staging copy, never the frozen tool.
+ for directory in [path,*path.rglob('*')]:
+  if directory.is_dir() and not directory.is_symlink():directory.chmod(directory.stat().st_mode|0o700)
  shutil.rmtree(path)
  return {'sha':pin,'git_tree':git('rev-parse',pin+'^{tree}').decode().strip(),'path':str(Path('.rf-release-soak/capsules/unpacked')/path.name),'archive':str(packed.relative_to(ROOT.parent)),'archive_sha256':archive_hash,'sha256':tree_files,'bundle_source':bundle.parent.name,'omitted_data_fixtures':omitted}
 
