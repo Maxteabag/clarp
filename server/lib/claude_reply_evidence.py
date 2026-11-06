@@ -43,6 +43,8 @@ class ClaudeReplyEvidence:
         self._meta: OrderedDict[bytes, bool] = OrderedDict()
         self._suppressed_texts: OrderedDict[bytes, bool] = OrderedDict()
         self._active: tuple[str, int] = ('unknown', 0)
+        self._active_identified = False
+        self._event_identified = False
         self._scope = 0
         self._overflow = False
         self.current_is_genuine = False
@@ -72,7 +74,8 @@ class ClaudeReplyEvidence:
         else:
             kind = 'unknown'
         identity = message.get('id') or event.get('uuid')
-        if not isinstance(identity, str) or not identity:
+        self._event_identified = isinstance(identity, str) and bool(identity)
+        if not self._event_identified:
             return kind, self._scope
         key = _digest(identity)
         old = self._messages.get(key)
@@ -86,6 +89,7 @@ class ClaudeReplyEvidence:
 
     def suppress_event(self, event: dict) -> bool:
         self.current_is_genuine = False
+        self._event_identified = False
         if event.get('isMeta') is True:
             identity = event.get('uuid')
             if isinstance(identity, str):
@@ -101,11 +105,13 @@ class ClaudeReplyEvidence:
             message = message if isinstance(message, dict) else {}
             context = self._message(event, message)
             self._active = context
+            self._active_identified = self._event_identified
         elif outer_assistant:
             context = self._message(event, message)
         elif event.get('type') == 'stream_event' and str(inner.get('type', '')).startswith(
                 ('message_', 'content_block_')):
             context = self._active
+            self._event_identified = self._active_identified
         else:
             return False
         kind, scope = context
@@ -132,7 +138,7 @@ class ClaudeReplyEvidence:
             self._facts['synthetic_seen'] = True
             for value in text:
                 self._remember(self._suppressed_texts, _digest(value.strip()), True)
-        elif kind == 'genuine' and not self._overflow:
+        elif kind == 'genuine' and self._event_identified and not self._overflow:
             self._facts['genuine_text_seen'] |= any(t.strip() for t in text)
             self._facts['genuine_tool_seen'] |= bool(tools)
         elif text or tools or kind == 'meta':
@@ -151,6 +157,10 @@ class ClaudeReplyEvidence:
         self._facts = self._empty()
         self._suppressed_texts.clear()
         self._scope += 1
+        if not self._active_identified:
+            # Metadata-less legacy chunks cannot be assigned to the prior
+            # message after a result. Preserve them as unknown, never stale.
+            self._active = ('unknown', self._scope)
         return facts if any(facts.values()) else None
 
 
