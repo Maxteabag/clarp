@@ -85,3 +85,24 @@ def test_projection_sql_error_is_not_swallowed_as_cache_failure(monkeypatch):
     monkeypatch.setattr(previews,'_dashboard_revisions',fail)
     with pytest.raises(sqlite3.OperationalError):
         previews.dashboard_messages()
+
+
+def test_borrowed_read_cursor_is_not_certified_by_a_newer_global_stamp():
+    aid, other = seed(2)
+    c = db.conn()
+    cursor = c.execute('SELECT message_id FROM messages ORDER BY message_id')
+    assert cursor.fetchone() is not None
+    assert not c.in_transaction  # SQLite implicit read snapshot, no explicit BEGIN
+    foreign = sqlite3.connect(str(db.DB_PATH))
+    try:
+        foreign.execute("UPDATE messages SET text='new committed',revision=2,updated_at=2000 WHERE agent_id=?", (aid,))
+        foreign.commit()
+        # The caller legitimately sees its earlier read snapshot here.
+        assert previews.dashboard_messages()[aid]['head']['preview'] == 'You: synthetic'
+    finally:
+        foreign.close()
+        cursor.fetchall()
+        cursor.close()
+    # Once the borrowed snapshot ends, the shared cache must not retain that
+    # old view under the stamp sampled after the foreign commit.
+    assert previews.dashboard_messages()[aid]['head']['preview'] == 'You: new committed'
