@@ -139,9 +139,9 @@ def test_concurrent_mutations_and_clear_leave_bounded_coherent_cache():
 
 
 def test_equivalent_redacted_matches_touch_lru_without_exposing_bodies(cache):
-    prefix = "/usr/bin/bash -lc \"python3 - <<'PY'\n"
-    first = prefix + "#" * 100 + "x" * 100 + "\nPY\""
-    second = prefix + "#" * 100 + "y" * 100 + "\nPY\""
+    prefix = '/usr/bin/bash -lc "python3 - <<\'PY\'\n'
+    first = prefix + "#" * 100 + "x" * 100 + '\nPY"'
+    second = prefix + "#" * 100 + "y" * 100 + '\nPY"'
     # Existing redaction equivalence is a successful logical lookup.
     commands.remember('equivalent', first)
     commands.remember('equivalent', second)
