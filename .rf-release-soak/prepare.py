@@ -31,7 +31,12 @@ def export(pin,path):
  omitted=[]
  # Match heavy-remote's data boundary: only tracked source, no database/env or
  # transcript-shaped fixtures. Omissions must be tests/benchmarks, never product.
- with tarfile.open(fileobj=io.BytesIO(git('archive',pin))) as archive:
+ raw=path.parent/(path.name+'.source.tar')
+ with raw.open('xb') as out:
+  import os
+  os.chmod(raw,0o600)
+  subprocess.run(['git','archive',pin],stdout=out,check=True)
+ with tarfile.open(raw) as archive:
   members=[]
   for member in archive.getmembers():
    name=member.name
@@ -40,6 +45,7 @@ def export(pin,path):
     omitted.append(name)
    else:members.append(member)
   archive.extractall(path,members=members,filter='data')
+ raw.unlink()
  bundle=None
  for candidate in sorted((PROGRAM/'bundles').iterdir(),key=lambda p:p.stat().st_mtime,reverse=True):
   r=subprocess.run(['git','diff','--quiet',candidate.name,pin,'--','web','package.json','package-lock.json','vite.config.js'])
