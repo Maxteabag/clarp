@@ -46,8 +46,9 @@ the hot spots; every high finding fixed or explicitly accepted.
 ## 2. Hard rules
 
 1. **Only the release owner restarts, updates or deploys the live Host**, inside
-   the windows **12:00 and 18:00 Europe/Oslo**. Runtime-class releases only at
-   18:00, at most one a day. Longest downtime 5 minutes. A failed health check
+   the windows **07:00, 12:00 and 18:00 Europe/Oslo**. Runtime-class releases at
+   07:00 and 18:00, at most two a day (Peter, 6 Nov); the release owner holds
+   program agents from T-30 and resumes them after the ship. Longest downtime 5 minutes. A failed health check
    rolls back automatically. Never run `make deploy`, `install.sh`,
    `make deploy-static`, `clarp-admin update` or `systemctl ... clarp*` yourself.
 2. **Main and `refactor/integration` move through the merge captain** for
@@ -101,6 +102,17 @@ the hot spots; every high finding fixed or explicitly accepted.
 10. **Fail safe.** Unknown, partial or contradictory means stop and report. Never
     retry a write that may have landed; read back first. Postpone rather than
     improvise.
+11. **Efficiency (Peter, 6 Nov, decision 673).** Review-first: for a behaviour
+    change the reviewer gives acceptance criteria and test cases before the
+    author implements, and the author fixes the whole class of problem; target
+    one round. Tool-verified pure moves (reviewed recipe, ast_identity 0
+    problems) get one light review. After big merge #1 ships there is no
+    integration branch: everything lands on main in small batches through the
+    captain with the same gates. The captain records R1 pins for exact pins
+    under an unchanged signed policy; R5 dispositions known flakes and
+    known-bug occurrences; compute applies the cache-cleanup rules. GitHub CI
+    runs only for SHAs that land on main or are release SHAs. Agents send the
+    lead only decisions, blockers, landed results and new findings.
 
 ## 3. Decisions already made (do not reopen)
 
