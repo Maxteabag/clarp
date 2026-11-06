@@ -344,7 +344,7 @@ def _cache_stamp():
     try:
         stamp = change_stamp()
     except Exception as exc:  # noqa: BLE001 - cache failure cannot hide the projection
-        cache_log.log_exception("dashboardCacheStampFail", exc)
+        cache_log.log("dashboardCacheStampFail", f"error={type(exc).__name__}")
         return None
     if stamp[0] < 0:
         cache_log.log("dashboardCacheStampFail", "code=unavailable")
@@ -352,19 +352,32 @@ def _cache_stamp():
     return stamp
 
 
-def _cache_read(cache, key, revision):
+def _cache_read(cache, key, revision, failed):
+    if cache.name in failed:
+        return False, None
     try:
         return cache.get(key, revision)
     except Exception as exc:  # noqa: BLE001 - recompute from SQLite
-        cache_log.log_exception("dashboardCacheReadFail", exc, detail=cache.name)
+        failed.add(cache.name)
+        cache_log.log("dashboardCacheReadFail", f"cache={cache.name} error={type(exc).__name__}")
         return False, None
 
 
-def _cache_write(cache, key, revision, value):
+def _cache_write(cache, key, revision, value, failed):
+    if cache.name in failed:
+        return
     try:
         cache.put(key, revision, value)
     except Exception as exc:  # noqa: BLE001 - the fresh result is already available
-        cache_log.log_exception("dashboardCacheWriteFail", exc, detail=cache.name)
+        failed.add(cache.name)
+        cache_log.log("dashboardCacheWriteFail", f"cache={cache.name} error={type(exc).__name__}")
+
+
+def _preview_copy(entry):
+    # The two head dictionaries are flat; isolate returned values from cached
+    # heads on both misses and hits. Revisions are attached as a separate copy.
+    return {key: dict(value) if isinstance(value, dict) else value
+            for key, value in entry.items()}
 
 
 def dashboard_messages(max_len: int = 80) -> dict[str, dict[str, Any]]:
@@ -374,12 +387,19 @@ def dashboard_messages(max_len: int = 80) -> dict[str, dict[str, Any]]:
     shared caches there. Otherwise validate one database stamp around the whole
     batch, so an import racing any fill cannot publish that mixed-generation
     map or preview. Stamp queries do not grow with the roster.
+
+    Shared caching requires callers to exhaust prior implicit read cursors.
+    The snapshot and warm-up caller tests pin this existing boundary; an old
+    borrowed SQLite snapshot is not certified by in_transaction=False.
+    General borrowed-cursor support remains parked under lead780/backlog33.
+    This guard does not make the returned multi-SELECT map an atomic snapshot.
     """
     database = conn()
     stamp = None if database.in_transaction else _cache_stamp()
     routine = tuple(sorted(origins.ROUTINE_AUTOMATION_ORIGINS))
+    failed: set[str] = set()
     map_hit, projection = ((False, None) if stamp is None else
-                          _cache_read(_REVISION_CACHE, "all", stamp))
+                          _cache_read(_REVISION_CACHE, "all", stamp, failed))
     if not map_hit:
         projection = _dashboard_revisions()
     revisions, stamps, live = projection
@@ -389,23 +409,24 @@ def dashboard_messages(max_len: int = 80) -> dict[str, dict[str, Any]]:
         key = tuple(sorted((str(session or ''), rev, stamps.get(agent_id, {}).get(session, 0))
                            for session, rev in revisions.get(agent_id, {}).items()))
         hit, cached = ((False, None) if stamp is None or max_len != 80 else
-                       _cache_read(_PREVIEW_CACHE, agent_id, key))
-        entry = dict(cached) if hit else _agent_preview(agent_id, max_len, routine)
+                       _cache_read(_PREVIEW_CACHE, agent_id, key, failed))
+        entry = _preview_copy(cached) if hit else _agent_preview(agent_id, max_len, routine)
         if not hit and stamp is not None and max_len == 80:
-            pending.append((agent_id, key, dict(entry)))
+            pending.append((agent_id, key, _preview_copy(entry)))
         if agent_id in revisions:
             entry['revisions'] = dict(revisions[agent_id])
         result[agent_id] = entry
     if stamp is not None and not database.in_transaction:
         if stamp == _cache_stamp():
             if not map_hit:
-                _cache_write(_REVISION_CACHE, "all", stamp, projection)
+                _cache_write(_REVISION_CACHE, "all", stamp, projection, failed)
             for agent_id, key, entry in pending:
-                _cache_write(_PREVIEW_CACHE, agent_id, key, entry)
-        try:
-            _PREVIEW_CACHE.retain(result)
-        except Exception as exc:  # noqa: BLE001 - stale keys are bounded and never projected
-            cache_log.log_exception("dashboardCachePruneFail", exc, detail=_PREVIEW_CACHE.name)
+                _cache_write(_PREVIEW_CACHE, agent_id, key, entry, failed)
+            if _PREVIEW_CACHE.name not in failed:
+                try:
+                    _PREVIEW_CACHE.retain(result)
+                except Exception as exc:  # noqa: BLE001 - bounded keys are never projected as a roster
+                    cache_log.log("dashboardCachePruneFail", f"cache={_PREVIEW_CACHE.name} error={type(exc).__name__}")
     return result
 
 
