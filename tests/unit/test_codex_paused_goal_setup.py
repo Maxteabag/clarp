@@ -120,6 +120,8 @@ def native_goal_gate(fake, tmp_path, monkeypatch):
     # It bounds only our observation gate; no product deadline is changed.
     deadline = time.monotonic() + 20
 
+    held_clients = []
+
     class Gate:
         def remaining(self):
             return max(0, deadline - time.monotonic())
@@ -130,6 +132,7 @@ def native_goal_gate(fake, tmp_path, monkeypatch):
             state = json.loads(path.read_text())
             assert state == {'thread':thread,'turn':turn,'pid':client.proc.pid,'phase':'running'}
             assert client.proc.poll() is None and self.remaining() > 0
+            held_clients.append(client)
             (fake / 'native-controls-verified').write_text(json.dumps(state))
             print('native-control: actual running identity verified before shutdown', file=sys.stderr)
 
@@ -137,3 +140,7 @@ def native_goal_gate(fake, tmp_path, monkeypatch):
         yield Gate()
     finally:
         (fake / 'release-native-control').touch()
+        for client in held_clients:
+            if client.proc.poll() is None:
+                assert _wait(lambda: json.loads((fake / 'native-control.json').read_text())['phase'] == 'released'
+                             or client.proc.poll() is not None, timeout=5), 'native execution gate did not release'
