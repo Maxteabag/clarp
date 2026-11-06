@@ -890,7 +890,7 @@ def test_notification_rejects_another_owner_with_only_one_durable_ledger(
     receipt. Equal timestamps must not make either request the prior cause.
     """
     from lib import db, message_live, message_store, message_writes
-    from lib import turn_lifecycle, user_notifications
+    from lib import prompt_admissions, turn_lifecycle, user_notifications
 
     clock = [1800000000000]
     for module in (db, agents_db, message_live, message_writes, turn_lifecycle):
@@ -904,16 +904,24 @@ def test_notification_rejects_another_owner_with_only_one_durable_ledger(
         text="Original answer.")
     assert source is not None
     if other_owner != "turn":
+        admission = prompt_admissions.create(
+            authenticated_at_admission=True, origin="user", sender_agent_id="", channel="chat",
+            observed_at=clock[0], client_admission_id="u-ledger-B", trace_id="ledger-B",
+            original_text="next request")
         service.dispatch(text="next request", requested_session="mike", trace_id="ledger-B",
-                         client_msg_id="u-ledger-B", synthesize_audio=False)
+                         client_msg_id="u-ledger-B", prompt_admission=admission, synthesize_audio=False)
         # Model the real asynchronous handoff gap after A's DONE, before B's
         # backend launch. No second turn is manufactured by the fixture.
         monkeypatch.setattr(service, "_spawn_next", lambda *args: None)
+    backend.spawned[0][1]["on_result"]({"duration_ms": 10})
+    if other_owner != "turn":
+        # A real queue edit after A's terminal stamp makes B newest at the
+        # same millisecond. Revision ordering must not hide the queue guard.
+        assert turn_queue.update_text("u-ledger-B", "edited next request")
         if other_owner == "queue-tombstone":
             turn_queue.mark_started("u-ledger-B")
             turn_queue.settle_receipt(aid, "ledger-B", "completed")
             assert turn_queue.status("u-ledger-B") == "done"
-    backend.spawned[0][1]["on_result"]({"duration_ms": 10})
     if other_owner == "turn":
         transcript = tmp_path / ".claude" / "projects" / "-ledger" / "backend-session-1.jsonl"
         transcript.parent.mkdir(parents=True)
