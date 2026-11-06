@@ -2092,7 +2092,7 @@ class TurnDispatchService:
         """Decide how to handle a new send for this agent:
         - Stop barrier up → park behind it, return True;
         - terminal attached → queue behind it, return True (caller doesn't spawn);
-        - in-flight turn running → PREEMPT it (legacy non-steerable backend);
+        - in-flight turn running → queue a user send; legacy other origins preempt;
         - stale slot (no live process) → take it over, return False;
         - idle → claim the slot, return False.
         Returns True when the send waits instead of spawning.
@@ -2120,23 +2120,49 @@ class TurnDispatchService:
             park_id = _park(spec, prefix="preempt-park")
         parked = False
         preempt: list = []
+        queue_user: list = []
         try:
             with _TURN_LOCK:
                 parked, decision = self._claim_or_queue(
                     spec, queue_if_busy=queue_if_busy, park_id=park_id,
-                    preempt=preempt)
+                    preempt=preempt, queue_user=queue_user)
         finally:
             if park_id and not parked:
                 turn_queue.unpark(park_id)
         if preempt and self._preempt_for(spec, preempt[0]):
             decision = True     # it waits for the old process to exit
+        if queue_user:
+            # Ordinary admission and supported steering have already run.
+            # Persist before making this previously-preempting send eligible.
+            queue_id = spec.client_msg_id or spec.trace_id
+            try:
+                turn_queue.enqueue(
+                    queue_id=queue_id, agent_id=spec.agent_id, session=spec.session,
+                    text=spec.text, trace_id=spec.trace_id,
+                    client_msg_id=spec.client_msg_id,
+                    synthesize_audio=spec.synthesize_audio, origin=spec.origin,
+                    sender_agent_id=spec.sender_agent_id,
+                    prompt_admission_id=spec.prompt_admission_id)
+            except Exception as exc:  # noqa: BLE001 - never queue only in memory
+                log_exception("userBusyQueueFail", exc, detail=spec.agent_id)
+                raise DispatchError(503, "could not durably queue message") from exc
+            waiting = replace(spec, queue_id=queue_id)
+            with _TURN_LOCK:
+                _parked, waits = self._claim_or_queue(
+                    waiting, queue_if_busy=True, park_id="", queue_user=[])
+            if not waits:
+                # The old turn ended during persistence: use the existing
+                # queue handoff so this receipt follows its actual launch.
+                self._spawn_next(spec.agent_id, waiting)
+            decision = True
         if decision and _SLOTS.fenced:
             # Held behind the release drain: durable before anything else.
             self.persist_held(spec.agent_id)
         return decision
 
     def _claim_or_queue(self, spec: _TurnSpec, *, queue_if_busy: bool,
-                        park_id: str, preempt: list | None = None) -> tuple[bool, bool]:
+                        park_id: str, queue_user: list,
+                        preempt: list | None = None) -> tuple[bool, bool]:
         """The decision half of _enqueue_if_busy; the caller holds _TURN_LOCK.
         Returns (parked behind Stop, send waits)."""
         agent_id = spec.agent_id
@@ -2210,6 +2236,11 @@ class TurnDispatchService:
             if _SLOTS.fenced:
                 # The release drain waits for this turn; never preempt it.
                 return self._hold_for_drain(spec, "behind a live turn")
+            if spec.origin == "user":
+                # Leave the live owner intact. The caller persists a normal
+                # queue receipt outside this lock, then rechecks ownership.
+                queue_user.append(spec.trace_id)
+                return False, True
             # Take the slot first so the preempted turn's dying callback is
             # already superseded, then interrupt once the lock is released
             # (the caller does, see ``preempt``).
