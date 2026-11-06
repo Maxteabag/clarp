@@ -4,6 +4,7 @@ import threading
 import pytest
 from lib import codex_app_server as cas
 from tests.unit.test_codex_generations import fake, _leftover, _wait, _goal_turns
+from tests.unit.test_codex_paused_goal_setup import native_goal_gate
 
 
 @pytest.mark.parametrize('user_action,expected', [('pause', 'paused'), ('resume', 'active')])
@@ -89,7 +90,7 @@ def test_a_failed_restore_can_be_recovered_on_the_next_pass(fake, tmp_path, monk
         'failed activation deleted durable recovery intent and left the goal paused'
 
 
-def test_a_drain_backstop_does_not_kill_a_continuation_before_its_notification_is_delivered(fake, tmp_path, monkeypatch):
+def test_a_drain_backstop_does_not_kill_a_continuation_before_its_notification_is_delivered(fake, tmp_path, monkeypatch, native_goal_gate):
     monkeypatch.setenv('CLARP_QA_GOAL_TURN_HOLD', '3')
     agent, thread, _ = _leftover(fake, tmp_path, monkeypatch, 'late-native-start')
     assert _wait(lambda: not cas.active_handles(agent))
@@ -98,10 +99,12 @@ def test_a_drain_backstop_does_not_kill_a_continuation_before_its_notification_i
     monkeypatch.setattr(cas, '_DRAINING', {id(client): client})
     delivered, release = threading.Event(), threading.Event()
     original = client._notification
+    native_turn = []
     def notification(method, params):
         if method == 'turn/started' and params.get('threadId') == thread:
+            native_turn.append(params["turn"]["id"])
             delivered.set()
-            assert release.wait(8)
+            assert release.wait(native_goal_gate.remaining()), "owned notification gate deadline"
         return original(method, params)
     monkeypatch.setattr(client, '_notification', notification)
     before = len(_goal_turns(fake, thread))
@@ -110,6 +113,8 @@ def test_a_drain_backstop_does_not_kill_a_continuation_before_its_notification_i
         assert delivered.wait(5)
         assert _wait(lambda: len(_goal_turns(fake, thread)) == before + 1), 'control: native continuation really started'
         assert not cas.active_handles(agent), 'control: its start notification is still being delivered'
+        assert len(native_turn) == 1
+        native_goal_gate.assert_live(client, thread, native_turn[0])
         client._exit_if_drained(backstop=True)
         assert client.proc.poll() is None, 'drain backstop killed a running native continuation before its start notification was adopted'
     finally:
@@ -167,7 +172,7 @@ def test_a_goal_admitted_after_the_last_drain_snapshot_is_not_killed(fake, tmp_p
     assert not cut_running, 'a goal admitted after the quiet snapshot was interrupted by drain shutdown'
 
 
-def test_a_credential_switch_does_not_kill_an_unadopted_native_continuation(fake, tmp_path, monkeypatch):
+def test_a_credential_switch_does_not_kill_an_unadopted_native_continuation(fake, tmp_path, monkeypatch, native_goal_gate):
     from tests.unit.test_codex_generations import _agent, _turn
     monkeypatch.setenv('CLARP_QA_GOAL_TURN_HOLD', '3')
     agent, thread, _ = _leftover(fake, tmp_path, monkeypatch, 'refresh-native-start')
@@ -175,10 +180,12 @@ def test_a_credential_switch_does_not_kill_an_unadopted_native_continuation(fake
     client = cas._client(agent, 'refresh-native-start')
     delivered, release = threading.Event(), threading.Event()
     original = client._notification
+    native_turn = []
     def notification(method, params):
         if method == 'turn/started' and params.get('threadId') == thread:
+            native_turn.append(params["turn"]["id"])
             delivered.set()
-            assert release.wait(8)
+            assert release.wait(native_goal_gate.remaining()), "owned notification gate deadline"
         return original(method, params)
     monkeypatch.setattr(client, '_notification', notification)
     before = len(_goal_turns(fake, thread))
@@ -187,6 +194,8 @@ def test_a_credential_switch_does_not_kill_an_unadopted_native_continuation(fake
         assert delivered.wait(5)
         assert _wait(lambda: len(_goal_turns(fake, thread)) == before + 1)
         assert not cas.active_handles(agent), 'control: native start is still in delivery'
+        assert len(native_turn) == 1
+        native_goal_gate.assert_live(client, thread, native_turn[0])
         (fake / 'auth.json').write_text('account-two')
         nxt = _agent(tmp_path, 'switch-next')
         done, outcome, _ = _turn(tmp_path, nxt, 'switch-next', 'new credential turn')

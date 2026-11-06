@@ -76,3 +76,62 @@ def test_a_paused_leftover_resumes_exactly_one_native_continuation(fake, tmp_pat
         assert cas.goal(agent, 'get')['status'] == 'complete'
     finally:
         (fake / 'release-setup-workers').touch()
+
+
+# Hold a real native execution after its durable start record, before its
+# completion. This is independent of the blocked Host adoption callback.
+NATIVE_GATE = r'''
+import json, os, pathlib, runpy, sys, threading, time
+home = pathlib.Path(os.environ['CODEX_HOME'])
+def profile(frame, event, result):
+    if (event == 'return' and frame.f_code.co_name == 'record_auth'
+            and frame.f_locals.get('kind') == 'goal_turn'):
+        caller = frame.f_back.f_locals
+        state = {'thread':caller['thread_id'],'turn':caller['turn_id'],
+                 'pid':os.getpid(),'phase':'running'}
+        path = home / 'native-control.json'
+        path.write_text(json.dumps(state))
+        end = time.monotonic() + 20
+        while not (home / 'release-native-control').exists():
+            if time.monotonic() > end:
+                raise TimeoutError('owned native execution gate unreleased')
+            time.sleep(.005)
+        state['phase'] = 'released'
+        path.write_text(json.dumps(state))
+threading.setprofile(profile)
+runpy.run_path(SOURCE, run_name='__main__')
+'''
+
+
+import pytest
+import time
+
+
+@pytest.fixture
+def native_goal_gate(fake, tmp_path, monkeypatch):
+    provider = Path(by_id('codex').required_binary)
+    wrapper = tmp_path / 'native-gated-codex'
+    wrapper.write_text('#!' + sys.executable + '\nSOURCE = ' + repr(str(provider)) + '\n' + NATIVE_GATE)
+    wrapper.chmod(0o700)
+    monkeypatch.setattr(by_id('codex'), 'required_binary', str(wrapper))
+    # Covers existing delivered5s + count8s + action5s, with cleanup margin.
+    # It bounds only our observation gate; no product deadline is changed.
+    deadline = time.monotonic() + 20
+
+    class Gate:
+        def remaining(self):
+            return max(0, deadline - time.monotonic())
+
+        def assert_live(self, client, thread, turn):
+            path = fake / 'native-control.json'
+            assert _wait(path.exists), 'native execution did not enter its gate'
+            state = json.loads(path.read_text())
+            assert state == {'thread':thread,'turn':turn,'pid':client.proc.pid,'phase':'running'}
+            assert client.proc.poll() is None and self.remaining() > 0
+            (fake / 'native-controls-verified').write_text(json.dumps(state))
+            print('native-control: actual running identity verified before shutdown', file=sys.stderr)
+
+    try:
+        yield Gate()
+    finally:
+        (fake / 'release-native-control').touch()
