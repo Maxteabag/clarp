@@ -116,15 +116,15 @@ def test_held_import_followup_waits_until_completion_plus_window(tmp_path, clock
     # work must be deferred rather than sleeping/spinning in the only worker.
     assert other_done.wait(2)
     assert [x[0] for x in observed] == ['initial', 'other'], observed
-    clock.advance(59.999)
+    clock.advance(139.999)
     assert not follow_done.is_set()
     # Continuous dirty updates must retain the original earned deadline.
     follow.write_text('v3 newest bytes')
     assert cache.schedule_import(follow, lambda: observed.append(
         ('follow', clock.now, follow.read_text())), owner='agent', after=follow_after)
-    clock.advance(60.0)
+    clock.advance(140.0)
     assert follow_done.wait(2)
-    assert observed[-1] == ('follow', 60.0, 'v3 newest bytes')
+    assert observed[-1] == ('follow', 140.0, 'v3 newest bytes')
     assert cache.wait_for_background(2)
 
 
@@ -407,11 +407,11 @@ def test_unchanged_validation_does_not_erase_last_expensive_import_cost(tmp_path
     seen = []
     done, after = completed()
     assert cache.schedule_import(b, lambda: seen.append(clock.now), owner='agent', after=after)
-    clock.advance(64.999)
+    clock.advance(144.999)
     assert not done.is_set()
-    clock.advance(65)
+    clock.advance(145)
     assert done.wait(2)
-    assert seen == [65]
+    assert seen == [145]
 
 
 @pytest.mark.parametrize('duration,next_admission', [(1, 11), (5, 15), (5.001, 35.007), (20, 140), (100, 400)])

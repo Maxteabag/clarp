@@ -28,6 +28,10 @@ _validated_at: RevisionedCache[str, float] = RevisionedCache(
 # Unchanged version checks do not erase a previously measured slow import.
 _last_import_duration: RevisionedCache[str, float] = RevisionedCache(
     "transcript-import-duration", max_entries=1024)
+# A timed-out snapshot must not pay its full wait again on every poll.
+_snapshot_wait_until: RevisionedCache[str, float] = RevisionedCache(
+    "transcript-snapshot-wait-cooldown", max_entries=1024)
+_SNAPSHOT_DEADLINE_COOLDOWN = 120.0
 
 
 def source_path(path: pathlib.Path) -> pathlib.Path:
@@ -191,6 +195,7 @@ def reset_for_tests(deadline_s: float = 5.0) -> bool:
                 _imported.clear()
                 _validated_at.reset()
                 _last_import_duration.reset()
+                _snapshot_wait_until.reset()
                 _last_started.clear()
                 _deferred.clear()
                 _pending.clear()
@@ -261,11 +266,17 @@ def _owner_key(key: str) -> str:
     return key.partition("\0")[0] or key
 
 
+def _background_interval(duration: float) -> float:
+    if duration > 5.0:
+        return min(300.0, max(_BACKGROUND_MIN_INTERVAL, 6 * duration))
+    return max(_BACKGROUND_MIN_INTERVAL, 2 * duration)
+
+
 def _owner_deadline(key: str) -> float:
     completed, duration = _last_started.get(_owner_key(key), (None, 0.0))
     if completed is None:
         return 0.0
-    return completed + max(_BACKGROUND_MIN_INTERVAL, 2 * duration)
+    return completed + _background_interval(duration)
 
 
 def _reserve_owner(key: str, now: float) -> bool:
@@ -275,7 +286,7 @@ def _reserve_owner(key: str, now: float) -> bool:
         active.add(_owner_key(_running[0]))
     for owner, (completed, duration) in list(_last_started.items()):
         if owner not in active and (completed is None or
-                completed + max(_BACKGROUND_MIN_INTERVAL, 2 * duration) <= now):
+                completed + _background_interval(duration) <= now):
             del _last_started[owner]
     owner = _owner_key(key)
     if owner in _last_started:
@@ -392,6 +403,14 @@ def import_for_snapshot(path: pathlib.Path, importer: Callable[[], None], *,
         if not _resetting and _imported.get(key) == signature:
             return True
         _, recent_duration = _last_import_duration.get(key, epoch)
+        _, wait_until = _snapshot_wait_until.get(key, epoch)
+    if wait_until is not None and started < wait_until:
+        # Ordinary scheduling preserves dirty work/callbacks without renewing
+        # urgency or the fixed cooldown on every snapshot poll.
+        schedule_import(path, importer, owner=owner)
+        print(f"snapshotImportSkip code=deadline_cooldown "
+              f"source_bytes={signature[1]}", file=sys.stderr, flush=True)
+        return False
     if recent_duration is not None and recent_duration > timeout:
         # Known slow histories retain today's asynchronous/coalesced refresh.
         # Waiting the whole bound again would add latency without fresh rows.
@@ -414,6 +433,8 @@ def import_for_snapshot(path: pathlib.Path, importer: Callable[[], None], *,
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 code = "deadline"
+                _snapshot_wait_until.put(
+                    key, epoch, time.monotonic() + _SNAPSHOT_DEADLINE_COOLDOWN)
                 break
             _cond.wait(remaining)
     # Journal only: synchronous telemetry writes can themselves wait on SQLite
