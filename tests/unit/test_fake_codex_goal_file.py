@@ -62,7 +62,10 @@ def write(path, data, *a, **kw):
         with path.open('w') as stream:
             hold()  # baseline has truncated the canonical file here
             return stream.write(data)
-    return original_write(path, data, *a, **kw)
+    result = original_write(path, data, *a, **kw)
+    if mode == 'publication' and path.name == 'fake-goals.json':
+        original_write(gate / 'before', original_read(path))
+    return result
 pathlib.Path.write_text = write
 
 def replace(src, dst, *a, **kw):
@@ -71,7 +74,10 @@ def replace(src, dst, *a, **kw):
             hold()  # repaired fixture has only written a private temp file
         if mode == 'fail-replace':
             raise OSError('injected pre-replace failure')
-    return original_replace(src, dst, *a, **kw)
+    result = original_replace(src, dst, *a, **kw)
+    if mode == 'publication' and pathlib.Path(dst).name == 'fake-goals.json' and threading.current_thread() is threading.main_thread():
+        original_write(gate / 'before', original_read(pathlib.Path(dst)))
+    return result
 os.replace = replace
 
 def flock(fd, operation):
@@ -198,7 +204,7 @@ def test_background_publication_never_exposes_empty_json(tmp_path, providers):
     provider = providers(tmp_path / "publisher", home, "publication")
     provider.call("thread/goal/set", threadId="background", objective="synthetic", status="active")
     # The initial set is complete; the real background goal_turn is held mid-publication.
-    before = json.loads(target.read_text())
+    before = json.loads((provider.gate / "before").read_text())
     wait_file(provider.gate / "ready")
     try:
         reader = subprocess.run(
