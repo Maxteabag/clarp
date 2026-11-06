@@ -29,7 +29,7 @@ def test_encoding_trims_method_and_preserves_nested_value_bytes():
         'path': pathlib.Path('/synthetic/home'), 'tuple': (1, False),
         'nested': {2: [None, 'x']},
     }) == (b'{"version":1,"method":"status","params":'
-           b'{"path":"/synthetic/home","tuple":[1,false],"nested":{"2":[null,"x"]}}\n')
+           b'{"path":"/synthetic/home","tuple":[1,false],"nested":{"2":[null,"x"]}}}\n')
 
 
 @pytest.mark.parametrize(('raw', 'message'), [
