@@ -171,8 +171,29 @@ admission, owns its phase/target slot and retires it in that dispatch's finally.
 A retained reference cannot replay after slot retirement; two identical separately
 received notifications still receive distinct operations. No global history.
 
+Proposed concrete memory storage is ONE active mirror-operation slot on the
+original client, issued from the actual response-pop/notification R adapter.
+A frozen MirrorFence carries original_client_ref, original_reader_ref,
+issued_operation_ref, expected_phase and the owner-associated scalar target.
+The slot holds phase and the admitted identity; it is not the authoritative
+goal row, pending-request map, latest-pool entry or a retained operation history.
+
+Proposed enforcement uses the EXISTING original-client lock for short slot
+issue/check/phase mutation only: require slot.reference IS the issued reference,
+matching original routing and associated target, and TARGET_RESOLVED; change
+phase to STORE_ISSUED once, then release BEFORE W. S6 must confirm this exact
+lock/context at the composed base: R already releases the client lock before
+the callback and requesters must not hold it across done.wait. Notification
+issuance must remain in its original reader order. If a real reentry path
+cannot use one bounded slot safely, resolve that before code, not with a history
+set, another lock or a new retirement hold. This is proposed, not enforced proof.
+
 The write port checks issued-reference identity, captured ORIGINAL client/
 reader/routing facts, current operation phase and its associated L target.
+R facts are compared to the retained issued record, not a fresh pending-map
+lookup: R has already popped that pending entry. A fake record with matching
+fields is not the issued reference. Retirement clears the slot and borrowed
+payload/result references in the existing finally path.
 It does NOT check the newest pool client or revoke on requester timeout.
 Actual slot storage/issuance/reentry must be agreed with S6 on the composed base;
 caller-self-equal records are not implementation of this port.
