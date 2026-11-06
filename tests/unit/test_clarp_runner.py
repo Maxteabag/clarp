@@ -1077,3 +1077,62 @@ def test_reply_evidence_snapshots_are_copies_and_overflow_cannot_certify_an_answ
     assert second['synthetic_seen'] is False
     assert len(evidence._messages) <= 256  # accepted per-attempt resource ceiling
     assert evidence.finish_result() is None
+
+
+@pytest.mark.parametrize('noise', ['fragmented', 'meta-parent'])
+@pytest.mark.parametrize('followed_by_genuine', [False, True])
+def test_suppressed_message_output_cannot_reappear_through_the_terminal_result(
+        fake_clarp, tmp_path, noise, followed_by_genuine):
+    """No full assistant snapshot: output association must follow actual blocks.
+
+    Meta provenance is deliberately not reclassified as synthetic/answered.
+    A second real result proves that suppression cannot terminate the process
+    or contaminate the next result's facts.
+    """
+    from lib.turn_dispatch import _result_assistant_text
+    phrase = 'No response requested.'
+    records = [{'type': 'system', 'subtype': 'init', 'session_id': 'sid-noise'}]
+    if noise == 'fragmented':
+        records += [
+            {'type': 'stream_event', 'event': {'type': 'message_start', 'message': {
+                'id': 'noise', 'role': 'assistant', 'model': '<synthetic>'}}},
+            {'type': 'stream_event', 'event': {'type': 'content_block_start',
+                'index': 0, 'content_block': {'type': 'text', 'text': ''}}},
+            *[{'type': 'stream_event', 'event': {'type': 'content_block_delta',
+                'index': 0, 'delta': {'type': 'text_delta', 'text': text}}}
+              for text in ['No response ', 'requested.']],
+            {'type': 'stream_event', 'event': {'type': 'content_block_stop', 'index': 0}},
+            {'type': 'stream_event', 'event': {'type': 'message_stop'}},
+        ]
+    else:
+        records += [
+            {'type': 'user', 'isMeta': True, 'uuid': 'meta',
+             'message': {'content': 'Injected resume input'}},
+            {'type': 'assistant', 'parentUuid': 'meta', 'message': {'id': 'noise',
+             'content': [{'type': 'text', 'text': phrase}]}},
+        ]
+    records += [{'type': 'result', 'subtype': 'success', 'result': phrase,
+                 'usage': {'input_tokens': 0, 'output_tokens': 0}}]
+    if followed_by_genuine:
+        records += [
+            {'type': 'user', 'message': {'content': phrase}},
+            {'type': 'assistant', 'message': {'id': 'real', 'model': 'claude-real',
+                'content': [{'type': 'text', 'text': phrase}]}},
+            {'type': 'result', 'subtype': 'success', 'result': phrase,
+             'usage': {'input_tokens': 10, 'output_tokens': 3}},
+        ]
+    fake_clarp(records)
+    results, errors = [], []
+    handle = CLAUDE.start_turn(text='structural noise fixture', cwd=tmp_path,
+        backend_session_id='sid-noise', on_result=results.append, on_error=errors.append)
+    handle.wait(timeout=5)
+    handle.drain_thread.join(timeout=5)
+    assert errors == []
+    assert len(results) == 1
+    assert results[0]['result'] == phrase
+    assert results[0]['usage'] == records[-1]['usage']
+    assert _result_assistant_text(results[0]) == (phrase if followed_by_genuine else '')
+    facts = results[0]['_clarp_reply_evidence']
+    assert facts['genuine_text_seen'] is followed_by_genuine
+    assert facts['synthetic_seen'] is (noise == 'fragmented' and not followed_by_genuine)
+    assert facts['unknown_assistant_seen'] is (noise == 'meta-parent' and not followed_by_genuine)
