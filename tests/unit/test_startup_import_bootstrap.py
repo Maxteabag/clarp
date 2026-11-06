@@ -42,7 +42,7 @@ def test_real_host_bootstrap_registers_before_lib_imports_and_alias_reset_cannot
     assert cache._host_started_at == first._HOST_PROCESS_STARTED_AT
 
 
-@pytest.mark.parametrize('origin', [-1, float('nan'), float('inf'), True, None])
+@pytest.mark.parametrize('origin', [-1, float('nan'), float('inf'), 1e100, True, None])
 def test_invalid_startup_origin_cannot_install_or_renew_the_anchor(monkeypatch, origin):
     monkeypatch.setattr(cache, '_host_started_at', None)
     with pytest.raises(ValueError, match='invalid Host startup'):

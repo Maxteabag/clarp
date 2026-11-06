@@ -471,7 +471,7 @@ def test_deadline_expiry_keeps_known_slow_skip_until_fast_import_recovers(tmp_pa
     assert cache.wait_for_background(2)
 
 
-@pytest.mark.parametrize('size,staggered', [(50 * 1024 * 1024 - 1, False), (50 * 1024 * 1024, True)])
+@pytest.mark.parametrize('size,staggered', [(50 * 1024 * 1024 - 1, False), (50 * 1024 * 1024, True), (50 * 1024 * 1024 + 1, True)])
 def test_first_large_background_source_waits_for_startup_grace_boundary(
         tmp_path, clock, monkeypatch, size, staggered):
     # Seed the real Host bootstrap hook, independent of cache/DB reset lifetime.
