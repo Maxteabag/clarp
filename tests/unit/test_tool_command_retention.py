@@ -67,7 +67,7 @@ def test_byte_boundary_duplicate_and_hot_entry_lru(monkeypatch):
     commands.remember('a', text(5))
     commands.remember('other', text(5))
     assert resolves('a', a) and resolves('a', c)
-    assert 'other' not in retained()
+    assert int('other' in retained()) == 0
 
 
 def test_idle_expiry_is_global_lazy_and_success_only(cache):
@@ -79,7 +79,7 @@ def test_idle_expiry_is_global_lazy_and_success_only(cache):
     assert not commands.resolve('cold', 'missing')
     cache[0] = TTL
     commands.remember('new', text(3, 100))
-    assert 'cold' not in retained(), 'another agent operation must sweep expired data'
+    assert int('cold' in retained()) == 0, 'another agent operation must sweep expired data'
     assert resolves('hot', b)
     cache[0] += TTL
     assert not resolves('hot', b)
@@ -94,7 +94,7 @@ def test_ambiguous_misses_do_not_refresh_idle_lifetime(cache):
     assert not commands.resolve('a', a[:80])
     cache[0] = TTL
     assert not commands.resolve('a', a[:80])
-    assert 'a' not in retained()
+    assert int('a' in retained()) == 0
 
 
 def test_count_agent_caps_and_agent_lru_are_preserved():
@@ -110,7 +110,7 @@ def test_count_agent_caps_and_agent_lru_are_preserved():
     commands.remember('new', text(128, 100))
     assert len(retained()) == 128
     assert resolves('0', text(0, 100))
-    assert '1' not in retained()
+    assert int('1' in retained()) == 0
     assert not resolves('2', text(0, 100))
 
 
@@ -136,3 +136,22 @@ def test_concurrent_mutations_and_clear_leave_bounded_coherent_cache():
     commands.remember('fresh', value)
     assert charge('fresh') == sys.getsizeof(value)
     assert resolves('fresh', value)
+
+
+def test_equivalent_redacted_matches_touch_lru_without_exposing_bodies(cache):
+    prefix = "/usr/bin/bash -lc \"python3 - <<'PY'\n"
+    first = prefix + "#" * 100 + "x" * 100 + "\nPY\""
+    second = prefix + "#" * 100 + "y" * 100 + "\nPY\""
+    # Existing redaction equivalence is a successful logical lookup.
+    commands.remember('equivalent', first)
+    commands.remember('equivalent', second)
+    cache[0] = TTL - 1
+    result = commands.answer('equivalent', first[:80])
+    assert bool(result)
+    assert int('x' * 100 in result) == 0
+    assert int('y' * 100 in result) == 0
+    cache[0] = TTL
+    commands.remember('other', text(3, 100))
+    assert int('equivalent' in retained()) == 1
+    commands.clear()
+    assert len(retained()) == 0
