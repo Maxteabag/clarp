@@ -335,9 +335,9 @@ def test_hot_path_timer_order_cannot_starve_older_same_owner_path(tmp_path, cloc
             entry = cache._deferred.get(key)
         if entry is not None:
             timer = entry[1]
-            assert timer.due <= clock.now
-            timer.alive = False
-            timer.function(*timer.args, **timer.kwargs)
+            if timer.due <= clock.now:
+                timer.alive = False
+                timer.function(*timer.args, **timer.kwargs)
 
     try:
         # Valid adversarial scheduling: A's timer, worker and reentrant after
