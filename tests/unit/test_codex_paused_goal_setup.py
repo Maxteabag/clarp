@@ -2,6 +2,9 @@
 import json
 from pathlib import Path
 import sys
+import time
+
+import pytest
 
 from lib.backend.registry import by_id
 from tests.unit.test_codex_generations import fake, _leftover, _goal_turns, _wait
@@ -90,21 +93,20 @@ def profile(frame, event, result):
         state = {'thread':caller['thread_id'],'turn':caller['turn_id'],
                  'pid':os.getpid(),'phase':'running'}
         path = home / 'native-control.json'
-        path.write_text(json.dumps(state))
+        temporary = path.with_suffix('.tmp')
+        temporary.write_text(json.dumps(state))
+        os.replace(temporary, path)
         end = time.monotonic() + 20
         while not (home / 'release-native-control').exists():
             if time.monotonic() > end:
                 raise TimeoutError('owned native execution gate unreleased')
             time.sleep(.005)
         state['phase'] = 'released'
-        path.write_text(json.dumps(state))
+        temporary.write_text(json.dumps(state))
+        os.replace(temporary, path)
 threading.setprofile(profile)
 runpy.run_path(SOURCE, run_name='__main__')
 '''
-
-
-import pytest
-import time
 
 
 @pytest.fixture
