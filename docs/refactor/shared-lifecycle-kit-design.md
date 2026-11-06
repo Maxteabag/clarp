@@ -37,7 +37,11 @@ Proposed public signatures (types below are contracts, not implemented code):
                 owner: OwnerWritePort[E, P, T], refusals: RefusalSink) -> Outcome[T]
     RejectAtWrite(reason: RefusalCode, state: str, ids: SafeIds,
                   *, primary: BaseException | None = None) -> Refused
-    RefusalSink.capture(family: str, event: str, state: str,
+    RefusalSink.family: str
+    RefusalSink.events: frozenset[str]
+    RefusalSink.states: frozenset[str]
+    RefusalSink.refusal_codes: frozenset[str]
+    RefusalSink.capture(event: str, state: str | None,
                         reason: RefusalCode, ids: SafeIds) -> RefusalNotice
     RefusalSink.emit(notice: RefusalNotice) -> None
 
@@ -353,6 +357,25 @@ by these signatures or the current reference contract.
 
 ## Diagnostics, helper and proof
 
+The OWNER-BOUND RefusalSink supplies the diagnostic metadata, not DecisionPolicy.
+Its family/events/states/refusal_codes fields are immutable configuration of the
+owner's existing diagnostic collaborator, fixed at adapter assembly. For a new
+Rules owner they are explicitly bound from that declaration; for S02's private
+legacy view the owner supplies a finite inventory of the existing machine/caller
+codes and state/event labels. Lifecycle, the legacy machine and DecisionPolicy
+need no new family/refusal_codes attributes. Nothing is inferred from class names,
+exception strings, payloads or arbitrary per-attempt family arguments.
+
+apply_owned passes only this bound sink plus event/state/reason/ids to capture;
+capture no longer accepts a caller-selected family. Static inventory compatibility
+is reviewed/validated at adapter assembly, not by a new per-attempt SQL/state
+lookup or a guard preceding S02's existing in_transaction check. Existing unknown
+state/event labels use fixed bounded tags; codes must be from the sink's declared
+finite inventory. A bad configuration is an adapter error, never new permission
+to write or an invented domain refusal. The sink preserves the owner's existing
+capture synchronization and diagnostic channels; it adds no lock, logging under
+a writer, generic guard increments to illegal_counts, or third S02 record.
+
 RefusalSink has fixed finite family/event/state/reason keys; ids are values,
 not unbounded counter keys. Unknown labels collapse to fixed diagnostic tags.
 Use owner collaborators: no logger/DB import in the pure decision engine, new
@@ -393,10 +416,11 @@ import them, change budgets/cursors or resume that benchmark. Keep its diff
 separate. No namespace collision or new cleanup/expiry behavior.
 
 Recorded settlements: B infrastructure direction ACCEPTED c8f29ae9; contract
-namespace/legacy SQL overlap AGREED c8f29ae9; S02 first-owner agreement 719c5a48
+namespace/legacy SQL overlap AGREED 71b6d966; S02 first-owner agreement 719c5a48
 conditionally satisfied; S42 reference composition c786772a supported by S6/A2.
 These are not code grants. This amendment requires A2/B exact D1/API review and
-contract overlap recheck for DecisionPolicy/completion changes. S6's actual
+contract amended overlap is settled at 71b6d966; this metadata wiring
+clarification still needs exact A2/B API review. S6's actual
 composed-base ingress/one-slot/reentry HOLD remains; source reference d68a is
 not the implementation base. No implementation until those agreements settle.
 All converter code/landing follows the authorized after-big-merge main route.
