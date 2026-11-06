@@ -747,11 +747,17 @@ def test_send_turn_done_waits_for_this_turns_message(tmp_path, monkeypatch):
 # --------------------------------------------------------------------------
 # avatar url for the notification service extension
 # --------------------------------------------------------------------------
-def test_avatar_url_uses_public_https_origin_only(tmp_path):
+def test_avatar_url_uses_public_https_origin_only(tmp_path, monkeypatch):
     """The notification extension has no tunnel of its own, so a plaintext
     bind-address URL was unreachable there and only burned its 30s budget.
     Emit an avatar URL only when a public HTTPS origin is configured."""
     from lib import apns, config
+    import hashlib
+    monkeypatch.setenv("CLAUDE_PWA_ROOT", str(tmp_path))
+    art = tmp_path / "static" / "avatars"
+    art.mkdir(parents=True)
+    (art / "mike.png").write_bytes(b"synthetic portrait")
+    version = hashlib.sha256(b"synthetic portrait").hexdigest()[:16]
     cfgfile = tmp_path / "config.toml"
     cfgfile.write_text('[server]\nbind_addr = "192.0.2.10"\nport = 7682\n')
     config.reset_cache()
@@ -762,7 +768,7 @@ def test_avatar_url_uses_public_https_origin_only(tmp_path):
     config.reset_cache()
     cfg = config.load(cfgfile)
     assert apns._avatar_details(cfg, "Mike")[0] == \
-        "https://computer.example.ts.net/static/avatars/mike.png"
+        f"https://computer.example.ts.net/static/avatars/mike.png?v={version}"
     # No persona → no url.
     assert apns._avatar_details(cfg, "")[0] is None
 
@@ -1007,3 +1013,44 @@ def test_text_input_push_offers_an_inline_reply():
     assert p["response_type"] == "text_input" and p["revision"] == 1 and p["expires_at"] == 123
     plain = apns.decision_payload("Rita", "rita", "Deploy?", "Now?", decision_id="d1", artifact_id="a1")
     assert "category" not in plain["aps"] and "response_type" not in plain
+
+
+@pytest.mark.parametrize("persona_file,default_file,expected", [
+    (True, True, "deepseek411017.png"),
+    (False, True, "default-codex.png"),
+    (False, False, None),
+])
+def test_notification_avatar_names_only_an_existing_static_portrait(
+    tmp_path, monkeypatch, persona_file, default_file, expected,
+):
+    import hashlib
+    from types import SimpleNamespace
+    from urllib.parse import urlsplit
+    from lib import agents
+
+    monkeypatch.setenv("CLAUDE_PWA_ROOT", str(tmp_path))
+    art = tmp_path / "static" / "avatars"
+    art.mkdir(parents=True)
+    if persona_file:
+        (art / "deepseek411017.png").write_bytes(b"persona")
+    else:
+        # A directory with the guessed image name is not a downloadable file.
+        (art / "deepseek411017.png").mkdir()
+    if default_file:
+        (art / "default-codex.png").write_bytes(b"default")
+    aid = agents.create_agent(persona="DeepSeek 4.1 1017", voice_id="V", cwd="/fixture",
+                              session="apns-fixture", backend="codex")
+    cfg = SimpleNamespace(public_base_url="https://host.example", auth_token="")
+    url, custom = apns._avatar_details(cfg, "DeepSeek 4.1 1017", aid)
+    assert custom is False
+    payload = apns.turn_done_payload("DeepSeek 4.1 1017", "apns-fixture",
+                                     avatar_url=url, avatar_custom=custom)
+    if expected is None:
+        assert url is None
+        assert "avatar_url" not in payload
+    else:
+        content = b"persona" if persona_file else b"default"
+        version = hashlib.sha256(content).hexdigest()[:16]
+        assert url == f"https://host.example/static/avatars/{expected}?v={version}"
+        assert payload["avatar_url"] == url
+        assert (tmp_path / urlsplit(url).path.lstrip("/")).is_file()
