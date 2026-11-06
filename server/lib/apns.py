@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import pathlib
 import math
+import os
 import json
 import re
 import hashlib
@@ -413,6 +414,7 @@ def _avatar_details(
         return None, False
 
     identity = str(agent_id or "").strip()
+    row = None
     if identity:
         from . import agents as agents_db
         from .avatar_urls import (
@@ -443,11 +445,13 @@ def _avatar_details(
                 query = urlencode({"v": version})
             return f"{base}{route}?{query}", True
 
-    allowed = set("abcdefghijklmnopqrstuvwxyz0123456789_-")
-    slug = "".join(
-        character for character in persona.strip().lower()
-        if character in allowed)
-    return (f"{base}/static/avatars/{slug}.png", False) if slug else (None, False)
+    from .avatar_urls import static_persona_avatar_url
+    from .context import resolve_root
+
+    static_root = resolve_root(pathlib.Path(__file__).resolve(), os.environ) / "static"
+    route = static_persona_avatar_url(
+        persona, str((row or {}).get("backend") or "claude"), static_root=static_root)
+    return (f"{base}{route}", False) if route else (None, False)
 
 
 def turn_done_payload(persona: str, session: str | None,
