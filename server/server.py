@@ -11,6 +11,11 @@ Endpoints (see Handler.do_GET / do_POST for the dispatch tables):
 """
 from __future__ import annotations
 
+import time
+_HOST_PROCESS_STARTED_AT = time.monotonic()
+from lib import transcript_import_cache as _transcript_import_cache
+_transcript_import_cache.note_host_started(_HOST_PROCESS_STARTED_AT)
+
 from lib import clip_store
 from lib import viz_normalize
 
@@ -26,7 +31,6 @@ import secrets
 import shutil
 import sqlite3
 import sys
-import time
 import threading
 from urllib.parse import parse_qs, unquote, urlparse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer

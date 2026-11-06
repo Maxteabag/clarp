@@ -128,7 +128,8 @@ def load_conversation(*, session: str, after_revision: int = 0,
             importing = (transcript_import_cache.schedule_import
                          if background_import and has_stored_history
                          else transcript_import_cache.import_if_changed)
-            importing(latest, import_latest, owner=agent_id)
+            importing(latest, import_latest, owner=agent_id,
+                      **({"startup_exempt": True} if background_import and has_stored_history else {}))
 
     # SQLite is the app-facing source of truth. Backend transcript files are
     # importer inputs only; every client sees one canonical read model.
