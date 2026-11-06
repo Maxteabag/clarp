@@ -146,8 +146,8 @@ def _evolution(old_splits, old_repoints, old_found, splits, repoints, found):
     new_splits = {e['name']: e for e in splits}
     for old in old_splits:
         new = new_splits[old['name']]
-        if old['module'] != new['module']:
-            raise s3_apply.Refusal(f'historical split source topology changed: {old["name"]}')
+        if any(old[k] != new[k] for k in ('module', 'recipe')):
+            raise s3_apply.Refusal(f'historical split source/recipe topology changed: {old["name"]}')
         _retained_order([p['module'] for p in old['part']],
                         [p['module'] for p in new['part']], f'{old["name"]} parts')
         parts = {p['module']: p for p in new['part']}
@@ -159,8 +159,8 @@ def _evolution(old_splits, old_repoints, old_found, splits, repoints, found):
     new_repoints = {e['name']: e for e in repoints}
     for old in old_repoints:
         new = new_repoints[old['name']]
-        if any(old[k] != new[k] for k in ('file', 'from_module', 'to_module')):
-            raise s3_apply.Refusal(f'historical repoint topology changed: {old["name"]}')
+        if any(old[k] != new[k] for k in ('file', 'from_module', 'to_module', 'recipe')):
+            raise s3_apply.Refusal(f'historical repoint recipe topology changed: {old["name"]}')
         _retained_order(old['names'], new['names'], f'{old["name"]} repoint members')
     new_methods = {path.name: groups for path, groups in found}
     _retained_order([p.name for p, _ in old_found],
