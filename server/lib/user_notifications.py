@@ -164,20 +164,23 @@ def _causing_user_row(agent_id: str, backend_session_id: str,
     if backend_session_id:
         where += " AND backend_session_id = ?"
         params.append(backend_session_id)
-    # A peer input does not replace the user's request that this execution
-    # answers. Keep legacy/unknown completion selection unchanged.
-    user_first = ("CASE WHEN COALESCE(NULLIF(TRIM(origin), ''), 'user')='user' "
-                  "AND COALESCE(sender_agent_id, '')='' THEN 0 ELSE 1 END, "
-                  if identified else "")
-    return db.conn().execute(
-        f"""SELECT message_id, origin, sender_agent_id, updated_at,
-                   backend_session_id, text, prompt_admission_id
-              FROM messages
-             WHERE {where}
-             ORDER BY {user_first}updated_at DESC, revision DESC, seq DESC
-             LIMIT 1""",
-        tuple(params),
-    ).fetchone()
+    select = f"""SELECT message_id, origin, sender_agent_id, updated_at,
+                        backend_session_id, text, prompt_admission_id
+                   FROM messages WHERE {where}"""
+    latest = " ORDER BY updated_at DESC, revision DESC, seq DESC LIMIT 1"
+    row = db.conn().execute(select + latest, tuple(params)).fetchone()
+    if identified and row is not None and row["origin"] == "agent":
+        # Only peers are subordinate to an eligible user request. Watcher,
+        # Oracle and automation keep their existing order among nonpeers.
+        user = db.conn().execute(
+            select + " AND COALESCE(NULLIF(TRIM(origin), ''), 'user')='user'"
+            " AND COALESCE(sender_agent_id, '')=''" + latest,
+            tuple(params)).fetchone()
+        if user is not None:
+            return db.conn().execute(
+                select + " AND COALESCE(origin, 'user')<>'agent'" + latest,
+                tuple(params)).fetchone()
+    return row
 
 
 def _sending_client(prompt_admission_id: str) -> str:
