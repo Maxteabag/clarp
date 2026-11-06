@@ -762,6 +762,112 @@ def test_identified_user_cause_precedes_an_unowned_peer(tmp_path, monkeypatch, l
         True, later_user, True, True)
 
 
+
+def test_late_own_import_reclassifies_once_without_borrowing_the_queued_reply(tmp_path, monkeypatch):
+    from lib import apns, db, message_live, message_store, message_writes
+    from lib import turn_lifecycle, user_notifications
+    from lib.state_watcher import StateLogWatcher
+    from lib.transcript_streamer import TranscriptStreamer
+
+    clock = [1800000000000]
+    for module in (db, agents_db, message_live, message_writes, turn_lifecycle):
+        patch_shared(monkeypatch, module, "now_ms", lambda: clock[0])
+    monkeypatch.setattr(user_notifications, "SETTLE_TIMEOUT_S", 0)
+    pushed = []
+    monkeypatch.setattr(apns, "on_user_notification", pushed.append)
+    service, backend, aid = _make_service(tmp_path)
+    service.dispatch(text="late original A", requested_session="mike", trace_id="late-A",
+                     client_msg_id="u-late-A", synthesize_audio=False)
+    service.dispatch(text="queued B", requested_session="mike", trace_id="late-B",
+                     client_msg_id="u-late-B", synthesize_audio=False)
+    clock[0] += 100
+    backend.spawned[0][1]["on_result"]({"duration_ms": 10})
+    done_a = db.conn().execute(
+        "SELECT ts,detail FROM state_log WHERE agent_id=? AND kind='done' ORDER BY state_id",
+        (aid,)).fetchone()
+    clock[0] += 100
+    reply_b = message_store.upsert_live_assistant_message(
+        agent_id=aid, backend_session_id="backend-session-1", trace_id="late-B", text="Answer B.")
+    assert reply_b is not None
+    clock[0] += 10
+    backend.spawned[1][1]["on_result"]({"duration_ms": 10})
+    stream = _Stream()
+    watcher = StateLogWatcher(stream)
+    import json
+    watcher._classify_completed_turn(agent_id=aid, session="mike", persona="Mike",
+                                    done_ts=done_a["ts"], detail=json.loads(done_a["detail"]))
+    before = db.conn().execute(
+        "SELECT * FROM user_notifications WHERE agent_id=? AND done_ts=?",
+        (aid, done_a["ts"])).fetchone()
+    assert before["cause_message_id"] == "u-late-A"
+    assert before["source_message_id"] == "" and before["notify"] == 0
+    assert pushed == []
+
+    clock[0] += 100
+    message_store.store_transcript_turns(
+        agent_id=aid, backend_session_id="backend-session-1", source_file="late-import",
+        turns=[{"role": "user", "text": "late original A"},
+               {"role": "assistant", "text": "Delayed answer A."}])
+    source_a = db.conn().execute(
+        "SELECT message_id,trace_id FROM messages WHERE agent_id=? AND role='assistant' "
+        "AND text='Delayed answer A.'", (aid,)).fetchone()
+    assert source_a is not None and source_a["trace_id"] == "late-A"
+    streamer = TranscriptStreamer(stream=stream)
+    streamer._bound[aid] = "backend-session-1"
+    streamer._bind_generation[aid] = 1
+    try:
+        # Real import-delivery owner, twice: one flip and one outward push.
+        streamer._after_import(aid, "backend-session-1", 1, 1)
+        streamer._after_import(aid, "backend-session-1", 1, 1)
+    finally:
+        streamer.stop()
+    after = db.conn().execute(
+        "SELECT * FROM user_notifications WHERE agent_id=? AND done_ts=?",
+        (aid, done_a["ts"])).fetchone()
+    assert after["notification_id"] == before["notification_id"]
+    assert after["cause_message_id"] == "u-late-A"
+    assert after["source_message_id"] == source_a["message_id"]
+    assert tuple(after[k] for k in ("notify", "push", "badge", "unread")) == (1,) * 4
+    assert len(pushed) == 1 and pushed[0]["source_message_id"] == source_a["message_id"]
+    assert len([e for e in stream.events if e["type"] == "user-notification"]) == 1
+
+
+@pytest.mark.parametrize("supplied_backend", ["", "backend-session-1", "wrong-backend", "with-competitor"])
+def test_identified_notification_uses_its_own_backend_binding(tmp_path, monkeypatch, supplied_backend):
+    from lib import db, message_store, user_notifications
+    monkeypatch.setattr(user_notifications, "SETTLE_TIMEOUT_S", 0)
+    service, backend, aid = _make_service(tmp_path)
+    service.dispatch(text="own request", requested_session="mike", trace_id="own-binding",
+                     client_msg_id="u-own-binding", synthesize_audio=False)
+    source = message_store.upsert_live_assistant_message(
+        agent_id=aid, backend_session_id="backend-session-1", trace_id="own-binding",
+        text="Own answer.")
+    assert source is not None
+    backend.spawned[0][1]["on_result"]({"duration_ms": 10})
+    done_ts = agents_db.latest_state(aid)["ts"]
+    # A later foreign agent using the same textual trace/backend cannot bind us.
+    other = agents_db.create_agent(persona="Other", voice_id="V", cwd=str(tmp_path), session="other")
+    message_store.record_user_message(agent_id=other, backend_session_id="backend-session-1",
+                                      client_msg_id="u-foreign-binding", trace_id="own-binding",
+                                      text="Foreign request", origin="user")
+    db.conn().execute("UPDATE messages SET updated_at=? WHERE message_id='u-foreign-binding'", (done_ts,))
+    if supplied_backend == "with-competitor":
+        message_store.record_user_message(
+            agent_id=aid, backend_session_id="foreign-backend", client_msg_id="u-other-conversation",
+            trace_id="own-binding", text="Other conversation", origin="user")
+        db.conn().execute("UPDATE messages SET updated_at=? WHERE message_id='u-other-conversation'", (done_ts,))
+    notification = user_notifications.classify_completed_turn(
+        agent_id=aid, session="mike", persona="Mike", trace_id="own-binding",
+        backend_session_id=("backend-session-1" if supplied_backend == "with-competitor" else supplied_backend),
+        done_ts=done_ts)
+    valid = supplied_backend != "wrong-backend"
+    assert notification["notify"] is valid
+    assert notification["cause_message_id"] == ("u-own-binding" if valid else "")
+    assert notification["source_message_id"] == (source["id"] if valid else "")
+    assert db.conn().execute(
+        "SELECT COUNT(*) FROM user_notifications WHERE agent_id=?", (other,)).fetchone()[0] == 0
+
+
 def test_user_queue_handoff_survives_completion_during_persistence(tmp_path, monkeypatch):
     service, backend, agent_id = _make_service(tmp_path)
     service.dispatch(text="first", requested_session="mike", trace_id="tA")
