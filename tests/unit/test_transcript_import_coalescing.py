@@ -473,9 +473,10 @@ def test_deadline_expiry_keeps_known_slow_skip_until_fast_import_recovers(tmp_pa
 
 @pytest.mark.parametrize('size,staggered', [(50 * 1024 * 1024 - 1, False), (50 * 1024 * 1024, True)])
 def test_first_large_background_source_waits_for_startup_grace_boundary(
-        tmp_path, clock, size, staggered):
-    # Existing reset models a fresh cache epoch under the deterministic clock.
-    assert cache.reset_for_tests()
+        tmp_path, clock, monkeypatch, size, staggered):
+    # Seed the real Host bootstrap hook, independent of cache/DB reset lifetime.
+    monkeypatch.setattr(cache, '_host_started_at', None)
+    assert cache.note_host_started(0)
     path = tmp_path / 'sparse-rollout'
     with path.open('wb') as stream:
         stream.truncate(size)
@@ -493,8 +494,9 @@ def test_first_large_background_source_waits_for_startup_grace_boundary(
 
 
 @pytest.mark.parametrize('request_path', ['direct', 'snapshot'])
-def test_large_user_import_paths_are_not_delayed_by_startup_stagger(tmp_path, clock, request_path):
-    assert cache.reset_for_tests()
+def test_large_user_import_paths_are_not_delayed_by_startup_stagger(tmp_path, clock, monkeypatch, request_path):
+    monkeypatch.setattr(cache, '_host_started_at', None)
+    assert cache.note_host_started(0)
     path = tmp_path / 'user-source'
     with path.open('wb') as stream:
         stream.truncate(50 * 1024 * 1024)
