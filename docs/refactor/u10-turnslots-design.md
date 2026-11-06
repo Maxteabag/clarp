@@ -73,8 +73,22 @@ Joint ownership table for reconciliation:
 
 Reference lead 636/642 and A2 reports tp02-design-d536d64a677c.md and
 tp02-design-288e377fb8c2.md; both exact code review and required intended
-signatures remain outstanding. Reconciliation request has been sent;
-this table is a proposal, agreement is PENDING, not inferred.
+signatures remain outstanding. Joint table AGREED by S4 against rf-fix3c's exact reconciliation proposal
+b93b28bb51b13778928a21a1605372a109466740,
+docs/refactor/tp02-u10-reconciliation.md (base a733). It adds the essential
+publication sequence: obtain parent reservation before the turn lock; retain
+it in the deferred decision; only after OUTERMOST release register/transfer
+the child before publication and before parent retirement. Failure remains
+owned. The opaque context is process-local, never a U09 field or permission,
+and TurnSlots neither creates generations nor calls the coordinator under
+its lock. No unused injection code is requested for U10 alone.
+
+Existing atomic reads are an explicit preservation obligation: at a733,
+turn_stop.begin_stop reads turn_queue.state while holding _TURN_LOCK, then
+defers the pause write. Inventory reads separately from writes/effects;
+U10 keeps that read's position/atomicity. Neither a generic no-DB slogan nor
+TP-02's future lock design authorizes moving it. Any proposed relocation
+requires a separately reviewed behavior change with its actual owner.
 
 ## Frozen-surface check and change rehearsal
 
@@ -114,7 +128,8 @@ discovery re-execution occurred for this design document.
 
 ## Decision state and route
 
-Await A2 acceptance and explicit TP-02 owner reconciliation. U10 remains
+S4 accepts exact TP-02 reconciliation b93b28bb with the inherited atomic-read
+clarification above; await A2 assessment of these reconciled pins. U10 remains
 DESIGN-ONLY even if U09 is accepted. Nothing lands before big merge #1. Any
 future code permission follows that merge, from then-current main in small
 captain batches, and needs fresh scope/source inventory. S4's approved M17
