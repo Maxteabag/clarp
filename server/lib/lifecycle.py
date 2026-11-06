@@ -582,6 +582,9 @@ class Rules:
                 seen.add(pair)
         if corrections & ordinary:
             raise LifecycleError("event mixes correction and ordinary edges")
+        outgoing = {s for edge in self.edges for s in edge.sources}
+        if self.transient - outgoing:
+            raise LifecycleError("transient state needs a declared outgoing continuation")
         forward = {(s, e.target) for e in self.edges for s in e.sources}
         if self.states - _closure({self.initial}, forward):
             raise LifecycleError("unreachable declared state")
@@ -773,18 +776,32 @@ def apply_owned(policy: DecisionPolicy, event: OwnedEvent[E, P],
     owner._claim_attempt()
     notice = None
     rejection = None
+    capture_started = False
+    capture_failure = None
     emission_started = False
 
+    def raise_capture_failure():
+        error, traceback, cause = capture_failure
+        _primary_with_cause(error, traceback, cause)
+
     def reject_once(reason, state, ids, *, primary=None):
-        nonlocal notice, rejection
-        if rejection is None:
-            try:
-                notice = refusals.capture(event.name, state, reason, ids)
-            except BaseException as capture_error:
-                if primary is not None:
-                    _primary_with_cause(primary, primary.__traceback__, capture_error)
-                raise
-            rejection = Refused(reason, state)
+        nonlocal notice, rejection, capture_started, capture_failure
+        if capture_started:
+            if capture_failure is not None:
+                raise_capture_failure()
+            if rejection is None:
+                raise LifecycleError("refusal capture is already in progress")
+            return rejection
+        capture_started = True  # BEFORE the potentially partially mutating hook.
+        try:
+            notice = refusals.capture(event.name, state, reason, ids)
+        except BaseException as capture_error:
+            error = primary if primary is not None else capture_error
+            capture_failure = (error, error.__traceback__, capture_error)
+            if primary is not None:
+                raise_capture_failure()
+            raise
+        rejection = Refused(reason, state)
         return rejection
 
     def emit_once():
@@ -802,6 +819,8 @@ def apply_owned(policy: DecisionPolicy, event: OwnedEvent[E, P],
 
     try:
         outcome = owner.write(policy, event, reject_once)
+        if capture_failure is not None:
+            raise_capture_failure()  # An owner catch cannot convert the fault to success.
         if not isinstance(outcome, (Applied, NoOp, Refused, WriteConflict)):
             raise LifecycleError("owner must return an explicit lifecycle outcome")
     except BaseException as primary:
