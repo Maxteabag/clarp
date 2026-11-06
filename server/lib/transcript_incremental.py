@@ -50,10 +50,10 @@ SUPPORTED_BACKENDS = ("claude", "codex", "agy")
 # changes the parser version, so every checkpoint taken by older code is
 # refused and the next import is a full one.
 _VERSION_SOURCES = {
-    "claude": ("claude_transcript.py",),
+    "claude": ("claude_transcript.py", "claude_reply_evidence.py"),
     "codex": ("codex_transcript.py",),
     "agy": ("agy_transcript.py", "codex_transcript.py", "opencode_transcript.py",
-            "claude_transcript.py", "backend/agy.py"),
+            "claude_transcript.py", "claude_reply_evidence.py", "backend/agy.py"),
 }
 _COMMON_SOURCES = ("transcript_incremental.py", "message_writes.py",
                    "message_context.py", "message_turns.py", "voice_markup.py")

@@ -47,6 +47,7 @@ from .. import provider_capabilities
 from .. import turn_lifecycle
 from ..turn_lifecycle import TurnEvent
 from ..live_pacing import LivePacer
+from ..claude_reply_evidence import ClaudeReplyEvidence
 from ..log import log, log_exception
 from ..proc_util import stderr_text
 from ..process_registry import TurnHandle
@@ -259,7 +260,8 @@ def _settle_live_message(*, agent_id: str, backend_session_id: str, trace_id: st
 
 
 def _store_live_partial(*, agent_id: str, backend_session_id: str, trace_id: str,
-                        text: str, session: str, stream, item_key: str = "") -> None:
+                        text: str, session: str, stream, item_key: str = "",
+                        provider_genuine: bool = False) -> None:
     if not agent_id or not backend_session_id:
         return
     try:
@@ -269,6 +271,7 @@ def _store_live_partial(*, agent_id: str, backend_session_id: str, trace_id: str
             trace_id=trace_id,
             text=text,
             item_key=item_key,
+            **({"_provider_genuine": True} if provider_genuine else {}),
         )
         if not row or not row.get("changed"):
             return
@@ -573,13 +576,17 @@ class ClaudeBackend(Backend):
         # marked final in place.
         message = {"key": "", "text": ""}
 
-        def new_pacer(key: str) -> LivePacer:
-            return LivePacer(lambda text: _store_live_partial(
+        evidence = ClaudeReplyEvidence()
+
+        def new_pacer(key: str):
+            provenance = {"genuine": False}
+            paced = LivePacer(lambda text: _store_live_partial(
                 agent_id=agent_id, backend_session_id=bound["backend_session_id"],
                 trace_id=trace_id, text=text, session=session, stream=stream,
-                item_key=key))
+                item_key=key, provider_genuine=provenance["genuine"]))
+            return paced, provenance
 
-        pacer = new_pacer("")
+        pacer, provenance = new_pacer("")
         from ..live_claude import ClaudeLiveItems
         from ..message_live import _live_message_id
         items = ClaudeLiveItems(
@@ -613,6 +620,8 @@ class ClaudeBackend(Backend):
                     continue
                 typ = ev.get("type")
                 sub = ev.get("subtype")
+                if evidence.suppress_event(ev):
+                    continue
                 items.on_event(ev)
                 if typ == "rate_limit_event":
                     info = ev.get("rate_limit_info")
@@ -651,9 +660,10 @@ class ClaudeBackend(Backend):
                     if message_id and message_id != message["key"]:
                         settle_message()
                         message["key"], message["text"] = message_id, ""
-                        pacer = new_pacer(message_id)
+                        pacer, provenance = new_pacer(message_id)
                     if not isolated and _is_message_stop(ev):
                         settle_message()
+                    provenance["genuine"] |= evidence.current_is_genuine
                     text, is_delta = _assistant_event_text(ev)
                     if text:
                         if isolated and not is_delta:
@@ -701,6 +711,13 @@ class ClaudeBackend(Backend):
                     final_result = (
                         {**ev, "_assistant_text": assistant_text}
                         if assistant_text else ev)
+                    if not assistant_text and evidence.suppresses_result_text(ev.get("result")):
+                        # Preserve raw provider diagnostics but prevent the
+                        # text extractor from falling back to this SDK text.
+                        final_result = {**ev, "_assistant_text": None}
+                    facts = evidence.finish_result()
+                    if facts is not None:
+                        final_result = {**final_result, "_clarp_reply_evidence": facts}
                     live_text = ""
                     isolated_texts = []
             rc = proc.wait()
