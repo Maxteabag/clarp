@@ -469,3 +469,40 @@ def test_deadline_expiry_keeps_known_slow_skip_until_fast_import_recovers(tmp_pa
     path.write_text('third version after fast measured import')
     assert cache.import_for_snapshot(path, lambda: None, owner='agent', timeout=.5)
     assert cache.wait_for_background(2)
+
+
+@pytest.mark.parametrize('size,staggered', [(50 * 1024 * 1024 - 1, False), (50 * 1024 * 1024, True)])
+def test_first_large_background_source_waits_for_startup_grace_boundary(
+        tmp_path, clock, size, staggered):
+    # Existing reset models a fresh cache epoch under the deterministic clock.
+    assert cache.reset_for_tests()
+    path = tmp_path / 'sparse-rollout'
+    with path.open('wb') as stream:
+        stream.truncate(size)
+    done, after = completed()
+    started = []
+    assert cache.schedule_import(path, lambda: started.append(clock.now), owner='agent', after=after)
+    if staggered:
+        assert not done.wait(.05), 'large background import started during startup grace'
+        clock.advance(119.999)
+        assert not done.wait(.05)
+        clock.advance(120)
+    assert done.wait(2)
+    assert started == [120 if staggered else 0]
+    assert cache.wait_for_background(2)
+
+
+@pytest.mark.parametrize('request_path', ['direct', 'snapshot'])
+def test_large_user_import_paths_are_not_delayed_by_startup_stagger(tmp_path, clock, request_path):
+    assert cache.reset_for_tests()
+    path = tmp_path / 'user-source'
+    with path.open('wb') as stream:
+        stream.truncate(50 * 1024 * 1024)
+    observed = []
+    importer = lambda: observed.append(clock.now)
+    if request_path == 'direct':
+        assert cache.import_if_changed(path, importer, owner='agent')
+    else:
+        assert cache.import_for_snapshot(path, importer, owner='agent', timeout=.5)
+    assert observed == [0]
+    assert cache.wait_for_background(2)
