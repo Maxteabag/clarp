@@ -97,14 +97,18 @@ def test_a_drain_backstop_does_not_kill_a_continuation_before_its_notification_i
     client = cas._client(agent, 'late-native-start')
     client.draining = True
     monkeypatch.setattr(cas, '_DRAINING', {id(client): client})
-    delivered, release = threading.Event(), threading.Event()
+    delivered, release, unblocked = (threading.Event() for _ in range(3))
     original = client._notification
     native_turn = []
     def notification(method, params):
         if method == 'turn/started' and params.get('threadId') == thread:
             native_turn.append(params["turn"]["id"])
             delivered.set()
-            assert release.wait(native_goal_gate.remaining()), "owned notification gate deadline"
+            try:
+                assert release.wait(native_goal_gate.remaining()), "owned notification gate deadline"
+                return original(method, params)
+            finally:
+                unblocked.set()
         return original(method, params)
     monkeypatch.setattr(client, '_notification', notification)
     before = len(_goal_turns(fake, thread))
@@ -119,6 +123,8 @@ def test_a_drain_backstop_does_not_kill_a_continuation_before_its_notification_i
         assert client.proc.poll() is None, 'drain backstop killed a running native continuation before its start notification was adopted'
     finally:
         release.set()
+        if delivered.is_set():
+            assert unblocked.wait(native_goal_gate.remaining()), "notification callback did not finish"
 
 
 def test_a_goal_admitted_after_the_last_drain_snapshot_is_not_killed(fake, tmp_path, monkeypatch):
@@ -178,14 +184,18 @@ def test_a_credential_switch_does_not_kill_an_unadopted_native_continuation(fake
     agent, thread, _ = _leftover(fake, tmp_path, monkeypatch, 'refresh-native-start')
     assert _wait(lambda: not cas.active_handles(agent))
     client = cas._client(agent, 'refresh-native-start')
-    delivered, release = threading.Event(), threading.Event()
+    delivered, release, unblocked = (threading.Event() for _ in range(3))
     original = client._notification
     native_turn = []
     def notification(method, params):
         if method == 'turn/started' and params.get('threadId') == thread:
             native_turn.append(params["turn"]["id"])
             delivered.set()
-            assert release.wait(native_goal_gate.remaining()), "owned notification gate deadline"
+            try:
+                assert release.wait(native_goal_gate.remaining()), "owned notification gate deadline"
+                return original(method, params)
+            finally:
+                unblocked.set()
         return original(method, params)
     monkeypatch.setattr(client, '_notification', notification)
     before = len(_goal_turns(fake, thread))
@@ -203,6 +213,8 @@ def test_a_credential_switch_does_not_kill_an_unadopted_native_continuation(fake
         assert client.proc.poll() is None, 'credential refresh called an executing native goal idle and killed its process'
     finally:
         release.set()
+        if delivered.is_set():
+            assert unblocked.wait(native_goal_gate.remaining()), "notification callback did not finish"
 
 
 @pytest.mark.parametrize('shutdown_path', ['credential', 'recycle', 'usage'])
