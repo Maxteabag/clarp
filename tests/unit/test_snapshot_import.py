@@ -111,7 +111,7 @@ def test_recent_slow_history_skips_wait_then_recovers_after_a_fast_import(tmp_pa
         started = time.monotonic()
         assert not cache.import_for_snapshot(path, importer, owner="private-canary-owner", timeout=0.5)
         assert time.monotonic() - started < 0.3
-        assert second_entered.wait(1), "skip must still schedule the normal refresh"
+        assert second_entered.wait(3), "skip must schedule refresh after its adaptive window"
         captured = capsys.readouterr().err
         assert "snapshotImportSkip code=recent_slow" in captured
         assert "private-canary" not in captured

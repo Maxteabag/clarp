@@ -86,12 +86,15 @@ def test_background_coalesces_growth_without_losing_new_version(tmp_path, monkey
     path = tmp_path / 'growing'
     path.write_text('first')
     entered, release = threading.Event(), threading.Event()
+    finished = threading.Event()
     calls = []
     def importer():
         calls.append(path.read_text())
         if len(calls) == 1:
             entered.set()
             assert release.wait(3)
+        else:
+            finished.set()
     cache.schedule_import(path, importer, owner='one')
     try:
         assert entered.wait(1)
@@ -100,6 +103,7 @@ def test_background_coalesces_growth_without_losing_new_version(tmp_path, monkey
             cache.schedule_import(path, importer, owner='one')
     finally:
         release.set()
+        assert finished.wait(4)  # adaptive completion window can defer the worker
         assert cache.wait_for_background(4)
     assert calls == ['first', 'second version']
     assert not cache.schedule_import(path, importer, owner='one')
@@ -812,8 +816,8 @@ def test_reset_waits_for_a_worker_tail_after_it_cleared_the_global(tmp_path, mon
 
 
 def test_reset_waits_for_a_timer_callback_after_it_removed_its_entry(tmp_path, monkeypatch):
-    """S-2 (b): a window timer removed its own _deferred entry, found the queue
-    full and is logging that outside _guard. Reset must wait for the timer thread
+    """S-2 (b): a window timer removed its own _deferred entry, could not start
+    its worker and is logging that outside _guard. Reset must wait for the timer thread
     although no _deferred entry names it any more."""
     from lib import log as log_module
     cache = transcript_import_cache
@@ -826,7 +830,7 @@ def test_reset_waits_for_a_timer_callback_after_it_removed_its_entry(tmp_path, m
     real_log = log_module.log
 
     def held_log(event, *args, **kwargs):
-        if event == "transcriptImportQueueFull":
+        if event == "transcriptImportThreadStartFail":
             logging.set()
             assert release.wait(5)
         return real_log(event, *args, **kwargs)
@@ -836,7 +840,11 @@ def test_reset_waits_for_a_timer_callback_after_it_removed_its_entry(tmp_path, m
     _bump_mtime(path)
     assert cache.schedule_import(path, lambda: None, owner="a", after=lambda: None)
     timer = cache._deferred[f"a\0{path}"][1]
-    monkeypatch.setattr(cache, "_BACKGROUND_LIMIT", 0)          # the window closes onto a full queue
+    class NoWorker(_threading.Thread):
+        def start(self):
+            raise RuntimeError("synthetic worker start failure")
+
+    monkeypatch.setattr(cache, "threading", _threading_with(Thread=NoWorker))
     try:
         assert logging.wait(3)
         assert f"a\0{path}" not in cache._deferred and timer.is_alive()
