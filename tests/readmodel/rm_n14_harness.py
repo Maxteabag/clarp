@@ -12,7 +12,7 @@ import json
 import os
 import pathlib
 import resource
-import select
+import selectors
 import sqlite3
 import subprocess
 import sys
@@ -389,14 +389,17 @@ class PersistentLane:
                                              "close_connection": close_connection}).encode() + b"\n")
         self.process.stdin.flush()
         deadline = time.monotonic() + self.timeout
-        while b"\n" not in self.buffer:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0 or not select.select([self.process.stdout], [], [], remaining)[0]:
-                raise TimeoutError("persistent oracle worker deadline")
-            part = os.read(self.process.stdout.fileno(), 65536)
-            if not part:
-                raise RuntimeError(f"persistent oracle worker exited code={self.process.poll()}")
-            self.buffer += part
+        if b"\n" not in self.buffer:
+            with selectors.DefaultSelector() as ready:
+                ready.register(self.process.stdout, selectors.EVENT_READ)
+                while b"\n" not in self.buffer:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0 or not ready.select(remaining):
+                        raise TimeoutError("persistent oracle worker deadline")
+                    part = os.read(self.process.stdout.fileno(), 65536)
+                    if not part:
+                        raise RuntimeError(f"persistent oracle worker exited code={self.process.poll()}")
+                    self.buffer += part
         line, self.buffer = self.buffer.split(b"\n", 1)
         return json.loads(line)
 
