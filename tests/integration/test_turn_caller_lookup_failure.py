@@ -66,8 +66,8 @@ def test_self_delete_is_refused_not_allowed(running_server, lookup_fails, capfd)
 def test_rings_are_refused(authenticated_terminal_server, lookup_fails, monkeypatch, path, body):
     from lib import agent_rings
     touched = []
-    for name in ("ring", "cancel"):
-        monkeypatch.setattr(agent_rings, name, lambda *a, **k: touched.append(name))
+    monkeypatch.setattr(agent_rings, "ring", lambda *a, **k: touched.append("ring"))
+    monkeypatch.setattr(agent_rings, "cancel", lambda *a, **k: touched.append("cancel"))
     base, _ctx, _srv = authenticated_terminal_server
     assert _call(base, "POST", path, body, token=OWNER) == UNAVAILABLE
     assert touched == []
