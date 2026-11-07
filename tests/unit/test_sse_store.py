@@ -280,3 +280,43 @@ def test_first_payload_encoding_precedes_standalone_writer_admission(monkeypatch
     event_id = sse_store.record_sse_event(event)
     assert encoded == [event]
     assert _row(event_id)["payload"] == '{"type":"ping","ts":123,"n":"prepare-before-lock","event_id":'+str(event_id)+'}'
+
+
+def test_exhausted_standalone_admission_keeps_hub_failure_fanout_without_id(tmp_path):
+    from lib import health
+    from lib.audio_stream import AudioStream
+    connection = db.conn()
+    connection.execute("PRAGMA busy_timeout=20")
+    path = connection.execute("PRAGMA database_list").fetchone()[2]
+    with sqlite3.connect(path, isolation_level=None, timeout=0) as holder:
+        holder.execute("BEGIN IMMEDIATE")
+        stream = AudioStream(tmp_path / "audio")
+        subscriber = stream.subscribe()
+        try:
+            stream.broadcast({"type": "agent-roster", "kind": "unchanged-failure"})
+            payload = json.loads(subscriber.get(timeout=1))
+        finally:
+            stream.unsubscribe(subscriber)
+            holder.execute("ROLLBACK")
+    assert payload == {"type": "agent-roster", "kind": "unchanged-failure"}
+    assert "event_id" not in payload
+    assert connection.execute("SELECT COUNT(*) FROM sse_events").fetchone()[0] == 0
+    assert not connection.in_transaction
+    assert connection.execute("PRAGMA busy_timeout").fetchone()[0] == 20
+    assert "locked" in health.snapshot()["sse"]["last_error"]
+
+
+def test_nested_record_never_starts_or_commits_a_separate_transaction():
+    connection = db.conn()
+    connection.execute("BEGIN IMMEDIATE")
+    statements = []
+    connection.set_trace_callback(statements.append)
+    try:
+        first = sse_store.record_sse_event({"type": "ping", "ts": 1})
+        second = sse_store.record_sse_event({"type": "ping", "ts": 2})
+    finally:
+        connection.set_trace_callback(None)
+        connection.execute("ROLLBACK")
+    assert not any(sql.upper().startswith(("BEGIN", "COMMIT", "END")) for sql in statements)
+    assert second > first
+    assert sse_store.events_after(0) == []
