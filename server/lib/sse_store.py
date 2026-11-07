@@ -21,23 +21,41 @@ def record_sse_event(event: dict[str, Any]) -> int:
     # would leave a replayable row without its event_id. A savepoint nests
     # inside a caller's transaction and is a transaction of its own otherwise.
     database = conn()
-    database.execute("SAVEPOINT record_sse_event")
+    standalone = not database.in_transaction
+    # Standalone writers use the existing same-connection polled admission:
+    # only BEGIN can retry, before any row/id exists, within its original busy
+    # timeout. Prepare JSON first so it adds no Python work under that writer.
+    # Nested callers retain their savepoint and outer commit/rollback ownership.
+    encoded = json.dumps(payload, separators=(",", ":")) if standalone else None
+    if standalone:
+        database.execute("BEGIN IMMEDIATE")
     try:
-        cur = database.execute(
-            """INSERT INTO sse_events (ts, type, session, agent_id, payload)
-               VALUES (?, ?, ?, ?, ?)""",
-            (ts, event_type, session, agent_id, json.dumps(payload, separators=(",", ":"))),
-        )
-        event_id = int(cur.lastrowid or 0)
-        database.execute(
-            "UPDATE sse_events SET payload = ? WHERE event_id = ?",
-            (json.dumps({**payload, "event_id": event_id}, separators=(",", ":")),
-             event_id),
-        )
-        database.execute("RELEASE record_sse_event")
+        database.execute("SAVEPOINT record_sse_event")
+        try:
+            cur = database.execute(
+                """INSERT INTO sse_events (ts, type, session, agent_id, payload)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (ts, event_type, session, agent_id,
+                 encoded if encoded is not None else json.dumps(payload, separators=(",", ":"))),
+            )
+            event_id = int(cur.lastrowid or 0)
+            database.execute(
+                "UPDATE sse_events SET payload = ? WHERE event_id = ?",
+                (json.dumps({**payload, "event_id": event_id}, separators=(",", ":")),
+                 event_id),
+            )
+            database.execute("RELEASE record_sse_event")
+        except BaseException:
+            database.execute("ROLLBACK TO record_sse_event")
+            database.execute("RELEASE record_sse_event")
+            raise
+        if standalone:
+            database.commit()
     except BaseException:
-        database.execute("ROLLBACK TO record_sse_event")
-        database.execute("RELEASE record_sse_event")
+        # After INSERT/UPDATE/RELEASE/COMMIT there is never a replay. A lost
+        # commit acknowledgement can leave the one row durable; do not remint.
+        if standalone and database.in_transaction:
+            database.rollback()
         raise
     return event_id
 
