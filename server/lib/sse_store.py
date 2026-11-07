@@ -27,9 +27,9 @@ def record_sse_event(event: dict[str, Any]) -> int:
     # timeout. Prepare JSON first so it adds no Python work under that writer.
     # Nested callers retain their savepoint and outer commit/rollback ownership.
     encoded = json.dumps(payload, separators=(",", ":")) if standalone else None
-    if standalone:
-        database.execute("BEGIN IMMEDIATE")
     try:
+        if standalone:
+            database.execute("BEGIN IMMEDIATE")
         database.execute("SAVEPOINT record_sse_event")
         try:
             cur = database.execute(
