@@ -14,6 +14,7 @@ from __future__ import annotations
 from tests.patching import patch_shared
 
 import json
+import sqlite3
 
 import pytest
 
@@ -577,3 +578,97 @@ def test_a_failure_after_the_first_batch_leaves_that_batch_and_skips_cleanup(clo
     got = {r["seq"]: r["text"] for r in transcript_rows()}
     assert got == {0: "q0", 1: "A0", 2: "q1", 3: "a1", 4: "q2", 5: "a2", 6: "q3", 7: "a3"}
     assert head()[1] == before_head[1]
+
+
+# ---- 877: current-text preparation versus protected DB-candidate cleanup ----
+
+@pytest.mark.parametrize("candidate", ["streamed", "final", "existing-slot"])
+def test_current_reply_normalization_leaves_the_writer_available(clock, monkeypatch, candidate):
+    """Real twin adoption must not re-clean immutable current text under BEGIN.
+
+    Candidate rows deliberately use DIFFERENT raw markup, so the independent
+    writer witness cannot mistake protected DB-row cleanup for current input.
+    The cleaner and all twin SQL still run; no choice/result is mocked.
+    """
+    current = "<speak>Prepared λ reply.\nSecond line.</speak>"
+    persisted = "Prepared λ reply. Second line."
+    turn_row("trace-visible", at=0)
+    client("visible-user", "question", at=0, trace="trace-visible")
+    if candidate == "streamed":
+        assistant_row("kept-visible", "live:trace-visible", persisted,
+                      at=1, trace="trace-visible")
+    elif candidate == "final":
+        assistant_row("kept-visible", "final:trace-visible", persisted,
+                      at=1, trace="trace-visible")
+    else:
+        own_id = message_writes._message_id(AGENT, SESSION, SOURCE, 1)
+        assistant_row(own_id, SOURCE, persisted, at=1, trace="trace-visible", seq=1)
+        assistant_row("duplicate-final", "final:trace-visible", persisted,
+                      at=1, trace="trace-visible")
+    connection = db.conn()
+    path = connection.execute("PRAGMA database_list").fetchone()[2]
+    other = sqlite3.connect(path, isolation_level=None, timeout=0)
+    original = message_writes._strip_voice_markup
+    admissions = []
+    candidate_inputs = []
+
+    def clean(text):
+        visible = original(text)
+        if text == current:
+            try:
+                other.execute("BEGIN IMMEDIATE")
+                other.execute("INSERT OR REPLACE INTO focus(singleton,agent_id,updated_at) VALUES(0,?,1)",
+                              (AGENT,))
+                other.execute("COMMIT")
+                admissions.append("admitted")
+            except sqlite3.OperationalError as exc:
+                if other.in_transaction:
+                    other.execute("ROLLBACK")
+                admissions.append(exc.sqlite_errorname)
+        elif text == persisted:
+            candidate_inputs.append(connection.in_transaction)
+        return visible
+
+    patch_shared(monkeypatch, message_writes, "_strip_voice_markup", clean)
+    try:
+        out = store([u("question", .1), a(current, 1)])
+    finally:
+        other.close()
+    expected_id = own_id if candidate == "existing-slot" else "kept-visible"
+    replies = [r for r in out if r["role"] == "assistant"]
+    assert len(replies) == 1 and replies[0]["id"] == expected_id
+    assert replies[0]["text"] == current
+    assert not db.conn().execute("SELECT 1 FROM messages WHERE message_id='duplicate-final'").fetchone()
+    assert candidate_inputs, "fixture must actually normalize a persisted candidate"
+    assert admissions and set(admissions) == {"admitted"}, admissions
+
+
+@pytest.mark.parametrize("prompt,raw,expected,origin", [
+    ("ordinary", "<speak>λ\nreply</speak>", "<speak>λ\nreply</speak>", "user"),
+    ("ordinary", "", "", "user"),
+    ("ordinary", "<vox>um</vox>", "<vox>um</vox>", "user"),
+    ("ordinary", "<thinking>private</thinking><speak>answer</speak>",
+     "<speak>answer</speak>", "user"),
+    (HEARTBEAT_PROMPT, HEARTBEAT_OK, "Heartbeat check: no action needed.", "heartbeat"),
+    (TICK_PROMPT, LEADER_NOOP, "Leader check: no action needed.", "leader_tick"),
+    ("Deep Dreaming contract: redacted", "DREAMING_OK", "Dreaming check: no action needed.", "dreaming"),
+    ("ordinary", HEARTBEAT_OK, HEARTBEAT_OK, "user"),
+    ("ordinary", LEADER_NOOP, LEADER_NOOP, "user"),
+    ("ordinary", "DREAMING_OK", "DREAMING_OK", "user"),
+])
+def test_prepared_visibility_preserves_effective_text_and_twin_choice(
+        clock, prompt, raw, expected, origin):
+    """Raw visibility is not the post-automation/hidden-block text contract."""
+    visible = message_writes._strip_voice_markup(expected)
+    # Plain persisted representation distinguishes candidate from raw input.
+    assistant_row("final-effective", "final:unlinked", visible, at=1)
+    out = store([u(prompt, 0), a(raw, 1)])
+    replies = [r for r in out if r["role"] == "assistant"]
+    if expected:
+        assert len(replies) == 1
+        assert replies[0]["text"] == expected
+        assert replies[0]["origin"] == origin
+        if visible:
+            assert replies[0]["id"] == "final-effective"
+    else:
+        assert not [r for r in replies if r["text"]]
