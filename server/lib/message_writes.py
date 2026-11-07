@@ -1291,7 +1291,13 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
                 source_file=source_file, seq=seq, msg_id=msg_id, text=text,
                 timestamp=turn.get("timestamp"), request_trace=current_request_trace,
                 reply_trace=reply_trace, final_rows=final_rows,
-                adopted_final_ids=adopted_final_ids, placed_ids=placed_ids)
+                adopted_final_ids=adopted_final_ids, placed_ids=placed_ids,
+                # The prelude normalized raw text before BEGIN. Automation
+                # and hidden-block processing above may replace that text;
+                # those cases retain normalization of the effective value.
+                # An empty prepared value is valid, not a missing value.
+                visible=(visible_replies[index] if visible_replies is not None
+                         and text == str(turn.get("text") or "") else None))
             skipped_slot_removed = skipped_slot_removed or changed
         row = _upsert_row(
             database, agent_id=agent_id, backend_session_id=backend_session_id,
