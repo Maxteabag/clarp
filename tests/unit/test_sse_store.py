@@ -320,3 +320,37 @@ def test_nested_record_never_starts_or_commits_a_separate_transaction():
     assert not any(sql.upper().startswith(("BEGIN", "COMMIT", "END")) for sql in statements)
     assert second > first
     assert sse_store.events_after(0) == []
+
+
+@pytest.mark.parametrize("nested", [False, True])
+def test_release_acknowledgement_loss_never_replays_and_keeps_outer_ownership(monkeypatch, nested):
+    real = db.conn()
+    if nested:
+        real.execute("BEGIN IMMEDIATE")
+    inserts = []
+    released = []
+
+    class LostRelease:
+        def __getattr__(self, name):
+            return getattr(real, name)
+
+        def execute(self, sql, *args):
+            if sql.lstrip().startswith("INSERT INTO sse_events"):
+                inserts.append(sql)
+            result = real.execute(sql, *args)
+            if sql == "RELEASE record_sse_event" and not released:
+                released.append(True)
+                raise sqlite3.OperationalError("injected release acknowledgement loss")
+            return result
+
+    monkeypatch.setattr(sse_store, "conn", lambda: LostRelease())
+    # Baseline rollback-to after a lost RELEASE may itself raise: neither
+    # exception is permission to replay or commit a caller-owned transaction.
+    with pytest.raises(sqlite3.OperationalError):
+        sse_store.record_sse_event({"type": "ping", "ts": 9})
+    assert released == [True] and len(inserts) == 1
+    assert real.in_transaction == nested
+    assert real.execute("SELECT COUNT(*) FROM sse_events").fetchone()[0] == int(nested)
+    if nested:
+        real.execute("ROLLBACK")
+    assert real.execute("SELECT COUNT(*) FROM sse_events").fetchone()[0] == 0
