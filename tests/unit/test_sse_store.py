@@ -259,3 +259,24 @@ def test_after_insert_failure_never_replays_or_remints(monkeypatch, stage):
     count = real.execute("SELECT COUNT(*) FROM sse_events").fetchone()[0]
     assert count == (1 if stage == "COMMIT" else 0)
     assert not real.in_transaction
+
+
+def test_first_payload_encoding_precedes_standalone_writer_admission(monkeypatch):
+    connection = db.conn()
+    path = connection.execute("PRAGMA database_list").fetchone()[2]
+    real_dumps = json.dumps
+    encoded = []
+
+    def encode(payload, *args, **kwargs):
+        if payload.get("n") == "prepare-before-lock" and "event_id" not in payload:
+            with sqlite3.connect(path, isolation_level=None, timeout=0) as other:
+                other.execute("BEGIN IMMEDIATE")
+                other.execute("COMMIT")
+            encoded.append(dict(payload))
+        return real_dumps(payload, *args, **kwargs)
+
+    monkeypatch.setattr(sse_store.json, "dumps", encode)
+    event = {"type": "ping", "ts": 123, "n": "prepare-before-lock"}
+    event_id = sse_store.record_sse_event(event)
+    assert encoded == [event]
+    assert _row(event_id)["payload"] == '{"type":"ping","ts":123,"n":"prepare-before-lock","event_id":'+str(event_id)+'}'
