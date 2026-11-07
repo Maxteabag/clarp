@@ -652,9 +652,9 @@ def test_current_reply_normalization_leaves_the_writer_available(clock, monkeypa
     (HEARTBEAT_PROMPT, HEARTBEAT_OK, "Heartbeat check: no action needed.", "heartbeat"),
     (TICK_PROMPT, LEADER_NOOP, "Leader check: no action needed.", "leader_tick"),
     ("Deep Dreaming contract: redacted", "DREAMING_OK", "Dreaming check: no action needed.", "dreaming"),
-    ("ordinary", HEARTBEAT_OK, HEARTBEAT_OK, "user"),
-    ("ordinary", LEADER_NOOP, LEADER_NOOP, "user"),
-    ("ordinary", "DREAMING_OK", "DREAMING_OK", "user"),
+    ("ordinary", HEARTBEAT_OK, "Heartbeat check: no action needed.", "user"),
+    ("ordinary", LEADER_NOOP, "Leader check: no action needed.", "user"),
+    ("ordinary", "DREAMING_OK", "Dreaming check: no action needed.", "user"),
 ])
 def test_prepared_visibility_preserves_effective_text_and_twin_choice(
         clock, prompt, raw, expected, origin):

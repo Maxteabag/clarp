@@ -161,14 +161,15 @@ class _FinalRows:
 
 
 def _streamed_twin(database, agent_id: str, backend_session_id: str, text: str,
-                   *, exclude: set[str], trace: str) -> str:
+                   *, exclude: set[str], trace: str, visible: str | None = None) -> str:
     """The still-live streamed row of this reply's own turn that it completes.
 
     Kept rows of several turns can coexist, so only a row of the reply's turn
     qualifies. A reply whose turn is unknown takes none: a missing trace is
     missing identity, not proof of a shared turn. A text match in another turn
     is never taken. Exact text wins over a prefix; among equals the oldest."""
-    visible = _strip_voice_markup(text)
+    if visible is None:
+        visible = _strip_voice_markup(text)
     if not visible or not trace:
         return ""
     exact = prefix = elsewhere = ""
@@ -209,9 +210,10 @@ def _related(a: str, b: str) -> bool:
 
 
 def _final_twins(final_rows: _FinalRows, *, text: str, timestamp: Any,
-                 exclude: set[str]) -> list[str]:
+                 exclude: set[str], visible: str | None = None) -> list[str]:
     """Finalized live rows showing `text`, written near `timestamp`."""
-    visible = _strip_voice_markup(text)
+    if visible is None:
+        visible = _strip_voice_markup(text)
     if not visible:
         return []
     reply_at = _parse_timestamp(timestamp)
@@ -336,7 +338,7 @@ def _resolve_reply_id(database, *, agent_id: str, backend_session_id: str,
                       source_file: str, seq: int, msg_id: str, text: str,
                       timestamp: Any, request_trace: str, reply_trace: str,
                       final_rows: "_FinalRows", adopted_final_ids: set[str],
-                      placed_ids: set[str]) -> tuple[str, bool]:
+                      placed_ids: set[str], visible: str | None = None) -> tuple[str, bool]:
     """The row a transcript reply without its own id lands on (S5 step 4).
 
     In order: the slot's occupant, unless another request's adopted reply
@@ -370,16 +372,20 @@ def _resolve_reply_id(database, *, agent_id: str, backend_session_id: str,
         # source_file is this transcript's now) and the turns have
         # shifted since: it moves with its turn, where a fresh import
         # would place it, and the slot's old occupant goes (RM-N1).
+        if visible is None:
+            visible = _strip_voice_markup(text)
         moved = _shifted_twin(database, agent_id, backend_session_id,
                               source_file, request_trace,
-                              _strip_voice_markup(text), seq,
+                              visible, seq,
                               exclude=adopted_final_ids | placed_ids)
     elif not slot:
         # A reply this import parked (RM-N1b) whose request could not
         # be linked: found again by its visible text, as a fresh
         # import adopts an unlinked reply's final row.
+        if visible is None:
+            visible = _strip_voice_markup(text)
         moved = _parked_twin(database, agent_id, backend_session_id,
-                             source_file, _strip_voice_markup(text),
+                             source_file, visible,
                              exclude=adopted_final_ids | placed_ids)
     if moved is not None:
         msg_id = moved[0]
@@ -391,7 +397,8 @@ def _resolve_reply_id(database, *, agent_id: str, backend_session_id: str,
         msg_id = slot["message_id"]
     elif request_trace:
         request_source = "final:" + request_trace
-        visible = _strip_voice_markup(text)
+        if visible is None:
+            visible = _strip_voice_markup(text)
         matching = [message_id for message_id, source, row_visible, _ts in final_rows.rows()
                     if source == request_source and message_id not in adopted_final_ids
                     and row_visible == visible]
@@ -401,9 +408,11 @@ def _resolve_reply_id(database, *, agent_id: str, backend_session_id: str,
     if not slot and msg_id not in adopted_final_ids:
         # The row this reply streamed into becomes its durable row,
         # in place: same id, so no client sees it vanish and return.
+        if visible is None:
+            visible = _strip_voice_markup(text)
         streamed = _streamed_twin(database, agent_id, backend_session_id,
                                   text, exclude=adopted_final_ids,
-                                  trace=reply_trace)
+                                  trace=reply_trace, visible=visible)
         if streamed:
             msg_id = streamed
             adopted_final_ids.add(msg_id)
@@ -415,7 +424,7 @@ def _resolve_reply_id(database, *, agent_id: str, backend_session_id: str,
         # reply already imported sheds an earlier import's twin.
         twins = _final_twins(final_rows,
                              text=text, timestamp=timestamp,
-                             exclude=adopted_final_ids | {msg_id})
+                             exclude=adopted_final_ids | {msg_id}, visible=visible)
         if len(twins) == 1 and not slot and not request_trace:
             msg_id = twins[0]
             adopted_final_ids.add(msg_id)
