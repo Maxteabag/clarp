@@ -48,6 +48,10 @@
   "2": {
    "parse": "ac792a6a1361891f2ac2b8c508190308a08e0f1b66f7cd345d330aa8db6441e0",
    "store": "0b7fc077b694c2a401eda4190c229e1474b8a6db3fc6ec46cbebb5a81f144f21"
+  },
+  "3": {
+   "parse": "a395ce68b40214e50ac8da9d65977011a49e266b241f12ea3ce137f46510af89",
+   "store": "763c373647cbb0b04a56445bd0e3f733bf64b4c0e21ccb65aa9fe1fe9065da39"
   }
  },
  "opencode": {
