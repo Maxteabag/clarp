@@ -8,6 +8,9 @@ their latest row in `recent_events`.
 from __future__ import annotations
 
 import json
+import sqlite3
+import threading
+import time
 
 import pytest
 
@@ -144,6 +147,9 @@ def test_event_row_is_never_left_without_its_event_id(monkeypatch):
     before = real.execute("SELECT COUNT(*) FROM sse_events").fetchone()[0]
 
     class FailingUpdate:
+        def __getattr__(self, name):
+            return getattr(real, name)
+
         def execute(self, sql, *args):
             if sql.lstrip().startswith("UPDATE sse_events"):
                 raise db.sqlite3.OperationalError("database is locked")
@@ -156,3 +162,100 @@ def test_event_row_is_never_left_without_its_event_id(monkeypatch):
     monkeypatch.undo()
     for (payload,) in real.execute("SELECT payload FROM sse_events"):
         assert "event_id" in json.loads(payload)
+
+
+
+def test_standalone_admission_takes_a_short_writer_gap_without_reminting(monkeypatch):
+    """Native busy backoff misses a gap; known-prewrite polled admission yields.
+
+    Both paths contend with a real independent SQLite writer. Only a Python
+    prewrite admission poll releases that writer, so the baseline native
+    INSERT wait is the intended RED (short test busy budget, not a timing race).
+    """
+    connection = db.conn()
+    connection.execute("PRAGMA busy_timeout=60")
+    path = connection.execute("PRAGMA database_list").fetchone()[2]
+    held = threading.Event()
+    release = threading.Event()
+    errors = []
+
+    def holder():
+        try:
+            with sqlite3.connect(path, isolation_level=None, timeout=0) as other:
+                other.execute("BEGIN IMMEDIATE")
+                held.set()
+                if not release.wait(2):
+                    raise RuntimeError("test holder release deadline")
+                other.execute("COMMIT")
+        except BaseException as exc:
+            errors.append(exc)
+            held.set()
+
+    thread = threading.Thread(target=holder)
+    thread.start()
+    real_sleep = time.sleep
+    caller = threading.get_ident()
+    polls = []
+
+    def yielding_poll(seconds):
+        if threading.get_ident() == caller and seconds == db._LOCK_POLL_SECONDS:
+            polls.append(connection.in_transaction)
+            release.set()
+        return real_sleep(seconds)
+
+    monkeypatch.setattr(db.time, "sleep", yielding_poll)
+    try:
+        assert held.wait(2) and not errors
+        event_id = sse_store.record_sse_event({"type": "ping", "ts": 123, "n": 1})
+    finally:
+        release.set()
+        thread.join(2)
+    assert not thread.is_alive() and not errors
+    assert polls and not any(polls), "retry must precede write transaction admission"
+    assert connection.execute("PRAGMA busy_timeout").fetchone()[0] == 60
+    records = connection.execute("SELECT event_id,payload FROM sse_events").fetchall()
+    assert [tuple(row) for row in records] == [(event_id, '{"type":"ping","ts":123,"n":1,"event_id":'+str(event_id)+'}')]
+    assert [event["event_id"] for event in sse_store.events_after(event_id-1)] == [event_id]
+
+
+def test_nested_event_rolls_back_with_its_caller():
+    connection = db.conn()
+    connection.execute("BEGIN IMMEDIATE")
+    event_id = sse_store.record_sse_event({"type": "ping", "ts": 7})
+    assert connection.in_transaction
+    assert _row(event_id) is not None
+    connection.execute("ROLLBACK")
+    assert _row(event_id) is None
+
+
+@pytest.mark.parametrize("stage", ["UPDATE sse_events", "RELEASE record_sse_event", "COMMIT"])
+def test_after_insert_failure_never_replays_or_remints(monkeypatch, stage):
+    real = db.conn()
+    statements = []
+
+    class Fault:
+        def __getattr__(self, name):
+            return getattr(real, name)
+
+        def execute(self, sql, *args):
+            statements.append(sql)
+            if sql.startswith(stage):
+                raise sqlite3.OperationalError("injected uncertain outcome")
+            return real.execute(sql, *args)
+
+        def commit(self):
+            statements.append("COMMIT")
+            if stage == "COMMIT":
+                # Actually committed, then an acknowledgement is lost. No retry
+                # may mint another row even though rollback is now impossible.
+                real.commit()
+                raise sqlite3.OperationalError("injected uncertain outcome")
+            return real.commit()
+
+    monkeypatch.setattr(sse_store, "conn", lambda: Fault())
+    with pytest.raises(sqlite3.OperationalError, match="injected uncertain"):
+        sse_store.record_sse_event({"type": "ping", "ts": 7})
+    assert len([sql for sql in statements if sql.lstrip().startswith("INSERT INTO sse_events")]) == 1
+    count = real.execute("SELECT COUNT(*) FROM sse_events").fetchone()[0]
+    assert count == (1 if stage == "COMMIT" else 0)
+    assert not real.in_transaction
