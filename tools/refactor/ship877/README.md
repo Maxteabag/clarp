@@ -24,8 +24,9 @@ failures and do not qualify passing product/control tests. Capture does not cove
 JSONL or external effect streams; existing real effect spies/controls retain
 assertions and output comparison must identify that limit.
 
-C-required extra controls still to add/source review before dispatch: provenance
-change at locked admission, explicit empty/legacy helper calls, shifted/parked and
-after-yield mutation coverage selection. Existing characterization scenarios are
+Added provenance change after the read snapshot (revalidated in locked pass) and
+explicit empty/markup-only current-input witnesses. Still select the existing
+shifted/parked and after-yield mutation controls and direct legacy helper cases
+for source review before dispatch. Existing characterization scenarios are
 the primary owners for branch products, no mocked twin-choice returns. No executed
 RED/GREEN or byte equality yet, no independent comparison gate result implied.
