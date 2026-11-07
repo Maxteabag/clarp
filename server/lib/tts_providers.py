@@ -115,25 +115,6 @@ def synthesize(
         manifest, text=text, voice=voice, out_path=out_path, on_chunk=on_chunk)
 
 
-def _wav_to_mp3(source: Path, destination: Path) -> None:
-    import av
-    from av.audio.resampler import AudioResampler
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    with av.open(str(source)) as input_container:
-        with av.open(str(destination), mode="w", format="mp3") as output_container:
-            input_stream = input_container.streams.audio[0]
-            output_stream = output_container.add_stream("mp3", rate=24_000)
-            output_stream.layout = "mono"
-            resampler = AudioResampler(
-                format="fltp", layout="mono", rate=24_000)
-            for frame in input_container.decode(input_stream):
-                for converted in resampler.resample(frame):
-                    converted.pts = None
-                    for packet in output_stream.encode(converted):
-                        output_container.mux(packet)
-            for converted in resampler.resample(None):
-                converted.pts = None
-                for packet in output_stream.encode(converted):
-                    output_container.mux(packet)
-            for packet in output_stream.encode(None):
-                output_container.mux(packet)
+from .audio_codec import (  # noqa: E402,F401  (split_apply: tts-providers-audio-codec)
+    _wav_to_mp3,
+)
