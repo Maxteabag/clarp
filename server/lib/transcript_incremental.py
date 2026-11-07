@@ -43,6 +43,7 @@ import sys
 import threading
 import time
 import types
+from time import monotonic
 from dataclasses import dataclass, replace
 from typing import Any, Callable
 
@@ -70,6 +71,10 @@ _SAMPLES = 16
 _SAMPLE_BYTES = 4096
 # Boundary candidates tried per checkpoint, latest first.
 _CANDIDATES = 6
+# Signed bounded-audit assumption (801/802), for authoritative tails only.
+# Older/tighter shadow settings may require an earlier full import.
+_TAIL_AUDIT_TICKS = 20
+_TAIL_AUDIT_SECONDS = 600.0
 
 
 @functools.cache
@@ -648,7 +653,8 @@ def _row_view(row: dict) -> tuple:
 class _TailState:
     checkpoint: Checkpoint
     raw_inputs: tuple
-    file_hash: str
+    file_digest: Any
+    audited_monotonic: float
 
 
 def _tail_weight(key, revision, state) -> int:
@@ -704,27 +710,23 @@ def _prefix_has_effects(turns) -> bool:
 
 
 
-def _tail_file_hashes(path, previous_size, current_size):
-    """One bounded-buffer read certifies ALL previously imported bytes.
+def _read_tail_digest(path, start, end, digest=None):
+    """Extend a COPY with [start,end); ordinary ticks assume append-only801.
 
-    Durable sampled hashes remain format-compatible shadow guards. Actual
-    tail writes additionally require this process-local full-prefix digest.
-    This read is outside SQLite transactions; its O(file bytes) cost is
-    separate from range parsing and exact DB-input validation.
+    Only full audits read the entire previously certified prefix. The copied
+    process-local state is published only with successful checkpoint lineage.
     """
-    digest = hashlib.blake2b(digest_size=16)
+    digest = digest.copy() if digest is not None else hashlib.blake2b(digest_size=16)
     with open(path, "rb") as source:
-        def read_until(count):
-            while count > 0:
-                block = source.read(min(count, 1 << 20))
-                if not block:
-                    raise OSError("transcript shrank during prefix certification")
-                digest.update(block)
-                count -= len(block)
-        read_until(previous_size)
-        previous = digest.hexdigest()
-        read_until(current_size - previous_size)
-    return previous, digest.hexdigest()
+        source.seek(start)
+        remaining = end - start
+        while remaining > 0:
+            block = source.read(min(remaining, 1 << 20))
+            if not block:
+                raise OSError("transcript shrank during digest read")
+            digest.update(block)
+            remaining -= len(block)
+    return digest
 
 
 def _tail_log(code, *, retention=False):
@@ -746,9 +748,9 @@ def _checkpoint_refused(status):
     return bool(reasons)
 
 
-def _cache_committed_tail(key, revision, checkpoint, raw_inputs, file_hash):
+def _cache_committed_tail(key, revision, checkpoint, raw_inputs, file_digest, audited_monotonic):
     from . import db
-    if raw_inputs is None or file_hash is None:
+    if raw_inputs is None or file_digest is None:
         _tail_log("checkpoint_not_written", retention=True)
         return
     try:
@@ -769,7 +771,7 @@ def _cache_committed_tail(key, revision, checkpoint, raw_inputs, file_hash):
     if any(row["origin"] not in ("user", "agent", None, "") for row in raw_inputs[1]):
         _tail_log("automation_provenance", retention=True)
         return
-    state = _TailState(checkpoint, raw_inputs, file_hash)
+    state = _TailState(checkpoint, raw_inputs, file_digest, audited_monotonic)
     _TAIL_STATES.put(key, revision, state)
     found, retained = _TAIL_STATES.get(key, revision)
     if not found or retained is not state:
@@ -792,14 +794,24 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started):
     before = identity(path)
     if complete_size(path, before.size) != before.size:
         return _refuse_tail("partial_record")
+    age = monotonic() - state.audited_monotonic
+    if age < 0:
+        return _refuse_tail("audit_clock_unknown")
+    tick_limit = min(_TAIL_AUDIT_TICKS, int(conf["audit_every"]))
+    time_limit = min(_TAIL_AUDIT_SECONDS, float(conf["audit_seconds"]))
+    # Audit BEFORE the twentieth attempted tail (19 completed tails), or the
+    # first import after 600s. Appends never renew either audit deadline.
+    due = cp.imports_since_audit >= tick_limit - 1 or age >= time_limit
     reason = decide(cp, backend, path, before, now_ms=db.now_ms(),
-                    audit_every=int(conf["audit_every"]), audit_seconds=float(conf["audit_seconds"]),
+                    audit_every=0 if due else sys.maxsize, audit_seconds=float("inf"),
                     max_tail_bytes=int(conf["max_tail_bytes"]))
+    if reason == "audit":
+        previous = _read_tail_digest(path, 0, cp.complete_size)
+        if previous.digest() != state.file_digest.digest():
+            return _refuse_tail("audit_prefix_rewritten")
     if reason:
         return _refuse_tail(reason)
-    previous_hash, current_hash = _tail_file_hashes(path, cp.complete_size, before.size)
-    if previous_hash != state.file_hash:
-        return _refuse_tail("prefix_content_changed")
+    current_digest = _read_tail_digest(path, cp.complete_size, before.size, state.file_digest)
     turns = parse_range(backend, path, cp.boundary_offset, before.size)
     parsed = time.perf_counter()
     if identity(path) != before:
@@ -829,7 +841,8 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started):
         return _refuse_tail("carry_inputs_changed")
     _tail_log("tail_applied")
     if not _checkpoint_refused(checkpoint_status):
-        _cache_committed_tail(key, revision, next_cp, raw_inputs, current_hash)
+        _cache_committed_tail(key, revision, next_cp, raw_inputs, current_digest,
+                              state.audited_monotonic)
     return {"rows": next_cp.turn_count, "parse_s": parsed - started,
             "store_s": time.perf_counter() - parsed, "shadow": "not_sampled_tail",
             "apply_mode": "tail", "parsed_bytes": before.size - cp.boundary_offset}
@@ -843,7 +856,8 @@ def _store_full_with_tail_checkpoint(backend, path, agent_id, backend_session_id
     kwargs = {}
     checkpoint = None
     raw_inputs = None
-    current_hash = None
+    current_digest = None
+    audited_monotonic = None
     checkpoint_status = {}
     refusal = "file_identity_unavailable"
     refusal_logged = False
@@ -867,7 +881,9 @@ def _store_full_with_tail_checkpoint(backend, path, agent_id, backend_session_id
                 refusal = "effect_bearing_prefix"
             else:
                 refusal = ""
-                _, current_hash = _tail_file_hashes(path, before.size, before.size)
+                # Age starts at full-prefix certification, never at an append.
+                audited_monotonic = monotonic()
+                current_digest = _read_tail_digest(path, 0, before.size)
                 captured = {}
 
                 def publish(database, carry):
@@ -903,7 +919,7 @@ def _store_full_with_tail_checkpoint(backend, path, agent_id, backend_session_id
     elif checkpoint is None:
         _tail_log("checkpoint_not_written", retention=True)
     else:
-        _cache_committed_tail(key, revision, checkpoint, raw_inputs, current_hash)
+        _cache_committed_tail(key, revision, checkpoint, raw_inputs, current_digest, audited_monotonic)
 
 
 def import_transcript(*, backend: str, path: pathlib.Path, agent_id: str,

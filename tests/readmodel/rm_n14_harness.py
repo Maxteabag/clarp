@@ -7,6 +7,8 @@ Timing excludes process startup and the outside-the-import database oracle.
 from __future__ import annotations
 
 import argparse
+import builtins
+import io
 from contextlib import ExitStack
 import json
 import os
@@ -72,11 +74,14 @@ def append_bytes(backend: str, ordinal: int, *, size: int = 1024,
 
 
 def write_history(path: pathlib.Path, backend: str, *, mebibytes: int,
-                  long_turn: bool = False) -> int:
-    batches = mebibytes * 1024
+                  long_turn: bool = False, record_bytes: int = 1024) -> int:
+    total_bytes = mebibytes * 1024 * 1024
+    if record_bytes < 1024 or total_bytes % record_bytes:
+        raise ValueError("history size must be divisible by record bytes")
+    batches = total_bytes // record_bytes
     with path.open("wb") as output:
         for ordinal in range(batches):
-            output.write(append_bytes(backend, ordinal, long_turn=long_turn))
+            output.write(append_bytes(backend, ordinal, long_turn=long_turn, size=record_bytes))
     return batches
 
 
@@ -195,6 +200,56 @@ def run_lane(database: pathlib.Path, transcript: pathlib.Path, backend: str,
                 metric["seconds"] += time.perf_counter() - started
         return call
 
+    # Observe actual reads at the file boundary, including parser range reads.
+    # These are userspace delivered bytes; Linux read_bytes below separately
+    # reports block-device I/O (usually zero with this warm-cache fixture).
+    metrics["transcript_read_bytes"] = 0
+
+    class CountedRead:
+        def __init__(self, source):
+            self.source = source
+
+        def _count(self, value):
+            metrics["transcript_read_bytes"] += len(value.encode() if isinstance(value, str) else value)
+            return value
+
+        def read(self, *args):
+            return self._count(self.source.read(*args))
+
+        def readline(self, *args):
+            return self._count(self.source.readline(*args))
+
+        def readinto(self, buffer):
+            count = self.source.readinto(buffer)
+            metrics["transcript_read_bytes"] += count or 0
+            return count
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            return self._count(next(self.source))
+
+        def __enter__(self):
+            self.source.__enter__()
+            return self
+
+        def __exit__(self, *args):
+            return self.source.__exit__(*args)
+
+        def __getattr__(self, name):
+            return getattr(self.source, name)
+
+    def counted_open(original):
+        def opened(file, *args, **kwargs):
+            source = original(file, *args, **kwargs)
+            return CountedRead(source) if str(file) == str(transcript) else source
+        return opened
+
+    def process_io():
+        return {key: int(value) for key, value in (
+            line.split(":", 1) for line in pathlib.Path("/proc/self/io").read_text().splitlines())}
+
     execute, commit = message_writes._ImportWriter.execute, message_writes._ImportWriter.commit
 
     def measured_execute(writer, *args, **kwargs):
@@ -216,10 +271,36 @@ def run_lane(database: pathlib.Path, transcript: pathlib.Path, backend: str,
 
     try:
         with ExitStack() as stack:
+            stack.enter_context(patch.object(builtins, "open", counted_open(builtins.open)))
+            stack.enter_context(patch.object(io, "open", counted_open(io.open)))
+            io_before = process_io()
             stack.enter_context(patch("time.time", return_value=(BASE_MS + tick * 1000) / 1000))
+            # Only the importer's audit clock moves; profiling and writer
+            # budgets retain their real monotonic clock.
+            stack.enter_context(patch.object(inc, "monotonic", return_value=(faults or {}).get("monotonic_seconds", float(tick)), create=True))
             stack.enter_context(patch.object(inc, "settings", return_value=dict(inc._DEFAULTS,
                 enabled=lane == "checkpoint", sample_every=1, max_cpu_seconds_per_hour=1e9,
-                max_load_per_cpu=1e9, max_io_pressure=1e9, max_memory_pressure=1e9)))
+                max_load_per_cpu=1e9, max_io_pressure=1e9, max_memory_pressure=1e9,
+                **(faults or {}).get("audit_settings", {}))))
+            for name in ("_read_tail_digest", "prefix_hash", "range_hash", "parse_range",
+                         "reference_outside_tail"):
+                if not hasattr(inc, name):
+                    continue
+                original = getattr(inc, name)
+
+                def read_component(*args, _name=name, _original=original, **kwargs):
+                    before_bytes = metrics["transcript_read_bytes"]
+                    started_read = time.perf_counter()
+                    try:
+                        return _original(*args, **kwargs)
+                    finally:
+                        metric = metrics["components"].setdefault(_name, {
+                            "status": "measured", "calls": 0, "seconds": 0.0, "read_bytes": 0})
+                        metric["calls"] += 1
+                        metric["seconds"] += time.perf_counter() - started_read
+                        metric["read_bytes"] += metrics["transcript_read_bytes"] - before_bytes
+
+                stack.enter_context(patch.object(inc, name, read_component))
             for name in ("_row_phases", "_visible_replies", "_prepare_import_prelude", "_revalidate_import_prelude"):
                 if hasattr(message_writes, name):
                     stack.enter_context(patch.object(message_writes, name, timed(name, getattr(message_writes, name))))
@@ -228,6 +309,10 @@ def run_lane(database: pathlib.Path, transcript: pathlib.Path, backend: str,
             stack.enter_context(patch.object(message_writes._ImportWriter, "execute", measured_execute))
             stack.enter_context(patch.object(message_writes._ImportWriter, "commit", measured_commit))
             faults = faults or {}
+            if faults.get("evict_frontier"):
+                # Exercise real LRU eviction, not a fake positive receipt.
+                for ordinal in range(inc._TAIL_STATES.max_entries + 1):
+                    inc._TAIL_STATES.put(("synthetic-pressure", ordinal), "synthetic", None)
             from lib import log as host_log
             original_log = host_log.log
             metrics["tail_events"] = []
@@ -344,6 +429,9 @@ def run_lane(database: pathlib.Path, transcript: pathlib.Path, backend: str,
             else:
                 raise ValueError("unknown oracle lane")
             metrics["total_s"] = time.perf_counter() - started
+            io_after = process_io()
+            metrics["process_io"] = {key: io_after[key] - io_before[key]
+                                     for key in ("rchar", "read_bytes", "syscr")}
             metrics["process_peak_rss_kib"] = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
             metrics["candidate_fast_path_proven"] = metrics.get("apply_mode") == "tail"
             if lane in ("candidate", "checkpoint"):
