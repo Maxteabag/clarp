@@ -703,7 +703,7 @@ def test_empty_prepared_visibility_does_not_repeat_current_cleanup(clock, monkey
     finally:
         other.close()
     assert admissions and set(admissions) == {"admitted"}, admissions
-    assert all(r["text"] != "question" for r in transcript_rows() if r["role"] == "assistant")
+    assert [r["text"] for r in transcript_rows() if r["role"] == "assistant"] == [current]
 
 
 def test_revalidated_automation_origin_uses_effective_reply_visibility(clock, monkeypatch):
