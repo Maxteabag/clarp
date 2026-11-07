@@ -158,6 +158,7 @@ class CodexBackend(StreamJsonBackend):
     brand = BackendBrand('#2b2f3c', '#14161d', '#c0caf5', '#3c4257')
     supports_fork = True
     supports_steer = True
+    supports_transcript_tail_apply = True
     supports_usage = True
     login_kind = 'device_code'
     efforts = ('low', 'medium', 'high', 'xhigh', 'max', 'ultra')

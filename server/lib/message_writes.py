@@ -583,6 +583,10 @@ IMPORT_FAIR_YIELD_SECONDS = 0.110
 _WRITE_VERBS = frozenset({"INSERT", "UPDATE", "DELETE", "REPLACE"})
 
 
+class _TailInvalidated(Exception):
+    """Cached carry inputs changed; the dispatcher must run a full import."""
+
+
 class _WriteNeeded(Exception):
     """The probe pass of an import found a row to change."""
 
@@ -609,6 +613,32 @@ class _ImportWriter:
         self.began_seq = 0
         self.seq = 0
         self.held_since_fair_yield = 0.0
+        self._released_connection = None
+        self._released_version = None
+        self._awaiting_reacquire = False
+        self._publication_refusals: set[str] = set()
+        self._finalizing = False
+
+    def _fence_version(self):
+        """Dirty signal ONLY: a matching version never certifies any input."""
+        try:
+            return int(self._database.execute("PRAGMA data_version").fetchone()[0])
+        except Exception:  # noqa: BLE001 - failure refuses publication, not committed products
+            self._publication_refusals.add("data_version_read_failure")
+            from .log import log
+            log("transcriptTailFenceRead", "code=data_version_read_failure count=1")
+            return None
+
+    def checkpoint_allowed(self, status=None) -> bool:
+        if self.locked and self.began_at is None:
+            # Admit the final transaction and finish any pending dirty-window
+            # check BEFORE deciding whether its savepoint may publish.
+            self.execute("SELECT 1")
+        if self._publication_refusals:
+            if status is not None:
+                status["refused"] = tuple(sorted(self._publication_refusals))
+            return False
+        return True
 
     def execute(self, sql, parameters=()):
         if not self.locked:
@@ -631,6 +661,17 @@ class _ImportWriter:
                 note_import_holds_lock(False)
             self.began_at = time.monotonic()
             self.began_seq = self.seq
+            if self._awaiting_reacquire:
+                # Same actual connection, sampled before releasing and after
+                # reacquiring BEGIN IMMEDIATE. This can ONLY reject reuse.
+                if self._released_connection is not self._database:
+                    self._publication_refusals.add("connection_changed_yield")
+                version = self._fence_version()
+                if (self._released_connection is self._database
+                        and version is not None and self._released_version is not None
+                        and version != self._released_version):
+                    self._publication_refusals.add("foreign_commit_yield")
+                self._awaiting_reacquire = False
         return self._database.execute(sql, parameters)
 
     def due(self) -> bool:
@@ -644,13 +685,24 @@ class _ImportWriter:
     def commit(self) -> None:
         """End the batch; the next statement opens the following one."""
         if self.began_at is not None:
+            if not self._finalizing:
+                self._released_connection = self._database
+                self._released_version = self._fence_version()
             self._database.execute("COMMIT")
             self.held_since_fair_yield += time.monotonic() - self.began_at
             self.began_at = None
 
+    def finish(self) -> None:
+        """Final release has no yield/reacquire window or post-publication sample."""
+        self._finalizing = True
+        self.commit()
+
     def yield_writer(self) -> None:
         """Between batches: the short yield, or once per second of held lock
         the long one (RM-N7)."""
+        self._awaiting_reacquire = True
+        if self._released_connection is None:
+            self._publication_refusals.add("yield_without_release_sample")
         if self.held_since_fair_yield >= _facade().IMPORT_FAIR_YIELD_EVERY_SECONDS:
             time.sleep(_facade().IMPORT_FAIR_YIELD_SECONDS)
             self.held_since_fair_yield = 0.0
@@ -667,6 +719,7 @@ def store_transcript_turns(*, agent_id: str, backend_session_id: str,
                            captured: dict[str, Any] | None = None,
                            on_stored=None,
                            out_seqs: list[int] | None = None,
+                           checkpoint_status: dict | None = None,
                            ) -> list[dict[str, Any]]:
     """Import a whole parsed transcript (the authoritative full import).
 
@@ -695,7 +748,7 @@ def store_transcript_turns(*, agent_id: str, backend_session_id: str,
             source_file=source_file, turns=turns,
             capture_at=capture_at, captured=captured, out_seqs=out_seqs,
             visible_replies=visible_replies, prelude=prelude.for_pass())
-        if on_stored is not None:
+        if on_stored is not None and writer.checkpoint_allowed(checkpoint_status):
             _write_checkpoint(writer, database, on_stored, captured)
         if database.in_transaction:
             database.execute("COMMIT")
@@ -721,9 +774,9 @@ def store_transcript_turns(*, agent_id: str, backend_session_id: str,
             source_file=source_file, turns=turns,
             capture_at=capture_at, captured=captured, out_seqs=out_seqs,
             visible_replies=visible_replies, prelude=prepared)
-        if on_stored is not None:
+        if on_stored is not None and writer.checkpoint_allowed(checkpoint_status):
             _write_checkpoint(writer, database, on_stored, captured)
-        writer.commit()
+        writer.finish()
         return out
     except Exception:
         if database.in_transaction:
@@ -769,23 +822,58 @@ def store_transcript_tail(*, agent_id: str, backend_session_id: str,
                           start_seq: int, carry: dict[str, Any],
                           capture_at: int | None = None,
                           captured: dict[str, Any] | None = None,
+                          on_stored=None,
+                          expected_prelude=None,
+                          checkpoint_status: dict | None = None,
                           ) -> list[dict[str, Any]]:
-    """Store only the turns from ``start_seq`` on, resuming from ``carry``.
+    """Apply a certified tail through the full import's admission protocol.
 
-    The incremental import's store. Production never calls it: the shadow
-    (lib.transcript_incremental) only plans it with ``plan_transcript_tail``;
-    the equivalence tests apply it to prove it matches the full import."""
+    Text/phase work stays outside the writer. One probe snapshot prepares
+    database inputs, which are exactly revalidated under BEGIN IMMEDIATE.
+    The optional durable checkpoint shares the final row transaction and
+    the full import's savepoint failure handling.
+    """
     visible_replies = _visible_replies(turns)
+    phases = _row_phases(turns)
     database = _facade().conn()
-    writer = _ImportWriter(database, locked=True)
+    writer = _ImportWriter(database, locked=False)
     try:
+        prelude = _prepare_import_prelude(
+            writer, agent_id, backend_session_id, turns, phases=phases,
+            guard_carry=expected_prelude is not None)
+        if expected_prelude is not None and not prelude.same_carry_inputs(expected_prelude):
+            raise _TailInvalidated("tail_carry_inputs_changed")
         out = _store_transcript_turns_txn(
             writer, agent_id=agent_id, backend_session_id=backend_session_id,
-            source_file=source_file, turns=turns,
-            start_seq=start_seq, carry=carry,
+            source_file=source_file, turns=turns, start_seq=start_seq, carry=carry,
             capture_at=capture_at, captured=captured,
-            visible_replies=visible_replies)
-        writer.commit()
+            visible_replies=visible_replies, prelude=prelude.for_pass())
+        if on_stored is not None and writer.checkpoint_allowed(checkpoint_status):
+            _write_checkpoint(writer, database, on_stored, captured)
+        if database.in_transaction:
+            database.execute("COMMIT")
+        return out
+    except _WriteNeeded:
+        if database.in_transaction:
+            database.execute("ROLLBACK")
+    except Exception:
+        if database.in_transaction:
+            database.execute("ROLLBACK")
+        raise
+    prepared = prelude.for_pass()
+    writer = _ImportWriter(database, locked=True)
+    try:
+        prepared = _revalidate_import_prelude(writer, agent_id, backend_session_id, prepared)
+        if expected_prelude is not None and not prepared.same_carry_inputs(expected_prelude):
+            raise _TailInvalidated("tail_carry_inputs_changed")
+        out = _store_transcript_turns_txn(
+            writer, agent_id=agent_id, backend_session_id=backend_session_id,
+            source_file=source_file, turns=turns, start_seq=start_seq, carry=carry,
+            capture_at=capture_at, captured=captured,
+            visible_replies=visible_replies, prelude=prepared)
+        if on_stored is not None and writer.checkpoint_allowed(checkpoint_status):
+            _write_checkpoint(writer, database, on_stored, captured)
+        writer.finish()
         return out
     except Exception:
         if database.in_transaction:
@@ -888,22 +976,52 @@ class _ImportPrelude:
     client_user_provenance: dict[str, list[tuple[str, str, str, str]]]
     user_provenance: tuple[str, str, str]
     client_rows: list
+    carry_rows: list | None = None
+    oracle_rows: list | None = None
+
+    def raw_carry_inputs(self) -> tuple:
+        return (self.turn_index._rows, self.client_rows, self.user_provenance,
+                self.carry_rows, self.oracle_rows)
+
+    def same_carry_inputs(self, previous) -> bool:
+        """Exact ordered raw rows; revisions/counts alone cannot certify carry."""
+        expected = previous.raw_carry_inputs() if isinstance(previous, _ImportPrelude) else previous
+        return (self.carry_rows is not None and expected[3] is not None
+                and self.raw_carry_inputs() == expected)
 
     def for_pass(self) -> _ImportPrelude:
         return _ImportPrelude(
             self.turn_index, self.phases,
             {key: list(rows) for key, rows in self.client_user_provenance.items()},
-            self.user_provenance, self.client_rows)
+            self.user_provenance, self.client_rows, self.carry_rows, self.oracle_rows)
 
 
 def _prepare_import_prelude(database, agent_id, backend_session_id, turns,
-                            *, phases=None) -> _ImportPrelude:
+                            *, phases=None, guard_carry=False, raw_only=False):
     from . import message_turns
+    if raw_only:
+        # A checkpoint callback captures only ordered raw inputs in its final
+        # transaction. No normalization/index/phase work moves under the writer.
+        return (
+            message_turns.TurnIndex.read_rows(database, agent_id),
+            _client_provenance_rows(database, agent_id, backend_session_id),
+            _latest_user_provenance(database, agent_id, backend_session_id),
+            database.execute("SELECT * FROM messages WHERE agent_id=? ORDER BY message_id",
+                             (agent_id,)).fetchall(),
+            database.execute("SELECT * FROM oracle_delegations WHERE agent_id=? ORDER BY delegation_id",
+                             (agent_id,)).fetchall())
     turn_index = message_turns.TurnIndex(database, agent_id)
     phases = _row_phases(turns) if phases is None else phases
     rows = _client_provenance_rows(database, agent_id, backend_session_id)
+    carry_rows = database.execute(
+        "SELECT * FROM messages WHERE agent_id=? ORDER BY message_id", (agent_id,)
+    ).fetchall() if guard_carry else None
+    oracle_rows = database.execute(
+        "SELECT * FROM oracle_delegations WHERE agent_id=? ORDER BY delegation_id", (agent_id,)
+    ).fetchall() if guard_carry else None
     return _ImportPrelude(turn_index, phases, _client_provenance(rows),
-                          _latest_user_provenance(database, agent_id, backend_session_id), rows)
+                          _latest_user_provenance(database, agent_id, backend_session_id),
+                          rows, carry_rows, oracle_rows)
 
 
 def _revalidate_import_prelude(database, agent_id, backend_session_id,
@@ -921,7 +1039,14 @@ def _revalidate_import_prelude(database, agent_id, backend_session_id,
     provenance = prelude.client_user_provenance
     if client_rows != prelude.client_rows:
         provenance = _client_provenance(client_rows)
-    return _ImportPrelude(turn_index, prelude.phases, provenance, user, client_rows)
+    carry_rows = database.execute(
+        "SELECT * FROM messages WHERE agent_id=? ORDER BY message_id", (agent_id,)
+    ).fetchall() if prelude.carry_rows is not None else None
+    oracle_rows = database.execute(
+        "SELECT * FROM oracle_delegations WHERE agent_id=? ORDER BY delegation_id", (agent_id,)
+    ).fetchall() if prelude.carry_rows is not None else None
+    return _ImportPrelude(turn_index, prelude.phases, provenance, user, client_rows,
+                          carry_rows, oracle_rows)
 
 
 def _store_transcript_turns_txn(database, *, agent_id: str,

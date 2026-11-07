@@ -112,6 +112,7 @@ class Backend:
     supports_fork: bool = False
     supports_steer: bool = False
     supports_transcript_streaming: bool = False
+    supports_transcript_tail_apply: bool = False
     supports_routing: bool = True
     efforts: tuple[str, ...] = ()
     aliases: tuple[str, ...] = ()

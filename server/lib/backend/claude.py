@@ -306,6 +306,7 @@ class ClaudeBackend(Backend):
     brand = BackendBrand('#e08b6a', '#c9603d', '#d97757', '#b85433')
     supports_fork = True
     supports_transcript_streaming = True
+    supports_transcript_tail_apply = True
     supports_mcp = True
     supports_usage = True
     login_kind = 'cli'
