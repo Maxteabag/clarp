@@ -717,15 +717,27 @@ def dashboard_states() -> dict[str, dict[str, Any]]:
 
 
 def dashboard_runtimes() -> dict[str, dict[str, Any]]:
+    # Most agents have one live runtime. Materialize that roster once instead
+    # of rescanning its unindexed agent_id for every agent. Multiple live rows
+    # keep the exact old scalar lookup (including its unspecified tie choice).
+    # One statement retains one SQLite read snapshot and caller transaction.
     rows = conn().execute("""
+        WITH live_runtime AS MATERIALIZED (
+            SELECT agent_id, MAX(backend_session_id) AS backend_session_id,
+                   COUNT(*) AS candidates
+              FROM runtimes WHERE ended_at IS NULL GROUP BY agent_id
+        )
         SELECT a.agent_id,
-               (SELECT backend_session_id FROM runtimes r
-                 WHERE r.agent_id = a.agent_id AND ended_at IS NULL
-                 ORDER BY started_at DESC LIMIT 1) AS backend_session_id,
+               CASE WHEN lr.candidates > 1 THEN
+                   (SELECT backend_session_id FROM runtimes r
+                     WHERE r.agent_id = a.agent_id AND ended_at IS NULL
+                     ORDER BY started_at DESC LIMIT 1)
+                   ELSE lr.backend_session_id END AS backend_session_id,
                (SELECT started_at FROM turns t
                  WHERE t.agent_id = a.agent_id AND ended_at IS NULL
                  ORDER BY started_at DESC LIMIT 1) AS open_turn_started_at
-          FROM agents a WHERE a.deleted_at IS NULL
+          FROM agents a LEFT JOIN live_runtime lr ON lr.agent_id = a.agent_id
+         WHERE a.deleted_at IS NULL
     """).fetchall()
     return {row['agent_id']: dict(row) for row in rows}
 
@@ -1051,6 +1063,7 @@ def record_user_message(*, agent_id: str, backend_session_id: str,
 
 def upsert_live_assistant_message(*, agent_id: str, backend_session_id: str,
                                   trace_id: str = "", text: str, item_key: str = "",
+                                  _provider_genuine: bool = False,
                                   ) -> dict[str, Any] | None:
     from .message_store import upsert_live_assistant_message as _upsert
     return _upsert(
@@ -1059,6 +1072,7 @@ def upsert_live_assistant_message(*, agent_id: str, backend_session_id: str,
         trace_id=trace_id,
         text=text,
         item_key=item_key,
+        **({"_provider_genuine": True} if _provider_genuine else {}),
     )
 
 

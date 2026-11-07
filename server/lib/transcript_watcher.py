@@ -22,6 +22,8 @@ processed before the crash.
 """
 from __future__ import annotations
 
+from .claude_reply_evidence import ClaudeReplyEvidence, is_synthetic_assistant_record
+
 import json
 import pathlib
 import sys
@@ -63,6 +65,7 @@ class TranscriptWatcher:
                  on_change: Callable[[], None] | None = None,
                  pass_line_timestamp: bool = False):
         self.path = pathlib.Path(path)
+        self._reply_evidence = ClaudeReplyEvidence()
         self.on_text = on_text
         # When set, on_text(text, line_ts) also gets the line's own "timestamp"
         # as written (or None). Diagnostics only: it is the producer's clock.
@@ -135,7 +138,7 @@ class TranscriptWatcher:
 
         emitted = 0
         for raw in complete:
-            texts, line_ts = _texts_and_timestamp(raw)
+            texts, line_ts = _texts_and_timestamp(raw, self._reply_evidence)
             for text in texts:
                 if self.pass_line_timestamp:
                     self.on_text(text, line_ts)
@@ -199,7 +202,7 @@ class TranscriptWatcher:
 # ---- JSONL parsing helpers ---------------------------------------------
 
 
-def _texts_and_timestamp(raw: bytes) -> tuple[list[str], str | None]:
+def _texts_and_timestamp(raw: bytes, evidence: ClaudeReplyEvidence | None = None) -> tuple[list[str], str | None]:
     """Every assistant text block in one JSONL line, with the line's own
     ``timestamp`` string when it has one."""
     line = raw.strip()
@@ -212,6 +215,8 @@ def _texts_and_timestamp(raw: bytes) -> tuple[list[str], str | None]:
     if not isinstance(entry, dict):
         return [], None
     stamp = entry.get("timestamp")
+    if evidence is not None and evidence.suppress_event(entry):
+        return [], stamp if isinstance(stamp, str) else None
     return list(_texts_in_entry(entry)), stamp if isinstance(stamp, str) else None
 
 
@@ -223,7 +228,7 @@ def _texts_in_line(raw: bytes) -> Iterable[str]:
 
 
 def _texts_in_entry(entry: dict) -> Iterable[str]:
-    if entry.get("type") != "assistant":
+    if entry.get("type") != "assistant" or entry.get("isMeta") is True or is_synthetic_assistant_record(entry):
         return
     msg = entry.get("message") or {}
     content = msg.get("content")

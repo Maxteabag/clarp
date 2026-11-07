@@ -11,6 +11,7 @@ import sys, json, pathlib
 import _clarp_lib  # noqa: F401  — puts Clarp's `lib` on sys.path
 try:
     from lib import agents as agents_db                  # noqa: E402
+    from _hook_report import report                # noqa: E402
     from lib import turn_lifecycle                       # noqa: E402
     from lib.activity import (                           # noqa: E402
         summarize_tool_activity,
@@ -40,7 +41,8 @@ def _log(msg):
 def main() -> int:
     try:
         payload = json.load(sys.stdin)
-    except Exception:
+    except Exception as exc:
+        report("toolend_hook", "stdinFail", exc)
         return 0
     backend_session_id = payload.get("session_id") or ""
     tool_name = (payload.get("tool_name") or
@@ -55,7 +57,8 @@ def main() -> int:
             backend_session_id=backend_session_id,
             session=session or None,
         )
-    except Exception:
+    except Exception as exc:
+        report("toolend_hook", "resolveFail", exc)
         return 0
     if not agent:
         return 0

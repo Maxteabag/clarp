@@ -1,0 +1,11 @@
+# CPU main4008 into reviewed S5 helper-port10dc (M17 D19e layout).
+# Keep the exact reviewed S5 facade. Main cf93's shifted-twin trace-index
+# hint lives in message_import_rows.py at this layout, certified by C on10dc.
+# Coalescing merges clean; no stamp/cache rider or handwritten source edit.
+# Supersedes merge16 same-path entry; three blob qualifiers are mandatory.
+# Author rf-readmodelc-cb42; captain combined gates/watch activation remain.
+path = "server/lib/message_writes.py"
+resolved = "cpu-s5-message_writes.py.resolved"
+base_blob = "901739a198e7c83f6e9e28e861c0114c0ba7d0aa"
+main_blob = "d21a7033094393860102ea9e915cc8147a0fb143"
+integration_blob = "51ddac0a0e202296ecc9268b8d86d004f34cdffb"

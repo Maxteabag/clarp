@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import sqlite3
+import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -139,3 +141,146 @@ def test_busy_timeout_restores_the_request_path_budget():
     with db.busy_timeout(30_000):
         assert db.conn().execute("PRAGMA busy_timeout").fetchone()[0] == 30_000
     assert db.conn().execute("PRAGMA busy_timeout").fetchone()[0] == 5000
+
+
+def test_lock_report_separates_read_snapshots_from_confirmed_writers(tmp_path, capsys):
+    path = tmp_path / "snapshot.sqlite"
+    reader, writer, waiter = [_tracked_connection(path) for _ in range(3)]
+    reader.execute("PRAGMA journal_mode=WAL")
+    reader.execute("CREATE TABLE sample(value TEXT)")
+    reader.execute("INSERT INTO sample VALUES ('synthetic')")
+    try:
+        reader.execute("BEGIN")
+        reader.execute("SELECT value FROM sample").fetchall()
+        writer.execute("BEGIN IMMEDIATE")
+        with pytest.raises(sqlite3.OperationalError):
+            waiter.execute("INSERT INTO sample VALUES (?)", ("private-value",))
+        stderr = capsys.readouterr().err
+        owners = [line for line in stderr.splitlines() if line.startswith("sqlite_lock_owner ")]
+        snapshots = [line for line in stderr.splitlines() if line.startswith("sqlite_lock_snapshot ")]
+        assert len(owners) == len(snapshots) == 1
+        assert f"connection={id(writer)} " in owners[0]
+        assert f"connection={id(reader)} " in snapshots[0]
+        assert "owner_count=1 snapshot_count=1" in stderr
+        assert "private-value" not in stderr
+    finally:
+        reader.close()
+        writer.close()
+        waiter.close()
+
+
+def test_deferred_write_confirmation_has_its_own_age(tmp_path, monkeypatch, capsys):
+    connection = _tracked_connection(tmp_path / "upgrade.sqlite")
+    connection.execute("CREATE TABLE sample(value INTEGER)")
+    tick = [10.0]
+    monkeypatch.setattr(db, "time", SimpleNamespace(
+        monotonic=lambda: tick[0], perf_counter=time.perf_counter, sleep=time.sleep))
+    try:
+        connection.execute("BEGIN")
+        connection.execute("SELECT value FROM sample").fetchall()
+        assert db._TRANSACTION_OWNERS[id(connection)].write_started_monotonic is None
+        tick[0] = 100.0
+        connection.execute("INSERT INTO sample VALUES (1)")
+        owner = db._TRANSACTION_OWNERS[id(connection)]
+        assert owner.started_monotonic == 10.0
+        assert owner.write_started_monotonic == 100.0
+        tick[0] = 102.0
+        db._report_database_locked("BEGIN IMMEDIATE")
+        stderr = capsys.readouterr().err
+        assert "age_sec=92.000" in stderr
+        assert "write_age_sec=2.000" in stderr
+    finally:
+        connection.close()
+
+
+def test_write_admission_is_registered_before_wait_logging_and_not_reset(tmp_path, monkeypatch):
+    from lib import log
+    connection = _tracked_connection(tmp_path / "admission.sqlite")
+    tick = [100.0]
+    observations = []
+    monkeypatch.setattr(db, "time", SimpleNamespace(
+        monotonic=lambda: tick[0], perf_counter=time.perf_counter, sleep=time.sleep))
+    monkeypatch.setattr(db, "_LONG_WRITE_WAIT_SECONDS", -1)
+
+    def observe(event, detail):
+        owner = db._TRANSACTION_OWNERS.get(id(connection))
+        observations.append((event, owner))
+        tick[0] = 200.0  # stand-in for a slow logging sink
+
+    monkeypatch.setattr(log, "log", observe)
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        assert len(observations) == 1
+        event, owner = observations[0]
+        assert event == "sqliteWriteWait"
+        assert owner is not None
+        assert owner.write_started_monotonic == 100.0
+        assert db._TRANSACTION_OWNERS[id(connection)].write_started_monotonic == 100.0
+    finally:
+        connection.close()
+
+
+def test_owner_names_current_sql_while_it_is_executing(tmp_path):
+    connection = _tracked_connection(tmp_path / "current.sqlite")
+    observed = []
+    connection.create_function("observe_current", 1, lambda value: observed.append(
+        db._TRANSACTION_OWNERS[id(connection)].last_sql) or 0)
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        connection.execute("SELECT observe_current(?)", ("private-value",)).fetchall()
+        assert observed == ["SELECT observe_current(?)"]
+    finally:
+        connection.close()
+
+
+def test_failed_snapshot_upgrade_is_not_a_confirmed_writer(tmp_path, capsys):
+    path = tmp_path / "stale.sqlite"
+    reader, other = [_tracked_connection(path) for _ in range(2)]
+    reader.execute("PRAGMA journal_mode=WAL")
+    reader.execute("CREATE TABLE sample(value INTEGER)")
+    reader.execute("INSERT INTO sample VALUES (1)")
+    try:
+        reader.execute("BEGIN")
+        reader.execute("SELECT value FROM sample").fetchall()
+        other.execute("INSERT INTO sample VALUES (2)")
+        with pytest.raises(sqlite3.OperationalError) as error:
+            reader.execute("UPDATE sample SET value=3")
+        assert error.value.sqlite_errorcode == sqlite3.SQLITE_BUSY_SNAPSHOT
+        assert db._TRANSACTION_OWNERS[id(reader)].write_started_monotonic is None
+        stderr = capsys.readouterr().err
+        assert "owner_count=0 snapshot_count=1" in stderr
+        assert "sqlite_lock_owner " not in stderr
+    finally:
+        reader.close()
+        other.close()
+
+
+@pytest.mark.parametrize("raises", [False, True])
+def test_context_exit_removes_confirmed_owner_on_commit_and_rollback(tmp_path, raises):
+    connection = _tracked_connection(tmp_path / "context.sqlite")
+    try:
+        try:
+            with connection:
+                connection.execute("BEGIN IMMEDIATE")
+                if raises:
+                    raise ValueError("synthetic rollback")
+        except ValueError:
+            pass
+        assert not connection.in_transaction
+        assert id(connection) not in db._TRANSACTION_OWNERS
+    finally:
+        connection.close()
+
+
+def test_sqlite_implicit_rollback_removes_confirmed_owner(tmp_path):
+    connection = _tracked_connection(tmp_path / "implicit.sqlite")
+    connection.execute("CREATE TABLE sample(value INTEGER UNIQUE)")
+    connection.execute("INSERT INTO sample VALUES (1)")
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute("INSERT OR ROLLBACK INTO sample VALUES (1)")
+        assert not connection.in_transaction
+        assert id(connection) not in db._TRANSACTION_OWNERS
+    finally:
+        connection.close()

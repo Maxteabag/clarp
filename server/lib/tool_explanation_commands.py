@@ -21,15 +21,19 @@ withheld heredoc body, the label stays clipped and is explained as today
 """
 from __future__ import annotations
 
+import sys
 import threading
 import time
-from collections import OrderedDict, deque
+from collections import OrderedDict
+from dataclasses import dataclass, field
 
 from . import tool_explanation_shapes as shapes
 from . import tool_explanation_templates as templates
 from .log import log
 
 PER_AGENT = 256
+PER_AGENT_BYTES = 1024 * 1024
+IDLE_SECONDS = 30 * 60
 AGENTS = 128
 MAX_COMMAND = 65536
 # A label the runtime could not complete is not asked about again for this
@@ -39,42 +43,89 @@ MISSES = 1024
 REPORT_SECONDS = 60.0
 
 _lock = threading.Lock()
-_recent: OrderedDict[str, deque] = OrderedDict()
+@dataclass(slots=True)
+class _Commands:
+    # Charge the actual Python str object, including wide Unicode, without
+    # retaining an encoded copy. OrderedDict nodes and these three scalar
+    # fields are separately bounded by PER_AGENT and AGENTS.
+    entries: OrderedDict[str, None] = field(default_factory=OrderedDict)
+    nbytes: int = 0
+    last_used: float = 0.0
+
+
+_recent: OrderedDict[str, _Commands] = OrderedDict()
 _peer = None
 _misses: OrderedDict[tuple, float] = OrderedDict()
 _counts = {"resolved": 0, "missed": 0, "failed": 0}
 _reported = [0.0]
 
 
+def _expire(now):
+    # Deliberately lazy: any cache access sweeps all idle agents. Without
+    # an operation there is no promise of physical release at the TTL.
+    for agent_id in list(_recent):
+        if now - _recent[agent_id].last_used >= IDLE_SECONDS:
+            del _recent[agent_id]
+
+
 def remember(agent_id, command):
-    """Keep a tool command longer than the label clip, for this agent."""
-    if not agent_id or not isinstance(command, str) or not templates.LABEL_CLIP <= len(command) <= MAX_COMMAND:
-        return
+    """Keep recent commands within both the count and Python-byte budgets."""
+    valid = (agent_id and isinstance(command, str)
+             and templates.LABEL_CLIP <= len(command) <= MAX_COMMAND)
+    size = sys.getsizeof(command) if valid else 0
     with _lock:
-        commands = _recent.pop(agent_id, None) or deque(maxlen=PER_AGENT)
-        if command in commands:
-            commands.remove(command)
-        commands.append(command)
-        _recent[agent_id] = commands
+        now = time.monotonic()
+        _expire(now)
+        # Reject before allocating/touching an agent or evicting hot entries.
+        if not valid or size > PER_AGENT_BYTES:
+            return
+        commands = _recent.get(agent_id)
+        if commands is None:
+            commands = _Commands()
+            _recent[agent_id] = commands
+        if command not in commands.entries:
+            commands.entries[command] = None
+            commands.nbytes += size
+        commands.entries.move_to_end(command)
+        while (commands.nbytes > PER_AGENT_BYTES
+               or len(commands.entries) > PER_AGENT):
+            old, _ = commands.entries.popitem(last=False)
+            commands.nbytes -= sys.getsizeof(old)
+        commands.last_used = now
+        _recent.move_to_end(agent_id)
         while len(_recent) > AGENTS:
             _recent.popitem(last=False)
 
 
 def resolve(agent_id, shown):
-    """The one remembered command `shown` is a clipped prefix of, or "".
+    """Resolve a prefix; only successful reads touch entry and agent LRU/TTL.
 
-    Several commands that read the same once their heredoc bodies are
-    withheld (`shapes.redact`) explain the same, so that text is returned.
+    Heredoc-equivalent matches all count as used; ambiguous or missing
+    prefixes never extend an agent's lifetime. answer/expand share this path.
     """
     shown = shown.strip() if isinstance(shown, str) else ""
-    if not agent_id or not shown:
-        return ""
     with _lock:
-        matches = {command for command in _recent.get(agent_id, ()) if len(command) > len(shown)
-                   and command.startswith(shown)}
-    if len(matches) > 1:
-        matches = {shapes.redact(command) for command in matches}
-    return matches.pop() if len(matches) == 1 else ""
+        now = time.monotonic()
+        _expire(now)
+        if not agent_id or not shown:
+            return ""
+        commands = _recent.get(agent_id)
+        if commands is None:
+            return ""
+        matches = [command for command in commands.entries
+                   if len(command) > len(shown) and command.startswith(shown)]
+        choices = set(matches)
+        if len(choices) > 1:
+            choices = {shapes.redact(command) for command in choices}
+        if len(choices) != 1:
+            return ""
+        result = choices.pop()
+        if result:
+            for command in matches:
+                commands.entries.move_to_end(command)
+            commands.last_used = now
+            _recent.move_to_end(agent_id)
+        return result
 
 
 def answer(agent_id, shown):

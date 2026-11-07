@@ -20,6 +20,8 @@ HTTP/2, so we use httpx with the h2 backend.
 from __future__ import annotations
 
 import pathlib
+import math
+import os
 import json
 import re
 import hashlib
@@ -412,6 +414,7 @@ def _avatar_details(
         return None, False
 
     identity = str(agent_id or "").strip()
+    row = None
     if identity:
         from . import agents as agents_db
         from .avatar_urls import (
@@ -442,11 +445,13 @@ def _avatar_details(
                 query = urlencode({"v": version})
             return f"{base}{route}?{query}", True
 
-    allowed = set("abcdefghijklmnopqrstuvwxyz0123456789_-")
-    slug = "".join(
-        character for character in persona.strip().lower()
-        if character in allowed)
-    return (f"{base}/static/avatars/{slug}.png", False) if slug else (None, False)
+    from .avatar_urls import static_persona_avatar_url
+    from .context import resolve_root
+
+    static_root = resolve_root(pathlib.Path(__file__).resolve(), os.environ) / "static"
+    route = static_persona_avatar_url(
+        persona, str((row or {}).get("backend") or "claude"), static_root=static_root)
+    return (f"{base}{route}", False) if route else (None, False)
 
 
 def turn_done_payload(persona: str, session: str | None,
@@ -725,7 +730,7 @@ class _RelayTransport:
             if resp.status_code != 200:
                 if resp.status_code == 429:
                     # The shared relay budget is spent: Live Activity waits (APNS-N1).
-                    _LA_GATE.rate_limited(_retry_after(resp))
+                    _rate_limited_response(resp)
                 if resp.status_code == 401:
                     # A revoked credential: registrations it made are gone too.
                     self._forget(token)
@@ -735,6 +740,8 @@ class _RelayTransport:
             except Exception:  # noqa: BLE001
                 return 502, "RelayBadResponse", ""
             status = int(result.get("status") or 0)
+            if status == 429:
+                _rate_limited_response(resp)
             reason = str(result.get("reason") or "")
             if reason == "RelayDeliveryFailed":
                 # The relay is up but could not reach Apple: an outage of
@@ -835,7 +842,7 @@ class _GrantTransport:
         if resp.status_code != 200:
             if resp.status_code == 429:
                 # The shared relay budget is spent: Live Activity waits (APNS-N1).
-                _LA_GATE.rate_limited(_retry_after(resp))
+                _rate_limited_response(resp)
             return resp.status_code, _relay_error(resp) or f"Relay{resp.status_code}", ""
         try:
             result = (resp.json().get("results") or [{}])[0]
@@ -845,7 +852,10 @@ class _GrantTransport:
         if reason == "RelayDeliveryFailed":
             self._down = "relay could not reach APNs"
             raise _RelayUnavailable(self._down)
-        return int(result.get("status") or 0), reason, str(result.get("apnsId") or "")
+        status = int(result.get("status") or 0)
+        if status == 429:
+            _rate_limited_response(resp)
+        return status, reason, str(result.get("apnsId") or "")
 
 
 class _Router:
@@ -1339,12 +1349,18 @@ class _LiveActivityGate:
         value, at = level
         return min(burst, value + (now - at) / refill)
 
-    def rate_limited(self, retry_after: float) -> None:
+    def rate_limited(self, retry_after: float, *, day_window: bool = False) -> None:
+        # The public relay has no day/minute discriminator (lead 759). Longer
+        # than an hour conservatively means day exhaustion. Never shorten the
+        # advertised wait, even if it extends beyond the next UTC reset.
+        wait = retry_after if math.isfinite(retry_after) and retry_after > 0 else 0.0
+        if day_window:
+            wait = max(wait, 86400 - time.time() % 86400)
         with self._lock:
             self.floor = (self.FLOOR_MIN_SEC if not self.floor
                           else min(self.floor * 2, self.FLOOR_MAX_SEC))
             self._paused_until = max(self._paused_until,
-                                     self._clock() + max(float(retry_after or 0), self.floor))
+                                     self._clock() + max(wait, self.floor))
 
     def delivered(self) -> None:
         with self._lock:
@@ -1391,7 +1407,7 @@ class _LiveActivityGate:
         schedule = self._schedule
         if schedule is None:
             from .live_pacing import _thread_timer as schedule
-        self._timer = schedule(wait, fire)
+        self._timer = schedule(min(wait, threading.TIMEOUT_MAX), fire)
 
     def due(self, flush: Callable[[], None]) -> list[tuple[dict, dict, str]]:
         """Take what may go now; arm one timer for the rest."""
@@ -1415,11 +1431,29 @@ _LA_GATE = _LiveActivityGate()
 _LA_SEND_LOCK = threading.Lock()
 
 
-def _retry_after(resp) -> float:
+def _retry_header(resp) -> float:
+    """Only the public integer HEADER can identify a relay day window."""
     try:
-        return float((resp.json() or {}).get("retryAfter") or 0)
-    except (ValueError, TypeError, AttributeError):  # no usable body: the floor applies
-        return 0.0
+        headers = getattr(resp, "headers", {})
+        raw = str(headers.get("Retry-After") or headers.get("retry-after") or "").strip()
+        value = float(raw) if raw.isascii() and raw.isdecimal() else 0.0
+        return value if math.isfinite(value) else 0.0
+    except (ValueError, OverflowError, TypeError, AttributeError):
+        return 0.0  # No valid header; the legacy body or bounded floor applies.
+
+
+def _retry_after(resp) -> float:
+    """Never shorten either a valid header or a legacy internal JSON wait."""
+    header = _retry_header(resp)
+    try:
+        body = float((resp.json() or {}).get("retryAfter") or 0)
+    except (ValueError, OverflowError, TypeError, AttributeError):
+        body = 0.0
+    return max(header, body if math.isfinite(body) and body > 0 else 0.0)
+
+
+def _rate_limited_response(resp) -> None:
+    _LA_GATE.rate_limited(_retry_after(resp), day_window=_retry_header(resp) > 3600)
 
 
 def send_live_activity(payload: dict, priority: str = "5") -> dict:
@@ -1470,6 +1504,10 @@ def _flush_live_activity_locked() -> dict:
             if status == 200:
                 _LA_GATE.delivered()
                 sent += 1
+                try:
+                    log("apnsLiveActivityAccepted", "status=200 count=1")
+                except Exception as e:  # noqa: BLE001 - diagnostics never abort a reserved batch
+                    log_exception("apnsLiveActivityDiagnosticFail", e)
             elif status == 410 or reason in _DEAD_REASONS:
                 live_activity.unregister(token=token)
                 disabled += 1
@@ -1479,7 +1517,7 @@ def _flush_live_activity_locked() -> dict:
                 if status == 429:
                     # The relay's 429 already backed off (its transport); Apple's
                     # own TooManyRequests does too. The state is kept, not lost.
-                    if reason != "push_rate_limited":
+                    if not _LA_GATE.paused():
                         _LA_GATE.rate_limited(0)
                     held.append((row, payload, priority))
         if held:

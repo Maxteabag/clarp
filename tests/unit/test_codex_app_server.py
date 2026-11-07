@@ -162,9 +162,11 @@ def test_recycle_clients_closes_stdio_and_drops_writer_slots():
     first = object.__new__(codex_app_server._Client)
     first.active = None
     first.proc = _FakeProc()
+    first._lock = threading.Lock()      # as _Client.__init__ sets it
     second = object.__new__(codex_app_server._Client)
     second.active = None
     second.proc = _FakeProc()
+    second._lock = threading.Lock()
     codex_app_server._CLIENTS.clear()
     codex_app_server._CLIENTS["a"] = first
     codex_app_server._CLIENTS["b"] = second
@@ -179,6 +181,7 @@ def test_recycle_clients_closes_a_shared_client_once():
     only.active = None
     only.proc = _FakeProc()
     only._actives = {}
+    only._lock = threading.Lock()       # as _Client.__init__ sets it
     codex_app_server._CLIENTS.clear()
     codex_app_server._CLIENTS[codex_app_server._SHARED_KEY] = only
     codex_app_server._CLIENTS["stale-agent"] = only
@@ -389,12 +392,18 @@ def test_credentials_change_and_recycle_preserve_active_turn(tmp_path, monkeypat
     client = handle.client
     auth.write_text('new')
     assert codex_app_server.recycle_clients() == 0
-    assert codex_app_server._client(agent, 'busy') is client
-    assert client.proc.poll() is None
-    handle.wait(8)
+    # BACKENDS-06b: the next turn gets a new generation on the new
+    # credentials; the busy turn keeps its process until it ends.
     fresh = codex_app_server._client(agent, 'busy')
     assert fresh is not client
-    assert client.proc.poll() is not None
+    assert client.proc.poll() is None
+    handle.wait(8)
+    for _ in range(200):
+        if client.proc.poll() is not None:
+            break
+        threading.Event().wait(0.05)
+    assert client.proc.poll() is not None, 'the drained generation did not exit'
+    assert codex_app_server._client(agent, 'busy') is fresh
     codex_app_server.recycle_clients()
 
 

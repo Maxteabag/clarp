@@ -12,7 +12,7 @@ import sqlite3
 import threading
 import time
 
-from . import xdg
+from . import batched_delete, xdg
 from .timing import SQLITE_BUSY_TIMEOUT_MS, SQLITE_CONNECT_TIMEOUT_SEC
 
 
@@ -22,7 +22,10 @@ DETAIL_RETENTION_MS = 24 * 60 * 60 * 1000
 ROLLUP_RETENTION_MS = 30 * DETAIL_RETENTION_MS
 _LOCAL = threading.local()
 _SCHEMA_LOCK = threading.Lock()
-_SCHEMA_READY = False
+# The files the schema has been made in (TEL-N1): a connection to one file never
+# marks another ready, so a thread still holding a previous path cannot leave the
+# current one without tables.
+_SCHEMA_READY_PATHS: set[str] = set()
 
 
 SCHEMA = """
@@ -154,20 +157,23 @@ def _open(path: pathlib.Path) -> sqlite3.Connection:
     con.row_factory = sqlite3.Row
     con.execute(f"PRAGMA busy_timeout={SQLITE_BUSY_TIMEOUT_MS}")
     con.execute("PRAGMA synchronous=NORMAL")
+    # Match the measured SQLite default (KiB), never enlarge each thread's
+    # private cache while reducing the state-store connection budget.
+    con.execute("PRAGMA cache_size=-2000")
     return con
 
 
 def conn() -> sqlite3.Connection:
-    global _SCHEMA_READY
     current = getattr(_LOCAL, "conn", None)
     if current is not None:
         return current
-    current = _open(TELEMETRY_PATH)
+    path = TELEMETRY_PATH
+    current = _open(path)
     with _SCHEMA_LOCK:
-        if not _SCHEMA_READY:
+        if str(path) not in _SCHEMA_READY_PATHS:
             current.execute("PRAGMA journal_mode=WAL")
             current.executescript(SCHEMA)
-            _SCHEMA_READY = True
+            _SCHEMA_READY_PATHS.add(str(path))
     _LOCAL.conn = current
     return current
 
@@ -180,42 +186,18 @@ def close_local() -> None:
 
 
 def reset_for_tests(path: pathlib.Path | None = None) -> None:
-    global TELEMETRY_PATH, _SCHEMA_READY
+    global TELEMETRY_PATH
     close_local()
-    if path is not None:
-        TELEMETRY_PATH = pathlib.Path(path)
-    _SCHEMA_READY = False
+    with _SCHEMA_LOCK:
+        if path is not None:
+            TELEMETRY_PATH = pathlib.Path(path)
+        _SCHEMA_READY_PATHS.clear()
 
 
-def rollup_and_prune(*, now_ms: int | None = None,
-                      checkpoint: bool = True) -> dict[str, int]:
-    now = int(now_ms if now_ms is not None else time.time() * 1000)
-    hour = 60 * 60 * 1000
-    current_hour = now - (now % hour)
-    c = conn()
-    c.execute(
-        """INSERT INTO hourly_metrics (
-               bucket_ms,source,event,path,status,samples,
-               total_duration_ms,max_duration_ms)
-           SELECT ts - (ts % ?),source,event,COALESCE(path,''),
-                  COALESCE(status,0),count(*),
-                  COALESCE(sum(duration_ms),0),COALESCE(max(duration_ms),0)
-             FROM diagnostic_events
-            WHERE ts < ?
-            GROUP BY ts - (ts % ?),source,event,COALESCE(path,''),
-                     COALESCE(status,0)
-           ON CONFLICT(bucket_ms,source,event,path,status) DO UPDATE SET
-               samples=excluded.samples,
-               total_duration_ms=excluded.total_duration_ms,
-               max_duration_ms=excluded.max_duration_ms""",
-        (hour, current_hour, hour),
-    )
-    c.execute(
-        """INSERT INTO hourly_latency_buckets (
-               bucket_ms,source,event,path,status,upper_ms,samples)
-           SELECT ts - (ts % ?),source,event,COALESCE(path,''),
-                  COALESCE(status,0),
-                  CASE
+UPSERT_BATCH = 500        # rollup rows per write transaction
+UPSERT_PAUSE_S = 0.05     # between them, so a waiting emit gets in
+
+_LATENCY_BUCKET = """CASE
                     WHEN duration_ms<=1 THEN 1 WHEN duration_ms<=5 THEN 5
                     WHEN duration_ms<=10 THEN 10 WHEN duration_ms<=25 THEN 25
                     WHEN duration_ms<=50 THEN 50 WHEN duration_ms<=100 THEN 100
@@ -223,37 +205,82 @@ def rollup_and_prune(*, now_ms: int | None = None,
                     WHEN duration_ms<=1000 THEN 1000
                     WHEN duration_ms<=2500 THEN 2500
                     WHEN duration_ms<=5000 THEN 5000
-                    WHEN duration_ms<=10000 THEN 10000 ELSE 60000 END,
-                  count(*)
+                    WHEN duration_ms<=10000 THEN 10000 ELSE 60000 END"""
+
+
+def _upsert_in_batches(c, statement: str, rows: list) -> None:
+    """Write ``rows`` with ``statement``, ``UPSERT_BATCH`` per transaction."""
+    for index in range(0, len(rows), UPSERT_BATCH):
+        if index and UPSERT_PAUSE_S:
+            time.sleep(UPSERT_PAUSE_S)
+        c.execute("BEGIN IMMEDIATE")
+        try:
+            c.executemany(statement, [tuple(row) for row in rows[index:index + UPSERT_BATCH]])
+            c.execute("COMMIT")
+        except BaseException:
+            c.execute("ROLLBACK")
+            raise
+
+
+def rollup_and_prune(*, now_ms: int | None = None,
+                      checkpoint: bool = True) -> dict[str, int]:
+    """Roll every retained hour up, then expire detail and old rollups.
+
+    The aggregation is a plain read, which in WAL mode blocks no writer; only
+    its results are written, in short transactions, and the deletes run in
+    bounded batches (RM-N8b). An emit waits at most one batch, never the scan.
+    """
+    now = int(now_ms if now_ms is not None else time.time() * 1000)
+    hour = 60 * 60 * 1000
+    current_hour = now - (now % hour)
+    c = conn()
+    metrics = c.execute(
+        """SELECT ts - (ts % ?),source,event,COALESCE(path,''),
+                  COALESCE(status,0),count(*),
+                  COALESCE(sum(duration_ms),0),COALESCE(max(duration_ms),0)
+             FROM diagnostic_events
+            WHERE ts < ?
+            GROUP BY ts - (ts % ?),source,event,COALESCE(path,''),
+                     COALESCE(status,0)""",
+        (hour, current_hour, hour),
+    ).fetchall()
+    _upsert_in_batches(c,
+        """INSERT INTO hourly_metrics (
+               bucket_ms,source,event,path,status,samples,
+               total_duration_ms,max_duration_ms)
+           VALUES (?,?,?,?,?,?,?,?)
+           ON CONFLICT(bucket_ms,source,event,path,status) DO UPDATE SET
+               samples=excluded.samples,
+               total_duration_ms=excluded.total_duration_ms,
+               max_duration_ms=excluded.max_duration_ms""", metrics)
+    latency = c.execute(
+        f"""SELECT ts - (ts % ?),source,event,COALESCE(path,''),
+                  COALESCE(status,0),{_LATENCY_BUCKET},count(*)
              FROM diagnostic_events
             WHERE ts < ? AND duration_ms IS NOT NULL
             GROUP BY ts - (ts % ?),source,event,COALESCE(path,''),
-                     COALESCE(status,0),
-                     CASE
-                       WHEN duration_ms<=1 THEN 1 WHEN duration_ms<=5 THEN 5
-                       WHEN duration_ms<=10 THEN 10 WHEN duration_ms<=25 THEN 25
-                       WHEN duration_ms<=50 THEN 50 WHEN duration_ms<=100 THEN 100
-                       WHEN duration_ms<=250 THEN 250 WHEN duration_ms<=500 THEN 500
-                       WHEN duration_ms<=1000 THEN 1000
-                       WHEN duration_ms<=2500 THEN 2500
-                       WHEN duration_ms<=5000 THEN 5000
-                       WHEN duration_ms<=10000 THEN 10000 ELSE 60000 END
-           ON CONFLICT(bucket_ms,source,event,path,status,upper_ms) DO UPDATE SET
-               samples=excluded.samples""",
+                     COALESCE(status,0),{_LATENCY_BUCKET}""",
         (hour, current_hour, hour),
-    )
-    details = c.execute(
-        "DELETE FROM diagnostic_events WHERE ts < ?",
-        (now - DETAIL_RETENTION_MS,),
-    ).rowcount
-    rollups = c.execute(
-        "DELETE FROM hourly_metrics WHERE bucket_ms < ?",
-        (now - ROLLUP_RETENTION_MS,),
-    ).rowcount
-    c.execute(
-        "DELETE FROM hourly_latency_buckets WHERE bucket_ms < ?",
-        (now - ROLLUP_RETENTION_MS,),
-    )
+    ).fetchall()
+    _upsert_in_batches(c,
+        """INSERT INTO hourly_latency_buckets (
+               bucket_ms,source,event,path,status,upper_ms,samples)
+           VALUES (?,?,?,?,?,?,?)
+           ON CONFLICT(bucket_ms,source,event,path,status,upper_ms) DO UPDATE SET
+               samples=excluded.samples""", latency)
+    # Detail expires by whole hours (RM-N8c): a delete inside an hour left a
+    # partial bucket that the next rollup re-aggregated, overwriting its full
+    # count with the remainder. Rows now live 24 to 25 h.
+    detail_cutoff = (now - DETAIL_RETENTION_MS) - (now - DETAIL_RETENTION_MS) % hour
+    details = batched_delete.prune(
+        c, "DELETE FROM diagnostic_events WHERE ts < ?",
+        (detail_cutoff,), indexed=True)
+    rollups = batched_delete.prune(
+        c, "DELETE FROM hourly_metrics WHERE bucket_ms < ?",
+        (now - ROLLUP_RETENTION_MS,), indexed=True)
+    batched_delete.prune(
+        c, "DELETE FROM hourly_latency_buckets WHERE bucket_ms < ?",
+        (now - ROLLUP_RETENTION_MS,))
     # Exclusive and can block concurrent event writers for its duration;
     # the boot sweep runs with checkpoint=False for the same reason
     # MaintenanceWorker defers state.sqlite's own truncate (see

@@ -639,3 +639,35 @@ def test_a_failed_watch_unwinds_the_published_binding(streamer_env, monkeypatch)
     assert agent_id not in streamer._bind_generation
     assert agent_id not in streamer._dirty
     assert not streamer.pool.has(agent_id)
+
+
+def test_structural_synthetic_speech_is_skipped_without_losing_the_next_partial_line(streamer_env):
+    """Actual watcher-to-TTS boundary; cursor consumption is independent of speech."""
+    streamer, tmp_path = streamer_env
+    agent_id, tx = _build_agent_with_transcript(tmp_path)
+    streamer.reconcile_once()
+    watcher = streamer.pool.watcher_for(agent_id)
+    assert watcher is not None
+    _append(tx, {'type': 'assistant', 'message': {'id': 'synthetic', 'model': '<synthetic>',
+        'content': [{'type': 'text', 'text': '<speak>Not a provider reply</speak>'}]}})
+    watcher.tick()
+    from lib import db
+    def texts():
+        return [row['text'] for row in db.conn().execute(
+            'SELECT text FROM tts_queue WHERE agent_id=? ORDER BY queue_id', (agent_id,))]
+    assert texts() == []
+    assert watcher.byte_offset == tx.stat().st_size
+    real = json.dumps({'type': 'assistant', 'message': {'id': 'real', 'model': 'claude-real',
+        'usage': {'input_tokens': 0}, 'content': [{'type': 'text',
+        'text': '<speak>No response requested.</speak>'}]}}).encode()
+    with tx.open('ab') as stream:
+        stream.write(real[:len(real)//2])
+    watcher.tick()
+    assert texts() == []
+    with tx.open('ab') as stream:
+        stream.write(real[len(real)//2:] + b'\n')
+    watcher.tick()
+    watcher.tick()  # unchanged source cannot speak twice
+    assert len(texts()) == 1
+    assert 'No response requested.' in texts()[0]
+    assert watcher.byte_offset == tx.stat().st_size
