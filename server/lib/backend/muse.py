@@ -28,7 +28,8 @@ from ..proc_util import stderr_text
 from ..process_registry import TurnHandle
 from ..turn_lifecycle import TurnEvent
 from ..voice_preamble import apply_voice_preamble
-from .base import BackendBrand
+from ..backend_catalogue import MUSE
+from .base import CatalogueDefault, BackendBrand
 from .stream_json import StreamJsonBackend, iter_json_dicts, stop_after_drain_failure
 from .long_prompt import PromptFile, fits_argv, removing
 
@@ -196,24 +197,23 @@ def _owned_holder(pid, *, agent_id, session, session_id, provider):
 class MuseBackend(StreamJsonBackend):
     """Runs ``muse exec --json --session-id <id>`` once per turn."""
     # --- catalogue data ---------------------------------------------------
-    id = 'muse'
-    label = 'Muse Code'
-    required_binary = 'muse'
-    aliases = ('muse-code', 'musecode')
-    badge = 'BackendMuse'
-    detail = 'Runs on Meta Muse Code.'
-    symbol = 'sparkles'
-    brand = BackendBrand('#1c2b4a', '#0d1526', '#8fb4ff', '#2b4a8a')
-    efforts = ('none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra')
+    _catalogue_definition = MUSE
+    id = CatalogueDefault('id')
+    label = CatalogueDefault('label')
+    required_binary = CatalogueDefault('required_binary')
+    aliases = CatalogueDefault('aliases')
+    badge = CatalogueDefault('badge')
+    detail = CatalogueDefault('detail')
+    symbol = CatalogueDefault('symbol')
+    brand = CatalogueDefault('brand')
+    efforts = CatalogueDefault('efforts')
     # Each model lists its own effort tiers in Muse's catalogue cache.
-    effort_scope = 'model'
-    runner = 'muse'
-    config_model_field = 'muse_model'
-    config_effort_field = 'muse_effort'
-    model_family = 'muse'
-    fallback_models = (
-        ('muse-wonder-1.0', 'Muse Wonder 1.0'),
-    )
+    effort_scope = CatalogueDefault('effort_scope')
+    runner = CatalogueDefault('runner')
+    config_model_field = CatalogueDefault('config_model_field')
+    config_effort_field = CatalogueDefault('config_effort_field')
+    model_family = CatalogueDefault('model_family')
+    fallback_models = CatalogueDefault('fallback_models')
 
     transcript = muse_transcript
 

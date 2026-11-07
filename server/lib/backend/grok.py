@@ -18,7 +18,8 @@ from ..proc_util import stderr_text
 from ..process_registry import TurnHandle
 from ..turn_lifecycle import TurnEvent
 from ..voice_preamble import apply_voice_preamble
-from .base import BackendBrand, CompactionStrategy
+from ..backend_catalogue import GROK
+from .base import CatalogueDefault, BackendBrand, CompactionStrategy
 from .stream_json import StreamJsonBackend, iter_json_dicts, stop_after_drain_failure
 from .long_prompt import PromptFile, fits_argv, removing
 
@@ -123,24 +124,22 @@ def _usage_from(ev: dict) -> tuple[int, int]:
 class GrokBackend(StreamJsonBackend):
     """Runs ``grok -p --output-format streaming-json`` once per turn."""
     # --- catalogue data ---------------------------------------------------
-    id = 'grok'
-    label = 'Grok'
-    required_binary = 'grok'
-    badge = 'BackendGrok'
-    detail = 'Runs on Grok Build.'
-    symbol = 'x.circle'
-    brand = BackendBrand('#1a1a1a', '#0a0a0a', '#e8e8e8', '#222222')
-    efforts = ('low', 'medium', 'high')
-    runner = 'grok'
-    config_model_field = 'grok_model'
-    config_effort_field = 'grok_effort'
-    model_family = 'grok'
+    _catalogue_definition = GROK
+    id = CatalogueDefault('id')
+    label = CatalogueDefault('label')
+    required_binary = CatalogueDefault('required_binary')
+    badge = CatalogueDefault('badge')
+    detail = CatalogueDefault('detail')
+    symbol = CatalogueDefault('symbol')
+    brand = CatalogueDefault('brand')
+    efforts = CatalogueDefault('efforts')
+    runner = CatalogueDefault('runner')
+    config_model_field = CatalogueDefault('config_model_field')
+    config_effort_field = CatalogueDefault('config_effort_field')
+    model_family = CatalogueDefault('model_family')
     # ``grok login --device-auth`` / ``grok logout`` (backend_auth).
-    login_kind = 'device_code'
-    fallback_models = (
-        ('grok-4.6', 'Grok 4.6'),
-        ('grok-4.5', 'Grok 4.5'),
-    )
+    login_kind = CatalogueDefault('login_kind')
+    fallback_models = CatalogueDefault('fallback_models')
 
 
     transcript = grok_transcript
