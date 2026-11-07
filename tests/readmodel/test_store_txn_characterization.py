@@ -672,3 +672,60 @@ def test_prepared_visibility_preserves_effective_text_and_twin_choice(
             assert replies[0]["id"] == "final-effective"
     else:
         assert not [r for r in replies if r["text"]]
+
+
+@pytest.mark.parametrize("current", ["", "<vox>um</vox>"])
+def test_empty_prepared_visibility_does_not_repeat_current_cleanup(clock, monkeypatch, current):
+    connection = db.conn()
+    path = connection.execute("PRAGMA database_list").fetchone()[2]
+    other = sqlite3.connect(path, isolation_level=None, timeout=0)
+    original = message_writes._strip_voice_markup
+    admissions = []
+
+    def clean(text):
+        result = original(text)
+        if text == current:
+            try:
+                other.execute("BEGIN IMMEDIATE")
+                other.execute("INSERT OR REPLACE INTO focus(singleton,agent_id,updated_at) VALUES(0,?,1)",
+                              (AGENT,))
+                other.execute("COMMIT")
+                admissions.append("admitted")
+            except sqlite3.OperationalError as exc:
+                if other.in_transaction:
+                    other.execute("ROLLBACK")
+                admissions.append(exc.sqlite_errorname)
+        return result
+
+    patch_shared(monkeypatch, message_writes, "_strip_voice_markup", clean)
+    try:
+        store([u("question", 0), a(current, 1)])
+    finally:
+        other.close()
+    assert admissions and set(admissions) == {"admitted"}, admissions
+    assert all(r["text"] != "question" for r in transcript_rows() if r["role"] == "assistant")
+
+
+def test_revalidated_automation_origin_uses_effective_reply_visibility(clock, monkeypatch):
+    """A current DB origin, not the probe's raw ACK visibility, chooses twins."""
+    from lib import message_turns
+    client("origin-user", "question", at=0, origin="user")
+    assistant_row("effective-status", "final:unlinked", "Heartbeat check: no action needed.", at=1)
+    connection = db.conn()
+    path = connection.execute("PRAGMA database_list").fetchone()[2]
+    original = message_turns.TurnIndex.__init__
+    changed = []
+
+    def change_after_snapshot(self, database, agent_id):
+        original(self, database, agent_id)
+        if not changed:
+            with sqlite3.connect(path, isolation_level=None, timeout=0) as other:
+                other.execute("UPDATE messages SET origin='heartbeat' WHERE message_id='origin-user'")
+            changed.append(True)
+
+    monkeypatch.setattr(message_turns.TurnIndex, "__init__", change_after_snapshot)
+    out = store([u("question", .1), a(HEARTBEAT_OK, 1)])
+    reply = next(row for row in out if row["role"] == "assistant")
+    assert changed == [True]
+    assert (reply["id"], reply["origin"], reply["text"]) == (
+        "effective-status", "heartbeat", "Heartbeat check: no action needed.")
