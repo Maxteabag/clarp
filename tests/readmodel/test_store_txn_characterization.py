@@ -647,7 +647,7 @@ def test_current_reply_normalization_leaves_the_writer_available(clock, monkeypa
     ("ordinary", "<speak>λ\nreply</speak>", "<speak>λ\nreply</speak>", "user"),
     ("ordinary", "", "", "user"),
     ("ordinary", "<vox>um</vox>", "<vox>um</vox>", "user"),
-    ("ordinary", "<thinking>private</thinking><speak>answer</speak>",
+    ("ordinary", "<environment_context>private</environment_context><speak>answer</speak>",
      "<speak>answer</speak>", "user"),
     (HEARTBEAT_PROMPT, HEARTBEAT_OK, "Heartbeat check: no action needed.", "heartbeat"),
     (TICK_PROMPT, LEADER_NOOP, "Leader check: no action needed.", "leader_tick"),
@@ -710,6 +710,11 @@ def test_revalidated_automation_origin_uses_effective_reply_visibility(clock, mo
     """A current DB origin, not the probe's raw ACK visibility, chooses twins."""
     from lib import message_turns
     client("origin-user", "question", at=0, origin="user")
+    users = db.conn().execute(
+        "SELECT message_id FROM messages WHERE agent_id=? AND backend_session_id=? AND role='user'",
+        (AGENT, SESSION)).fetchall()
+    assert len(users) == 1
+    user_id = users[0]["message_id"]
     assistant_row("effective-status", "final:unlinked", "Heartbeat check: no action needed.", at=1)
     connection = db.conn()
     path = connection.execute("PRAGMA database_list").fetchone()[2]
@@ -720,7 +725,9 @@ def test_revalidated_automation_origin_uses_effective_reply_visibility(clock, mo
         original(self, database, agent_id)
         if not changed:
             with sqlite3.connect(path, isolation_level=None, timeout=0) as other:
-                other.execute("UPDATE messages SET origin='heartbeat' WHERE message_id='origin-user'")
+                updated = other.execute("UPDATE messages SET origin='heartbeat' WHERE message_id=?",
+                                        (user_id,)).rowcount
+                assert updated == 1
             changed.append(True)
 
     monkeypatch.setattr(message_turns.TurnIndex, "__init__", change_after_snapshot)
