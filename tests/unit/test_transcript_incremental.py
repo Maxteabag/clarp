@@ -463,20 +463,32 @@ def test_the_shadow_reports_a_divergence_and_the_full_import_still_wins(tmp_path
     assert len(continued) == 2 and continued.count("u-c3") == 1
 
 
-def test_without_the_shadow_the_import_is_the_plain_full_import(tmp_path, clock, monkeypatch):
+def test_disabled_shadow_preserves_full_rows_without_running_comparison(tmp_path, clock, monkeypatch):
     monkeypatch.setattr(inc, "BUDGET", inc.ShadowBudget())
     _prepare(tmp_path / "a.sqlite", "claude")
+    reference = tmp_path / "reference.sqlite"
+    with sqlite3.connect(reference) as copy:
+        db.conn().backup(copy)
     transcript = tmp_path / "t.jsonl"
     transcript.write_bytes(b"".join(claude_lines(3)))
-    calls = []
-    real = message_store.store_transcript_turns
-    monkeypatch.setattr(message_store, "store_transcript_turns",
-                        lambda **kw: calls.append(sorted(kw)) or real(**kw))
+    events = []
+    real_emit = eventlog.emit
+
+    def emit(source, event, **kw):
+        events.append(event)
+        return real_emit(source, event, **kw)
+
+    monkeypatch.setattr(eventlog, "emit", emit)
     result = inc.import_transcript(backend="claude", path=transcript, agent_id=AGENT,
                                    backend_session_id=SESSION)
+    actual = snapshot()
     assert result["shadow"] == "disabled"
-    assert calls == [["agent_id", "backend_session_id", "source_file", "turns"]]
-    assert db.conn().execute("SELECT count(*) FROM transcript_import_checkpoints").fetchone()[0] == 0
+    assert "import_shadow" not in events
+    db.reset_for_tests(reference)
+    message_store.store_transcript_turns(agent_id=AGENT, backend_session_id=SESSION,
+                                         source_file=str(transcript), turns=inc.parse_range(
+                                             "claude", transcript, 0, transcript.stat().st_size))
+    assert actual == snapshot()
 
 
 def test_the_kill_switch_outranks_the_config(monkeypatch):

@@ -39,9 +39,11 @@ import json
 import os
 import pathlib
 import re
+import sys
 import threading
 import time
-from dataclasses import dataclass
+import types
+from dataclasses import dataclass, replace
 from typing import Any, Callable
 
 SUPPORTED_BACKENDS = ("claude", "codex", "agy")
@@ -50,16 +52,17 @@ SUPPORTED_BACKENDS = ("claude", "codex", "agy")
 # changes the parser version, so every checkpoint taken by older code is
 # refused and the next import is a full one.
 _VERSION_SOURCES = {
-    "claude": ("claude_transcript.py", "claude_reply_evidence.py"),
-    "codex": ("codex_transcript.py", "codex_tool_cells.py"),
+    "claude": ("claude_transcript.py", "claude_reply_evidence.py", "backend/claude.py"),
+    "codex": ("codex_transcript.py", "codex_tool_cells.py", "backend/codex.py"),
     "agy": ("agy_transcript.py", "codex_transcript.py", "codex_tool_cells.py", "opencode_transcript.py",
             "claude_transcript.py", "claude_reply_evidence.py", "backend/agy.py"),
 }
-_COMMON_SOURCES = ("transcript_incremental.py", "message_writes.py",
+_COMMON_SOURCES = ("transcript_incremental.py", "backend/base.py", "message_writes.py",
                    "message_import_rows.py", "message_import_common.py",
                    "message_context.py", "message_turns.py", "voice_markup.py",
                    # The store's ack-token decisions (AUT-07).
-                   "origins.py", "heartbeat.py", "dreaming.py", "team_leader.py")
+                   "origins.py", "heartbeat.py", "dreaming.py", "team_leader.py",
+                   "team_store.py", "oracle_delegations.py")
 
 _HEAD_BYTES = 4096
 _WINDOW_BYTES = 64 * 1024
@@ -291,9 +294,9 @@ def _claude_reference(records, carry: dict) -> str:
                 defined.add(str(block["id"]))
             elif block.get("type") == "tool_result":
                 ref = str(block.get("tool_use_id") or block.get("toolUseId") or "")
-                if not ref and pending:
+                if not ref:
                     return "claude_unnamed_tool_result"
-                if ref and ref not in defined and (ref in pending or ref in subagents):
+                if ref not in defined:
                     return "claude_late_tool_result"
             elif block.get("type") == "text":
                 texts.append(str(block.get("text") or ""))
@@ -640,6 +643,269 @@ def _row_view(row: dict) -> tuple:
     return tuple(json.dumps(row.get(name), sort_keys=True, default=str) for name in _ROW_FIELDS)
 
 
+
+@dataclass
+class _TailState:
+    checkpoint: Checkpoint
+    raw_inputs: tuple
+    file_hash: str
+
+
+def _tail_weight(key, revision, state) -> int:
+    if state is None:
+        return 1
+    # Include payload strings and row/container overhead, not just entry count.
+    total = len(json.dumps(state.checkpoint.__dict__, default=str)) + 1024
+    for component in state.raw_inputs:
+        total += sys.getsizeof(component)
+        for row in component:
+            total += sys.getsizeof(row)
+            if not isinstance(row, str):
+                total += sum(sys.getsizeof(value) for value in row)
+    return total
+
+
+from .revisioned_cache import RevisionedCache
+_TAIL_STATES = RevisionedCache("transcript-tail-state", max_entries=64,
+                              max_weight=32 * 1024 * 1024, weight=_tail_weight)
+
+
+def _tail_key(path, agent_id, backend_session_id):
+    from . import db
+    return (str(db.DB_PATH), agent_id, backend_session_id, str(path))
+
+
+def _prefix_has_effects(turns) -> bool:
+    """P1 leaves effect-bearing prefixes on the full recovery path.
+
+    Their effects may need retry even when their message row is unchanged.
+    They cannot be skipped merely because bytes or rows were checkpointed.
+    """
+    from . import dreaming, heartbeat, team_leader, team_store
+    for turn in turns:
+        # Discovery is external to the parent bytes: a missing child/meta
+        # directory at bootstrap does not make this prefix immutable.
+        if (any(cell.get("kind") == "subagents" for cell in turn.get("display_cells") or [])
+                or any(tool.get("name") in ("Agent", "Task") for tool in turn.get("tools") or [])):
+            return True
+        text = str(turn.get("text") or "")
+        if turn.get("role") == "user":
+            if (heartbeat.should_skip_heartbeat_prompt(text)
+                    or team_leader.should_skip_leader_tick_prompt(text)
+                    or dreaming.should_skip_dream_prompt(text)):
+                return True
+        elif turn.get("role") == "assistant":
+            if (team_store.extract_team_blocks(text)
+                    or heartbeat.HEARTBEAT_OK in text or team_leader.LEADER_NOOP in text
+                    or dreaming.process_assistant_text("", text, origin="dreaming", live=True)
+                    != (False, text)):
+                return True
+    return False
+
+
+
+def _tail_file_hashes(path, previous_size, current_size):
+    """One bounded-buffer read certifies ALL previously imported bytes.
+
+    Durable sampled hashes remain format-compatible shadow guards. Actual
+    tail writes additionally require this process-local full-prefix digest.
+    This read is outside SQLite transactions; its O(file bytes) cost is
+    separate from range parsing and exact DB-input validation.
+    """
+    digest = hashlib.blake2b(digest_size=16)
+    with open(path, "rb") as source:
+        def read_until(count):
+            while count > 0:
+                block = source.read(min(count, 1 << 20))
+                if not block:
+                    raise OSError("transcript shrank during prefix certification")
+                digest.update(block)
+                count -= len(block)
+        read_until(previous_size)
+        previous = digest.hexdigest()
+        read_until(current_size - previous_size)
+    return previous, digest.hexdigest()
+
+
+def _tail_log(code, *, retention=False):
+    """Fixed codes and unit counts; no session, path, text or message IDs."""
+    from .log import log
+    log("transcriptTailRetention" if retention else "transcriptTailDecision",
+        f"code={code} count=1")
+
+
+def _refuse_tail(code):
+    _tail_log("full_" + code)
+    return None
+
+
+def _checkpoint_refused(status):
+    reasons = status.get("refused", ())
+    for code in reasons:
+        _tail_log("checkpoint_" + code, retention=True)
+    return bool(reasons)
+
+
+def _cache_committed_tail(key, revision, checkpoint, raw_inputs, file_hash):
+    from . import db
+    if raw_inputs is None or file_hash is None:
+        _tail_log("checkpoint_not_written", retention=True)
+        return
+    try:
+        current = identity(pathlib.Path(checkpoint.source_file))
+    except OSError:
+        _tail_log("file_unavailable_after_store", retention=True)
+        return
+    if current != Identity(checkpoint.device, checkpoint.inode, checkpoint.size, checkpoint.mtime_ns):
+        _tail_log("file_moved_before_publication", retention=True)
+        return
+    if load_checkpoint(db.conn(), checkpoint.agent_id, checkpoint.backend_session_id,
+                       checkpoint.source_file) != checkpoint:
+        _tail_log("checkpoint_superseded", retention=True)
+        return
+    if raw_inputs[4]:
+        _tail_log("oracle_history", retention=True)
+        return
+    if any(row["origin"] not in ("user", "agent", None, "") for row in raw_inputs[1]):
+        _tail_log("automation_provenance", retention=True)
+        return
+    state = _TailState(checkpoint, raw_inputs, file_hash)
+    _TAIL_STATES.put(key, revision, state)
+    found, retained = _TAIL_STATES.get(key, revision)
+    if not found or retained is not state:
+        _tail_log("frontier_not_retained", retention=True)
+
+
+def _try_tail(backend, path, agent_id, backend_session_id, conf, started):
+    from . import db, message_writes
+    key = _tail_key(path, agent_id, backend_session_id)
+    revision = parser_version(backend)
+    found, state = _TAIL_STATES.get(key, revision)
+    # Invalidate before any attempt, including a failure after a partial batch
+    # or external effect. Only successful committed progress re-admits carry.
+    _TAIL_STATES.put(key, revision, None)
+    if not found or state is None:
+        return _refuse_tail("no_frontier")
+    cp = load_checkpoint(db.conn(), agent_id, backend_session_id, str(path))
+    if cp != state.checkpoint:
+        return _refuse_tail("checkpoint_changed")
+    before = identity(path)
+    if complete_size(path, before.size) != before.size:
+        return _refuse_tail("partial_record")
+    reason = decide(cp, backend, path, before, now_ms=db.now_ms(),
+                    audit_every=int(conf["audit_every"]), audit_seconds=float(conf["audit_seconds"]),
+                    max_tail_bytes=int(conf["max_tail_bytes"]))
+    if reason:
+        return _refuse_tail(reason)
+    previous_hash, current_hash = _tail_file_hashes(path, cp.complete_size, before.size)
+    if previous_hash != state.file_hash:
+        return _refuse_tail("prefix_content_changed")
+    turns = parse_range(backend, path, cp.boundary_offset, before.size)
+    parsed = time.perf_counter()
+    if identity(path) != before:
+        return _refuse_tail("file_moved_during_parse")
+    next_cp = replace(cp, size=before.size, mtime_ns=before.mtime_ns,
+                      complete_size=before.size, turn_count=cp.boundary_seq + len(turns),
+                      tail_hash=range_hash(path, cp.boundary_offset, before.size),
+                      imports_since_audit=cp.imports_since_audit + 1, updated_at=db.now_ms())
+    raw_inputs = None
+    checkpoint_status = {}
+
+    def publish(database, captured):
+        nonlocal raw_inputs
+        if identity(path) != before:
+            return
+        write_checkpoint(database, next_cp)
+        raw_inputs = message_writes._prepare_import_prelude(
+            database, agent_id, backend_session_id, [], raw_only=True)
+
+    try:
+        message_writes.store_transcript_tail(
+            agent_id=agent_id, backend_session_id=backend_session_id,
+            source_file=str(path), turns=turns, start_seq=cp.boundary_seq,
+            carry=cp.store_carry, expected_prelude=state.raw_inputs, on_stored=publish,
+            checkpoint_status=checkpoint_status)
+    except message_writes._TailInvalidated:
+        return _refuse_tail("carry_inputs_changed")
+    _tail_log("tail_applied")
+    if not _checkpoint_refused(checkpoint_status):
+        _cache_committed_tail(key, revision, next_cp, raw_inputs, current_hash)
+    return {"rows": next_cp.turn_count, "parse_s": parsed - started,
+            "store_s": time.perf_counter() - parsed, "shadow": "not_sampled_tail",
+            "apply_mode": "tail", "parsed_bytes": before.size - cp.boundary_offset}
+
+
+def _store_full_with_tail_checkpoint(backend, path, agent_id, backend_session_id,
+                                     turns, before, conf):
+    from . import db, message_store, message_writes
+    key = _tail_key(path, agent_id, backend_session_id)
+    revision = parser_version(backend)
+    kwargs = {}
+    checkpoint = None
+    raw_inputs = None
+    current_hash = None
+    checkpoint_status = {}
+    refusal = "file_identity_unavailable"
+    refusal_logged = False
+    try:
+        if before is None:
+            pass
+        elif not turns:
+            refusal = "empty_transcript"
+        elif turns[0].get("role") != "user":
+            refusal = "assistant_prefix"
+        elif identity(path) != before:
+            refusal = "file_moved_before_bootstrap"
+        elif complete_size(path, before.size) != before.size:
+            refusal = "partial_record"
+        else:
+            boundary, why = choose_boundary(backend, path, turns, turn_digests(turns), before,
+                                            int(conf["max_tail_bytes"]))
+            if boundary is None:
+                refusal = "no_safe_boundary_" + why
+            elif _prefix_has_effects(turns[:boundary.seq]):
+                refusal = "effect_bearing_prefix"
+            else:
+                refusal = ""
+                _, current_hash = _tail_file_hashes(path, before.size, before.size)
+                captured = {}
+
+                def publish(database, carry):
+                    nonlocal checkpoint, raw_inputs
+                    if not carry or identity(path) != before:
+                        return
+                    now = db.now_ms()
+                    checkpoint = Checkpoint(
+                        agent_id, backend_session_id, str(path), backend, parser_version(backend),
+                        before.device, before.inode, before.size, before.mtime_ns,
+                        boundary.complete_size, boundary.offset, boundary.seq, len(turns),
+                        boundary.prefix_hash, boundary.tail_hash, boundary.prefix_turns_hash,
+                        boundary.parser_carry, dict(carry), 0, now, now)
+                    write_checkpoint(database, checkpoint)
+                    raw_inputs = message_writes._prepare_import_prelude(
+                        database, agent_id, backend_session_id, [], raw_only=True)
+
+                kwargs = {"capture_at": boundary.seq, "captured": captured, "on_stored": publish}
+    except OSError:
+        # Losing optimization input must not discard an already completed full parse.
+        _tail_log("bootstrap_file_io", retention=True)
+        refusal_logged = True
+        refusal = "bootstrap_file_io"
+        kwargs = {}
+    message_store.store_transcript_turns(
+        agent_id=agent_id, backend_session_id=backend_session_id,
+        source_file=str(path), turns=turns, checkpoint_status=checkpoint_status, **kwargs)
+    if _checkpoint_refused(checkpoint_status):
+        return
+    if refusal:
+        if not refusal_logged:
+            _tail_log(refusal, retention=True)
+    elif checkpoint is None:
+        _tail_log("checkpoint_not_written", retention=True)
+    else:
+        _cache_committed_tail(key, revision, checkpoint, raw_inputs, current_hash)
+
+
 def import_transcript(*, backend: str, path: pathlib.Path, agent_id: str,
                       backend_session_id: str,
                       parse: Callable[[pathlib.Path], list[dict]] | None = None,
@@ -649,6 +915,11 @@ def import_transcript(*, backend: str, path: pathlib.Path, agent_id: str,
     from . import backends, message_store
     started = time.perf_counter()
     path = pathlib.Path(path)
+    implementation = backends.get(backend)
+    native_parse = parse is None or (
+        isinstance(parse, types.MethodType) and implementation is not None
+        and parse.__self__ is implementation
+        and parse.__func__ is type(implementation).parse_transcript)
     parse = parse or (lambda p: backends.parse_turns(backend, p))
     skip = "unsupported_backend"
     if backend in SUPPORTED_BACKENDS:
@@ -657,16 +928,47 @@ def import_transcript(*, backend: str, path: pathlib.Path, agent_id: str,
         except Exception as exc:  # noqa: BLE001 - a bad [transcript_shadow] must not stop imports
             from .log import log_exception
             log_exception("transcriptShadowSettingsFail", exc)
-            conf = {"enabled": False}
+            conf = dict(_DEFAULTS, enabled=False)
         skip = BUDGET.admit(conf)
     if skip:
+        tail_enabled = (native_parse and backend in SUPPORTED_BACKENDS
+                        and implementation is not None
+                        and implementation.supports_transcript_tail_apply)
+        before = None
+        if tail_enabled:
+            try:
+                before = identity(path)
+                tail = _try_tail(backend, path, agent_id, backend_session_id, conf, started)
+            except OSError as exc:
+                from .log import log_exception
+                log_exception("transcriptTailFileSkip", exc)
+                _tail_log("full_file_io")
+            except Exception:
+                _tail_log("tail_failed")
+                raise
+            else:
+                if tail is not None:
+                    return tail
+        if not tail_enabled:
+            if not native_parse:
+                _tail_log("full_custom_parser")
+            elif implementation is None or backend not in SUPPORTED_BACKENDS:
+                _tail_log("full_backend_unsupported")
+            else:
+                _tail_log("full_backend_tail_disabled")
         turns = parse(path)
         parsed = time.perf_counter()
-        message_store.store_transcript_turns(
-            agent_id=agent_id, backend_session_id=backend_session_id,
-            source_file=str(path), turns=turns)
+        if tail_enabled:
+            _store_full_with_tail_checkpoint(backend, path, agent_id, backend_session_id,
+                                             turns, before, conf)
+        else:
+            message_store.store_transcript_turns(
+                agent_id=agent_id, backend_session_id=backend_session_id,
+                source_file=str(path), turns=turns)
         return {"rows": len(turns), "parse_s": parsed - started,
-                "store_s": time.perf_counter() - parsed, "shadow": skip}
+                "store_s": time.perf_counter() - parsed, "shadow": skip,
+                "apply_mode": "full", "parsed_bytes": before.size if before else None}
+    _tail_log("full_shadow_admitted")
     shadow = _Shadow(backend, path, agent_id, backend_session_id, conf)
     try:
         try:
@@ -676,9 +978,12 @@ def import_transcript(*, backend: str, path: pathlib.Path, agent_id: str,
         turns = parse(path)
         parsed = time.perf_counter()
         shadow.before_store(before, turns)
+        checkpoint_status = {}
         out = message_store.store_transcript_turns(
             agent_id=agent_id, backend_session_id=backend_session_id,
-            source_file=str(path), turns=turns, **shadow.store_kwargs())
+            source_file=str(path), turns=turns, checkpoint_status=checkpoint_status,
+            **shadow.store_kwargs())
+        _checkpoint_refused(checkpoint_status)
         stored = time.perf_counter()
         shadow.after_store(out)
         return {"rows": len(turns), "parse_s": parsed - started,
