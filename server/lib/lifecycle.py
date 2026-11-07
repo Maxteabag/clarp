@@ -407,7 +407,11 @@ class ReapBatch:
 
 def reap(con: sqlite3.Connection, lc: Lifecycle, *, now: int, limit: int = 100,
          after: tuple[str, int, object] | None = None,
-         eligible: Callable[[dict], str | None] | None = None) -> ReapBatch:
+         eligible: Callable[[dict], str | None] | None = None,
+         states: Sequence[str] | None = None,
+         cutoffs: Mapping[str, int] | None = None,
+         values_by_event: Mapping[str, Mapping[str, object]] | None = None,
+         where: str = "", params: Sequence[object] = ()) -> ReapBatch:
     """One bounded batch, in the caller's transaction: at most ``limit`` overdue
     rows, in keyset order (state, entered_at, key) from ``after``.
 
@@ -417,14 +421,34 @@ def reap(con: sqlite3.Connection, lc: Lifecycle, *, now: int, limit: int = 100,
     target, any other event goes through ``decide`` (for example ``abandon``
     once a persisted attempt count reaches its cap). It must be pure or read
     only SQLite: no process, runtime or network calls under the writer lock.
-    Default: every overdue row expires."""
+    Default: every overdue row expires. ``cutoffs`` overrides the deadline's
+    absolute cutoff without changing the transition's ``now``. Values are
+    keyed by the chosen event, so different repairs cannot share a stamp
+    update accidentally. ``where``/``params`` filters candidates before the
+    limit (for example exclusions), rather than charging them to the batch.
+
+    Explicit ``states`` may include a WaitForever state with an entry column,
+    but only with an eligibility hook that chooses a declared event. Such a
+    sweep examines that state's rows without inventing an age deadline."""
     _require_txn(con, lc)
     if limit <= 0:
         raise LifecycleError(f"{lc.name}: reap limit must be positive")
-    deadlines = sorted((s, w) for s, w in lc.waits.items() if isinstance(w, Deadline))
+    if params and not where:
+        raise LifecycleError(f"{lc.name}: reap params require a where predicate")
+    selected = set(states) if states is not None else {
+        s for s, wait in lc.waits.items() if isinstance(wait, Deadline)}
+    for state in selected:
+        if state not in lc.waits or not lc.entered_of(state):
+            raise LifecycleError(f"{lc.name}: cannot reap state {state!r} without a wait and entry column")
+        if isinstance(lc.waits[state], WaitForever) and eligible is None:
+            raise LifecycleError(f"{lc.name}: WaitForever sweep requires an eligibility hook")
+    for state in cutoffs or {}:
+        if state not in selected or not isinstance(lc.waits[state], Deadline):
+            raise LifecycleError(f"{lc.name}: cutoff requires a selected deadline state: {state!r}")
     moved: list[Transition] = []
     examined = 0
-    for state, wait in deadlines:
+    for state in sorted(selected):
+        wait = lc.waits[state]
         if after is not None and state < after[0]:
             continue
         # Validation guarantees a column for a Deadline state. A NULL entry
@@ -433,19 +457,27 @@ def reap(con: sqlite3.Connection, lc: Lifecycle, *, now: int, limit: int = 100,
         keyset, args = "", []
         if after is not None and state == after[0]:
             keyset, args = f" AND ({entered}, {lc.key}) > (?, ?)", [after[1], after[2]]
+        deadline, deadline_args = "", []
+        if isinstance(wait, Deadline):
+            deadline = f" AND {entered} <= ?"
+            deadline_args = [(cutoffs or {}).get(state, now - wait.after_ms)]
         cursor = con.execute(
-            f"SELECT * FROM {lc.table} WHERE {lc.state_column} = ? AND {entered} <= ?{keyset}"
+            f"SELECT * FROM {lc.table} WHERE {lc.state_column} = ?"
+            + (f" AND ({where})" if where else "") + f"{deadline}{keyset}"
             f" ORDER BY {entered}, {lc.key} LIMIT ?",
-            (state, now - wait.after_ms, *args, limit - examined))
+            (state, *params, *deadline_args, *args, limit - examined))
         names = [d[0] for d in cursor.description]
         rows = [dict(zip(names, r)) for r in cursor.fetchall()]
         for row in rows:
             examined += 1
             event = eligible(row) if eligible is not None else EXPIRED
             if event is not None:
+                if event == EXPIRED and not isinstance(wait, Deadline):
+                    raise LifecycleError(f"{lc.name}: WaitForever cannot expire; choose a declared event")
                 target = wait.expire_to if event == EXPIRED else lc.decide(state, event)
                 moved.append(compare_and_set(con, lc, row[lc.key], event=event, source=state,
-                                             target=target, now=now))
+                                             target=target, now=now,
+                                             values=(values_by_event or {}).get(event)))
             if examined == limit:
                 return ReapBatch(moved, examined, (state, row[lc.entered_of(state)] or 0, row[lc.key]))
     return ReapBatch(moved, examined, None)
@@ -454,8 +486,13 @@ def reap(con: sqlite3.Connection, lc: Lifecycle, *, now: int, limit: int = 100,
 def reap_tick(con: sqlite3.Connection, lc: Lifecycle, *, now: int,
               cursor: tuple[str, int, object] | None = None, batch: int = 100,
               max_rows: int = 500, max_ms: float = 200.0,
+              batch_budget_ms: float = 50.0,
               eligible: Callable[[dict], str | None] | None = None,
               effects: Callable[[Outbox, list[Transition]], None] | None = None,
+              states: Sequence[str] | None = None,
+              cutoffs: Mapping[str, int] | None = None,
+              values_by_event: Mapping[str, Mapping[str, object]] | None = None,
+              where: str = "", params: Sequence[object] = (),
               clock: Callable[[], float] = time.perf_counter
               ) -> tuple[list[Transition], tuple[str, int, object] | None]:
     """A host's tick: ``reap`` batches, each in its own ``transaction`` (so the
@@ -463,17 +500,24 @@ def reap_tick(con: sqlite3.Connection, lc: Lifecycle, *, now: int,
     examined, ``max_ms`` of time inside the batches was spent, or every
     overdue row was seen. ``effects(outbox, moved)`` queues each batch's
     after-commit effects. Returns everything moved and the cursor for the next
-    tick (None: start from the beginning)."""
+    tick (None: start from the beginning). Reserve ``batch_budget_ms`` before
+    starting another batch; owners measure their batches against that budget.
+    Elapsed time includes COMMIT and outbox effects, not just the row writes.
+    Selection and values options are passed unchanged to ``reap``."""
+    if batch_budget_ms <= 0:
+        raise LifecycleError(f"{lc.name}: batch budget must be positive")
     moved: list[Transition] = []
     examined, spent = 0, 0.0
-    while examined < max_rows and spent < max_ms:
+    while examined < max_rows and spent + batch_budget_ms <= max_ms:
         started = clock()
         with transaction(con) as outbox:
             result = reap(con, lc, now=now, limit=min(batch, max_rows - examined),
-                          after=cursor, eligible=eligible)
+                          after=cursor, eligible=eligible, states=states,
+                          cutoffs=cutoffs, values_by_event=values_by_event,
+                          where=where, params=params)
             if effects is not None:
                 effects(outbox, result.moved)
-            spent += (clock() - started) * 1000.0  # inside the batch, before COMMIT and effects
+        spent += (clock() - started) * 1000.0
         moved += result.moved
         examined += result.examined
         cursor = result.cursor

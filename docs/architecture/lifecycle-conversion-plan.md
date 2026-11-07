@@ -407,6 +407,56 @@ behaviour difference. The unchanged G0 matrix pins `move_to_back`,
 `park_at_head` and `take_over_at_head`, including ordering, copied row fields
 and revisions. The two dispatcher entry points keep their names and code.
 
+### Queue reaper (Phase 3, commit 7)
+
+The queue owner uses `lk.reap_tick` for claim reset and the idle repair. Each
+owner call now examines at most 100 candidate receipts, with a keyset cursor
+kept per thread and database connection; skipped rows count, and cursor wrap
+makes them eligible for another observation. This conservative page size
+leaves room for the snapshot and revision SQL within the lead's maximum of
+500 rows and 200 ms per tick. Every receipt batch and revision batch is at
+most 100 writes and is measured against the 50 ms budget. The first
+production-shaped synthetic probe at `61e533f5` met the batch limit but
+reached 320 ms for an owner tick; it must not be treated as passing evidence.
+
+- **Claims.** Excluded opening rows are filtered in SQL before the limit,
+  so a prefix of excluded rows cannot hide an eligible claim. The reset
+  keeps its own clock, separate from the opening owner's earlier cutoff;
+  zero and negative ages still mean a zero-age cutoff. A NULL claim time
+  still means 0. Expiry clears `claimed_at` through the event-specific CAS
+  values. Revisions are bumped once per changed agent in each invocation,
+  after its receipt transaction commits, with at most 100 revision writes
+  grouped in another transaction. A failed receipt batch announces nothing.
+  An explicit outer transaction is joined by one bounded `lk.reap` call,
+  with revisions in that same transaction; it is never committed here.
+- **Idle repair.** `started` remains `WaitForever`, not a plain age
+  deadline. The owner snapshots a bounded page and performs `is_live` outside
+  the writer lock; an inspection error still counts as live. Inside the
+  batch it reads the latest persisted state through the existing
+  `idx_state_log_agent_ts` index and applies the busy, newer-terminal/60 s
+  and 24 h gates to the current row. A NULL `started_at` still uses
+  `enqueued_at` for age; the NULL=0 keyset is only paging order.
+- **Signed difference.** Lead decision 546, "Queue reaper race fence" in
+  `differences.md`: a newer busy or newly ineligible persisted state arriving
+  between snapshot and CAS keeps the receipt open. An unchanged state gives
+  the prior result. This replaces the old snapshot race; it is intentional.
+- **Caller ownership.** `TurnDispatchService.recover_queued` serializes
+  recovery and calls `_recover_queued_locked` without a SQLite transaction;
+  `resolve_stale_claims` exits its opening transactions before the generic
+  reset. Idle repair is called from runtime startup and the background
+  watcher's reconcile pass, neither of which owns a transaction.
+
+The kit's optional `states`, absolute `cutoffs`, `values_by_event` and SQL
+`where`/bound `params` support these policies without new stored states,
+timestamps or indexes. A `WaitForever` selection requires an eligibility
+hook that chooses a declared event; it cannot expire by age. A tick reserves
+the next batch's time budget before starting it and counts commit/outbox
+time. The opt-in synthetic benchmark is
+`CLARP_QUEUE_REAPER_BENCHMARK=1` with
+`tests/unit/test_queue_reaper.py::test_production_size_reaper_budgets`, on
+heavy-remote only; it populates one million synthetic state-log rows and
+1,000 receipts and checks both real batch and whole-owner tick timings.
+
 ## 2. Dream runs
 
 **Today** (`dreaming.py`).

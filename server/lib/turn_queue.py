@@ -1,6 +1,7 @@
 """Durable ledger for explicit queue-after-current-turn requests."""
 from __future__ import annotations
 
+import threading
 from typing import Callable
 
 from . import db, prompt_admissions
@@ -401,12 +402,26 @@ IDLE_RECEIPT_SETTLE_GRACE_MS = 60_000
 # state proves it: the agent has been idle far longer than any turn runs.
 IDLE_RECEIPT_MAX_AGE_MS = 24 * 3_600_000
 
+# A separate cursor per thread/connection: overlapping owners do not replace
+# one another's progress, and a new database never inherits an old cursor.
+_REAP_PROGRESS = threading.local()
+_REAP_ROWS_PER_TICK = 100  # Leave headroom for snapshot and revision SQL outside the receipt batch.
+
+
+def _reap_cursor(name, con):
+    previous = getattr(_REAP_PROGRESS, name, None)
+    return previous[1] if previous is not None and previous[0] is con else None
+
+
+def _save_reap_cursor(name, con, cursor):
+    setattr(_REAP_PROGRESS, name, (con, cursor))
+
 
 def terminalize_idle_agent_receipts(
         is_live: Callable[[str], bool], *, now_ms: int | None = None,
         settle_grace_ms: int = IDLE_RECEIPT_SETTLE_GRACE_MS,
         max_age_ms: int = IDLE_RECEIPT_MAX_AGE_MS) -> dict[str, int]:
-    """End every ``started`` receipt of an agent that is not running a turn.
+    """Repair a bounded page of ``started`` receipts on agents with no turn.
 
     terminalize_ended_receipts needs the ledger to prove a turn ended, and a
     trace whose ``turns`` row never settled, on an agent with no later turn,
@@ -417,49 +432,69 @@ def terminalize_idle_agent_receipts(
     start, or the receipt is older than ``max_age_ms`` and the agent has no
     busy state. Such a receipt becomes ``ended``. Idempotent; queued, claimed,
     parked and terminal rows are never touched, and the row keeps
-    deduplicating client retries. Returns {"ended": n} or {}."""
+    deduplicating client retries. Each call examines at most 100 receipts,
+    resuming its thread/connection's keyset cursor on the next call. Returns
+    {"ended": n} or {}. Liveness runs before the write transaction; persisted
+    state and age gates are rechecked inside it (the signed reaper race fence)."""
     from .turn_lifecycle import TERMINAL
     now = db.now_ms() if now_ms is None else now_ms
     con = db.conn()
+    cursor = _reap_cursor("idle", con)
+    keyset = " AND (COALESCE(q.started_at, 0), q.queue_id) > (?, ?)" if cursor else ""
     rows = con.execute(
         """SELECT q.queue_id, q.agent_id,
                   COALESCE(q.started_at, q.enqueued_at) AS started_at,
-                  l.kind, l.ts
+                  COALESCE(q.started_at, 0) AS cursor_at, l.kind, l.ts
              FROM queued_turns q
              LEFT JOIN state_log l ON l.state_id = (
                   SELECT s.state_id FROM state_log s
                    WHERE s.agent_id = q.agent_id
                    ORDER BY s.ts DESC, s.state_id DESC LIMIT 1)
-            WHERE q.status = 'started'""").fetchall()
-    candidates: dict[str, list[str]] = {}
-    for row in rows:
-        kind = str(row["kind"] or "")
+            WHERE q.status = 'started'""" + keyset
+        + " ORDER BY COALESCE(q.started_at, 0), q.queue_id LIMIT 100",
+        (cursor[1], cursor[2]) if cursor else ()).fetchall()
+
+    def due(kind, ts, started):
+        kind = str(kind or "")
         if kind and kind not in TERMINAL:
-            continue
-        settled_after = (kind and int(row["ts"]) > int(row["started_at"])
-                         and now - int(row["ts"]) >= settle_grace_ms)
-        if settled_after or now - int(row["started_at"]) >= max_age_ms:
-            candidates.setdefault(str(row["agent_id"]), []).append(
-                str(row["queue_id"]))
-    queue_ids = []
-    for agent_id, ids in candidates.items():
+            return False
+        settled_after = (kind and int(ts) > started and now - int(ts) >= settle_grace_ms)
+        return bool(settled_after or now - started >= max_age_ms)
+
+    candidates = {str(row["agent_id"]) for row in rows
+                  if due(row["kind"], row["ts"], int(row["started_at"]))}
+    idle = set()
+    for agent_id in candidates:
         try:
             if is_live(agent_id):
                 continue
         except Exception as exc:  # noqa: BLE001 - can't tell -> leave it
             log("queueReceiptIdleCheckFail", f"agent={agent_id} {exc!r}")
             continue
-        queue_ids.extend(ids)
-    if not queue_ids:
+        idle.add(agent_id)
+    if not idle:
+        last = rows[-1] if len(rows) == _REAP_ROWS_PER_TICK else None
+        _save_reap_cursor("idle", con, ("started", last["cursor_at"], last["queue_id"]) if last else None)
         return {}
-    con.execute("BEGIN IMMEDIATE")
-    try:
-        ended = sum(_cas("idle_settle", "queue_id = ?", (queue_id,), con=con)
-                    for queue_id in queue_ids)
-        con.execute("COMMIT")
-    except BaseException:
-        con.execute("ROLLBACK")
-        raise
+    observed = {str(row["queue_id"]): str(row["agent_id"]) for row in rows}
+
+    def eligible(row):
+        agent_id = str(row["agent_id"])
+        if agent_id not in idle or observed.get(str(row["queue_id"])) != agent_id:
+            return None
+        # Signed queue-reaper race fence: the snapshot and liveness check
+        # happened outside this transaction. Re-read persisted state here.
+        latest = con.execute(
+            "SELECT kind, ts FROM state_log WHERE agent_id = ? "
+            "ORDER BY ts DESC, state_id DESC LIMIT 1", (agent_id,)).fetchone()
+        started = int(row["started_at"] if row["started_at"] is not None else row["enqueued_at"])
+        kind, ts = (latest["kind"], latest["ts"]) if latest else (None, None)
+        return "idle_settle" if due(kind, ts, started) else None
+
+    moved, cursor = lk.reap_tick(con, QUEUE_RECEIPT, now=now, cursor=cursor,
+                                 states=("started",), eligible=eligible, max_rows=_REAP_ROWS_PER_TICK)
+    _save_reap_cursor("idle", con, cursor)
+    ended = len(moved)
     if not ended:
         return {}
     log("queueReceiptsTerminalized", f"reason=idle_agent ended={ended}")
@@ -658,18 +693,58 @@ def release_claim(queue_id: str) -> bool:
 
 
 def reset_stale_claims(max_age_ms: int = 30_000, *, exclude=()) -> int:
-    """Return abandoned manual-send claims to the visible durable queue.
-    ``exclude``: rows another owner already settled (agent_rings openings)."""
-    cutoff = db.now_ms() - max(0, max_age_ms)
+    """Return a bounded page of abandoned manual-send claims to the queue.
+    ``exclude`` is filtered before the page limit (agent_rings openings).
+    Each call moves at most 100 rows and keeps a thread/connection cursor;
+    the cutoff still uses this call's own clock. An explicit caller-owned
+    transaction is joined without committing or nesting."""
+    con, now = db.conn(), db.now_ms()
     excluded = tuple(exclude)
-    rows = _cas(
-        "release",
-        "COALESCE(claimed_at, 0) <= ?"
-        + (" AND queue_id NOT IN (" + ",".join("?" * len(excluded)) + ")" if excluded else ""),
-        (cutoff, *excluded), returning="agent_id", values={"claimed_at": None})
-    for agent_id in {str(row["agent_id"]) for row in rows}:
-        _bump_revision(agent_id)
-    return len(rows)
+    options = dict(states=("claimed",), cutoffs={"claimed": now - max(0, max_age_ms)},
+                   values_by_event={lk.EXPIRED: {"claimed_at": None}},
+                   where=("queue_id NOT IN (" + ",".join("?" for _ in excluded) + ")") if excluded else "",
+                   params=excluded)
+    changed_agents = set()
+
+    def agents(moved):
+        if not moved:
+            return set()
+        marks = ",".join("?" for _ in moved)
+        return {str(row[0]) for row in con.execute(
+            f"SELECT DISTINCT agent_id FROM queued_turns WHERE queue_id IN ({marks})",
+            [transition.key for transition in moved])}
+
+    def committed(outbox, moved):
+        batch_agents = agents(moved)
+        outbox.add(lambda: changed_agents.update(batch_agents))
+
+    cursor = _reap_cursor("claims", con)
+    try:
+        if con.in_transaction:
+            # Join an explicitly owned transaction, never commit it or nest.
+            # Production recovery calls outside one; this preserves the API
+            # for a caller that composes a reset with its own writes.
+            result = lk.reap(con, QUEUE_RECEIPT, now=now, after=cursor, **options)
+            moved, cursor = result.moved, result.cursor
+            changed_agents.update(agents(moved))
+        else:
+            moved, cursor = lk.reap_tick(con, QUEUE_RECEIPT, now=now, cursor=cursor,
+                                         effects=committed, max_rows=_REAP_ROWS_PER_TICK, **options)
+        _save_reap_cursor("claims", con, cursor)
+        return len(moved)
+    finally:
+        # Once per changed agent, as before, including batches committed
+        # before a later batch failed. Never announce a rolled-back batch.
+        if changed_agents:
+            if con.in_transaction:
+                for agent_id in changed_agents:
+                    _bump_revision(agent_id)
+            else:
+                # The receipt tick moves at most 100 rows. Group its at most
+                # 100 revision writes instead of taking one autocommit per agent.
+                with lk.transaction(con):
+                    for agent_id in changed_agents:
+                        _bump_revision(agent_id)
 
 
 def claimed_count() -> int:
