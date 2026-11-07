@@ -16,6 +16,7 @@ import time
 from functools import lru_cache
 from typing import Any
 
+from .claude_reply_evidence import is_synthetic_assistant_record
 from .activity import summarize_tool_activity
 from .log import log_exception
 from .text_util import truncate
@@ -374,10 +375,7 @@ def parse_turns(path: pathlib.Path) -> list[dict]:
             # isApiErrorMessage=true (and model="<synthetic>"). It's
             # not something Rachel/the agent actually said — drop it
             # so the history pane stays clean across restarts.
-            if t == "assistant" and (
-                d.get("isApiErrorMessage") is True
-                or (d.get("message") or {}).get("model") == "<synthetic>"
-            ):
+            if is_synthetic_assistant_record(d):
                 continue
             msg = d.get("message") or {}
             content = msg.get("content", "")

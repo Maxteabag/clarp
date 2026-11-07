@@ -14,6 +14,7 @@ import json
 import pathlib
 import socket
 import socketserver
+import sys
 import threading
 import time
 import uuid
@@ -379,6 +380,24 @@ class RuntimeClient:
 
 
 class _RuntimeRequestHandler(socketserver.StreamRequestHandler):
+    def finish(self) -> None:
+        try:
+            super().finish()
+        finally:
+            # Complete response flushing/stream processing before releasing
+            # THIS thread's connections. Async workers acquire their own TLS
+            # handles; no request-owned cursor is passed to them.
+            from . import db, telemetry
+            for store, close in (("state", db.close_local),
+                                 ("telemetry", telemetry.close_local)):
+                try:
+                    close()
+                except Exception as exc:  # cleanup must preserve the RPC outcome
+                    # Ordinary event logging writes telemetry: never reopen a
+                    # store solely to report that its cleanup failed.
+                    print(f"runtimeDbCloseFail store={store} code={type(exc).__name__}",
+                          file=sys.stderr, flush=True)
+
     def handle(self) -> None:
         raw = self.rfile.readline(MAX_MESSAGE_BYTES + 1)
         if not raw or len(raw) > MAX_MESSAGE_BYTES:

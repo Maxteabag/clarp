@@ -45,11 +45,14 @@ the hot spots; every high finding fixed or explicitly accepted.
 
 ## 2. Hard rules
 
-1. **Only the release owner restarts, updates or deploys the live Host**, inside
-   the windows **07:00, 12:00 and 18:00 Europe/Oslo**. Runtime-class releases at
-   07:00 and 18:00, at most two a day (Peter, 6 Nov); the release owner holds
-   program agents from T-30 and resumes them after the ship. Longest downtime 5 minutes. A failed health check
-   rolls back automatically. Never run `make deploy`, `install.sh`,
+1. **Only the release owner restarts, updates or deploys the live Host.** There
+   are no release windows and no holds (Peter, 6 Nov 18:18). A server (Host)
+   release does not affect agents and ships as soon as it is gated. A runtime
+   restart interrupts running turns; it is allowed when needed, and afterwards
+   every interrupted agent gets one "continue where you left off" message, sent
+   from an agent session so it queues and never preempts. Never restart the
+   runtime by hand while a release follow is watching (decision 734). Longest
+   downtime 5 minutes. A failed health check rolls back automatically. Never run `make deploy`, `install.sh`,
    `make deploy-static`, `clarp-admin update` or `systemctl ... clarp*` yourself.
 2. **Main and `refactor/integration` move through the merge captain** for
    program work. You commit on your own branch and never push.
@@ -119,8 +122,8 @@ the hot spots; every high finding fixed or explicitly accepted.
 - Keep the stdlib HTTP server; no ASGI move.
 - **Two tracks (Peter, 3 Nov evening; replaces "no long-lived refactor
   branch").** Bug fixes (the fix lane) and other agents' work land on main and
-  go live as we go, in the 18:00 window, only when the release interrupts no
-  running agent turn and can be rolled back. The restructuring (slices S1-S6,
+  go live as we go, as soon as they are gated and can be rolled back (no
+  windows since 6 Nov 18:18). The restructuring (slices S1-S6,
   and anything else that is not a bug fix) lands on `refactor/integration`,
   which takes in main after every main landing. It goes live as **one big
   release** when everything is done and good. Tests-only, tools, harness and
@@ -148,7 +151,7 @@ the hot spots; every high finding fixed or explicitly accepted.
 | 1 (days 1–3) | this brief; flakes quarantined; parked-branch manifest; route goldens; schema golden; migration rehearsal; lifecycle kit contract; harness S0; each slice's characterization tests | **Go/no-go 1** (lead, on the harness proof) |
 | 2 | S3 route seam then moves; S5 read model; S1 layering (move-only); S2 guards (all on `refactor/integration`); F1 fixes with replay evidence (on main, released as we go); then S4 turn engine and S6 backends after canary ×3 | **Go/no-go 2** (lead, on the Phase 2 evidence) |
 | 3 | deep work: lifecycle conversions, incremental transcript import, locks out of I/O, database behaviour (P) | lead's done check |
-| 4 | the one big release: `refactor/integration` into main after a full replay against main, CI, and a canary soak on the buildbox, then a window with rollback ready; close-out: archive agents, remove worktrees, update ARCHITECTURE.md, delete this file | lead's release GO |
+| 4 | the one big release: `refactor/integration` into main after a full replay against main, CI, and a canary soak on the buildbox, then the release with rollback ready; close-out: archive agents, remove worktrees, update ARCHITECTURE.md, delete this file | lead's release GO |
 
 **Checkpoints (Peter, 3 Nov 11:3x):** "I dont want to approve for next stages. I just want a finshed refactored server". Both go/no-go checkpoints are the lead's decisions on the same evidence; no agent waits for Peter. Every gate in section 5 still applies.
 
@@ -188,7 +191,7 @@ continue as before.
   fixes, tests and tools; `refactor/integration` for slices); the rebased diff's
   `git patch-id --stable` equals the reviewed diff's, otherwise back to review;
   rerun G1 (and G2) on the rebased commit; fast-forward push.
-- **G5 release owner:** tag `refactor-<yyyymmdd>-<n>` on main inside a window;
+- **G5 release owner:** tag `refactor-<yyyymmdd>-<n>` on main;
   backup; deploy; health check; automatic rollback on failure; entry in
   `registers/releases.md`.
 
@@ -198,7 +201,7 @@ continue as before.
 |---|---|---|---|
 | Lead | `hobbles-18b0` | Claude | this brief, scope, decisions, registers, sign-offs |
 | Merge captain | `rf-mergec-fc0a` (was `rf-merge-f870`) | Codex | landing on main, the gate script, the flake quarantine list, the parked-branch manifest |
-| Release owner | `rf-releasec-29c5` (was `rf-release-d188`) | Codex | windows, tags, backup, deploy, health check, rollback, break-glass, the canary node |
+| Release owner | `rf-releasec-29c5` (was `rf-release-d188`) | Codex | tags, backup, deploy, health check, rollback, break-glass, resuming interrupted agents, the canary node |
 | Harness owner | `rf-harnessc-4a4a` (was `rf-harness-eeb2`) | Codex | `tests/replay/` (new), the corpus tools, planted changes, diff report |
 | Contract owner | `rf-contractc-be17` (was `rf-contract-80af`) | Codex | `server/lib/db_schema.py`, `server/lib/db_migrations.py`, `contract/`, `server/lib/server_identity.py` contract constants, the lifecycle kit (`server/lib/lifecycle.py`, `docs/architecture/lifecycles.md`), schema goldens |
 | Fix-lane owner | `rf-fix-c4ab` | Claude | one fix per commit, in the files the lead names per fix |
@@ -272,7 +275,7 @@ Order rule (5 Nov): on a file that a regenerated split owns (S3, S4, S6, S9), th
   Reviewers answer on the first line: `SOURCE YES <sha>`, `CHANGES NEEDED <sha>;
   <n> findings` or `HOLD <sha>`.
 - A reviewed commit goes to the merge captain with its SOURCE YES line. The
-  release owner ships what is on main in the next window.
+  release owner ships what is on main as soon as it is gated.
 - **Pace.** Never wait for a person or a clock: ask the lead, then do the next
   independent task. Keep turns short: never wait inside a turn for more than
   about 10 minutes. Start CI runs, heavy-remote suites, canaries and other long

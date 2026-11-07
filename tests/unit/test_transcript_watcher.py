@@ -390,3 +390,20 @@ def test_a_non_object_json_line_does_not_discard_the_next_line(tmp_path):
         f.write(json.dumps(_assistant_text("after the list")) + "\n")
     w.tick()
     assert received == ["after the list"]
+
+
+def test_watcher_suppresses_synthetic_voice_text_but_advances_to_genuine_record(tmp_path):
+    from lib.transcript_watcher import TranscriptWatcher
+    path = tmp_path / 'synthetic.jsonl'
+    path.touch()
+    received = []
+    watcher = TranscriptWatcher(path, on_text=received.append)
+    synthetic = _assistant_text('<speak>SDK synthetic content</speak>')
+    synthetic['message']['model'] = '<synthetic>'
+    real = _assistant_text('<speak>Genuine spoken output</speak>')
+    real['message']['model'] = 'claude-genuine'
+    _append(path, synthetic, real)
+    watcher.tick()
+    watcher.tick()
+    assert received == ['<speak>Genuine spoken output</speak>']
+    assert watcher.byte_offset == path.stat().st_size

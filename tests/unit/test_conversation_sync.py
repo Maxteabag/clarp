@@ -321,13 +321,19 @@ def test_a_delta_returns_only_rows_newer_than_the_cursor(tmp_path):
         [(t.get("revision"), t["text"][:24]) for t in delta["turns"]]
 
 
-def test_chat_read_returns_stored_rows_without_waiting_for_import(tmp_path, monkeypatch):
+@pytest.mark.parametrize('sparse_large', [False, True])
+def test_chat_read_returns_stored_rows_without_waiting_for_import(tmp_path, monkeypatch, sparse_large):
     import threading
     from lib import backends, transcript_import_cache, db
     agent = _agent(tmp_path)
     _store(agent, [{'role':'user','text':'stored message','timestamp':'2026-01-01T00:00:00Z'}])
     source = tmp_path / 'growing.jsonl'
     source.write_text('changed')
+    if sparse_large:
+        monkeypatch.setattr(transcript_import_cache, '_host_started_at', None)
+        assert transcript_import_cache.note_host_started(transcript_import_cache.time.monotonic())
+        with source.open('r+b') as stream:
+            stream.truncate(50 * 1024 * 1024)
     entered, release, returned = threading.Event(), threading.Event(), threading.Event()
     answers, errors = [], []
     monkeypatch.setattr(backends, 'find_session_jsonl', lambda *a: source)

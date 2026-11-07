@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import itertools
 import os
 import pathlib
 import shutil
@@ -44,14 +45,18 @@ def _codex_argv() -> list[str]:
     A ``.py`` path is launched with the current interpreter.
     """
     binary = str(_backend().required_binary)
+    # A thread Clarp releases (a move off a draining generation, BACKENDS-06b)
+    # closes 2 s after its last subscriber left instead of codex's 60 s; Clarp
+    # unsubscribes nothing else, so normal operation is unchanged.
+    unload = ["-c", "thread_unload_delay_secs=2"]
     if os.path.isfile(binary) and binary.endswith(".py"):
-        return [sys.executable, binary, "app-server", "--stdio"]
+        return [sys.executable, binary, "app-server", "--stdio", *unload]
     found = shutil.which(binary)
     if found is None and os.path.isfile(binary) and os.access(binary, os.X_OK):
         found = binary
     if found is None:
         raise FileNotFoundError(f"`{binary}` not on PATH")
-    return [found, "app-server", "--stdio"]
+    return [found, "app-server", "--stdio", *unload]
 
 
 @dataclass
@@ -111,10 +116,11 @@ class AppTurnHandle:
         # slot during the handoff) must not reach the agent's next turn (TP-N1).
         if self._done.is_set():
             return
+        self.stop_requested = True
         timer = threading.Timer(STOP_DETACH_SEC, self._detach_if_running)
         timer.daemon = True
         timer.start()
-        self.client.interrupt_active(self.agent_id, handle=self)
+        self.client.interrupt_active(self.agent_id, handle=self, by_user=True)
 
     def _detach_if_running(self) -> None:
         """The server never ended this stopped turn: detach it (BACKENDS-07b).
@@ -158,6 +164,15 @@ class _Client:
         self.detached_agents: set[str] = set()
         self.detached_executions: set[str] = set()
         self.recycled = False
+        # BACKENDS-06b: a generation is one app-server process. A draining
+        # one takes no new turns and releases its threads at turn boundaries.
+        self.generation = next(_GENERATIONS)
+        self.draining = False
+        self.unsubscribe_unsupported = False
+        # Turns running on threads no Clarp agent owns (codex subagents):
+        # until they end no thread moves off this process.
+        self.foreign_turns: set[str] = set()
+        self.releasing: set[str] = set()
         self.rate_limits = {}
         # One shared server serves every Codex agent: it has no turn identity
         # and no agent identity. Naming the agent that started it would let a
@@ -361,6 +376,17 @@ class _Client:
             self._mirror_goal(str(params.get("threadId") or ""),
                               params.get("goal") if method.endswith("updated") else None)
             return
+        if method == "thread/closed":
+            thread_id = str(params.get("threadId") or "")
+            self._loaded_threads.discard(thread_id)
+            getattr(self, "releasing", set()).discard(thread_id)
+            if getattr(self, "draining", False):
+                log("codexThreadMoveDone", f"thread={thread_id[:8]} from={self.generation}")
+                _drain_later(self)
+                if (_move_get(thread_id) or {}).get("phase") == "moving":
+                    threading.Thread(target=_continue_move, args=(thread_id,), daemon=True,
+                                     name="codex-goal-move").start()
+            return
         if active is None and method == "turn/started" and self._detached_execution(params):
             # The detached turn (or a continuation on its stuck thread) must
             # not count as busy again: that would keep the stuck process alive.
@@ -372,7 +398,11 @@ class _Client:
             # adopt it so it streams, records state and marks the agent busy
             # like any other turn instead of being dropped on the floor.
             active = self._adopt_server_turn(params)
+            if active is None:
+                self._note_foreign_turn(params, started=True)
         if active is None:
+            if method == "turn/completed":
+                self._note_foreign_turn(params, started=False)
             return
         notified_turn = params.get("turn") if isinstance(params.get("turn"), dict) else {}
         event_turn_id = str(params.get("turnId") or notified_turn.get("id") or "")
@@ -451,12 +481,22 @@ class _Client:
                 # waits for this reader to deliver its turn/start reply.
                 threading.Thread(target=self.recycle_if_quiet, daemon=True,
                                  name="codex-recycle").start()
+            if getattr(self, "draining", False):
+                _drain_later(self)
             if status == "failed":
                 message = str(error.get("message") or "codex turn failed")
                 if active.on_error:
                     self._callback(active.on_error, CodexTurnFailure(
                         message, self, active.produced_output))
             elif status == "interrupted":
+                if not getattr(active.handle, "stop_requested", False):
+                    # No Stop asked for it. A move must never cause this
+                    # (pausing an active goal leaves its turn running); the
+                    # post-release check counts these lines (BACKENDS-06b).
+                    log("codexTurnInterruptedUnasked",
+                        f"agent={active.agent_id} thread={str(active.thread_id)[:8]} "
+                        f"moving={bool(getattr(self, 'draining', False))} "
+                        f"goal_paused_for_move={_move_get(active.thread_id) is not None}")
                 if active.on_error:
                     self._callback(active.on_error, "codex turn interrupted")
             elif active.on_result:
@@ -549,6 +589,193 @@ class _Client:
         """Threads whose goal state is unknown (call under _goal_state_lock)."""
         return set(self._goal_marks())
 
+    def _note_foreign_turn(self, params: dict, *, started: bool) -> None:
+        turn = params.get("turn") if isinstance(params.get("turn"), dict) else {}
+        thread_id = str(params.get("threadId") or turn.get("threadId") or "")
+        if not thread_id or agents_db.get_by_backend_session(thread_id):
+            return
+        key = str(turn.get("id") or params.get("turnId") or thread_id)
+        foreign = getattr(self, "foreign_turns", None)
+        if foreign is None:
+            foreign = self.foreign_turns = set()
+        if started:
+            foreign.add(key)
+        elif key in foreign:
+            foreign.discard(key)
+            if getattr(self, "draining", False):
+                _drain_later(self)
+
+    def _thread_running(self, thread_id: str) -> bool:
+        turns = list(getattr(self, "_actives", {}).values())
+        if self.active is not None:
+            turns.append(self.active)
+        return any(turn.thread_id == thread_id and not turn.handle._done.is_set()
+                   for turn in turns)
+
+    def drain_step(self) -> None:
+        """Release what a draining generation can release now (BACKENDS-06b):
+        each idle thread is unsubscribed, a running turn is never interrupted
+        and its thread follows at turn/completed. While a codex subagent turn
+        runs here, nothing moves. Exits once nothing is left."""
+        if getattr(self, "exiting", False) or _DRAINING.get(id(self)) is not self:
+            return
+        if self.foreign_turns or self.unsubscribe_unsupported:
+            self._exit_if_drained()
+            return
+        for thread_id in sorted(self._loaded_threads - self.releasing):
+            if self.proc.poll() is not None:
+                continue
+            self._pause_for_move(thread_id)
+            if self._thread_running(thread_id):
+                continue
+            if not self._capture_move(thread_id):
+                continue
+            self.releasing.add(thread_id)
+            try:
+                result = self.request("thread/unsubscribe", {"threadId": thread_id}, timeout=10)
+            except RuntimeError as exc:
+                self.releasing.discard(thread_id)
+                if "-32601" in str(exc) or "not found" in str(exc).lower():
+                    # An app-server without the method: drain like stage 1,
+                    # until quiet, then shut down.
+                    self.unsubscribe_unsupported = True
+                    log("codexMoveFallback", f"gen={self.generation}")
+                    break
+                log_exception("codexThreadReleaseFail", exc, detail=thread_id[:8])
+                continue
+            except Exception as exc:  # noqa: BLE001 - try again at the next boundary
+                self.releasing.discard(thread_id)
+                log_exception("codexThreadReleaseFail", exc, detail=thread_id[:8])
+                continue
+            status = str((result or {}).get("status") or "")
+            log("codexThreadMoveStart", f"thread={thread_id[:8]} from={self.generation} status={status}")
+            # Only notLoaded means released. notSubscribed means this
+            # connection was already unsubscribed (an earlier reply lost) and
+            # the thread is still loaded with its writer lock (pinned
+            # thread_processor.rs:1028-1045): keep holding it until
+            # thread/closed or the process exits.
+            if status == "notLoaded":
+                self._loaded_threads.discard(thread_id)
+                self.releasing.discard(thread_id)
+        self._exit_if_drained()
+
+    def _pause_for_move(self, thread_id: str) -> None:
+        """An active goal is paused before its thread moves, so neither this
+        process nor the new one starts a continuation during the move. The
+        intent is recorded first (decide, then act); pausing never interrupts
+        the running turn (ext/goal runtime.rs:248-253)."""
+        agent = agents_db.get_by_backend_session(thread_id)
+        if not agent:
+            return
+        record = {"agent_id": agent["agent_id"], "thread": thread_id, "phase": "pausing",
+                  "generation": f"{os.getpid()}:{self.generation}"}
+        # The whole decision, the pause's effect at codex and the record are
+        # under the lock users' goal actions take: a user's pause or resume is
+        # ordered entirely before or after the move's pause, so the user's
+        # word is the last effect codex sees (a record-only fence does not
+        # order the requests themselves). Bounded by the request's timeout.
+        with _GOAL_MOVE_LOCK:
+            row = agent_goals.get(agent["agent_id"])
+            if not row or row.get("status") != agent_goals.ACTIVE or _move_get(thread_id):
+                return
+            _move_put(thread_id, record)
+            self._goal_answer_begin(thread_id)
+            try:
+                result = self.request("thread/goal/set", {"threadId": thread_id, "status": "paused"},
+                                      timeout=10)
+                goal = result.get("goal") if isinstance(result, dict) else None
+                self._mirror_goal(thread_id, goal if isinstance(goal, dict) else None)
+            except Exception as exc:  # noqa: BLE001 - left 'pausing': recovery decides
+                log_exception("codexGoalMovePauseFail", exc, detail=thread_id[:8])
+                return
+            finally:
+                self._goal_answer_end(thread_id)
+            if not _move_advance(thread_id, "pausing", {**record, "phase": "paused"}):
+                log("codexGoalMoveYielded", f"thread={thread_id[:8]} at=paused")
+                return
+        log("codexThreadMoveStart", f"thread={thread_id[:8]} from={self.generation} goal_paused=True")
+
+    def _capture_move(self, thread_id: str) -> bool:
+        """At the boundary (no turn runs on the thread), record the paused
+        goal's updatedAt for the compare-and-set: codex accounts a turn's usage
+        on a paused goal too and bumps it (state/runtime/goals.rs), so the
+        pause answer's value is stale once the turn has ended. False: try
+        again at the next boundary."""
+        record = _move_get(thread_id)
+        if not record or record.get("phase") not in ("paused",):
+            return record is None or record.get("phase") == "moving"
+        try:
+            result = self.request("thread/goal/get", {"threadId": thread_id}, timeout=10)
+        except Exception as exc:  # noqa: BLE001
+            log_exception("codexGoalMoveCaptureFail", exc, detail=thread_id[:8])
+            return False
+        goal = result.get("goal") if isinstance(result, dict) else None
+        if not isinstance(goal, dict) or goal.get("status") != "paused":
+            with _GOAL_MOVE_LOCK:            # completed, cleared or changed: nothing to restore
+                if (_move_get(thread_id) or {}).get("phase") == "paused":
+                    _move_forget(thread_id)
+            return True
+        if not _move_advance(thread_id, "paused",
+                             {**record, "phase": "moving", "updated_at": goal.get("updatedAt")}):
+            log("codexGoalMoveYielded", f"thread={thread_id[:8]} at=moving")
+        return True
+
+    def _mark_retiring_if_quiet(self) -> bool:
+        """Before any direct shutdown of this process (credential refresh,
+        recycle_clients, usage recovery): the exit mark goal() refuses on is
+        set under self._lock, only while no goal answer is outstanding, and
+        kept only if nothing may still run here (busy, a subagent turn, or a
+        goal that may continue: the coarse rule). So a goal request is
+        admitted before the mark (and blocks the shutdown) or refused after
+        it. True: the caller may shut it down."""
+        with self._lock:
+            with self._goal_state_lock:
+                if self._goal_activations():
+                    return False
+            self.exiting = True
+        if _busy(self) or getattr(self, "foreign_turns", None) or self._goal_may_continue():
+            with self._lock:
+                self.exiting = False
+            return False
+        return True
+
+    def _exit_if_drained(self, *, backstop: bool = False) -> None:
+        with _LOCK:
+            if (_DRAINING.get(id(self)) is not self or getattr(self, "exiting", False)
+                    or _busy(self) or self.foreign_turns):
+                return
+            if self._loaded_threads and not (backstop or self.unsubscribe_unsupported):
+                return
+            # The exit mark shares self._lock with goal admission (goal()
+            # refuses on it), as stage 1's recycle mark does: a goal request
+            # is admitted before the mark (its answer is outstanding: no
+            # exit) or refused after it.
+            with self._lock:
+                with self._goal_state_lock:
+                    answering = bool(self._goal_activations())
+                if answering:
+                    return
+                self.exiting = True
+            if self._loaded_threads and self._goal_may_continue():
+                # A thread still loaded here may have a native turn running
+                # whose turn/started is not delivered yet: the backstop and
+                # the fallback never end a process while any loaded thread's
+                # goal could continue or any goal answer is outstanding
+                # (stage 1's coarse rule). They try again later.
+                with self._lock:
+                    self.exiting = False
+                return
+            # It stays in _DRAINING until the process has exited: its threads'
+            # holds (and their writer locks) end only then.
+        log("codexGenerationExited", f"gen={self.generation} backstop={backstop} "
+                                     f"loaded={len(self._loaded_threads)}")
+        try:
+            self.shutdown()
+        finally:
+            with _LOCK:
+                if _DRAINING.get(id(self)) is self and self.proc.poll() is not None:
+                    del _DRAINING[id(self)]
+
     def _detached_execution(self, params: dict) -> bool:
         detached = getattr(self, "detached_executions", None)
         if not detached:
@@ -631,6 +858,10 @@ class _Client:
         with self._lock:
             if getattr(self, "recycled", False):
                 raise RuntimeError("Codex is restarting a stuck session; try again in a moment")
+            if getattr(self, "exiting", False):
+                # A drained generation being shut down (BACKENDS-06b).
+                raise RuntimeError("Codex is moving this conversation to a new session; "
+                                   "try again in a moment")
             self._goal_answer_begin(thread_id)
         try:
             try:
@@ -870,11 +1101,16 @@ class _Client:
         self.request("turn/steer", params)
         return True
 
-    def interrupt_active(self, agent_id: str = "", *, handle: "AppTurnHandle | None" = None) -> None:
+    def interrupt_active(self, agent_id: str = "", *, handle: "AppTurnHandle | None" = None,
+                         by_user: bool = False) -> None:
         """Interrupt the agent's active turn; with ``handle``, only if that turn
         is the one the handle was returned for."""
         active = self._actives.get(agent_id) if agent_id else self.active
         if active and (handle is None or active.handle is handle):
+            if by_user:
+                # Only a user's Stop: an internal interrupt (a shutdown, a
+                # move) must stay visible to codexTurnInterruptedUnasked.
+                active.handle.stop_requested = True
             self._pause_goal_for_stop(active)
             if not active.turn_id:
                 if len(getattr(self, "_actives", {})) <= 1:
@@ -1041,6 +1277,13 @@ def _normalize_item(item: dict) -> dict:
 
 
 _CLIENTS: dict[str, _Client] = {}
+# Generations still releasing their threads after a credential change
+# (BACKENDS-06b); each exits once nothing runs or is loaded on it.
+_DRAINING: dict[int, _Client] = {}
+_GENERATIONS = itertools.count(1)
+# A draining generation that still has an idle thread loaded this long after
+# its last turn ended is shut down: the thread has no writer left to protect.
+DRAIN_BACKSTOP_SEC = 60.0
 # Recycled clients whose process has not been seen to exit (BACKENDS-07b).
 _RETIRING: dict[int, _Client] = {}
 _LOCK = threading.RLock()
@@ -1121,16 +1364,32 @@ class _StuckSessionHold:
                 and client.proc.poll() is None)
 
 
-def turn_holders(agent_id: str) -> list[_StuckSessionHold]:
-    """Processes that still hold ``agent_id``'s thread outside any turn
-    (BACKENDS-07b): a send waits behind them instead of failing."""
+class _MovingThreadHold:
+    """The agent's thread is still open in a draining generation; its next
+    turn waits until that process released it (BACKENDS-06b)."""
+
+    def __init__(self, client: "_Client", thread_id: str):
+        self.client, self.thread_id = client, thread_id
+
+    def is_alive(self) -> bool:
+        return (self.thread_id in self.client._loaded_threads
+                and self.client.proc.poll() is None)
+
+
+def turn_holders(agent_id: str) -> list:
+    """Processes that still hold ``agent_id``'s thread outside any turn: a
+    stuck one (BACKENDS-07b) or a draining generation (BACKENDS-06b). A send
+    waits behind them instead of failing."""
     with _LOCK:
         for key, client in list(_RETIRING.items()):
             if client.proc.poll() is not None:
                 del _RETIRING[key]
         clients = list({id(client): client for client in
                         [*_CLIENTS.values(), *_RETIRING.values()]}.values())
-    holds = [_StuckSessionHold(client, agent_id) for client in clients]
+        draining = list(_DRAINING.values())
+    holds: list = [_StuckSessionHold(client, agent_id) for client in clients]
+    thread_id = agents_db.live_backend_session(agent_id) if draining else ""
+    holds += [_MovingThreadHold(client, thread_id) for client in draining if thread_id]
     return [hold for hold in holds if hold.is_alive()]
 
 
@@ -1179,7 +1438,7 @@ def recover_usage_failure(message: str) -> bool:
         if _CLIENTS.get(_SHARED_KEY) is not client:
             return False
         client.refresh_requested = True
-        if _busy(client) or message.produced_output:
+        if message.produced_output or not client._mark_retiring_if_quiet():
             return False
         # Close the old writer before allowing a new process to resume its
         # threads. Admission and retirement share this lock.
@@ -1221,8 +1480,17 @@ def _client(agent_id: str, session: str, stream=None) -> _Client:
             changed = getattr(client, "auth_fingerprint", fingerprint) != fingerprint
             if changed or getattr(client, "refresh_requested", False):
                 client.refresh_requested = True
-                if not _busy(client):
+                # No direct shutdown while a goal could be running natively
+                # with its turn/started not delivered yet (the coarse rule):
+                # such a process drains as a generation instead.
+                if client._mark_retiring_if_quiet():
                     client.shutdown()
+                    _CLIENTS.clear()
+                    client = None
+                elif changed:
+                    # A busy process keeps its turns; the new credentials
+                    # start a new generation for the next ones (BACKENDS-06b).
+                    _begin_drain(client)
                     _CLIENTS.clear()
                     client = None
         if client is not None and getattr(client, "reader_dead", False):
@@ -1236,6 +1504,206 @@ def _client(agent_id: str, session: str, stream=None) -> _Client:
         elif stream is not None:
             client.stream = stream
         return client
+
+
+_MOVE_PREFIX = "codex.goal_move."
+# Serialises a move's compare-and-set with users' goal actions.
+_GOAL_MOVE_LOCK = threading.RLock()
+
+
+def _move_get(thread_id: str) -> dict | None:
+    """The durable record of a goal paused for a thread move (BACKENDS-06b),
+    in the settings table: an older release ignores it, and a goal left
+    paused by a rollback stays visibly paused for the user to resume."""
+    if not thread_id:
+        return None
+    value = settings_store.get(_MOVE_PREFIX + thread_id)
+    try:
+        return json.loads(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _move_put(thread_id: str, record: dict) -> None:
+    """Through settings_store, the settings table's only writer. The record
+    carries the time of its first write (the move decision, ms) for the
+    recovery window; later phases keep it."""
+    record = {**record, "written_at": record.get("written_at") or int(time.time() * 1000)}
+    settings_store.set_text(_MOVE_PREFIX + thread_id, json.dumps(record))
+
+
+def _move_forget(thread_id: str) -> None:
+    settings_store.delete(_MOVE_PREFIX + thread_id)
+
+
+def _move_advance(thread_id: str, expected_phase: str, record: dict) -> bool:
+    """Compare-and-set: write ``record`` only while the stored record is
+    still in ``expected_phase`` (a user's goal action deletes it under the
+    same lock). False: the claim is gone and stays gone."""
+    with _GOAL_MOVE_LOCK:
+        current = _move_get(thread_id)
+        if not current or current.get("phase") != expected_phase:
+            return False
+        _move_put(thread_id, {**record, "written_at": current.get("written_at")})
+        return True
+
+
+def _continue_move(thread_id: str) -> None:
+    """After the move: resume the thread on the current generation and set
+    its goal active again, only if it is still paused exactly as the move
+    left it (compare-and-set on updatedAt). The record is cleared either
+    way; a thread that no longer exists just loses its record."""
+    with _GOAL_MOVE_LOCK:
+        record = _move_get(thread_id)
+        if not record or record.get("phase") != "moving":
+            return
+        agent = agents_db.get_by_backend_session(thread_id)
+        if not agent:
+            _move_forget(thread_id)
+            log("codexGoalMoveDropped", f"thread={thread_id[:8]} reason=no-agent")
+            return
+        try:
+            with _LOCK:
+                client = _client(agent["agent_id"], agent["session"])
+            client._ensure_loaded(agent, thread_id)
+            result = client.request("thread/goal/get", {"threadId": thread_id})
+        except RuntimeError as exc:
+            if "no rollout" in str(exc).lower() or "not found" in str(exc).lower():
+                _move_forget(thread_id)
+                log("codexGoalMoveDropped", f"thread={thread_id[:8]} reason=gone")
+                return
+            log_exception("codexGoalMoveResumeFail", exc, detail=thread_id[:8])
+            return
+        goal = result.get("goal") if isinstance(result, dict) else None
+        unchanged = (isinstance(goal, dict) and goal.get("status") == "paused"
+                     and goal.get("updatedAt") == record.get("updated_at"))
+        if not unchanged:
+            _move_forget(thread_id)
+            log("codexGoalMoveRefused", f"thread={thread_id[:8]} status={(goal or {}).get('status')}")
+            return
+        try:
+            client.goal(agent, "resume")
+        except Exception as exc:  # noqa: BLE001 - the record stays: the next pass retries
+            log_exception("codexGoalMoveResumeFail", exc, detail=thread_id[:8])
+            return
+        _move_forget(thread_id)       # only once the goal is active again
+        log("codexGoalMoveResumed", f"thread={thread_id[:8]} to={client.generation}")
+
+
+# A 'pausing' or 'paused' leftover younger than this is restored at recovery:
+# the surviving record proves no user goal action through Clarp since. An
+# older one (a rollback and re-upgrade, a long outage) is only cleared.
+MOVE_RESTORE_WINDOW_MS = 30 * 60 * 1000
+
+
+def _restore_paused(thread_id: str) -> None:
+    """Recovery of a recent 'pausing'/'paused' leftover: re-activate the goal
+    if codex still shows it paused, then clear the record."""
+    with _GOAL_MOVE_LOCK:
+        if not _move_get(thread_id):
+            return
+        agent = agents_db.get_by_backend_session(thread_id)
+        if not agent:
+            _move_forget(thread_id)
+            log("codexGoalMoveDropped", f"thread={thread_id[:8]} reason=no-agent")
+            return
+        try:
+            with _LOCK:
+                client = _client(agent["agent_id"], agent["session"])
+            client._ensure_loaded(agent, thread_id)
+            result = client.request("thread/goal/get", {"threadId": thread_id})
+        except RuntimeError as exc:
+            if "no rollout" in str(exc).lower() or "not found" in str(exc).lower():
+                _move_forget(thread_id)
+                log("codexGoalMoveDropped", f"thread={thread_id[:8]} reason=gone")
+                return
+            raise
+        goal = result.get("goal") if isinstance(result, dict) else None
+        if not isinstance(goal, dict) or goal.get("status") != "paused":
+            _move_forget(thread_id)
+            log("codexGoalMoveDropped", f"thread={thread_id[:8]} reason=not-paused")
+            return
+        try:
+            client.goal(agent, "resume")
+        except Exception as exc:  # noqa: BLE001 - the record stays: the next pass retries
+            log_exception("codexGoalMoveResumeFail", exc, detail=thread_id[:8])
+            return
+        _move_forget(thread_id)       # only once the goal is active again
+        log("codexGoalMoveRestored", f"thread={thread_id[:8]} to={client.generation}")
+
+
+def recover_goal_moves() -> int:
+    """Runtime start: finish or clear every move record a crash or a rollback
+    left. A 'moving' record is continued (compare-and-set). A 'pausing' or
+    'paused' one written within MOVE_RESTORE_WINDOW_MS is restored if codex
+    still shows the goal paused; an older one is only cleared, and its goal
+    stays visibly paused (lead, 4 Nov)."""
+    keys = settings_store.keys_with_prefix(_MOVE_PREFIX)
+    now_ms = int(time.time() * 1000)
+    for key in keys:
+        thread_id = key[len(_MOVE_PREFIX):]
+        record = _move_get(thread_id) or {}
+        phase = record.get("phase")
+        try:
+            written_at = int(record.get("written_at") or 0)
+        except (TypeError, ValueError):
+            written_at = 0
+        try:
+            if phase == "moving":
+                _continue_move(thread_id)
+            elif phase in ("pausing", "paused") and now_ms - written_at <= MOVE_RESTORE_WINDOW_MS:
+                _restore_paused(thread_id)
+            else:
+                _move_forget(thread_id)
+                log("codexGoalMoveDropped", f"thread={thread_id[:8]} reason=stale phase={phase or 'invalid'}")
+        except Exception as exc:  # noqa: BLE001 - one record never stops the others
+            log_exception("codexGoalMoveRecoverFail", exc, detail=thread_id[:8])
+    return len(keys)
+
+
+def _begin_drain(client: _Client) -> None:
+    """Called under _LOCK: the client becomes a draining generation."""
+    client.draining = True
+    _DRAINING[id(client)] = client
+    log("codexGenerationDraining", f"gen={client.generation} loaded={len(client._loaded_threads)} "
+                                   f"running={int(_busy(client))}")
+    _drain_later(client)
+
+    def backstop() -> None:
+        # Repeated until it exits: never while a turn runs on it.
+        if _DRAINING.get(id(client)) is not client:
+            return
+        client._exit_if_drained(backstop=True)
+        if _DRAINING.get(id(client)) is client:
+            _schedule_backstop()
+
+    def _schedule_backstop() -> None:
+        timer = threading.Timer(DRAIN_BACKSTOP_SEC, backstop)
+        timer.daemon = True
+        timer.start()
+
+    _schedule_backstop()
+
+
+def _drain_later(client: _Client) -> None:
+    """Off the reader thread: a release waits for its own reply."""
+    threading.Thread(target=client.drain_step, daemon=True, name="codex-drain").start()
+
+
+def _moving_owner(thread_id: str) -> _Client | None:
+    """The draining generation that still has ``thread_id`` open."""
+    if not thread_id:
+        return None
+    for client in list(_DRAINING.values()):
+        if thread_id in client._loaded_threads and client.proc.poll() is None:
+            return client
+    return None
+
+
+def _all_clients() -> list[_Client]:
+    with _LOCK:
+        return list({id(client): client for client in
+                     [*_CLIENTS.values(), *_DRAINING.values()]}.values())
 
 
 def spawn_turn(*, text: str, cwd: pathlib.Path, backend_session_id: str = "",
@@ -1257,6 +1725,11 @@ def spawn_turn(*, text: str, cwd: pathlib.Path, backend_session_id: str = "",
     with _LOCK:
         client = _client(agent_id, session, stream=stream)
         admit_turn(client, agent_id)   # before turn/start: nothing is sent
+        if not is_new_session and _moving_owner(backend_session_id) is not None:
+            # Never open one thread in two processes (codex's writer lock
+            # would refuse it anyway): the dispatcher waits for the release.
+            raise CodexSessionStuck(
+                "Waiting for the previous Codex session to release this conversation")
         handle = AppTurnHandle(client, agent_id=agent_id)
         agent = agents_db.get_by_agent_id(agent_id) if agent_id else None
         persona = (agent or {}).get("persona") or ""
@@ -1300,12 +1773,22 @@ def goal(agent_id: str, action: str, *, objective: str = "", stream=None) -> dic
     agent = agents_db.get_by_agent_id(agent_id)
     if not agent:
         raise ValueError("no such agent")
-    with _LOCK:
-        client = _client(agent_id, agent["session"], stream=stream)
-    if action != "get":
-        # The user's own word on the goal replaces a pending Stop-pause.
-        _stop_pause_forget(agents_db.live_backend_session(agent_id))
-    return client.goal(agent, action, objective)
+    thread_id = agents_db.live_backend_session(agent_id)
+    with _GOAL_MOVE_LOCK:
+        with _LOCK:
+            # During a move the thread is still open in the draining
+            # generation: act there, never open it twice (BACKENDS-06b).
+            # _client() first: it may itself turn the current process into a
+            # draining generation (a credential change), so the owner is
+            # resolved after it.
+            current = _client(agent_id, agent["session"], stream=stream)
+            client = _moving_owner(thread_id) or current
+        if action != "get" and thread_id:
+            # The user's own word on the goal ends a move's claim and
+            # replaces a pending Stop-pause.
+            _move_forget(thread_id)
+            _stop_pause_forget(thread_id)
+        return client.goal(agent, action, objective)
 
 
 def _shared_client() -> _Client | None:
@@ -1317,28 +1800,39 @@ def _shared_client() -> _Client | None:
         return client
 
 
+def _client_running(agent_id: str) -> _Client | None:
+    """The generation where ``agent_id`` has a live turn: the current one or
+    a draining one (BACKENDS-06b), so Stop and steering reach it there."""
+    for client in _all_clients():
+        active = getattr(client, "_actives", {}).get(agent_id) or (
+            client.active if getattr(client.active, "agent_id", None) == agent_id
+            else None)
+        if active and active.handle.is_alive():
+            return client
+    return None
+
+
 def steer(agent_id: str, text: str, *, client_msg_id: str = "",
           synthesize_audio: bool = False) -> bool:
-    client = _shared_client()
+    client = _client_running(agent_id) or _shared_client()
     return bool(client and client.steer(
         text, client_msg_id, synthesize_audio, agent_id=agent_id))
 
 
 def active_handles(agent_id: str) -> list[AppTurnHandle]:
-    client = _shared_client()
-    if client is None:
-        return []
-    active = getattr(client, "_actives", {}).get(agent_id) or (
-        client.active if getattr(client.active, "agent_id", None) == agent_id
-        else None)
-    return [active.handle] if active and active.handle.is_alive() else []
+    for client in _all_clients():
+        active = getattr(client, "_actives", {}).get(agent_id) or (
+            client.active if getattr(client.active, "agent_id", None) == agent_id
+            else None)
+        if active and active.handle.is_alive():
+            return [active.handle]
+    return []
 
 
 def busy_agents() -> set[str]:
     """Agents with a live turn on any app-server connection, including goal
     continuations the server started itself (adopted, without a Clarp slot)."""
-    with _LOCK:
-        clients = list({id(client): client for client in _CLIENTS.values()}.values())
+    clients = _all_clients()
     busy: set[str] = set()
     for client in clients:
         turns = list(getattr(client, "_actives", {}).values())
@@ -1355,10 +1849,10 @@ def interrupt(agent_id: str) -> int:
         for handle in handles:
             handle.terminate()
         return len(handles)
-    client = _shared_client()
+    client = _client_running(agent_id) or _shared_client()
     if client is None:
         return 0
-    client.interrupt_active(agent_id)
+    client.interrupt_active(agent_id, by_user=True)
     return 0
 
 
@@ -1369,7 +1863,7 @@ def recycle_clients() -> int:
         closed = 0
         for client in clients:
             client.refresh_requested = True
-            if _busy(client):
+            if not client._mark_retiring_if_quiet():
                 continue
             client.shutdown()
             for key, value in list(_CLIENTS.items()):

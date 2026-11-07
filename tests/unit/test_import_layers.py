@@ -39,13 +39,13 @@ SERVER = pathlib.Path(__file__).resolve().parents[2] / "server"
 LAYERS = ("persistence", "core", "features", "http")
 
 PERSISTENCE = frozenset({
-    "lib", "lib.clock", "lib.db", "lib.db_migrations", "lib.db_schema",
+    "lib", "lib.batched_delete", "lib.clock", "lib.db", "lib.db_migrations", "lib.db_schema",
     "lib.lifecycle", "lib.paths", "lib.revisioned_cache", "lib.timing", "lib.xdg",
 })
 PERSISTENCE_PACKAGES = ("lib.persistence",)
 CORE = frozenset({f"lib.{m}" for m in (
     "agent_lifecycle", "agent_store", "agents", "backends", "config", "config_writer",
-    "conversation", "deployment", "error_classify", "eventlog", "events", "hook_runtime",
+    "conversation", "claude_reply_evidence", "deployment", "error_classify", "eventlog", "events", "hook_runtime",
     "http_utils", "identity", "launch_receipts", "log", "message_live", "message_store", "message_turns",
     "message_writes", "origins", "proc_util", "process_registry", "prompt_admissions",
     "protocol", "roster", "roster_seed", "runtime_bridge", "runtime_events", "server_identity",

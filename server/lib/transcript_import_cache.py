@@ -8,6 +8,7 @@ watch events or process startup.
 from __future__ import annotations
 
 import pathlib
+import math
 import sys
 import threading
 import time
@@ -17,6 +18,29 @@ from dataclasses import dataclass
 from .revisioned_cache import RevisionedCache
 
 _guard = threading.Lock()
+# Registered once by the Host composition root before scheduling. Deliberately
+# survives cache/DB resets and repeated server-module imports in this process.
+_host_started_at: float | None = None
+_STARTUP_GRACE_SECONDS = 120.0
+_LARGE_SOURCE_BYTES = 50 * 1024 * 1024
+
+
+def note_host_started(origin: float) -> bool:
+    """Bind the first valid Host-start origin; conflicting later origins lose.
+
+    Runtime-only processes do not register a Host and acquire no startup gate.
+    Invalid/future origins are programming errors; no wall-clock coercion.
+    """
+    global _host_started_at
+    if (type(origin) not in (int, float) or not math.isfinite(origin)
+            or origin < 0 or origin > time.monotonic()):
+        raise ValueError("invalid Host startup monotonic origin")
+    with _guard:
+        if _host_started_at is not None:
+            return False
+        _host_started_at = float(origin)
+        return True
+
 # Waits for admitted direct imports to finish (test reset); releases _guard while waiting.
 _cond = threading.Condition(_guard)
 _path_locks: dict[str, threading.Lock] = {}
@@ -28,6 +52,10 @@ _validated_at: RevisionedCache[str, float] = RevisionedCache(
 # Unchanged version checks do not erase a previously measured slow import.
 _last_import_duration: RevisionedCache[str, float] = RevisionedCache(
     "transcript-import-duration", max_entries=1024)
+# A timed-out snapshot must not pay its full wait again on every poll.
+_snapshot_wait_until: RevisionedCache[str, float] = RevisionedCache(
+    "transcript-snapshot-wait-cooldown", max_entries=1024)
+_SNAPSHOT_DEADLINE_COOLDOWN = 120.0
 
 
 def source_path(path: pathlib.Path) -> pathlib.Path:
@@ -191,6 +219,7 @@ def reset_for_tests(deadline_s: float = 5.0) -> bool:
                 _imported.clear()
                 _validated_at.reset()
                 _last_import_duration.reset()
+                _snapshot_wait_until.reset()
                 _last_started.clear()
                 _deferred.clear()
                 _pending.clear()
@@ -209,7 +238,8 @@ def reset_for_tests(deadline_s: float = 5.0) -> bool:
 
 # One fallback importer per process; coalesce callers by owner/path. Watcher
 # imports share import_if_changed's version lock and remain authoritative.
-# A request is (path, importer, owner, after): ``after`` runs on the worker once
+# A request is (path, importer, owner, after, urgent, first_wait_rank,
+# startup_exempt, observed_source_bytes): ``after`` runs on the worker once
 # the import returned normally, whether it imported or found the version current.
 _pending: dict[str, tuple[tuple, int]] = {}
 _worker: threading.Thread | None = None
@@ -218,8 +248,11 @@ _BACKGROUND_LIMIT = 64
 # re-imported at most once per window, then once more when the window
 # closes, instead of a full re-parse per poll. Live text and tools reach
 # clients through live items meanwhile (docs/live-items.md).
-_BACKGROUND_MIN_INTERVAL = 5.0
-_last_started: dict[str, float] = {}
+_BACKGROUND_MIN_INTERVAL = 10.0
+# Historical name retained for the reset/ownership seam: now keyed by agent
+# (ownerless calls by path), with (actual completion, duration). None reserves
+# a bounded slot for admitted work whose first validation has not completed.
+_last_started: dict[str, tuple[float | None, float]] = {}
 # key -> (newest request, its window timer, epoch): the timer submits it.
 _deferred: dict[str, tuple[tuple, threading.Timer, int]] = {}
 
@@ -254,63 +287,143 @@ def _ensure_worker() -> bool:
     return True
 
 
+def _owner_key(key: str) -> str:
+    return key.partition("\0")[0] or key
+
+
+def _background_interval(duration: float) -> float:
+    if duration > 5.0:
+        return min(300.0, max(_BACKGROUND_MIN_INTERVAL, 6 * duration))
+    return max(_BACKGROUND_MIN_INTERVAL, 2 * duration)
+
+
+def _owner_deadline(key: str) -> float:
+    completed, duration = _last_started.get(_owner_key(key), (None, 0.0))
+    if completed is None:
+        return 0.0
+    return completed + _background_interval(duration)
+
+
+def _request_deadline(key: str, request: tuple, *, size: int | None = None) -> float:
+    deadline = _owner_deadline(key)
+    if (_host_started_at is not None and not request[4] and not request[6]
+            and (request[7] if size is None else size) >= _LARGE_SOURCE_BYTES):
+        deadline = max(deadline, _host_started_at + _STARTUP_GRACE_SECONDS)
+    return deadline
+
+
+def _reserve_owner(key: str, now: float) -> bool:
+    """Under _guard; never evict an unexpired or admitted owner's window."""
+    active = {_owner_key(k) for k in (*_pending, *_deferred)}
+    if _running is not None:
+        active.add(_owner_key(_running[0]))
+    for owner, (completed, duration) in list(_last_started.items()):
+        if owner not in active and (completed is None or
+                completed + _background_interval(duration) <= now):
+            del _last_started[owner]
+    owner = _owner_key(key)
+    if owner in _last_started:
+        return True
+    if len(_last_started) >= 4 * _BACKGROUND_LIMIT:
+        return False
+    _last_started[owner] = (None, 0.0)
+    return True
+
+
+def _defer_locked(key: str, request: tuple, epoch: int, wait: float) -> bool:
+    """Arm one tracked timer; replacing dirty work never moves its deadline."""
+    old = _deferred.get(key)
+    if old is not None and _request_deadline(key, request) >= _request_deadline(key, old[0]):
+        _deferred[key] = (request, old[1], old[2])
+        return True
+    # Explicit user provenance (or a source shrinking below the threshold)
+    # can remove a startup-only wait while preserving the786 owner deadline.
+    timer = threading.Timer(wait, _schedule_deferred)
+    timer.args = (key, epoch, timer)
+    timer.daemon = True
+    if not _start_tracked(timer):
+        if old is not None:
+            _deferred[key] = (request, old[1], old[2])  # newest intent, old live wake
+        return False
+    if old is not None:
+        old[1].cancel()
+    _deferred[key] = (request, timer, epoch)
+    return True
+
+
+def _rearm_owner_locked(key: str, now: float) -> list[str]:
+    """A successful faster import can shorten every path's owner deadline."""
+    failures = []
+    owner = _owner_key(key)
+    for waiting_key, entry in list(_deferred.items()):
+        if _owner_key(waiting_key) != owner:
+            continue
+        request, timer, epoch = entry
+        del _deferred[waiting_key]
+        if _defer_locked(waiting_key, request, epoch,
+                         max(0.0, _request_deadline(waiting_key, request) - now)):
+            timer.cancel()
+        else:
+            # Preserve the original retry/callback if a replacement timer
+            # cannot start; the dirty version is never marked covered here.
+            _deferred[waiting_key] = entry
+            failures.append(request[2])
+    return failures
+
+
 def schedule_import(path: pathlib.Path, importer: Callable[[], None], *, owner: str = '',
-                    after: Callable[[], None] | None = None,
-                    urgent: bool = False) -> bool:
-    """Import ``path`` for ``owner`` on the background worker. With ``after``,
-    the request is queued even when this version is already imported, so
-    ``after`` still runs once the worker's import returns; never after a failed
-    import. ``urgent`` bypasses the coalescing window, retaining queued watcher
-    callbacks and the same serialized worker. False when refused (queue full,
-    or a test reset in progress)."""
+                    after: Callable[[], None] | None = None, urgent: bool = False,
+                    startup_exempt: bool = False) -> bool:
+    """Coalesce normal work by agent; urgent RM-N12 requests bypass at drain.
+
+    Dirty signatures, locks and latest-winner callbacks remain per owner/path.
+    Every successful validation opens an adaptive completion-based normal window.
+    False means refused: the source version remains unread and retryable.
+    """
     key = f'{owner}\0{path}'
     signature = _signature(path)
     full = start_failed = False
     with _guard:
         if _resetting:
             return False
+        queued = _pending.get(key) or _deferred.get(key)
         if after is None:
             if _imported.get(key) == signature:
                 return False
-            # A caller without an after step (/log) must not drop a queued one.
-            after = _queued_after(key)
-        request = (path, importer, owner, after)
-        last = _last_started.get(key)
-        wait = (_BACKGROUND_MIN_INTERVAL - (time.monotonic() - last)
-                if last is not None and not urgent else 0.0)
-        if wait > 0 and key not in _pending:
-            if key in _deferred:
-                _, timer, epoch = _deferred[key]
-                _deferred[key] = (request, timer, epoch)   # the newest request wins
-            else:
-                timer = threading.Timer(wait, _schedule_deferred)
-                timer.args = (key, _epoch, timer)
-                timer.daemon = True
-                if not _start_tracked(timer):
-                    start_failed = True
-                else:
-                    _deferred[key] = (request, timer, _epoch)
-            if not start_failed:
-                return True
-        elif key not in _pending and len(_pending) >= _BACKGROUND_LIMIT:
-            # The next request/watcher can retry; never create unbounded threads.
+            after = queued[0][3] if queued else None
+        # Once requested, urgency belongs to the queued token, not to whichever
+        # normal request last supplied the newest importer/callback.
+        urgent = urgent or bool(queued and queued[0][4])
+        now = time.monotonic()
+        # Keep the first accepted wait rank through coalescing and timers.
+        # A hot path's new callback request goes behind an older waiting path.
+        rank = queued[0][5] if queued else now
+        # The exemption belongs only to this owner/path's queued user intent;
+        # it does not grant urgency or bypass the ordinary owner backoff.
+        startup_exempt = startup_exempt or bool(queued and queued[0][6])
+        request = (path, importer, owner, after, urgent, rank, startup_exempt, signature[1])
+        if (key not in _pending and key not in _deferred
+                and len(set(_pending) | set(_deferred)) >= _BACKGROUND_LIMIT):
             full = True
+        elif not _reserve_owner(key, now):
+            full = True
+        elif not urgent and key not in _pending and (wait := _request_deadline(key, request) - now) > 0:
+            start_failed = not _defer_locked(key, request, _epoch, wait)
         else:
-            if urgent and key in _deferred:
+            if key in _deferred:
                 _, timer, _ = _deferred.pop(key)
                 timer.cancel()
             _pending[key] = (request, _epoch)
             if not _ensure_worker():
-                del _pending[key]           # no worker owns it: refuse instead
+                del _pending[key]
                 start_failed = True
     if start_failed:
         from .log import log
         log("transcriptImportThreadStartFail", f"owner={owner}")
         return False
     if full:
-        if after is not None:
-            from .log import log
-            log("transcriptImportQueueFull", f"owner={owner}")
+        from .log import log
+        log("transcriptImportQueueFull", f"owner={owner}")
         return False
     return True
 
@@ -333,10 +446,18 @@ def import_for_snapshot(path: pathlib.Path, importer: Callable[[], None], *,
         if not _resetting and _imported.get(key) == signature:
             return True
         _, recent_duration = _last_import_duration.get(key, epoch)
+        _, wait_until = _snapshot_wait_until.get(key, epoch)
+    if wait_until is not None and started < wait_until:
+        # Ordinary scheduling preserves dirty work/callbacks without renewing
+        # urgency or the fixed cooldown on every snapshot poll.
+        schedule_import(path, importer, owner=owner, startup_exempt=True)
+        print(f"snapshotImportSkip code=deadline_cooldown "
+              f"source_bytes={signature[1]}", file=sys.stderr, flush=True)
+        return False
     if recent_duration is not None and recent_duration > timeout:
         # Known slow histories retain today's asynchronous/coalesced refresh.
         # Waiting the whole bound again would add latency without fresh rows.
-        schedule_import(path, importer, owner=owner)
+        schedule_import(path, importer, owner=owner, startup_exempt=True)
         print(f"snapshotImportSkip code=recent_slow "
               f"duration_ms={round(recent_duration * 1000)} "
               f"bound_ms={round(timeout * 1000)} source_bytes={signature[1]}",
@@ -355,6 +476,8 @@ def import_for_snapshot(path: pathlib.Path, importer: Callable[[], None], *,
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 code = "deadline"
+                _snapshot_wait_until.put(
+                    key, epoch, time.monotonic() + _SNAPSHOT_DEADLINE_COOLDOWN)
                 break
             _cond.wait(remaining)
     # Journal only: synchronous telemetry writes can themselves wait on SQLite
@@ -366,46 +489,22 @@ def import_for_snapshot(path: pathlib.Path, importer: Callable[[], None], *,
 
 
 def _schedule_deferred(key: str, epoch: int, token: threading.Timer) -> None:
-    """The window closed: admit the newest request, unless a test reset began
-    since this timer was armed (a stale timer touches nothing)."""
-    full_owner = failed_owner = None
-    with _guard:
-        entry = _deferred.get(key)
-        if _resetting or epoch != _epoch or entry is None or entry[1] is not token:
-            return
-        path = entry[0][0]                  # fixed per key; newer requests share it
-    # Stat outside _guard: file I/O must not stall every caller, and a vanished
-    # file must not raise here after the request left _deferred (it would be
-    # lost); unknown means submit, and the worker logs the import failure.
-    try:
-        signature = _signature(path)
-    except OSError:
-        signature = None
+    """Requeue newest dirty work; drain rechecks the owner's current deadline."""
+    failed_owner = None
     with _guard:
         entry = _deferred.get(key)
         if _resetting or epoch != _epoch or entry is None or entry[1] is not token:
             return
         request = entry[0]
         del _deferred[key]
-        _last_started.pop(key, None)
-        path, importer, owner, after = request
-        if after is None and signature is not None and _imported.get(key) == signature:
-            return
-        if key not in _pending and len(_pending) >= _BACKGROUND_LIMIT:
-            full_owner = owner if after is not None else None
-        else:
-            if after is None and key in _pending:
-                request = (path, importer, owner, _pending[key][0][3])
-            _pending[key] = (request, _epoch)
-            if not _ensure_worker():
-                del _pending[key]
-                failed_owner = owner
+        # This key already owns a waiting slot and a reserved cooldown entry.
+        _pending[key] = (request, epoch)
+        if not _ensure_worker():
+            del _pending[key]
+            failed_owner = request[2]
     if failed_owner is not None:
         from .log import log
         log("transcriptImportThreadStartFail", f"owner={failed_owner}")
-    if full_owner is not None:
-        from .log import log
-        log("transcriptImportQueueFull", f"owner={full_owner}")
 
 
 def is_active(path: pathlib.Path, *, owner: str = '') -> bool:
@@ -419,47 +518,102 @@ def is_active(path: pathlib.Path, *, owner: str = '') -> bool:
 def _drain_background():
     global _worker, _running
     from . import db
-    from .log import log_exception
+    from .log import log, log_exception
     try:
         while True:
+            failed = []
+            selected = None
             with _guard:
-                idle = not _pending
-                if not idle:
-                    # Pop and install _running in ONE section: is_active() never
-                    # sees a popped item as gone before it runs.
-                    key = next(iter(_pending))
-                    (path, importer, owner, after), item_epoch = _pending.pop(key)
+                now = time.monotonic()
+                # Due timer threads may get CPU in any order. Promote all due
+                # keys here so an older path cannot lose its place merely
+                # because its timer callback ran after a hotter path's.
+                for key, (request, timer, item_epoch) in list(_deferred.items()):
+                    if _request_deadline(key, request) <= now:
+                        timer.cancel()
+                        del _deferred[key]
+                        _pending[key] = (request, item_epoch)
+                waiting = sorted(_pending.items(), key=lambda item: item[1][0][5])
+            for key, (request, item_epoch) in waiting:
+                # Retain the waiting slot/rank while stat runs outside _guard.
+                # Revalidate the exact request token and epoch before consuming
+                # it: a replacement/reset during stat must keep its own intent.
+                size = request[7]
+                stat_error = None
+                if (_host_started_at is not None and not request[4] and not request[6]
+                        and time.monotonic() < _host_started_at + _STARTUP_GRACE_SECONDS):
+                    try:
+                        size = source_size(request[0])
+                    except OSError as exc:
+                        stat_error = exc
+                with _guard:
+                    current = _pending.get(key)
+                    if current is None or current[0] is not request or current[1] != item_epoch:
+                        continue
                     if _resetting or item_epoch != _epoch:
-                        continue                    # invalidated by a test reset
-                    _running = (key, item_epoch)
-            if idle:
-                # Close this thread's DB connection BEFORE clearing _worker, so a
-                # reset that later finds _worker None knows the thread holds no
-                # connection any more; new work queued meanwhile keeps it running.
+                        del _pending[key]
+                        continue
+                    if stat_error is not None:
+                        del _pending[key]
+                    else:
+                        now = time.monotonic()
+                        request = (*request[:7], size)
+                        wait = _request_deadline(key, request) - now
+                        if not request[4] and wait > 0:
+                            if not _defer_locked(key, request, item_epoch, wait):
+                                failed.append(request[2])
+                            del _pending[key]
+                            continue
+                        del _pending[key]
+                        _running = (key, item_epoch)
+                        selected = (key, request, item_epoch)
+                if stat_error is not None:
+                    log_exception('backgroundTranscriptImportFail', stat_error, detail=request[2])
+                if selected is not None:
+                    break
+            for failed_owner in failed:
+                log('transcriptImportThreadStartFail', f'owner={failed_owner}')
+            if selected is None:
+                # Never sleep or hold the worker behind an ineligible owner.
+                # Close before clearing: reset must outlive every real thread.
                 db.close_local()
                 with _guard:
                     if not _pending:
                         _worker = None
                         return
                 continue
+            key, (path, importer, owner, after, urgent, rank, startup_exempt, size), item_epoch = selected
             started = time.monotonic()
             try:
                 try:
                     imported = _import_admitted(path, importer, owner, item_epoch)
-                    duration = time.monotonic() - started
+                    completed = time.monotonic()
+                    rearm_failed = []
                     with _guard:
-                        # Only a completed import opens the window: a failed one
-                        # stays retryable at once.
-                        if _epoch == item_epoch:
-                            _last_started[key] = started
+                        if _epoch == item_epoch and not _resetting:
+                            previous_deadline = _owner_deadline(key)
+                            previous_cost = _last_started.get(_owner_key(key), (None, 0.0))[1]
+                            # Unchanged validation opens a new window but is
+                            # not a new expensive import: retain its last cost.
+                            cost = max(0.0, completed - started) if imported else previous_cost
+                            _last_started[_owner_key(key)] = (completed, cost)
+                            if _owner_deadline(key) < previous_deadline:
+                                rearm_failed = _rearm_owner_locked(key, completed)
                             if imported:
-                                _last_import_duration.put(key, item_epoch, duration)
-                            if len(_last_started) > 4 * _BACKGROUND_LIMIT:
-                                _last_started.pop(next(iter(_last_started)))
+                                # RM-N12: unchanged callback-only validation
+                                # must not erase the last measured slow import.
+                                _last_import_duration.put(
+                                    key, item_epoch, max(0.0, completed - started))
+                    for failed_owner in rearm_failed:
+                        log('transcriptImportThreadStartFail', f'owner={failed_owner}')
                 except Exception as exc:
                     log_exception('backgroundTranscriptImportFail', exc, detail=owner)
                 else:
-                    if after is not None:
+                    # Successful unchanged validation counts too; callback
+                    # duration/error never changes the completed import window.
+                    with _guard:
+                        current = _epoch == item_epoch and not _resetting
+                    if current and after is not None:
                         try:
                             after()
                         except Exception as exc:

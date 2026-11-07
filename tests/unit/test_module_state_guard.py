@@ -88,6 +88,8 @@ ALLOWED: dict[tuple[str, str], str] = {
     # Recycled app-server clients whose process has not been seen to exit;
     # their threads stay held until it has (BACKENDS-07b).
     ("lib/codex_app_server.py", "_RETIRING"): JOBS,
+    # Draining app-server generations after a credential change (BACKENDS-06b).
+    ("lib/codex_app_server.py", "_DRAINING"): JOBS,
     ("lib/compaction.py", "_active"): JOBS,
     ("lib/compaction.py", "_runtime_client"): CLIENT,
     ("lib/config.py", "PERSONA_PERSONALITIES"): IMPORT,
@@ -117,6 +119,8 @@ ALLOWED: dict[tuple[str, str], str] = {
     ("lib/elevenlabs_voices.py", "_cache"): CACHE,
     ("lib/google_stt.py", "_TOKENS"): CACHE,
     ("lib/eventlog.py", "LOG_DIR"): PATHS,
+    ("lib/eventlog.py", "_DEFERRED"): "per-thread deferred telemetry rows and sqliteWriteWait sinks; wait sinks flush only after their weakly referenced explicit state transaction ends (RM-N8b/B)",
+    ("lib/eventlog.py", "_DROPPED"): "per-process telemetry row loss and JSONL summary throttle; reset on restart and in tests (RM-N8b)",
     ("lib/health.py", "_STATE"): JOBS,
     ("lib/heartbeat.py", "_STATE_BY_AGENT"): "per-agent heartbeat timers of the running worker; rebuilt from agents rows on start",
     ("lib/janitor_autonomy.py", "_SCHEMA_READY_FOR"): PATHS,
@@ -154,7 +158,7 @@ ALLOWED: dict[tuple[str, str], str] = {
     ("lib/server_identity.py", "FEATURE_CONTRACTS"): IMPORT,
     ("lib/server_update.py", "_cache"): CACHE,
     ("lib/telemetry.py", "TELEMETRY_PATH"): PATHS,
-    ("lib/telemetry.py", "_SCHEMA_READY"): PATHS,
+    ("lib/telemetry.py", "_SCHEMA_READY_PATHS"): PATHS,
     ("lib/terminal_ws.py", "_live"): JOBS,
     ("lib/tool_explanation_commands.py", "_counts"): THROTTLE,
     ("lib/tool_explanation_commands.py", "_misses"): THROTTLE,
@@ -168,6 +172,7 @@ ALLOWED: dict[tuple[str, str], str] = {
     ("lib/transcript_import_cache.py", "_running"): JOBS,
     ("lib/transcript_import_cache.py", "_threads"): JOBS,
     ("lib/transcript_import_cache.py", "_direct_active"): JOBS,
+    ("lib/transcript_import_cache.py", "_host_started_at"): "fixed Host-process origin bound once by composition root; deliberately survives cache/DB resets",
     ("lib/transcript_import_cache.py", "_epoch"): RESET,
     ("lib/transcript_import_cache.py", "_resetting"): RESET,
     ("lib/transcript_import_cache.py", "_reset_owner"): RESET,

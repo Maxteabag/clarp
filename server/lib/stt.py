@@ -537,6 +537,7 @@ class SubprocessWhisperSTT(WhisperSTT):
         self._proc: subprocess.Popen | None = None
         self._proc_lock = threading.Lock()
         self._pending: dict[str, tuple[threading.Event, dict]] = {}
+        self._pending_workers: dict[str, subprocess.Popen] = {}
         self._pending_lock = threading.Lock()
         self._fallback_in_process = False
         self._load_event_text: str | None = None
@@ -607,7 +608,8 @@ class SubprocessWhisperSTT(WhisperSTT):
                     continue
                 rid = str(msg.get("id") or "")
                 with self._pending_lock:
-                    slot = self._pending.get(rid)
+                    slot = (self._pending.get(rid)
+                            if self._pending_workers.get(rid) is proc else None)
                 if slot is not None:
                     slot[1].update(msg)
                     slot[0].set()
@@ -619,7 +621,8 @@ class SubprocessWhisperSTT(WhisperSTT):
                 ready.set()
             # Fail every request still waiting on this (now dead) worker.
             with self._pending_lock:
-                waiting = list(self._pending.values())
+                waiting = [slot for rid, slot in self._pending.items()
+                           if self._pending_workers.get(rid) is proc]
             for ev, box in waiting:
                 box.setdefault("error", "stt worker exited")
                 ev.set()
@@ -704,6 +707,10 @@ class SubprocessWhisperSTT(WhisperSTT):
                     if not self._spawn_worker():
                         raise RuntimeError("stt worker unavailable")
                     proc = self._proc
+                # A request registered before respawn has no worker yet. A
+                # retired reader must never fail that request or its successor.
+                with self._pending_lock:
+                    self._pending_workers[rid] = proc
                 try:
                     proc.stdin.write(json.dumps({
                         "op": "transcribe", "id": rid, "path": path,
@@ -719,6 +726,7 @@ class SubprocessWhisperSTT(WhisperSTT):
         finally:
             with self._pending_lock:
                 self._pending.pop(rid, None)
+                self._pending_workers.pop(rid, None)
         if box.get("error"):
             self._raise_if_replaced()
             raise RuntimeError(f"stt worker: {box['error']}")

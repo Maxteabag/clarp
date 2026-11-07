@@ -34,6 +34,7 @@ Schema (top-level promoted columns; everything else goes in `detail`):
 """
 from __future__ import annotations
 
+import atexit
 import datetime as _dt
 import fcntl
 import json
@@ -41,7 +42,10 @@ import os
 import pathlib
 import hashlib
 import sys
+import sqlite3
+import weakref
 import threading
+import time
 import traceback
 from dataclasses import dataclass
 
@@ -82,6 +86,8 @@ def reset_for_tests(path: pathlib.Path | None = None) -> None:
         str(pathlib.Path.home() / ".cache" / "clarp" / "logs"),
     ))
     LOG_DIR.mkdir(parents=True, exist_ok=True)
+    with _DROPPED_LOCK:
+        _DROPPED.update(pid=os.getpid(), total=0, reported=0, last_report=None)
 
 
 def _iso(now: _dt.datetime | None = None) -> str:
@@ -113,7 +119,112 @@ def _sanitize_detail(value: object, key: str = "") -> object:
     return value
 
 
+# Ordinary emits queue only their SQLite row; JSONL stays synchronous. The
+# sqliteWriteWait record queues both sinks (and stderr) until its particular
+# explicit/open state transaction ends (RM-N8b addition B).
+@dataclass(frozen=True)
+class _DeferredRecord:
+    record: dict | None
+    now: _dt.datetime
+    jsonl: bool = False
+    stderr_line: str | None = None
+    connection: weakref.ReferenceType | None = None
+
+
+_DEFERRED: dict[int, list[_DeferredRecord]] = {}
+_DEFERRED_LOCK = threading.Lock()
+
+# Process-local loss accounting, independent of the contended telemetry DB.
+# Report the first loss immediately, then at most once per minute on an insert
+# attempt (including recovery); orderly exit flushes any remaining count.
+_DROPPED = {"pid": os.getpid(), "total": 0, "reported": 0, "last_report": None}
+_DROPPED_LOCK = threading.Lock()
+
+
+def _in_state_transaction() -> bool:
+    from . import db
+    return db.thread_holds_transaction()
+
+
+def flush_deferred() -> None:
+    """Write this thread's queued rows and those of threads that have ended."""
+    if not _DEFERRED:
+        return
+    me = threading.get_ident()
+    alive = {thread.ident for thread in threading.enumerate()}
+    with _DEFERRED_LOCK:
+        owners = [ident for ident in _DEFERRED if ident == me or ident not in alive]
+        batches = [(ident, _DEFERRED.pop(ident)) for ident in owners]
+    for owner, batch in batches:
+        _flush_batch(owner, batch)
+
+
+def _flush_batch(owner: int, batch: list[_DeferredRecord]) -> None:
+    for index, item in enumerate(batch):
+        connection = item.connection() if item.connection is not None else None
+        if connection is not None:
+            try:
+                blocked = connection.in_transaction
+            except sqlite3.ProgrammingError:  # a closed connection released its lock
+                blocked = False
+            if blocked:
+                # Manual/exit flushes must not bypass this wait's transaction.
+                # Prepend before later emits to preserve this thread's order.
+                with _DEFERRED_LOCK:
+                    _DEFERRED[owner] = batch[index:] + _DEFERRED.get(owner, [])
+                return
+        if item.stderr_line is not None:
+            print(item.stderr_line, file=sys.stderr, flush=True)
+        if item.record is not None:
+            _insert_sqlite(item.record, item.now)
+            if item.jsonl:
+                _append_jsonl(item.record, item.now)
+
+
+def _flush_all_deferred() -> None:
+    with _DEFERRED_LOCK:
+        batches = list(_DEFERRED.items())
+        _DEFERRED.clear()
+    for owner, batch in batches:
+        _flush_batch(owner, batch)
+    _report_dropped(_dt.datetime.now(_dt.timezone.utc), force=True)
+
+
+def defer_sqlite_write_wait(connection, stderr_line: str, detail: str) -> bool:
+    """Queue the wait line without sink I/O while its explicit transaction is open.
+
+    Autocommit RETURNING cursors are deliberately outside this predicate (RM-N13).
+    Weak ownership never keeps an abandoned connection/its writer lock alive.
+    """
+    if not connection.in_transaction:
+        return False
+    from . import diagnostics_settings
+    now = _dt.datetime.now(_dt.timezone.utc)
+    record = None
+    if diagnostics_settings.allows_event(source="server", event="sqliteWriteWait"):
+        record = {"ts": _iso(now), "source": "server", "event": "sqliteWriteWait",
+                  "level": "info", "detail": {"msg": detail}}
+    item = _DeferredRecord(record, now, jsonl=True, stderr_line=stderr_line,
+                           connection=weakref.ref(connection))
+    with _DEFERRED_LOCK:
+        _DEFERRED.setdefault(threading.get_ident(), []).append(item)
+    return True
+
+
+atexit.register(_flush_all_deferred)
+
+
 def _write_sqlite(record: dict, now: _dt.datetime) -> None:
+    if _in_state_transaction():
+        with _DEFERRED_LOCK:
+            _DEFERRED.setdefault(threading.get_ident(), []).append(_DeferredRecord(record, now))
+        return
+    flush_deferred()
+    _insert_sqlite(record, now)
+
+
+def _insert_sqlite(record: dict, now: _dt.datetime) -> None:
+    dropped = False
     try:
         from . import telemetry
 
@@ -158,7 +269,9 @@ def _write_sqlite(record: dict, now: _dt.datetime) -> None:
             ),
         )
     except Exception as error:
+        dropped = True
         print(f"eventlog sqlite write failed: {error}", file=sys.stderr)
+    _report_dropped(_dt.datetime.now(_dt.timezone.utc), dropped=dropped)
 
 
 def _write_jsonl(record: dict, now: _dt.datetime) -> None:
@@ -171,6 +284,37 @@ def _write_jsonl(record: dict, now: _dt.datetime) -> None:
                 f.write(line)
             finally:
                 fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+
+
+def _report_dropped(now: _dt.datetime, *, dropped: bool = False, force: bool = False) -> None:
+    # Never call emit() here: a summary must not attempt SQLite or recursively
+    # count itself. Hold this lock only across accounting and the JSONL append,
+    # never across an insert, state transaction or deferred-queue lock.
+    with _DROPPED_LOCK:
+        pid = os.getpid()
+        if _DROPPED["pid"] != pid:  # a fork starts a new process counter
+            _DROPPED.update(pid=pid, total=0, reported=0, last_report=None)
+        if dropped:
+            _DROPPED["total"] += 1
+        pending = _DROPPED["total"] - _DROPPED["reported"]
+        if not pending:
+            return
+        tick = time.monotonic()
+        last = _DROPPED["last_report"]
+        if not force and last is not None and tick - last < 60:
+            return
+        record = {
+            "ts": _iso(now), "source": "server", "event": "eventlogDropped", "level": "warn",
+            "detail": {"pid": pid, "dropped": pending, "total_dropped": _DROPPED["total"]},
+        }
+        try:
+            _write_jsonl(record, now)
+        except OSError as error:
+            # Retain the count for the next attempt; logging cannot break callers.
+            print(f"eventlog drop report failed: {error}", file=sys.stderr)
+            return
+        _DROPPED["reported"] = _DROPPED["total"]
+        _DROPPED["last_report"] = tick
 
 
 def emit(source: str, event: str, *,
@@ -247,8 +391,12 @@ def emit(source: str, event: str, *,
             print(f"eventlog serialization failed: {error}", file=sys.stderr)
             return
     _write_sqlite(record, now_dt)
+    _append_jsonl(record, now_dt)
+
+
+def _append_jsonl(record: dict, now: _dt.datetime) -> None:
     try:
-        _write_jsonl(record, now_dt)
+        _write_jsonl(record, now)
     except OSError as error:
         # Never let logging hurt the caller, but leave a journal trail.
         print(f"eventlog write failed: {error}", file=sys.stderr)

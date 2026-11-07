@@ -98,22 +98,89 @@ def _previous_done(agent_id: str, done_ts: int) -> int:
     return int(row["previous_done"] or 0) if row else 0
 
 
+def _completion_scope(agent_id: str, trace_id: str, backend_session_id: str
+                      ) -> tuple[bool, str, bool]:
+    """Resolve only existing attempt identity; never use the current runtime.
+
+    Unknown traces keep the historical window policy. A known attempt with no
+    unique backend binding cannot search every conversation on the agent.
+    """
+    if not trace_id:
+        return False, backend_session_id, True
+    turn = db.conn().execute(
+        "SELECT 1 FROM turns WHERE agent_id=? AND trace_id=? LIMIT 1",
+        (agent_id, trace_id)).fetchone()
+    if turn is None:
+        return False, backend_session_id, True
+    bindings = {str(r[0]) for r in db.conn().execute(
+        """SELECT DISTINCT backend_session_id FROM messages
+             WHERE agent_id=? AND trace_id=? AND role='user'
+               AND COALESCE(backend_session_id,'')<>'' LIMIT 2""",
+        (agent_id, trace_id))}
+    if not bindings:
+        bindings = {str(r[0]) for r in db.conn().execute(
+            """SELECT DISTINCT r.backend_session_id FROM turns t
+                 JOIN runtimes r ON r.runtime_id=t.runtime_id AND r.agent_id=t.agent_id
+                 WHERE t.agent_id=? AND t.trace_id=?
+                   AND COALESCE(r.backend_session_id,'')<>'' LIMIT 2""",
+            (agent_id, trace_id))}
+    if backend_session_id:
+        return True, backend_session_id, not bindings or backend_session_id in bindings
+    if len(bindings) == 1:
+        return True, next(iter(bindings)), True
+    return True, "", False
+
+
+# A queued request can be visible before the preceding execution completes.
+# Its independent durable owner excludes it, even after payload-free settlement.
+_OTHER_OWNER_SQL = """
+    NOT EXISTS (SELECT 1 FROM turns t
+                 WHERE t.agent_id=messages.agent_id
+                   AND t.trace_id=messages.trace_id AND t.trace_id<>?)
+    AND NOT EXISTS (SELECT 1 FROM queued_turns q
+                     WHERE q.agent_id=messages.agent_id AND q.trace_id<>?
+                       AND (q.trace_id=messages.trace_id
+                            OR (messages.role='user' AND (
+                                (q.prompt_admission_id<>'' AND
+                                 q.prompt_admission_id=messages.prompt_admission_id)
+                                OR (q.client_msg_id<>'' AND messages.message_id=
+                                    CASE WHEN q.client_msg_id LIKE 'u-%'
+                                         THEN q.client_msg_id ELSE 'u-'||q.client_msg_id END)))))
+"""
+
+
 def _causing_user_row(agent_id: str, backend_session_id: str,
-                      lower_bound: int, upper_bound: int):
-    params: list[Any] = [agent_id, lower_bound, upper_bound]
-    where = "agent_id = ? AND role = 'user' AND updated_at >= ? AND updated_at <= ?"
+                      lower_bound: int, upper_bound: int, *, trace_id: str = "",
+                      identified: bool = False):
+    params: list[Any] = [agent_id, upper_bound, lower_bound]
+    where = "agent_id = ? AND role = 'user' AND updated_at <= ? AND (updated_at >= ?"
+    if identified:
+        where += " OR trace_id = ?"
+        params.append(trace_id)
+    where += ")"
+    if identified:
+        where += " AND " + _OTHER_OWNER_SQL
+        params.extend((trace_id, trace_id))
     if backend_session_id:
         where += " AND backend_session_id = ?"
         params.append(backend_session_id)
-    return db.conn().execute(
-        f"""SELECT message_id, origin, sender_agent_id, updated_at,
-                   backend_session_id, text, prompt_admission_id
-              FROM messages
-             WHERE {where}
-             ORDER BY updated_at DESC, revision DESC, seq DESC
-             LIMIT 1""",
-        tuple(params),
-    ).fetchone()
+    select = f"""SELECT message_id, origin, sender_agent_id, updated_at,
+                        backend_session_id, text, prompt_admission_id
+                   FROM messages WHERE {where}"""
+    latest = " ORDER BY updated_at DESC, revision DESC, seq DESC LIMIT 1"
+    row = db.conn().execute(select + latest, tuple(params)).fetchone()
+    if identified and row is not None and row["origin"] == "agent":
+        # Only peers are subordinate to an eligible user request. Watcher,
+        # Oracle and automation keep their existing order among nonpeers.
+        user = db.conn().execute(
+            select + " AND COALESCE(NULLIF(TRIM(origin), ''), 'user')='user'"
+            " AND COALESCE(sender_agent_id, '')=''" + latest,
+            tuple(params)).fetchone()
+        if user is not None:
+            return db.conn().execute(
+                select + " AND COALESCE(origin, 'user')<>'agent'" + latest,
+                tuple(params)).fetchone()
+    return row
 
 
 def _sending_client(prompt_admission_id: str) -> str:
@@ -145,7 +212,8 @@ def _next_user_after(agent_id: str, backend_session_id: str, done_ts: int) -> in
 
 
 def _assistant_candidates(agent_id: str, backend_session_id: str, floor_ms: int,
-                          ceiling_ms: int):
+                          ceiling_ms: int, *, trace_id: str = "",
+                          identified: bool = False):
     params: list[Any] = [agent_id, floor_ms, ceiling_ms]
     where = (
         "agent_id = ? AND role = 'assistant' "
@@ -159,6 +227,9 @@ def _assistant_candidates(agent_id: str, backend_session_id: str, floor_ms: int,
     if backend_session_id:
         where += " AND backend_session_id = ?"
         params.append(backend_session_id)
+    if identified:
+        where += " AND trace_id = ?"
+        params.append(trace_id)
     params.append(ASSISTANT_CANDIDATE_LIMIT)
     return db.conn().execute(
         f"""SELECT message_id, text, updated_at, origin, kind
@@ -336,7 +407,11 @@ def classify_completed_turn(*, agent_id: str, session: str, persona: str,
     now = db.now_ms()
     notification_id = _notification_id(agent_id, done_ts)
     lower_bound = _previous_done(agent_id, done_ts)
-    cause = _causing_user_row(agent_id, backend_session_id, lower_bound, done_ts)
+    identified, backend_session_id, compatible = _completion_scope(
+        agent_id, trace_id, backend_session_id)
+    cause = (_causing_user_row(
+        agent_id, backend_session_id, lower_bound, done_ts,
+        trace_id=trace_id, identified=identified) if compatible else None)
     origin = ""
     cause_message_id = ""
     cause_updated_at = lower_bound
@@ -359,14 +434,17 @@ def classify_completed_turn(*, agent_id: str, session: str, persona: str,
         else AMBIGUOUS_ASSISTANT_LATE_WINDOW_MS
     )
     ceiling_ms = done_ts + late_window_ms
-    next_user_at = _next_user_after(agent_id, backend_session_id, done_ts)
+    next_user_at = (0 if identified else
+                    _next_user_after(agent_id, backend_session_id, done_ts))
     if next_user_at:
         ceiling_ms = min(ceiling_ms, next_user_at - 1)
     timeout = SETTLE_TIMEOUT_S if settle_timeout_s is None else float(settle_timeout_s)
     wait = _settle_wait if wait_for_message is None else wait_for_message
     source, preview, content_reason = wait(
         lambda: _select_content_source(
-            _assistant_candidates(agent_id, backend_session_id, floor_ms, ceiling_ms)),
+            _assistant_candidates(
+                agent_id, backend_session_id, floor_ms, ceiling_ms,
+                trace_id=trace_id, identified=identified) if compatible else []),
         timeout,
     )
 

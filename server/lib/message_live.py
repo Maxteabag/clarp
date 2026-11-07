@@ -58,6 +58,7 @@ CLAUDE_META_REPLY = "No response requested."
 def upsert_live_assistant_message(*, agent_id: str, backend_session_id: str,
                                   trace_id: str = "", text: str,
                                   item_key: str = "",
+                                  _provider_genuine: bool = False,
                                   ) -> dict[str, Any] | None:
     """Store the current streamed assistant text of one provider message.
 
@@ -69,7 +70,7 @@ def upsert_live_assistant_message(*, agent_id: str, backend_session_id: str,
     if not agent_id or not backend_session_id:
         return None
     text = strip_hidden_blocks(str(text or ""))
-    if not text.strip() or text.strip() == CLAUDE_META_REPLY:
+    if not text.strip() or (text.strip() == CLAUDE_META_REPLY and not _provider_genuine):
         # Claude Code answers its own injected "Continue from where you left
         # off." with this line whenever an interrupted session is resumed.
         # parse_turns drops it from the durable transcript; streaming it here

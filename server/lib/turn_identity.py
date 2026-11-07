@@ -22,6 +22,12 @@ from .provider_background_jobs import TURN_ENV, _TOKEN
 IDENTITY_BACKENDS = frozenset({"claude", "agy", "grok", "opencode", "deepseek"})
 
 
+class TurnIdentityUnavailable(Exception):
+    """A well-formed turn token whose lookup failed: the caller's turn identity
+    is unknown, which must not read as "no turn" (HTTP-N5). The HTTP layer
+    answers a retryable 503."""
+
+
 def caller_agent_id(environ=None) -> str:
     """The agent whose turn issued this process's token, or ""."""
     token = (os.environ if environ is None else environ).get(TURN_ENV, "")
