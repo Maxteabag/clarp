@@ -617,3 +617,85 @@ def test_catalog_rows_advertise_presentation_and_flags():
     # Claude efforts are per model, so the provider row carries none.
     assert claude["supported_efforts"] is None
     assert claude["supports_mcp"] is True and claude["sort_index"] == 0
+
+
+@pytest.mark.parametrize("provider,command,timeout", [
+    ("codex", ["debug", "models"], 2.5),
+    ("agy", ["models"], 5.0),
+    ("grok", ["models"], 5.0),
+])
+@pytest.mark.parametrize("failure", ["timeout", "oserror", "nonzero"])
+def test_model_probe_failures_preserve_version_and_unknown_fallback(
+    provider, command, timeout, failure,
+):
+    calls = []
+
+    def run(argv, **kwargs):
+        if argv[-1] == "--version":
+            return subprocess.CompletedProcess(argv, 0, "probe 9.8.7", "")
+        calls.append((argv, kwargs["timeout"]))
+        if failure == "timeout":
+            raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
+        if failure == "oserror":
+            raise OSError("synthetic missing probe")
+        return subprocess.CompletedProcess(argv, 2, "", "not available")
+
+    row = capabilities._discover_provider(
+        provider, OBSERVED_AT, resolve=lambda value: f"/synthetic/{value}", run=run,
+    )
+    assert calls == [([f"/synthetic/{provider}", *command], timeout)]
+    assert row["cli_version"] == "probe 9.8.7"
+    assert row["availability"] == "unknown"
+    assert row["source"]["kind"] == "static_fallback"
+    assert row["source"]["freshness"] == "unknown"
+    assert row["models"] and all(m["source"]["kind"] == "static_fallback" for m in row["models"])
+
+
+def test_discovery_complete_catalogue_uses_current_strategy_overrides(monkeypatch):
+    from lib import backends
+    from lib.backend.base import Unsupported
+
+    grok = backends.by_id("grok")
+
+    def unsupported(session):
+        raise Unsupported("synthetic unsupported")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(grok, "label", "Temporary Grok")
+        patch.setattr(grok, "login_kind", "none")
+        patch.setattr(grok, "compaction", unsupported)
+        row = capabilities._discover_provider(
+            "grok", OBSERVED_AT, resolve=lambda value: None,
+            run=lambda *args, **kwargs: pytest.fail("missing executable must not probe"),
+        )
+        assert row["label"] == "Temporary Grok"
+        assert row["supports_auth"] is False
+        assert row["supports_compact"] is False
+    restored = capabilities._discover_provider(
+        "grok", OBSERVED_AT, resolve=lambda value: None,
+        run=lambda *args, **kwargs: pytest.fail("missing executable must not probe"),
+    )
+    assert restored["label"] == "Grok"
+    assert restored["supports_auth"] is True
+    assert restored["supports_compact"] is True
+
+
+@pytest.mark.parametrize("provider", ["GROK", "CLAUDE", "antigravity", " CODEX "])
+def test_discovery_probe_selection_requires_exact_registered_id(provider):
+    # Strategy lookup accepts these spellings; discovery historically does not
+    # turn them into a command/cache probe. Preserve the distinct boundaries.
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 2, "", "synthetic unavailable")
+
+    row = capabilities._discover_provider(
+        provider, OBSERVED_AT, resolve=lambda value: "/synthetic/provider", run=run,
+    )
+    assert calls == [["/synthetic/provider", "--version"]]
+    assert row["id"] == provider
+    assert row["availability"] == "unknown"
+    assert row["source"]["kind"] == "static_fallback"
+    assert row["models"]
+    assert all(model["supported_efforts"] is None for model in row["models"])

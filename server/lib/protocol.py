@@ -71,24 +71,7 @@ class SSEType:
                 if name.isupper() and isinstance(value, str)}
 
 
-class AgentBackend:
-    """Bundled backend ids this server build knows how to run.
-
-    The live allow-list is ``lib.backends.ids()`` / ``/agent-model-options``.
-    Clients treat ``backend`` as an open string so a newer Host can advertise
-    a provider this app binary has never seen.
-    """
-    CLAUDE = "claude"
-    CODEX = "codex"
-    AGY = "agy"
-    GROK = "grok"
-    OPENCODE = "opencode"
-    DEEPSEEK = "deepseek"
-    MUSE = "muse"
-
-    @classmethod
-    def valid(cls) -> set[str]:
-        return {cls.CLAUDE, cls.CODEX, cls.AGY, cls.GROK, cls.OPENCODE, cls.DEEPSEEK}
+from .backend_catalogue import AgentBackend  # compatibility import
 
 
 class ClipStatus:
