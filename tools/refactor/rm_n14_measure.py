@@ -55,6 +55,37 @@ def percentile95(values):
     return sorted(values)[max(0, math.ceil(len(values) * 0.95) - 1)]
 
 
+def cycle_summary(observations):
+    """Expose ordinary vs audit vs complete-cycle costs, including all reads."""
+    groups = {"ordinary": [], "audit": [], "fallback": []}
+    for item in observations[1:]:
+        row = item["candidate"]
+        codes = {e["code"] for e in row["tail_events"] if e["event"] == "transcriptTailDecision"}
+        group = "ordinary" if row.get("apply_mode") == "tail" else (
+            "audit" if codes & {"full_audit", "full_audit_prefix_rewritten"} else "fallback")
+        groups[group].append(row)
+    result = {}
+    for name, rows in groups.items():
+        item = {"ticks": len(rows)}
+        if rows:
+            for metric in ("total_s", "writer_hold_s", "writer_max_hold_s", "transcript_read_bytes"):
+                values = [r[metric] for r in rows]
+                item[metric] = {"median": statistics.median(values), "p95": percentile95(values),
+                                "sum": sum(values)}
+            item["component_read_bytes"] = {key: sum(r["components"].get(key, {}).get("read_bytes", 0)
+                                                    for r in rows)
+                                             for key in ("_read_tail_digest", "prefix_hash", "range_hash",
+                                                         "parse_range", "reference_outside_tail")}
+            item["linux_block_read_bytes"] = sum(r["process_io"]["read_bytes"] for r in rows)
+        result[name] = item
+    warm = [o["candidate"] for o in observations[1:]]
+    result["all_warm"] = {"ticks": len(warm), "total_s": sum(r["total_s"] for r in warm),
+                           "transcript_read_bytes": sum(r["transcript_read_bytes"] for r in warm),
+                           "writer_hold_s": sum(r["writer_hold_s"] for r in warm)}
+    result["complete_audits"] = len(groups["audit"])
+    return result
+
+
 def measure(args):
     started = time.monotonic()
     deadline = started + args.wall_budget
@@ -62,7 +93,7 @@ def measure(args):
         root = pathlib.Path(directory)
         reference, candidate, transcript = root / "reference.sqlite", root / "candidate.sqlite", root / "synthetic.jsonl"
         next_ordinal = harness.write_history(transcript, args.backend, mebibytes=args.mebibytes,
-                                             long_turn=args.long_turn)
+                                             long_turn=args.long_turn, record_bytes=args.history_record_bytes)
         seed_inputs(reference, args.backend, args.turn_rows, args.client_rows)
         with sqlite3.connect(reference) as original, sqlite3.connect(candidate) as clone:
             original.backup(clone)
@@ -74,7 +105,7 @@ def measure(args):
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     raise TimeoutError("measurement wall budget exhausted")
-                full.timeout = actual.timeout = min(120, remaining)
+                full.timeout = actual.timeout = min(args.tick_budget, remaining)
                 if tick:
                     with transcript.open("ab") as output:
                         output.write(harness.append_bytes(args.backend, next_ordinal + tick - 1,
@@ -92,6 +123,10 @@ def measure(args):
                 "candidate_fast_path_proven": all(
                     r["candidate"].get("apply_mode") == "tail" for r in observations[1:]),
                 "backend": args.backend, "history_mib": args.mebibytes,
+                "history_record_bytes": args.history_record_bytes,
+                "history_records": next_ordinal,
+                "workload_density": "synthetic padding; file size does not imply historical row count",
+                "cycle_summary": cycle_summary(observations),
                 "long_turn": args.long_turn, "append_bytes": args.append_bytes,
                 "warm_ticks": args.ticks, "turn_input_rows": args.turn_rows,
                 "client_input_rows": args.client_rows,
@@ -108,7 +143,9 @@ def measure(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--backend", choices=harness.BACKENDS, default="claude")
-    parser.add_argument("--mebibytes", choices=(1, 10, 17), type=int, default=1)
+    parser.add_argument("--mebibytes", choices=(1, 10, 17, 512), type=int, default=1)
+    parser.add_argument("--history-record-bytes", choices=(1024, 65536), type=int, default=1024)
+    parser.add_argument("--tick-budget", type=float, default=120)
     parser.add_argument("--append-bytes", choices=(1024, 10240), type=int, default=1024)
     parser.add_argument("--ticks", type=int, default=10)
     parser.add_argument("--turn-rows", type=int, default=1000)
@@ -117,7 +154,7 @@ if __name__ == "__main__":
     parser.add_argument("--long-turn", action="store_true")
     parser.add_argument("--output", type=pathlib.Path, required=True)
     args = parser.parse_args()
-    if args.ticks < 1 or args.wall_budget <= 0 or min(args.turn_rows, args.client_rows) < 0:
+    if args.ticks < 1 or min(args.wall_budget, args.tick_budget) <= 0 or min(args.turn_rows, args.client_rows) < 0:
         parser.error("positive ticks/budget and nonnegative input counts required")
     result = measure(args)
     args.output.parent.mkdir(parents=True, exist_ok=True)

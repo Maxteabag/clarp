@@ -386,7 +386,8 @@ def test_effect_bearing_prefix_uses_full_replay_to_recover_team_fanout(tmp_path,
 
 
 @pytest.mark.parametrize("backend", harness.BACKENDS)
-def test_dispatch_checkpoint_failure_invalidates_frontier_and_retries_full(tmp_path, backend):
+@pytest.mark.parametrize("failed_tick", [1, 600])
+def test_dispatch_checkpoint_failure_invalidates_frontier_and_retries_full(tmp_path, backend, failed_tick):
     reference, candidate = _clones(tmp_path, backend)
     transcript = tmp_path / "synthetic.jsonl"
     initial = b"".join(harness.append_bytes(backend, i) for i in range(20))
@@ -397,19 +398,25 @@ def test_dispatch_checkpoint_failure_invalidates_frontier_and_retries_full(tmp_p
             actual.tick(0)
             with transcript.open("ab") as output:
                 output.write(harness.append_bytes(backend, 20))
-            full.tick(1)
-            failed_progress = actual.tick(1, faults={"checkpoint": True})
-            assert failed_progress["apply_mode"] == "tail"
+            full.tick(failed_tick)
+            failed_progress = actual.tick(failed_tick, faults={"checkpoint": True})
+            assert failed_progress["apply_mode"] == ("tail" if failed_tick == 1 else "full")
             harness.assert_product_equal(reference, candidate)
             with sqlite3.connect(candidate) as connection:
                 assert connection.execute("SELECT complete_size FROM transcript_import_checkpoints").fetchone()[0] == len(initial)
             with transcript.open("ab") as output:
                 output.write(harness.append_bytes(backend, 21))
-            full.tick(2)
-            recovered = actual.tick(2)
+            full.tick(failed_tick + 1)
+            recovered = actual.tick(failed_tick + 1)
             assert recovered["apply_mode"] == "full"
             harness.assert_product_equal(reference, candidate)
             harness.assert_checkpoint_parse_equal(candidate, transcript, backend)
+            with transcript.open("ab") as output:
+                output.write(harness.append_bytes(backend, 22))
+            full.tick(failed_tick + 2)
+            resumed = actual.tick(failed_tick + 2)
+            harness.assert_product_equal(reference, candidate)
+            assert resumed["apply_mode"] == "tail"
 
 
 @pytest.mark.parametrize("backend", harness.BACKENDS)
@@ -508,8 +515,9 @@ def test_assistant_prefix_replays_latest_user_provenance_like_full_import(tmp_pa
 
 
 @pytest.mark.parametrize("backend", harness.BACKENDS)
-def test_rewrite_outside_durable_sample_windows_cannot_skip_changed_prefix(tmp_path, backend):
-    """Shadow's sampled prefix hash is insufficient for authoritative writes."""
+@pytest.mark.parametrize("audit_by", ["ticks", "elapsed"])
+def test_unsampled_rewrite_is_repaired_by_bounded_audit(tmp_path, backend, audit_by):
+    """801 accepts stale unsampled bytes only until the bounded full audit."""
     from lib import transcript_incremental as inc
     reference, candidate = _clones(tmp_path, backend)
     transcript = tmp_path / "synthetic.jsonl"
@@ -525,13 +533,61 @@ def test_rewrite_outside_durable_sample_windows_cannot_skip_changed_prefix(tmp_p
             changed = original.replace(b"synthetic step 8", b"synthetic task 8", 1)
             assert changed != original and len(changed) == len(original)
             transcript.write_bytes(changed + harness.append_bytes(backend, 300))
-            # The mutation deliberately survives the existing durable sample
-            # guard, so only authoritative prefix certification can reject it.
             assert inc.prefix_hash(transcript, offset) == sampled
-            full.tick(1)
-            report = actual.tick(1)
+            first = actual.tick(1)
+            assert first["apply_mode"] == "tail"
+            # Run to the twentieth attempted tail, or to the ten-minute limit.
+            ticks = range(2, 21) if audit_by == "ticks" else [600]
+            for tick in ticks:
+                # Repeated unsampled edits must not postpone the audit.
+                old, new = ((b"synthetic task 8", b"synthetic risk 8") if tick % 2 == 0
+                            else (b"synthetic risk 8", b"synthetic task 8"))
+                contents = transcript.read_bytes()
+                assert old in contents
+                transcript.write_bytes(contents.replace(old, new, 1))
+                with transcript.open("ab") as output:
+                    output.write(harness.append_bytes(backend, 300 + tick))
+                due = tick == (20 if audit_by == "ticks" else 600)
+                if due:
+                    with sqlite3.connect(candidate) as source, sqlite3.connect(reference) as target:
+                        assert source.execute("SELECT count(*) FROM messages WHERE text=?",
+                                              ("synthetic step 8",)).fetchone()[0] == 1
+                        # Recovery oracle starts from the SAME committed stale
+                        # state. An always-fresh history necessarily allocated
+                        # its rewrite revision earlier under signed801; do not
+                        # hide that chronology by excluding revision columns.
+                        source.backup(target)
+                report = actual.tick(tick)
+            full.tick(tick)
             harness.assert_product_equal(reference, candidate)
             assert report["apply_mode"] == "full"
+            assert {"event": "transcriptTailDecision", "code": "full_audit_prefix_rewritten",
+                    "count": 1} in report["tail_events"]
+            with transcript.open("ab") as output:
+                output.write(harness.append_bytes(backend, 1000))
+            full.tick(tick + 1)
+            recovery = actual.tick(tick + 1)
+            harness.assert_product_equal(reference, candidate)
+            assert recovery["apply_mode"] == "tail"
+
+
+@pytest.mark.parametrize("backend", harness.BACKENDS)
+def test_ordinary_append_reads_bounded_samples_and_new_bytes(tmp_path, backend):
+    reference, candidate = _clones(tmp_path, backend)
+    transcript = tmp_path / "synthetic.jsonl"
+    next_ordinal = harness.write_history(transcript, backend, mebibytes=1)
+    with harness.PersistentLane(reference, transcript, backend, "reference") as full:
+        with harness.PersistentLane(candidate, transcript, backend, "candidate") as actual:
+            full.tick(0)
+            actual.tick(0)
+            with transcript.open("ab") as output:
+                output.write(harness.append_bytes(backend, next_ordinal))
+            full.tick(1)
+            report = actual.tick(1, close_connection=True)
+            harness.assert_product_equal(reference, candidate)
+            assert report["apply_mode"] == "tail"
+            # All delivered source bytes counted, not an implementation flag.
+            assert report["transcript_read_bytes"] < 512 * 1024
 
 
 @pytest.mark.parametrize("backend", harness.BACKENDS)
@@ -719,3 +775,78 @@ def test_dirty_window_and_partial_fanout_failure_keep_recovery_full(tmp_path, ba
             full.tick(3)
             assert actual.tick(3)["apply_mode"] == "tail"
             harness.assert_product_equal(reference, candidate)
+
+
+@pytest.mark.parametrize("backend", harness.BACKENDS)
+@pytest.mark.parametrize("audit_by", ["ticks", "elapsed"])
+def test_audit_deadline_is_not_renewed_by_ordinary_appends(tmp_path, backend, audit_by):
+    reference, candidate = _clones(tmp_path, backend)
+    transcript = tmp_path / "synthetic.jsonl"
+    transcript.write_bytes(b"".join(harness.append_bytes(backend, i) for i in range(20)))
+    with harness.PersistentLane(reference, transcript, backend, "reference") as full:
+        with harness.PersistentLane(candidate, transcript, backend, "candidate") as actual:
+            full.tick(0)
+            actual.tick(0)
+            ticks = range(1, 22) if audit_by == "ticks" else [599, 600, 601]
+            for ordinal, tick in enumerate(ticks):
+                with transcript.open("ab") as output:
+                    output.write(harness.append_bytes(backend, 20 + ordinal))
+                full.tick(tick)
+                report = actual.tick(tick, close_connection=True)
+                harness.assert_product_equal(reference, candidate)
+                due = tick == (20 if audit_by == "ticks" else 600)
+                assert report["apply_mode"] == ("full" if due else "tail")
+                if due:
+                    assert {"event": "transcriptTailDecision", "code": "full_audit",
+                            "count": 1} in report["tail_events"]
+
+
+@pytest.mark.parametrize("backend", harness.BACKENDS)
+@pytest.mark.parametrize("anomaly", ["sample", "restart", "eviction", "clock"])
+def test_digest_unknown_interval_or_sample_change_requires_full(tmp_path, backend, anomaly):
+    from contextlib import ExitStack
+    reference, candidate = _clones(tmp_path, backend)
+    transcript = tmp_path / "synthetic.jsonl"
+    original = b"".join(harness.append_bytes(backend, i) for i in range(20))
+    transcript.write_bytes(original)
+    with ExitStack() as stack:
+        full = stack.enter_context(harness.PersistentLane(reference, transcript, backend, "reference"))
+        actual = stack.enter_context(harness.PersistentLane(candidate, transcript, backend, "candidate"))
+        full.tick(0)
+        actual.tick(0)
+        if anomaly == "sample":
+            changed = original.replace(b"synthetic step 0", b"synthetic task 0", 1)
+            assert changed != original
+            transcript.write_bytes(changed)
+        elif anomaly == "restart":
+            stack.pop_all().close()
+            full = stack.enter_context(harness.PersistentLane(reference, transcript, backend, "reference"))
+            actual = stack.enter_context(harness.PersistentLane(candidate, transcript, backend, "candidate"))
+        with transcript.open("ab") as output:
+            output.write(harness.append_bytes(backend, 20))
+        faults = {"evict_frontier": True} if anomaly == "eviction" else (
+            {"monotonic_seconds": -1.0} if anomaly == "clock" else {})
+        full.tick(1)
+        report = actual.tick(1, faults=faults)
+        harness.assert_product_equal(reference, candidate)
+        assert report["apply_mode"] == "full"
+        assert report["components"]["_read_tail_digest"]["read_bytes"] >= transcript.stat().st_size
+
+
+@pytest.mark.parametrize("backend", harness.BACKENDS)
+@pytest.mark.parametrize("settings", [{"audit_every": 2}, {"audit_seconds": 2.0}])
+def test_tighter_audit_settings_still_force_earlier_full(tmp_path, backend, settings):
+    reference, candidate = _clones(tmp_path, backend)
+    transcript = tmp_path / "synthetic.jsonl"
+    transcript.write_bytes(b"".join(harness.append_bytes(backend, i) for i in range(20)))
+    with harness.PersistentLane(reference, transcript, backend, "reference") as full:
+        with harness.PersistentLane(candidate, transcript, backend, "candidate") as actual:
+            full.tick(0)
+            actual.tick(0)
+            for tick in [1, 2]:
+                with transcript.open("ab") as output:
+                    output.write(harness.append_bytes(backend, 20 + tick))
+                full.tick(tick)
+                report = actual.tick(tick, faults={"audit_settings": settings})
+                harness.assert_product_equal(reference, candidate)
+                assert report["apply_mode"] == ("tail" if tick == 1 else "full")
