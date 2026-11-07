@@ -411,7 +411,8 @@ def test_reap_tick_stops_at_its_time_budget(con):
     ticks = iter(range(0, 1000, 60))                         # each batch "takes" 60 ms
     clock = lambda: next(ticks) / 1000.0
     moved, cursor = lk.reap_tick(con, lc, now=MIN, batch=1, max_rows=500, max_ms=200, clock=clock)
-    assert len(moved) == 4 and cursor == ("claimed", 3, "k003")  # 60+60+60 < 200, the 4th reaches 240
+    # After 180 ms, another batch's reserved 50 ms cannot fit in the tick.
+    assert len(moved) == 3 and cursor == ("claimed", 2, "k002")
 
 
 
@@ -523,6 +524,81 @@ def test_the_reaper_keyset_works_across_null_entry_times(qcon):
     with lk.transaction(qcon):
         rest = lk.reap(qcon, lc, now=30_000, limit=2, after=first.cursor)
     assert [t.key for t in rest.moved] == ["n3"] and rest.cursor is None
+
+
+def test_reaper_cutoff_keeps_the_real_transition_clock_and_clears_the_claim(qcon):
+    lc = _queue()
+    qcon.executemany("INSERT INTO q (id, status, claimed_at) VALUES (?, 'claimed', ?)",
+                     [("old", 50), ("fresh", 51), ("missing", None)])
+    moved, _ = lk.reap_tick(qcon, lc, now=100, states=("claimed",),
+                            cutoffs={"claimed": 50}, values_by_event={lk.EXPIRED: {"claimed_at": None}})
+    assert [(t.key, t.at) for t in moved] == [("missing", 100), ("old", 100)]
+    assert _q(qcon, "old") == ("queued", None, None, None)
+    assert _q(qcon, "missing") == ("queued", None, None, None)
+    assert _q(qcon, "fresh") == ("claimed", 51, None, None)
+
+
+def test_owner_sweep_of_wait_forever_requires_a_legal_event_and_keeps_skips(qcon):
+    lc = _queue()
+    qcon.executemany("INSERT INTO q (id, status, started_at) VALUES (?, 'started', ?)",
+                     [("ready", 0), ("held", 1), ("next", 2)])
+    # A deadline is not invented for started; default reaping leaves all three.
+    assert lk.reap_tick(qcon, lc, now=100_000)[0] == []
+    with pytest.raises(lk.LifecycleError, match="requires an eligibility hook"):
+        lk.reap_tick(qcon, lc, now=100_000, states=("started",))
+    with pytest.raises(lk.LifecycleError, match="cannot expire"):
+        lk.reap_tick(qcon, lc, now=100_000, states=("started",), eligible=lambda row: lk.EXPIRED)
+    moved, cursor = lk.reap_tick(
+        qcon, lc, now=100_000, states=("started",), batch=2, max_rows=2,
+        eligible=lambda row: "settle_done" if row["id"] == "ready" else None)
+    assert [t.key for t in moved] == ["ready"] and cursor == ("started", 1, "held")
+    assert _q(qcon, "held")[0] == "started" and _q(qcon, "next")[0] == "started"
+    rest, _ = lk.reap_tick(qcon, lc, now=100_000, states=("started",), cursor=cursor,
+                           eligible=lambda row: "settle_done")
+    assert [t.key for t in rest] == ["next"]
+
+
+def test_tick_budget_counts_the_committed_effects(con):
+    lc = _receipt()
+    _many(con, lc, 3)
+    elapsed = [0.0]
+
+    def effects(outbox, moved):
+        outbox.add(lambda: elapsed.__setitem__(0, elapsed[0] + 0.160))
+
+    moved, cursor = lk.reap_tick(con, lc, now=MIN, batch=1,
+                                 effects=effects, clock=lambda: elapsed[0])
+    assert len(moved) == 1 and cursor == ("claimed", 0, "k000")
+
+
+def test_owner_sweep_values_follow_the_chosen_event(qcon):
+    lc = _queue()
+    qcon.executemany("INSERT INTO q (id, status, started_at) VALUES (?, 'started', 0)",
+                     [("ok",), ("bad",)])
+    lk.reap_tick(qcon, lc, now=1, states=("started",),
+                 eligible=lambda row: "settle_done" if row["id"] == "ok" else "settle_failed",
+                 values_by_event={"settle_done": {"note": "complete"},
+                                  "settle_failed": {"note": "failure"}})
+    assert _q(qcon, "ok") == ("done", None, 0, "complete")
+    assert _q(qcon, "bad") == ("failed", None, 0, "failure")
+
+
+def test_wait_forever_paging_keeps_null_stamps_and_owner_age_fallback(qcon):
+    lc = _queue()
+    qcon.execute("ALTER TABLE q ADD COLUMN enqueued_at INTEGER")
+    qcon.executemany("INSERT INTO q (id, status, enqueued_at) VALUES (?, 'started', ?)",
+                     [("old", 10), ("young", 90)])
+
+    def eligible(row):
+        at = row["started_at"] if row["started_at"] is not None else row["enqueued_at"]
+        return "settle_done" if at <= 50 else None
+
+    moved, cursor = lk.reap_tick(qcon, lc, now=100, states=("started",),
+                                 max_rows=1, eligible=eligible)
+    assert [t.key for t in moved] == ["old"] and cursor == ("started", 0, "old")
+    rest, _ = lk.reap_tick(qcon, lc, now=100, states=("started",),
+                           cursor=cursor, eligible=eligible)
+    assert rest == [] and _q(qcon, "young")[0] == "started"
 
 
 @pytest.mark.parametrize("overrides, problem", [
