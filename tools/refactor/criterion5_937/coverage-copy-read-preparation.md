@@ -61,3 +61,36 @@ snapshots and API/cleanup overhead need numerical whole-package qualification.
 6000s/~17NOK inclusive ALLsetup/controls/copy/fetch/drain/tails LOWEST everygate,
 noFUND/preempt/delay/full B/C qualification/fresh compute+captain gap unchanged.
 No sourceReady, test/SQL/API/job/window/Actions measurement or herald931 resume.
+
+## 79d C1 control-export repair — SOURCE ONLY
+
+B found that an ordinary read error with a cleanup KeyboardInterrupt/SystemExit
+could be exported as the ordinary error with cancellation only in its cause.
+A caller's except Exception could then consume the cancellation and continue.
+The repair exports a BaseExceptionGroup containing both exact original objects
+when an ordinary primary is followed by non-Exception cleanup. The read primary
+and its existing cause are not modified in that case. Existing control primaries
+remain the selected exact control with secondary cleanup retained as cause;
+ordinary/ordinary behavior retains the original ordinary primary and prior
+cause policy. No caller must traverse causes to discover exported cancellation.
+Close is still attempted once and no optional posthash/next input follows an
+error/control outcome. No read/API/native behavior change or cleanup retry.
+
+Three finite SOURCE controls call the actual adapter with physical private
+source/copy files and genuine injected read/cleanup error objects. They cover
+ordinary-read/control-close, control-read/ordinary-close and ordinary/ordinary.
+An actual nested except Exception caller must not consume either control case;
+exact original objects and causes remain retained, read/close counts and no
+posthash are observed. A tool-module snapshot alias counts real preflight reads
+and restores finally; no coverage class/global SQLite/OS/native method is patched.
+These are LOWER controlled API-shaped fault-adapter cases, NOT a valid database,
+actual CoverageData close/descriptor cleanup, real signal, tracing, root or
+pytest process positive. The separate seven actual pinned-API storage cases
+remain authored and UNEXECUTED; no extra run/selector/allowance is granted.
+
+Independent contract: cancellation must escape ordinary-error callers without
+losing the original read error or cleanup failure. Credible regression is the
+exact79d source path B identified; the pure receipt/storage happy paths cannot
+exercise cleanup cancellation priority. Controls hit the actual owner, not a
+copy of _retain, and need no new production/native seam. All controls remain
+UNEXECUTED, no baseline RED/new GREEN or component source closure claimed.

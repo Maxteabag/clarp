@@ -63,6 +63,10 @@ def _snapshot(path):
 def _retain(primary, secondary):
     if primary is None:
         return secondary
+    if isinstance(primary, Exception) and not isinstance(secondary, Exception):
+        # Export cancellation outside except Exception, while retaining BOTH
+        # original objects and the read primary's untouched cause chain.
+        return BaseExceptionGroup('coverage read failure and cleanup control', [primary, secondary])
     if secondary is not primary and primary.__cause__ is not secondary:
         prior = primary.__cause__
         primary.__cause__ = secondary if prior is None else BaseExceptionGroup(
