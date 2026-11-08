@@ -11,10 +11,14 @@ from .coverage_copy_read import _retain
 LIMITS = {'files', 'contexts', 'pairs', 'items', 'name_bytes', 'total_name_bytes'}
 
 
-def capture_sets(data, *, limits):
+def check_limits(limits):
     if (type(limits) is not dict or set(limits) != LIMITS
             or any(type(v) is not int or v <= 0 for v in limits.values())):
         raise ValueError('all finite positive limits must be frozen by qualified owner')
+
+
+def capture_sets(data, *, limits):
+    check_limits(limits)
     costs = {'pairs': 0, 'items': 0, 'total_name_bytes': 0}
 
     def name(value, *, file=False):
