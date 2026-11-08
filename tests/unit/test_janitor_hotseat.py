@@ -257,3 +257,369 @@ def test_real_hotseat_calls_are_bounded_and_parse_json(monkeypatch):
     assert hotseat.switch_account("hotseat", "codex", "q") is True
     assert [argv for argv, _ in seen][2:] == [["hotseat", "switch", "b", "--yes", "--json"], ["hotseat", "codex-account", "switch", "q"]]
     assert all(kwargs_timeout <= 150 for _, kwargs_timeout in seen)
+
+
+@pytest.fixture
+def notification_ownership(switcher, monkeypatch):
+    """Real configured owners and one deterministic scheduler tick; all I/O is synthetic."""
+    import datetime
+    owner, worker, readings, calls, sent = switcher
+    quota = janitor_builtins.get_builtin("quota-monitor")
+    quota = janitors.set_enabled(quota["session"], quota["revision"], True)
+    clock = [1_800_000_000_000]
+    monkeypatch.setattr(db, "now_ms", lambda: clock[0])
+    stamp = datetime.datetime.fromtimestamp(clock[0] / 1000, datetime.timezone.utc).isoformat()
+    window = {"window_id": "ownership-window", "used_percentage": 90,
+              "observed_at": stamp, "freshness": "fresh"}
+    usage = {"providers": {"claude": {"provider_instance_id": "opaque-ownership-account", "windows": [window]}}}
+    def read_usage():
+        calls.append(("usage",))
+        return usage
+    worker.usage_read = read_usage
+    original_notify = worker.notify
+    def notify(payload):
+        assert not db.conn().in_transaction, "notification ran inside the receipt writer"
+        return original_notify(payload)
+    worker.notify = notify
+    return {"owner": owner, "quota": quota, "worker": worker, "readings": readings,
+            "calls": calls, "sent": sent, "clock": clock, "usage": usage, "window": window}
+
+
+def _ownership_receipts(case):
+    rows = db.conn().execute("SELECT * FROM janitor_quota_receipts WHERE json_extract(payload_json,'$.reason')='quota_threshold'").fetchall()
+    return [dict(row) for row in rows]
+
+
+def _quota_count(case):
+    run = janitors.list_runs(case["quota"]["session"])[0]
+    return run["demand_result"]["item_count"]
+
+
+@pytest.mark.parametrize("provider", ["claude", "codex"])
+def test_one_tick_threshold_and_automatic_switch_have_one_notification(notification_ownership, provider):
+    c = notification_ownership
+    if provider == "codex":
+        c["usage"]["providers"] = {"codex": c["usage"]["providers"].pop("claude")}
+        c["window"]["used_percentage"] = 95
+        c["readings"]["claude"] = claude_payload(a=(True, 0.5))
+        c["readings"]["codex"] = {"accounts": [
+            {"alias": "p", "is_active": True, "usage": {"usable": True, "worst_used": 0.95}},
+            {"alias": "q", "is_active": False, "usage": {"usable": True, "worst_used": 0.1}}]}
+    assert janitor_builtins.resolve(hotseat.ROLE)["agent_id"] == c["owner"]["agent_id"]
+    c["worker"].run_once()
+    assert [p["reason"] for p in c["sent"]] == ["account_switch"]
+    audit, = _ownership_receipts(c)
+    assert "cancelled" in json.loads(audit["delivery_json"])
+    assert json.loads(audit["payload_json"])["reason"] == "quota_threshold"
+    assert _quota_count(c) == 0
+    assert c["calls"].count(("usage",)) == 1
+    assert len([v for v in c["calls"] if v[0] == "read"]) == 2
+    assert len([v for v in c["calls"] if v[0] == "switch"]) == 1
+    c["worker"].deliver_notifications(c["quota"])
+    assert len(c["sent"]) == 1
+
+
+def test_automatic_noop_owns_threshold_without_any_push_and_keeps_watermark(notification_ownership):
+    c = notification_ownership
+    cfg = janitors.configure(c["owner"]["session"], c["owner"]["revision"], options={"claude_min_remaining": 10})
+    janitors.set_enabled(cfg["session"], cfg["revision"], True)
+    c["window"]["used_percentage"] = 80
+    c["readings"]["claude"] = claude_payload(a=(True, 0.8), b=(False, 0.1))
+    c["worker"].run_once()
+    assert c["sent"] == []
+    audit, = _ownership_receipts(c)
+    assert "cancelled" in json.loads(audit["delivery_json"])
+    assert _quota_count(c) == 0
+    key = service.quota_window_key("claude", "opaque-ownership-account", c["window"])
+    assert json.loads(settings_store.get_text(key))["remaining"] == 20
+    c["clock"][0] += 1000
+    _check_again("quota-keeper")
+    _check_again("hotseat-switcher.claude")
+    c["worker"].run_once()
+    assert c["sent"] == [] and len(_ownership_receipts(c)) == 1
+
+
+@pytest.mark.parametrize("state", ["notify", "disabled", "missing", "ambiguous", "restricted", "unrunnable", "unsupported"])
+def test_threshold_notice_remains_when_no_automatic_provider_owner(notification_ownership, monkeypatch, state):
+    c = notification_ownership
+    owner = c["owner"]
+    if state == "notify":
+        cfg = janitors.configure(owner["session"], owner["revision"], options={"mode": "notify"})
+        janitors.set_enabled(cfg["session"], cfg["revision"], True)
+    elif state == "disabled":
+        janitors.set_enabled(owner["session"], owner["revision"], False)
+    elif state == "missing":
+        agents.soft_delete(owner["agent_id"])
+    elif state == "ambiguous":
+        agents.create_agent(persona="Other switcher", voice_id="v", cwd="/tmp", session="other-hotseat", backend="codex")
+        cfg = janitors.create("other-hotseat", template_id="account-hotseat")
+        janitors.set_enabled(cfg["session"], cfg["revision"], True)
+    elif state == "restricted":
+        aid = agents.create_agent(persona="Scope fixture", voice_id="v", cwd="/tmp", session="scope-fixture", backend="codex")
+        cfg = janitors.configure(owner["session"], owner["revision"], scope={"agent_ids": [aid]})
+        janitors.set_enabled(cfg["session"], cfg["revision"], True)
+    elif state == "unrunnable":
+        original = janitors._execution
+        def unavailable(role, *args, **kwargs):
+            if role == hotseat.ROLE:
+                raise janitors.JanitorError("Synthetic unavailable executor")
+            return original(role, *args, **kwargs)
+        monkeypatch.setattr(janitors, "_execution", unavailable)
+    else:
+        c["usage"]["providers"] = {"openai": c["usage"]["providers"].pop("claude")}
+    c["worker"].run_once()
+    thresholds = [p for p in c["sent"] if p["reason"] == "quota_threshold"]
+    assert len(thresholds) == 1
+    assert thresholds[0]["preview"] == ("openai" if state == "unsupported" else "claude") + ": 10% quota remaining"
+    audit, = _ownership_receipts(c)
+    assert json.loads(audit["delivery_json"]) == {"sent": 1}
+    assert _quota_count(c) == 1
+    if state == "notify":
+        assert [p["reason"] for p in c["sent"]] == ["quota_threshold", "account_switch"]
+        assert not [v for v in c["calls"] if v[0] == "switch"]
+
+
+def test_current_configuration_is_read_after_usage_not_cached_before_it(notification_ownership):
+    c = notification_ownership
+    original = c["worker"].usage_read
+    def usage_after_mode_change():
+        cfg = janitors.configure(c["owner"]["session"], c["owner"]["revision"], options={"mode": "notify"})
+        janitors.set_enabled(cfg["session"], cfg["revision"], True)
+        return original()
+    c["worker"].usage_read = usage_after_mode_change
+    c["worker"].run_once()
+    assert [p["reason"] for p in c["sent"]] == ["quota_threshold", "account_switch"]
+
+
+def test_owner_resolution_fault_keeps_threshold_notice_without_extra_probe(notification_ownership, monkeypatch, capsys):
+    c = notification_ownership
+    original = janitors._execution
+    def broken(role, *args, **kwargs):
+        if role == hotseat.ROLE:
+            raise RuntimeError("PRIVATE_RESOLUTION_SENTINEL")
+        return original(role, *args, **kwargs)
+    monkeypatch.setattr(janitors, "_execution", broken)
+    c["worker"].quota_once()
+    assert [p["reason"] for p in c["sent"]] == ["quota_threshold"]
+    assert c["calls"] == [("usage",)]
+    captured = capsys.readouterr()
+    assert "PRIVATE_RESOLUTION_SENTINEL" not in captured.out + captured.err
+
+
+@pytest.mark.parametrize("mode", ["notify", "ask", "automatic"])
+def test_exhaustion_keeps_hotseat_notice_and_recovery_authority(notification_ownership, monkeypatch, mode):
+    from lib import artifacts, turn_dispatch
+    c = notification_ownership
+    quota = janitors.configure(c["quota"]["session"], c["quota"]["revision"], options={"recovery_mode": mode})
+    c["quota"] = janitors.set_enabled(quota["session"], quota["revision"], True)
+    c["window"]["used_percentage"] = 100
+    c["readings"]["claude"] = claude_payload(a=(True, "rejected"), b=(False, "rejected"))
+    monkeypatch.setattr(turn_dispatch, "account_selector", lambda provider: ("synthetic-selector",))
+    recovered = []
+    def recover(*args):
+        assert not db.conn().in_transaction
+        recovered.append(args)
+        return {"status": "recovering"}
+    c["worker"].recover = recover
+    c["worker"].run_once()
+    assert [p["reason"] for p in c["sent"]] == ["account_switch"]
+    assert c["sent"][0]["preview"] == "Claude: a has 0% of the 5-hour window left and no saved account has more"
+    audit, = _ownership_receipts(c)
+    assert "cancelled" in json.loads(audit["delivery_json"])
+    payload = json.loads(audit["payload_json"])
+    assert _quota_count(c) == 0
+    if mode == "notify":
+        assert recovered == [] and "recovery" not in payload
+    elif mode == "automatic":
+        assert len(recovered) == 1 and payload["recovery"]["status"] == "recovering"
+    else:
+        assert recovered == [] and payload["recovery"]["status"] == "awaiting_approval"
+        decision = db.conn().execute("SELECT decision_id,revision FROM artifact_decisions WHERE artifact_id=?",
+                                     (payload["recovery"]["artifact_id"],)).fetchone()
+        artifacts.resolve(decision["decision_id"], expected_revision=decision["revision"], choice="accepted")
+        c["worker"].recover_approved(c["quota"])
+        c["worker"].recover_approved(c["quota"])
+        assert len(recovered) == 1
+
+
+def test_suppressed_insert_is_never_visible_pending_to_an_independent_reader(notification_ownership, monkeypatch):
+    import sqlite3
+    c = notification_ownership
+    with sqlite3.connect(f"file:{db.DB_PATH}?mode=ro", uri=True) as observer:
+        seen = []
+        original = service.janitor_store.set_quota_receipt_delivery
+        def cancelling(receipt_id, delivery_json, *args, **kwargs):
+            seen.append(observer.execute("SELECT COUNT(*) FROM janitor_quota_receipts WHERE receipt_id=? AND delivery_json IS NULL", (receipt_id,)).fetchone()[0])
+            original(receipt_id, delivery_json, *args, **kwargs)
+            seen.append(observer.execute("SELECT COUNT(*) FROM janitor_quota_receipts WHERE receipt_id=?", (receipt_id,)).fetchone()[0])
+        monkeypatch.setattr(service.janitor_store, "set_quota_receipt_delivery", cancelling)
+        c["worker"].quota_once()
+        assert seen == [0, 0]
+        assert observer.execute("SELECT COUNT(*) FROM janitor_quota_receipts WHERE delivery_json IS NULL").fetchone()[0] == 0
+        assert observer.execute("SELECT COUNT(*) FROM janitor_quota_receipts").fetchone()[0] == 1
+    assert c["sent"] == []
+
+
+@pytest.mark.parametrize("fault", ["insert", "cancel"])
+def test_new_receipt_fault_rolls_back_without_notify_or_recovery(notification_ownership, monkeypatch, fault):
+    import sqlite3
+    c = notification_ownership
+    c["window"]["used_percentage"] = 100
+    quota = janitors.configure(c["quota"]["session"], c["quota"]["revision"], options={"recovery_mode": "automatic"})
+    c["quota"] = janitors.set_enabled(quota["session"], quota["revision"], True)
+    c["worker"].request_recovery = lambda *a: pytest.fail("recovery admitted before receipt transaction succeeded")
+    name = "insert_quota_receipt" if fault == "insert" else "set_quota_receipt_delivery"
+    original = getattr(service.janitor_store, name)
+    def fail_after_write(*args, **kwargs):
+        original(*args, **kwargs)
+        raise sqlite3.OperationalError("INJECTED_RECEIPT_FAULT")
+    monkeypatch.setattr(service.janitor_store, name, fail_after_write)
+    with pytest.raises(sqlite3.OperationalError, match="INJECTED_RECEIPT_FAULT"):
+        c["worker"].quota_once()
+    assert db.conn().execute("SELECT COUNT(*) FROM janitor_quota_receipts").fetchone()[0] == 0
+    assert c["sent"] == [] and not db.conn().in_transaction
+
+
+def test_old_pending_receipt_conflict_keeps_normal_delivery_metadata(notification_ownership):
+    import datetime
+    c = notification_ownership
+    run = janitor_builtins.begin_run("quota-monitor", "pending-before-ownership")
+    assert run and janitor_builtins.claim_run(run["run_id"])
+    stamp = int(datetime.datetime.fromisoformat(c["window"]["observed_at"]).timestamp() * 1000)
+    rid = service.digest(["claude", "opaque-ownership-account", "ownership-window", stamp, c["quota"]["generation"]])
+    payload = {"notification_id": rid, "session": c["quota"]["session"], "agent_id": c["quota"]["agent_id"],
+               "persona": c["quota"]["name"], "preview": "claude: 10% quota remaining", "push": True,
+               "reason": "quota_threshold", "recovery_mode": "notify", "owner_generation": c["quota"]["generation"]}
+    assert service.janitor_store.insert_quota_receipt(rid, run["run_id"], json.dumps(payload), c["clock"][0])
+    janitor_builtins.complete_run(run["run_id"])
+    c["worker"].run_once()
+    assert [p["reason"] for p in c["sent"]] == ["quota_threshold", "account_switch"]
+    audit, = _ownership_receipts(c)
+    assert audit["receipt_id"] == rid
+    assert json.loads(audit["delivery_json"]) == {"sent": 1}
+    assert json.loads(audit["payload_json"]) == payload
+
+
+def test_receipt_writer_never_builds_full_janitor_views(notification_ownership, monkeypatch):
+    from contextlib import contextmanager
+    c = notification_ownership
+    inside = [False]
+    observed = []
+    original_tx = settings_store.transaction
+    @contextmanager
+    def receipt_transaction():
+        with original_tx():
+            inside[0] = True
+            try:
+                yield
+            finally:
+                inside[0] = False
+    monkeypatch.setattr(settings_store, "transaction", receipt_transaction)
+    for module, name in [(janitor_builtins, "resolve"), (janitor_builtins, "eligible"),
+                         (janitors, "get"), (janitors, "_execution"),
+                         (janitors, "_model"), (janitors, "_cadence")]:
+        original = getattr(module, name)
+        def observing(*args, _original=original, _name=name, **kwargs):
+            observed.append((_name, inside[0]))
+            return _original(*args, **kwargs)
+        monkeypatch.setattr(module, name, observing)
+    c["worker"].run_once()
+    assert observed and any(name == "resolve" for name, _ in observed)
+    assert not [name for name, under_writer in observed if under_writer], observed
+    assert [p["reason"] for p in c["sent"]] == ["account_switch"]
+
+
+def _restricted_ownership_sibling():
+    aid = agents.create_agent(persona="Restricted switcher", voice_id="v", cwd="/tmp",
+                              session="restricted-hotseat", backend="codex")
+    target = agents.create_agent(persona="Scope target", voice_id="v", cwd="/tmp",
+                                 session="restricted-target", backend="codex")
+    cfg = janitors.create("restricted-hotseat", template_id="account-hotseat", scope={"agent_ids": [target]})
+    return janitors.set_enabled(cfg["session"], cfg["revision"], True)
+
+
+def test_one_unrestricted_owner_still_suppresses_with_restricted_sibling(notification_ownership):
+    c = notification_ownership
+    _restricted_ownership_sibling()
+    assert janitor_builtins.resolve(hotseat.ROLE)["agent_id"] == c["owner"]["agent_id"]
+    c["worker"].run_once()
+    assert [p["reason"] for p in c["sent"]] == ["account_switch"]
+    audit, = _ownership_receipts(c)
+    assert "cancelled" in json.loads(audit["delivery_json"])
+
+
+@pytest.mark.parametrize("change", ["new_candidate", "enable", "delete", "archive", "mode", "scope", "effort", "sibling_scope"])
+def test_candidate_set_and_all_fingerprints_are_rechecked_at_receipt_transaction(notification_ownership, monkeypatch, change):
+    from contextlib import contextmanager
+    c = notification_ownership
+    sibling = None
+    if change in {"enable", "sibling_scope"}:
+        sibling = _restricted_ownership_sibling()
+        if change == "enable":
+            sibling = janitors.configure(sibling["session"], sibling["revision"], scope={})
+            sibling = janitors.set_enabled(sibling["session"], sibling["revision"], False)
+    assert janitor_builtins.resolve(hotseat.ROLE)["agent_id"] == c["owner"]["agent_id"]
+    original_tx = settings_store.transaction
+    changed = []
+    @contextmanager
+    def change_before_writer():
+        # Actual config mutation AFTER outside capture and BEFORE BEGIN: no
+        # in-memory owner stub, sleep, nested transaction or manufactured receipt.
+        if not changed:
+            changed.append(True)
+            owner = c["owner"]
+            if change == "new_candidate":
+                agents.create_agent(persona="New switcher", voice_id="v", cwd="/tmp", session="new-hotseat", backend="codex")
+                new = janitors.create("new-hotseat", template_id="account-hotseat")
+                janitors.set_enabled(new["session"], new["revision"], True)
+            elif change == "enable":
+                janitors.set_enabled(sibling["session"], sibling["revision"], True)
+            elif change == "delete": agents.soft_delete(owner["agent_id"])
+            elif change == "archive": agents.set_archived(owner["agent_id"], True)
+            elif change == "mode": janitors.configure(owner["session"], owner["revision"], options={"mode": "notify"})
+            elif change == "scope":
+                target = agents.create_agent(persona="New target", voice_id="v", cwd="/tmp", session="new-target", backend="codex")
+                janitors.configure(owner["session"], owner["revision"], scope={"agent_ids": [target]})
+            elif change == "effort":
+                janitors.configure(owner["session"], owner["revision"], effort="high" if owner["effort"] != "high" else "low")
+            else: janitors.configure(sibling["session"], sibling["revision"], scope={})
+        with original_tx():
+            yield
+    monkeypatch.setattr(settings_store, "transaction", change_before_writer)
+    c["worker"].run_once()
+    assert changed == [True]
+    assert len([p for p in c["sent"] if p["reason"] == "quota_threshold"]) == 1
+    audit, = _ownership_receipts(c)
+    assert json.loads(audit["delivery_json"]) == {"sent": 1}
+
+
+def test_unstable_capture_is_not_retried_or_used_to_suppress(notification_ownership, monkeypatch):
+    c = notification_ownership
+    original = janitor_builtins.resolve
+    resolved = []
+    def changed_during_resolve(role, **kwargs):
+        owner = original(role, **kwargs)
+        if role == hotseat.ROLE:
+            resolved.append(True)
+            janitors.configure(owner["session"], owner["revision"], options={"mode": "notify"})
+        return owner
+    monkeypatch.setattr(janitor_builtins, "resolve", changed_during_resolve)
+    c["worker"].quota_once()
+    assert resolved == [True]
+    assert [p["reason"] for p in c["sent"]] == ["quota_threshold"]
+
+
+def test_fingerprint_read_failure_inside_writer_is_not_a_fallback_delivery(notification_ownership, monkeypatch):
+    import sqlite3
+    c = notification_ownership
+    original = service.janitor_store.admission_fingerprint
+    def broken_under_writer(*args, **kwargs):
+        if args and args[0] == c["owner"]["agent_id"] and db.conn().in_transaction:
+            raise sqlite3.OperationalError("INJECTED_FINGERPRINT_READ_FAULT")
+        return original(*args, **kwargs)
+    monkeypatch.setattr(service.janitor_store, "admission_fingerprint", broken_under_writer)
+    with pytest.raises(sqlite3.OperationalError, match="INJECTED_FINGERPRINT_READ_FAULT"):
+        c["worker"].quota_once()
+    assert c["sent"] == []
+    assert db.conn().execute("SELECT COUNT(*) FROM janitor_quota_receipts").fetchone()[0] == 0
+    assert not db.conn().in_transaction
