@@ -192,11 +192,18 @@ class DrainMixin:
                             spec.queue_id, agent_id=spec.agent_id,
                             trace_id=spec.trace_id,
                             prompt_admission_id=spec.prompt_admission_id)
-                        turn_lifecycle.close_turns_for_trace(spec.agent_id, spec.trace_id)
+                        closed_ids = [row[0] for row in con.execute(
+                            "SELECT turn_id FROM turns WHERE agent_id=? AND trace_id=? AND ended_at IS NULL",
+                            (spec.agent_id, spec.trace_id)).fetchall()]
+                        if turn_lifecycle.close_turns_for_trace(spec.agent_id, spec.trace_id) != len(closed_ids):
+                            raise RuntimeError("handoff frontier close mismatch")
                         turn_lifecycle.transition(
                             spec.agent_id, TurnEvent.UPDATE_HANDOFF, {
                                 "reason": "update_handoff", "trace_id": spec.trace_id,
-                                "message": UPDATE_HOLD_HEADLINE})
+                                "message": UPDATE_HOLD_HEADLINE,
+                                **({"dispatch_not_started": True,
+                                    "dispatch_not_started_through_turn_id": max(closed_ids)}
+                                   if closed_ids else {})})
                         continue
                     turn_queue.park_at_head(
                         queue_id=f"{RECOVERY_PARK_PREFIX}-{spec.trace_id}",
@@ -206,13 +213,20 @@ class DrainMixin:
                         synthesize_audio=spec.synthesize_audio,
                         origin=spec.origin, sender_agent_id=spec.sender_agent_id,
                         prompt_admission_id=spec.prompt_admission_id)
-                    turn_lifecycle.close_turns_for_trace(spec.agent_id, spec.trace_id)
+                    closed_ids = [row[0] for row in con.execute(
+                        "SELECT turn_id FROM turns WHERE agent_id=? AND trace_id=? AND ended_at IS NULL",
+                        (spec.agent_id, spec.trace_id)).fetchall()]
+                    if turn_lifecycle.close_turns_for_trace(spec.agent_id, spec.trace_id) != len(closed_ids):
+                        raise RuntimeError("handoff frontier close mismatch")
                     # Not busy (a crash leaves no "interrupted" turn behind)
                     # and not an outcome: the turn has not run yet.
                     turn_lifecycle.transition(
                         spec.agent_id, TurnEvent.UPDATE_HANDOFF, {
                             "reason": "update_handoff", "trace_id": spec.trace_id,
-                            "message": UPDATE_HOLD_HEADLINE})
+                            "message": UPDATE_HOLD_HEADLINE,
+                            **({"dispatch_not_started": True,
+                                "dispatch_not_started_through_turn_id": max(closed_ids)}
+                               if closed_ids else {})})
                 con.execute("COMMIT")
             except BaseException:
                 con.execute("ROLLBACK")

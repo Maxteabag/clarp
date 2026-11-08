@@ -856,6 +856,9 @@ def trace_launch_status(agent_id: str, trace_id: str, *,
     if row is None:
         return "retryable" if receipt == "retryable" else "unknown"
     detail = json.loads(row["detail"] or "{}")
+    # Administrative transfer is queue-owned, never direct-resend authority.
+    if detail.get("reason") == "update_handoff":
+        return "observed"
     return "retryable" if detail.get("dispatch_not_started") else "observed"
 
 
