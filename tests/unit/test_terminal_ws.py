@@ -21,6 +21,7 @@ import pytest
 
 from lib import backends, terminal_presence, terminal_ws, ws
 from lib.backend import registry
+from lib.turn_slots import TurnSlots
 
 _KEY = "dGhlIHNhbXBsZSBub25jZQ=="
 _UPGRADE = {"Upgrade": "websocket", "Connection": "keep-alive, Upgrade",
@@ -117,15 +118,27 @@ def test_launch_argv_per_backend(monkeypatch, backend, resume, fresh):
 
 
 def test_live_counter_marks_and_never_goes_negative():
-    assert terminal_ws.has_live_terminal("a") is False
+    slots = TurnSlots()
+    assert terminal_ws.has_live_terminal is terminal_presence.has_live_terminal
+    assert terminal_ws._mark is terminal_presence._mark
+
+    def observed():
+        assert slots.live_work("unrelated").terminal is False
+        assert terminal_presence.has_live_terminal("unrelated") is False
+        return (terminal_ws.has_live_terminal("a"),
+                terminal_presence.has_live_terminal("a"),
+                slots.live_work("a").terminal)
+
+    assert observed() == (False, False, False)
     terminal_ws._mark("a", +1)
-    assert terminal_ws.has_live_terminal("a") is True
+    assert observed() == (True, True, True)
     terminal_ws._mark("a", +1)
     terminal_ws._mark("a", -1)
-    assert terminal_ws.has_live_terminal("a") is True
+    assert observed() == (True, True, True)
     terminal_ws._mark("a", -1)
-    assert terminal_ws.has_live_terminal("a") is False
+    assert observed() == (False, False, False)
     terminal_ws._mark("a", -1)
+    assert observed() == (False, False, False)
     assert terminal_presence._live == {}  # clamped at zero and evicted
 
 

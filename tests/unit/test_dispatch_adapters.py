@@ -135,7 +135,11 @@ def test_dream_requires_idle_agent_without_handles_or_compaction(adapters, monke
     assert adapters.journal == []  # dreams never go through TurnDispatchService
 
 
-def test_janitor_run_queues_behind_busy_janitor_and_tags_the_run(adapters):
+@pytest.mark.parametrize("external_runtime", [False, True], ids=["in-process", "supported-runtime"])
+def test_janitor_run_queues_behind_busy_janitor_and_tags_the_run(adapters, external_runtime):
+    if external_runtime:
+        adapters.ctx.runtime_client = SimpleNamespace(
+            status=lambda: {"capabilities": {"janitor_runs": True}})
     adapters.service.result = SimpleNamespace(queued=True)
     run = {"session": "sam", "trace_id": "janitor-run-1", "run_id": "run-1"}
     assert adapters.janitor_run(run, "clean up") == {"ok": True, "queued": True}
@@ -147,8 +151,17 @@ def test_janitor_run_queues_behind_busy_janitor_and_tags_the_run(adapters):
     assert kwargs["janitor_run_id"] == "run-1"
 
 
-def test_janitor_run_refuses_without_runtime_support(adapters):
-    adapters.ctx.runtime_client = SimpleNamespace(status=lambda: {"capabilities": {}})
+@pytest.mark.parametrize("status", [
+    {}, {"capabilities": {}}, {"capabilities": {"janitor_runs": False}},
+    {"capabilities": {"janitor_runs": 1}}, RuntimeError("runtime unavailable"),
+], ids=["missing-capabilities", "missing-flag", "false-flag", "truthy-not-true", "status-error"])
+def test_janitor_run_refuses_without_runtime_support(adapters, status):
+    def runtime_status():
+        if isinstance(status, Exception):
+            raise status
+        return status
+
+    adapters.ctx.runtime_client = SimpleNamespace(status=runtime_status)
     with pytest.raises(RuntimeError):
         adapters.janitor_run({"session": "sam", "trace_id": "t", "run_id": "r"}, "x")
     assert adapters.journal == []
