@@ -335,7 +335,9 @@ synthetic branches:
 
 - `live_projection` owns the unchanged reference reducer; `live_core` owns the live projection kernel and sole process registry. Feature `live_items`/`live_hub` preserve canonical exports; feature observation/relay/forwarding remains above the kernel. Producer used attributes retain exact object identity even though their module aliases now name `live_core`. Dispatcher/lifecycle feature edges remain for separate repairs.
 
-The first twenty-one repaired upward edges are removed from the ratchet; this section does not authorize reclassifying any existing module or expanding named exceptions.
+- Core backend leaves `agy_layout` and `claude_models` own the unchanged call-time AGY brain path value and Claude model-pin normalization. Feature transcript/capability modules re-export the canonical functions; hooks and launch import those functions directly without loading feature services. Environment/path/argv semantics remain unchanged.
+
+The first twenty-three repaired upward edges are removed from the ratchet; this section does not authorize reclassifying any existing module or expanding named exceptions.
 
 ## Wave 2: lead-signed map corrections (937)
 

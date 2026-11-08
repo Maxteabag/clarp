@@ -58,9 +58,12 @@ def test_parse_turns_strips_voice_preamble(tmp_path):
 
 
 def test_find_latest_jsonl(tmp_path):
+    from lib.backend import agy_layout
+    assert agy_transcript._agy_home is agy_layout._agy_home
     brain = tmp_path / "brain"
     p = _write_transcript(brain, "conv-x", [{"step_index": 0, "type": "USER_INPUT",
                                              "content": "<USER_REQUEST>hi</USER_REQUEST>"}])
+    assert agy_layout._agy_home(brain) is brain
     assert agy_transcript.find_latest_jsonl("conv-x", brain_root=brain) == p
     assert agy_transcript.find_latest_jsonl("missing", brain_root=brain) is None
     assert agy_transcript.find_latest_jsonl("") is None

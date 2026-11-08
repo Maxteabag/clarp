@@ -579,6 +579,8 @@ def test_claude_fallback_names_current_models_and_cli_aliases():
 
 
 def test_claude_model_pin_drops_legacy_default():
+    from lib.backend import claude_models
+    assert capabilities.claude_model_pin is claude_models.claude_model_pin
     assert capabilities.claude_model_pin("default") == ""
     assert capabilities.claude_model_pin(" DEFAULT ") == ""
     assert capabilities.claude_model_pin(None) == ""
