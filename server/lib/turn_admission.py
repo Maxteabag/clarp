@@ -267,7 +267,7 @@ class AdmissionMixin:
             if spec.queue_id and not turn_queue.dispatchable(
                     spec.queue_id, agent_id=spec.agent_id, trace_id=spec.trace_id,
                     session=spec.session, client_msg_id=spec.client_msg_id,
-                    origin=spec.origin, sender_agent_id=spec.sender_agent_id,
+                    origin=command.origin, sender_agent_id=spec.sender_agent_id,
                     prompt_admission_id=spec.prompt_admission_id):
                 raise _QueuedReceiptUnavailable(409, "queued message is no longer dispatchable")
             admission = True
