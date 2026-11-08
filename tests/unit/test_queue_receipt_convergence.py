@@ -310,8 +310,12 @@ def test_recovery_does_not_redispatch_more_than_one_repair_page(tmp_path, termin
     backend.live = False
     for index in range(105):
         _receipt(str(index), agent=agent, trace=str(index))
-        _turn(agent=agent, trace=str(index),
-              outcome="completed" if terminal == "completed" else None, ended=True)
+        turn_id = _turn(agent=agent, trace=str(index),
+                        outcome="completed" if terminal == "completed" else None, ended=True)
+        if terminal == "ended-only":
+            # A stale outcome does not turn an ended-only row into a settlement.
+            db.conn().execute("UPDATE turns SET outcome='completed' WHERE turn_id=?", (turn_id,))
+    before_revision = turn_queue.revision(agent)
     original_turns = [tuple(row) for row in db.conn().execute(
         "SELECT * FROM turns WHERE agent_id=? ORDER BY turn_id", (agent,))]
     # The FIRST recovery call must fence even receipts beyond its repair page.
@@ -321,10 +325,16 @@ def test_recovery_does_not_redispatch_more_than_one_repair_page(tmp_path, termin
         _tick()
     expected = "done" if terminal == "completed" else "ended"
     assert [turn_queue.status(str(index)) for index in range(105)] == [expected] * 105
+    assert all(_stored(str(index))["text"] == _stored(str(index))["sender_agent_id"] == ""
+               for index in range(105))
     assert turn_queue.pending_counts() == {}
+    assert turn_queue.revision(agent) > before_revision
     # A later boot/recovery cannot resurrect the converged receipt either.
     assert service.recover_queued() == 0
     assert backend.spawned == []
+    for index in range(105):
+        assert not turn_queue.claim_for_dispatch(str(index))
+        assert turn_queue.claim(str(index)) is None
     assert [tuple(row) for row in db.conn().execute(
         "SELECT * FROM turns WHERE agent_id=? ORDER BY turn_id", (agent,))] == original_turns
 
