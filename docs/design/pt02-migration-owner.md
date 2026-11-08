@@ -248,8 +248,10 @@ assumptions can still break old writers.
 
 ## Acceptance evidence required before closure
 
-A2 upfront criteria are requested by r2f9db6e032cf; they are PENDING. No source code
-until those criteria and exact design boundaries settle. Release-tooling seams and
+A2 upfront criteria were received via r2f9db6e032cf and read in full:
+`/var/tmp/clarp-refactor-program/reviews/pt02-937-A2-upfront-f666fb0.md`.
+They are criteria ONLY, not design/format/source permission. No source code until
+this exact design and its required boundaries settle. Release-tooling seams and
 new internal lock path require their owners/lead; journal exact DDL needs contract
 review and expand-only proof. Normal outputs and all intended refusal/boot changes
 must be registered/signed before replay. No tests written or executed by this note.
@@ -302,3 +304,87 @@ captain remote qualification/release scheduling additional and unestimated until
 slots assigned. Index/legacy-shape failures may require a separate approved plan.
 PT-02 remains OPEN/DEFERRED in high-findings until full corrective evidence; neither
 this note, profiling, nor the bridge alone closes it.
+
+
+## A2 criteria reconciliation and precise unresolved choices
+
+The independent criteria require production readiness before imports with actual
+DB side effects as well as before main(). Implementation must either prove those
+imports inert or establish the gate before importing them; adding a check halfway
+through main is insufficient. No early runtime socket or public HTTP bind is
+proposed. For each entrypoint a failed compatibility check is a terminal operation
+failure; ordinary authorized business writes remain enabled after compatibility.
+
+Proposed error matrix (lead approval pending; successful outputs unchanged):
+
+| Condition | Owner | Host/runtime | DB CLI | Hook |
+|---|---|---|---|---|
+| Missing/empty DB | Explicit fresh bootstrap only; create/schema atomically | Exit 1 before context/workers; existing supervisor retry | Exit 1, stderr fixed schema_not_ready code, no success JSON | Existing fallback/exit/stdout; report schema_not_ready only |
+| Known upgradeable older schema | Offline explicit plan; no owner fallback in client | Same refusal/retry | Same refusal | Same fallback |
+| Below floor61 / unknown newer / malformed metadata | Refuse exit1, no moving/deleting/resetting | Exit1 unsupported, no public readiness | Exit1 unsupported | Existing fallback, report unsupported |
+| Known compatible prior/next expansion | Check plan; run only authorized unfinished jobs | Ordinary business use, checked readiness | Ordinary business use | Ordinary business use |
+| Required phase pending/failed | Resume only after durable plan/identity verification | Not ready; no recovery/provider work | Not ready, no partial command mutation | Existing fallback |
+| Read lock/BUSY/IO error | One bounded attempt; primary code retained; uncertain commit readback later | Exit1 before startup; no migrate/reset; supervisor may retry startup | Nonzero existing failure envelope/SQLite code; no retry command body | Existing bounded fallback; no DB logging recursion |
+| Owner lock contention/unverifiable lock | Nonblocking refusal exit1; no second migration | Not an owner; readiness gate alone applies | Not an owner | Not an owner |
+
+Exact error spelling/channel mappings must be checked against each existing CLI
+and hook envelope before implementation. No new public JSON fields or HTTP error
+shape is proposed. A2/lead must settle whether existing generic errors suffice or
+new error wording needs a frozen-output exception. Proposed schema-check admission
+ceiling is 100 ms per connection using existing timeout machinery, bounded small
+metadata reads, and no internal polling loop. This is not a hard IO deadline;
+actual error/latency receipt is required. No two busy-timeout budgets are multiplied.
+
+Lock order, with no concurrent restore: release/restore orchestration serialization
+-> owner flock -> bounded SQLite write transaction -> COMMIT -> release SQLite
+writer; repeat batches while holding flock; release flock -> activate/start services.
+No network/provider/file operation inside the write unit. Restore uses its existing
+root locks before migration begins; never acquire restore exclusivity from inside
+a SQLite transaction. Replacement invalidates every ready cache by canonical
+path device/inode plus schema generation, not PID or a process bool. In-place
+restore/replacement while users are open is refused by release orchestration;
+inode checks alone cannot make an unsupported live replacement safe. Long-lived
+mixed-version users need compatible expansion or an explicit quiescence boundary;
+open-time validation alone is not concurrency proof.
+
+Job completion protocol proposal: each transaction commits business transformations
+and its typed frontier together; only a final writer transaction, after a residual
+eligibility check under the same owner, publishes job done/required readiness and
+version. If a predicate can be re-enabled by old writers, residual emptiness alone
+is NOT completion: require a proven dual-write/fallback contract or drain those
+writers before finalization. Journal loss/corruption refuses; never infer done from
+an absent row. A failed rollback preserves/logs both primary and rollback codes,
+without retrying an uncertain admitted write. A long keyset traversal across a
+legacy schema must retain which conditional additions/data conversions were
+needed before any DDL commit changed that evidence.
+
+Explicit implementation decisions still OPEN/HOLD:
+
+1. Lead frozen-path approval for the owner lock and release-owner/captain agreement
+   on native/container bootstrap and serialization. No current install/restore
+   helper is assumed to serialize all these routes already.
+2. A2 exact route/readiness/error/compatibility review. A known-next manifest must
+   describe the actual expansion; R cannot approve an unspecified future schema.
+3. Journal exact additive DDL/format and reader-first release separation. Ownership
+   bridge can avoid new schema, but fully resumable legacy work cannot just be
+   declared complete without durable progress or a per-job proven idempotent
+   convergence alternative. These alternatives need an exact plan, not improvisation.
+4. Complete statement-level plan for historical schema strings, dependency ordering,
+   destructive legacy steps and blocking index duration before claiming all upgrades
+   bounded. This initial design identifies the class and concrete examples; it is
+   not a final per-version executable migration plan or a complete DDL cost proof.
+5. Current future code target must be re-pinned after urgent main work. This design
+   remains bound to f666fb0d; no production edit on a moved base is implied.
+
+A2-required negative plants for the eventual existing owner tests: nonowner invokes
+_migrate; ready emitted before final COMMIT; locked recheck omitted; replacement
+reuses cached readiness; version stamped before required data; checkpoint advances
+without row mutation; resumed non-idempotent chunk runs twice; strict equality
+rejects supported rollback; unknown future schema accepted; one hook/CLI/import
+path still creates/migrates. Use actual old-schema fixtures and real disposable
+SQLite/process barriers, not a version stamp on a current shape. Controls include
+blank and old DB contenders, unrelated DB independence, read-only disk/lock failure,
+NULL/deleted/reordered/frontier-behind rows, old runtime retained during Host-only
+upgrade, crash after chunk commit before bookkeeping and after final commit before
+readiness. They extend existing migration/startup/rehearsal tests; no duplicate
+campaign or jobs are requested by this design.
