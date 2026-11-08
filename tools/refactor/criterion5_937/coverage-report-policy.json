@@ -1,0 +1,44 @@
+{
+  "coverage_version": "7.17.0",
+  "config_source_sha256": "82523b68e49b85e8e69903701eff6838f6fad8af9c33a9cad21d90477934f9da",
+  "scope": "PINNED_PUBLIC_OPTION_CONTRACT_NOT_EXECUTED_CONFIG_EVIDENCE",
+  "options": {
+    "paths": {},
+    "run:branch": true,
+    "run:core": "ctrace",
+    "run:relative_files": true,
+    "run:parallel": false,
+    "run:plugins": [],
+    "run:patch": [],
+    "run:concurrency": [],
+    "run:source_pkgs": [],
+    "run:source_dirs": [],
+    "run:disable_warnings": [],
+    "run:sigterm": false,
+    "run:debug": [],
+    "run:debug_file": null,
+    "run:include": [],
+    "run:omit": [],
+    "run:dynamic_context": "test_function",
+    "report:include": null,
+    "report:omit": null,
+    "report:contexts": null,
+    "report:ignore_errors": false,
+    "report:skip_empty": false,
+    "report:skip_covered": false,
+    "report:exclude_lines": [
+      "#\\s*(pragma|PRAGMA)[:\\s]?\\s*(no|NO)\\s*(cover|COVER)",
+      "^\\s*(((async )?def .*?)?[\\])]+(\\s*->.*?)?:\\s*)?\\.\\.\\.\\s*(#|$)",
+      "^\\s*if (typing\\.)?TYPE_CHECKING:"
+    ],
+    "report:exclude_also": [],
+    "report:partial_branches": [
+      "#\\s*(pragma|PRAGMA)[:\\s]?\\s*(no|NO)\\s*(branch|BRANCH)"
+    ],
+    "report:partial_branches_always": [
+      "^\\s*while (True|1|False|0):",
+      "^\\s*if (True|1|False|0):"
+    ],
+    "report:partial_also": []
+  }
+}
