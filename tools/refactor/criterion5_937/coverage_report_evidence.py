@@ -91,6 +91,8 @@ def reconcile_report(report, analyses, *, inventory):
                     or item['total'] <= 1 or not 0 <= item['taken'] <= item['total']
                     or item['line'] in by_line):
                 raise ValueError('invalid typed public branch statistics')
+            if item['line'] in excluded:
+                raise ValueError('excluded source cannot be a public branch-statistics source')
             by_line[item['line']] = item
         if (covered_branches & missing_branches
                 or any(e[0] not in by_line for e in covered_branches | missing_branches)
