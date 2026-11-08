@@ -74,6 +74,7 @@ def _launch_status(row) -> str:
     if raw is not None and receipt is None:
         return "unknown"  # malformed is not missing/unsent
     if receipt is not None and (receipt.get("agent_id") != row["agent_id"]
+                    or receipt.get("trace_id") != row["trace_id"]
                     or receipt.get("client_msg_id") != row["client_msg_id"]
                     or receipt.get("origin") != row["origin"]
                     or (row["status"] in ("queued", "claimed")
