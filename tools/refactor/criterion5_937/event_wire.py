@@ -9,6 +9,7 @@ import json
 from pathlib import PurePosixPath
 
 from .packed_columns import WIDTH, MAX_BANK_STORAGE_BYTES
+from .terminal_channel import SIZE as TERMINAL_BYTES
 
 A_PIN = '4f33cdc9287eafcddd0adfb17b51487c84ace28b'
 B_PIN = '0073254687d22ac5a6c1d01b8af29fa678dcf4a2'
@@ -181,9 +182,10 @@ def fixed_buffer_arithmetic(capacities):
         result[table] = {'row_width':width,'column_bytes':width*item['rows'],
                          'dictionary_bytes':item['dictionary_bytes'],
                          'dictionary_offset_bytes':4*(item['dictionary_entries']+1),
-                         'exceeds_primitive_safety_ceiling':(width*item['rows']+item['dictionary_bytes']+4*(item['dictionary_entries']+1)>MAX_BANK_STORAGE_BYTES)}
+                         'independent_refusal_bytes':TERMINAL_BYTES,
+                         'exceeds_primitive_safety_ceiling':(width*item['rows']+item['dictionary_bytes']+4*(item['dictionary_entries']+1)+TERMINAL_BYTES>MAX_BANK_STORAGE_BYTES)}
     return {'tables':result,
-            'fixed_buffer_bytes_per_producer':sum(sum(v[k] for k in ('column_bytes','dictionary_bytes','dictionary_offset_bytes')) for v in result.values()),
+            'fixed_buffer_bytes_per_producer':sum(sum(v[k] for k in ('column_bytes','dictionary_bytes','dictionary_offset_bytes','independent_refusal_bytes')) for v in result.values()),
             'additional_peak':('ALL producer multiplicities; Python key/lookup objects; live connection/epoch/range indices; '
                                'transient decode; export/hash buffers; consumer/merge; actual page touch and CPU/lock cost'),
             'source_cardinality_approved':False,'total_peak_established':False,'corpus_fit_established':False}

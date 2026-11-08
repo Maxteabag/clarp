@@ -39,7 +39,8 @@ are not native semantic acceptance. Storage is still unexecuted/unreviewed.
 The worksheet function requires ALL nine tables, no implicit zero/missing table.
 Each table reserves a positive row capacity, just as the Bank does; dictionary
 entry/byte capacity may be0. It computes sum(row_width*reserved_rows), exact
-raw dictionary bytes and4*(reserved_entries+1) offsets per producer. Exceeding
+raw dictionary bytes,4*(reserved_entries+1) offsets and128 independent refusal
+bytes PER BANK per producer. Exceeding
 any primitive ceiling is explicit, not an invitation to raise it. No bank is
 allocated by this function, and it never reports source capacity or corpus fit.
 
@@ -64,3 +65,27 @@ nonallocating-writer tests there. An isolated check that a declared domain hash
 changes is not actual producer coverage. These controls, whole event schemas'
 source mapping, recorder/export validation and capacity arithmetic still need
 exact review and admitted buildbox execution. No local tests or measurement.
+
+
+## Conditional capacity boundary accepted by C (764 source facts)
+
+The C capacity-boundary report separates successful-path capacity, detection/
+retained-history and bounded in-flight/drain. No exhaustive arbitrary-failure
+schedule bound is required, but source-qualified expected probe flow/native
+retry/approved absence fallback remains part of the clean path. The earlier
+finite Witness is NOT yet that complete exception-classification profile.
+
+The new terminal primitive records the first refusal plus a last-publication
+watermark and explicit missing-trigger/prefix-integrity/unknown-suffix state,
+using storage independent of the main columns/dictionary. It is memory-only
+unless the owner supplies separately qualified persistent/shared storage. A
+zero channel is UNRECORDED, not success; a torn/lost channel is UNKNOWN. No
+actual kernel sharing, survival across process death or lifecycle is proven.
+
+A refused Bank can expose read-only prefix segments for the separately
+qualified owner to preserve; the prefix is never promoted to a full native
+history. Positive producer quiescence/exit or qualified termination and known
+ownership are still needed. No automatic second export, product retry, root
+reuse or copied diagnostic prefix may qualify a cell. Emergency bytes and
+encoding/export transients join the ALL-producer resource worksheet; native
+handlers that outlive clients and actual drain remain independently bounded.

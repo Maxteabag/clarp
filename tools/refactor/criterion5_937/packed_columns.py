@@ -12,6 +12,8 @@ from pathlib import Path
 import struct
 import threading
 
+from .terminal_channel import Terminal, SIZE as TERMINAL_BYTES
+
 VERSION = 1
 ENCODING = 'utf-8/surrogatepass'
 WIDTH = {'u64': 8, 'i64': 8, 'optional_u64': 9, 'optional_i64': 9,
@@ -100,7 +102,7 @@ class Bank:
     producers, exports and consumers in its peak calculation. Initialization
     uses eager bytearray allocation; resident cost/page touch is NOT certified.
     """
-    def __init__(self, *, schema, rows, dictionary_entries, dictionary_bytes, storage_limit_bytes, domain):
+    def __init__(self, *, schema, rows, dictionary_entries, dictionary_bytes, storage_limit_bytes, domain, terminal_buffer=None, bank_id=0):
         if (type(schema) is not tuple or not 1 <= len(schema) <= MAX_COLUMNS
                 or any(type(item) is not tuple or len(item) != 2 for item in schema)):
             raise ValueError('column schema type/count')
@@ -114,7 +116,8 @@ class Bank:
                 or type(dictionary_bytes) is not int or not 0 <= dictionary_bytes < (1 << 32)
                 or type(domain) is not bytes or not domain or len(domain) > MAX_SCHEMA_BYTES):
             raise ValueError('explicit bounded capacities/domain required')
-        total_storage = rows * sum(WIDTH[kind] for _, kind in schema) + dictionary_bytes + (dictionary_entries + 1) * 4
+        integer(bank_id)
+        total_storage = rows * sum(WIDTH[kind] for _, kind in schema) + dictionary_bytes + (dictionary_entries + 1) * 4 + TERMINAL_BYTES
         if (type(storage_limit_bytes) is not int or not 0 < storage_limit_bytes <= MAX_BANK_STORAGE_BYTES
                 or total_storage > storage_limit_bytes):
             raise ValueError('unqualified fixed-buffer allocation budget')
@@ -134,11 +137,23 @@ class Bank:
         self.lock = threading.RLock()
         self.state = 'OPEN'
         self.refusal = None
+        self.last_published = (0, 0, 0)
+        self.bank_id = bank_id
+        self.terminal = Terminal(bytearray(TERMINAL_BYTES) if terminal_buffer is None else terminal_buffer)
+        self.terminal_unknown = False
 
     def refuse(self, code):
         if self.refusal is None:
             self.refusal = code
         self.state = 'REFUSED'
+        try:
+            self.terminal.mark(code, bank=self.bank_id, published=self.last_published,
+                               triggering_event_missing=True,
+                               prefix_integrity_unknown=code == 'DECODE_INCOMPLETE')
+        except BaseException:
+            # Preserve the original observer/native primary. A lost terminal
+            # means UNKNOWN, never an inferred complete or successful producer.
+            self.terminal_unknown = True
 
     def append(self, record):
         """All-participating-capacity reservation before used-index publication.
@@ -202,6 +217,7 @@ class Bank:
                 self.entries += len(planned)
                 self.bytes_used = cursor
                 self.used += 1
+                self.last_published = (self.used, self.entries, self.bytes_used)
                 self.state = 'OPEN'
                 return index
             except BaseException:
@@ -246,6 +262,35 @@ class Bank:
             except BaseException:
                 self.refuse('DECODE_INCOMPLETE')
                 raise
+
+    def partial_segments(self):
+        """Zero-copy retained prefix for a REFUSED bank, NEVER qualification.
+
+        Owner must freeze/quiesce the producer and preserve these bytes under
+        its separately reviewed publication/lifetime protocol. No file is
+        written, deleted or retried here. Unknown terminal/prefix stays UNKNOWN.
+        """
+        with self.lock:
+            if self.state != 'REFUSED':
+                raise ValueError('partial evidence requires refused bank')
+            rows, entries, nbytes = self.last_published
+            if not (0 <= rows <= self.capacity and 0 <= entries <= self.entry_capacity
+                    and 0 <= nbytes <= len(self.dictionary)):
+                raise ValueError('UNKNOWN published watermark')
+            try:
+                terminal = self.terminal.read()
+            except BaseException:
+                terminal = {'state':'UNKNOWN','qualified':False}
+            if self.terminal_unknown or terminal.get('state') != 'PARTIAL':
+                terminal = {'state':'UNKNOWN','qualified':False}
+            segments = {f'column-{i}.bin':memoryview(self.columns[name])[:rows*WIDTH[kind]].toreadonly()
+                        for i,(name,kind) in enumerate(self.schema)}
+            segments['dictionary.bin'] = memoryview(self.dictionary)[:nbytes].toreadonly()
+            segments['offsets.bin'] = memoryview(self.offsets)[:(entries+1)*4].toreadonly()
+            segments['refusal.bin'] = self.terminal.buffer.toreadonly()
+            return {'qualified':False,'domain':self.domain,'schema':self.schema,
+                    'last_published':self.last_published,'terminal':terminal,
+                    'suffix_qualified':False,'segments':segments}
 
     def export(self, directory):
         """Bounded bulk write; final manifest is published LAST. No retry/cleanup.
