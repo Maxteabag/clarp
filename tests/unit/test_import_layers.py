@@ -44,7 +44,7 @@ PERSISTENCE = frozenset({
 })
 PERSISTENCE_PACKAGES = ("lib.persistence",)
 CORE = frozenset({f"lib.{m}" for m in (
-    "agent_lifecycle", "agent_mcp_codec", "agent_store", "agents", "backends", "config", "config_writer", "diagnostics_settings",
+    "agent_mcp_codec", "agent_store", "agents", "backends", "config", "config_writer", "diagnostics_settings",
     "claude_reply_evidence", "deployment", "error_classify", "eventlog", "events", "hook_runtime",
     "http_utils", "identity", "launch_receipts", "live_core", "live_projection", "log", "message_live", "message_store", "message_turns",
     "message_writes", "message_text", "origins", "proc_util", "process_registry", "prompt_admissions",
@@ -79,9 +79,6 @@ NAMED_EXCEPTIONS = {
 }
 
 UPWARD_BASELINE = frozenset({
-    'lib.agent_lifecycle -> lib.contact_assignment',
-    'lib.agent_lifecycle -> lib.personas',
-    'lib.agent_lifecycle -> lib.session_models',
     'lib.agents -> lib.artifacts',
     'lib.agents -> lib.clip_store',
     'lib.agents -> lib.goal_ledger',
