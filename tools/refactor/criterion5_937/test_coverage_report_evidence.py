@@ -53,7 +53,7 @@ def test_statement_denominator_exclusion_credits_and_empty_units_are_separate():
 @pytest.mark.parametrize('fault', ['missing-file', 'extra-file', 'missing-analysis', 'duplicate-statement',
                                   'wrong-source', 'bool-count', 'wrong-statements', 'excluded-statement',
                                   'wrong-branch-credit', 'wrong-missing-branch', 'bool-branch',
-                                  'wrong-totals', 'excluded-executed', 'noncanonical-line-context'])
+                                  'wrong-totals', 'excluded-executed', 'excluded-branch-source', 'noncanonical-line-context'])
 def test_missing_inventory_or_inconsistent_units_cannot_be_report_consistent(fault):
     report, analyses, inventory = records()
     row = report['files']['server/a.py']
@@ -79,11 +79,15 @@ def test_missing_inventory_or_inconsistent_units_cannot_be_report_consistent(fau
         row['missing_branches'] = [[2, 3]]
     elif fault == 'bool-branch':
         row['executed_branches'] = [[True, -1]]
+    elif fault == 'excluded-branch-source':
+        analyses['server/a.py']['branch_stats'] = [{'line': 4, 'total': 2, 'taken': 2}]
+        row['executed_branches'] = [[4, -1], [4, 1]]
     elif fault == 'excluded-executed':
         row['executed_lines'].append(4)
     elif fault == 'wrong-totals':
         report['totals']['missing_lines'] = 0
     else:
         row['contexts']['01'] = row['contexts'].pop('1')
-    with pytest.raises(ValueError):
+    reason = 'excluded source cannot be a public branch-statistics source' if fault == 'excluded-branch-source' else None
+    with pytest.raises(ValueError, match=reason):
         reconcile_report(report, analyses, inventory=inventory)

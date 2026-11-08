@@ -85,3 +85,30 @@ copy/fetch/drain/tails LOWEST everygate/noFUND/preempt/delay/fullB-C+fresh
 rfcomputec/captain gap unchanged. No additional job/run/allowance/Actions
 benchmark or herald931 resume. Beyond cap/no faithful useful fit =>STOP/report
 before compute; no corpus/control/denominator shrink to claim completion.
+
+
+## c1d C1 excluded-source correction — SOURCE ONLY
+
+B's pinned-source finding distinguishes excluded SOURCE from excluded DESTINATION.
+PythonParser.exit_counts skips excluded source lines; public branch_stats and
+JSON branch source keys derive from that map. The consumer now explicitly
+refuses any branch_stats line in the same analysis exclusion set before adding
+it to by_line. Existing raw-arc source membership checks remain; legitimate
+observed arcs TO excluded targets, negative exits and tool-credit semantics
+are unchanged. No stronger statement-membership assumption or adjusted counts.
+
+The existing LOWER fault table gains excluded-branch-source: keep all positive
+line/summary/global units valid, set branch_stats to line4,total2,taken2 while
+excluded remains[4], and executed branches [[4,-1],[4,1]]. It must refuse at the
+specific excluded-source guard, not a total/duplicate/type failure. The prior
+positive excluded-destination/credit/empty-file case stays unchanged. These are
+supplied record contracts, not actual parser/API outputs or traced execution.
+No new row alters an input to force coverage or fabricates a passing native
+report. All controls UNEXECUTED, no observed baselineRED/currentGREEN.
+
+This relation-specific contract was not covered by existing source-bounds and
+sum checks: mutually consistent numbers could conceal the excluded source.
+No duplicate validator/product seam/API/parser is introduced. This is a narrow
+source repair awaiting exact B closure, not fullReady or compute/control grant.
+Static434 B inventory and all report-source/producer/custody/lifecycle/family/
+numeric-budget obligations remain as above; no additional run/allowance.
