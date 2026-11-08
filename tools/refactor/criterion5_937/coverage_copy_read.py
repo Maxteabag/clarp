@@ -141,6 +141,8 @@ def _inspect_closed_copy(*, original_root, copy_root, filename, expected_sha256,
     receipt = {'public_read_returned': True, 'public_close_returned': True,
             'copy_bytes_unchanged': True, 'original_bytes_unchanged': True,
             'artifact_sha256': expected_sha256, 'artifact_bytes': expected_bytes,
+            'original_observation': {'path': str(original), **pre_a},
+            'copy_observation': {'path': str(copy), **pre_b},
             'schema_valid_empty_union_or_producer_accepted': False,
             'scope': 'one strict same-version copy read/accessor/close only; no update/report/process/drain proof'}
 
