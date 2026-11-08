@@ -169,9 +169,10 @@ by an older failure over a successor. Reuse the earlier b93/47d9/288 ownership
 split with fix3: TP02 owns control/lease/publication; TurnSlots owns exact bounded
 slot decisions. A concrete exact Stop generation/claim/rollback adapter is a
 PRE-CODE design requirement with A and fix3/A2; do not pretend current bool
-restore_stop proves a generation fence. The earlier642 ordered-payload refinement
-must be separately identified if its implementation goes beyond current signed
-semantics. No implied permission to close backlog36 via this lock change.
+restore_stop proves a generation fence. Lead937 explicitly excludes the earlier642 ordered-payload refinement. Keep
+today's shipped Stop semantics. If A proves a correct concurrency fix requires a
+part of642, STOP for a short exact intended-difference memo and lead decision;
+there is no rider permission. No authority to close backlog36 via this fix.
 
 ### 4. Drain without invisible work or I/O under metadata locks
 
@@ -193,12 +194,12 @@ retries, drain budget, natural-idle path, account recovery carry and revert rema
 A stale scan after cancel/revert cannot seal the new epoch. Start-held work and
 any child handoff occur outside locks with parent-to-child owner transfer.
 
-Hard-seal policy is NOT silently broadened: current methods outside the four
-rejected RPCs can still have effects after _draining today. The old636 policy
-expansion has never been an exact source signature here. A must resolve this
-with the lead before a complete release safety claim if the implementation needs
-new refusals/re-arm behavior. No status-code reuse conceals a new policy. Until
-settled, this design makes no all-method post-seal no-launch claim.
+Lead937 SETTLES hard-seal scope: ONLY the current four rejected RPCs stay
+rejected. Other side-effecting methods get reservation/accounting with NO new
+refusal. The old636 expansion is OUT and separately assigned backlog45. The
+acceptance bar here is drain safety NO WORSE than current shipped semantics, not
+a new all-method post-seal no-launch guarantee. No status-code reuse conceals a
+new policy; no blanket closure of backlog45 is claimed.
 
 ## Lock order and lifetime invariants
 
@@ -258,8 +259,9 @@ TP-02 by proxy. New long-lived jobs use the program's durable launcher via capta
    fix3 (existing TP02/U10/S02/S03/S08 boundary). No implementation while shared
    operation/Stop/seal API or owner boundary is unresolved.
 2. Refine concrete ticket/agent-lane/Stop-completion/deferred-child API and exact
-   outcome matrix with A. If new Stop ordering/refusal/release policy is needed,
-   send its explicit intended-difference memo to lead; do not call it latency-only.
+   outcome matrix with A. Lead937 keeps the four-method seal policy and shipped Stop ordering;
+   do not reopen636/642. If A proves a correct fix requires changed Stop semantics,
+   send only that precise intended-difference memo to lead before code.
 3. Re-pin after both queue933 and BACKENDS-01/TPN3 land. Named narrow maintenance
    agreements for actual hooks, then RED tests, then production; no code in this
    design commit. Keep runtime status-only mitigation independently revertible
@@ -269,9 +271,11 @@ TP-02 by proxy. New long-lived jobs use the program's durable launcher via capta
    qualified fix; no risk acceptance or source-design substitution.
 
 Known limits/open design gates: exact design acceptance under A's delivered criteria; actual post933/TPN3 source;
-canonical admission/effect hook; overlapping Stop generation ownership; internal
-pending-seal result; sealed-method policy scope. These are named pre-code design
-questions, not excuses to accept TP-02. Source note delivered before09:30; refined
+canonical admission/effect hook and a preserving Stop completion adapter. Lead937
+approves private PENDING/OWNED/SEALED and narrow named hooks as INTERNAL seams,
+subject to A and file-owner agreement; it settles existing seal/Stop policy, not
+the concrete implementation. These are pre-code design questions, not excuses
+to accept TP-02. Source note delivered before09:30; refined
 review-ready API draft ETA within one working turn of A/peer criteria arriving.
 
 ## Owner reconciliation and precise remaining design gates
@@ -329,12 +333,38 @@ whole-RPC lock replacement cannot prove same-agent Stop and canonical routing.
 without smuggling lead642's separately signed ordering refinement into a
 latency-only patch. If source-preserving handling cannot satisfy the criteria,
 request its explicit scope/signature rather than weaken them.
-3. Private pending-seal outcome and non-gated goal/compact/other producer policy.
-The four-method whitelist stays until an explicit lead decision. Full all-method
-seal proof cannot be claimed while that scope is unresolved.
+3. Concrete private pending-seal implementation and producer accounting. Lead937
+approves the internal result and explicitly retains the four-method whitelist;
+non-gated goal/compact stay permitted with accounting. Prove current drain safety
+does not regress; do not make a full all-method post-seal no-launch claim.
 
 A design-ready decision will therefore distinguish the latency/concurrency fix
 from any separate Stop/release policy amendment. No new lock-across-provider,
 SQL transaction, schema/state value, timeout or public blocker field is approved.
 Next action is A's review of this exact first note and the bounded open choices;
 no production/tests have been authored or executed.
+
+## Lead937 policy rulings — incorporated after first draft
+
+Scope is latency/concurrency ONLY: unrelated status/agents progress, same-agent
+admission order/client-ID dedup/exact ownership/Stop payload conservation remain,
+and drain safety does not regress. Four-method hard-seal set STAYS.636 is OUT to
+backlog45. Today's shipped Stop semantics STAY;642 is not a rider. If A finds a
+necessary semantic change, send the exact small intended-difference memo for lead
+decision rather than expanding scope inside an internal helper.
+
+Private PENDING/OWNED/SEALED between bridge and monitor, plus narrow named
+admission/deferred-owner hooks, are approved INTERNAL seams only; concrete A
+acceptance and owner agreement still required. fix237 owns TP-N3 regions; fix3
+owns TurnSlots. Re-pin and land after933+BACKENDS-01/TPN3. A status-only early
+mitigation must be independently revertible and explicitly PARTIAL; it cannot
+close the high finding. All public shapes/codes/timeouts/wire remain unchanged.
+
+Parallel TurnSlots diagnostic maintenance is not a TP-02 production claim: on
+0073254687d2 the relevant fact helpers are module `_terminal_live(agent_id)`
+(wrapping `terminal_ws.has_live_terminal`) and `_compacting(session)`. S4 has NO
+production edits/hook claim in those functions or elsewhere in TurnSlots. An
+exception binding plus bounded code/class-only throttled diagnostic retaining
+False fallback and associated two-to-zero ratchet update is outside TP-02's
+proposed seams; its owner/review controls still apply. Refresh source baseline on
+actual landing rather than restoring an older TurnSlots file.
