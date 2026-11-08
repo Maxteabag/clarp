@@ -329,7 +329,9 @@ synthetic branches:
 
 - `stream_pacing` is a new core primitive owning generic markdown prefix pacing, per-instance timer generations and trailing throttling. Feature `live_pacing` preserves exact object exports; provider/runtime core consumers use the canonical owner. The existing feature module retains its classification. Muse timer observers patch the canonical scheduler read by the moved classes.
 
-The first eight repaired upward edges are removed from the ratchet; this section does not authorize reclassifying any existing module or expanding named exceptions.
+- `workspace_paths` is a new core primitive owning call-time native/container path confinement and recovery. Feature `launch_paths` preserves exact function exports; lifecycle and the generated Stop helper import the canonical owner through named recipe repoints. Environment/path semantics and Stop ownership remain unchanged.
+
+The first eleven repaired upward edges are removed from the ratchet; this section does not authorize reclassifying any existing module or expanding named exceptions.
 
 ## Wave 2: lead-signed map corrections (937)
 

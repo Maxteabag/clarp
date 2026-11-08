@@ -50,7 +50,7 @@ CORE = frozenset({f"lib.{m}" for m in (
     "message_writes", "origins", "proc_util", "process_registry", "prompt_admissions",
     "protocol", "roster", "roster_seed", "runtime_bridge", "runtime_events", "server_identity",
     "settings_store", "status_labels", "stream_pacing", "telemetry", "text_util", "trace", "turn_dispatch",
-    "turn_identity", "turn_lifecycle", "turn_queue", "turn_slots", "turn_usage", "terminal_presence", "voice", "voice_markup", "ws",
+    "turn_identity", "turn_lifecycle", "turn_queue", "turn_slots", "turn_usage", "terminal_presence", "voice", "voice_markup", "workspace_paths", "ws",
 )})
 CORE_PACKAGES = ("lib.backend", "lib.policies")
 HTTP = frozenset({"server", "runtime", "__init__"} | {f"lib.{m}" for m in (
@@ -80,7 +80,6 @@ NAMED_EXCEPTIONS = {
 
 UPWARD_BASELINE = frozenset({
     'lib.agent_lifecycle -> lib.contact_assignment',
-    'lib.agent_lifecycle -> lib.launch_paths',
     'lib.agent_lifecycle -> lib.personas',
     'lib.agent_lifecycle -> lib.session_models',
     'lib.agents -> lib.artifacts',
@@ -164,7 +163,6 @@ UPWARD_BASELINE = frozenset({
     'lib.turn_dispatch -> lib.janitor_design_policy',
     'lib.turn_dispatch -> lib.janitors',
     'lib.turn_dispatch -> lib.judgment_sites',
-    'lib.turn_dispatch -> lib.launch_paths',
     'lib.turn_dispatch -> lib.live_hub',
     'lib.turn_dispatch -> lib.oracle_delegations',
     'lib.turn_dispatch -> lib.recovery_backoff',

@@ -17,7 +17,7 @@ from .turn_dispatch_state import _FAILOVERS, _QUEUED, _SLOTS, _TURN_LOCK
 
 
 def _existing_cwd(raw: Any) -> pathlib.Path:
-    from .launch_paths import existing_workspace_path
+    from .workspace_paths import existing_workspace_path
     return existing_workspace_path(raw)
 
 
