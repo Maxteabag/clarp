@@ -59,6 +59,36 @@ not client/process reuse. A pending control suppresses the optional end-clock
 call. Cleanup cannot replace an existing primary; a new cleanup control with no
 primary propagates. All fields/lifecycle claims still need finite fault proof.
 
+### F1 repair after f45 source review
+
+The old _quiet_mark discarded a new control. It now returns the exact control
+and latches pending_control; no exception/frame/socket is retained on the object
+or in receipts. The original selected primary is an explicit local variable,
+not sys.exc_info() inside a handler that might instead denote a cleanup error.
+All cleanup/diagnostic paths use one selection rule: an existing exact primary
+wins; otherwise the first new control becomes primary. A diagnostic control is
+retained as cause. If an explicit native cause already exists, a cause-level
+BaseExceptionGroup retains BOTH that exact prior cause and the new control;
+the top-level primary is never replaced by this group. Further cleanup controls
+remain in that bounded call's cause structure, not a receipt/callback registry.
+
+Ordinary metadata errors still yield UNKNOWN without replacing result/primary.
+Restoration and independent release are attempted before raising the selected
+control. Once a control is pending, the optional end clock is skipped. No close
+retry, additional socket/RPC, I/O diagnostic or native deadline change is added.
+The ownership refusal interpretation was accepted by C: it makes the campaign
+PARTIAL/NOT_STARTED plus any actual outstanding call, never reduced-load success.
+
+`peer_quiet_mark_controls.py` authors the three requested diagnostic timing
+cases: ordinary selected primary with prior cause; successful controlled return
+then ordinary post-restore failure; and an already-pending original control.
+A new control DURING marking must select/retain the specified objects, latch,
+restore inherited/own binding, release and skip end timing. These are explicitly
+LOWER TOOLING ADAPTER controls with a controlled native_status slot and NO
+socket or native transport. Their zero-close check is not an owned-socket-close
+proof; actual transport/owned-close/lifecycle controls below remain owed.
+No case has run or been admitted, and no extra control job/budget is granted.
+
 ## Finite control SOURCE still to be authored and qualified
 
 No control below has run. It must fit the SAME reviewed setup selector/budget,
