@@ -54,8 +54,8 @@ compressed aggregate that loses an assignment.
    Nonconsecutive or different-membership allocations use another range. Both
    range fragmentation AND retained row/key edges have independent byte caps.
 4. Keyed assignments: every actual source-qualified SQL write gets an edge
-   `(native event order, key ID, attempt ID OR exact seed-revision reference,
-   transaction/savepoint identity, writer/caller role)`. Raw PK strings have a
+   `(producer-local append index, key ID, attempt ID OR exact seed-revision reference,
+   transaction/savepoint identity, writer/caller role, native call brackets)`. Raw PK strings have a
    lossless length-prefixed bounded dictionary; a digest alone is not an
    identity. Rewrites/deletes/multiple writes are retained, not just the latest
    value. Head revision/replace_revision and no-allocation source/seq mutations
@@ -136,3 +136,31 @@ rather than claim MET, shrink S/L, change the treatment or expand the budget.
 
 No new capacity number is approved by this proposal. No observer implementation
 or control execution is inferred from a favourable design review.
+
+
+## C f5a1 upfront amendments: binding for future integration
+
+The f5a1 direction review accepted representation design only. In particular,
+append offsets, callback arrival and wall-clock receipt order do NOT define a
+native global order. Preserve source-grounded same-connection program order,
+transaction/savepoint ancestry, qualified acknowledgement brackets and complete
+committed revision ordering where it applies. A non-allocating conflicting write
+without a proved native/source order remains UNKNOWN/PARTIAL; do not choose an
+order merely to match the reference.
+
+The first packed-column primitive defines scalar storage bytes only, not the
+complete event schema or a domain merger. It fixes little-endian signed64
+SQLite values, unsigned64 evidence IDs, tagged optional values and native-state
+unknown/false/true tags, reversible typed identities and fail-closed partial
+publication/export. All local IDs still require exact producer/PID-start/boot/
+source and physical-DB incarnation namespace in real merges. Domain bytes and
+a structural seal are NOT attestations of actual process identity or exit.
+
+Capacity review must count simultaneous live lookups AND lifetime evidence,
+all dictionaries/transients/exports/consumer buffers and every producer. Actual
+resident page cost, observer CPU/lock cost and a common bank/touch policy across
+A/B remain unproved; buffer lengths alone are not RSS or zero overhead. Direct
+prompt-admission returned-value-to-key/source/transaction binding, complete
+aliases/callbacks/reentrant imports and explicit initial/reset domains remain
+mandatory. Neither the old finite clearance nor the new storage primitive
+closes them. No numeric corpus-fit conclusion or control activation follows.
