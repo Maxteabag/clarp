@@ -26,8 +26,10 @@ In branch mode each call scans that file's stored arc/context rows, builds a
 set per positive endpoint and materializes lists. If U_f is native arc/context
 row count, distinct endpoint/context incidences P_f <=2*U_f. Nonpositive-only
 arcs contribute no JSON line context; independent accessor evidence retains
-them. The full call/scan structural expression is at most sum(R_f*U_f), where
-R_f=3+function_defs_f+class_defs_f; output/context object references scale with
+them. The logical returned-row contribution is at most sum(R_f*U_f), where
+R_f=3+function_defs_f+class_defs_f. This does NOT bound actual SQLite rows
+visited, query-plan/VM work, connection/metadata lookups, allocation or time
+(including when U_f=0). Output/context object references scale with
 sum(R_f*P_f) plus line keys and escaped names. Native U_f, name byte volumes,
 API memory layout, source parse/analysis work and total costs remain UNKNOWN.
 No physical-line count, node count or post-generation512MiB limit substitutes
