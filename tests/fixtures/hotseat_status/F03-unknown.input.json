@@ -1,0 +1,21 @@
+{
+  "case": "F03-unknown",
+  "janitor_enabled": true,
+  "served_at": 1800000060000,
+  "note": "'errored': a free-text row error gives unknown/provider_error with no windows. 'blank': the read succeeded but carried no numbers, so the windows have null ratios (never 0) and the state is unknown.",
+  "steps": [
+    {"op": "read", "provider": "claude", "received_at": 1800000000000, "payload": {
+      "generated_at": 1800000000.0, "sessions": 1, "error": null,
+      "accounts": [
+        {"alias": "errored", "email": "errored@example.invalid", "org": null, "plan": "max", "plan_label": "Max 5×",
+         "rate_limit_tier": null, "is_active": true, "error": "usage endpoint returned 500", "usage": null,
+         "signin_days_left": 30.0},
+        {"alias": "blank", "email": "blank@example.invalid", "org": null, "plan": "pro", "plan_label": "Pro",
+         "rate_limit_tier": null, "is_active": false, "error": null, "signin_days_left": 30.0,
+         "usage": {"status": "allowed", "available": true, "limited": false, "severity": null,
+                   "used_5h": null, "reset_5h": null, "used_7d": null, "reset_7d": null,
+                   "scoped": [], "blocked_models": [], "extra_usage_enabled": false,
+                   "extra_usage_reason": null, "plan": "pro"}}
+      ]}}
+  ]
+}

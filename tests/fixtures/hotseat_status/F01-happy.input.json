@@ -1,0 +1,26 @@
+{
+  "case": "F01-happy",
+  "janitor_enabled": true,
+  "served_at": 1800000060000,
+  "steps": [
+    {"op": "read", "provider": "claude", "received_at": 1800000000000, "payload": {
+      "generated_at": 1800000000.0, "sessions": 2, "error": null,
+      "accounts": [
+        {"alias": "main", "email": "main@example.invalid", "org": null, "plan": "max", "plan_label": "Max 5×",
+         "rate_limit_tier": null, "is_active": true, "error": null, "signin_days_left": 30.0,
+         "usage": {"status": "allowed", "available": true, "limited": false, "severity": null,
+                   "used_5h": 0.42, "reset_5h": 1800010800.25, "used_7d": 0.3, "reset_7d": 1800500000.5,
+                   "scoped": [], "blocked_models": [], "extra_usage_enabled": false,
+                   "extra_usage_reason": null, "plan": "max"}},
+        {"alias": "spare", "email": "spare@example.invalid", "org": null, "plan": "pro", "plan_label": "Pro",
+         "rate_limit_tier": null, "is_active": false, "error": null, "signin_days_left": 30.0,
+         "usage": {"status": "allowed", "available": true, "limited": false, "severity": null,
+                   "used_5h": 0.05, "reset_5h": 1800010800.25, "used_7d": 0.1, "reset_7d": 1800500000.5,
+                   "scoped": [], "blocked_models": [], "extra_usage_enabled": false,
+                   "extra_usage_reason": null, "plan": "pro"}}
+      ]}},
+    {"op": "action", "provider": "claude", "decision": {"action": "noop", "active": "main", "remaining": 58, "rung": 25},
+     "mode": "automatic", "switched": null, "now": 1800000000000, "floor_pct": 25, "cadence_s": 300,
+     "next_due_at": 1800000300000}
+  ]
+}

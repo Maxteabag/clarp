@@ -1,0 +1,21 @@
+{
+  "case": "F10-janitor-disabled",
+  "janitor_enabled": false,
+  "served_at": 1800000060000,
+  "note": "No UsageRefreshWorker sample: its cache is not bound to a Hotseat account identity, so none is emitted (source usage-worker never appears).",
+  "steps": [
+    {"op": "read", "provider": "claude", "received_at": 1800000000000, "payload": {
+      "generated_at": 1800000000.0, "sessions": 1, "error": null,
+      "accounts": [
+        {"alias": "main", "email": "main@example.invalid", "org": null, "plan": "max", "plan_label": "Max 5×",
+         "rate_limit_tier": null, "is_active": true, "error": null, "signin_days_left": 30.0,
+         "usage": {"status": "allowed", "available": true, "limited": false, "severity": null,
+                   "used_5h": 0.25, "reset_5h": 1800010800.25, "used_7d": 0.5, "reset_7d": 1800500000.5,
+                   "scoped": [], "blocked_models": [], "extra_usage_enabled": false,
+                   "extra_usage_reason": null, "plan": "max"}}
+      ]}},
+    {"op": "action", "provider": "claude", "decision": {"action": "noop", "active": "main", "remaining": 75, "rung": 25},
+     "mode": "automatic", "switched": null, "now": 1800000000000, "floor_pct": 25, "cadence_s": 300,
+     "next_due_at": 1800000300000}
+  ]
+}
