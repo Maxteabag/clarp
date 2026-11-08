@@ -87,6 +87,7 @@ class NativePeerObserver:
         self.restore_complete = False
         self.pending_control = False
         self.observer_control = False
+        self.diagnostic_control_type = None
         self.ownership_refusal = False
         self.outcome = 'NOT_STARTED'
         self.error_type = None
@@ -104,13 +105,55 @@ class NativePeerObserver:
             pass  # UNKNOWN is already sticky; missing reason cannot be green
 
     def _quiet_mark(self, reason):
-        # Only while a primary/control is already pending: diagnostics cannot
-        # replace it. No I/O, callbacks, saved exception or traceback receipt.
+        # Return, never discard, a diagnostic control. The explicit original
+        # primary belongs to the caller, NOT sys.exc_info() in a cleanup handler.
+        # No exception/frame/socket object is saved on this observer or receipt.
         self.unknown = True
         try:
             self.mark(reason)
-        except BaseException:
-            pass
+        except Exception:
+            return None
+        except BaseException as control:
+            self.pending_control = True
+            self.diagnostic_control_type = type(control).__name__[:64]
+            return control
+        return None
+
+    def _retain_control(self, primary, control):
+        self.pending_control = True
+        if primary is None:
+            self.observer_control = True
+            return control
+        if control is not primary and primary.__cause__ is not control:
+            prior = primary.__cause__
+            # Preserve the exact selected primary and prior cause objects.
+            # A group retains both when a native explicit cause already exists;
+            # it is a cause, never a new top-level primary/result or receipt.
+            primary.__cause__ = (control if prior is None else BaseExceptionGroup(
+                'observer cleanup control with prior cause', [prior, control]))
+        return primary
+
+    def _diagnostic(self, reason, *, primary, failure=None):
+        """Explicit selection: existing primary wins; otherwise first control.
+
+        Ordinary metadata/cleanup errors never replace a native result/primary.
+        Cleanup's control predates any new control during its diagnostic mark.
+        """
+        if primary is not None and not isinstance(primary, Exception):
+            self.pending_control = True
+        if failure is not None and not isinstance(failure, Exception):
+            primary = self._retain_control(primary, failure)
+        control = self._quiet_mark(reason)
+        if control is not None:
+            primary = self._retain_control(primary, control)
+        return primary
+
+    def _refuse(self, reason, message):
+        control = self._diagnostic(reason, primary=None)
+        if control is not None:
+            raise control
+        self.ownership_refusal = True
+        raise ObserverOwnershipRefusal(message)
 
     def _read_peer(self, native_socket):
         if (sys.platform != 'linux' or not hasattr(socket, 'SO_PEERCRED')
@@ -128,14 +171,10 @@ class NativePeerObserver:
         # A private-client ownership violation stops before allocating a new
         # socket. It is tool-owned, not a native failure or a new native wait.
         if not self.active or threading.get_ident() != self.owner_thread:
-            self.mark('unexpected_use')
-            self.ownership_refusal = True
-            raise ObserverOwnershipRefusal('unexpected private-client use')
+            self._refuse('unexpected_use', 'unexpected private-client use')
         self.connect_calls += 1
         if self.connect_calls != 1:
-            self.mark('multiple_connects')
-            self.ownership_refusal = True
-            raise ObserverOwnershipRefusal('multiple connect delegations refused')
+            self._refuse('multiple_connects', 'multiple connect delegations refused')
         native_socket = None
         try:
             # Cover delegation/assignment itself as well as metadata. Until a
@@ -151,7 +190,7 @@ class NativePeerObserver:
                 self.mark('peer_metadata')
             self.return_intent = True
             return native_socket  # SAME object, no socket proxy/extra RPC
-        except BaseException:
+        except BaseException as primary:
             if native_socket is None:
                 # No known returned socket to close/retry. Preserve original
                 # connect failure or unqualified interpreter-boundary control.
@@ -159,13 +198,14 @@ class NativePeerObserver:
             # Control prevents handoff. Close this exact owned object ONCE.
             # A close error/control cannot replace the pending primary. No
             # raw-fd fallback or repeated cleanup; ownership then UNKNOWN.
-            self.pending_control = True
-            self.observer_control = True
+            if not isinstance(primary, Exception):
+                self.pending_control = True
+                self.observer_control = True
             self.close_attempts += 1
             try:
                 native_socket.close()
-            except BaseException:
-                self._quiet_mark('socket_cleanup_unknown')
+            except BaseException as cleanup:
+                primary = self._diagnostic('socket_cleanup_unknown', primary=primary, failure=cleanup)
             raise
 
     def _restore(self):
@@ -201,89 +241,70 @@ class NativePeerObserver:
     def status_within(self, *args, **kwargs):
         """Delegate the actual public method once with its exact arguments."""
         if not self.lock.acquire(blocking=False):
-            self.mark('unexpected_use')
-            self.ownership_refusal = True
-            raise ObserverOwnershipRefusal('concurrent observer use refused')
+            self._refuse('unexpected_use', 'concurrent observer use refused')
+        primary = None
+        value = None
+        binding_attempted = False
         try:
-            if self.used or threading.get_ident() != self.owner_thread:
-                self.mark('unexpected_use')
-                self.ownership_refusal = True
-                raise ObserverOwnershipRefusal('one-shot/owner-thread contract violated')
-            self.used = True
-            if (('_connect' in self.client.__dict__) != self.had_own
-                    or (self.had_own and self.client.__dict__['_connect'] is not self.prior_own)
-                    or self.client._connect != self.native_connect):
-                self.mark('binding_conflict')
-                self.ownership_refusal = True
-                raise ObserverOwnershipRefusal('private client binding changed before call')
             try:
+                if self.used or threading.get_ident() != self.owner_thread:
+                    self._refuse('unexpected_use', 'one-shot/owner-thread contract violated')
+                self.used = True
+                if (('_connect' in self.client.__dict__) != self.had_own
+                        or (self.had_own and self.client.__dict__['_connect'] is not self.prior_own)
+                        or self.client._connect != self.native_connect):
+                    self._refuse('binding_conflict', 'private client binding changed before call')
                 # Finally covers the binding mutation itself, not just the
                 # native call. No metadata call sits outside restoration.
+                binding_attempted = True
                 self.client.__dict__['_connect'] = self.wrapper
                 self.active = True
                 try:
                     self.started_ns = time.monotonic_ns()
-                except Exception:
-                    self.mark('peer_metadata')
-                try:
-                    value = self.native_status(*args, **kwargs)
-                except BaseException as error:
-                    self.outcome = 'ERROR'
-                    self.error_type = type(error).__name__[:64]
-                    self._quiet_mark('native_error')
-                    raise
-                self.outcome = 'RETURNED'
-                try:
-                    self._status_metadata(value)
-                except Exception:
-                    self.mark('bad_status')
-                return value  # preserve original native return object
-            finally:
-                primary = sys.exc_info()[1]
-                self.pending_control = self.pending_control or (
-                    primary is not None and not isinstance(primary, Exception))
-                if primary is not None and not isinstance(primary, Exception) and self.outcome != 'ERROR':
-                    self.observer_control = True
-                self.active = False
-                try:
-                    self._restore()
-                except BaseException as cleanup:
-                    self._quiet_mark('restore_failure')
-                    if not isinstance(cleanup, Exception):
-                        self.pending_control = True
-                        if primary is None:
-                            self.observer_control = True
-                    if primary is None and not isinstance(cleanup, Exception):
-                        raise
-                    if primary is not None and not isinstance(cleanup, Exception) and primary.__cause__ is None:
-                        primary.__cause__ = cleanup
-                if not self.pending_control:
+                except BaseException as metadata:
+                    primary = self._diagnostic('peer_metadata', primary=primary, failure=metadata)
+                if primary is None:
                     try:
-                        self.ended_ns = time.monotonic_ns()
-                    except BaseException as cleanup:
-                        self._quiet_mark('peer_metadata')
-                        if not isinstance(cleanup, Exception):
-                            self.pending_control = True
-                            if primary is None:
-                                self.observer_control = True
-                        if primary is None and not isinstance(cleanup, Exception):
-                            raise
-                        if primary is not None and not isinstance(cleanup, Exception) and primary.__cause__ is None:
-                            primary.__cause__ = cleanup
-        finally:
-            primary = sys.exc_info()[1]
-            try:
-                self.lock.release()
-            except BaseException as cleanup:
-                self._quiet_mark('restore_failure')
-                if not isinstance(cleanup, Exception):
+                        value = self.native_status(*args, **kwargs)
+                    except BaseException as error:
+                        self.outcome = 'ERROR'
+                        self.error_type = type(error).__name__[:64]
+                        primary = self._diagnostic('native_error', primary=error)
+                    else:
+                        self.outcome = 'RETURNED'
+                        try:
+                            self._status_metadata(value)
+                        except BaseException as metadata:
+                            primary = self._diagnostic('bad_status', primary=primary, failure=metadata)
+            except BaseException as error:
+                # Installation/preflight or another helper control: preserve
+                # this exact object, never infer a native product failure.
+                primary = error
+                if not isinstance(error, Exception):
                     self.pending_control = True
-                    if primary is None:
-                        self.observer_control = True
-                if primary is None and not isinstance(cleanup, Exception):
-                    raise
-                if primary is not None and not isinstance(cleanup, Exception) and primary.__cause__ is None:
-                    primary.__cause__ = cleanup
+                    self.observer_control = True
+        finally:
+            try:
+                self.active = False
+                if binding_attempted:
+                    try:
+                        self._restore()
+                    except BaseException as cleanup:
+                        primary = self._diagnostic('restore_failure', primary=primary, failure=cleanup)
+                    if not self.pending_control:
+                        try:
+                            self.ended_ns = time.monotonic_ns()
+                        except BaseException as cleanup:
+                            primary = self._diagnostic('peer_metadata', primary=primary, failure=cleanup)
+            finally:
+                # Independent release even if restoration/diagnostics fail.
+                try:
+                    self.lock.release()
+                except BaseException as cleanup:
+                    primary = self._diagnostic('restore_failure', primary=primary, failure=cleanup)
+        if primary is not None:
+            raise primary
+        return value  # exact original native return object
 
     def receipt(self):
         """Primitive observation only; never a readiness/source/drain verdict."""
@@ -299,6 +320,7 @@ class NativePeerObserver:
                                       else 'OBSERVER_CONTROL' if self.observer_control
                                       else 'NATIVE_OR_UNCLASSIFIED' if self.outcome == 'ERROR' else None),
                 'pending_control_seen': self.pending_control,
+                'diagnostic_control_type': self.diagnostic_control_type,
                 'connect_calls': self.connect_calls, 'socket_returns': self.socket_returns,
                 'peer': list(self.peer) if self.peer is not None else None,
                 'instance': self.instance, 'instance_compared': self.expected_instance is not None,
