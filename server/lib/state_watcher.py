@@ -158,6 +158,12 @@ class StateLogWatcher:
                     detail = json.loads(r["detail"])
                 except json.JSONDecodeError:
                     detail = None
+            if (r["kind"] == AgentState.IDLE and isinstance(detail, dict)
+                    and detail.get("reason") == "update_handoff"):
+                # Queue-only proof remains stored, never part of public state.
+                detail = dict(detail)
+                detail.pop("dispatch_not_started", None)
+                detail.pop("dispatch_not_started_through_turn_id", None)
             events.broadcast(self.stream, events.agent_state(
                 agent_id=r["agent_id"],
                 session=r["session"],
