@@ -13,9 +13,12 @@ by this. The shared Codex app-server has no per-turn process and so no token.
 from __future__ import annotations
 
 import os
+import re
 
 from . import db
-from .provider_background_jobs import TURN_ENV, _TOKEN
+# Shared vocabulary: identity readers and provider evidence writers use one contract.
+TURN_ENV = "CLARP_PROVIDER_TURN"
+_TOKEN = re.compile(r"[0-9a-f]{24}\Z")
 
 # Backends whose every turn carries a token. Codex runs through one shared
 # app-server, so its agents cannot prove who they are.

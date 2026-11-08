@@ -187,7 +187,6 @@ UPWARD_BASELINE = frozenset({
     'lib.turn_dispatch -> lib.task_plans',
     'lib.turn_dispatch -> lib.team_store',
     'lib.turn_dispatch -> lib.tts_queue',
-    'lib.turn_identity -> lib.provider_background_jobs',
     'lib.turn_lifecycle -> lib.live_hub',
     'lib.turn_slots -> lib.compaction',
 })

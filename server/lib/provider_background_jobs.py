@@ -20,6 +20,7 @@ from datetime import datetime
 from . import background_jobs as jobs, db
 from .janitor_context import redact
 from .log import log_exception
+from .turn_identity import TURN_ENV, _TOKEN
 
 from .persistence.schema_parts.provider_background_jobs import SCHEMA
 # A Clarp turn is one provider process. Claude ends its background Bash tasks
@@ -29,8 +30,6 @@ from .persistence.schema_parts.provider_background_jobs import SCHEMA
 # launched each background tool call. Native session ids span resumed turns
 # and are not enough on their own.
 from .persistence.schema_parts.provider_background_jobs import TURN_SCHEMA
-TURN_ENV = "CLARP_PROVIDER_TURN"
-_TOKEN = re.compile(r"[0-9a-f]{24}\Z")
 # Open turns whose process is gone are closed by the observer (runtime restart
 # or a drain that died); a few per visit, like every other observer write.
 # Every open turn is checked (one /proc read each), so live long turns at the
