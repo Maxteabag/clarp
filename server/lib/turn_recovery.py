@@ -11,7 +11,7 @@ from . import events
 from .turn_lifecycle import TurnEvent
 from .log import log, log_exception
 from .turn_dispatch_state import _TURN_LOCK, _SLOTS, account_failover, _INFLIGHT, _RECOVERY_LOCK, _RECOVERY_BACKOFF, _NO_LOCK, LEAKED_SLOT_GRACE_MS, ORPHAN_SPAWN_GRACE_S, REPAIR_SPAWN_GRACE_S, _launch_running
-from .turn_command import _TurnSpec, JanitorDispatchError, GoalWakeDispatchError, _validate_goal_dispatch, _recovered_janitor_run, _REGENERATED_ORIGINS, _remove_queued_run, DispatchCommand
+from .turn_command import _TurnSpec, JanitorDispatchError, GoalWakeDispatchError, _validate_goal_dispatch, _recovered_janitor_run, _REGENERATED_ORIGINS, _remove_queued_run, DispatchCommand, _preinvoke_failure, _QueuedReceiptUnavailable
 
 
 class RecoveryMixin:
@@ -148,6 +148,8 @@ class RecoveryMixin:
                 recovered += 1
                 readmitted.setdefault(row["agent_id"], []).append(str(row["queue_id"]))
                 _RECOVERY_BACKOFF.clear(row["agent_id"])
+            except _QueuedReceiptUnavailable:
+                continue  # completed/uncertain since snapshot: no readmission or backoff
             except JanitorDispatchError as exc:
                 _remove_queued_run(str(row["queue_id"]))
                 log("janitorQueueRejected", str(exc))
@@ -172,9 +174,11 @@ class RecoveryMixin:
         return recovered
 
     def _recovery_failed(self, row, exc: BaseException) -> recovery_backoff.Backoff:
-        """Back off one agent's queued recovery after a launch that failed
-        before its backend started; park it after repeated identical
-        failures. The queued rows stay exactly as they are."""
+        """Back off a queued handoff failure without losing its durable work.
+
+        This also receives post-spawn bookkeeping failures. Only a captured
+        positive pre-invoke proof may publish a never-launched marker.
+        """
         agent_id = str(row["agent_id"])
         backoff = _RECOVERY_BACKOFF.failed(
             agent_id, str(row["queue_id"]), exc, self.now())
@@ -188,10 +192,14 @@ class RecoveryMixin:
                        f"{backoff.failures} times ({backoff.error}). Send a message "
                        f"or retry to try again.")
             try:
-                turn_lifecycle.try_transition(agent_id, TurnEvent.UNLAUNCHED, {
-                    "trace_id": str(row["trace_id"]), "dispatch_not_started": True,
-                    "queued_recovery_parked": True, "failures": backoff.failures,
-                    "error": backoff.error, "message": message})
+                proof = _preinvoke_failure(exc)
+                if proof is not None and (proof.agent_id, proof.trace_id) == (agent_id, str(row["trace_id"])):
+                    # Zero is an internal unknown-target request, stripped before persistence.
+                    turn_lifecycle.try_transition(agent_id, TurnEvent.UNLAUNCHED, {
+                        "trace_id": str(row["trace_id"]), "dispatch_not_started": True,
+                        "dispatch_not_started_turn_id": proof.turn_id or 0,
+                        "queued_recovery_parked": True, "failures": backoff.failures,
+                        "error": backoff.error, "message": message})
             except Exception as state_error:  # noqa: BLE001 - the park still holds
                 log_exception("queuedRecoveryParkStateFail", state_error,
                               detail=row["session"])

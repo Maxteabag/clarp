@@ -164,6 +164,10 @@ class StateLogWatcher:
                 detail = dict(detail)
                 detail.pop("dispatch_not_started", None)
                 detail.pop("dispatch_not_started_through_turn_id", None)
+            elif (r["kind"] == AgentState.INTERRUPTED and isinstance(detail, dict)
+                  and detail.get("dispatch_not_started") is True):
+                detail = dict(detail)
+                detail.pop("dispatch_not_started_turn_id", None)
             events.broadcast(self.stream, events.agent_state(
                 agent_id=r["agent_id"],
                 session=r["session"],
