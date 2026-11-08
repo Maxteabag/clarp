@@ -63,23 +63,29 @@ def test_trace_lookup_failure_preserves_original_record_and_reports_fault(tmp_pa
     assert SECRET not in stderr
 
 
-@pytest.fixture
-def sinks(monkeypatch):
-    # Private state is the real bounded throttle, not a new reset/export seam.
+@pytest.fixture(autouse=True)
+def _isolated_fault_state():
+    # The helper's process-local window must not couple tests or xdist history.
     for name in ('_FAULT_LOG_THROTTLE', '_FAULT_LOG_COUNTS'):
         state = getattr(logging, name, None)
         if state is not None:
             state.clear()
+    yield
+    for name in ('_FAULT_LOG_THROTTLE', '_FAULT_LOG_COUNTS'):
+        state = getattr(logging, name, None)
+        if state is not None:
+            state.clear()
+
+
+@pytest.fixture
+def sinks(monkeypatch):
     stderr, structured, raw, clock = io.StringIO(), [], [], [100.0]
     monkeypatch.setattr(logging.sys, 'stderr', stderr)
     monkeypatch.setattr(logging.time, 'monotonic', lambda: clock[0])
     monkeypatch.setattr(eventlog, 'emit', lambda *args, **kwargs: structured.append((args, kwargs)))
     monkeypatch.setattr(os, 'write', lambda fd, data: raw.append((fd, data)) or len(data))
     yield SimpleNamespace(stderr=stderr, structured=structured, raw=raw, clock=clock)
-    for name in ('_FAULT_LOG_THROTTLE', '_FAULT_LOG_COUNTS'):
-        state = getattr(logging, name, None)
-        if state is not None:
-            state.clear()
+
 
 
 @pytest.mark.parametrize('stderr_bad,structured_bad,raw_bad,structured_mode,expected', [
@@ -233,3 +239,22 @@ def test_invalid_labels_are_replaced_not_echoed_or_retained(sinks):
     assert logging.log_fault(SECRET + '\ninvalid', secret_type()) == 'attempted'
     blob = sinks.stderr.getvalue() + json.dumps(sinks.structured) + repr(logging._FAULT_LOG_THROTTLE)
     assert SECRET not in blob and 'faultLogInvalidCode' in blob and 'UnknownError' in blob
+
+
+@pytest.mark.parametrize('exception_logger', [False, True])
+def test_legacy_primary_print_failure_still_raises_before_forwarding(monkeypatch, exception_logger):
+    class BrokenStream:
+        def write(self, data):
+            raise OSError('broken primary stream')
+        def flush(self):
+            raise AssertionError('failed write must not flush')
+    def forbidden(*args, **kwargs):
+        pytest.fail('legacy logger forwarded after a primary print failure')
+    monkeypatch.setattr(logging.sys, 'stderr', BrokenStream())
+    monkeypatch.setattr(eventlog, 'emit', forbidden)
+    monkeypatch.setattr(eventlog, 'emit_exception', forbidden)
+    with pytest.raises(OSError, match='broken primary stream'):
+        if exception_logger:
+            logging.log_exception('legacyFault', ValueError('legacy message'))
+        else:
+            logging.log('legacyEvent', 'legacy detail')
