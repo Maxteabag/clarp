@@ -305,12 +305,13 @@ def test_recovery_does_not_redispatch_more_than_one_repair_page(tmp_path):
     assert turn_queue.pending_counts() == {}
 
 
-def test_latest_ended_only_attempt_and_tied_settlements_use_deterministic_order():
+@pytest.mark.parametrize("stale_outcome", ["completed", "failed", "interrupted"])
+def test_latest_ended_only_attempt_and_tied_settlements_use_deterministic_order(stale_outcome):
     _receipt()
     _turn(outcome="completed")
     ended = _turn(ended=True)
-    db.conn().execute("UPDATE turns SET ended_at=?, outcome='completed' WHERE turn_id=?",
-                      (db.now_ms()+1, ended))
+    db.conn().execute("UPDATE turns SET ended_at=?, outcome=? WHERE turn_id=?",
+                      (db.now_ms()+1, stale_outcome, ended))
     _tick()
     assert turn_queue.status("q") == "ended"
     _receipt("tie", trace="tie")
