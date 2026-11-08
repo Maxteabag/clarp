@@ -64,6 +64,7 @@ class RecoveryMixin:
 
     def _recover_queued_locked(self) -> int:
         from . import task_goal_recovery
+        turn_queue.reconcile_receipts()
         self._rehydrate_once()
         from . import agent_rings
         examined = agent_rings.resolve_stale_claims(db.now_ms() - 30_000)
@@ -78,7 +79,7 @@ class RecoveryMixin:
         # Rows re-admitted by this pass, per agent in queue order: the other
         # half of the drain's order evidence (``drainHeldOrder``).
         readmitted: dict[str, list[str]] = {}
-        for row in turn_queue.pending():
+        for row in turn_queue.pending_for_dispatch():
             if row["agent_id"] in held:
                 continue
             agent = agents_db.get_by_agent_id(row["agent_id"])

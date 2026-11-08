@@ -222,9 +222,10 @@ def end_idle_agent_receipts(status: dict[str, Any]) -> dict[str, int]:
     does one has_live_work still sees a process for. When the provider turns
     are unknown nothing is ended."""
     from . import turn_queue
+    repaired = turn_queue.reconcile_receipts()
     provider_turns = set(status.get("provider_turns") or ())
     if "<unknown>" in provider_turns:
-        return {}
+        return repaired
     held = (set(status.get("active") or {}) | set(status.get("spawning") or ())
             | set(status.get("terminals") or ()) | set(status.get("queued") or {})
             | provider_turns)
@@ -235,7 +236,9 @@ def end_idle_agent_receipts(status: dict[str, Any]) -> dict[str, int]:
         agent = agents_db.get_by_agent_id(agent_id) or {}
         return has_live_work(agent_id, backends.normalize(agent.get("backend")))
 
-    return turn_queue.terminalize_idle_agent_receipts(is_live)
+    for state, count in turn_queue.terminalize_idle_agent_receipts(is_live).items():
+        repaired[state] = repaired.get(state, 0) + count
+    return repaired
 
 
 def end_idle_agent_receipts_now() -> dict[str, int]:
