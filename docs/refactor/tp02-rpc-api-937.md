@@ -179,7 +179,10 @@ BeginStop reserves an operation before barrier/pause/fence work. Its existing
 owner commits USER-vs-maintenance semantics and exact target. Native interrupt
 runs outside C/TURN/lease locks under that owner. On success publish the existing
 lease under C -> lease-map short locking, transferring begin ownership to lease
-atomically. Schedule ORIGINAL30s timer outside locks; no lease timer restart.
+atomically. Schedule the timer outside locks with the existing configured
+self.stop_lease_timeout (default30.0, existing max(0.01,value) clamp), AFTER lease
+publication as today. Do not start its deadline at reserve/begin time, hardcode30
+or restart/extend it on a second Stop.
 On timer-start failure, retain the operation/lease owner while the actual current
 owner performs its preserving error cleanup; no lost barrier or invented success.
 
@@ -261,3 +264,20 @@ have a concrete canonical/lifetime choice accepted IN PRINCIPLE by A; this is
 not concrete API/implementation acceptance or execution proof. Actual post933/TP-N3 pin,
 canonical outcome matrix, owner hooks/transfer handshake and preserving Stop
 adapter remain exact pre-code gates. No generic source/atomicity/runtime grant.
+
+## Exact A supplement review checkpoint
+
+A FULLREAD102db0b5/patch9de88ae3, report
+reviews/tp02-937-A-api-102db0b53004.md: ACCEPT F1/F2 correction and
+carrier/lease/seal skeleton. Complete PRE-CODE acceptance remains HOLD for ONLY
+the source-anchored adapter sheet on actual main after933 and BACKENDS-01/TP-N3:
+(1) saved bound witness vs Stop barrier + deferred USER commit/rollback + actual
+receipt/claim write predicate/outcome; (2) actual retained parent for pop/defer,
+retry/recovery/direct producers and final seal epoch/publication handshake;
+(3) preserving S1/S2/error/hold=False completion with fix3/A2. Do not supply
+another generic type inventory as proof. No636/642 rider or new policy request.
+
+As of this checkpoint fetched main is0073254687d22ac5a6c1d01b8af29fa678dcf4a2,
+which has not landed either dependency. Captain is asked for the authoritative
+post933+TPN3 full pin/home map before these traces are claimed exact. This is
+an input dependency, not runtime failure evidence. No code/tests/jobs.
