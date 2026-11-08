@@ -1,0 +1,414 @@
+{
+  "state": "SOURCE_PREPARATION_PARTIAL_CALLEE_CLOSURE_UNEXECUTED",
+  "pins": {
+    "A": {
+      "pin": "4f33cdc9287eafcddd0adfb17b51487c84ace28b",
+      "files": {
+        "server/lib/runtime_bridge.py": {
+          "sha256": "ddc72aba0875a2ae487bfcba50cdbe9cd658408364708171890e4e2e661971c6",
+          "symbols": {
+            "_RuntimeRequestHandler.finish": {
+              "line": 383,
+              "end_line": 399,
+              "ast_sha256": "01e7c4e43118b907d5c676f20a1a0d8684fa1ecfb820530b8f1f7ed299c0760c"
+            },
+            "_RuntimeRequestHandler.handle": {
+              "line": 401,
+              "end_line": 426,
+              "ast_sha256": "4ee08e5425e3e2fd71f91601d4d56b0ee391f5d5d6d0b0be2024a80ade7623b3"
+            },
+            "RuntimeRPCServer._default_status": {
+              "line": 533,
+              "end_line": 535,
+              "ast_sha256": "e6d05fbe57d158c527f46e0cd55a07222f8e67a68d4f292ad5a194aaf65cc648"
+            },
+            "RuntimeRPCServer.dispatch_request": {
+              "line": 537,
+              "end_line": 544,
+              "ast_sha256": "986ff94a8ca9ef3b862ae7097722e5d65e7f41f1f2dca603075a8efbcc6f12a0"
+            }
+          },
+          "absent_requested_symbols": []
+        },
+        "server/server.py": {
+          "sha256": "29c8429ee8a21d6f13950752cebd210d633ed2589f08b4a7b984b86c152617ae",
+          "symbols": {
+            "Handler.finish": {
+              "line": 432,
+              "end_line": 444,
+              "ast_sha256": "6f2445b3bed12c7c25d60d9544bfcb1342fefe202516928ca456b400d3625413"
+            }
+          },
+          "absent_requested_symbols": []
+        },
+        "server/lib/db.py": {
+          "sha256": "9f6007107f7c6cac839355f387e6bdad85272b8adaf1063dcaa154217abf6a6a",
+          "symbols": {
+            "conn": {
+              "line": 551,
+              "end_line": 585,
+              "ast_sha256": "653f50bebb86d2ca936a8a634c6b47d7307d7f7f28ab4f0dc23743afc6399ee0"
+            },
+            "close_local": {
+              "line": 707,
+              "end_line": 720,
+              "ast_sha256": "95f7dabe89155ee70e6906f97ecce9ae1e9968cabbe57337477d05e5d5270648"
+            }
+          },
+          "absent_requested_symbols": []
+        },
+        "server/lib/telemetry.py": {
+          "sha256": "08f4e640ff8bfcea7e88f3c4796aae0e8100f7489d5e184aa937c66977b5e0b6",
+          "symbols": {
+            "conn": {
+              "line": 166,
+              "end_line": 178,
+              "ast_sha256": "54ab743d2accd2af230ace79f61872b0099a5ae8da6e2f83e1ab80bf8cefbc67"
+            },
+            "close_local": {
+              "line": 181,
+              "end_line": 185,
+              "ast_sha256": "bc617d3e8a56376661700dee07d803dbe628d9486c81ba37ad5a73252ed3c984"
+            }
+          },
+          "absent_requested_symbols": []
+        },
+        "server/lib/turn_slots.py": {
+          "sha256": "b3040a0d423ab188c59cf7890a07d8dca0ce61e7d7695f3d5e6a578ba47b5127",
+          "symbols": {
+            "TurnSlots.admitting_agents": {
+              "line": 208,
+              "end_line": 210,
+              "ast_sha256": "8e4f4ef83b1784ee7e36bf8fd7346b1ad7435053da70241ceedc30e7c8e6d79e"
+            },
+            "TurnSlots.snapshot": {
+              "line": 241,
+              "end_line": 259,
+              "ast_sha256": "c8e23438f528f3da70604fe36bcd2b71e3417e96b92e54d51faf158d0041ffc6"
+            },
+            "TurnSlots.held": {
+              "line": 270,
+              "end_line": 278,
+              "ast_sha256": "e9647b23e369144d440a7e35b16448aa018dbb727aed76270deb2aab0b002501"
+            },
+            "TurnSlots.queued_specs": {
+              "line": 280,
+              "end_line": 284,
+              "ast_sha256": "392fbd749e58362b7c18113cd5cc5c9d06a3ba6ef16746837fd73b429bf9f02a"
+            }
+          },
+          "absent_requested_symbols": []
+        },
+        "server/lib/compaction.py": {
+          "sha256": "3675cd2079af24c1757f3f51004847af318c71650249b452c443fb30a40f45d3",
+          "symbols": {
+            "active_sessions": {
+              "line": 52,
+              "end_line": 54,
+              "ast_sha256": "11e2043e79a78c19e7c64716f33045e5ed843eb338f5052b3eb51e21b86d6252"
+            }
+          },
+          "absent_requested_symbols": []
+        },
+        "server/lib/live_hub.py": {
+          "sha256": "d9a4c511bd0033a2b73536f20b3a56a768e204ac1dd50aede17577c06dca53d3",
+          "symbols": {
+            "LiveHub.activities": {
+              "line": 324,
+              "end_line": 328,
+              "ast_sha256": "6ca25b5542dda4cf8808b6cb4c0c43cb2c2cf0176e7d1c04bbc2bb344206ec01"
+            }
+          },
+          "absent_requested_symbols": []
+        },
+        "server/lib/codex_app_server.py": {
+          "sha256": "e1aaf1dadb8f938667b608ea60b52594809ede10b913d142e0259395fb3662c1",
+          "symbols": {
+            "_all_clients": {
+              "line": 1703,
+              "end_line": 1706,
+              "ast_sha256": "f690bb0070c11b36ff5fe877657227c758fa1791b8ba5e3f12d4d06b17b2b4c1"
+            },
+            "busy_agents": {
+              "line": 1832,
+              "end_line": 1843,
+              "ast_sha256": "2cb0331f3a37c1d8d9570acfd1f7d43533d73544390341af90155bbceb3c030a"
+            }
+          },
+          "absent_requested_symbols": []
+        },
+        "server/lib/account_failover.py": {
+          "sha256": "2617c44314eec1a7f4a92a455e998ab46140c9de3f14a1d9e80492db3fc22d5b",
+          "symbols": {
+            "AccountFailover.status": {
+              "line": 332,
+              "end_line": 336,
+              "ast_sha256": "32a56e99f9d3f6ce65a68cb0fc6c41f8b78b598c19cbf238b797f7a5869c8c8c"
+            }
+          },
+          "absent_requested_symbols": []
+        },
+        "server/lib/runtime_release.py": {
+          "sha256": "090782d9e7cd5724c18d798a4f36f58fd383a2f7ab78dbd871a6a36b69c2d968",
+          "symbols": {
+            "RuntimeReleaseMonitor.status": {
+              "line": 228,
+              "end_line": 253,
+              "ast_sha256": "fde6bdab58d28b22729ed08554f04fc02e1d8b60d5e2dafe9412624c179cce0e"
+            }
+          },
+          "absent_requested_symbols": []
+        },
+        "server/lib/turn_dispatch.py": {
+          "sha256": "6ad9b1493da290b485ef28682afce5be255f98bf7eec0b7090c71e8b40331808",
+          "symbols": {
+            "runtime_status": {
+              "line": 122,
+              "end_line": 145,
+              "ast_sha256": "8afda831d6e1b6edb483b20431c79d9d8a27ae33a98c1652cbda1186617abba4"
+            },
+            "held_order": {
+              "line": 148,
+              "end_line": 157,
+              "ast_sha256": "92b2016f7412f5bb9aeee8651a5eac7edd8ba10b7f45e0ab6614b41872d4826e"
+            },
+            "unpersisted_held": {
+              "line": 242,
+              "end_line": 246,
+              "ast_sha256": "d1d2eae588723441dc1e99bc7d8f8da81917c6ecefad75cf746114b8644e1424"
+            },
+            "provider_turns": {
+              "line": 249,
+              "end_line": 257,
+              "ast_sha256": "8fec4a0756dde50afd0b86d71706009264cf003adda4e4f0b4cf03bb5ebd7412"
+            }
+          },
+          "absent_requested_symbols": []
+        }
+      }
+    },
+    "B": {
+      "pin": "0073254687d22ac5a6c1d01b8af29fa678dcf4a2",
+      "files": {
+        "server/lib/runtime_bridge.py": {
+          "sha256": "6995a57d0eea07e8eb17e6056c47c02c94be7f5c94c66454d94345e1fb211c66",
+          "symbols": {
+            "_RuntimeRequestHandler.finish": {
+              "line": 383,
+              "end_line": 399,
+              "ast_sha256": "01e7c4e43118b907d5c676f20a1a0d8684fa1ecfb820530b8f1f7ed299c0760c"
+            },
+            "_RuntimeRequestHandler.handle": {
+              "line": 401,
+              "end_line": 426,
+              "ast_sha256": "4ee08e5425e3e2fd71f91601d4d56b0ee391f5d5d6d0b0be2024a80ade7623b3"
+            },
+            "RuntimeRPCServer._default_status": {
+              "line": 533,
+              "end_line": 535,
+              "ast_sha256": "e6d05fbe57d158c527f46e0cd55a07222f8e67a68d4f292ad5a194aaf65cc648"
+            },
+            "RuntimeRPCServer.dispatch_request": {
+              "line": 537,
+              "end_line": 544,
+              "ast_sha256": "986ff94a8ca9ef3b862ae7097722e5d65e7f41f1f2dca603075a8efbcc6f12a0"
+            }
+          },
+          "absent_requested_symbols": []
+        },
+        "server/server.py": {
+          "sha256": "3986a8c321030492aa8d237b3a757485c1c448b41f1f8f815b9e3d9d7673736d",
+          "symbols": {
+            "Handler.finish": {
+              "line": 448,
+              "end_line": 460,
+              "ast_sha256": "6f2445b3bed12c7c25d60d9544bfcb1342fefe202516928ca456b400d3625413"
+            }
+          },
+          "absent_requested_symbols": []
+        },
+        "server/lib/db.py": {
+          "sha256": "9f6007107f7c6cac839355f387e6bdad85272b8adaf1063dcaa154217abf6a6a",
+          "symbols": {
+            "conn": {
+              "line": 551,
+              "end_line": 585,
+              "ast_sha256": "653f50bebb86d2ca936a8a634c6b47d7307d7f7f28ab4f0dc23743afc6399ee0"
+            },
+            "close_local": {
+              "line": 707,
+              "end_line": 720,
+              "ast_sha256": "95f7dabe89155ee70e6906f97ecce9ae1e9968cabbe57337477d05e5d5270648"
+            }
+          },
+          "absent_requested_symbols": []
+        },
+        "server/lib/telemetry.py": {
+          "sha256": "08f4e640ff8bfcea7e88f3c4796aae0e8100f7489d5e184aa937c66977b5e0b6",
+          "symbols": {
+            "conn": {
+              "line": 166,
+              "end_line": 178,
+              "ast_sha256": "54ab743d2accd2af230ace79f61872b0099a5ae8da6e2f83e1ab80bf8cefbc67"
+            },
+            "close_local": {
+              "line": 181,
+              "end_line": 185,
+              "ast_sha256": "bc617d3e8a56376661700dee07d803dbe628d9486c81ba37ad5a73252ed3c984"
+            }
+          },
+          "absent_requested_symbols": []
+        },
+        "server/lib/turn_slots.py": {
+          "sha256": "b3040a0d423ab188c59cf7890a07d8dca0ce61e7d7695f3d5e6a578ba47b5127",
+          "symbols": {
+            "TurnSlots.admitting_agents": {
+              "line": 208,
+              "end_line": 210,
+              "ast_sha256": "8e4f4ef83b1784ee7e36bf8fd7346b1ad7435053da70241ceedc30e7c8e6d79e"
+            },
+            "TurnSlots.snapshot": {
+              "line": 241,
+              "end_line": 259,
+              "ast_sha256": "c8e23438f528f3da70604fe36bcd2b71e3417e96b92e54d51faf158d0041ffc6"
+            },
+            "TurnSlots.held": {
+              "line": 270,
+              "end_line": 278,
+              "ast_sha256": "e9647b23e369144d440a7e35b16448aa018dbb727aed76270deb2aab0b002501"
+            },
+            "TurnSlots.queued_specs": {
+              "line": 280,
+              "end_line": 284,
+              "ast_sha256": "392fbd749e58362b7c18113cd5cc5c9d06a3ba6ef16746837fd73b429bf9f02a"
+            }
+          },
+          "absent_requested_symbols": []
+        },
+        "server/lib/compaction.py": {
+          "sha256": "3675cd2079af24c1757f3f51004847af318c71650249b452c443fb30a40f45d3",
+          "symbols": {
+            "active_sessions": {
+              "line": 52,
+              "end_line": 54,
+              "ast_sha256": "11e2043e79a78c19e7c64716f33045e5ed843eb338f5052b3eb51e21b86d6252"
+            }
+          },
+          "absent_requested_symbols": []
+        },
+        "server/lib/live_hub.py": {
+          "sha256": "d9a4c511bd0033a2b73536f20b3a56a768e204ac1dd50aede17577c06dca53d3",
+          "symbols": {
+            "LiveHub.activities": {
+              "line": 324,
+              "end_line": 328,
+              "ast_sha256": "6ca25b5542dda4cf8808b6cb4c0c43cb2c2cf0176e7d1c04bbc2bb344206ec01"
+            }
+          },
+          "absent_requested_symbols": []
+        },
+        "server/lib/codex_app_server.py": {
+          "sha256": "e1aaf1dadb8f938667b608ea60b52594809ede10b913d142e0259395fb3662c1",
+          "symbols": {
+            "_all_clients": {
+              "line": 1703,
+              "end_line": 1706,
+              "ast_sha256": "f690bb0070c11b36ff5fe877657227c758fa1791b8ba5e3f12d4d06b17b2b4c1"
+            },
+            "busy_agents": {
+              "line": 1832,
+              "end_line": 1843,
+              "ast_sha256": "2cb0331f3a37c1d8d9570acfd1f7d43533d73544390341af90155bbceb3c030a"
+            }
+          },
+          "absent_requested_symbols": []
+        },
+        "server/lib/account_failover.py": {
+          "sha256": "2617c44314eec1a7f4a92a455e998ab46140c9de3f14a1d9e80492db3fc22d5b",
+          "symbols": {
+            "AccountFailover.status": {
+              "line": 332,
+              "end_line": 336,
+              "ast_sha256": "32a56e99f9d3f6ce65a68cb0fc6c41f8b78b598c19cbf238b797f7a5869c8c8c"
+            }
+          },
+          "absent_requested_symbols": []
+        },
+        "server/lib/runtime_release.py": {
+          "sha256": "090782d9e7cd5724c18d798a4f36f58fd383a2f7ab78dbd871a6a36b69c2d968",
+          "symbols": {
+            "RuntimeReleaseMonitor.status": {
+              "line": 228,
+              "end_line": 253,
+              "ast_sha256": "fde6bdab58d28b22729ed08554f04fc02e1d8b60d5e2dafe9412624c179cce0e"
+            }
+          },
+          "absent_requested_symbols": []
+        },
+        "server/lib/turn_dispatch_state.py": {
+          "sha256": "b4e550bee7cc2a303a0fdb85f221b609dda073672fac29ee571df394c0b708bc",
+          "symbols": {
+            "runtime_status": {
+              "line": 105,
+              "end_line": 128,
+              "ast_sha256": "8afda831d6e1b6edb483b20431c79d9d8a27ae33a98c1652cbda1186617abba4"
+            },
+            "held_order": {
+              "line": 131,
+              "end_line": 140,
+              "ast_sha256": "92b2016f7412f5bb9aeee8651a5eac7edd8ba10b7f45e0ab6614b41872d4826e"
+            },
+            "unpersisted_held": {
+              "line": 225,
+              "end_line": 229,
+              "ast_sha256": "d1d2eae588723441dc1e99bc7d8f8da81917c6ecefad75cf746114b8644e1424"
+            },
+            "provider_turns": {
+              "line": 232,
+              "end_line": 240,
+              "ast_sha256": "8fec4a0756dde50afd0b86d71706009264cf003adda4e4f0b4cf03bb5ebd7412"
+            }
+          },
+          "absent_requested_symbols": []
+        }
+      }
+    }
+  },
+  "actual_requests_or_connections": null,
+  "total_connection_bound": null,
+  "capacity_fit": null,
+  "source_ready": false,
+  "source_rules": [
+    {
+      "id": "cleanup_does_not_allocate",
+      "fact": "db.close_local and telemetry.close_local first read existing thread-local conn; absence returns/no opening call. A handler finish call is not a newly born SQLite connection.",
+      "not_claimed": "Handler never opened a DB; finish succeeded; descendants drained; all DB identities observed."
+    },
+    {
+      "id": "RPC_thread_scope",
+      "fact": "Native RPC handles one decoded request line, dispatches and writes response; handler finish closes this thread state/telemetry handles if present. ThreadingMixIn daemon-thread and socket/request counts are not SQLite connection counts.",
+      "not_claimed": "One request one database; retries/concurrent workers share TLS; request finish is all-child drain."
+    },
+    {
+      "id": "status_default_provider",
+      "fact": "Default RuntimeRPCServer status provider calls native runtime_status; it composes slot/live/compaction/provider/failover views. Some selected methods are in-memory views.",
+      "not_claimed": "Complete all-callee SQL-free theorem; actual private startup has no recovery/client/error branches."
+    },
+    {
+      "id": "status_callee_conditions",
+      "fact": "AccountFailover.status may invoke attempt.owned for qualifying attempts; provider_turns catches errors and logs them. Empty attempt/client state and absence of import/log/error side effects need source+actual fixture evidence before reducing a producer bound.",
+      "not_claimed": "Callbacks/logging harmless or ignored; module import is no-cost/no-database; every status call follows empty-state route."
+    },
+    {
+      "id": "separate_namespaces",
+      "fact": "State db and telemetry expose separate conn/TLS/close functions. Current finite state _TrackedConnection witness is not automatically a telemetry lifetime/actor/cgroup proof.",
+      "not_claimed": "All telemetry excluded or free; same file/namespace/connection/commit semantics."
+    },
+    {
+      "id": "steady_external_fanout",
+      "fact": "Prior frozen120direct+120HTTP steady offered reads can cause240runtime status calls in that subgraph; none of those call totals is a connection bound. Readiness and other native traffic remain additional.",
+      "not_claimed": "240requests is entire campaign;1connection per socket/retry;0connections globally."
+    }
+  ],
+  "remaining": "Exact root/client/API/callee/worker/native retry/fallback and startup/recovery/import/logger state bindings; positive owned process/DB identity and ALL-producer total/live lifetimes; numeric clean/detection/inflight/drain/time/CPU/heap/common A/B policy before integration."
+}
