@@ -164,3 +164,17 @@ prompt-admission returned-value-to-key/source/transaction binding, complete
 aliases/callbacks/reentrant imports and explicit initial/reset domains remain
 mandatory. Neither the old finite clearance nor the new storage primitive
 closes them. No numeric corpus-fit conclusion or control activation follows.
+
+
+## Reassess before representation integration (source hypothesis)
+
+The earlier input-size-to-record-volume argument does not prove measured-root
+8192 impossibility. Native INITIAL A already populates the common seed, without
+installing the transaction Witness. A subsequent forced full parse/import may
+find rows unchanged and preserve their revision/time; source/seq-only updates
+may also retain them. Need actual per-pin row/summary/head/checkpoint/other-actor
+predicates and the populated-seed/reference path before choosing a record bound.
+The18exchanges/36 appended records are NOT that full bound. Reconstruction/setup
+and measured/reference domains must be explicit, never silently dropped. This
+is not a signed fit or a lifted integration blocker: C direction is requested,
+all capacities stay UNKNOWN and no cap/row/corpus/evidence limit is relaxed.
