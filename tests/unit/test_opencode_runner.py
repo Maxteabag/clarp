@@ -492,7 +492,9 @@ def test_text_is_responding_and_a_finished_tool_reports_its_call(tmp_path, monke
 
 
 def test_opencode_reasoning_and_running_output_become_live_items():
-    from lib import live_hub, turn_lifecycle as lifecycle
+    from lib import live_hub, live_tools, tool_output, turn_lifecycle as lifecycle
+    assert live_tools.diff_stats is tool_output.diff_stats
+    assert live_tools.output_tail is tool_output.output_tail
     from lib.backend.opencode import _TurnState
 
     hub = live_hub.LiveHub(sink=lambda _e: None)
@@ -516,9 +518,17 @@ def test_opencode_reasoning_and_running_output_become_live_items():
         OPENCODE._on_part(running, st, **kw)
         running["state"]["metadata"]["output"] = "cc a.c\ncc b.c\nlink\n"
         OPENCODE._on_part(running, st, **kw)
+        edit = {"id": "prt_e", "callID": "call_e", "type": "tool", "tool": "edit",
+                "state": {"status": "running", "input": {"filePath": "src/a.ts"},
+                          "metadata": {"diff": "--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1 +1,2 @@\n-old\n+new\n+extra\n"}}}
+        OPENCODE._on_part(edit, st, **kw)
         items = {item["id"]: item for item in hub.snapshot(session="sindre")["items"]}
         assert (items["oc:prt_r"]["status"], items["oc:prt_r"]["text"]) == ("completed", "Look at the build.")
         output = items["oc:call_b"]["tool"]["output"]
         assert (output["tail"], output["total_lines"]) == (["cc a.c", "cc b.c", "link"], 3)
+        diff = items["oc:call_e"]["tool"]["diff"]
+        assert (diff["added"], diff["removed"]) == (2, 1)
+        assert diff["files"] == [{"path": "src/a.ts", "added": 2, "removed": 1}]
+        assert diff["preview"] == "@@ -1 +1,2 @@\n-old\n+new\n+extra"
     finally:
         live_hub.install(None)

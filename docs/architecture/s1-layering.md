@@ -339,7 +339,9 @@ synthetic branches:
 
 - `message_text` is a new core owner for unchanged injected-context delimiters and pure message normalization. Feature `message_context` retains automation display policy and re-exports canonical text objects; handwritten import/live/restore consumers use the lower owner. The checkpoint source closure includes the new implementation leaf, preserving existing parser-version invalidation policy.
 
-The first twenty-seven repaired upward edges are removed from the ratchet; this section does not authorize reclassifying any existing module or expanding named exceptions.
+- `tool_output` is a new core owner for unchanged pure diff statistics and bounded output-tail helpers. Feature `live_tools` preserves exact helper exports and retains classification policy; OpenCode imports the lower helpers directly, with payload and slicing semantics unchanged.
+
+The first twenty-eight repaired upward edges are removed from the ratchet; this section does not authorize reclassifying any existing module or expanding named exceptions.
 
 ## Wave 2: lead-signed map corrections (937)
 

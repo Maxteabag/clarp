@@ -139,7 +139,7 @@ def _live_tool_output(agent_id: str, part: dict, state: dict, st: Any,
                       trace_id: str = "") -> None:
     """A running tool's output as a live tail; an edit's diff stats."""
     from .. import live_core as live_hub
-    from ..live_tools import diff_stats, output_tail
+    from ..tool_output import diff_stats, output_tail
     if live_hub.current() is None:
         return
     call_id = _call_id(part)
