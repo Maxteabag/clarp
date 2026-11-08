@@ -63,8 +63,11 @@ today. Before current swap373/seeds/services, the immutable candidate helper
 completes the explicit owner step. bin/clarp-admin forward activation shares that
 preparation; check-only rollback never performs a forward migration. No second
 lock path or new public env bypass. Docker: existing root restore/custody first,
-then explicit owner, then identity/seeds/stack startup; maintenance commands remain
-nonowners. Existing approved restore exclusion rules stay intact; backup must skip
+then explicit owner, then identity/seeds/stack startup. Preserve ALL entrypoint
+roles that bootstrap today, including a fresh-root maintenance invocation: the
+ENTRYPOINT invokes the sole helper before that command, while the ordinary
+maintenance command itself remains a nonowner. Do not silently refuse a currently
+supported fresh maintenance startup. Existing approved restore exclusion rules stay intact; backup must skip
 the exact companion and never install an archived lock as live state.
 
 Peter-machine supervised activation retains decision830's route, coordinated with
@@ -134,3 +137,15 @@ criteria without making universal old-binary fencing a new R acceptance claim.
 Release owner must confirm this lead-selected existing830/native/Docker insertion
 route before edits. Exact A2 YES and exceptional-output signature still required.
 No test/job/product import/source edit/deployment/restart is authorized by this note.
+
+
+Release-owner no-regression addendum received/fullread:
+`reviews/pt02-937-lead-no-regression-R-addendum.md`, SHA256
+878aba24716e3158470a3080b3126a5e8304fde112b6be799cd9c60f04832d40.
+It supersedes prior support-restriction/custody prerequisites for R and agrees
+this lead-selected route in principle, not source clearance. Additional exact
+proof targets: all today-produced61..120->121 variants are admitted; the owner
+raw connection is used transitively through the migration chain without ordinary
+conn reentry; every Docker role which bootstraps today keeps that availability;
+configured DB path is unchanged; preactivation failure and SAME-DB rollback do not
+regress. These are future qualification obligations, not reproduced bug claims.
