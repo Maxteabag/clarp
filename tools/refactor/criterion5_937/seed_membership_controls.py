@@ -38,6 +38,7 @@ def run_membership_controls(products, *, root):
     user = locate('messages', agent_id='synthetic-0', message_id='u-0-0')
     reply = locate('messages', agent_id='synthetic-0', trace_id='trace-0-0', role='assistant')
     future = locate('turns', agent_id='synthetic-0', trace_id='trace-0-1005')
+    settled = locate('turns', agent_id='synthetic-0', trace_id='trace-0-0')
     summary = products['tables']['messages']['rows'][reply][
         products['tables']['messages']['columns'].index('turn_json')]
     cases = [
@@ -45,6 +46,10 @@ def run_membership_controls(products, *, root):
         ('different_session', 'messages', reply, 'backend_session_id', ['text', 'other'], 'identity/session/path/slot'),
         ('different_source', 'messages', reply, 'source_file', ['text', '/other/source'], 'identity/session/path/slot'),
         ('different_slot', 'messages', reply, 'seq', ['integer', 2], 'identity/session/path/slot'),
+        ('wrong_native_message_id', 'messages', reply, 'message_id', ['text', 'msg-wrong'], 'identity/session/path/slot'),
+        ('wrong_durable_client_id', 'messages', user, 'message_id', ['text', 'u-wrong'], 'identity/session/path/slot'),
+        ('turn_settled_at_changed', 'turns', settled, 'settled_at', ['integer', 1767225602001], 'turn membership/outcome/time'),
+        ('turn_outcome_changed', 'turns', settled, 'outcome', ['text', 'interrupted'], 'turn membership/outcome/time'),
         ('request_summary_holder', 'messages', user, 'turn_json', list(summary), 'last-row summary'),
         ('missing_reply_summary', 'messages', reply, 'turn_json', ['null'], 'last-row summary'),
         ('changed_phase', 'messages', reply, 'phase', ['text', 'commentary'], 'payload/provenance/phase'),

@@ -51,9 +51,11 @@ capture from the eventually reviewed owner. It first requires that actual
 capture to satisfy the predicate. It does not generate passing native rows
 using this oracle, copy a native parser or launch any seed/root/test itself.
 
-Eleven typed single-field negatives change trace owner, backend session, source
+Fifteen typed single-field negatives change trace owner, backend session, source
 path, slot, request summary holder, missing reply summary, phase, origin, native
-update clock, client revision and integer storage type. A twelfth removes an
+update clock, client revision and integer storage type, plus native and durable
+message IDs, native turn settlement and outcome (C30c2 control amendments).
+A sixteenth negative removes an
 actual future turn. Each must refuse at the declared contract reason; a wrong
 reason/setup failure stops the control driver. Original raw bytes are hashed
 before/after. Only the affected table row-vector and one typed row are copied;
