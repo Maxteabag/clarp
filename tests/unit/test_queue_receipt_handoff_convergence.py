@@ -114,3 +114,55 @@ def test_later_attempt_defeats_real_transfer_frontier_without_new_start_state(
     assert not turn_queue.release_claim("work")
     assert turn_queue.reset_stale_claims(max_age_ms=0) == 0
     assert "work" not in provider.texts()
+
+
+@pytest.mark.parametrize("queued", [False, True], ids=["new-park", "taken-over-row"])
+def test_empty_transfer_capture_publishes_neither_internal_proof_key(
+        tmp_path, monkeypatch, selector_configured, queued):
+    from lib import turn_lifecycle
+    agent, provider, runtime = _transfer(tmp_path, monkeypatch, queued=queued, origin="agent")
+    turn = db.conn().execute(
+        "SELECT turn_id FROM turns WHERE agent_id=? AND trace_id='t-work' ORDER BY turn_id DESC LIMIT 1",
+        (agent,)).fetchone()[0]
+    turn_lifecycle.close_turn(turn)
+    try:
+        assert runtime.seal_if_drained() == {}
+    finally:
+        runtime.server_close()
+    detail = json.loads(db.conn().execute(
+        "SELECT detail FROM state_log WHERE agent_id=? ORDER BY state_id DESC LIMIT 1",
+        (agent,)).fetchone()[0])
+    assert detail["reason"] == "update_handoff" and detail["trace_id"] == "t-work"
+    assert "dispatch_not_started" not in detail
+    assert "dispatch_not_started_through_turn_id" not in detail
+    assert "work" not in provider.texts()
+
+
+@pytest.mark.parametrize("queued", [False, True], ids=["new-park", "taken-over-row"])
+def test_transfer_close_count_mismatch_rolls_back_payload_and_frontier(
+        tmp_path, monkeypatch, selector_configured, queued):
+    from lib import turn_lifecycle
+    agent, provider, runtime = _transfer(tmp_path, monkeypatch, queued=queued, origin="agent")
+    def rows():
+        return [tuple(row) for row in db.conn().execute(
+            "SELECT * FROM queued_turns WHERE agent_id=? ORDER BY queue_seq", (agent,))]
+    before = rows()
+    revision = turn_queue.revision(agent)
+    turn = db.conn().execute(
+        "SELECT turn_id FROM turns WHERE agent_id=? AND trace_id='t-work' ORDER BY turn_id DESC LIMIT 1",
+        (agent,)).fetchone()[0]
+    close = turn_lifecycle.close_turns_for_trace
+    def mismatched_count(agent_id, trace_id):
+        return close(agent_id, trace_id) + 1
+    monkeypatch.setattr(turn_lifecycle, "close_turns_for_trace", mismatched_count)
+    try:
+        blockers = runtime.seal_if_drained()
+    finally:
+        runtime.server_close()
+    assert blockers["account_recovery_refused"] == [f"{agent}:persist_failed"]
+    assert rows() == before and turn_queue.revision(agent) == revision
+    assert db.conn().execute("SELECT ended_at FROM turns WHERE turn_id=?", (turn,)).fetchone()[0] is None
+    assert not db.conn().execute(
+        "SELECT 1 FROM state_log WHERE agent_id=? AND json_extract(detail,'$.reason')='update_handoff'",
+        (agent,)).fetchone()
+    assert "work" not in provider.texts()
