@@ -4,6 +4,7 @@ from __future__ import annotations
 import sqlite3
 import threading
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -41,6 +42,13 @@ def _tick():
     return reconcile.end_idle_agent_receipts({"provider_turns": ["<unknown>"]})
 
 
+def _stored(queue_id):
+    """Inspect the durable receipt in any state; public get is queued-only."""
+    row = db.conn().execute("SELECT * FROM queued_turns WHERE queue_id = ?",
+                            (queue_id,)).fetchone()
+    return dict(row) if row else None
+
+
 @pytest.mark.parametrize("initial", ["queued", "claimed"])
 @pytest.mark.parametrize("outcome,expected", [
     (None, "started"), ("completed", "done"), ("failed", "failed"),
@@ -52,7 +60,7 @@ def test_periodic_repair_converges_receipts_with_their_exact_turn(initial, outco
     before = turn_queue.revision("a")
     _tick()
     assert turn_queue.status("q") == expected
-    row = turn_queue.get("q")
+    row = _stored("q")
     assert row["text"] == row["sender_agent_id"] == ""
     assert row["client_msg_id"] == "q" and row["trace_id"] == "t"
     assert turn_queue.pending_counts() == {}
@@ -176,7 +184,7 @@ def test_steered_receipt_with_no_own_turn_is_not_bound_to_the_live_agent_turn():
     _turn(trace="active")
     _tick()
     assert turn_queue.status("steer") == "queued"
-    assert turn_queue.get("steer")["text"] == "synthetic work"
+    assert _stored("steer")["text"] == "synthetic work"
     # The accepted-steer owner still marks its own receipt without guessing
     # a parent execution in the periodic repair.
     turn_queue.mark_started("steer")
@@ -190,9 +198,9 @@ def test_explicit_notstarted_turn_stays_retryable_until_real_same_trace_attempt(
     db.conn().execute(
         "INSERT INTO state_log(agent_id,kind,ts,detail) VALUES ('a','failed',?,?)",
         (db.now_ms(), json.dumps({"trace_id": "t", "dispatch_not_started": True})))
-    before = turn_queue.get("q")
+    before = _stored("q")
     _tick()
-    assert turn_queue.get("q") == before
+    assert _stored("q") == before
     assert [row["queue_id"] for row in turn_queue.pending_for_dispatch()] == ["q"]
     _turn(outcome="completed")  # later attempt's positive state supersedes the marker
     _tick()
@@ -202,9 +210,9 @@ def test_explicit_notstarted_turn_stays_retryable_until_real_same_trace_attempt(
 def test_bare_turn_is_uncertain_not_consumed_or_new_replay_permission():
     _receipt()
     _turn(observed=False)
-    before = turn_queue.get("q")
+    before = _stored("q")
     _tick()
-    assert turn_queue.get("q") == before
+    assert _stored("q") == before
     assert turn_queue.claim("q") is None
     assert turn_queue.pending_for_dispatch() == []
 
@@ -219,7 +227,7 @@ def test_start_and_revision_rollback_together_on_revision_failure(monkeypatch):
         with pytest.raises(sqlite3.OperationalError, match="synthetic revision fault"):
             turn_queue.mark_started("q")
     assert turn_queue.status("q") == "queued"
-    assert turn_queue.get("q")["text"] == "synthetic work"
+    assert _stored("q")["text"] == "synthetic work"
     assert turn_queue.state("a") == before
     assert not db.conn().in_transaction
 
@@ -301,7 +309,8 @@ def test_latest_ended_only_attempt_and_tied_settlements_use_deterministic_order(
     _receipt()
     _turn(outcome="completed")
     ended = _turn(ended=True)
-    db.conn().execute("UPDATE turns SET ended_at=? WHERE turn_id=?", (db.now_ms()+1, ended))
+    db.conn().execute("UPDATE turns SET ended_at=?, outcome='completed' WHERE turn_id=?",
+                      (db.now_ms()+1, ended))
     _tick()
     assert turn_queue.status("q") == "ended"
     _receipt("tie", trace="tie")
@@ -384,3 +393,79 @@ def test_opened_but_explicitly_unlaunched_work_uses_existing_recovery_once(tmp_p
     assert turn_queue.status("retry") == "started"
     assert service.recover_queued() == 0
     assert len(backend.spawned) == 1
+
+
+@pytest.mark.parametrize("joined", [False, True], ids=["owned", "caller-owned"])
+def test_both_diagnostic_sinks_failing_preserves_primary_sqlite_error(monkeypatch, joined):
+    _receipt()
+    con = db.conn()
+    before = turn_queue.state("a")
+    try:
+        con.execute("SELECT nonexistent_column")
+    except sqlite3.OperationalError as exc:
+        primary = exc
+    attempts = []
+    def fail_write(*_args, **_kwargs):
+        attempts.append(True)
+        raise primary
+    def fail_log(*_args, **_kwargs):
+        raise OSError("synthetic diagnostic sink failure")
+    class BrokenSink:
+        def write(self, _text):
+            raise BrokenPipeError("synthetic fallback sink failure")
+        def flush(self):
+            raise BrokenPipeError("synthetic fallback sink failure")
+    if joined:
+        con.execute("BEGIN IMMEDIATE")
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(turn_queue, "_cas", fail_write)
+            patch.setattr(turn_queue, "log", fail_log)
+            patch.setattr(turn_queue, "sys", SimpleNamespace(stderr=BrokenSink()))
+            with pytest.raises(sqlite3.OperationalError) as error:
+                turn_queue.mark_started("q")
+        assert error.value is primary
+        assert error.value.sqlite_errorcode == sqlite3.SQLITE_ERROR
+        assert any("queueReceiptDiagnosticLost" in note for note in primary.__notes__)
+        assert len(attempts) == 1
+        assert con.in_transaction is joined
+        assert turn_queue.state("a") == before
+        assert _stored("q")["text"] == "synthetic work"
+        assert turn_queue.status("q") == "queued"
+    finally:
+        if joined:
+            con.execute("ROLLBACK")
+
+
+@pytest.mark.parametrize("outcome,observed", [
+    (None, True), ("completed", True), ("failed", True),
+    ("interrupted", True), (None, False),
+])
+def test_claimed_identity_guard_blocks_release_independently_of_reconciliation(outcome, observed):
+    _receipt(status="claimed")
+    _turn(outcome=outcome, observed=observed)
+    before = _stored("q"), turn_queue.state("a")
+    assert turn_queue.release_claim("q") is False
+    assert (_stored("q"), turn_queue.state("a")) == before
+    assert turn_queue.get("q") is None  # preserve its existing queued-only contract
+
+
+def test_expired_preliminary_read_budget_never_acquires_a_writer(monkeypatch):
+    _receipt()
+    con = db.conn()
+    expired, begins = [False], []
+    def trace(sql):
+        if sql.startswith("SELECT") and "queued_turns" in sql:
+            expired[0] = True
+        if sql.startswith("BEGIN"):
+            begins.append(sql)
+    con.set_trace_callback(trace)
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(turn_queue, "time", SimpleNamespace(
+                monotonic=lambda: 1.0 if expired[0] else 0.0))
+            _tick()
+    finally:
+        con.set_trace_callback(None)
+    assert expired[0] and not begins
+    assert turn_queue.status("q") == "queued"
