@@ -176,5 +176,10 @@ may also retain them. Need actual per-pin row/summary/head/checkpoint/other-acto
 predicates and the populated-seed/reference path before choosing a record bound.
 The18exchanges/36 appended records are NOT that full bound. Reconstruction/setup
 and measured/reference domains must be explicit, never silently dropped. This
-is not a signed fit or a lifted integration blocker: C direction is requested,
-all capacities stay UNKNOWN and no cap/row/corpus/evidence limit is relaxed.
+is not a signed fit or a lifted integration blocker. C accepted the corrected
+mutation-volume direction and withdrew the blanket parse-count inference; all
+capacities stay UNKNOWN and no cap/row/corpus/evidence limit is relaxed. Initial
+seed construction, measured cells AND own-pin references must use the SAME
+logical source_file path, not merely a common path for the later cells. A path
+mismatch can cause N retained-revision keyed rewrites. Source/summary/provenance/
+tie/age/all-producer/connection conditions still require independent proof.
