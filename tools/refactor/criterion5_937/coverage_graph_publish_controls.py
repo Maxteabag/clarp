@@ -7,6 +7,8 @@ from pathlib import Path
 from .coverage_graph_publish import publish_graph, verify_graph, NAME
 from .coverage_graph_wire import FORMAT, B_PIN, BINDINGS
 from .coverage_copy_read import _same_capture
+from .coverage_retained_bytes import read_retained_bytes
+from .coverage_retained_bytes_controls import run_retained_reader_fault_table
 from .suite_evidence import ROLES
 
 
@@ -26,6 +28,8 @@ def run_graph_publication_storage_control(*, root):
     actual = Path(root) / NAME
     before = actual.read_bytes()
     assert before and result['observation']['bytes'] == len(before)
+    assert read_retained_bytes(result['observation'], byte_limit=200000,
+                               path_bytes_limit=4096) == before
     # Existing output refuses without overwrite, even with the same graph.
     try:
         publish_graph(root=root, graph=graph, limits=limits)
@@ -42,6 +46,17 @@ def run_graph_publication_storage_control(*, root):
         pass
     else:
         raise AssertionError('wrong graph linkage hash accepted')
+    assert actual.read_bytes() == before
+    try:
+        read_retained_bytes(bad, byte_limit=200000, path_bytes_limit=4096)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError('retained reader accepted wrong observed bytes')
+    assert actual.read_bytes() == before
+    faults = run_retained_reader_fault_table(result['observation'])
+    assert faults['boolean_observation_refusals'] == 5
+    assert faults['fault_outcomes'] == ['control_read', 'control_close', 'ordinary_pair']
     assert actual.read_bytes() == before
     return {'scope': 'FILESYSTEM_WIRE_STORAGE_ONLY_NOT_GRAPH_OR_PRODUCER_PROOF',
             'outcomes': 3, 'actual_coverage_or_report_accepted': False}
