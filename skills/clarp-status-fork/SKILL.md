@@ -24,9 +24,37 @@ Agents are matched by session slug, slug prefix or persona name.
   `ClaudeBackend.build_cmd`, so model, effort, plugin, MCP scope and persona prompt
   match and the fork reuses the agent's prompt cache. Any difference at the start of
   the request (for example `--tools ""`) is a cache miss that bills the whole context.
-- **Read-only.** `--dangerously-skip-permissions` becomes `--permission-mode dontAsk`:
-  the same tool list (cache-safe), but Bash, Write and Edit are denied. Reads work, so
-  the fork can answer questions about code and files as well as status.
+- **Read-only.** A PreToolUse hook (`scripts/read_only_guard.py`, passed with
+  `--settings`) denies every tool except Read, Grep, Glob, LS and NotebookRead, and a
+  hook's deny wins over inherited `permissions.allow` rules. `dontAsk` replaces
+  `--dangerously-skip-permissions` as a second layer, but on its own it still runs
+  pre-approved tools. Do not swap the hook for deny rules: a bare-tool or `Tool(*)`
+  deny removes the tool from the request and loses the agent's prompt cache. Reads
+  work, so the fork can answer questions about code and files as well as status. The
+  working directory stays the agent's, because `--resume` finds the conversation by it
+  and it is part of the cached system prompt.
+- **Fail-closed, within limits.** Before launching, `preflight()` resolves the agent's
+  saved working directory to one absolute, real directory and refuses a relative,
+  missing or non-directory path; the launch uses exactly that directory, never the
+  caller's. It checks the guard exists and passes a self-test, and that Claude Code is
+  at least 2.1.285. It refuses, launching nothing, when a local managed settings file
+  disables or restricts hooks, or (before 2.1.295) when any settings file it examines
+  pre-approves a non-read tool: managed, user, and the project and local files of every
+  ancestor of the directory, both as saved and resolved through symlinks. The hook
+  overrides an inherited `disableAllHooks: true` and is wrapped in `|| exit 2`, so a
+  guard that cannot start or crashes blocks the call. From 2.1.295 it also sets
+  `onFailure: "block"`, so a timed-out guard blocks too; before that, a timeout falls
+  back to `dontAsk`. `scripts/guard_controls.py` re-runs the live controls (real CLI,
+  throwaway session, a few small-model calls).
+- **What it does not cover.** The guard is a tool-call boundary, not a process
+  sandbox: other hooks and plugins still run at their own lifecycle points.
+  Server-managed policy delivered from the claude.ai console is not visible to a local
+  preflight, so a hook restriction set there is not detected. Before Claude Code
+  2.1.295, a guard timeout combined with an installed mod that approves calls through
+  `tool.check` is not covered. Upgrading Clarp's Claude Code to 2.1.295 or later
+  closes the timeout case.
+- **Database reads** go only through `sqlite3 -readonly -json`, with values inlined
+  as quoted literals.
 - **No traces.** `--fork-session --no-session-persistence`, with the Clarp session
   variables removed, so nothing is written to disk or to Clarp's messages.
 - **Live fact sheet.** Before forking, it reads the database read-only: the current
@@ -45,6 +73,9 @@ Agents are matched by session slug, slug prefix or persona name.
 ## Limits
 
 - Claude-backend agents only. Other backends return an error.
+- The command refuses, launching nothing, when the agent's saved working directory is
+  gone, when a local managed policy disables hooks, or (before Claude Code 2.1.295)
+  when inherited settings pre-approve a non-read tool. See "What it does not cover".
 - The prompt cache lives about an hour. The first fork of an agent idle for longer
   reloads its whole context once.
 - About 0.3 GB RAM per fork for 10 to 60 seconds. Fork one agent at a time when the

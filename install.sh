@@ -395,7 +395,8 @@ chmod 700 "$SHARE/current/scripts/agent_tasks.py" \
           "$SHARE/current/scripts/github_workflow_artifact.py"
 chmod 700 "$SHARE/current/skills/clarp-message-watch/scripts/watch_messages.py"
 chmod 700 "$SHARE/current/skills/clarp-adopt/scripts/adopt_session.py"
-chmod 700 "$SHARE/current/skills/clarp-status-fork/scripts/status_fork.py"
+chmod 700 "$SHARE/current/skills/clarp-status-fork/scripts/status_fork.py" \
+          "$SHARE/current/skills/clarp-status-fork/scripts/read_only_guard.py"
 write_python_wrapper() {
     "$PYTHON" - "$BIN/$1" "$SHARE" "$CFG_DIR" "$CACHE_DIR" \
         "$RELEASE" "$2" <<'PY'
