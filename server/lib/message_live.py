@@ -330,7 +330,7 @@ def mark_live_message_final(*, agent_id: str, backend_session_id: str,
 def _streamed_row_key(database, agent_id: str, backend_session_id: str,
                       trace_id: str, text: str) -> str:
     """The item key of the turn's streamed row that ``text`` completes."""
-    from .message_context import _strip_voice_markup
+    from .message_text import _strip_voice_markup
     visible = _strip_voice_markup(text)
     rows = database.execute(
         """SELECT message_id, text FROM messages

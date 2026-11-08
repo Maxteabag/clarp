@@ -337,7 +337,9 @@ synthetic branches:
 
 - Core backend leaves `agy_layout` and `claude_models` own the unchanged call-time AGY brain path value and Claude model-pin normalization. Feature transcript/capability modules re-export the canonical functions; hooks and launch import those functions directly without loading feature services. Environment/path/argv semantics remain unchanged.
 
-The first twenty-three repaired upward edges are removed from the ratchet; this section does not authorize reclassifying any existing module or expanding named exceptions.
+- `message_text` is a new core owner for unchanged injected-context delimiters and pure message normalization. Feature `message_context` retains automation display policy and re-exports canonical text objects; handwritten import/live/restore consumers use the lower owner. The checkpoint source closure includes the new implementation leaf, preserving existing parser-version invalidation policy.
+
+The first twenty-seven repaired upward edges are removed from the ratchet; this section does not authorize reclassifying any existing module or expanding named exceptions.
 
 ## Wave 2: lead-signed map corrections (937)
 

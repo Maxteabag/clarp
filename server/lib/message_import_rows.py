@@ -9,7 +9,7 @@ import json
 from typing import Any, NamedTuple
 
 from .clock import now_ms
-from .message_context import _strip_voice_markup
+from .message_text import _strip_voice_markup
 from .message_import_common import (
     _FINAL_TWIN_WINDOW_S,
     _PARKED_SEQ_BASE,

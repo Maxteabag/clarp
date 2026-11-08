@@ -208,7 +208,7 @@ def _restore_prompt(agent_id: str, conversation_id: str, text: str,
     conversation as Clarp recorded it (at most RESTORE_MAX_BYTES). The record
     sits in an injected-context block, so the chat shows only the new turn."""
     from .. import db
-    from ..message_context import RESTORED_CONTEXT_OPEN, RESTORED_CONTEXT_CLOSE
+    from ..message_text import RESTORED_CONTEXT_OPEN, RESTORED_CONTEXT_CLOSE
     from ..voice_markup import clean_for_display
     blocks: list[str] = []
     for row in db.conn().execute(

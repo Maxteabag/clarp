@@ -389,7 +389,7 @@ def test_edits_and_rewrites_of_earlier_records_force_a_full_import(tmp_path, clo
 @pytest.mark.parametrize("backend,helper", [
     (backend, helper)
     for backend in ["claude", "codex", "agy"]
-    for helper in ["message_import_rows.py", "message_import_common.py"]
+    for helper in ["message_import_rows.py", "message_import_common.py", "message_text.py"]
 ] + [("codex", "codex_tool_cells.py"), ("agy", "codex_tool_cells.py")])
 def test_parser_version_changes_when_an_import_helper_changes(monkeypatch, backend, helper):
     """A moved import dependency must invalidate checkpoints on each affected backend."""
