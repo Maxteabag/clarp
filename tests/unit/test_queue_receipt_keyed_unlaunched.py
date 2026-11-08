@@ -167,3 +167,26 @@ def test_late_backdated_marker_retained_after_pruning_cannot_revive_later_turn(t
     turn_queue.reconcile_receipts()
     assert dict(db.conn().execute("SELECT * FROM queued_turns WHERE queue_id='q'").fetchone()) == before
     assert turn_queue.pending_for_dispatch() == []
+
+
+def test_recovery_snapshot_cannot_replay_receipt_completed_by_manual_delivery(tmp_path, monkeypatch):
+    service, backend, agent = _make_service(tmp_path)
+    backend.live = False
+    turn_queue.enqueue(queue_id="q", agent_id=agent, session="mike", text="synthetic",
+                       trace_id="t", client_msg_id="q", synthesize_audio=False,
+                       origin="agent", sender_agent_id="")
+    pending = turn_queue.pending_for_dispatch
+    entered = []
+    def stale_snapshot():
+        rows = pending()
+        if not entered:
+            entered.append(True)
+            service.dispatch_queued("q")
+            assert len(backend.spawned) == 1
+            backend.spawned[0][1]["on_result"]({"duration_ms": 1})
+            assert turn_queue.status("q") == "done"
+        return rows
+    monkeypatch.setattr(turn_queue, "pending_for_dispatch", stale_snapshot)
+    assert service.recover_queued() == 0
+    assert len(backend.spawned) == 1
+    assert db.conn().execute("SELECT COUNT(*) FROM turns WHERE agent_id=? AND trace_id='t'", (agent,)).fetchone()[0] == 1
