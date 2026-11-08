@@ -19,7 +19,15 @@ import weakref
 
 from .native_peer_observer import NativePeerObserver
 
-CASES = ('native_success', 'metadata_oserror', 'wrong_peer', 'native_unavailable_metadata_oserror')
+CASES = ('native_success', 'metadata_oserror', 'wrong_peer', 'native_unavailable_metadata_oserror',
+         'wrong_uid', 'wrong_gid', 'wrong_instance', 'bool_protocol', 'malformed_instance',
+         'missing_attestation')
+# Independent expected rejection reasons; do not derive these from observer
+# flags or call its metadata validator to manufacture the expected outcome.
+REJECTION_REASON = {'metadata_oserror': 'peer_metadata', 'wrong_peer': 'peer_mismatch',
+                    'wrong_uid': 'peer_mismatch', 'wrong_gid': 'peer_mismatch',
+                    'wrong_instance': 'instance_changed', 'bool_protocol': 'bad_status',
+                    'malformed_instance': 'bad_status', 'missing_attestation': 'bad_status'}
 REQUEST = b'{"version":1,"method":"status","params":{}}\n'
 INSTANCE = 'd' * 32
 CASE_SECONDS = 4.0
@@ -133,6 +141,14 @@ def run_native_transport_controls(*, native_class, source_file, root, output, ab
         response = ({'ok': False, 'status': 503, 'error': 'controlled unavailable'}
                     if name == 'native_unavailable_metadata_oserror' else
                     {'ok': True, 'result': {'protocol_version': 1, 'instance': INSTANCE, 'attestation': None}})
+        if name == 'wrong_instance':
+            response['result']['instance'] = 'e' * 32
+        elif name == 'bool_protocol':
+            response['result']['protocol_version'] = True  # True == 1 is not valid typed evidence
+        elif name == 'malformed_instance':
+            response['result']['instance'] = 'not-a-native-instance'
+        elif name == 'missing_attestation':
+            del response['result']['attestation']
         wire_response = (json.dumps(response, separators=(',', ':')) + '\n').encode('ascii')
         listener = None
         worker = None
@@ -184,8 +200,12 @@ def run_native_transport_controls(*, native_class, source_file, root, output, ab
             worker.start()
             client = native_class(path, timeout=0.5)
             expected_pid = os.getpid() + (1 if name == 'wrong_peer' else 0)
+            # Deliberately wrong declarations only; actual credentials and
+            # native socket/response remain untouched. XOR stays in uint32.
+            expected_uid = os.getuid() ^ (1 if name == 'wrong_uid' else 0)
+            expected_gid = os.getgid() ^ (1 if name == 'wrong_gid' else 0)
             observer = NativePeerObserver(client, native_class=native_class, source_file=source_file,
-                                          expected_peer=(expected_pid, os.getuid(), os.getgid()),
+                                          expected_peer=(expected_pid, expected_uid, expected_gid),
                                           expected_instance=INSTANCE)
             read_peer = observer._read_peer
 
@@ -256,7 +276,20 @@ def run_native_transport_controls(*, native_class, source_file, root, output, ab
                 assert returned == response['result'], 'native response changed'
                 expected = 'CAPTURED' if name == 'native_success' else 'UNKNOWN'
                 assert receipt['observation'] == expected, 'metadata fault incorrectly qualified'
-                assert receipt['attestation_absent'] is True and receipt['full_readiness'] is False
+                reason = REJECTION_REASON.get(name)
+                assert receipt['reasons'] == ([] if reason is None else [reason]), 'wrong rejection path'
+                assert receipt['full_readiness'] is False
+                if name in ('bool_protocol', 'malformed_instance', 'missing_attestation'):
+                    # Invalid shape returns before the observer has qualified
+                    # status instance/attestation; do not manufacture absence.
+                    assert receipt['instance'] is None and receipt['attestation_absent'] is None
+                else:
+                    assert receipt['attestation_absent'] is True
+                if name in ('wrong_uid', 'wrong_gid', 'wrong_instance', 'bool_protocol',
+                            'malformed_instance', 'missing_attestation', 'native_success'):
+                    assert receipt['peer'] == [os.getpid(), os.getuid(), os.getgid()], 'actual peer changed'
+                if name == 'wrong_instance':
+                    assert receipt['instance'] == 'e' * 32 and receipt['instance_compared'] is True
             ref = observed['connect_returns'][0][1]
             item = ref()
             try:
