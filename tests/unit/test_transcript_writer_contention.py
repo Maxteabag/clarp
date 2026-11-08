@@ -5,6 +5,7 @@ import time
 import pytest
 
 from lib import agents, db, message_store
+from tests.patching import patch_shared
 
 
 @pytest.mark.parametrize("writer", ["sqlite", "oracle-admission"])
@@ -105,7 +106,7 @@ def test_an_import_yields_longer_than_the_busy_handlers_longest_step_every_secon
     from lib import message_writes
     agent = agents.create_agent(persona='Writer', voice_id='v', cwd=str(tmp_path), session='writer')
     fake = _FakeTime()
-    monkeypatch.setattr(message_writes, "time", types.SimpleNamespace(
+    patch_shared(monkeypatch, message_writes, "time", types.SimpleNamespace(
         monotonic=fake.monotonic, perf_counter=fake.perf_counter, time=fake.time,
         sleep=fake.sleep))
     original = db._TrackedConnection.execute
