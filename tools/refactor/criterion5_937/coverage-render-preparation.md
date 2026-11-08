@@ -52,7 +52,11 @@ json_report uses explicit absolute morfs for all434 sources, explicit new JSON
 output, ignore_errors=False/show_contexts=True and unfiltered contexts. No
 tracing start/stop/save, glob, caller module object, default data or hidden omit.
 Supported analysis2 and branch_stats records are acquired under the same data/
-source epoch, checked for exact filename and source-bound hash. The reviewed
+source epoch, checked for exact canonical relative inventory filename and
+source-bound hash. Absolute morfs remain explicit. Pinned _init selects
+relative_filename under relative_files=True, _analyze maps the reporter name,
+and analysis2 returns that mapped Analysis.filename. No either-spelling check,
+alias normalization or private mapper access is permitted. The reviewed
 pure consumer reconciles report units/counts only AFTER required cleanup and
 source/data/version checks. Full JSON including native regions is retained;
 nested function/class summaries are not added to whole-file totals.

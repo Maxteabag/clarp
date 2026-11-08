@@ -59,6 +59,9 @@ def run_render_storage_control(*, coverage_module, source_root, root):
     inventory = json.loads(Path(__file__).with_name('coverage-source-B.json').read_bytes())
     assert set(result['consistency']['files']) == set(inventory['files'])
     assert result['consistency']['source_file_count'] == 434
+    assert set(result['analysis_records']) == set(inventory['files'])
+    for name, record in result['analysis_records'].items():
+        assert record['source_sha256'] == inventory['files'][name]['sha256']
     assert result['consistency']['source_input_process_coverage_or_no_worse_accepted'] is False
     assert result['actual_run_input_producer_coverage_or_no_worse_accepted'] is False
     assert original.read_bytes() == raw and copy.read_bytes() == raw
