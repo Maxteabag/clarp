@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import threading
+import json
 import contextlib
 import sys
 import time
@@ -68,20 +69,78 @@ def _receipt_write(event: str, queue_ids, *, agent_ids=None):
 
 def _launch_status(row) -> str:
     from . import agents, launch_receipts
+    raw = launch_receipts.settings_store.get_text(launch_receipts._key(str(row["trace_id"])))
     receipt = launch_receipts.get(str(row["trace_id"]))
-    if receipt and (receipt.get("agent_id") != row["agent_id"]
+    if raw is not None and receipt is None:
+        return "unknown"  # malformed is not missing/unsent
+    if receipt is not None and (receipt.get("agent_id") != row["agent_id"]
                     or receipt.get("client_msg_id") != row["client_msg_id"]
                     or receipt.get("origin") != row["origin"]
                     or (row["status"] in ("queued", "claimed")
                         and (receipt.get("sender_agent_id") or "")
                         != (row["sender_agent_id"] or ""))):
         return "unknown"  # a trace alias does not transfer another admission's authority
-    return agents.trace_launch_status(
-        str(row["agent_id"]), str(row["trace_id"]),
-        client_msg_id=str(row["client_msg_id"] or ""), origin=row["origin"],
-        sender_agent_id=(str(row["sender_agent_id"])
-                         if row["status"] in ("queued", "claimed")
-                         and row["sender_agent_id"] is not None else None))
+    if row["prompt_admission_id"]:
+        admission = db.conn().execute(
+            "SELECT * FROM prompt_admissions WHERE admission_id=?",
+            (row["prompt_admission_id"],)).fetchone()
+        if (admission is None or any(admission[field] != row[field] for field in
+                                     ("agent_id", "session", "trace_id", "origin"))
+                or admission["client_admission_id"] != (row["client_msg_id"] or row["trace_id"])
+                or (row["status"] in ("queued", "claimed")
+                    and (admission["sender_agent_id"] or "") != (row["sender_agent_id"] or ""))):
+            return "unknown"
+    attempt = agents._receipt_attempt_status(str(row["agent_id"]), str(row["trace_id"]))
+    if attempt is None:
+        # No-turn durable work still has its first-launch route. Possibly-sent
+        # steer receipts do not become new independent launches.
+        if receipt and receipt.get("state") not in (launch_receipts.PENDING, launch_receipts.FENCED):
+            return "unknown"
+        return "unstarted"
+    return _handoff_launch_status(row, attempt)
+
+
+def _handoff_launch_status(row, fallback: str) -> str:
+    """Administrative frontier proof is queue-local, not global retry authority."""
+    con = db.conn()
+    marker = con.execute(
+        """SELECT detail FROM state_log WHERE agent_id=?
+             AND json_extract(detail,'$.trace_id')=? AND kind='idle'
+             AND json_extract(detail,'$.reason')='update_handoff'
+           ORDER BY state_id DESC LIMIT 1""",
+        (row["agent_id"], row["trace_id"])).fetchone()
+    if marker is None:
+        return fallback
+    detail = json.loads(marker["detail"] or "{}")
+    frontier = detail.get("dispatch_not_started_through_turn_id")
+    if (detail.get("dispatch_not_started") is not True or type(frontier) is not int
+            or not 1 <= frontier <= 9223372036854775807):
+        return fallback if fallback == "observed" else "unknown"
+    selected = con.execute(
+        """SELECT turn_id,ended_at,settled_at,outcome FROM turns
+            WHERE agent_id=? AND trace_id=? ORDER BY turn_id DESC LIMIT 1""",
+        (row["agent_id"], row["trace_id"])).fetchone()
+    covered = con.execute(
+        "SELECT ended_at,settled_at FROM turns WHERE turn_id=? AND agent_id=? AND trace_id=?",
+        (frontier, row["agent_id"], row["trace_id"])).fetchone()
+    if covered is None or covered["ended_at"] is None or covered["settled_at"] is not None:
+        return "unknown"
+    if selected is None or selected["turn_id"] > frontier:
+        return fallback  # later evidence wins; an unobserved open attempt is unknown
+    if selected["turn_id"] != frontier:
+        return "unknown"
+    if con.execute(
+            """SELECT 1 FROM turns WHERE agent_id=? AND trace_id=?
+                 AND outcome IN ('completed','interrupted')
+                 AND (settled_at IS NOT NULL OR ended_at IS NOT NULL) LIMIT 1""",
+            (row["agent_id"], row["trace_id"])).fetchone():
+        return "unknown"
+    if con.execute(
+            """SELECT 1 FROM queued_turns WHERE agent_id=? AND trace_id=?
+                 AND queue_id<>? AND status IN ('queued','claimed','parked','started') LIMIT 1""",
+            (row["agent_id"], row["trace_id"], row["queue_id"])).fetchone():
+        return "unknown"
+    return "handoff"  # exact closed administrative attempt; pause/Resume own admission
 
 
 def _has_turn(row) -> bool:
@@ -92,7 +151,7 @@ def _has_turn(row) -> bool:
 
 def _consumed_or_uncertain(row) -> bool:
     """A turn alone cannot override explicit, current NOTSTARTED evidence."""
-    return _has_turn(row) and _launch_status(row) != "retryable"
+    return _launch_status(row) not in ("retryable", "handoff", "unstarted")
 
 # The receipt's lifecycle (docs/architecture/lifecycles.md; Phase 3 queue
 # conversion, docs/architecture/lifecycle-conversion-plan.md section 1). This
@@ -563,10 +622,7 @@ def reconcile_receipts() -> dict[str, int]:
                 turn = con.execute(
                     """SELECT turn_id, started_at, ended_at, settled_at, outcome FROM turns
                         WHERE agent_id = ? AND trace_id = ?
-                        ORDER BY CASE WHEN settled_at IS NULL AND ended_at IS NULL
-                                      THEN 0 ELSE 1 END,
-                                 COALESCE(settled_at, ended_at, started_at) DESC,
-                                 turn_id DESC LIMIT 1""",
+                        ORDER BY turn_id DESC LIMIT 1""",
                     (row["agent_id"], row["trace_id"])).fetchone()
                 if turn is None:
                     continue
@@ -806,6 +862,25 @@ def get(queue_id: str) -> dict | None:
         (queue_id,),
     ).fetchone()
     return dict(row) if row else None
+
+
+def dispatchable(queue_id: str, *, agent_id: str, trace_id: str, session: str,
+                 client_msg_id: str, origin: str, sender_agent_id: str,
+                 prompt_admission_id: str) -> bool:
+    """Fresh receipt evidence inside the existing same-client admission gate.
+
+    No write/transaction: claim/release/reset retain their own writer checks.
+    A stale recovery snapshot must not bypass terminal/uncertain receipt state.
+    """
+    row = db.conn().execute("SELECT * FROM queued_turns WHERE queue_id=?", (queue_id,)).fetchone()
+    if row is None or row["status"] not in ("queued", "claimed"):
+        return False
+    expected = {"agent_id": agent_id, "trace_id": trace_id, "session": session,
+                "client_msg_id": client_msg_id, "origin": origin,
+                "sender_agent_id": sender_agent_id, "prompt_admission_id": prompt_admission_id}
+    if any(str(row[key] or "") != str(value or "") for key, value in expected.items()):
+        return False
+    return not _consumed_or_uncertain(row)
 
 
 def update_text(queue_id: str, text: str) -> bool:

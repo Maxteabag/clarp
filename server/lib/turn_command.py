@@ -236,6 +236,10 @@ class JanitorDispatchError(DispatchError):
     """A maintenance run lost authorization; retrying cannot restore it."""
 
 
+class _QueuedReceiptUnavailable(DispatchError):
+    """A recovery snapshot lost its current receipt before serialized admission."""
+
+
 class _LaunchReceiptUnrecorded(DispatchError):
     """The launch receipt could not leave ``pending``, so the backend was never
     handed the prompt: a same-id retry may still launch it exactly once."""
@@ -436,6 +440,29 @@ def _is_call_opening(spec) -> bool:
     # Only positive evidence (a non-call prompt admission) makes it someone's
     # own message; otherwise the opening's gate decides.
     return not agent_rings.is_foreign_message(str(getattr(spec, "prompt_admission_id", "") or ""))
+
+
+@dataclass(frozen=True)
+class _PreInvokeFailure:
+    """Private authority captured ONLY before the provider call boundary."""
+    agent_id: str
+    trace_id: str
+    turn_id: int | None = None
+
+
+def _mark_preinvoke_failure(exc: BaseException, *, agent_id: str, trace_id: str,
+                            turn_id: int | None = None) -> None:
+    try:
+        exc.clarp_preinvoke_failure = _PreInvokeFailure(agent_id, trace_id, turn_id)
+    except Exception:  # the original failure remains authoritative; no proof means protected
+        BaseException.add_note(exc, "preInvokeProofUnavailable")
+
+
+def _preinvoke_failure(exc: BaseException | None) -> _PreInvokeFailure | None:
+    if _backend_invoked(exc):
+        return None
+    proof = getattr(exc, "clarp_preinvoke_failure", None)
+    return proof if isinstance(proof, _PreInvokeFailure) else None
 
 
 def _mark_backend_invoked(exc: BaseException) -> None:
