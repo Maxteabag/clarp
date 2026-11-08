@@ -66,35 +66,15 @@ handlers/import fallbacks. A typed refusal must flow through each real owner wit
 DB-dependent diagnostics or unrelated prompt-context/provider-policy changes. The
 full per-command/hook mapping is still an A2 HOLD, not inferred from a family label.
 
-## Fresh release-owner answer and controlling blocker
+## Superseded custody discussion and current decision
 
-Fullread `reviews/pt02-937-f639-custody-owner-response.md`, actual SHA256
-0b96d24957cda96268c7b5e0cd64f98951d96f386ee9229ed527f7504fa5b360.
-The earlier non-hash placeholder in its message is NOT evidence.
+The prior source discussion of current830 child/lock structure remains valid as
+an observation, but a universal new custodian/supervisor is NOT required for R.
+Lead937 preserves existing serialization/activation and names the old-binary race
+as an OPEN residual. Release-owner addendum878aba and A2 no-regression boundary
+supersede that earlier R hold. The full old discussion is in Git history.
 
-Release owner agrees lifetime direction IN PRINCIPLE only. Required order is
-supervisor admission -> companion owner -> program release.lock in each fixed
-rc5/830/r3 phase -> short SQLite unit, with existing container root custody first.
-Never acquire a new custodian while holding release.lock in the reverse order.
-Actual rc5 starts installer/observer in other systemd units; actual830 releases
-release.lock then launches r3 in a new session. Therefore parent cgroup kill,
-PDEATHSIG, a process group or released flock alone cannot prove those effect-capable
-units retired. Holding the companion inside install.sh cannot cover an830 phase
-started only after installer exit. No claim current approved snapshots implement
-this custody protocol; they remain untouched.
-
-Exact independently persistent supervisor admission/retirement interface is still
-required before all-route native implementation: fixed canonical-root identity
-independent of candidate/DB inode, prior operation retirement before new admission,
-child registration before start, authoritative ownership of installer/observer/
-rollback/830/r3 and uncertain-POST reconciliation. A new version/unit name cannot
-skip an unresolved predecessor. Any proposed new supervisor/unit interface or
-restricted Linux/direct/macOS support needs explicit scope/release/A2 settlement.
-No invented PID marker, timeout steal, new lock path or env bypass is approved.
-
-The previous lead request for initial121-only scope and R2-before-unknown-W is
-still pending; do not resend it merely because the technical owner replied. Next
-work is concrete fixed supervisor-interface design/review or the lead's restricted
-route decision, followed by exact A2 review. Production source, format, tooling,
-compute and live operations remain held. PT-02 stays OPEN, including legacy floor61
-conversion and bounded historical work.
+This object manifest is DIAGNOSTIC evidence only. R does not install a whole-schema
+allowlist or refuse additional currently supported121 shapes based on these two
+fixtures. The exact R version/readiness/cache/error contract is specified in
+pt02-r-lead-settled-scope.md; that document is authoritative.
