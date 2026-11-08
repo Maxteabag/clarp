@@ -1,0 +1,17 @@
+# Wave 2 / 937: the full/probe writer and read-only planning adapter share
+# transaction primitives, while the import orchestration stays in the facade.
+# Definition bodies move unchanged; message_writes reexports their identity.
+
+[[split]]
+name = "message-import-writer"
+module = "lib/message_writes.py"
+acknowledged_patches = [
+    {path = "tests/readmodel/rm_n14_harness.py", name = "*", reason = "The computed patch loop wraps only orchestration functions retained in message_writes; the moved writer methods are patched through the reexported class object itself.", evidence = "At base 0073254687d22ac5a6c1d01b8af29fa678dcf4a2 run_lane's loop is the explicit tuple _row_phases, _visible_replies, _prepare_import_prelude, _revalidate_import_prelude. None moves or is a global read of _ImportWriter/_PlanWriter. The following execute/commit/__init__/yield_writer patches target message_writes._ImportWriter, which remains the identical imported class. No harness edit or lost moved binding."},
+]
+
+[[split.part]]
+module = "lib/message_import_writer.py"
+names = [
+    "_facade", "_WRITE_VERBS", "_TailInvalidated", "_WriteNeeded",
+    "_ImportWriter", "_PlanCursor", "_PlanWriter",
+]
