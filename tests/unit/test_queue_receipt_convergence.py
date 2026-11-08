@@ -139,16 +139,29 @@ def test_missing_or_foreign_turn_and_final_receipts_are_unchanged():
 
 def test_unattributed_open_retry_is_protected_until_its_later_settlement():
     _receipt()
-    _turn(outcome="failed")
+    earlier = _turn(outcome="failed")
     active = _turn()
+    earlier_before = dict(db.conn().execute("SELECT * FROM turns WHERE turn_id=?", (earlier,)).fetchone())
     before = _stored("q")
     _tick()
     assert _stored("q") == before  # unbound same-trace observations cannot name this attempt
     assert turn_queue.pending_for_dispatch() == []
     db.conn().execute("UPDATE turns SET ended_at=?,settled_at=?,outcome='completed' WHERE turn_id=?",
                       (db.now_ms(), db.now_ms(), active))
+    completed = dict(db.conn().execute("SELECT * FROM turns WHERE turn_id=?", (active,)).fetchone())
+    assert completed["agent_id"] == "a" and completed["trace_id"] == "t"
+    assert completed["outcome"] == "completed" and completed["settled_at"] is not None
+    assert completed["ended_at"] is not None and active > earlier
+    assert dict(db.conn().execute("SELECT * FROM turns WHERE turn_id=?", (earlier,)).fetchone()) == earlier_before
+    revision = turn_queue.revision("a")
+    # The bounded owner may use one empty-tail pass to wrap before revisiting.
+    _tick()
     _tick()
     assert turn_queue.status("q") == "done"
+    assert _stored("q")["text"] == _stored("q")["sender_agent_id"] == ""
+    assert turn_queue.revision("a") > revision
+    assert dict(db.conn().execute("SELECT * FROM turns WHERE turn_id=?", (earlier,)).fetchone()) == earlier_before
+    assert dict(db.conn().execute("SELECT * FROM turns WHERE turn_id=?", (active,)).fetchone()) == completed
 
 
 def test_lost_settlement_converges_after_connection_restart():
