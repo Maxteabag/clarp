@@ -41,6 +41,11 @@ A close failure latches UNKNOWN; no raw-fd fallback/retry and no different socke
 is closed. Observer-origin control is identified separately from an unclassified
 native/public-call error; this component cannot label a product defect.
 
+Delegation and assignment are inside the ownership handler. Before a returned
+socket is actually bound locally, native/interpreter cleanup remains in force;
+the connect-return-to-assignment gap is ALSO not certified. Never close/retry an
+unknown object based on a missing local binding.
+
 Wrapper-return intent is NOT atomic native-with ownership. This seam cannot
 certify the interpreter gap or all-descriptor drain. Keep UNKNOWN/outer owned
 process containment unless the actual supported interpreter lifecycle control
@@ -74,7 +79,8 @@ input hashes and unconditional owned server/thread cleanup.
   may be needed to inject close failure safely; it is not a native transport
   positive or permission for raw os.close/socket-class/global patches.
 - Actual interpreter return-to-with cancellation: propose a bounded thread-local
-  trace on the exact own-pin _request code at its BEFORE_WITH opcode, retaining
+  trace on the exact own-pin _request code at its BEFORE_WITH opcode and the
+  observer's native-return assignment boundary, retaining
   the supported Python version/bytecode/source and restoring the previous trace
   unconditionally. Observe only weak references to actual sockets after handoff
   and descriptor state; do not retain sockets to manufacture liveness. This is
