@@ -33,3 +33,31 @@ setup/plateau/measurement cannot fit, stop and report the protocol gap before
 compute. Only rf-computec/captain admit actual jobs. Never run any test,
 collection, generator, product import or server on laptopstudio. No live data,
 credentials or Host/runtime action. Held herald931 backend work stays held.
+
+## Instrumentation source slice (unexecuted)
+
+`proc_samples.py` reads smaps_rollup RSS/PSS, CPU/IO and current all-task
+child snapshots with PID/start/boot rechecks. A missing/denied/reused/exited
+record is UNKNOWN, never memory zero. This is NOT a continuous containment or
+historical all-descendant drain theorem and does not qualify a cgroup charge.
+
+`pytest_plugin/c5_937.py` is explicitly loaded from its dedicated directory,
+not through sitecustomize or an executable/child_env change. It pins pytest
+9.1.1, records actual controller/eight-worker identities and exact rosters,
+disables worker replacements, separates nested subtests and preserves primary
+failure statuses. Missing/changed worker terminals make a prior zero non-green.
+Hook elapsed and outer/summary pytest elapsed remain separately named metrics.
+
+Coverage mode uses the supported coverage7.17 API before initial conftest
+imports, retaining each pytest process's data+hash instead of combining stale
+globs. Tool version/config/import path are checked. External Host/runtime/
+provider children are UNOBSERVED unless separate evidence is supplied; no
+allowlist/Popen/executable bypass forces participation. The public coverage
+package was source-packaged from a retained cp312 cache without importing its
+native module; artifact hash inventory is outside this repo under the goal's
+evidence directory. Actual VM compatibility and finite positive/negative/
+publication-failure controls are still UNEXECUTED and owed inside the same cap.
+No fallback download or rebuild outside the setup allotment is authorized.
+
+Remaining full-package glue, native lifecycle/oracles, coverage aggregation/
+family mapping, priority/budget/drain and exact B/C source readiness remain open.
