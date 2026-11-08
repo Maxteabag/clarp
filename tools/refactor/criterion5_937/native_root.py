@@ -129,7 +129,7 @@ def run_native_root(*, attempt, pin, role, source, root, output, files, port, ab
             with lock:
                 if code not in state['partial'] and len(state['partial'])<32:
                     state['partial'].append(code)
-        except BaseException:
+        except Exception:
             state['observation_failed']=True
 
     def serving(server,*args,**kwargs):
@@ -143,14 +143,16 @@ def run_native_root(*, attempt, pin, role, source, root, output, files, port, ab
                       'pid':me.pid,'start_ticks':me.start_ticks,'boot_id':me.boot_id,
                       'native_class':type(server).__module__+'.'+type(server).__qualname__,
                       'mono_ns':time.monotonic_ns(),'scope':'actual serve entry ONLY, not readiness'})
-        except BaseException:
+        except Exception:
             state['observation_failed']=True
             partial('serve_diagnostic_failed')
-        finally:
-            try:
-                entered.set()
-            except BaseException:
-                state['observation_failed']=True
+        # A process-control exception above leaves immediately: it cannot set
+        # a serve-handoff marker then restart the native serving loop.
+        try:
+            entered.set()
+        except Exception:
+            state['observation_failed']=True
+            partial('serve_handoff_marker_failed')
         return original_serve(server,*args,**kwargs)
 
     def thread_error(args):
@@ -159,7 +161,7 @@ def run_native_root(*, attempt, pin, role, source, root, output, files, port, ab
                 if len(state['thread_errors'])<32:
                     state['thread_errors'].append(args.exc_type.__name__[:128])
             partial('uncaught_native_thread_exception')
-        except BaseException:
+        except Exception:
             state['observation_failed']=True
         finally:
             original_exception(args)  # preserve actual native diagnostic exactly once
@@ -204,73 +206,186 @@ def run_native_root(*, attempt, pin, role, source, root, output, files, port, ab
                     # Actual native shutdown may block. The outer qualified
                     # supervisor owns the absolute timeout/unknown preservation.
                     state['server'].shutdown()
-        except BaseException as error:
+        except Exception as error:
             partial('owned_control_'+type(error).__name__)
 
     socketserver.BaseServer.serve_forever=serving
     threading.excepthook=thread_error
     owner=threading.Thread(target=control,name='criterion5-owned-stop',daemon=True)
     primary=None
+    native_primary=None
+    tool_primary=None
+    entry_driver_primary=None
+    native_completion=None
+    phase='OWNER_HELPER_START'
+    native_entry_state='ROOT_NOT_STARTED'
+    failure_origin=None
+    native_call_attempted=False
+    product=source/'server'/('server.py' if role=='host' else 'runtime.py')
     old_argv=sys.argv[:]
+
+    def has_native_frame(error):
+        # Bound the evidence walk; do not retain frames/tracebacks in diagnostics.
+        # No frame at this path means driver/load UNKNOWN, not a native claim.
+        cursor=error.__traceback__
+        try:
+            for _ in range(64):
+                if cursor is None:
+                    return False
+                if cursor.tb_frame.f_code.co_filename==str(product):
+                    return True
+                cursor=cursor.tb_next
+            return None
+        finally:
+            cursor=None
+
     try:
         owner.start()
-        product=source/'server'/('server.py' if role=='host' else 'runtime.py')
+        phase='ENTRY_PREPARATION'
         sys.argv=[str(product)]
-        write_new(output/'entrypoint-enter.json',{'attempt':attempt,'pin':pin,'role':role,
+        phase='ENTRY_METADATA'
+        write_new(output/'entrypoint-intent.json',{'attempt':attempt,'pin':pin,'role':role,
                   'pid':me.pid,'start_ticks':me.start_ticks,'boot_id':me.boot_id,
                   'mono_ns':started,'process_cpu_ns':cpu,
                   'entrypoint_sha256':files[product.relative_to(source).as_posix()],
-                  'scope':'helper entry-to-root; primary spawn timing belongs to parent'})
+                  'native_entry_state':'ROOT_NOT_STARTED','qualified':False,
+                  'scope':'tool pre-entry intent ONLY; not native entry/boot/readiness'})
+        phase='NATIVE_DISPATCH'
+        native_call_attempted=True
+        native_entry_state='CALL_PENDING'
         try:
-            runpy.run_path(str(product),run_name='__main__')
-        except SystemExit as exit_value:
-            if exit_value.code not in (None,0):
+            namespace=runpy.run_path(str(product),run_name='__main__')
+        except BaseException as delegated_error:
+            # This catch covers ONLY the delegated call, not owner startup or
+            # publication/return-metadata work before or after that call.
+            phase='ENTRY_EXCEPTION_CLASSIFICATION'
+            if isinstance(delegated_error,SystemExit) and delegated_error.code in (None,0):
+                native_completion='SYSTEM_EXIT_ZERO'
+                phase='ENTRY_EXIT_METADATA'
+                if has_native_frame(delegated_error) is True:
+                    native_entry_state='ENTERED_SYSTEM_EXIT_ZERO'
+                else:
+                    native_entry_state='ENTRY_DRIVER_UNKNOWN'
+                    failure_origin='ENTRY_DRIVER_UNKNOWN'
+                    partial('entry_driver_zero_exit_unqualified')
+            else:
+                entry_driver_primary=delegated_error
+                native_entry_state='ENTRY_DRIVER_UNKNOWN'
+                failure_origin='ENTRY_DRIVER_OR_NATIVE_LOAD_UNKNOWN'
+                try:
+                    if has_native_frame(delegated_error) is True:
+                        native_primary=delegated_error
+                        entry_driver_primary=None
+                        native_entry_state='ENTERED_EXCEPTION'
+                        failure_origin='NATIVE_ENTRY'
+                except BaseException as secondary:
+                    # Failure while inspecting provenance cannot replace the
+                    # exact delegated primary. Provenance remains UNKNOWN.
+                    raise delegated_error from secondary
                 raise
+        else:
+            native_completion='RETURNED'
+            phase='ENTRY_RETURN_METADATA'
+            try:
+                if (type(namespace) is dict and namespace.get('__file__')==str(product)
+                        and namespace.get('__name__')=='__main__'):
+                    native_entry_state='RETURNED_FROM_ENTRY'
+                else:
+                    native_entry_state='ENTRY_DRIVER_UNKNOWN'
+                    failure_origin='ENTRY_DRIVER_UNKNOWN'
+                    partial('entry_result_metadata_unknown')
+            finally:
+                # Never keep returned product globals/actors/connections alive.
+                del namespace
+        phase='NATIVE_RETURNED'
     except BaseException as error:
         primary=error
-        partial('native_root_'+type(error).__name__)
+        if error is not native_primary and error is not entry_driver_primary:
+            tool_primary=error
+            if native_call_attempted:
+                failure_origin='TOOL_OBSERVATION_AFTER_DISPATCH'
+            else:
+                native_entry_state='ROOT_NOT_STARTED'
+                failure_origin='TOOL_SETUP'
+        try:
+            partial('root_failure_'+failure_origin)
+        except BaseException as secondary:
+            # A control interruption during diagnosis cannot replace a primary
+            # already unwinding; retain it as the cause, and do not restart root.
+            raise primary from secondary
         raise
     finally:
-        done.set(); sys.argv=old_argv
+        final_error=None
+        restoration_ok=True
+        alive_count=None
         try:
+            done.set()
             if owner.ident is not None:
-                owner.join(min(1.0,max(0.,absolute_deadline-time.monotonic())))
-        except BaseException:
-            partial('owned_control_join_unknown')
-        if owner.is_alive():
-            partial('owned_control_not_joined')
-        if socketserver.BaseServer.serve_forever is not serving or threading.excepthook is not thread_error:
-            partial('observer_binding_changed')
-        socketserver.BaseServer.serve_forever=original_serve
-        threading.excepthook=original_exception
-        if state['observation_failed']:
-            partial('observer_metadata_unknown')
-        try:
-            if guard.failed or failure.exists():
-                partial('native_guard_refused')
-        except BaseException:
-            partial('native_guard_result_unknown')
-        # This census is diagnostic ONLY. Neither daemon status nor native root
-        # return proves worker completion/exit/drain. Parent must qualify actors.
-        try:
-            alive_count=sum(t is not threading.current_thread() for t in threading.enumerate())
-        except BaseException:
-            alive_count=None
-            partial('thread_census_unknown')
-        if not entered.is_set() or not state['stop_requested']:
-            partial('no_observed_serve_or_owner_stop')
-        try:
-            write_new(output/'root-return.json',{'attempt':attempt,'pin':pin,'role':role,
-                      'pid':me.pid,'start_ticks':me.start_ticks,'boot_id':me.boot_id,
-                      'native_primary':None if primary is None else type(primary).__name__,
-                      'mono_ns':time.monotonic_ns(),'process_cpu_ns':time.process_time_ns(),
-                      'partial':state['partial'],'thread_errors':state['thread_errors'],
-                      'other_live_thread_count':alive_count,'guard_counts':dict(guard.counts),
-                      'qualified':False,'scope':'native-return diagnostics ONLY; no work/readiness/actor/exit certificate'})
+                try:
+                    owner.join(min(1.0,max(0.,absolute_deadline-time.monotonic())))
+                except Exception:
+                    partial('owned_control_join_unknown')
+            if owner.is_alive():
+                partial('owned_control_not_joined')
+            if socketserver.BaseServer.serve_forever is not serving or threading.excepthook is not thread_error:
+                partial('observer_binding_changed')
+            if state['observation_failed']:
+                partial('observer_metadata_unknown')
+            try:
+                if guard.failed or failure.exists():
+                    partial('native_guard_refused')
+            except Exception:
+                partial('native_guard_result_unknown')
+            # Diagnostic only, never actor/child/exit/drain evidence.
+            try:
+                alive_count=sum(t is not threading.current_thread() for t in threading.enumerate())
+            except Exception:
+                partial('thread_census_unknown')
+            if not entered.is_set() or not state['stop_requested']:
+                partial('no_observed_serve_or_owner_stop')
         except BaseException as error:
+            # Temporarily defer ONLY to attempt binding restoration below.
+            # Never return to native work or turn cancellation into metadata.
+            final_error=error
+        finally:
+            # Independent restoration attempts even after a new cancellation.
+            # Keep the first process-control error in preference to an ordinary
+            # metadata error; all failures still make this attempt unqualified.
+            for restore in (lambda:setattr(socketserver.BaseServer,'serve_forever',original_serve),
+                            lambda:setattr(threading,'excepthook',original_exception),
+                            lambda:setattr(sys,'argv',old_argv)):
+                try:
+                    restore()
+                except BaseException as error:
+                    restoration_ok=False
+                    if final_error is None or isinstance(final_error,Exception) and not isinstance(error,Exception):
+                        final_error=error
+        # Do not start more diagnostic I/O while a process-control exception is
+        # pending. The outer owner records missing terminal evidence as UNKNOWN.
+        if final_error is None or isinstance(final_error,Exception):
+            try:
+                write_new(output/'root-return.json',{'attempt':attempt,'pin':pin,'role':role,
+                          'pid':me.pid,'start_ticks':me.start_ticks,'boot_id':me.boot_id,
+                          'launch_phase':phase,'native_call_attempted':native_call_attempted,
+                          'native_entry_state':native_entry_state,'failure_origin':failure_origin,
+                          'native_completion':native_completion,
+                          'native_primary':None if native_primary is None else type(native_primary).__name__,
+                          'tool_primary':None if tool_primary is None else type(tool_primary).__name__,
+                          'entry_driver_primary':None if entry_driver_primary is None else type(entry_driver_primary).__name__,
+                          'finalization_primary':None if final_error is None else type(final_error).__name__,
+                          'restoration_ok':restoration_ok,
+                          'mono_ns':time.monotonic_ns(),'process_cpu_ns':time.process_time_ns(),
+                          'partial':state['partial'],'thread_errors':state['thread_errors'],
+                          'other_live_thread_count':alive_count,'guard_counts':dict(guard.counts),
+                          'qualified':False,'scope':'diagnostics ONLY; no work/readiness/actor/exit certificate'})
+            except BaseException as error:
+                if final_error is None or isinstance(final_error,Exception) and not isinstance(error,Exception):
+                    final_error=error
+        if final_error is not None:
             if primary is not None:
-                primary.add_note('root diagnostic publication failed: '+type(error).__name__)
-            else:
-                raise
+                # Exact original primary identity survives; a new cancellation
+                # or finalization failure remains visible as its explicit cause.
+                raise primary from final_error
+            raise final_error
     if state['partial']:
         raise RuntimeError('root diagnostics partial; no retry or qualification')
