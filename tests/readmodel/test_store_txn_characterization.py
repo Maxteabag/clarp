@@ -13,7 +13,10 @@ from __future__ import annotations
 
 from tests.patching import patch_shared
 
+import builtins
+from contextlib import closing
 import json
+import os
 import sqlite3
 
 import pytest
@@ -295,12 +298,103 @@ def test_a_reply_adopts_the_live_row_of_its_own_turn_exact_text_first(clock):
     assert "live-prefix" not in {r["message_id"] for r in rows()}   # cleanup removed it
 
 
-def test_a_live_row_of_another_turn_is_neither_adopted_nor_removed(clock):
-    client("c0", "ask", at=0, trace="tr-0")
-    assistant_row("live-other", "live:tr-9", "answer", at=4, trace="tr-9")
-    store([u("ask", 0.2), a("answer", 5)])
-    assert {r["message_id"]: r["source_file"] for r in rows()}["live-other"] == "live:tr-9"
+@pytest.mark.parametrize("primary_fault, fallback_fault", [
+    ("normal", "none"), ("sink", "none"), ("import", "none"),
+    ("sink", "oserror"), ("import", "oserror"),
+    ("sink", "short"), ("import", "short"),
+])
+def test_a_live_row_of_another_turn_is_neither_adopted_nor_removed(
+        clock, monkeypatch, capfd, primary_fault, fallback_fault):
+    """A failed optional diagnostic cannot change the actual import/twin result.
+
+    Compare every stored state product with the normal path from the same
+    seed. The fallback is real fd output; only genuine sink refusal/short
+    writes are injected, and neither is evidence of full diagnostic delivery.
+    """
+    from lib import log as log_module, message_import_rows
+
+    sensitive = "SENSITIVE-DIAGNOSTIC-SENTINEL"
+    trace, live_id = f"tr-0-{sensitive}", f"live-other-{sensitive}"
+    event = "transcriptLiveTwinOtherTurn"
+    detail = f"agent={AGENT} trace={trace} kept={live_id}"
+    fallback = b"transcriptDiagnosticFallback code=primary_log_failed count=1\n"
+    client("c0", "ask", at=0, trace=trace)
+    assistant_row(live_id, "live:tr-9", "answer", at=4, trace="tr-9")
+    turns = [u("ask", 0.2), a("answer", 5)]
+    mode = {"primary": "normal"}
+    diagnoses, primary_calls, fallback_attempts = [], [], []
+    real_log, real_import, real_write = log_module.log, builtins.__import__, os.write
+    real_diagnose = message_import_rows._diagnose
+
+    def observe_diagnostic(actual_event, actual_detail):
+        result = real_diagnose(actual_event, actual_detail)
+        diagnoses.append((actual_event, actual_detail, result))
+        return result
+
+    def primary(actual_event, actual_detail=""):
+        if actual_event == event:
+            primary_calls.append((actual_event, actual_detail))
+            if mode["primary"] == "sink":
+                raise RuntimeError(sensitive)
+        return real_log(actual_event, actual_detail)
+
+    def primary_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if (mode["primary"] == "import" and name == "log" and level == 1
+                and "log" in fromlist
+                and (globals or {}).get("__name__") == "lib.message_import_rows"):
+            raise ImportError(sensitive)
+        return real_import(name, globals, locals, fromlist, level)
+
+    def fallback_write(fd, payload):
+        if fd == 2 and payload.startswith(b"transcriptDiagnosticFallback"):
+            fallback_attempts.append((fd, payload))
+            if fallback_fault == "oserror":
+                raise OSError(sensitive)
+            if fallback_fault == "short":
+                return real_write(fd, payload[:5])
+        return real_write(fd, payload)
+
+    patch_shared(monkeypatch, message_writes, "_diagnose", observe_diagnostic)
+    monkeypatch.setattr(log_module, "log", primary)
+    monkeypatch.setattr(builtins, "__import__", primary_import)
+    monkeypatch.setattr(os, "write", fallback_write)
+    connection = db.conn()
+    with closing(sqlite3.connect(":memory:")) as seed:
+        connection.backup(seed)
+        store(turns)
+        expected_products = tuple(connection.iterdump())
+        expected_diagnoses = list(diagnoses)
+        assert expected_diagnoses and all(item == (event, detail, None)
+                                          for item in expected_diagnoses)
+        assert primary_calls == [(event, detail)] * len(expected_diagnoses)
+        assert fallback_attempts == []
+        capfd.readouterr()
+
+        seed.backup(connection)
+        diagnoses.clear()
+        primary_calls.clear()
+        mode["primary"] = primary_fault
+        store(turns)
+
+    assert diagnoses == expected_diagnoses, "no failed diagnostic retries the import"
+    assert tuple(connection.iterdump()) == expected_products
+    assert not connection.in_transaction
+    assert {r["message_id"]: r["source_file"] for r in rows()}[live_id] == "live:tr-9"
     assert len(transcript_rows()) == 1
+    stderr = capfd.readouterr().err
+    if primary_fault == "normal":
+        assert primary_calls == [(event, detail)] * len(expected_diagnoses)
+        assert fallback_attempts == []
+        assert event in stderr and detail in stderr
+    else:
+        assert primary_calls == ([] if primary_fault == "import" else
+                                 [(event, detail)] * len(expected_diagnoses))
+        assert fallback_attempts == [(2, fallback)] * len(expected_diagnoses)
+        expected_output = ("" if fallback_fault == "oserror" else
+                           fallback[:5].decode() if fallback_fault == "short" else
+                           fallback.decode())
+        assert stderr == expected_output * len(expected_diagnoses)
+        assert sensitive not in stderr and event not in stderr and AGENT not in stderr
 
 
 def test_a_reply_of_unknown_turn_adopts_one_final_twin_within_ten_minutes(clock):
