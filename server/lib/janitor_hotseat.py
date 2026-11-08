@@ -17,7 +17,7 @@ import json
 import subprocess
 from typing import Callable
 
-from . import clock, hotseat_status
+from . import hotseat_status
 
 ROLE = "account-hotseat"
 LADDER_TAIL = (10, 0)
@@ -132,7 +132,8 @@ def read_accounts(command: str, provider: str) -> list[dict]:
         raise RuntimeError(f"hotseat exited {proc.returncode}")
     payload = json.loads(proc.stdout)
     # The status view keeps an allowlisted copy of this same read; no extra call.
-    hotseat_status.record_read(provider, payload, clock.now_ms())
+    # Never raises: the timestamp, persistence and diagnostics all sit inside its own guard.
+    hotseat_status.record_read(provider, payload)
     return spec.parse(payload)
 
 

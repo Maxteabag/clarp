@@ -89,11 +89,11 @@ def lane_record(lane,owner,base_seconds,activity,summary,now):
     return interval
 
 def _hotseat_receipt(site,record):
-    """Status receipts never break or alter the switcher; a failure is logged by site and class only."""
+    """Status receipts never break or alter the switcher; a failure is reported by site and class
+    only, through hotseat_status.diagnose, which never raises (a broken log sink included)."""
     try:record()
     except Exception as exc:
-        from .log import log
-        log('hotseatStatusReceiptFailed',f'site={site} error={type(exc).__name__}')
+        hotseat_status.diagnose('hotseatStatusReceiptFailed',f'site={site} error={type(exc).__name__}')
 
 def lanes(config):
     """(lane, base seconds, legacy last-check key) for each schedule lane of an autonomy Janitor."""

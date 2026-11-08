@@ -35,6 +35,7 @@ from typing import Callable
 
 from . import settings_store
 from .clock import now_ms
+from . import log as log_module
 from .log import log
 
 SCHEMA = "clarp.hotseat-status/1"
@@ -156,9 +157,31 @@ def _family(model) -> str | None:
     return next((f for f in MODEL_FAMILIES if f in text), None)
 
 
+def diagnose(event: str, detail: str) -> str:
+    """Best-effort, codes-only diagnostic for the observational hooks; it never raises.
+
+    The status view only observes the switcher, so a broken stderr sink must not turn a good read,
+    switch or run into a failure, and the read-only GET must not start writing state. When the log
+    sink fails, the same codes plus the sink's exception class go to the structured eventlog: the
+    second half of what log() itself writes. No settings/state write ever. That helper swallows its
+    own sink errors, so the fallback is only an attempt: "eventlog_attempted" proves no delivery, and
+    the event may still be lost. If even the attempt raises, it is "dropped". Nothing is ever
+    reported as stored or accepted."""
+    try:
+        log(event, detail)
+        return "logged"
+    except Exception as exc:  # noqa: BLE001 - a closed or broken sink (OSError, BrokenPipeError, ValueError)
+        sink_error = type(exc).__name__
+    try:
+        log_module._eventlog_emit(event, "warning", f"{detail} sink_error={sink_error}"[:256])
+        return "eventlog_attempted"
+    except Exception:  # noqa: BLE001 - the eventlog can share the fault; the observed operation outranks it
+        return "dropped"
+
+
 def _log_failure(site: str, exc: BaseException) -> None:
     # Codes only: the message of a parse or provider error can carry payload text.
-    log("hotseatStatusRecordFailed", f"site={site} error={type(exc).__name__}")
+    diagnose("hotseatStatusRecordFailed", f"site={site} error={type(exc).__name__}")
 
 
 # --- parsing the CLI payloads ---------------------------------------------
@@ -202,7 +225,9 @@ def _structured_auth(row: dict) -> bool:
 def _claude_account(provider: str, row: dict, observed_at: int) -> dict:
     usage = row.get("usage") if isinstance(row.get("usage"), dict) else {}
     windows = []
-    if usage and not row.get("error"):  # a missing number stays null, never 0
+    # A row whose read failed (free-text error or typed auth) contributes no samples: its numbers may be
+    # cached or partial, and the same identity's last-good values stay. A missing number stays null, never 0.
+    if usage and not row.get("error") and not _structured_auth(row):
         windows = [_window("5h", "5-hour", usage.get("used_5h"), _epoch_ms(usage.get("reset_5h")), observed_at),
                    _window("7d", "7-day", usage.get("used_7d"), _epoch_ms(usage.get("reset_7d")), observed_at)]
         for scoped in usage.get("scoped") or []:
@@ -251,8 +276,11 @@ def _no_reset(value) -> str | None:
 
 def _codex_account(provider: str, row: dict, observed_at: int) -> dict:
     usage = row.get("usage") if isinstance(row.get("usage"), dict) else None
+    failed = _structured_auth(row) or bool(usage and (_structured_auth(usage) or usage.get("error")))
     windows = []
-    for raw in (usage or {}).get("windows") or []:
+    # A failed row (usage.error or typed auth) contributes no samples, even when it still carries numeric
+    # (cached) windows: the same identity's last-good values stay, with the current error.
+    for raw in [] if failed else (usage or {}).get("windows") or []:
         if not isinstance(raw, dict) or not isinstance(raw.get("label"), str):
             continue
         kind = _codex_kind(provider, raw["label"])
@@ -277,7 +305,7 @@ def _codex_account(provider: str, row: dict, observed_at: int) -> dict:
                                      account_id=row.get("account_id")),
             "tag": _alias_tag(provider, row.get("alias")), "alias": display_alias(row.get("alias")),
             "plan": _plan(row.get("plan")), "label": None, "active": row.get("is_active") is True,
-            "state": state, "error_code": code, "windows": windows, "dropped": dropped,
+            "state": state, "error_code": code, "windows": windows, "dropped": dropped, "failed": failed,
             "no_reset": _no_reset((usage or {}).get("no_reset_reason"))}
 
 
@@ -357,6 +385,10 @@ def _merge(previous: dict | None, reading: dict, observed_at: int) -> list[dict]
     merged = []
     for account in reading["accounts"]:
         prior = before.get(account["identity"]) or {}
+        if account.pop("failed", False) and "no_reset" in account:
+            # A failed row's reset metadata is no sample either: the no-reset hint stays the one that
+            # goes with the retained last-good windows of this exact identity (none without a prior).
+            account["no_reset"] = prior.get("no_reset")
         kept = {w.get("kind"): w for w in prior.get("windows") or []  # D2: no observed_at, not eligible
                 if isinstance(w, dict) and w.get("used") is not None and _int_ms(w.get("observed_at"))}
         if _numbers(account["windows"]):  # per kind: a fresh value wins, a null keeps last-good
@@ -381,7 +413,7 @@ def record_read(provider: str, payload, observed_at: int | None = None) -> None:
         try:
             reading = parse(provider, payload, stamp)
         except ValueError:
-            log("hotseatStatusReadRejected", f"provider={provider} code=parse_failed")
+            diagnose("hotseatStatusReadRejected", f"provider={provider} code=parse_failed")
             _store_failure(provider, "parse_failed", received, previous)
             return
         _store(SNAPSHOT_PREFIX, provider, {
@@ -463,7 +495,7 @@ def record_action(provider: str, decision: dict, *, mode: str, switched, now: in
         decision = dict(decision or {})
         kind, reason = _kind(decision, mode, switched)
         if reason is None:  # every emitted reason_code is in the closed list, so an unknown branch writes nothing
-            log("hotseatStatusReceiptSkipped", f"provider={provider} code=unknown_branch")
+            diagnose("hotseatStatusReceiptSkipped", f"provider={provider} code=unknown_branch")
             return
         snapshot = _load(SNAPSHOT_PREFIX, provider)
         target = decision.get("target") if decision.get("action") == "switch" else None
