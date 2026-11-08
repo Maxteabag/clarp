@@ -190,3 +190,15 @@ def test_recovery_snapshot_cannot_replay_receipt_completed_by_manual_delivery(tm
     assert service.recover_queued() == 0
     assert len(backend.spawned) == 1
     assert db.conn().execute("SELECT COUNT(*) FROM turns WHERE agent_id=? AND trace_id='t'", (agent,)).fetchone()[0] == 1
+
+
+@pytest.mark.parametrize("outcome", ["completed", "interrupted"])
+def test_pruned_state_cannot_make_pending_receipt_retry_an_executed_terminal(tmp_path, outcome):
+    from lib import launch_receipts
+    _service, _backend, agent = _make_service(tmp_path)
+    own = _opened(agent)
+    launch_receipts.record_pending(agent_id=agent, trace_id="t", client_msg_id="q", origin="user")
+    db.conn().execute("UPDATE turns SET settled_at=1,ended_at=1,outcome=? WHERE turn_id=?",
+                      (outcome, own))
+    db.conn().execute("DELETE FROM state_log WHERE agent_id=?", (agent,))
+    assert agents.trace_launch_status(agent, "t", client_msg_id="q", origin="user", sender_agent_id="") != "retryable"
