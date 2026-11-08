@@ -99,3 +99,43 @@ full B/C measurement runner qualification are not supplied by this fixture.
 The same6000s/~17NOK inclusive/LOWEST-every-gate/compute-captain admission and
 herald931 hold remain unchanged. Actions program-gate authority is not a matched
 measurement or extra control allocation. No control has run on any machine.
+
+
+## 07a C F1 repair — source only
+
+The actual transport owner now calls `_finish_joined_case` after its unchanged
+independent hook-restoration/listener-close/worker-join attempts and lifetime
+check. This cohesive boundary owns joined verification, raw/preliminary archive
+and successful endpoint/terminal publication. Non-Exception verification
+controls select/preserve their identity and escape immediately, before any
+optional archive or endpoint work. Ordinary verification errors still retain
+raw prefix, intended response input and preliminary diagnostic evidence and
+stop before endpoint removal or a successful terminal. Later uncaught endpoint
+inspection/removal controls propagate naturally; archive-phase exceptions retain
+the selected primary/cause and stop before endpoint work. This is not a theorem
+about arbitrary interruption between Python bytecodes.
+
+`peer_postjoin_controls.py` authors three finite LOWER TOOLING boundary cases:
+KeyboardInterrupt, SystemExit and ordinary AssertionError at actual verification.
+They call the actual publication boundary with a faulting server mapping, exact
+exception/cause identities, retained endpoint marker and real private output
+files. Tool-module-only publication/fsync aliases count optional effects, restored
+unconditionally. Controls require zero optional reads/archive/fsync on cancellation;
+the ordinary failure requires both raw files plus preliminary failed evidence,
+no successful terminal, endpoint unchanged and no caller continuation. These
+are NOT native-client positive cases, worker/hook cleanup execution proof, or
+kernel socket lifecycle proof. The upstream cleanup attempts remain in the
+actual transport owner; observing those attempts under injected verification
+cancellation is a separate integration obligation, not inferred from these
+lower-tier cases. No new selector/job/admission or additional transport run is
+created by this source. All seven authored transport/boundary cases remain
+UNEXECUTED; no RED/GREEN or full SOURCE_READY claim.
+
+Test-authoring contract: cancellation must stop optional evidence side effects,
+while an ordinary wire assertion must preserve diagnostics. The credible
+regression is precisely 07a's post-join BaseException catch falling into fsync.
+Existing quiet-mark cases protect observer diagnostic priority at a different
+boundary, and the four native transport cases exercise ordinary completion.
+The extracted boundary is used by the actual owner and centralizes its evidence
+publication; no production or native-client test seam is introduced. Whole
+setup/fsync/archive/cleanup cost and finite outer supervision remain OPEN.

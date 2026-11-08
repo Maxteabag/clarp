@@ -50,6 +50,55 @@ def _publish(path, value):
         os.fsync(stream.fileno())
 
 
+def _finish_joined_case(*, server, joined, error, output, name, wire_response,
+                        receipt, path, endpoint_identity):
+    """Verify and publish after required cleanup; controls never start archives.
+
+    The caller has already attempted hook restoration, listener close and join.
+    An ordinary failed verification retains diagnostic evidence; a process
+    control escapes immediately with roots preserved. No retry or native work.
+    """
+    if error is None:
+        try:
+            assert server['done'] and not server['errors'], 'synthetic server incomplete/failed'
+            assert server['requests'] == [REQUEST], 'native wire/count changed'
+        except BaseException as failure:
+            error = _select(error, failure)
+            if not isinstance(failure, Exception):
+                raise error  # required cleanup already attempted; preserve/no optional I/O
+    # Retain failed/partial raw input too. An alive worker means this is a
+    # diagnostic prefix only, never complete history or a DRAINED receipt.
+    raw_prefix = server['wire_prefix']
+    try:
+        for suffix, raw in (('request', raw_prefix), ('response-input', wire_response)):
+            with (output / (name + '.' + suffix + '.bin')).open('xb') as stream:
+                if stream.write(raw) != len(raw):
+                    raise OSError('short raw control archive; preserve/no retry')
+                stream.flush()
+                os.fsync(stream.fileno())
+        _publish(output / (name + '.json'), {'case': name, 'native_observation': receipt,
+                 'request_prefix_bytes': len(raw_prefix),
+                 'request_prefix_sha256': hashlib.sha256(raw_prefix).hexdigest(),
+                 'response_input_sha256': hashlib.sha256(wire_response).hexdigest(),
+                 'server_joined': joined, 'server_done': server['done'], 'server_errors': list(server['errors']),
+                 'error_type': type(error).__name__ if error is not None else None,
+                 'phase': 'CHECKS_AND_RAW_ARCHIVE_ONLY', 'endpoint_cleanup': 'NOT_YET_DONE',
+                 'history': 'COMPLETE_SYNTHETIC_REQUEST' if joined and error is None else 'DIAGNOSTIC_PREFIX_ONLY',
+                 'scope': 'native client/synthetic transport only; no root/startup/drain proof'})
+    except BaseException as failure:
+        error = _select(error, failure)
+    if error is not None:
+        raise error  # preserve endpoint/archives; do not launch next case
+    info = path.lstat()
+    if (info.st_dev, info.st_ino) != endpoint_identity or not stat.S_ISSOCK(info.st_mode):
+        raise ValueError('endpoint ownership changed; preserve/no next case')
+    path.unlink()  # only after raw receipt/archive + positive owned thread exit
+    _publish(output / (name + '.terminal.json'), {
+        'case': name, 'owned_server_joined': True, 'owned_endpoint_removed': True,
+        'result': 'EXPECTED_COMPONENT_OUTCOME_AND_OWNED_CLEANUP',
+        'scope': 'this synthetic server only; not remote/native-root/all-descendant drain'})
+
+
 def run_native_transport_controls(*, native_class, source_file, root, output, absolute_deadline):
     if socket.gethostname() == 'laptopstudio':
         raise RuntimeError('BUILDBOX_ONLY; source-only until exact admission')
@@ -242,43 +291,9 @@ def run_native_transport_controls(*, native_class, source_file, root, output, ab
             error = _select(error, failure)
             if not isinstance(failure, Exception):
                 raise error
-        if error is None:
-            try:
-                assert server['done'] and not server['errors'], 'synthetic server incomplete/failed'
-                assert server['requests'] == [REQUEST], 'native wire/count changed'
-            except BaseException as failure:
-                error = failure
-        # Retain failed/partial raw input too. An alive worker means this is a
-        # diagnostic prefix only, never complete history or a DRAINED receipt.
-        raw_prefix = server['wire_prefix']
-        try:
-            for suffix, raw in (('request', raw_prefix), ('response-input', wire_response)):
-                with (output / (name + '.' + suffix + '.bin')).open('xb') as stream:
-                    if stream.write(raw) != len(raw):
-                        raise OSError('short raw control archive; preserve/no retry')
-                    stream.flush()
-                    os.fsync(stream.fileno())
-            _publish(output / (name + '.json'), {'case': name, 'native_observation': receipt,
-                     'request_prefix_bytes': len(raw_prefix),
-                     'request_prefix_sha256': hashlib.sha256(raw_prefix).hexdigest(),
-                     'response_input_sha256': hashlib.sha256(wire_response).hexdigest(),
-                     'server_joined': joined, 'server_done': server['done'], 'server_errors': list(server['errors']),
-                     'error_type': type(error).__name__ if error is not None else None,
-                     'phase': 'CHECKS_AND_RAW_ARCHIVE_ONLY', 'endpoint_cleanup': 'NOT_YET_DONE',
-                     'history': 'COMPLETE_SYNTHETIC_REQUEST' if joined and error is None else 'DIAGNOSTIC_PREFIX_ONLY',
-                     'scope': 'native client/synthetic transport only; no root/startup/drain proof'})
-        except BaseException as failure:
-            error = _select(error, failure)
-        if error is not None:
-            raise error  # preserve endpoint/archives; do not launch next case
-        info = path.lstat()
-        if (info.st_dev, info.st_ino) != endpoint_identity or not stat.S_ISSOCK(info.st_mode):
-            raise ValueError('endpoint ownership changed; preserve/no next case')
-        path.unlink()  # only after raw receipt/archive + positive owned thread exit
-        _publish(output / (name + '.terminal.json'), {
-            'case': name, 'owned_server_joined': True, 'owned_endpoint_removed': True,
-            'result': 'EXPECTED_COMPONENT_OUTCOME_AND_OWNED_CLEANUP',
-            'scope': 'this synthetic server only; not remote/native-root/all-descendant drain'})
+        _finish_joined_case(server=server, joined=joined, error=error, output=output,
+                            name=name, wire_response=wire_response, receipt=receipt,
+                            path=path, endpoint_identity=endpoint_identity)
         observed['native_errors'].clear()
         selected = None
         returned = None
