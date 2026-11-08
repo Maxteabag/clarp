@@ -274,6 +274,9 @@ def run_native_transport_controls(*, native_class, source_file, root, output, ab
                 assert selected is None, 'unexpected native/control error'
                 assert observed['status_return_ids'] == [id(returned)], 'original native result object replaced'
                 assert returned == response['result'], 'native response changed'
+                if name == 'bool_protocol':
+                    assert type(returned['protocol_version']) is bool, 'native bool protocol type changed'
+                    assert returned['protocol_version'] is True, 'native bool protocol value changed'
                 expected = 'CAPTURED' if name == 'native_success' else 'UNKNOWN'
                 assert receipt['observation'] == expected, 'metadata fault incorrectly qualified'
                 reason = REJECTION_REASON.get(name)

@@ -189,3 +189,15 @@ shrink the corpus after results. All ten transport plus three post-join cases
 remain UNEXECUTED. Source-loaded/PID-start/boot/namespace/ABI/ownership-refusal,
 control handoff/close fault, actual root/Host/work and all actor/fidelity/resource
 and whole budget proof remain separate OPEN obligations.
+
+
+## C9604 C1 type-preservation amendment — SOURCE ONLY
+
+The existing bool_protocol row now independently requires the native returned
+protocol_version to have exact type bool and value True. Dictionary equality
+alone permits bool-to-int mutation because True==1, even if dictionary identity
+is preserved. The same row retains its independent bad_status/UNKNOWN and
+unobserved instance/attestation requirements. No new row/RPC/endpoint or observer
+change; all ten transport and three lower boundary cases remain UNEXECUTED.
+This repairs the control evidence gap identified by C, not an observed native
+or observer mutation. Source review and full-package admission are still owed.
