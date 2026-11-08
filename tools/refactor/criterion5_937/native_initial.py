@@ -25,6 +25,7 @@ from .native_isolation import Guard
 from .proc_samples import bind
 from .raw_products import capture
 from .recipe import APPEND_EXCHANGES, COUNTS, INITIAL_BYTES, record
+from .seed_paths import audit_initial_paths
 
 A_PIN = '4f33cdc9287eafcddd0adfb17b51487c84ace28b'
 EPOCH_MS = 1767225600000
@@ -199,6 +200,7 @@ def build_initial_fixture(*, run_id, pin, mode, source, root, output, source_fil
             raise RuntimeError('initial aggregate corpus mismatch')
         deadline(absolute_deadline)
         products = capture(database, owned_root=root)
+        source_path_census = audit_initial_paths(products, root=str(root))
         if connection.in_transaction:
             raise RuntimeError('native seed transaction left open')
         versions = {name: connection.execute('PRAGMA ' + name).fetchone()[0]
@@ -227,6 +229,7 @@ def build_initial_fixture(*, run_id, pin, mode, source, root, output, source_fil
             'source_manifest_sha256': hashlib.sha256(json.dumps(
                 source_files, sort_keys=True, separators=(',', ':')).encode()).hexdigest(),
             'size': size, 'records': records, 'products': products,
+            'source_path_census': source_path_census,
             'native_imports': imports, 'native_connection': native_connection,
             'native_versions': versions, 'checkpoint': checkpoint, 'clock': clock_receipt,
             'guard_counts': dict(guard.counts), 'guard_failure_file': str(failure_file),
