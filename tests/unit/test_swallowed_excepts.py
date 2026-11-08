@@ -60,7 +60,7 @@ BASELINE: dict[str, int] = {
     'lib/live_activity.py': 2,
     'lib/live_explain.py': 1,
     'lib/live_hub.py': 3,
-    'lib/live_pacing.py': 1,
+    'lib/stream_pacing.py': 1,
     'lib/log.py': 2,
     'lib/maintenance.py': 2,
     'lib/message_writes.py': 1,

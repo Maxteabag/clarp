@@ -46,7 +46,7 @@ from .. import events
 from .. import provider_capabilities
 from .. import turn_lifecycle
 from ..turn_lifecycle import TurnEvent
-from ..live_pacing import LivePacer
+from ..stream_pacing import LivePacer
 from ..claude_reply_evidence import ClaudeReplyEvidence, REPLY_CODEC
 from ..log import log, log_exception
 from ..proc_util import stderr_text
