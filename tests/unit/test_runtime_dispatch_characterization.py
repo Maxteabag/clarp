@@ -9,8 +9,8 @@ import threading
 
 import pytest
 
-from lib import agents, backends, runtime_bridge, turn_dispatch, turn_queue
-from lib.runtime_bridge import RuntimeRPCServer
+from lib import agents, backends, runtime_rpc_server, turn_dispatch, turn_queue
+from lib.runtime_rpc_server import RuntimeRPCServer
 from lib.turn_dispatch import DispatchError, DispatchResult
 
 
@@ -218,7 +218,7 @@ def test_stop_without_hold_completes_with_correct_receipt_fence(rpc, stop_effect
 
 def test_stop_hold_lease_is_finished_once_with_cancelled_ids(rpc, stop_effects, monkeypatch):
     timer = Mock()
-    monkeypatch.setattr(runtime_bridge.threading, "Timer", timer)
+    monkeypatch.setattr(runtime_rpc_server.threading, "Timer", timer)
     response = rpc.dispatch_request("begin_stop", {"agent_id": "a", "backend": "codex"})
     lease_id = response["result"]["lease_id"]
     assert lease_id.startswith("stop-")

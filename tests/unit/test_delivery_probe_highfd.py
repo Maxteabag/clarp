@@ -149,7 +149,7 @@ def test_an_unreaped_child_on_a_high_fd_keeps_the_slot_without_a_second_child():
 
 
 def test_a_status_provider_cannot_replace_the_computed_attestation(monkeypatch):
-    from lib.runtime_bridge import RuntimeRPCServer
+    from lib.runtime_rpc_server import RuntimeRPCServer
     computed = {"pid": 4242, "start_ticks": 777, "boot_id": "0b8a1f9e-2c3d-4e5f-8a9b-0c1d2e3f4a5b",
                 "cgroup": "/user.slice/user-1000.slice/user@1000.service/app.slice/clarp-runtime.service",
                 "invocation": "3932aee90792440bae6f9c8c5a14c973"}

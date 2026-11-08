@@ -2210,7 +2210,7 @@ def test_new_user_turn_parked_on_an_existing_session_keeps_native_user_boundary(
 
 def test_strict_runtime_cancellation_accepts_reaped_recovery_work(tmp_path, monkeypatch):
     from lib import backends as registry
-    from lib.runtime_bridge import RuntimeRPCServer
+    from lib.runtime_rpc_server import RuntimeRPCServer
     coordinator, recovery = _enable_account_failover(monkeypatch, available=False)
     service, backend, agent_id = _make_service(tmp_path)
     service.dispatch(text="delegated work", requested_session="mike", trace_id="oracle-work",
@@ -2926,7 +2926,7 @@ def _wire_runtime(server):
 
 def test_rpc_round_trip_admits_the_command_once_on_the_owning_side(tmp_path, monkeypatch):
     from lib.prompt_admissions import PromptAdmission
-    from lib.runtime_bridge import RuntimeRPCServer
+    from lib.runtime_rpc_server import RuntimeRPCServer
     owner, backends, agent_id = _make_service(tmp_path)
     runtime = RuntimeRPCServer(tmp_path / "rt.sock", dispatch_service=owner)
     try:
@@ -2960,7 +2960,7 @@ def test_rpc_round_trip_admits_the_command_once_on_the_owning_side(tmp_path, mon
 
 def test_rpc_runs_the_janitor_demand_authority_check_once(tmp_path, monkeypatch):
     from lib import janitor_autonomy
-    from lib.runtime_bridge import RuntimeRPCServer
+    from lib.runtime_rpc_server import RuntimeRPCServer
     owner, backends, _agent_id = _make_service(tmp_path)
     runtime = RuntimeRPCServer(tmp_path / "rt.sock", dispatch_service=owner)
     checks = []
