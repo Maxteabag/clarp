@@ -26,6 +26,7 @@ from .proc_samples import bind
 from .raw_products import capture
 from .recipe import APPEND_EXCHANGES, COUNTS, INITIAL_BYTES, record
 from .seed_paths import a_initial_checkpoint_policy, audit_initial_paths
+from .seed_membership import audit_initial_membership
 
 A_PIN = '4f33cdc9287eafcddd0adfb17b51487c84ace28b'
 EPOCH_MS = 1767225600000
@@ -226,6 +227,8 @@ def build_initial_fixture(*, run_id, pin, mode, source, root, output, source_fil
         products = capture(database, owned_root=root)
         source_path_census = audit_initial_paths(
             products, root=str(root), checkpoint_route=checkpoint_policy['route'])
+        initial_membership = audit_initial_membership(
+            products, root=str(root), size=size, pin=pin, mode=mode)
         if connection.in_transaction:
             raise RuntimeError('native seed transaction left open')
         versions = {name: connection.execute('PRAGMA ' + name).fetchone()[0]
@@ -256,6 +259,7 @@ def build_initial_fixture(*, run_id, pin, mode, source, root, output, source_fil
             'size': size, 'records': records, 'products': products,
             'source_path_census': source_path_census,
             'transcript_checkpoint_policy': checkpoint_policy,
+            'initial_membership': initial_membership,
             'native_imports': imports, 'native_connection': native_connection,
             'native_versions': versions, 'checkpoint': checkpoint, 'clock': clock_receipt,
             'guard_counts': dict(guard.counts), 'guard_failure_file': str(failure_file),

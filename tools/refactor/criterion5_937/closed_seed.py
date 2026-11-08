@@ -13,6 +13,7 @@ import subprocess
 
 from .raw_products import capture, exact_diff, private_database
 from .seed_paths import a_initial_checkpoint_policy, audit_initial_paths
+from .seed_membership import audit_initial_membership
 
 MAX_DB_BYTES = 512 * 1024 * 1024
 
@@ -90,7 +91,7 @@ def qualify_initial(child, *, expected_argv, launch_identity, expected, terminal
     """
     root_reaped = require_root_reaped(child, identity=launch_identity, expected_argv=expected_argv)
     if terminal['producer'] != launch_identity or any(terminal[key] != expected[key]
-            for key in ('run_id', 'pin', 'mode', 'source_manifest_sha256', 'guard_failure_file')):
+            for key in ('run_id', 'pin', 'mode', 'size', 'source_manifest_sha256', 'guard_failure_file')):
         raise ValueError('initial native terminal source/attempt/birth mismatch')
     if terminal['mode'] != 'initial_seed' or terminal['checkpoint'] != [0, 0, 0]:
         raise ValueError('no successful native INITIAL checkpoint')
@@ -120,6 +121,10 @@ def qualify_initial(child, *, expected_argv, launch_identity, expected, terminal
         closed_products, root=str(root), checkpoint_route=checkpoint_policy['route'])
     if source_paths != terminal['source_path_census']:
         raise ValueError('initial native source-path census missing/changed after constructor')
+    membership = audit_initial_membership(
+        closed_products, root=str(root), size=expected['size'], pin=expected['pin'], mode=expected['mode'])
+    if membership != terminal['initial_membership']:
+        raise ValueError('INITIAL membership receipt missing/changed after constructor')
     diff = exact_diff(terminal['products'], closed_products)
     if diff['changes']:
         raise ValueError('logical seed changed after constructor snapshot; no usable fixture')
@@ -129,6 +134,7 @@ def qualify_initial(child, *, expected_argv, launch_identity, expected, terminal
             'closed_products_sha256': diff['after_products_sha256'],
             'source_path_census': source_paths,
             'transcript_checkpoint_policy': checkpoint_policy,
+            'initial_membership': membership,
             'logical_changes_after_constructor': 0,
             'scope': 'initial fixture only, with qualified pinned guard; not measured root reaping'}
 
