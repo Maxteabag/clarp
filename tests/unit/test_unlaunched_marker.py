@@ -11,6 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from lib import live_core
 from lib import agents, backends as backends_module, live_hub, turn_lifecycle
 from lib.turn_dispatch import DispatchError
 import lib.turn_dispatch as _td
@@ -68,7 +69,7 @@ def test_a_marker_that_landed_before_its_error_is_not_written_again(tmp_path, mo
         if event != turn_lifecycle.TurnEvent.UNLAUNCHED:
             return original(agent_id, event, target, detail)
         with monkeypatch.context() as failure:
-            failure.setattr(live_hub, "_HUB", None)
+            failure.setattr(live_core, "_HUB", None)
             failure.setattr(backends_module, "_RUNTIME_CLIENT",
                             SimpleNamespace(live_observe=lambda *a: None))
             failure.setattr(threading.Thread, "start", no_forward_worker)
@@ -104,7 +105,7 @@ def test_a_failed_retry_scheduling_keeps_one_marker_and_the_dispatch_failure(tmp
         if event != turn_lifecycle.TurnEvent.UNLAUNCHED:
             return original(agent_id, event, target, detail)
         with monkeypatch.context() as failure:
-            failure.setattr(live_hub, "_HUB", None)
+            failure.setattr(live_core, "_HUB", None)
             failure.setattr(backends_module, "_RUNTIME_CLIENT",
                             SimpleNamespace(live_observe=lambda *a: None))
             failure.setattr(threading.Thread, "start", no_forward_worker)

@@ -333,7 +333,9 @@ synthetic branches:
 
 - `runtime_rpc_server` owns the application runtime server and socket handler in the feature layer. Core `runtime_bridge` retains its canonical protocol/client; the runtime entry point constructs the same server from the new owner. Both class bodies and all Stop/admission/drain/cleanup order remain unchanged; there is no reverse core export.
 
-The first seventeen repaired upward edges are removed from the ratchet; this section does not authorize reclassifying any existing module or expanding named exceptions.
+- `live_projection` owns the unchanged reference reducer; `live_core` owns the live projection kernel and sole process registry. Feature `live_items`/`live_hub` preserve canonical exports; feature observation/relay/forwarding remains above the kernel. Producer used attributes retain exact object identity even though their module aliases now name `live_core`. Dispatcher/lifecycle feature edges remain for separate repairs.
+
+The first twenty-one repaired upward edges are removed from the ratchet; this section does not authorize reclassifying any existing module or expanding named exceptions.
 
 ## Wave 2: lead-signed map corrections (937)
 
