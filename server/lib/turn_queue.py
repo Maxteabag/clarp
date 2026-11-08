@@ -2,12 +2,90 @@
 from __future__ import annotations
 
 import threading
+import contextlib
+import sys
+import time
 from typing import Callable
 
 from . import db, prompt_admissions
 from . import lifecycle as lk
 from .lifecycle import Deadline, Edge, Lifecycle, WaitForever
 from .log import log
+
+
+def _receipt_failure(event: str, queue_ids, exc: BaseException, *, agents=None) -> None:
+    """A failed receipt write must name its receipts without logging content."""
+    for queue_id in queue_ids:
+        detail = (f"queue={queue_id} agent={(agents or {}).get(queue_id, 'unknown')} "
+                  f"event={event} type={type(exc).__name__} "
+                  f"code={getattr(exc, 'sqlite_errorcode', 'none')}")
+        try:
+            if db.conn().in_transaction:
+                # Joined writers belong to the caller: no recursive eventlog
+                # work and no rollback/commit from this diagnostic boundary.
+                print(f"queueReceiptWriteFail {detail}", file=sys.stderr, flush=True)
+            else:
+                log("queueReceiptWriteFail", detail)
+        except Exception as diagnostic_error:  # keep the primary write failure
+            print(f"queueReceiptWriteFail {detail} diagnostic={type(diagnostic_error).__name__}",
+                  file=sys.stderr, flush=True)
+
+
+@contextlib.contextmanager
+def _receipt_write(event: str, queue_ids):
+    """Join a caller transaction, or atomically write a receipt and revision.
+
+    BEGIN IMMEDIATE uses db's existing plain-BUSY polling and this connection's
+    original busy deadline. Never retry an admitted body, fetch or commit.
+    """
+    con = db.conn()
+    started = time.monotonic()
+    agents = {}
+    queue_ids = tuple(queue_ids)
+    try:
+        for queue_id in queue_ids:
+            row = con.execute("SELECT agent_id FROM queued_turns WHERE queue_id = ?",
+                              (queue_id,)).fetchone()
+            if row:
+                agents[queue_id] = str(row[0])
+        if con.in_transaction:
+            yield con
+        else:
+            with lk.transaction(con):
+                yield con
+    except Exception as exc:
+        _receipt_failure(f"{event}:elapsed_ms={round((time.monotonic() - started) * 1000)}",
+                         queue_ids, exc, agents=agents)
+        raise
+
+
+def _launch_status(row) -> str:
+    from . import agents, launch_receipts
+    receipt = launch_receipts.get(str(row["trace_id"]))
+    if receipt and (receipt.get("agent_id") != row["agent_id"]
+                    or receipt.get("client_msg_id") != row["client_msg_id"]
+                    or receipt.get("origin") != row["origin"]
+                    or (row["status"] in ("queued", "claimed")
+                        and (receipt.get("sender_agent_id") or "")
+                        != (row["sender_agent_id"] or ""))):
+        return "unknown"  # a trace alias does not transfer another admission's authority
+    return agents.trace_launch_status(
+        str(row["agent_id"]), str(row["trace_id"]),
+        client_msg_id=str(row["client_msg_id"] or ""), origin=row["origin"],
+        sender_agent_id=(str(row["sender_agent_id"])
+                         if row["status"] in ("queued", "claimed")
+                         and row["sender_agent_id"] is not None else None))
+
+
+def _has_turn(row) -> bool:
+    return bool(row["agent_id"] and row["trace_id"] and db.conn().execute(
+        "SELECT 1 FROM turns WHERE agent_id = ? AND trace_id = ? LIMIT 1",
+        (row["agent_id"], row["trace_id"])).fetchone())
+
+
+def _consumed_or_uncertain(row) -> bool:
+    """A turn alone cannot override explicit, current NOTSTARTED evidence."""
+    return _has_turn(row) and _launch_status(row) != "retryable"
 
 # The receipt's lifecycle (docs/architecture/lifecycles.md; Phase 3 queue
 # conversion, docs/architecture/lifecycle-conversion-plan.md section 1). This
@@ -336,8 +414,15 @@ def settle_receipt(agent_id: str, trace_id: str, outcome: str) -> int:
     status = _RECEIPT_STATUS.get(outcome, "ended")
     # From started (settle) or from another settled outcome (resettle): the
     # union is today's ``status <> target AND status IN _SETTLEABLE``.
-    return int(_cas((f"settle_{status}", f"resettle_{status}"),
-                    "agent_id = ? AND trace_id = ?", (agent_id, trace_id)))
+    queue_ids = [str(row[0]) for row in db.conn().execute(
+        "SELECT queue_id FROM queued_turns WHERE agent_id = ? AND trace_id = ?",
+        (agent_id, trace_id)).fetchall()]
+    if not queue_ids:
+        return 0
+    with _receipt_write("settle", queue_ids):
+        moved = int(_cas((f"settle_{status}", f"resettle_{status}"),
+                         "agent_id = ? AND trace_id = ?", (agent_id, trace_id)))
+    return moved
 
 
 def terminalize_ended_receipts(live_traces: frozenset[str] | set[str] = frozenset()
@@ -377,17 +462,13 @@ def terminalize_ended_receipts(live_traces: frozenset[str] | set[str] = frozense
         updates.setdefault(status, []).append(str(row["queue_id"]))
     if not updates:
         return {}
-    con.execute("BEGIN IMMEDIATE")
-    try:
+    affected = [queue_id for queue_ids in updates.values() for queue_id in queue_ids]
+    with _receipt_write("end", affected):
         counts = {}
         for status, queue_ids in updates.items():
             counts[status] = sum(
                 _cas(f"ended_settle_{status}", "queue_id = ?", (queue_id,), con=con)
                 for queue_id in queue_ids)
-        con.execute("COMMIT")
-    except BaseException:
-        con.execute("ROLLBACK")
-        raise
     counts = {status: n for status, n in counts.items() if n}
     if counts:
         log("queueReceiptsTerminalized",
@@ -415,6 +496,89 @@ def _reap_cursor(name, con):
 
 def _save_reap_cursor(name, con, cursor):
     setattr(_REAP_PROGRESS, name, (con, cursor))
+
+
+def reconcile_receipts() -> dict[str, int]:
+    """Converge one bounded page from exact durable turn evidence.
+
+    At most 100 receipts are examined per pass. A connection-local keyset
+    cursor advances only after commit and wraps, including past no-turn rows
+    and unchanged live receipts. Admission gets at most 50ms, with a 200ms
+    cooperative pass deadline; no provider/liveness calls run under the writer.
+    This never releases work, changes a pause, or infers a steered association.
+    """
+    con = db.conn()
+    if con.in_transaction:
+        raise lk.LifecycleError("receipt reconciliation needs its own transaction")
+    deadline = time.monotonic() + 0.2
+    after = _reap_cursor("convergence", con) or 0
+    rows = con.execute(
+        """SELECT queue_id, agent_id, trace_id, prompt_admission_id, queue_seq
+             FROM queued_turns
+            WHERE status IN ('queued', 'claimed', 'started') AND queue_seq > ?
+            ORDER BY queue_seq LIMIT 100""", (after,)).fetchall()
+    if not rows:
+        _save_reap_cursor("convergence", con, None)
+        return {}
+    counts: dict[str, int] = {}
+    repaired = []
+    deferred = []
+    changed_agents = set()
+    cursor = after
+    with db.busy_timeout_at_most(50):
+        with _receipt_write("reconcile", [str(row["queue_id"]) for row in rows]):
+            for observed in rows:
+                if time.monotonic() >= deadline:
+                    break
+                cursor = observed["queue_seq"]
+                row = con.execute(
+                    """SELECT * FROM queued_turns WHERE queue_id = ? AND agent_id = ?
+                         AND trace_id = ? AND prompt_admission_id IS ? AND queue_seq = ?
+                         AND status IN ('queued', 'claimed', 'started')""",
+                    (observed["queue_id"], observed["agent_id"], observed["trace_id"],
+                     observed["prompt_admission_id"], observed["queue_seq"])).fetchone()
+                if row is None or not row["agent_id"] or not row["trace_id"]:
+                    continue
+                turn = con.execute(
+                    """SELECT turn_id, started_at, ended_at, settled_at, outcome FROM turns
+                        WHERE agent_id = ? AND trace_id = ?
+                        ORDER BY CASE WHEN settled_at IS NULL AND ended_at IS NULL
+                                      THEN 0 ELSE 1 END,
+                                 COALESCE(settled_at, ended_at, started_at) DESC,
+                                 turn_id DESC LIMIT 1""",
+                    (row["agent_id"], row["trace_id"])).fetchone()
+                if turn is None:
+                    continue
+                launch = _launch_status(row)
+                if launch != "observed":
+                    if launch != "retryable":
+                        deferred.append((row["queue_id"], row["agent_id"], launch))
+                    continue  # NOTSTARTED, Stop fences and unknowns are not consumed proof.
+                running = turn["settled_at"] is None and turn["ended_at"] is None
+                target = "started" if running else _RECEIPT_STATUS.get(turn["outcome"], "ended")
+                where = "queue_id = ? AND agent_id = ? AND trace_id = ? AND status = ?"
+                params = (row["queue_id"], row["agent_id"], row["trace_id"], row["status"])
+                moved = 0
+                if row["status"] in ("queued", "claimed"):
+                    moved = int(_cas("start", where, params,
+                                     values={"text": "", "sender_agent_id": ""}, con=con))
+                if not running:
+                    moved += int(_cas(f"settle_{target}", where,
+                                      (*params[:3], "started"), con=con))
+                if moved:
+                    counts[target] = counts.get(target, 0) + 1
+                    changed_agents.add(str(row["agent_id"]))
+                    repaired.append((row["queue_id"], row["agent_id"], target,
+                                     turn["turn_id"]))
+            for agent_id in changed_agents:
+                _bump_revision(agent_id)
+    _save_reap_cursor("convergence", con, cursor if cursor else None)
+    for queue_id, agent_id, target, turn_id in repaired:
+        log("queueReceiptReconciled", f"queue={queue_id} agent={agent_id} "
+            f"reason=durable_turn target={target} turn={turn_id}")
+    for queue_id, agent_id, reason in deferred:
+        log("queueReceiptDeferred", f"queue={queue_id} agent={agent_id} reason=launch_{reason}")
+    return counts
 
 
 def terminalize_idle_agent_receipts(
@@ -491,8 +655,12 @@ def terminalize_idle_agent_receipts(
         kind, ts = (latest["kind"], latest["ts"]) if latest else (None, None)
         return "idle_settle" if due(kind, ts, started) else None
 
-    moved, cursor = lk.reap_tick(con, QUEUE_RECEIPT, now=now, cursor=cursor,
-                                 states=("started",), eligible=eligible, max_rows=_REAP_ROWS_PER_TICK)
+    try:
+        moved, cursor = lk.reap_tick(con, QUEUE_RECEIPT, now=now, cursor=cursor,
+                                     states=("started",), eligible=eligible, max_rows=_REAP_ROWS_PER_TICK)
+    except Exception as exc:
+        _receipt_failure("idle_end", observed, exc, agents=observed)
+        raise
     _save_reap_cursor("idle", con, cursor)
     ended = len(moved)
     if not ended:
@@ -521,29 +689,31 @@ def mark_started(queue_id: str) -> None:
     The receipt is ``started`` while its turn runs; settle_receipt ends it.
     """
     if queue_id:
-        row = db.conn().execute(
-            "SELECT agent_id, origin, trace_id FROM queued_turns WHERE queue_id = ? AND status IN ('queued', 'claimed')",
-            (queue_id,),
-        ).fetchone()
-        started = _cas("start", "queue_id = ?", (queue_id,),
-                       values={"text": "", "sender_agent_id": ""})  # stamps started_at
+        with _receipt_write("start", (queue_id,)):
+            row = db.conn().execute(
+                "SELECT agent_id, origin, trace_id FROM queued_turns WHERE queue_id = ? AND status IN ('queued', 'claimed')",
+                (queue_id,),
+            ).fetchone()
+            started = _cas("start", "queue_id = ?", (queue_id,),
+                           values={"text": "", "sender_agent_id": ""})  # stamps started_at
+            if started and row:
+                _bump_revision(str(row["agent_id"]))
+                # A fast backend may settle its turn before the dispatcher gets
+                # here; the receipt then ends at once.
+                settled = db.conn().execute(
+                    """SELECT outcome FROM turns
+                        WHERE agent_id = ? AND trace_id = ? AND settled_at IS NOT NULL
+                          AND NOT EXISTS (
+                              SELECT 1 FROM turns o
+                               WHERE o.agent_id = turns.agent_id
+                                 AND o.trace_id = turns.trace_id
+                                 AND o.settled_at IS NULL AND o.ended_at IS NULL)
+                        ORDER BY settled_at DESC LIMIT 1""",
+                    (row["agent_id"], row["trace_id"])).fetchone()
+                if settled:
+                    settle_receipt(str(row["agent_id"]), str(row["trace_id"]),
+                                   str(settled["outcome"] or ""))
         if started and row:
-            _bump_revision(str(row["agent_id"]))
-            # A fast backend may settle its turn before the dispatcher gets
-            # here; the receipt then ends at once.
-            settled = db.conn().execute(
-                """SELECT outcome FROM turns
-                    WHERE agent_id = ? AND trace_id = ? AND settled_at IS NOT NULL
-                      AND NOT EXISTS (
-                          SELECT 1 FROM turns o
-                           WHERE o.agent_id = turns.agent_id
-                             AND o.trace_id = turns.trace_id
-                             AND o.settled_at IS NULL AND o.ended_at IS NULL)
-                    ORDER BY settled_at DESC LIMIT 1""",
-                (row["agent_id"], row["trace_id"])).fetchone()
-            if settled:
-                settle_receipt(str(row["agent_id"]), str(row["trace_id"]),
-                               str(settled["outcome"] or ""))
             # A listen-first opening passes a pause that existed when the
             # call was answered (agent_rings); it never ends that pause.
             if (not queue_id.startswith("call-open:")
@@ -655,7 +825,11 @@ def withdraw_unclaimed(queue_id: str) -> bool:
 
 def claim_for_dispatch(queue_id: str) -> bool:
     """The dispatcher's claim of an opening row before it spawns (once)."""
-    return _cas("claim", "queue_id = ?", (queue_id,)) == 1  # stamps claimed_at
+    with _receipt_write("claim", (queue_id,)):
+        row = get(queue_id)
+        if row and _consumed_or_uncertain(row):
+            return False
+        return _cas("claim", "queue_id = ?", (queue_id,)) == 1  # stamps claimed_at
 
 
 def mark_unknown(queue_id: str) -> bool:
@@ -676,19 +850,27 @@ def allow_paused_for(queue_id: str) -> None:
 
 def claim(queue_id: str) -> dict | None:
     """Atomically reserve one queued item for an explicit manual send."""
-    moved = _cas("claim", "queue_id = ?", (queue_id,), returning="*")  # stamps claimed_at
-    row = moved[0] if moved else None
-    if row:
-        _bump_revision(str(row["agent_id"]))
+    with _receipt_write("claim", (queue_id,)):
+        current = get(queue_id)
+        if current and _consumed_or_uncertain(current):
+            return None
+        moved = _cas("claim", "queue_id = ?", (queue_id,), returning="*")  # stamps claimed_at
+        row = moved[0] if moved else None
+        if row:
+            _bump_revision(str(row["agent_id"]))
     return dict(row) if row else None
 
 
 def release_claim(queue_id: str) -> bool:
-    moved = _cas("release", "queue_id = ?", (queue_id,), returning="agent_id",
-                 values={"claimed_at": None})
-    row = moved[0] if moved else None
-    if row:
-        _bump_revision(str(row["agent_id"]))
+    with _receipt_write("release", (queue_id,)):
+        current = get(queue_id)
+        if current and _consumed_or_uncertain(current):
+            return False
+        moved = _cas("release", "queue_id = ?", (queue_id,), returning="agent_id",
+                     values={"claimed_at": None})
+        row = moved[0] if moved else None
+        if row:
+            _bump_revision(str(row["agent_id"]))
     return row is not None
 
 
@@ -704,6 +886,7 @@ def reset_stale_claims(max_age_ms: int = 30_000, *, exclude=()) -> int:
                    values_by_event={lk.EXPIRED: {"claimed_at": None}},
                    where=("queue_id NOT IN (" + ",".join("?" for _ in excluded) + ")") if excluded else "",
                    params=excluded)
+    options["eligible"] = lambda row: None if _consumed_or_uncertain(row) else lk.EXPIRED
     changed_agents = set()
 
     def agents(moved):
@@ -719,6 +902,16 @@ def reset_stale_claims(max_age_ms: int = 30_000, *, exclude=()) -> int:
         outbox.add(lambda: changed_agents.update(batch_agents))
 
     cursor = _reap_cursor("claims", con)
+    failure_scope = (" AND queue_id NOT IN (" + ",".join("?" for _ in excluded) + ")") if excluded else ""
+    failure_args = [now - max(0, max_age_ms), *excluded]
+    if cursor:
+        failure_scope += " AND (COALESCE(claimed_at, 0), queue_id) > (?, ?)"
+        failure_args.extend((cursor[1], cursor[2]))
+    failure_rows = con.execute(
+        "SELECT queue_id, agent_id FROM queued_turns WHERE status = 'claimed' "
+        "AND COALESCE(claimed_at, 0) <= ?" + failure_scope
+        + " ORDER BY COALESCE(claimed_at, 0), queue_id LIMIT 100",
+        failure_args).fetchall()
     try:
         if con.in_transaction:
             # Join an explicitly owned transaction, never commit it or nest.
@@ -732,19 +925,29 @@ def reset_stale_claims(max_age_ms: int = 30_000, *, exclude=()) -> int:
                                          effects=committed, max_rows=_REAP_ROWS_PER_TICK, **options)
         _save_reap_cursor("claims", con, cursor)
         return len(moved)
+    except Exception as exc:
+        _receipt_failure("reset_claims", [str(row[0]) for row in failure_rows], exc,
+                         agents={str(row[0]): str(row[1]) for row in failure_rows})
+        raise
     finally:
-        # Once per changed agent, as before, including batches committed
-        # before a later batch failed. Never announce a rolled-back batch.
-        if changed_agents:
-            if con.in_transaction:
-                for agent_id in changed_agents:
-                    _bump_revision(agent_id)
-            else:
-                # The receipt tick moves at most 100 rows. Group its at most
-                # 100 revision writes instead of taking one autocommit per agent.
-                with lk.transaction(con):
+        # Preserve the existing tick's partial-commit and once-per-agent
+        # revision boundary (including its 100-change writer batch cap).
+        primary = sys.exception()
+        try:
+            if changed_agents:
+                if con.in_transaction:
                     for agent_id in changed_agents:
                         _bump_revision(agent_id)
+                else:
+                    with lk.transaction(con):
+                        for agent_id in changed_agents:
+                            _bump_revision(agent_id)
+        except Exception as exc:
+            _receipt_failure("reset_revision", [str(row[0]) for row in failure_rows], exc,
+                             agents={str(row[0]): str(row[1]) for row in failure_rows})
+            if primary is not None:
+                raise primary
+            raise
 
 
 def claimed_count() -> int:
@@ -790,6 +993,16 @@ def pending(agent_id: str = "") -> list[dict]:
         rows = db.conn().execute(
             "SELECT * FROM queued_turns WHERE status = 'queued' ORDER BY queue_seq")
     return [dict(row) for row in rows]
+
+
+def pending_for_dispatch() -> list[dict]:
+    """Recovery excludes consumed/uncertain launches independently of page repair.
+
+    Keep pending()/wire counts authoritative to stored receipt state; a queue
+    beyond the convergence page must still never cause a second launch.
+    Explicit, current NOTSTARTED work keeps its existing recovery eligibility.
+    """
+    return [row for row in pending() if not _consumed_or_uncertain(row)]
 
 
 def pending_counts() -> dict[str, int]:
