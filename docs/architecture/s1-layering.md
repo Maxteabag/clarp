@@ -317,3 +317,12 @@ synthetic branches:
    literal SQL: confirm they leave S1. If wanted later, they are a behaviour
    slice proven by the start-version matrix test, the schema goldens and the
    rehearsal, with the lead's explicit classification.
+
+
+## Wave 2: strict-layer code inversions (937)
+
+- `terminal_presence` is a new core primitive owning the process-local terminal counter and lock. HTTP `terminal_ws` imports its mark/query operations; core `turn_slots` queries the same owner without importing PTY/WebSocket transport. This does not reclassify `terminal_ws`.
+- `janitor_runtime.runtime_available` owns the shared feature-level Janitor capability query. HTTP `janitor_http` re-exports it; the scheduler imports the feature owner, preserving the in-process and fail-closed capability behavior.
+- `turn_identity` owns the unchanged `TURN_ENV` literal and token regex used for both identity lookup and provider evidence. `provider_background_jobs` imports/re-exports that vocabulary; identity lookup no longer imports the feature observer. Token/environment/SQL behavior and layer assignments are unchanged.
+
+The first three repaired upward edges are removed from the ratchet; this section does not authorize reclassifying any existing module or expanding named exceptions.
