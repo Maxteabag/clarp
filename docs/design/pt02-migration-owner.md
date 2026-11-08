@@ -388,3 +388,39 @@ NULL/deleted/reordered/frontier-behind rows, old runtime retained during Host-on
 upgrade, crash after chunk commit before bookkeeping and after final commit before
 readiness. They extend existing migration/startup/rehearsal tests; no duplicate
 campaign or jobs are requested by this design.
+
+
+## Lead 937 rulings received; A2 AMEND remains in force
+
+Lead 937 approved the ADDITIVE internal companion path
+`<canonical database>.migration-owner.lock` with only the sole migrator creating
+and holding it, kernel flock for the whole run, nonblocking acquisition,
+close-on-exec and alias/wrong-owner refusal. Existing paths/env meanings do not
+change; install.json.lock is not reused. Backup/restore must not restore a lock as
+live state. Container ordering is root restore -> owner lock -> migration. The
+lead will register the implemented difference; this note does not edit registers.
+
+The private immutable-release module route is approved IN PRINCIPLE: native
+install before activation/seeding, Docker after root restore before schema/identity,
+rollback check-only, developer fresh roots explicit bootstrap, ordinary Host restart
+never migrates. These seams belong to rf-releasec and require its agreement before
+edits, INCLUDING decision830's supervised activation path. No permission to bypass
+that ownership is inferred from the module name or this design.
+
+Typed mismatch refusal is approved in principle; exact exceptional outputs await
+A2 YES and lead signature on the proven forms. Normal successful outputs stay
+byte-compatible. Progress DDL/format remains HOLD until bridge R ships; W follows R
+with SAME-DB mixed-version/rollback proof. Captain priority is after S5 and TP-02.
+
+A2's full exact review `reviews/pt02-design-47a210c81103-A2.md` is AMEND/HOLD,
+not YES. AMEND1 requires concrete native/container activation, old-opener fencing,
+lock identity and crash protocol; AMEND2 requires actual readiness/generation and
+per-entrypoint boundaries; AMEND3 requires the concrete bounded job/format and
+reader-first matrix before full PT-02 closure. Lead rulings settle the in-principle
+path/route questions, not these technical proof obligations. Production code,
+tests/jobs and final format remain unauthorized pending that settlement.
+
+Next dependency: release owner source-only seam agreement and actual830 activation
+protocol on f666; then amend the bridge design with that protocol and exact
+readiness/connection-unit rules for A2. No repeated A2 review of unchanged47a is
+requested and no old result is relabeled as approval.
