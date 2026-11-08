@@ -1,0 +1,510 @@
+{
+  "state": "SOURCE_FACTS_NOT_RUNTIME_COUNTS_OR_CAPACITY_CERTIFICATE",
+  "pins": {
+    "A": {
+      "pin": "4f33cdc9287eafcddd0adfb17b51487c84ace28b",
+      "source_profiles": [
+        {
+          "path": "server/server.py",
+          "sha256": "29c8429ee8a21d6f13950752cebd210d633ed2589f08b4a7b984b86c152617ae",
+          "symbols": {
+            "_seed_startup_invariants": {
+              "line": 6936,
+              "end_line": 6944,
+              "ast_sha256": "02dad486edbba9bcba5a534fd0c1c21de4c80d6e6050c7ddc74fe26dd07ab0d9"
+            },
+            "_server_workers": {
+              "line": 6947,
+              "end_line": 7189,
+              "ast_sha256": "fc56ef759954c83ab0bb2f7d76299ebc0ec7e407bf6b3068ad014a9b4a59eee2"
+            },
+            "Handler._handle_status": {
+              "line": 1880,
+              "end_line": 1915,
+              "ast_sha256": "ec118db7058b2a3f85d0e01545e5e9299a21425ff0ba2176411b602f3f28b583"
+            }
+          },
+          "literal_constants": {}
+        },
+        {
+          "path": "server/runtime.py",
+          "sha256": "6999efdddeeb7755981d67a54933f2f44d6f421ad74c60265ab33180bf3f8c84",
+          "symbols": {
+            "main": {
+              "line": 29,
+              "end_line": 92,
+              "ast_sha256": "0b1dab62a09cfaa70eeaa8bd72eee6a72f6d42a940ff90d984883a69d27a75bb"
+            }
+          },
+          "literal_constants": {}
+        },
+        {
+          "path": "server/lib/runtime_startup.py",
+          "sha256": "4765e2a0bf854b6701f452880382d17648c9bd137a543124ce05bb2280bae859",
+          "symbols": {
+            "recover_runtime": {
+              "line": 51,
+              "end_line": 93,
+              "ast_sha256": "cb3af5e2c998577d258d3baaa4d11349c6881634037af8b270bdc44f3dc6f5a2"
+            },
+            "restore_persisted_agents": {
+              "line": 14,
+              "end_line": 48,
+              "ast_sha256": "31d696dc03c072aab24bfe074676c460102042f44ad3b9d3364619b88848c28e"
+            },
+            "_recover_goal_moves_later": {
+              "line": 96,
+              "end_line": 108,
+              "ast_sha256": "a5d7f4f580f97834278fe738c594577459144f601eafb695670d54664d12cd8f"
+            }
+          },
+          "literal_constants": {}
+        },
+        {
+          "path": "server/lib/transcript_import_cache.py",
+          "sha256": "8527af70619dff5d1a8d2236b6cc168f48b15ddf952d0cc78fc105980bef336b",
+          "symbols": {
+            "_import_admitted": {
+              "line": 95,
+              "end_line": 125,
+              "ast_sha256": "f57f585b45131b1d790b776e2ff5a4951f5430f95e10a556e20351687380e2f1"
+            },
+            "import_if_changed": {
+              "line": 128,
+              "end_line": 153,
+              "ast_sha256": "92e8990319528885c76cbbfd8aefbe0e243d61102a276a75f1605850ce67da46"
+            },
+            "_drain_background": {
+              "line": 518,
+              "end_line": 627,
+              "ast_sha256": "a0fe67ea0e8036f85121fe49a24eef5a6450ab455da70f23bf08af1f09e7b435"
+            },
+            "_ensure_worker": {
+              "line": 279,
+              "end_line": 287,
+              "ast_sha256": "513ea974d47008634b7a34136de80e21d380dcd75ab11291dd882c2be09b2c4c"
+            },
+            "_start_tracked": {
+              "line": 265,
+              "end_line": 276,
+              "ast_sha256": "21b7ef7465eeed4a3ade747acaeaf100cb654b5467d8c3916b198e8da4d51aa6"
+            },
+            "_background_interval": {
+              "line": 294,
+              "end_line": 297,
+              "ast_sha256": "bf15a34ccb45403677c16f5d8a9f8830bf4d9a5b0013936a1a67bb7c03ca26f6"
+            },
+            "schedule_import": {
+              "line": 374,
+              "end_line": 428,
+              "ast_sha256": "ee48c70e36ff5a71454732e1d21a919bc11678a7459cabba66841e30a6049ab4"
+            }
+          },
+          "literal_constants": {
+            "_BACKGROUND_LIMIT": 64,
+            "_BACKGROUND_MIN_INTERVAL": 10.0
+          }
+        },
+        {
+          "path": "server/lib/runtime_bridge.py",
+          "sha256": "ddc72aba0875a2ae487bfcba50cdbe9cd658408364708171890e4e2e661971c6",
+          "symbols": {
+            "RuntimeClient._connect": {
+              "line": 105,
+              "end_line": 124,
+              "ast_sha256": "13fce16ae4fc9a1f2c838ab1fbd4c3b910face1f2efa8d8abc7d5780c40b75b6"
+            },
+            "RuntimeClient._request": {
+              "line": 126,
+              "end_line": 170,
+              "ast_sha256": "05d4630470ace39b686ac41234b7494fef4e701a81231aad349bd35cc2039758"
+            },
+            "RuntimeClient.status_within": {
+              "line": 220,
+              "end_line": 224,
+              "ast_sha256": "4f5a90f61c26b124b4d740d622f891149a2ac38308d9c149c0ee5a55a41a0730"
+            }
+          },
+          "literal_constants": {}
+        },
+        {
+          "path": "server/lib/runtime_release.py",
+          "sha256": "090782d9e7cd5724c18d798a4f36f58fd383a2f7ab78dbd871a6a36b69c2d968",
+          "symbols": {
+            "RuntimeStatusView.block": {
+              "line": 474,
+              "end_line": 503,
+              "ast_sha256": "6fdd5c4b89715c29b321ae50713b8a2123ca30812feba9d08d8f9b5873fa0953"
+            },
+            "_bounded_status": {
+              "line": 530,
+              "end_line": 538,
+              "ast_sha256": "7f8781b67e06cfb3e22990d27bc5c32450e9e0bbde63e79d64d64f0e4ded62c4"
+            },
+            "status_view_for": {
+              "line": 541,
+              "end_line": 552,
+              "ast_sha256": "6ffc266a03cf2509e7fa6b665acd0cd2d4373d0711096dbbfe925809dbd9591b"
+            }
+          },
+          "literal_constants": {
+            "STATUS_RPC_TIMEOUT": 0.75
+          }
+        },
+        {
+          "path": "server/lib/janitor_bootstrap.py",
+          "sha256": "1ec13dab06b6a05a0bfb3f309bd4746ee2d1514e3cd0bcd66065c64e4da3d630",
+          "symbols": {
+            "initialize": {
+              "line": 7,
+              "end_line": 23,
+              "ast_sha256": "a6f28ad73a03162baf9aefa5bb5ce3f14f0a2e0c4e4c72789a4a2a0a4b160534"
+            }
+          },
+          "literal_constants": {}
+        },
+        {
+          "path": "server/lib/janitor_builtins.py",
+          "sha256": "d397e7aa67216f9fac8ba06dac05d60d7d55d65d3573b9b9bf1fdd559c112fa5",
+          "symbols": {
+            "ensure_builtins": {
+              "line": 61,
+              "end_line": 111,
+              "ast_sha256": "fd7518b55e9abc956d06bf56792a4cc94424b9428fc49bfdefaa98b3d469cff9"
+            }
+          },
+          "literal_constants": {
+            "ROLES": [
+              "message-delegator",
+              "tool-explainer",
+              "audio-bookkeeper",
+              "heartbeat-decider",
+              "quota-monitor",
+              "label-auditor"
+            ]
+          }
+        },
+        {
+          "path": "server/lib/bookkeeping_listener.py",
+          "sha256": "484d47fd598b873495914afea810ecceb0c6fe30c94f83d520582e4d614b2f08",
+          "symbols": {
+            "ensure_running": {
+              "line": 338,
+              "end_line": 351,
+              "ast_sha256": "345db9c92f9f0aab1019bbfe23f179e99ef6c96179c10e5fce81ccb78a494cc0"
+            }
+          },
+          "literal_constants": {}
+        },
+        {
+          "path": "server/lib/cache_warmup.py",
+          "sha256": "310a0348732e43aea6d11e0f6a4b9920a4d99ce731672e489582a0fb13e5730a",
+          "symbols": {
+            "_steps": {
+              "line": 20,
+              "end_line": 27,
+              "ast_sha256": "f4b37852c5be6a46225d9951eba1dee86df6b42c4b7c96e0fa8b6b2eb08c9878"
+            },
+            "CacheWarmupWorker._run": {
+              "line": 42,
+              "end_line": 53,
+              "ast_sha256": "df721c1114e49574c59b1db7256ba285db18ea4baece5fe6d9f36db2d1cc4c2a"
+            }
+          },
+          "literal_constants": {
+            "START_DELAY_SEC": 1.5
+          }
+        },
+        {
+          "path": "server/lib/db.py",
+          "sha256": "9f6007107f7c6cac839355f387e6bdad85272b8adaf1063dcaa154217abf6a6a",
+          "symbols": {
+            "retry_locked": {
+              "line": 687,
+              "end_line": 704,
+              "ast_sha256": "671b4b3d8a54be7c273661dde541e8df9bdcf8b8730de465522be4c705e21501"
+            },
+            "close_local": {
+              "line": 707,
+              "end_line": 720,
+              "ast_sha256": "95f7dabe89155ee70e6906f97ecce9ae1e9968cabbe57337477d05e5d5270648"
+            }
+          },
+          "literal_constants": {}
+        },
+        {
+          "path": "server/lib/timing.py",
+          "sha256": "abdadbace3df737daa905c5488f79263b5feb39a0bf6aca976819019c839585a",
+          "symbols": {},
+          "literal_constants": {
+            "SQLITE_LOCK_RETRIES": 3,
+            "SQLITE_LOCK_RETRY_SLEEP_SEC": 0.05
+          }
+        }
+      ]
+    },
+    "B": {
+      "pin": "0073254687d22ac5a6c1d01b8af29fa678dcf4a2",
+      "source_profiles": [
+        {
+          "path": "server/server.py",
+          "sha256": "3986a8c321030492aa8d237b3a757485c1c448b41f1f8f815b9e3d9d7673736d",
+          "symbols": {
+            "_seed_startup_invariants": {
+              "line": 2894,
+              "end_line": 2902,
+              "ast_sha256": "02dad486edbba9bcba5a534fd0c1c21de4c80d6e6050c7ddc74fe26dd07ab0d9"
+            },
+            "_server_workers": {
+              "line": 2905,
+              "end_line": 3147,
+              "ast_sha256": "fc56ef759954c83ab0bb2f7d76299ebc0ec7e407bf6b3068ad014a9b4a59eee2"
+            },
+            "Handler._handle_status": {
+              "line": 1311,
+              "end_line": 1346,
+              "ast_sha256": "ec118db7058b2a3f85d0e01545e5e9299a21425ff0ba2176411b602f3f28b583"
+            }
+          },
+          "literal_constants": {}
+        },
+        {
+          "path": "server/runtime.py",
+          "sha256": "6999efdddeeb7755981d67a54933f2f44d6f421ad74c60265ab33180bf3f8c84",
+          "symbols": {
+            "main": {
+              "line": 29,
+              "end_line": 92,
+              "ast_sha256": "0b1dab62a09cfaa70eeaa8bd72eee6a72f6d42a940ff90d984883a69d27a75bb"
+            }
+          },
+          "literal_constants": {}
+        },
+        {
+          "path": "server/lib/runtime_startup.py",
+          "sha256": "4765e2a0bf854b6701f452880382d17648c9bd137a543124ce05bb2280bae859",
+          "symbols": {
+            "recover_runtime": {
+              "line": 51,
+              "end_line": 93,
+              "ast_sha256": "cb3af5e2c998577d258d3baaa4d11349c6881634037af8b270bdc44f3dc6f5a2"
+            },
+            "restore_persisted_agents": {
+              "line": 14,
+              "end_line": 48,
+              "ast_sha256": "31d696dc03c072aab24bfe074676c460102042f44ad3b9d3364619b88848c28e"
+            },
+            "_recover_goal_moves_later": {
+              "line": 96,
+              "end_line": 108,
+              "ast_sha256": "a5d7f4f580f97834278fe738c594577459144f601eafb695670d54664d12cd8f"
+            }
+          },
+          "literal_constants": {}
+        },
+        {
+          "path": "server/lib/transcript_import_cache.py",
+          "sha256": "8527af70619dff5d1a8d2236b6cc168f48b15ddf952d0cc78fc105980bef336b",
+          "symbols": {
+            "_import_admitted": {
+              "line": 95,
+              "end_line": 125,
+              "ast_sha256": "f57f585b45131b1d790b776e2ff5a4951f5430f95e10a556e20351687380e2f1"
+            },
+            "import_if_changed": {
+              "line": 128,
+              "end_line": 153,
+              "ast_sha256": "92e8990319528885c76cbbfd8aefbe0e243d61102a276a75f1605850ce67da46"
+            },
+            "_drain_background": {
+              "line": 518,
+              "end_line": 627,
+              "ast_sha256": "a0fe67ea0e8036f85121fe49a24eef5a6450ab455da70f23bf08af1f09e7b435"
+            },
+            "_ensure_worker": {
+              "line": 279,
+              "end_line": 287,
+              "ast_sha256": "513ea974d47008634b7a34136de80e21d380dcd75ab11291dd882c2be09b2c4c"
+            },
+            "_start_tracked": {
+              "line": 265,
+              "end_line": 276,
+              "ast_sha256": "21b7ef7465eeed4a3ade747acaeaf100cb654b5467d8c3916b198e8da4d51aa6"
+            },
+            "_background_interval": {
+              "line": 294,
+              "end_line": 297,
+              "ast_sha256": "bf15a34ccb45403677c16f5d8a9f8830bf4d9a5b0013936a1a67bb7c03ca26f6"
+            },
+            "schedule_import": {
+              "line": 374,
+              "end_line": 428,
+              "ast_sha256": "ee48c70e36ff5a71454732e1d21a919bc11678a7459cabba66841e30a6049ab4"
+            }
+          },
+          "literal_constants": {
+            "_BACKGROUND_LIMIT": 64,
+            "_BACKGROUND_MIN_INTERVAL": 10.0
+          }
+        },
+        {
+          "path": "server/lib/runtime_bridge.py",
+          "sha256": "6995a57d0eea07e8eb17e6056c47c02c94be7f5c94c66454d94345e1fb211c66",
+          "symbols": {
+            "RuntimeClient._connect": {
+              "line": 105,
+              "end_line": 124,
+              "ast_sha256": "13fce16ae4fc9a1f2c838ab1fbd4c3b910face1f2efa8d8abc7d5780c40b75b6"
+            },
+            "RuntimeClient._request": {
+              "line": 126,
+              "end_line": 170,
+              "ast_sha256": "05d4630470ace39b686ac41234b7494fef4e701a81231aad349bd35cc2039758"
+            },
+            "RuntimeClient.status_within": {
+              "line": 220,
+              "end_line": 224,
+              "ast_sha256": "4f5a90f61c26b124b4d740d622f891149a2ac38308d9c149c0ee5a55a41a0730"
+            }
+          },
+          "literal_constants": {}
+        },
+        {
+          "path": "server/lib/runtime_release.py",
+          "sha256": "090782d9e7cd5724c18d798a4f36f58fd383a2f7ab78dbd871a6a36b69c2d968",
+          "symbols": {
+            "RuntimeStatusView.block": {
+              "line": 474,
+              "end_line": 503,
+              "ast_sha256": "6fdd5c4b89715c29b321ae50713b8a2123ca30812feba9d08d8f9b5873fa0953"
+            },
+            "_bounded_status": {
+              "line": 530,
+              "end_line": 538,
+              "ast_sha256": "7f8781b67e06cfb3e22990d27bc5c32450e9e0bbde63e79d64d64f0e4ded62c4"
+            },
+            "status_view_for": {
+              "line": 541,
+              "end_line": 552,
+              "ast_sha256": "6ffc266a03cf2509e7fa6b665acd0cd2d4373d0711096dbbfe925809dbd9591b"
+            }
+          },
+          "literal_constants": {
+            "STATUS_RPC_TIMEOUT": 0.75
+          }
+        },
+        {
+          "path": "server/lib/janitor_bootstrap.py",
+          "sha256": "1ec13dab06b6a05a0bfb3f309bd4746ee2d1514e3cd0bcd66065c64e4da3d630",
+          "symbols": {
+            "initialize": {
+              "line": 7,
+              "end_line": 23,
+              "ast_sha256": "a6f28ad73a03162baf9aefa5bb5ce3f14f0a2e0c4e4c72789a4a2a0a4b160534"
+            }
+          },
+          "literal_constants": {}
+        },
+        {
+          "path": "server/lib/janitor_builtins.py",
+          "sha256": "d397e7aa67216f9fac8ba06dac05d60d7d55d65d3573b9b9bf1fdd559c112fa5",
+          "symbols": {
+            "ensure_builtins": {
+              "line": 61,
+              "end_line": 111,
+              "ast_sha256": "fd7518b55e9abc956d06bf56792a4cc94424b9428fc49bfdefaa98b3d469cff9"
+            }
+          },
+          "literal_constants": {
+            "ROLES": [
+              "message-delegator",
+              "tool-explainer",
+              "audio-bookkeeper",
+              "heartbeat-decider",
+              "quota-monitor",
+              "label-auditor"
+            ]
+          }
+        },
+        {
+          "path": "server/lib/bookkeeping_listener.py",
+          "sha256": "484d47fd598b873495914afea810ecceb0c6fe30c94f83d520582e4d614b2f08",
+          "symbols": {
+            "ensure_running": {
+              "line": 338,
+              "end_line": 351,
+              "ast_sha256": "345db9c92f9f0aab1019bbfe23f179e99ef6c96179c10e5fce81ccb78a494cc0"
+            }
+          },
+          "literal_constants": {}
+        },
+        {
+          "path": "server/lib/cache_warmup.py",
+          "sha256": "310a0348732e43aea6d11e0f6a4b9920a4d99ce731672e489582a0fb13e5730a",
+          "symbols": {
+            "_steps": {
+              "line": 20,
+              "end_line": 27,
+              "ast_sha256": "f4b37852c5be6a46225d9951eba1dee86df6b42c4b7c96e0fa8b6b2eb08c9878"
+            },
+            "CacheWarmupWorker._run": {
+              "line": 42,
+              "end_line": 53,
+              "ast_sha256": "df721c1114e49574c59b1db7256ba285db18ea4baece5fe6d9f36db2d1cc4c2a"
+            }
+          },
+          "literal_constants": {
+            "START_DELAY_SEC": 1.5
+          }
+        },
+        {
+          "path": "server/lib/db.py",
+          "sha256": "9f6007107f7c6cac839355f387e6bdad85272b8adaf1063dcaa154217abf6a6a",
+          "symbols": {
+            "retry_locked": {
+              "line": 687,
+              "end_line": 704,
+              "ast_sha256": "671b4b3d8a54be7c273661dde541e8df9bdcf8b8730de465522be4c705e21501"
+            },
+            "close_local": {
+              "line": 707,
+              "end_line": 720,
+              "ast_sha256": "95f7dabe89155ee70e6906f97ecce9ae1e9968cabbe57337477d05e5d5270648"
+            }
+          },
+          "literal_constants": {}
+        },
+        {
+          "path": "server/lib/timing.py",
+          "sha256": "abdadbace3df737daa905c5488f79263b5feb39a0bf6aca976819019c839585a",
+          "symbols": {},
+          "literal_constants": {
+            "SQLITE_LOCK_RETRIES": 3,
+            "SQLITE_LOCK_RETRY_SLEEP_SEC": 0.05
+          }
+        }
+      ]
+    }
+  },
+  "execution": null,
+  "known_quantities": {
+    "external_steady_HTTP_requests": 120,
+    "external_steady_RPC_requests": 120,
+    "nominal_status_RPC_call_sites_if_all_HTTP_arrive": 240,
+    "request_identity_scope": "offered external calls and HTTP status fan-out ONLY; excludes connect retries and all other product/native traffic",
+    "fixture_owner_count": 3,
+    "actual_producer_process_count": null,
+    "actual_connection_lifetimes": null,
+    "native_full_import_attempts": null,
+    "record_cap_fit": null
+  },
+  "necessary_distinctions": [
+    "Handler._handle_status -> RuntimeStatusView.block -> fetch -> RuntimeClient.status uses native runtime RPC once per reached HTTP handler, not a status-result cache.",
+    "Host internal STATUS_RPC_TIMEOUT is750ms; external500ms timeout does not cancel/join that server handler. RuntimeClient.status_within has an existing native total_s boundary for the direct measurement client only.",
+    "RuntimeClient._connect can create multiple sockets on backlog EAGAIN under bounded backoff. RPC calls are not socket-attempt or native DB-connection counts.",
+    "Background importer worker None/exit and _ensure_worker allow later incarnations. _threads is a registry/prune, not a total lifetime cap.",
+    "Background normal backoff updates after successful validation. Urgency bypasses normal deadlines; direct import_if_changed has its own admission and db.retry_locked.10s alone is not a bound for all entrypoints/failures.",
+    "Seed startup invariants install native builtin Janitors in addition to three corpus owners. Actual setup raw state/scheduler controls are still needed; do not invent a three-agent total.",
+    "Bookkeeping launch is conditional on active delegation rows. Cache warm-up has native provider capability discovery. Private raw-state and guard eligibility must be proved without disabling workers or expanding process/network authority."
+  ]
+}
