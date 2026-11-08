@@ -909,9 +909,11 @@ def _receipt_attempt_status(agent_id: str, trace_id: str) -> str | None:
     negative = database.execute(
         """SELECT 1 FROM state_log WHERE agent_id=? AND kind='interrupted'
              AND json_extract(detail,'$.trace_id')=?
+             AND json_type(detail,'$.dispatch_not_started')='true'
              AND json_extract(detail,'$.dispatch_not_started')=1
              AND COALESCE(json_extract(detail,'$.reason'),'')<>'update_handoff'
              AND json_type(detail,'$.dispatch_not_started_turn_id')='integer'
+             AND json_extract(detail,'$.dispatch_not_started_turn_id') BETWEEN 1 AND 9223372036854775807
              AND json_extract(detail,'$.dispatch_not_started_turn_id')=? LIMIT 1""",
         (agent_id, trace_id, turn["turn_id"])).fetchone() is not None
     if negative and turn["settled_at"] is not None and turn["outcome"] == "failed":
