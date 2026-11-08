@@ -171,8 +171,6 @@ def test_a_new_turn_starts_with_only_its_own_items():
 def test_sse_subscribers_get_item_ops_only_for_the_chats_they_asked_for(tmp_path):
     import json
 
-    from lib import live_hub, live_items, live_projection
-    from lib.backend import opencode
     from lib.audio_stream import AudioStream
 
     stream = AudioStream(tmp_path)
@@ -208,6 +206,8 @@ def test_the_runtime_pushes_live_events_and_answers_snapshots_over_its_socket(tm
     import threading
     import time
 
+    from lib import live_hub, live_items, live_projection
+    from lib.backend import opencode
     from lib.audio_stream import AudioStream
     from lib.live_hub import LiveFanout, LiveRelay
     from lib.runtime_bridge import RuntimeClient
