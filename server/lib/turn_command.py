@@ -384,6 +384,7 @@ def _unlaunched_marked(agent_id: str, trace_id: str) -> bool:
         """SELECT 1 FROM state_log WHERE agent_id = ?
               AND json_extract(detail, '$.trace_id') = ?
               AND json_extract(detail, '$.dispatch_not_started')
+              AND COALESCE(json_extract(detail, '$.reason'), '') <> 'update_handoff'
             LIMIT 1""", (agent_id, trace_id)).fetchone() is not None
 
 
