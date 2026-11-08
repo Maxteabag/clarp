@@ -27,12 +27,19 @@ source/archive proof, budget/priority cancellation, fetch/accounting/drain and
 exact B/C source qualification. No runner exists here yet.
 
 All work is LOWEST priority behind every program gate. The entire allocation
-is <=90 VM minutes / about15 NOK INCLUDING setup, controls, fetch, drain and
+is <=100 VM minutes / about17 NOK INCLUDING setup, controls, copy, fetch, drain and
 worst idle tails; no autonomous retries, replacement or extension. If faithful
 setup/plateau/measurement cannot fit, stop and report the protocol gap before
 compute. Only rf-computec/captain admit actual jobs. Never run any test,
 collection, generator, product import or server on laptopstudio. No live data,
 credentials or Host/runtime action. Held herald931 backend work stays held.
+
+Lead937 raised only the inclusive ceiling to6000seconds. Draft82minutes of
+phases plus11minutes worst tail leaves7minutes margin; numerical fit is not
+native/protocol/cancellation qualification. Any phase redistribution needs an
+explicit source-qualified plan. The compute queue remains UNALLOCATED and no
+extra window, FUND override, preemption or delay of any gate is authorized.
+Stop and return to the lead before exceeding100minutes.
 
 ## Instrumentation source slice (unexecuted)
 
