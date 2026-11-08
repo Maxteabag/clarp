@@ -258,3 +258,129 @@ def test_reconciliation_preserves_pauses_final_siblings_and_unrelated_admission(
     assert turn_queue.status("final") == "failed"
     assert (turn_queue.is_paused("a"), turn_queue.stop_generation("a"),
             turn_queue.user_stop_generation("a")) == stop
+
+
+def test_actual_accepted_steer_marks_its_receipt_without_a_separate_turn(tmp_path):
+    from lib.turn_command import DispatchCommand
+    from tests.unit.test_turn_dispatch import _make_service, _SteerableBackends
+    service, _backend, agent = _make_service(tmp_path)
+    backend = _SteerableBackends()
+    service.backends = backend
+    service.dispatch(text="first", requested_session="mike", trace_id="first",
+                     synthesize_audio=False)
+    turn_queue.enqueue(
+        queue_id="steered", agent_id=agent, session="mike", text="mid turn",
+        trace_id="follow", client_msg_id="steered", synthesize_audio=False,
+        origin="user", sender_agent_id="")
+    service.submit(DispatchCommand(
+        text="mid turn", requested_session="mike", trace_id="follow",
+        client_msg_id="steered", durable_queue_id="steered",
+        queue_if_busy=False, skip_admission=True, synthesize_audio=False))
+    assert len(backend.spawned) == len(backend.steered) == 1
+    assert turn_queue.status("steered") == "started"
+    assert not db.conn().execute(
+        "SELECT 1 FROM turns WHERE agent_id=? AND trace_id='follow'", (agent,)).fetchone()
+    assert turn_queue.pending_counts() == {}
+
+
+def test_recovery_does_not_redispatch_more_than_one_repair_page(tmp_path):
+    from tests.unit.test_turn_dispatch import _make_service
+    service, backend, agent = _make_service(tmp_path)
+    backend.live = False
+    for index in range(105):
+        _receipt(str(index), agent=agent, trace=str(index))
+        _turn(agent=agent, trace=str(index), outcome="completed")
+    assert service.recover_queued() == 0
+    assert backend.spawned == []
+    for _ in range(4):
+        _tick()
+    assert turn_queue.pending_counts() == {}
+
+
+def test_latest_ended_only_attempt_and_tied_settlements_use_deterministic_order():
+    _receipt()
+    _turn(outcome="completed")
+    ended = _turn(ended=True)
+    db.conn().execute("UPDATE turns SET ended_at=? WHERE turn_id=?", (db.now_ms()+1, ended))
+    _tick()
+    assert turn_queue.status("q") == "ended"
+    _receipt("tie", trace="tie")
+    first = _turn(trace="tie", outcome="completed")
+    second = _turn(trace="tie", outcome="failed")
+    db.conn().execute("UPDATE turns SET settled_at=123 WHERE turn_id IN (?,?)", (first, second))
+    _tick()
+    assert turn_queue.status("tie") == "failed"
+
+
+@pytest.mark.parametrize("site,initial,expected", [
+    ("start", "queued", "started"), ("settle", "started", "done"),
+    ("release", "claimed", "queued"), ("reset", "claimed", "queued"),
+])
+def test_each_receipt_writer_reports_exhausted_admission_and_can_later_progress(
+        monkeypatch, site, initial, expected):
+    _receipt(status=initial)
+    operations = {"start": lambda: turn_queue.mark_started("q"),
+                  "settle": lambda: turn_queue.settle_receipt("a", "t", "completed"),
+                  "release": lambda: turn_queue.release_claim("q"),
+                  "reset": lambda: turn_queue.reset_stale_claims(0)}
+    logs = []
+    monkeypatch.setattr(turn_queue, "log", lambda event, detail: logs.append((event, detail)))
+    holder = sqlite3.connect(str(db.DB_PATH), isolation_level=None)
+    holder.execute("BEGIN IMMEDIATE")
+    try:
+        with db.busy_timeout_at_most(0):
+            with pytest.raises(sqlite3.OperationalError):
+                operations[site]()
+            assert db.conn().execute("PRAGMA busy_timeout").fetchone()[0] == 0
+    finally:
+        holder.execute("ROLLBACK")
+        holder.close()
+    assert turn_queue.status("q") == initial
+    assert not db.conn().in_transaction
+    assert any(event == "queueReceiptWriteFail" and "queue=q" in detail
+               for event, detail in logs)
+    operations[site]()
+    assert turn_queue.status("q") == expected
+
+
+def test_noncontention_write_failure_is_not_retried_and_does_not_leak_the_writer():
+    _receipt()
+    attempts = []
+    con = db.conn()
+    def deny(action, table, column, _database, _trigger):
+        if action == sqlite3.SQLITE_UPDATE and table == "queued_turns":
+            attempts.append(column)
+            return sqlite3.SQLITE_DENY
+        return sqlite3.SQLITE_OK
+    con.set_authorizer(deny)
+    try:
+        with pytest.raises(sqlite3.DatabaseError):
+            turn_queue.mark_started("q")
+    finally:
+        con.set_authorizer(None)
+    assert len(attempts) == 1
+    assert not con.in_transaction
+    assert turn_queue.status("q") == "queued"
+
+
+def test_opened_but_explicitly_unlaunched_work_uses_existing_recovery_once(tmp_path):
+    from lib import agents, turn_lifecycle
+    from tests.unit.test_turn_dispatch import _make_service
+    service, backend, agent = _make_service(tmp_path)
+    backend.live = False
+    turn_queue.enqueue(
+        queue_id="retry", agent_id=agent, session="mike", text="retry unsent",
+        trace_id="retry-trace", client_msg_id="retry", synthesize_audio=False,
+        origin="user", sender_agent_id="")
+    turn_lifecycle.open_turn(agent_id=agent, source="pwa", trace_id="retry-trace",
+                             synthesize_audio=False)
+    agents.record_unlaunched_trace(agent, "retry-trace")
+    assert agents.trace_launch_status(agent, "retry-trace", client_msg_id="retry",
+                                     origin="user", sender_agent_id="") == "retryable"
+    _tick()
+    assert turn_queue.status("retry") == "queued"
+    assert service.recover_queued() == 1
+    assert [call["trace_id"] for _, call in backend.spawned] == ["retry-trace"]
+    assert turn_queue.status("retry") == "started"
+    assert service.recover_queued() == 0
+    assert len(backend.spawned) == 1
