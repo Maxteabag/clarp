@@ -77,3 +77,13 @@ separate and rejects nonzero/missing terminals. ABBA exposes opposite-order
 gaps and refuses outcome drift; it deliberately cannot assign MET without the
 still-owed timer/load/source/cache qualifications. Its synthetic record controls
 test receipt interpretation only, not actual pytest participation or lifecycle.
+
+`raw_products.py` is the unexecuted synthetic-database snapshot foundation:
+one read-only SQL transaction covers the complete schema and every table,
+including empty tables, duplicate multiplicities, generated/hidden columns and
+typed text/blob/number/null cells. Capacity limits refuse, never truncate.
+It retains all timestamp/revision/identity fields and emits unresolved exact
+differences. This is NOT the still-owed source/writer-specific native-time and
+causal correspondence oracle; it cannot certify readiness or complete work.
+Its actual SQLite controls (including a concurrent WAL commit after the schema
+read) are authored only and must consume admitted remote setup time.
