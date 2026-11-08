@@ -229,7 +229,8 @@ def build_initial_fixture(*, run_id, pin, mode, source, root, output, source_fil
             'size': size, 'records': records, 'products': products,
             'native_imports': imports, 'native_connection': native_connection,
             'native_versions': versions, 'checkpoint': checkpoint, 'clock': clock_receipt,
-            'guard_counts': dict(guard.counts), 'private_environment_keys': sorted(expected_env),
+            'guard_counts': dict(guard.counts), 'guard_failure_file': str(failure_file),
+            'private_environment_keys': sorted(expected_env),
             'started_mono': began, 'ended_mono': time.monotonic(),
             'native_setup_wall_bracket_ns': [began_wall, time.time_ns()],
             'scope': 'unmeasured INITIAL fixture only; no independent reference/plan/readiness or process-exit/copy proof'}

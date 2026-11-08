@@ -87,12 +87,13 @@ def qualify_initial(child, *, expected_argv, launch_identity, expected, terminal
     """
     root_reaped = require_root_reaped(child, identity=launch_identity, expected_argv=expected_argv)
     if terminal['producer'] != launch_identity or any(terminal[key] != expected[key]
-            for key in ('run_id', 'pin', 'mode', 'source_manifest_sha256')):
+            for key in ('run_id', 'pin', 'mode', 'source_manifest_sha256', 'guard_failure_file')):
         raise ValueError('initial native terminal source/attempt/birth mismatch')
     if terminal['mode'] != 'initial_seed' or terminal['checkpoint'] != [0, 0, 0]:
         raise ValueError('no successful native INITIAL checkpoint')
     counts = terminal['guard_counts']
-    if (set(counts) - {'qualified_usage_attempt', 'native_usage_enoent'}
+    if (str(guard_failure_file) != terminal['guard_failure_file']
+            or set(counts) - {'qualified_usage_attempt', 'native_usage_enoent'}
             or any(type(value) is not int or value < 0 for value in counts.values())
             or counts.get('qualified_usage_attempt', 0) != counts.get('native_usage_enoent', 0)
             or Path(guard_failure_file).exists() or Path(guard_failure_file).is_symlink()):
