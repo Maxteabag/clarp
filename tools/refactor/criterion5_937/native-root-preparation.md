@@ -124,3 +124,29 @@ must prove zero delegated serves; ordinary publication OSError must still prove
 one exact delegated serve. Native error plus finalization failure must preserve
 the original primary identity and separate cause. All C7f finite controls remain
 owed/unexecuted; no source finding is self-closed and no permission is inferred.
+
+## Pending-control finalization residual repair (after C7b)
+
+F2 was source-closed on7b; C identified a remaining F1 path when a control was
+already propagating before final_error was initialized. The new control_pending
+latch spans original unhandled control primary, retained secondary, cleanup,
+restoration and final publication. It is never reset on entry to finally.
+SystemExit(None/0) explicitly accepted as normal native completion remains a
+separate case, not an unhandled control path.
+
+While latched, no new owner join/is_alive check, guard-file probe, thread census
+or root-return write/fsync begins. Only the necessary in-memory done notification
+and independent required binding restores are attempted, then exception
+propagation. The restoration descriptors are prepared before native execution;
+observer installation is in the protected tool-setup phase. No signal handler
+or masking policy changes. The original primary identity is retained; the first
+retained secondary control cause takes precedence over a later ordinary cleanup
+failure. New control during cleanup/restore also gates every subsequent optional
+probe/publication. An absent terminal file is UNKNOWN, not successful cleanup.
+
+This is source repair only. Distinct finite cases for pending primary, retained
+secondary during diagnosis, newly arriving finalization/restore control and
+ordinary metadata failure still need authored/reviewed/admitted proof. Actual
+actor/process exit, durable refusal retention, source/RSS policy, hard backend
+and the entire measurement package remain unqualified. C must close the source
+finding; no execution or source-readiness permission is inferred here.
