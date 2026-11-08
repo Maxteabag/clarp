@@ -149,3 +149,81 @@ raw connection is used transitively through the migration chain without ordinary
 conn reentry; every Docker role which bootstraps today keeps that availability;
 configured DB path is unchanged; preactivation failure and SAME-DB rollback do not
 regress. These are future qualification obligations, not reproduced bug claims.
+
+
+## Exact R open/readiness policy for bounded design review
+
+R carries a source descriptor with ID pt02-r121, target121, upgrade floor61 and
+ordinary-consumer supported version121. There are NO stored readiness phases,
+unknown progress rows or extra schema-generation format in R. Owner completion is
+the actual unchanged migration COMMIT/readback, not a process flag/file receipt.
+The ordinary check reads PRAGMA user_version from an existing readable DB and
+requires121; it does not add a whole-shape fingerprint restriction. This preserves
+ALL shapes today's61..120 migrations produce at121, including legitimate object
+ordering and extra indexes. Corrupt/unreadable SQLite raises a typed/code-only
+failure; a manually forged121 stamp is not certified as correct schema by this
+policy and receives existing business SQL failures. R does not invent a repair.
+
+Owner supported inputs: absent/zero => exact existing fresh flow;61..120 => exact
+existing upgrade chain;121 => read-only no-op verification;1..60 => existing floor
+refusal;>121 => unsupported. Ordinary input absent/zero/61..120 => NOT_READY;
+1..60 or>121 => UNSUPPORTED. Fresh/upgrade OWNER runs before current activation,
+identity/seeding/recovery/services. Checks use the same unchanged configured DB
+path resolution as db.DB_PATH, not a new env var or guessed default.
+
+A minimal pure check layer depends only on stdlib and inert existing xdg path
+resolution; no db_schema/db_migrations/feature-store import, no eventlog/state-store
+logging. New production conn opens only existing store (mode=rw), performs the
+check before application PRAGMAs, then restores today's connection settings. It
+never mkdir/creates/migrates. Stamp opens existing mode=ro and checks before use.
+Failed connections are closed and not cached. Raw backup/verification remains
+available for unsupported versions without ordinary conn or migration.
+
+For cached ordinary connections, at each conn() OUTSIDE a transaction: verify
+path/file identity and consume user_version again. No process-ready or inode-only
+cache stands in for this check. If already IN a caller transaction, return its
+same connection without polling/invalidation; the outer unit was checked before
+BEGIN. Existing live restore/replacement is not made safe by this check; established
+release/restore protocol governs it. No new quiescence claim. W must define its
+real progress/generation unit protocol separately because user_version alone
+cannot observe W readiness changes without DDL.
+
+Direct Host execution: invoke the pure gate before server.py16's first lib import;
+direct runtime: before runtime.py12's context import. Importing these modules as
+libraries must remain inert with respect to this gate; conn still guards actual
+store work. Test fixtures explicitly bootstrap their disposable DB instead of
+making product imports implicit owners. At source review, enumerate top-level
+reachable calls to prove there is no earlier DB side effect. Path-only hook setup
+stays inert; each hook's actual first DB operation checks through conn, and must
+follow its existing catch/stdout/exit fallback. No global clarp-admin import gate
+blocks no-DB diagnostics/raw backup/install preparation: gate DB-dependent command
+units before effects; central conn protects missed store call sites. Helper/task
+and job processes likewise cannot gain authority via an import.
+
+Proposed diagnostics: fixed type/code only, schema_not_ready or schema_unsupported,
+version numeric/unknown, phase=open and SQLite numeric code where available; no
+raw exception body/path/content. Direct Host/runtime exit1 before context/listener/
+recovery. DB CLI failure uses existing nonzero exceptional envelope with bounded
+stderr and no success JSON; preserve already-defined distinct exit codes. Hook
+fallback stdout/exit stays EXACT baseline. Exact per-command wiring and exceptional
+wording need source review/lead signature; this design is not that certificate.
+
+The explicit owner uses one raw connection throughout the unchanged migration
+chain. Any transitive helper which falls back to ordinary conn and sees NOT_READY
+would regress supported upgrade; this is a required negative control/source check.
+Do not admit owner context to normal business threads. No nested owner or repeated
+migration from startup; no body retry or replay of an uncertain COMMIT. Preserve
+existing migration cutoff, statement order, row factory expectations, row results
+and transaction behavior. Changing those belongs to W, not R.
+
+Bounded R qualification plan, captain-only: existing migration matrix/real old-shape
+fixtures and fresh path with the exact old migration body versus sole owner;
+all produced121 variants admitted; two participating owners on same DB serialized;
+nonowner startup/CLI/hook/stamp cannot create/migrate; owner/raw-connection reentry
+plant rejected; current path/env unchanged; absent/floor/newer/locked/malformed
+cases preserve failure contracts; primary/rollback/diagnostic failures; no ready
+before commit, failed preactivation code/data facts and SAME-disposableDB O->R->O
+business reads AND writes. Preserve Docker maintenance fresh bootstrap via the
+entrypoint owner. Full G1/G2/CI/G4 and actual ship/watch remain independent.
+No local/reviewer jobs or live probe authorized. The old nonparticipating opener
+and long-TXN residuals are not silently added to R's demonstrated guarantee.
