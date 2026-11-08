@@ -582,3 +582,33 @@ def test_receipt_embedded_trace_conflict_protects_payload_and_dispatch(embedded_
     assert not turn_queue.claim_for_dispatch("q")
     assert turn_queue.claim("q") is None
     assert _stored("q") == before
+
+
+@pytest.mark.parametrize("stored", [None, "", "null", "[]", "invalid-json"])
+@pytest.mark.parametrize("outcome", [None, "completed"])
+def test_missing_receipt_is_distinct_from_present_malformed_record(stored, outcome):
+    from lib import launch_receipts, settings_store
+    _receipt()
+    if outcome:
+        _turn(outcome=outcome)
+    key = launch_receipts._key("t")
+    assert settings_store.get(key) is None
+    if stored is not None:
+        settings_store.set_text(key, stored)
+    before, revision = _stored("q"), turn_queue.revision("a")
+    _tick()
+    if stored is None and outcome == "completed":
+        assert turn_queue.status("q") == "done"
+        assert _stored("q")["text"] == _stored("q")["sender_agent_id"] == ""
+        assert turn_queue.revision("a") > revision
+        assert turn_queue.pending_counts() == {}
+    elif stored is None:
+        assert _stored("q") == before
+        assert turn_queue.revision("a") == revision
+        assert [r["queue_id"] for r in turn_queue.pending_for_dispatch()] == ["q"]
+    else:
+        assert _stored("q") == before
+        assert turn_queue.revision("a") == revision
+        assert turn_queue.pending_for_dispatch() == []
+        assert not turn_queue.claim_for_dispatch("q")
+        assert turn_queue.claim("q") is None
