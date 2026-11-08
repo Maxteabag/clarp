@@ -1,0 +1,5538 @@
+{
+  "base": "f666fb0db240513ae6dae1eda8227046b4001088",
+  "method": "tracked-source lexical connector and lib-import anchors; not dynamic reachability or live census",
+  "records": [
+    {
+      "path": "bin/clarp-admin.py",
+      "anchors": [
+        {
+          "line": 32,
+          "anchor": "from lib import service_manager, xdg  # noqa: E402"
+        },
+        {
+          "line": 33,
+          "anchor": "from lib.config_writer import set_toml_value, toml_value  # noqa: E402"
+        },
+        {
+          "line": 317,
+          "anchor": "from lib import personal_skills"
+        },
+        {
+          "line": 403,
+          "anchor": "from lib.stt import _installed_model_records  # type: ignore"
+        },
+        {
+          "line": 404,
+          "anchor": "from lib.transcription_catalog import (model_by_id, public_catalog,"
+        },
+        {
+          "line": 426,
+          "anchor": "from lib.transcription_models import install"
+        },
+        {
+          "line": 440,
+          "anchor": "from lib.transcription_models import remove"
+        },
+        {
+          "line": 450,
+          "anchor": "from lib import custom_stt_adapters"
+        },
+        {
+          "line": 502,
+          "anchor": "from lib.custom_stt_adapters import get as custom_adapter, models"
+        },
+        {
+          "line": 534,
+          "anchor": "from lib.transcription_models import register"
+        },
+        {
+          "line": 581,
+          "anchor": "with sqlite3.connect(f\"file:{path}?mode=ro\", uri=True) as database:"
+        },
+        {
+          "line": 600,
+          "anchor": "\"from lib.roster_seed import seed_defaults; \""
+        },
+        {
+          "line": 674,
+          "anchor": "from lib.tts_providers import valid_ids"
+        },
+        {
+          "line": 942,
+          "anchor": "from lib import config as config_module"
+        },
+        {
+          "line": 991,
+          "anchor": "from lib.tts_providers import status as tts_status"
+        },
+        {
+          "line": 1027,
+          "anchor": "from lib.deployment import DeploymentLayout"
+        },
+        {
+          "line": 1028,
+          "anchor": "from lib.paths import RuntimePaths"
+        },
+        {
+          "line": 1051,
+          "anchor": "from lib import db"
+        },
+        {
+          "line": 1053,
+          "anchor": "rows = db.conn().execute("
+        },
+        {
+          "line": 1188,
+          "anchor": "from lib import tool_explanation_learning as learning"
+        },
+        {
+          "line": 1189,
+          "anchor": "from lib import tool_explanation_templates as templates"
+        },
+        {
+          "line": 1190,
+          "anchor": "from lib.tool_explanations import PROMPT_VERSION"
+        },
+        {
+          "line": 1239,
+          "anchor": "from lib import instance_backup"
+        },
+        {
+          "line": 1251,
+          "anchor": "from lib import data_root_locks"
+        },
+        {
+          "line": 1273,
+          "anchor": "from lib.server_identity import get_server_info"
+        },
+        {
+          "line": 1277,
+          "anchor": "from lib.device_pairing import issue"
+        },
+        {
+          "line": 1313,
+          "anchor": "from lib.device_pairing import issue, list_devices, revoke"
+        },
+        {
+          "line": 1335,
+          "anchor": "from lib.relay_settings import load as load_relay"
+        },
+        {
+          "line": 1351,
+          "anchor": "from lib.server_identity import get_server_info"
+        },
+        {
+          "line": 1544,
+          "anchor": "from lib.relay_settings import load as load_relay"
+        },
+        {
+          "line": 1564,
+          "anchor": "from lib.relay_settings import RelaySettings, load, write, import_legacy"
+        },
+        {
+          "line": 1818,
+          "anchor": "from lib.google_tts import collision_code"
+        },
+        {
+          "line": 1909,
+          "anchor": "from lib import google_tts"
+        },
+        {
+          "line": 1910,
+          "anchor": "from lib.voice import voice_map"
+        },
+        {
+          "line": 1923,
+          "anchor": "from lib import agents as agents_db"
+        },
+        {
+          "line": 1941,
+          "anchor": "from lib import config as config_module, custom_tts_adapters, deployment, google_tts"
+        },
+        {
+          "line": 1969,
+          "anchor": "from lib import custom_tts_adapters, data_root_locks as locks"
+        },
+        {
+          "line": 1970,
+          "anchor": "from lib.deployment import LAYOUT"
+        },
+        {
+          "line": 2103,
+          "anchor": "from lib import tts_providers"
+        },
+        {
+          "line": 2107,
+          "anchor": "from lib import custom_tts_adapters"
+        },
+        {
+          "line": 2228,
+          "anchor": "from lib import identity"
+        },
+        {
+          "line": 2262,
+          "anchor": "from lib.server_peers import send"
+        },
+        {
+          "line": 2283,
+          "anchor": "from lib import peer_requests"
+        },
+        {
+          "line": 2293,
+          "anchor": "from lib import identity, turn_identity"
+        },
+        {
+          "line": 2431,
+          "anchor": "from lib import agents, backends"
+        },
+        {
+          "line": 2480,
+          "anchor": "from lib import server_peers"
+        },
+        {
+          "line": 2495,
+          "anchor": "from lib import workspace_repos"
+        },
+        {
+          "line": 2688,
+          "anchor": "from lib.backend.agy_hooks import configure_hooks"
+        },
+        {
+          "line": 2879,
+          "anchor": "from lib.controller_actions_cli import execute"
+        },
+        {
+          "line": 2884,
+          "anchor": "from lib.janitor_cli import execute"
+        },
+        {
+          "line": 2891,
+          "anchor": "from lib.janitor_cli import add_parsers as add_janitor_parsers"
+        },
+        {
+          "line": 2893,
+          "anchor": "from lib.controller_actions_cli import add_parsers as add_controller_action_parsers"
+        }
+      ]
+    },
+    {
+      "path": "docker/entrypoint.sh",
+      "anchors": [
+        {
+          "line": 45,
+          "anchor": "from lib.deployment import LAYOUT"
+        },
+        {
+          "line": 51,
+          "anchor": "from lib.host_generation import ensure_instance_generation"
+        },
+        {
+          "line": 86,
+          "anchor": "from lib.config_writer import set_toml_value"
+        },
+        {
+          "line": 92,
+          "anchor": "from lib import db"
+        },
+        {
+          "line": 93,
+          "anchor": "db.conn()"
+        },
+        {
+          "line": 94,
+          "anchor": "from lib.server_identity import get_server_info"
+        },
+        {
+          "line": 99,
+          "anchor": "from lib import managed_skills"
+        },
+        {
+          "line": 103,
+          "anchor": "from lib.personal_skills import repair_links as repair_personal_skill_links"
+        },
+        {
+          "line": 106,
+          "anchor": "from lib.device_pairing import list_devices, issue"
+        }
+      ]
+    },
+    {
+      "path": "install.sh",
+      "anchors": [
+        {
+          "line": 363,
+          "anchor": "'import sys; from lib import service_manager; service_manager.restore_after_failed_install(had_previous=bool(int(sys.argv[1])), had_runtime_previous=bool(int(sys.argv[2])))' \\"
+        },
+        {
+          "line": 608,
+          "anchor": "from lib import service_manager"
+        },
+        {
+          "line": 623,
+          "anchor": "from lib import service_manager"
+        },
+        {
+          "line": 645,
+          "anchor": "from lib.backend.agy_hooks import configure_hooks"
+        }
+      ]
+    },
+    {
+      "path": "plugin/hooks/_hook_report.py",
+      "anchors": [
+        {
+          "line": 34,
+          "anchor": "from lib.eventlog import emit"
+        },
+        {
+          "line": 40,
+          "anchor": "from lib.paths import RuntimePaths"
+        }
+      ]
+    },
+    {
+      "path": "plugin/hooks/agy_state.py",
+      "anchors": [
+        {
+          "line": 24,
+          "anchor": "con = sqlite3.connect(f\"file:{database}?mode=ro\", uri=True, timeout=0.5)"
+        },
+        {
+          "line": 43,
+          "anchor": "from lib.backend.agy_hooks import record_event"
+        }
+      ]
+    },
+    {
+      "path": "plugin/hooks/notification_state.py",
+      "anchors": [
+        {
+          "line": 17,
+          "anchor": "from lib import agents as _agents             # noqa: E402"
+        },
+        {
+          "line": 18,
+          "anchor": "from lib import turn_lifecycle                # noqa: E402"
+        },
+        {
+          "line": 19,
+          "anchor": "from lib.hook_runtime import app_session  # noqa: E402"
+        },
+        {
+          "line": 24,
+          "anchor": "from lib.eventlog import emit as _emit    # noqa: E402"
+        }
+      ]
+    },
+    {
+      "path": "plugin/hooks/pre_compact.py",
+      "anchors": [
+        {
+          "line": 19,
+          "anchor": "from lib import agents as _agents             # noqa: E402"
+        },
+        {
+          "line": 20,
+          "anchor": "from lib import turn_lifecycle                # noqa: E402"
+        },
+        {
+          "line": 21,
+          "anchor": "from lib.hook_runtime import app_session  # noqa: E402"
+        },
+        {
+          "line": 26,
+          "anchor": "from lib.eventlog import emit as _emit    # noqa: E402"
+        }
+      ]
+    },
+    {
+      "path": "plugin/hooks/pwa_source_flag.py",
+      "anchors": [
+        {
+          "line": 23,
+          "anchor": "from lib import agents as _agents                # noqa: E402"
+        },
+        {
+          "line": 25,
+          "anchor": "from lib import turn_lifecycle                   # noqa: E402"
+        },
+        {
+          "line": 26,
+          "anchor": "from lib.transcript_cursor import CursorStoreError, reset_spoken_first_all  # noqa: E402"
+        },
+        {
+          "line": 27,
+          "anchor": "from lib.hook_runtime import app_session  # noqa: E402"
+        },
+        {
+          "line": 28,
+          "anchor": "from lib.paths import RuntimePaths                # noqa: E402"
+        },
+        {
+          "line": 29,
+          "anchor": "from lib.protocol import TurnSource               # noqa: E402"
+        },
+        {
+          "line": 30,
+          "anchor": "from lib.timing import HOOK_TIMING                # noqa: E402"
+        },
+        {
+          "line": 35,
+          "anchor": "from lib.eventlog import emit as _emit_event  # noqa: E402"
+        },
+        {
+          "line": 247,
+          "anchor": "from lib.clarp_guidance import identity_line"
+        },
+        {
+          "line": 259,
+          "anchor": "from lib import group_calls"
+        },
+        {
+          "line": 269,
+          "anchor": "from lib import voice_humanness"
+        },
+        {
+          "line": 281,
+          "anchor": "from lib.clarp_guidance import CLARP_SKILLS_GUIDANCE"
+        }
+      ]
+    },
+    {
+      "path": "plugin/hooks/stop_state.py",
+      "anchors": [
+        {
+          "line": 20,
+          "anchor": "from lib import agents as _agents             # noqa: E402"
+        },
+        {
+          "line": 21,
+          "anchor": "from lib import turn_lifecycle                # noqa: E402"
+        },
+        {
+          "line": 22,
+          "anchor": "from lib.hook_runtime import app_session  # noqa: E402"
+        },
+        {
+          "line": 27,
+          "anchor": "from lib.eventlog import emit as _emit    # noqa: E402"
+        }
+      ]
+    },
+    {
+      "path": "plugin/hooks/subagent_stop.py",
+      "anchors": [
+        {
+          "line": 17,
+          "anchor": "from lib import agents as _agents             # noqa: E402"
+        },
+        {
+          "line": 18,
+          "anchor": "from lib.hook_runtime import app_session  # noqa: E402"
+        },
+        {
+          "line": 23,
+          "anchor": "from lib.eventlog import emit as _emit    # noqa: E402"
+        }
+      ]
+    },
+    {
+      "path": "plugin/hooks/tool_activity.py",
+      "anchors": [
+        {
+          "line": 12,
+          "anchor": "from lib import agents as agents_db  # noqa: E402"
+        },
+        {
+          "line": 14,
+          "anchor": "from lib import turn_lifecycle  # noqa: E402"
+        },
+        {
+          "line": 15,
+          "anchor": "from lib.activity import summarize_tool_activity, tool_input_from_hook_payload  # noqa: E402"
+        },
+        {
+          "line": 16,
+          "anchor": "from lib.hook_runtime import app_session  # noqa: E402"
+        },
+        {
+          "line": 17,
+          "anchor": "from lib.protocol import ActivityStatus  # noqa: E402"
+        },
+        {
+          "line": 65,
+          "anchor": "from lib.backend.claude_background_provenance import ("
+        },
+        {
+          "line": 67,
+          "anchor": "from lib.provider_background_jobs import TURN_ENV, record_task_turn"
+        }
+      ]
+    },
+    {
+      "path": "plugin/hooks/tool_finished.py",
+      "anchors": [
+        {
+          "line": 13,
+          "anchor": "from lib import agents as agents_db                  # noqa: E402"
+        },
+        {
+          "line": 15,
+          "anchor": "from lib import turn_lifecycle                       # noqa: E402"
+        },
+        {
+          "line": 16,
+          "anchor": "from lib.activity import (                           # noqa: E402"
+        },
+        {
+          "line": 21,
+          "anchor": "from lib.hook_runtime import HookLogger, app_session  # noqa: E402"
+        },
+        {
+          "line": 22,
+          "anchor": "from lib.paths import RuntimePaths                  # noqa: E402"
+        },
+        {
+          "line": 30,
+          "anchor": "from lib.eventlog import emit as _emit_event"
+        }
+      ]
+    },
+    {
+      "path": "scripts/agent_artifacts.py",
+      "anchors": [
+        {
+          "line": 184,
+          "anchor": "from lib.html_forms import connect_origins"
+        },
+        {
+          "line": 214,
+          "anchor": "from lib.html_forms import connect_origins"
+        }
+      ]
+    },
+    {
+      "path": "scripts/agent_bg.py",
+      "anchors": [
+        {
+          "line": 34,
+          "anchor": "from lib import agents               # noqa: E402"
+        },
+        {
+          "line": 35,
+          "anchor": "from lib.protocol import AgentState  # noqa: E402"
+        },
+        {
+          "line": 36,
+          "anchor": "from lib.status_labels import shorten_status_label  # noqa: E402"
+        },
+        {
+          "line": 40,
+          "anchor": "from lib import background_jobs"
+        },
+        {
+          "line": 45,
+          "anchor": "from lib import background_jobs"
+        },
+        {
+          "line": 54,
+          "anchor": "from lib import background_jobs"
+        },
+        {
+          "line": 68,
+          "anchor": "from lib import background_jobs"
+        },
+        {
+          "line": 78,
+          "anchor": "from lib import background_jobs"
+        },
+        {
+          "line": 83,
+          "anchor": "from lib import background_jobs"
+        },
+        {
+          "line": 91,
+          "anchor": "from lib import background_jobs"
+        },
+        {
+          "line": 98,
+          "anchor": "from lib import background_jobs"
+        },
+        {
+          "line": 109,
+          "anchor": "from lib import background_jobs"
+        },
+        {
+          "line": 137,
+          "anchor": "from lib import background_jobs"
+        },
+        {
+          "line": 144,
+          "anchor": "from lib import background_jobs"
+        },
+        {
+          "line": 160,
+          "anchor": "from lib import background_jobs"
+        },
+        {
+          "line": 166,
+          "anchor": "from lib import background_jobs"
+        },
+        {
+          "line": 200,
+          "anchor": "from lib import background_jobs"
+        }
+      ]
+    },
+    {
+      "path": "scripts/agent_tasks.py",
+      "anchors": [
+        {
+          "line": 14,
+          "anchor": "from lib import task_plans  # noqa: E402"
+        },
+        {
+          "line": 31,
+          "anchor": "from lib import goal_ledger"
+        },
+        {
+          "line": 41,
+          "anchor": "from lib import turn_identity"
+        },
+        {
+          "line": 55,
+          "anchor": "from lib import goal_ledger, turn_identity"
+        },
+        {
+          "line": 77,
+          "anchor": "from lib import goal_ledger"
+        },
+        {
+          "line": 115,
+          "anchor": "from lib import task_goal_state"
+        }
+      ]
+    },
+    {
+      "path": "scripts/benchmark_server_hotpaths.py",
+      "anchors": [
+        {
+          "line": 31,
+          "anchor": "from lib import agents, db"
+        },
+        {
+          "line": 32,
+          "anchor": "from lib.snapshot import build_agent_snapshot"
+        },
+        {
+          "line": 40,
+          "anchor": "db.conn().set_trace_callback(statements.append)"
+        },
+        {
+          "line": 42,
+          "anchor": "db.conn().set_trace_callback(None)"
+        },
+        {
+          "line": 66,
+          "anchor": "con = sqlite3.connect(path, timeout=10, isolation_level=None,"
+        },
+        {
+          "line": 87,
+          "anchor": "with sqlite3.connect(f\"file:{args.database}?mode=ro\", uri=True) as source, \\"
+        },
+        {
+          "line": 88,
+          "anchor": "sqlite3.connect(snapshot) as target:"
+        }
+      ]
+    },
+    {
+      "path": "scripts/debug_bundle.py",
+      "anchors": [
+        {
+          "line": 10,
+          "anchor": "with sqlite3.connect(path.resolve().as_uri() + '?mode=ro', uri=True) as db:"
+        }
+      ]
+    },
+    {
+      "path": "scripts/find-session.sh",
+      "anchors": [
+        {
+          "line": 33,
+          "anchor": "exec sqlite3 -header -column \"$DB\" \"$QUERY\""
+        }
+      ]
+    },
+    {
+      "path": "scripts/generate_orchestrator_phrases.py",
+      "anchors": [
+        {
+          "line": 17,
+          "anchor": "from lib import agents as agents_db  # noqa: E402"
+        },
+        {
+          "line": 18,
+          "anchor": "from lib import config  # noqa: E402"
+        },
+        {
+          "line": 19,
+          "anchor": "from lib.cartesia_tts import synthesize as cartesia_synthesize  # noqa: E402"
+        },
+        {
+          "line": 20,
+          "anchor": "from lib.db import conn, now_ms  # noqa: E402"
+        },
+        {
+          "line": 21,
+          "anchor": "from lib.orchestrator import ORCHESTRATOR_VOICE_ID  # noqa: E402"
+        },
+        {
+          "line": 22,
+          "anchor": "from lib.paths import RuntimePaths  # noqa: E402"
+        },
+        {
+          "line": 23,
+          "anchor": "from lib.tts_engine import make_clip_filename  # noqa: E402"
+        }
+      ]
+    },
+    {
+      "path": "scripts/github_workflow_artifact.py",
+      "anchors": [
+        {
+          "line": 8,
+          "anchor": "from lib import service_manager  # type: ignore"
+        }
+      ]
+    },
+    {
+      "path": "scripts/inspect_oracle.py",
+      "anchors": [
+        {
+          "line": 10,
+          "anchor": "from lib import xdg"
+        }
+      ]
+    },
+    {
+      "path": "scripts/leader_decision.py",
+      "anchors": [
+        {
+          "line": 13,
+          "anchor": "from lib.leader_memory import main  # noqa: E402"
+        }
+      ]
+    },
+    {
+      "path": "scripts/live_console.py",
+      "anchors": [
+        {
+          "line": 33,
+          "anchor": "con = sqlite3.connect(uri, uri=True, timeout=2.0)"
+        }
+      ]
+    },
+    {
+      "path": "scripts/migration_rehearsal.py",
+      "anchors": [
+        {
+          "line": 80,
+          "anchor": "from lib import db"
+        },
+        {
+          "line": 81,
+          "anchor": "con = sqlite3.connect(sys.argv[2])"
+        },
+        {
+          "line": 82,
+          "anchor": "db._migrate(con)"
+        },
+        {
+          "line": 93,
+          "anchor": "from lib import db, db_migrations"
+        },
+        {
+          "line": 96,
+          "anchor": "db_migrations._migrate(con)"
+        },
+        {
+          "line": 239,
+          "anchor": "con = sqlite3.connect(f\"file:{source}?mode=ro\", uri=True, isolation_level=None)"
+        },
+        {
+          "line": 341,
+          "anchor": "con = sqlite3.connect(str(db_path))"
+        },
+        {
+          "line": 352,
+          "anchor": "con = sqlite3.connect(str(db_path))"
+        }
+      ]
+    },
+    {
+      "path": "scripts/pair_docker_test_client.py",
+      "anchors": [
+        {
+          "line": 23,
+          "anchor": "'from lib.device_pairing import issue; print(issue(device_name=\"Disposable CI client\", scope=\"full\")[\"code\"])',"
+        }
+      ]
+    },
+    {
+      "path": "scripts/portrait_generation_job.py",
+      "anchors": [
+        {
+          "line": 19,
+          "anchor": "from lib import background_jobs, portrait_generation  # noqa: E402"
+        }
+      ]
+    },
+    {
+      "path": "scripts/probe_explanation_jev.py",
+      "anchors": [
+        {
+          "line": 68,
+          "anchor": "from lib import judgment_sites, judgments, settings_store"
+        },
+        {
+          "line": 69,
+          "anchor": "from lib import tool_explanation_templates as templates"
+        },
+        {
+          "line": 70,
+          "anchor": "from lib.tool_explanations import normalize_activity"
+        }
+      ]
+    },
+    {
+      "path": "scripts/probe_podcast_history.py",
+      "anchors": [
+        {
+          "line": 28,
+          "anchor": "from lib import agents,artifacts,db,media_store,podcast_history as history,podcast_live"
+        },
+        {
+          "line": 61,
+          "anchor": "'schema':db.conn().execute('PRAGMA user_version').fetchone()[0]}"
+        }
+      ]
+    },
+    {
+      "path": "scripts/probe_provider_fallbacks.py",
+      "anchors": [
+        {
+          "line": 41,
+          "anchor": "from lib import model_fallbacks"
+        },
+        {
+          "line": 90,
+          "anchor": "from lib import backends as registry, db"
+        }
+      ]
+    },
+    {
+      "path": "scripts/run_orchestrator_scenarios.py",
+      "anchors": [
+        {
+          "line": 16,
+          "anchor": "from lib import agents as agents_db  # noqa: E402"
+        },
+        {
+          "line": 17,
+          "anchor": "from lib import db  # noqa: E402"
+        },
+        {
+          "line": 18,
+          "anchor": "from lib.orchestrator import OrchestratorService  # noqa: E402"
+        },
+        {
+          "line": 19,
+          "anchor": "from lib.tts_engine import FakeTTSEngine  # noqa: E402"
+        },
+        {
+          "line": 56,
+          "anchor": "from lib.db import conn, now_ms"
+        }
+      ]
+    },
+    {
+      "path": "scripts/server_update_job.py",
+      "anchors": [
+        {
+          "line": 19,
+          "anchor": "from lib import background_jobs  # noqa: E402"
+        },
+        {
+          "line": 20,
+          "anchor": "from lib.server_update import UPDATE_JOB_ID  # noqa: E402"
+        }
+      ]
+    },
+    {
+      "path": "scripts/simulate-server-conversation.py",
+      "anchors": [
+        {
+          "line": 28,
+          "anchor": "from lib.audio_stream import AudioStream                # noqa: E402"
+        },
+        {
+          "line": 29,
+          "anchor": "from lib.herald import HeraldManager                    # noqa: E402"
+        },
+        {
+          "line": 30,
+          "anchor": "from lib.tts_engine import FakeTTSEngine                # noqa: E402"
+        }
+      ]
+    },
+    {
+      "path": "scripts/sqlite-query.sh",
+      "anchors": [
+        {
+          "line": 13,
+          "anchor": "exec sqlite3 -cmd \".headers on\" -cmd \".mode column\" \\"
+        }
+      ]
+    },
+    {
+      "path": "scripts/test_clarp_pipeline.py",
+      "anchors": [
+        {
+          "line": 59,
+          "anchor": "c = sqlite3.connect(DB)"
+        }
+      ]
+    },
+    {
+      "path": "scripts/test_docker_node.sh",
+      "anchors": [
+        {
+          "line": 62,
+          "anchor": "db = sqlite3.connect(\"/data/clarp/state.sqlite\")"
+        },
+        {
+          "line": 83,
+          "anchor": "python3 -c \"from lib import service_manager; ok,error=service_manager.launch_detached([\\\"/bin/true\\\"],unit=\\\"clarp-smoke\\\"); assert ok, error\""
+        },
+        {
+          "line": 88,
+          "anchor": "from lib import agents"
+        }
+      ]
+    },
+    {
+      "path": "scripts/test_e2e_docker.sh",
+      "anchors": [
+        {
+          "line": 67,
+          "anchor": "from lib.roster_seed import seed_defaults"
+        }
+      ]
+    },
+    {
+      "path": "scripts/transcription_model_job.py",
+      "anchors": [
+        {
+          "line": 29,
+          "anchor": "from lib import background_jobs, transcription_models  # noqa: E402"
+        }
+      ]
+    },
+    {
+      "path": "scripts/tts_streaming_demo.py",
+      "anchors": [
+        {
+          "line": 35,
+          "anchor": "from lib.config import load as load_config         # noqa: E402"
+        },
+        {
+          "line": 36,
+          "anchor": "from lib.eleven_http import synthesize_to_file     # noqa: E402"
+        }
+      ]
+    },
+    {
+      "path": "scripts/verify_raw_pcm_stream.py",
+      "anchors": [
+        {
+          "line": 29,
+          "anchor": "from lib.cartesia_ws import synthesize_raw_pcm  # noqa: E402"
+        },
+        {
+          "line": 30,
+          "anchor": "from lib.clip_stream import ClipStreamBroker, _serve_live_chunked  # noqa: E402"
+        },
+        {
+          "line": 31,
+          "anchor": "from lib.config import load as load_config  # noqa: E402"
+        }
+      ]
+    },
+    {
+      "path": "scripts/viz_activate_view.py",
+      "anchors": [
+        {
+          "line": 5,
+          "anchor": "from lib import viz_library"
+        }
+      ]
+    },
+    {
+      "path": "scripts/viz_author.py",
+      "anchors": [
+        {
+          "line": 12,
+          "anchor": "from lib import viz_corpus, viz_normalize, viz_rule_author, viz_library"
+        },
+        {
+          "line": 27,
+          "anchor": "con = sqlite3.connect(a.db.resolve().as_uri() + '?mode=ro', uri=True)"
+        },
+        {
+          "line": 32,
+          "anchor": "from lib import db"
+        }
+      ]
+    },
+    {
+      "path": "scripts/viz_evolve.py",
+      "anchors": [
+        {
+          "line": 5,
+          "anchor": "from lib import db,viz_library,viz_normalize,viz_rule_author"
+        },
+        {
+          "line": 12,
+          "anchor": "con=sqlite3.connect(a.db.resolve().as_uri()+'?mode=ro',uri=True);con.row_factory=sqlite3.Row"
+        }
+      ]
+    },
+    {
+      "path": "scripts/viz_preview.py",
+      "anchors": [
+        {
+          "line": 18,
+          "anchor": "from lib import db, viz_learning, viz_library"
+        },
+        {
+          "line": 35,
+          "anchor": "con = sqlite3.connect(a.db.resolve().as_uri() + '?mode=ro', uri=True)"
+        },
+        {
+          "line": 87,
+          "anchor": "from lib.viz_owner_avatar import portrait"
+        },
+        {
+          "line": 98,
+          "anchor": "row=db.conn().execute('SELECT storage_path,mime_type FROM media_assets WHERE asset_id=? AND deleted_at IS NULL',(asset_id,)).fetchone()"
+        },
+        {
+          "line": 129,
+          "anchor": "row=db.conn().execute('SELECT avatar_path FROM agents WHERE agent_id=?',(identity,)).fetchone()"
+        },
+        {
+          "line": 148,
+          "anchor": "from lib import viz_normalize"
+        }
+      ]
+    },
+    {
+      "path": "scripts/viz_publish_flow.py",
+      "anchors": [
+        {
+          "line": 17,
+          "anchor": "from lib import viz_library"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/agent_portraits.py",
+      "anchors": [
+        {
+          "line": 33,
+          "anchor": "asset = db.conn().execute("
+        },
+        {
+          "line": 47,
+          "anchor": "con = db.conn()"
+        },
+        {
+          "line": 84,
+          "anchor": "con = db.conn()"
+        },
+        {
+          "line": 124,
+          "anchor": "row = db.conn().execute("
+        },
+        {
+          "line": 137,
+          "anchor": "con = db.conn()"
+        },
+        {
+          "line": 173,
+          "anchor": "row = db.conn().execute("
+        },
+        {
+          "line": 184,
+          "anchor": "con = db.conn()"
+        },
+        {
+          "line": 270,
+          "anchor": "rows = [dict(row) for row in db.conn().execute("
+        }
+      ]
+    },
+    {
+      "path": "server/lib/agent_ring_live.py",
+      "anchors": [
+        {
+          "line": 377,
+          "anchor": "row = db.conn().execute(\"SELECT scope,revoked_at FROM paired_devices WHERE device_id=?\", (principal,)).fetchone()"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/agent_ring_openings.py",
+      "anchors": [
+        {
+          "line": 173,
+          "anchor": "con = db.conn()"
+        },
+        {
+          "line": 275,
+          "anchor": "row = db.conn().execute(\"SELECT token_hash FROM paired_devices WHERE device_id = ?\","
+        },
+        {
+          "line": 290,
+          "anchor": "con = db.conn()"
+        },
+        {
+          "line": 361,
+          "anchor": "row = db.conn().execute("
+        },
+        {
+          "line": 376,
+          "anchor": "row = db.conn().execute(\"SELECT channel FROM prompt_admissions WHERE admission_id = ?\","
+        },
+        {
+          "line": 382,
+          "anchor": "row = db.conn().execute(\"SELECT prompt_admission_id FROM queued_turns WHERE queue_id = ?\","
+        },
+        {
+          "line": 389,
+          "anchor": "return db.conn().execute(\"SELECT status, claimed_at, trace_id FROM queued_turns WHERE queue_id = ?\","
+        },
+        {
+          "line": 741,
+          "anchor": "con = db.conn()"
+        },
+        {
+          "line": 971,
+          "anchor": "for candidate in db.conn().execute(sql, args).fetchall():"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/agy_transcript.py",
+      "anchors": [
+        {
+          "line": 382,
+          "anchor": "con = sqlite3.connect(f\"file:{path}?mode=ro\", uri=True, timeout=1)"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/apns.py",
+      "anchors": [
+        {
+          "line": 170,
+          "anchor": "database = db.conn()"
+        },
+        {
+          "line": 275,
+          "anchor": "rows = db.conn().execute("
+        },
+        {
+          "line": 285,
+          "anchor": "db.conn().execute("
+        },
+        {
+          "line": 295,
+          "anchor": "db.conn().execute("
+        },
+        {
+          "line": 302,
+          "anchor": "db.conn().execute("
+        },
+        {
+          "line": 1594,
+          "anchor": "database = db.conn()"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/application_activity.py",
+      "anchors": [
+        {
+          "line": 47,
+          "anchor": "if value[\"owner\"] == \"administrator\" or db.conn().execute(\"SELECT 1 FROM paired_devices WHERE device_id=? AND revoked_at IS NULL AND scope='full'\", (value[\"owner\"],)).fetchone():"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/artifacts.py",
+      "anchors": [
+        {
+          "line": 273,
+          "anchor": "db.conn().execute("
+        },
+        {
+          "line": 286,
+          "anchor": "row = db.conn().execute("
+        },
+        {
+          "line": 295,
+          "anchor": "plan = db.conn().execute("
+        },
+        {
+          "line": 302,
+          "anchor": "db.conn().execute("
+        },
+        {
+          "line": 325,
+          "anchor": "decision = db.conn().execute("
+        },
+        {
+          "line": 659,
+          "anchor": "row = db.conn().execute("
+        },
+        {
+          "line": 689,
+          "anchor": "page = [row[0] for row in db.conn().execute("
+        },
+        {
+          "line": 696,
+          "anchor": "rows = {row[\"artifact_id\"]: row for row in db.conn().execute("
+        },
+        {
+          "line": 733,
+          "anchor": "db.conn().execute("
+        },
+        {
+          "line": 860,
+          "anchor": "con = db.conn(); con.execute(\"BEGIN IMMEDIATE\")"
+        },
+        {
+          "line": 940,
+          "anchor": "con = db.conn(); con.execute(\"BEGIN IMMEDIATE\")"
+        },
+        {
+          "line": 974,
+          "anchor": "con = db.conn(); con.execute(\"BEGIN IMMEDIATE\")"
+        },
+        {
+          "line": 1022,
+          "anchor": "con = db.conn(); con.execute(\"BEGIN IMMEDIATE\")"
+        },
+        {
+          "line": 1043,
+          "anchor": "con = db.conn(); con.execute(\"BEGIN IMMEDIATE\")"
+        },
+        {
+          "line": 1059,
+          "anchor": "con = db.conn(); con.execute(\"BEGIN IMMEDIATE\")"
+        },
+        {
+          "line": 1079,
+          "anchor": "con = db.conn(); con.execute(\"BEGIN IMMEDIATE\")"
+        },
+        {
+          "line": 1107,
+          "anchor": "con = db.conn(); con.execute(\"BEGIN IMMEDIATE\")"
+        },
+        {
+          "line": 1124,
+          "anchor": "rows = db.conn().execute("
+        },
+        {
+          "line": 1136,
+          "anchor": "return db.conn().execute("
+        },
+        {
+          "line": 1159,
+          "anchor": "row = db.conn().execute("
+        },
+        {
+          "line": 1172,
+          "anchor": "rows = db.conn().execute("
+        },
+        {
+          "line": 1198,
+          "anchor": "for row in db.conn().execute("
+        },
+        {
+          "line": 1232,
+          "anchor": "db.conn().execute("
+        },
+        {
+          "line": 1238,
+          "anchor": "row = db.conn().execute("
+        },
+        {
+          "line": 1245,
+          "anchor": "now = db.now_ms(); con = db.conn()"
+        },
+        {
+          "line": 1271,
+          "anchor": "now = db.now_ms(); con = db.conn()"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/attention_index.py",
+      "anchors": [
+        {
+          "line": 57,
+          "anchor": "c=db.conn();c.execute('SAVEPOINT attention_read')"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/audio_bookkeeper.py",
+      "anchors": [
+        {
+          "line": 37,
+          "anchor": "rows = db.conn().execute(_PENDING_SQL, (ROLE, max(1, min(int(limit), 128)))).fetchall()"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/backend/agy.py",
+      "anchors": [
+        {
+          "line": 214,
+          "anchor": "for row in db.conn().execute("
+        },
+        {
+          "line": 294,
+          "anchor": "row = agents_db.conn().execute("
+        }
+      ]
+    },
+    {
+      "path": "server/lib/backend/codex.py",
+      "anchors": [
+        {
+          "line": 788,
+          "anchor": "with sqlite3.connect(f\"file:{self._home() / 'state_5.sqlite'}?mode=ro\","
+        }
+      ]
+    },
+    {
+      "path": "server/lib/backend/muse.py",
+      "anchors": [
+        {
+          "line": 180,
+          "anchor": "row = db.conn().execute('''SELECT agent_id,provider,pid,start_token FROM provider_turns"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/backend_usage.py",
+      "anchors": [
+        {
+          "line": 171,
+          "anchor": "database = db.conn()"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/backend_usage_codex.py",
+      "anchors": [
+        {
+          "line": 25,
+          "anchor": "structured = db.conn().execute("
+        },
+        {
+          "line": 387,
+          "anchor": "database = db.conn()"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/backend_usage_store.py",
+      "anchors": [
+        {
+          "line": 127,
+          "anchor": "db.conn().execute("
+        },
+        {
+          "line": 153,
+          "anchor": "row = db.conn().execute("
+        },
+        {
+          "line": 169,
+          "anchor": "db.conn().execute("
+        },
+        {
+          "line": 454,
+          "anchor": "database = db.conn()"
+        },
+        {
+          "line": 472,
+          "anchor": "database = db.conn()"
+        },
+        {
+          "line": 534,
+          "anchor": "database = db.conn()"
+        },
+        {
+          "line": 620,
+          "anchor": "db.conn().execute("
+        },
+        {
+          "line": 685,
+          "anchor": "database = db.conn()"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/background_jobs.py",
+      "anchors": [
+        {
+          "line": 48,
+          "anchor": "rows = db.conn().execute("
+        },
+        {
+          "line": 169,
+          "anchor": "c = db.conn()"
+        },
+        {
+          "line": 285,
+          "anchor": "row = db.conn().execute("
+        },
+        {
+          "line": 296,
+          "anchor": "changed = db.conn().execute("
+        },
+        {
+          "line": 309,
+          "anchor": "c = db.conn()"
+        },
+        {
+          "line": 400,
+          "anchor": "c = db.conn()"
+        },
+        {
+          "line": 480,
+          "anchor": "c = db.conn()"
+        },
+        {
+          "line": 537,
+          "anchor": "c = db.conn()"
+        },
+        {
+          "line": 565,
+          "anchor": "c = db.conn()"
+        },
+        {
+          "line": 584,
+          "anchor": "c = db.conn()"
+        },
+        {
+          "line": 601,
+          "anchor": "rows = db.conn().execute("
+        },
+        {
+          "line": 741,
+          "anchor": "row = db.conn().execute("
+        },
+        {
+          "line": 756,
+          "anchor": "c = db.conn()"
+        },
+        {
+          "line": 783,
+          "anchor": "c = db.conn()"
+        },
+        {
+          "line": 806,
+          "anchor": "row = db.conn().execute("
+        },
+        {
+          "line": 820,
+          "anchor": "row = db.conn().execute("
+        },
+        {
+          "line": 836,
+          "anchor": "c = db.conn()"
+        },
+        {
+          "line": 913,
+          "anchor": "rows = db.conn().execute("
+        },
+        {
+          "line": 994,
+          "anchor": "c = db.conn()"
+        },
+        {
+          "line": 1025,
+          "anchor": "c = db.conn()"
+        },
+        {
+          "line": 1052,
+          "anchor": "rows = db.conn().execute("
+        },
+        {
+          "line": 1061,
+          "anchor": "row = db.conn().execute("
+        },
+        {
+          "line": 1073,
+          "anchor": "c = db.conn()"
+        },
+        {
+          "line": 1342,
+          "anchor": "bound = db.conn().execute(\"SELECT 1 FROM runtimes WHERE agent_id=? AND backend_session_id=? AND ended_at IS NULL\","
+        }
+      ]
+    },
+    {
+      "path": "server/lib/bookkeeping_listener.py",
+      "anchors": [
+        {
+          "line": 47,
+          "anchor": "return db.conn().execute(\"SELECT * FROM goal_delegations WHERE delegation_id=?\","
+        },
+        {
+          "line": 66,
+          "anchor": "message, event, newest, _ = goal_ledger.unbooked_activity(db.conn(), row)"
+        },
+        {
+          "line": 79,
+          "anchor": "con = db.conn()"
+        },
+        {
+          "line": 123,
+          "anchor": "if not goal_ledger.agents_live(db.conn(), row):"
+        },
+        {
+          "line": 127,
+          "anchor": "backends = [r[0] for r in db.conn().execute("
+        },
+        {
+          "line": 143,
+          "anchor": "_update(delegation_id, unapplied_since=goal_ledger.unapplied_since(db.conn(), row, now))"
+        },
+        {
+          "line": 177,
+          "anchor": "agents = {r[0]: r[1] for r in db.conn().execute("
+        },
+        {
+          "line": 243,
+          "anchor": "if not goal_ledger.agents_live(db.conn(), row):"
+        },
+        {
+          "line": 246,
+          "anchor": "sessions = {r[0]: r[1] for r in db.conn().execute("
+        },
+        {
+          "line": 342,
+          "anchor": "for delegation_id, heartbeat in db.conn().execute("
+        }
+      ]
+    },
+    {
+      "path": "server/lib/clip_stream.py",
+      "anchors": [
+        {
+          "line": 430,
+          "anchor": "row = db.conn().execute("
+        },
+        {
+          "line": 445,
+          "anchor": "row = db.conn().execute("
+        }
+      ]
+    },
+    {
+      "path": "server/lib/codex_transcript.py",
+      "anchors": [
+        {
+          "line": 713,
+          "anchor": "with sqlite3.connect(uri, uri=True, timeout=1) as conn:"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/contact_assignment.py",
+      "anchors": [
+        {
+          "line": 58,
+          "anchor": "connection = db.conn()"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/conversation.py",
+      "anchors": [
+        {
+          "line": 49,
+          "anchor": "row = agents_db.conn().execute("
+        },
+        {
+          "line": 119,
+          "anchor": "has_stored_history = agents_db.conn().execute("
+        }
+      ]
+    },
+    {
+      "path": "server/lib/db.py",
+      "anchors": [
+        {
+          "line": 280,
+          "anchor": "con = sqlite3.connect(str(DB_PATH), timeout=SQLITE_CONNECT_TIMEOUT_SEC,"
+        },
+        {
+          "line": 533,
+          "anchor": "con = sqlite3.connect(str(DB_PATH), timeout=SQLITE_CONNECT_TIMEOUT_SEC,"
+        },
+        {
+          "line": 582,
+          "anchor": "db_migrations._migrate(c)"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/desktop_presence.py",
+      "anchors": [
+        {
+          "line": 60,
+          "anchor": "if db.conn().execute('''SELECT 1 FROM paired_devices"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/device_pairing.py",
+      "anchors": [
+        {
+          "line": 40,
+          "anchor": "connection = db.conn()"
+        },
+        {
+          "line": 61,
+          "anchor": "connection = db.conn()"
+        },
+        {
+          "line": 102,
+          "anchor": "row = db.conn().execute("
+        },
+        {
+          "line": 127,
+          "anchor": "rows = db.conn().execute("
+        },
+        {
+          "line": 136,
+          "anchor": "result = db.conn().execute("
+        }
+      ]
+    },
+    {
+      "path": "server/lib/dispatch_adapters.py",
+      "anchors": [
+        {
+          "line": 83,
+          "anchor": "return turn_queue.is_paused(agent_id) or db.conn().execute("
+        }
+      ]
+    },
+    {
+      "path": "server/lib/dreaming.py",
+      "anchors": [
+        {
+          "line": 224,
+          "anchor": "row = db.conn().execute("
+        },
+        {
+          "line": 239,
+          "anchor": "db.conn().execute("
+        },
+        {
+          "line": 249,
+          "anchor": "db.conn().execute("
+        },
+        {
+          "line": 258,
+          "anchor": "db.conn().execute("
+        },
+        {
+          "line": 414,
+          "anchor": "db.conn().execute("
+        }
+      ]
+    },
+    {
+      "path": "server/lib/dreaming_prompt.py",
+      "anchors": [
+        {
+          "line": 293,
+          "anchor": "rows = db.conn().execute("
+        },
+        {
+          "line": 380,
+          "anchor": "row = db.conn().execute("
+        }
+      ]
+    },
+    {
+      "path": "server/lib/dreaming_run_lookup.py",
+      "anchors": [
+        {
+          "line": 12,
+          "anchor": "row = db.conn().execute("
+        }
+      ]
+    },
+    {
+      "path": "server/lib/dreaming_store.py",
+      "anchors": [
+        {
+          "line": 58,
+          "anchor": "row = db.conn().execute("
+        },
+        {
+          "line": 67,
+          "anchor": "row = db.conn().execute("
+        },
+        {
+          "line": 77,
+          "anchor": "rows = db.conn().execute("
+        },
+        {
+          "line": 111,
+          "anchor": "inserted = db.conn().execute("
+        },
+        {
+          "line": 185,
+          "anchor": "runs = db.conn().execute("
+        },
+        {
+          "line": 195,
+          "anchor": "dict(r) for r in db.conn().execute("
+        },
+        {
+          "line": 216,
+          "anchor": "for r in db.conn().execute("
+        },
+        {
+          "line": 240,
+          "anchor": "sent = db.conn().execute("
+        },
+        {
+          "line": 249,
+          "anchor": "queued = db.conn().execute("
+        },
+        {
+          "line": 265,
+          "anchor": "claimed = db.conn().execute("
+        },
+        {
+          "line": 278,
+          "anchor": "db.conn().execute("
+        },
+        {
+          "line": 294,
+          "anchor": "db.conn().execute("
+        },
+        {
+          "line": 302,
+          "anchor": "db.conn().execute("
+        },
+        {
+          "line": 310,
+          "anchor": "row = db.conn().execute("
+        },
+        {
+          "line": 315,
+          "anchor": "db.conn().execute("
+        },
+        {
+          "line": 323,
+          "anchor": "row = db.conn().execute("
+        },
+        {
+          "line": 337,
+          "anchor": "completed = db.conn().execute("
+        },
+        {
+          "line": 347,
+          "anchor": "db.conn().execute("
+        },
+        {
+          "line": 447,
+          "anchor": "abandoned = db.conn().execute("
+        },
+        {
+          "line": 456,
+          "anchor": "db.conn().execute("
+        },
+        {
+          "line": 586,
+          "anchor": "db.conn().execute("
+        },
+        {
+          "line": 599,
+          "anchor": "db.conn().execute("
+        },
+        {
+          "line": 682,
+          "anchor": "row = db.conn().execute("
+        },
+        {
+          "line": 696,
+          "anchor": "if not db.conn().execute("
+        },
+        {
+          "line": 703,
+          "anchor": "db.conn().execute("
+        },
+        {
+          "line": 892,
+          "anchor": "db.conn().execute("
+        },
+        {
+          "line": 954,
+          "anchor": "dict(r) for r in db.conn().execute("
+        },
+        {
+          "line": 963,
+          "anchor": "dict(r) for r in db.conn().execute("
+        },
+        {
+          "line": 971,
+          "anchor": "row = db.conn().execute("
+        },
+        {
+          "line": 980,
+          "anchor": "r[\"stage\"] for r in db.conn().execute("
+        },
+        {
+          "line": 989,
+          "anchor": "row = db.conn().execute("
+        },
+        {
+          "line": 998,
+          "anchor": "seed = db.conn().execute("
+        },
+        {
+          "line": 1027,
+          "anchor": "db.conn().execute("
+        },
+        {
+          "line": 1037,
+          "anchor": "db.conn().execute("
+        },
+        {
+          "line": 1080,
+          "anchor": "db.conn().execute("
+        },
+        {
+          "line": 1097,
+          "anchor": "row = db.conn().execute("
+        },
+        {
+          "line": 1103,
+          "anchor": "db.conn().execute("
+        }
+      ]
+    },
+    {
+      "path": "server/lib/dreaming_worktree.py",
+      "anchors": [
+        {
+          "line": 111,
+          "anchor": "db.conn().execute("
+        }
+      ]
+    },
+    {
+      "path": "server/lib/goal_ledger.py",
+      "anchors": [
+        {
+          "line": 218,
+          "anchor": "con = db.conn()"
+        },
+        {
+          "line": 224,
+          "anchor": "return bool(agent_id) and db.conn().execute("
+        },
+        {
+          "line": 288,
+          "anchor": "con = con or db.conn()"
+        },
+        {
+          "line": 416,
+          "anchor": "con = db.conn()"
+        },
+        {
+          "line": 480,
+          "anchor": "con = db.conn()"
+        },
+        {
+          "line": 512,
+          "anchor": "db.conn().execute("
+        },
+        {
+          "line": 520,
+          "anchor": "cursor = db.conn().execute("
+        },
+        {
+          "line": 537,
+          "anchor": "row = db.conn().execute(\"SELECT * FROM goal_delegations WHERE delegation_id=?\","
+        },
+        {
+          "line": 546,
+          "anchor": "sessions = {r[0]: r[1] for r in db.conn().execute("
+        },
+        {
+          "line": 570,
+          "anchor": "db.conn().execute(f\"UPDATE goal_delegations SET {columns} WHERE delegation_id=?\","
+        },
+        {
+          "line": 575,
+          "anchor": "return [public_delegation(r) for r in db.conn().execute("
+        },
+        {
+          "line": 581,
+          "anchor": "return (con or db.conn()).execute("
+        },
+        {
+          "line": 588,
+          "anchor": "return bool(sender_agent_id) and db.conn().execute("
+        },
+        {
+          "line": 627,
+          "anchor": "con = db.conn()"
+        },
+        {
+          "line": 674,
+          "anchor": "con = db.conn()"
+        },
+        {
+          "line": 856,
+          "anchor": "rows = db.conn().execute("
+        },
+        {
+          "line": 859,
+          "anchor": "sessions = {r[0]: r[1] for r in db.conn().execute(\"SELECT agent_id, session FROM agents\")}"
+        },
+        {
+          "line": 871,
+          "anchor": "con = db.conn()"
+        },
+        {
+          "line": 888,
+          "anchor": "con = con or db.conn()"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/group_calls.py",
+      "anchors": [
+        {
+          "line": 690,
+          "anchor": "rows = db.conn().execute("
+        }
+      ]
+    },
+    {
+      "path": "server/lib/html_form_events.py",
+      "anchors": [
+        {
+          "line": 41,
+          "anchor": "con = db.conn(); con.execute('BEGIN IMMEDIATE')"
+        },
+        {
+          "line": 66,
+          "anchor": "con = db.conn()"
+        },
+        {
+          "line": 82,
+          "anchor": "row = db.conn().execute('SELECT draft_key FROM html_form_event_config WHERE artifact_id=?', (artifact_id,)).fetchone()"
+        },
+        {
+          "line": 92,
+          "anchor": "db.conn().execute('INSERT INTO html_form_event_config(artifact_id,draft_key) VALUES(?,?) ON CONFLICT(artifact_id) DO UPDATE SET draft_key=excluded.draft_key', (artifact_id,key))"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/html_forms.py",
+      "anchors": [
+        {
+          "line": 134,
+          "anchor": "con = db.conn()"
+        },
+        {
+          "line": 179,
+          "anchor": "return [dict(r) for r in db.conn().execute("
+        },
+        {
+          "line": 187,
+          "anchor": "db.conn().execute(\"UPDATE form_submissions SET status='delivered',delivered_at=? WHERE submission_id=? AND status='pending'\", (db.now_ms(), submission_id))"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/html_report_revisions.py",
+      "anchors": [
+        {
+          "line": 17,
+          "anchor": "db.conn().execute('''INSERT OR IGNORE INTO html_report_revisions"
+        },
+        {
+          "line": 25,
+          "anchor": "con = db.conn()"
+        },
+        {
+          "line": 46,
+          "anchor": "con = db.conn()"
+        },
+        {
+          "line": 77,
+          "anchor": "previous = db.conn().execute('SELECT * FROM html_report_revisions WHERE artifact_id=? AND version=?',"
+        },
+        {
+          "line": 102,
+          "anchor": "row = db.conn().execute('SELECT * FROM html_report_revisions WHERE artifact_id=? AND version=?',"
+        },
+        {
+          "line": 112,
+          "anchor": "rows = db.conn().execute('''SELECT version,title,summary,created_at FROM html_report_revisions"
+        },
+        {
+          "line": 117,
+          "anchor": "if offset or db.conn().execute('SELECT 1 FROM html_report_revisions WHERE artifact_id=? LIMIT 1', (artifact_id,)).fetchone():"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/instance_backup.py",
+      "anchors": [
+        {
+          "line": 63,
+          "anchor": "with sqlite3.connect(database) as source, sqlite3.connect(staged_db) as target:"
+        },
+        {
+          "line": 111,
+          "anchor": "with sqlite3.connect(database) as connection:"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/janitor_attention.py",
+      "anchors": [
+        {
+          "line": 42,
+          "anchor": "con = db.conn()"
+        },
+        {
+          "line": 122,
+          "anchor": "con = db.conn()"
+        },
+        {
+          "line": 193,
+          "anchor": "rows = db.conn().execute(\"\"\"SELECT a.*,g.persona AS agent_name,j.generation"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/janitor_autonomy.py",
+      "anchors": [
+        {
+          "line": 24,
+          "anchor": "db.conn().executescript(SCHEMA)"
+        },
+        {
+          "line": 38,
+          "anchor": "if queue.get('paused') or db.conn().execute(\"SELECT 1 FROM queued_turns WHERE agent_id=? AND status IN ('queued','claimed')\",(agent['agent_id'],)).fetchone():return None"
+        },
+        {
+          "line": 44,
+          "anchor": "jobs=[dict(r) for r in db.conn().execute(\"SELECT job_id,title,status,generation,revision FROM background_jobs WHERE agent_id=? AND terminal_at IS NULL\",(agent['agent_id'],))]"
+        },
+        {
+          "line": 370,
+          "anchor": "rows=db.conn().execute(\"SELECT a.artifact_id,a.payload_json FROM artifacts a JOIN artifact_decisions d ON d.artifact_id=a.artifact_id WHERE d.resolved_choice='accepted' AND a.session=?\",(owner['session'],)).fetchall()"
+        },
+        {
+          "line": 425,
+          "anchor": "row=db.conn().execute(\"SELECT a.payload_json,d.resolved_choice FROM artifacts a JOIN artifact_decisions d ON d.artifact_id=a.artifact_id WHERE a.artifact_id=? AND a.session=?\",(approval_id,owner['session'])).fetchone()"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/janitor_builtins.py",
+      "anchors": [
+        {
+          "line": 212,
+          "anchor": "c = db.conn()"
+        },
+        {
+          "line": 259,
+          "anchor": "c = connection if connection is not None else db.conn()"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/janitor_context.py",
+      "anchors": [
+        {
+          "line": 117,
+          "anchor": "with contextlib.closing(sqlite3.connect(uri, uri=True, timeout=5)) as c:"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/janitor_runner.py",
+      "anchors": [
+        {
+          "line": 80,
+          "anchor": "row = db.conn().execute(\"\"\"SELECT COALESCE((SELECT state_id FROM state_log ORDER BY state_id LIMIT 1),0),"
+        },
+        {
+          "line": 85,
+          "anchor": "rows = db.conn().execute(\"\"\"SELECT s.*,a.session,a.is_janitor,a.deleted_at,a.archived_at"
+        },
+        {
+          "line": 91,
+          "anchor": "rows = db.conn().execute(\"\"\"SELECT a.agent_id,a.session,a.is_janitor,a.deleted_at,a.archived_at,"
+        },
+        {
+          "line": 98,
+          "anchor": "c = db.conn()"
+        },
+        {
+          "line": 107,
+          "anchor": "row = db.conn().execute(\"\"\"SELECT state_id,kind,detail FROM state_log WHERE agent_id=?"
+        },
+        {
+          "line": 117,
+          "anchor": "latest_turn = db.conn().execute(\"\"\"SELECT trace_id,started_at FROM turns"
+        },
+        {
+          "line": 119,
+          "anchor": "latest_state = db.conn().execute(\"\"\"SELECT state_id,kind,ts,detail FROM state_log"
+        },
+        {
+          "line": 127,
+          "anchor": "turn = db.conn().execute(\"\"\"SELECT ended_at FROM turns WHERE agent_id=? AND trace_id=?"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/janitor_store.py",
+      "anchors": [
+        {
+          "line": 53,
+          "anchor": "c = db.conn()"
+        },
+        {
+          "line": 64,
+          "anchor": "return c if c is not None else db.conn()"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/janitors.py",
+      "anchors": [
+        {
+          "line": 399,
+          "anchor": "c = db.conn()"
+        },
+        {
+          "line": 886,
+          "anchor": "row = _active_run(db.conn(), run_id)"
+        },
+        {
+          "line": 890,
+          "anchor": "attachment = _active_attachment(db.conn(), row[\"attachment_id\"], row[\"generation\"])"
+        },
+        {
+          "line": 894,
+          "anchor": "store.cancel_run(db.conn(), run_id, db.now_ms(), error=\"Application became inactive before execution\","
+        },
+        {
+          "line": 903,
+          "anchor": "row = _active_run(db.conn(), run_id)"
+        },
+        {
+          "line": 966,
+          "anchor": "c = db.conn()"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/launch_directories.py",
+      "anchors": [
+        {
+          "line": 10,
+          "anchor": "recent = [r[0] for r in db.conn().execute("
+        }
+      ]
+    },
+    {
+      "path": "server/lib/launch_receipts.py",
+      "anchors": [
+        {
+          "line": 132,
+          "anchor": "if db.conn().in_transaction:"
+        },
+        {
+          "line": 308,
+          "anchor": "if db.conn().in_transaction:"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/leader_memory.py",
+      "anchors": [
+        {
+          "line": 124,
+          "anchor": "rows = db.conn().execute("
+        },
+        {
+          "line": 146,
+          "anchor": "rows = db.conn().execute("
+        },
+        {
+          "line": 171,
+          "anchor": "row = db.conn().execute("
+        },
+        {
+          "line": 192,
+          "anchor": "db.conn().execute("
+        },
+        {
+          "line": 226,
+          "anchor": "db.conn().execute("
+        },
+        {
+          "line": 253,
+          "anchor": "c = db.conn()"
+        },
+        {
+          "line": 297,
+          "anchor": "db.conn().execute("
+        },
+        {
+          "line": 304,
+          "anchor": "row = db.conn().execute("
+        },
+        {
+          "line": 408,
+          "anchor": "rows = db.conn().execute("
+        }
+      ]
+    },
+    {
+      "path": "server/lib/maintenance.py",
+      "anchors": [
+        {
+          "line": 132,
+          "anchor": "c = db.conn()"
+        },
+        {
+          "line": 233,
+          "anchor": "rows = db.conn().execute("
+        },
+        {
+          "line": 290,
+          "anchor": "result = db.conn().execute(\"PRAGMA wal_checkpoint(PASSIVE)\").fetchone()"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/media_store.py",
+      "anchors": [
+        {
+          "line": 93,
+          "anchor": "db.conn().execute("
+        },
+        {
+          "line": 109,
+          "anchor": "row = db.conn().execute("
+        },
+        {
+          "line": 121,
+          "anchor": "rows = db.conn().execute("
+        }
+      ]
+    },
+    {
+      "path": "server/lib/model_fallbacks.py",
+      "anchors": [
+        {
+          "line": 50,
+          "anchor": "c = db.conn()"
+        },
+        {
+          "line": 197,
+          "anchor": "for r in db.conn().execute("
+        }
+      ]
+    },
+    {
+      "path": "server/lib/opencode_transcript.py",
+      "anchors": [
+        {
+          "line": 504,
+          "anchor": "con = sqlite3.connect(f\"file:{db}?mode=ro\", uri=True)"
+        },
+        {
+          "line": 579,
+          "anchor": "con = sqlite3.connect(f\"file:{db}?mode=ro\", uri=True)"
+        },
+        {
+          "line": 606,
+          "anchor": "con = sqlite3.connect(f\"file:{db}?mode=ro\", uri=True)"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/oracle_attention.py",
+      "anchors": [
+        {
+          "line": 103,
+          "anchor": "con = db.conn()"
+        },
+        {
+          "line": 132,
+          "anchor": "con = db.conn()"
+        },
+        {
+          "line": 180,
+          "anchor": "rows = db.conn().execute("
+        },
+        {
+          "line": 219,
+          "anchor": "newer = db.conn().execute("
+        }
+      ]
+    },
+    {
+      "path": "server/lib/oracle_delegations.py",
+      "anchors": [
+        {
+          "line": 41,
+          "anchor": "return _row(db.conn().execute("
+        },
+        {
+          "line": 59,
+          "anchor": "database = db.conn()"
+        },
+        {
+          "line": 178,
+          "anchor": "database = db.conn()"
+        },
+        {
+          "line": 211,
+          "anchor": "return db.conn().execute("
+        },
+        {
+          "line": 224,
+          "anchor": "changed = db.conn().execute("
+        },
+        {
+          "line": 235,
+          "anchor": "db.conn().execute("
+        },
+        {
+          "line": 246,
+          "anchor": "return db.conn().execute("
+        },
+        {
+          "line": 261,
+          "anchor": "rows = db.conn().execute("
+        },
+        {
+          "line": 274,
+          "anchor": "committed = db.conn().execute("
+        },
+        {
+          "line": 302,
+          "anchor": "database = db.conn()"
+        },
+        {
+          "line": 334,
+          "anchor": "database = db.conn()"
+        },
+        {
+          "line": 383,
+          "anchor": "rows = db.conn().execute("
+        },
+        {
+          "line": 402,
+          "anchor": "return db.conn().execute("
+        },
+        {
+          "line": 415,
+          "anchor": "rows = db.conn().execute("
+        },
+        {
+          "line": 427,
+          "anchor": "rows=db.conn().execute(\"\"\"SELECT delegation_id,request_text FROM oracle_delegations"
+        },
+        {
+          "line": 437,
+          "anchor": "db.conn().execute("
+        },
+        {
+          "line": 444,
+          "anchor": "committed = db.conn().execute("
+        }
+      ]
+    },
+    {
+      "path": "server/lib/oracle_live_calls.py",
+      "anchors": [
+        {
+          "line": 178,
+          "anchor": "device = db.conn().execute(\"SELECT scope,revoked_at FROM paired_devices WHERE device_id=?\", (self.principal,)).fetchone()"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/oracle_memory.py",
+      "anchors": [
+        {
+          "line": 26,
+          "anchor": "con = db.conn(); con.execute(\"BEGIN IMMEDIATE\")"
+        },
+        {
+          "line": 58,
+          "anchor": "row = db.conn().execute(\"SELECT * FROM oracle_threads WHERE thread_id=? AND owner_principal=?\","
+        },
+        {
+          "line": 71,
+          "anchor": "changed = db.conn().execute(\"UPDATE oracle_threads SET state_json=?,revision=?,updated_at=? WHERE thread_id=? AND owner_principal=? AND active_connection=?\","
+        },
+        {
+          "line": 79,
+          "anchor": "result = db.conn().execute(\"INSERT OR IGNORE INTO oracle_observations(thread_id,source_key,event_json,created_at) VALUES(?,?,?,?)\","
+        },
+        {
+          "line": 85,
+          "anchor": "row = db.conn().execute(\"SELECT owner_principal FROM oracle_delegations WHERE delegation_id=?\", (operation_id,)).fetchone()"
+        },
+        {
+          "line": 87,
+          "anchor": "db.conn().execute(\"INSERT OR IGNORE INTO oracle_thread_work VALUES(?,?,?)\", (self.thread_id, operation_id, db.now_ms()))"
+        },
+        {
+          "line": 91,
+          "anchor": "return [dict(row) for row in db.conn().execute(\"\"\"SELECT d.* FROM oracle_thread_work w"
+        },
+        {
+          "line": 100,
+          "anchor": "db.conn().execute(\"INSERT OR IGNORE INTO oracle_admissions VALUES(?,?,?,?,?,?,NULL,'planned',?,?)\","
+        },
+        {
+          "line": 102,
+          "anchor": "row = db.conn().execute(\"SELECT * FROM oracle_admissions WHERE thread_id=? AND revision=? AND action_index=?\", (self.thread_id, revision, index)).fetchone()"
+        },
+        {
+          "line": 109,
+          "anchor": "db.conn().execute(\"UPDATE oracle_admissions SET status='completed',result_json=?,updated_at=? WHERE thread_id=? AND revision=? AND action_index=?\","
+        },
+        {
+          "line": 118,
+          "anchor": "return [dict(row) for row in db.conn().execute(sql + \" ORDER BY revision,action_index\", params)]"
+        },
+        {
+          "line": 155,
+          "anchor": "existing = db.conn().execute(\"SELECT content_hash FROM oracle_user_context WHERE thread_id=? AND context_id=?\", (self.thread_id, context_id)).fetchone()"
+        },
+        {
+          "line": 160,
+          "anchor": "images = db.conn().execute(\"SELECT count(*) FROM oracle_user_context WHERE thread_id=? AND kind='image' AND removed_at IS NULL\", (self.thread_id,)).fetchone()[0]"
+        },
+        {
+          "line": 162,
+          "anchor": "count = db.conn().execute(\"SELECT count(*) FROM oracle_user_context WHERE thread_id=? AND removed_at IS NULL\", (self.thread_id,)).fetchone()[0]"
+        },
+        {
+          "line": 164,
+          "anchor": "db.conn().execute(\"INSERT INTO oracle_user_context VALUES(?,?,?,?,?,?,?,?,NULL,?)\","
+        },
+        {
+          "line": 170,
+          "anchor": "return bool(db.conn().execute(\"UPDATE oracle_user_context SET removed_at=? WHERE thread_id=? AND context_id=? AND removed_at IS NULL\","
+        },
+        {
+          "line": 176,
+          "anchor": "return [dict(row) for row in db.conn().execute(f\"SELECT {columns} FROM oracle_user_context WHERE thread_id=? AND removed_at IS NULL ORDER BY added_at,context_id\", (self.thread_id,))]"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/outdated_clients.py",
+      "anchors": [
+        {
+          "line": 6,
+          "anchor": "from lib import eventlog"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/personas.py",
+      "anchors": [
+        {
+          "line": 41,
+          "anchor": "db.conn().execute("
+        },
+        {
+          "line": 48,
+          "anchor": "db.conn().execute("
+        },
+        {
+          "line": 58,
+          "anchor": "return [dict(row) for row in db.conn().execute("
+        },
+        {
+          "line": 64,
+          "anchor": "row = db.conn().execute("
+        },
+        {
+          "line": 92,
+          "anchor": "db.conn().execute("
+        },
+        {
+          "line": 137,
+          "anchor": "db.conn().execute("
+        },
+        {
+          "line": 167,
+          "anchor": "db.conn().execute("
+        },
+        {
+          "line": 182,
+          "anchor": "db.conn().execute("
+        },
+        {
+          "line": 189,
+          "anchor": "referenced = bool(path and db.conn().execute("
+        }
+      ]
+    },
+    {
+      "path": "server/lib/podcast_history.py",
+      "anchors": [
+        {
+          "line": 48,
+          "anchor": "db.conn().execute(\"INSERT OR IGNORE INTO podcast_snapshots VALUES(?,?,?)\","
+        },
+        {
+          "line": 56,
+          "anchor": "row = db.conn().execute(\"SELECT content_json FROM podcast_snapshots WHERE sha256=?\", (digest,)).fetchone()"
+        },
+        {
+          "line": 72,
+          "anchor": "con = db.conn()"
+        },
+        {
+          "line": 101,
+          "anchor": "db.conn().execute(\"UPDATE podcast_conversations SET status='active',updated_at=? WHERE conversation_id=?\","
+        },
+        {
+          "line": 107,
+          "anchor": "con = db.conn()"
+        },
+        {
+          "line": 131,
+          "anchor": "db.conn().execute(\"\"\"UPDATE podcast_conversations SET status=?,closed_at=?,updated_at=?"
+        },
+        {
+          "line": 141,
+          "anchor": "con = db.conn()"
+        },
+        {
+          "line": 179,
+          "anchor": "con = db.conn()"
+        },
+        {
+          "line": 224,
+          "anchor": "con = db.conn()"
+        },
+        {
+          "line": 271,
+          "anchor": "cursor = db.conn().execute(\"SELECT created_at FROM podcast_conversations WHERE conversation_id=?\", (before,)).fetchone()"
+        },
+        {
+          "line": 277,
+          "anchor": "rows = db.conn().execute(f\"\"\"SELECT c.*,"
+        },
+        {
+          "line": 296,
+          "anchor": "rows = db.conn().execute(\"\"\"SELECT artifact_id,title,type,summary,updated_at,session"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/portrait_generation.py",
+      "anchors": [
+        {
+          "line": 225,
+          "anchor": "con = db.conn()"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/prompt_admissions.py",
+      "anchors": [
+        {
+          "line": 112,
+          "anchor": "con = db.conn()"
+        },
+        {
+          "line": 160,
+          "anchor": "row = db.conn().execute("
+        },
+        {
+          "line": 171,
+          "anchor": "con = db.conn()"
+        },
+        {
+          "line": 220,
+          "anchor": "db.conn().execute("
+        }
+      ]
+    },
+    {
+      "path": "server/lib/prompt_history.py",
+      "anchors": [
+        {
+          "line": 293,
+          "anchor": "con = db.conn()"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/provider_background_jobs.py",
+      "anchors": [
+        {
+          "line": 201,
+          "anchor": "c = db.conn()"
+        },
+        {
+          "line": 216,
+          "anchor": "c = db.conn()"
+        },
+        {
+          "line": 234,
+          "anchor": "c = db.conn()"
+        },
+        {
+          "line": 283,
+          "anchor": "c = db.conn()"
+        },
+        {
+          "line": 338,
+          "anchor": "c = db.conn()"
+        },
+        {
+          "line": 364,
+          "anchor": "c = db.conn()"
+        },
+        {
+          "line": 457,
+          "anchor": "c = db.conn()"
+        },
+        {
+          "line": 497,
+          "anchor": "rows = db.conn().execute('''SELECT a.agent_id,a.session,r.backend_session_id,"
+        },
+        {
+          "line": 572,
+          "anchor": "for row in db.conn().execute("
+        }
+      ]
+    },
+    {
+      "path": "server/lib/roster_seed.py",
+      "anchors": [
+        {
+          "line": 11,
+          "anchor": "database = db.conn()"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/routes/agents.py",
+      "anchors": [
+        {
+          "line": 9,
+          "anchor": "from lib.agent_lifecycle import AgentLifecycleError, AgentLifecycleService"
+        },
+        {
+          "line": 10,
+          "anchor": "from lib import agents as agents_db"
+        },
+        {
+          "line": 11,
+          "anchor": "from lib import backends"
+        },
+        {
+          "line": 12,
+          "anchor": "from lib import events"
+        },
+        {
+          "line": 13,
+          "anchor": "from lib import identity"
+        },
+        {
+          "line": 14,
+          "anchor": "from lib.log import log"
+        },
+        {
+          "line": 15,
+          "anchor": "from lib.routes.helpers import _raw_query_value"
+        },
+        {
+          "line": 37,
+          "anchor": "from lib.contact_assignment import assign_contact"
+        },
+        {
+          "line": 64,
+          "anchor": "from lib import agent_conversations"
+        },
+        {
+          "line": 69,
+          "anchor": "from lib.agent_files import AgentFileError, read_text_file"
+        },
+        {
+          "line": 101,
+          "anchor": "from lib.agent_files import AgentFileError, list_directory"
+        },
+        {
+          "line": 146,
+          "anchor": "from lib import agent_fork"
+        },
+        {
+          "line": 165,
+          "anchor": "from lib import config"
+        },
+        {
+          "line": 221,
+          "anchor": "from lib import config"
+        },
+        {
+          "line": 243,
+          "anchor": "from lib.mcp_selection import encode"
+        },
+        {
+          "line": 253,
+          "anchor": "from lib import provider_capabilities"
+        },
+        {
+          "line": 314,
+          "anchor": "from lib.mcp_selection import decode as decode_mcp"
+        },
+        {
+          "line": 315,
+          "anchor": "from lib.avatar_urls import versioned_avatar_url"
+        },
+        {
+          "line": 321,
+          "anchor": "from lib.session_models import agent_model"
+        },
+        {
+          "line": 332,
+          "anchor": "from lib import turn_dispatch"
+        },
+        {
+          "line": 358,
+          "anchor": "from lib.prompt_history import build_prompt_history"
+        },
+        {
+          "line": 389,
+          "anchor": "from lib import snapshot"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/routes/artifacts.py",
+      "anchors": [
+        {
+          "line": 8,
+          "anchor": "from lib import events"
+        },
+        {
+          "line": 19,
+          "anchor": "from lib import artifacts"
+        },
+        {
+          "line": 25,
+          "anchor": "from lib import live_activity"
+        },
+        {
+          "line": 33,
+          "anchor": "from lib import artifacts"
+        },
+        {
+          "line": 56,
+          "anchor": "from lib import html_form_events"
+        },
+        {
+          "line": 64,
+          "anchor": "from lib import artifacts"
+        },
+        {
+          "line": 81,
+          "anchor": "from lib import artifacts, html_forms"
+        },
+        {
+          "line": 91,
+          "anchor": "from lib import artifacts"
+        },
+        {
+          "line": 112,
+          "anchor": "from lib import artifacts"
+        },
+        {
+          "line": 128,
+          "anchor": "from lib import html_forms"
+        },
+        {
+          "line": 141,
+          "anchor": "from lib import artifacts"
+        },
+        {
+          "line": 151,
+          "anchor": "from lib import artifacts"
+        },
+        {
+          "line": 179,
+          "anchor": "from lib import artifacts, janitor_attention"
+        },
+        {
+          "line": 194,
+          "anchor": "from lib import attention_index"
+        },
+        {
+          "line": 207,
+          "anchor": "from lib import artifacts"
+        },
+        {
+          "line": 232,
+          "anchor": "from lib import artifacts"
+        },
+        {
+          "line": 251,
+          "anchor": "from lib import artifacts"
+        },
+        {
+          "line": 282,
+          "anchor": "from lib import artifacts"
+        },
+        {
+          "line": 299,
+          "anchor": "from lib import artifacts"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/routes/calls.py",
+      "anchors": [
+        {
+          "line": 6,
+          "anchor": "from lib import identity"
+        },
+        {
+          "line": 7,
+          "anchor": "from lib.log import log_exception"
+        },
+        {
+          "line": 18,
+          "anchor": "from lib import group_calls"
+        },
+        {
+          "line": 19,
+          "anchor": "from lib.http_utils import principal_of"
+        },
+        {
+          "line": 30,
+          "anchor": "from lib import turn_identity"
+        },
+        {
+          "line": 31,
+          "anchor": "from lib.provider_background_jobs import TURN_ENV"
+        },
+        {
+          "line": 46,
+          "anchor": "from lib.http_utils import principal_of, require_full_scope"
+        },
+        {
+          "line": 55,
+          "anchor": "from lib import agent_rings, group_calls"
+        },
+        {
+          "line": 70,
+          "anchor": "from lib import group_calls"
+        },
+        {
+          "line": 94,
+          "anchor": "from lib import group_calls"
+        },
+        {
+          "line": 110,
+          "anchor": "from lib import agent_ring_live as live"
+        },
+        {
+          "line": 166,
+          "anchor": "from lib import agent_ring_live"
+        },
+        {
+          "line": 170,
+          "anchor": "from lib import agent_ring_live"
+        },
+        {
+          "line": 191,
+          "anchor": "from lib import group_calls"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/routes/goals.py",
+      "anchors": [
+        {
+          "line": 6,
+          "anchor": "from lib import agents as agents_db"
+        },
+        {
+          "line": 7,
+          "anchor": "from lib import backends"
+        },
+        {
+          "line": 8,
+          "anchor": "from lib import identity"
+        },
+        {
+          "line": 9,
+          "anchor": "from lib.log import log, log_exception"
+        },
+        {
+          "line": 56,
+          "anchor": "from lib import agent_goals"
+        },
+        {
+          "line": 83,
+          "anchor": "from lib import helper_agents"
+        },
+        {
+          "line": 114,
+          "anchor": "from lib import agents as agents_db, bookkeeping_listener, goal_ledger"
+        },
+        {
+          "line": 135,
+          "anchor": "from lib import bookkeeping_listener, goal_ledger"
+        },
+        {
+          "line": 149,
+          "anchor": "from lib import goal_ledger"
+        },
+        {
+          "line": 157,
+          "anchor": "from lib import goal_ledger"
+        },
+        {
+          "line": 170,
+          "anchor": "from lib import task_plans"
+        },
+        {
+          "line": 181,
+          "anchor": "from lib import task_plans"
+        },
+        {
+          "line": 191,
+          "anchor": "from lib import task_goal_state, task_plans"
+        },
+        {
+          "line": 200,
+          "anchor": "from lib import goal_ledger"
+        },
+        {
+          "line": 210,
+          "anchor": "from lib import task_plans"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/routes/heartbeat.py",
+      "anchors": [
+        {
+          "line": 6,
+          "anchor": "from lib import db"
+        },
+        {
+          "line": 7,
+          "anchor": "from lib import agents as agents_db"
+        },
+        {
+          "line": 8,
+          "anchor": "from lib import backends"
+        },
+        {
+          "line": 9,
+          "anchor": "from lib import identity"
+        },
+        {
+          "line": 10,
+          "anchor": "from lib.log import log_exception"
+        },
+        {
+          "line": 21,
+          "anchor": "from lib import provider_capabilities"
+        },
+        {
+          "line": 65,
+          "anchor": "from lib import dreaming"
+        },
+        {
+          "line": 97,
+          "anchor": "from lib import heartbeat"
+        },
+        {
+          "line": 128,
+          "anchor": "from lib import heartbeat"
+        },
+        {
+          "line": 134,
+          "anchor": "rows = db.conn().execute("
+        },
+        {
+          "line": 152,
+          "anchor": "from lib import dreaming"
+        },
+        {
+          "line": 178,
+          "anchor": "from lib import dreaming"
+        },
+        {
+          "line": 194,
+          "anchor": "from lib import dream_seeds, dreaming"
+        },
+        {
+          "line": 223,
+          "anchor": "from lib import dreaming"
+        },
+        {
+          "line": 235,
+          "anchor": "from lib import heartbeat"
+        },
+        {
+          "line": 244,
+          "anchor": "from lib import heartbeat"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/routes/helpers.py",
+      "anchors": [
+        {
+          "line": 10,
+          "anchor": "from lib import db"
+        },
+        {
+          "line": 11,
+          "anchor": "from lib.paths import RuntimePaths"
+        },
+        {
+          "line": 44,
+          "anchor": "row = db.conn().execute("
+        }
+      ]
+    },
+    {
+      "path": "server/lib/routes/media.py",
+      "anchors": [
+        {
+          "line": 9,
+          "anchor": "from lib import eventlog"
+        },
+        {
+          "line": 10,
+          "anchor": "from lib import media_store"
+        },
+        {
+          "line": 11,
+          "anchor": "from lib.log import log_exception"
+        },
+        {
+          "line": 12,
+          "anchor": "from lib.paths import _safe_session"
+        },
+        {
+          "line": 13,
+          "anchor": "from lib.focus import current_focus_session"
+        },
+        {
+          "line": 14,
+          "anchor": "from lib.routes.helpers import _runtime_paths, _safe_upload_name"
+        },
+        {
+          "line": 82,
+          "anchor": "from lib import upload_results"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/routes/ops.py",
+      "anchors": [
+        {
+          "line": 12,
+          "anchor": "from lib.controller_events import ControllerEventError, build_controller_event"
+        },
+        {
+          "line": 13,
+          "anchor": "from lib import db"
+        },
+        {
+          "line": 14,
+          "anchor": "from lib import eventlog"
+        },
+        {
+          "line": 15,
+          "anchor": "from lib import agents as agents_db"
+        },
+        {
+          "line": 16,
+          "anchor": "from lib.calendar_request import CalendarRequestError, build_calendar_request"
+        },
+        {
+          "line": 17,
+          "anchor": "from lib import events"
+        },
+        {
+          "line": 18,
+          "anchor": "from lib import identity"
+        },
+        {
+          "line": 19,
+          "anchor": "from lib.log import log, log_exception"
+        },
+        {
+          "line": 20,
+          "anchor": "from lib.protocol import ClientAction"
+        },
+        {
+          "line": 21,
+          "anchor": "from lib.routes.helpers import _runtime_paths"
+        },
+        {
+          "line": 29,
+          "anchor": "from lib import diagnostics_settings"
+        },
+        {
+          "line": 100,
+          "anchor": "from lib.ios_diagnostics import diagnostic_counts"
+        },
+        {
+          "line": 138,
+          "anchor": "from lib import client_chat"
+        },
+        {
+          "line": 165,
+          "anchor": "from lib import location"
+        },
+        {
+          "line": 184,
+          "anchor": "from lib import apns"
+        },
+        {
+          "line": 185,
+          "anchor": "from lib.agent_ring_live import device_ok"
+        },
+        {
+          "line": 186,
+          "anchor": "from lib.http_utils import principal_of"
+        },
+        {
+          "line": 296,
+          "anchor": "from lib import location"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/routes/oracle.py",
+      "anchors": [
+        {
+          "line": 6,
+          "anchor": "from lib.log import log, log_exception"
+        },
+        {
+          "line": 11,
+          "anchor": "from lib import oracle_calls"
+        },
+        {
+          "line": 19,
+          "anchor": "from lib import oracle_calls, oracle_contact"
+        },
+        {
+          "line": 37,
+          "anchor": "from lib import oracle_calls"
+        },
+        {
+          "line": 46,
+          "anchor": "from lib import oracle_handoffs"
+        },
+        {
+          "line": 63,
+          "anchor": "from lib import oracle_contact"
+        },
+        {
+          "line": 68,
+          "anchor": "from lib import oracle_contact"
+        },
+        {
+          "line": 80,
+          "anchor": "from lib.oracle_live_calls import context_image"
+        },
+        {
+          "line": 84,
+          "anchor": "from lib import oracle_delegations"
+        },
+        {
+          "line": 100,
+          "anchor": "from lib import oracle_delegations"
+        },
+        {
+          "line": 136,
+          "anchor": "from lib import oracle_delegations"
+        },
+        {
+          "line": 163,
+          "anchor": "from lib import oracle_delegations, turn_dispatch"
+        },
+        {
+          "line": 182,
+          "anchor": "from lib import oracle_handoffs"
+        },
+        {
+          "line": 196,
+          "anchor": "from lib import oracle_handoffs"
+        },
+        {
+          "line": 205,
+          "anchor": "from lib.oracle_live_calls import handle"
+        },
+        {
+          "line": 209,
+          "anchor": "from lib.oracle_live_calls import handle"
+        },
+        {
+          "line": 213,
+          "anchor": "from lib.oracle_live_calls import handle"
+        },
+        {
+          "line": 217,
+          "anchor": "from lib.oracle_live_calls import handle"
+        },
+        {
+          "line": 221,
+          "anchor": "from lib.oracle_realtime import capability"
+        },
+        {
+          "line": 226,
+          "anchor": "from lib import config, oracle_voice_provider"
+        },
+        {
+          "line": 232,
+          "anchor": "from lib import config, oracle_voice_provider"
+        },
+        {
+          "line": 250,
+          "anchor": "from lib.http_utils import principal_of, require_full_scope"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/routes/personas.py",
+      "anchors": [
+        {
+          "line": 8,
+          "anchor": "from lib import events"
+        },
+        {
+          "line": 9,
+          "anchor": "from lib.routes.helpers import _runtime_paths"
+        },
+        {
+          "line": 14,
+          "anchor": "from lib import agent_portraits"
+        },
+        {
+          "line": 24,
+          "anchor": "from lib import portrait_generation"
+        },
+        {
+          "line": 39,
+          "anchor": "from lib import portrait_generation"
+        },
+        {
+          "line": 49,
+          "anchor": "from lib import agent_portraits"
+        },
+        {
+          "line": 62,
+          "anchor": "from lib import agent_portraits"
+        },
+        {
+          "line": 93,
+          "anchor": "from lib import personas"
+        },
+        {
+          "line": 111,
+          "anchor": "from lib import personas"
+        },
+        {
+          "line": 122,
+          "anchor": "from lib import personas"
+        },
+        {
+          "line": 128,
+          "anchor": "from lib import personas"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/routes/providers.py",
+      "anchors": [
+        {
+          "line": 9,
+          "anchor": "from lib import backends"
+        },
+        {
+          "line": 10,
+          "anchor": "from lib.log import log_exception"
+        },
+        {
+          "line": 19,
+          "anchor": "from lib import application_activity"
+        },
+        {
+          "line": 32,
+          "anchor": "from lib.backend_auth import status, task"
+        },
+        {
+          "line": 42,
+          "anchor": "from lib.backend_auth import start_login"
+        },
+        {
+          "line": 54,
+          "anchor": "from lib.backend_auth import submit_login_code"
+        },
+        {
+          "line": 68,
+          "anchor": "from lib.backend_auth import logout"
+        },
+        {
+          "line": 86,
+          "anchor": "from lib import desktop_presence"
+        },
+        {
+          "line": 149,
+          "anchor": "from lib.managed_skills import status"
+        },
+        {
+          "line": 153,
+          "anchor": "from lib.personal_skills import status as personal_status"
+        },
+        {
+          "line": 162,
+          "anchor": "from lib.managed_skills import set_enabled"
+        },
+        {
+          "line": 180,
+          "anchor": "from lib.device_pairing import revoke"
+        },
+        {
+          "line": 193,
+          "anchor": "from lib.device_pairing import list_devices"
+        },
+        {
+          "line": 197,
+          "anchor": "from lib.device_pairing import PairingError, exchange"
+        },
+        {
+          "line": 198,
+          "anchor": "from lib.server_identity import get_server_info"
+        },
+        {
+          "line": 217,
+          "anchor": "from lib.server_update import request_update"
+        },
+        {
+          "line": 222,
+          "anchor": "from lib.server_update import get_update_status"
+        },
+        {
+          "line": 228,
+          "anchor": "from lib.tts_providers import status"
+        },
+        {
+          "line": 232,
+          "anchor": "from lib import config as config_module"
+        },
+        {
+          "line": 233,
+          "anchor": "from lib.config_writer import set_toml_value"
+        },
+        {
+          "line": 234,
+          "anchor": "from lib.tts_providers import status, valid_ids"
+        },
+        {
+          "line": 242,
+          "anchor": "from lib.google_tts import collision_code"
+        },
+        {
+          "line": 272,
+          "anchor": "from lib import service_manager"
+        },
+        {
+          "line": 281,
+          "anchor": "from lib import harness_providers"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/routes/registry.py",
+      "anchors": [
+        {
+          "line": 37,
+          "anchor": "from lib import janitor_http"
+        },
+        {
+          "line": 43,
+          "anchor": "from lib import janitor_http"
+        },
+        {
+          "line": 49,
+          "anchor": "from lib import controller_actions_http"
+        },
+        {
+          "line": 55,
+          "anchor": "from lib import controller_actions_http"
+        },
+        {
+          "line": 80,
+          "anchor": "from lib import podcast_history_http"
+        },
+        {
+          "line": 107,
+          "anchor": "from lib import html_report_revisions"
+        },
+        {
+          "line": 147,
+          "anchor": "from lib.viz_owner_avatar import portrait"
+        },
+        {
+          "line": 171,
+          "anchor": "from lib.audio_growing import is_in_progress, serve_growing"
+        },
+        {
+          "line": 181,
+          "anchor": "from lib.stt_stream import serve_stt_stream"
+        },
+        {
+          "line": 192,
+          "anchor": "from lib.terminal_ws import serve_server_terminal"
+        },
+        {
+          "line": 199,
+          "anchor": "from lib.terminal_ws import serve_terminal"
+        },
+        {
+          "line": 210,
+          "anchor": "from lib.clip_stream import serve_clip_stream"
+        },
+        {
+          "line": 237,
+          "anchor": "from lib.clip_delivery.hls import serve_hls_artifact"
+        },
+        {
+          "line": 332,
+          "anchor": "from lib import podcast_history_http"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/routes/schedules.py",
+      "anchors": [
+        {
+          "line": 11,
+          "anchor": "from lib import scheduler"
+        },
+        {
+          "line": 22,
+          "anchor": "from lib import scheduler"
+        },
+        {
+          "line": 33,
+          "anchor": "from lib import scheduler"
+        },
+        {
+          "line": 53,
+          "anchor": "from lib import scheduler"
+        },
+        {
+          "line": 67,
+          "anchor": "from lib import background_jobs"
+        },
+        {
+          "line": 80,
+          "anchor": "from lib import background_jobs"
+        },
+        {
+          "line": 84,
+          "anchor": "from lib import scheduler"
+        },
+        {
+          "line": 91,
+          "anchor": "from lib import scheduler"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/routes/send.py",
+      "anchors": [
+        {
+          "line": 7,
+          "anchor": "from lib import agents as agents_db"
+        },
+        {
+          "line": 8,
+          "anchor": "from lib import trace as _trace"
+        },
+        {
+          "line": 9,
+          "anchor": "from lib import events"
+        },
+        {
+          "line": 10,
+          "anchor": "from lib import identity"
+        },
+        {
+          "line": 11,
+          "anchor": "from lib.log import log_exception"
+        },
+        {
+          "line": 12,
+          "anchor": "from lib.send_request import SendRequest, SendRequestError"
+        },
+        {
+          "line": 13,
+          "anchor": "from lib.orchestrator import get_settings as get_orchestrator_settings, recent_ignored_decisions as recent_orchestrator_ignored_decisions, recent_decisions as recent_orchestrator_decisions, update_settings as update_orchestrator_settings"
+        },
+        {
+          "line": 14,
+          "anchor": "from lib.routes.helpers import _runtime_paths"
+        },
+        {
+          "line": 24,
+          "anchor": "from lib import agent_rings, group_calls"
+        },
+        {
+          "line": 25,
+          "anchor": "from lib.http_utils import principal_of"
+        },
+        {
+          "line": 48,
+          "anchor": "from lib import compaction"
+        },
+        {
+          "line": 67,
+          "anchor": "from lib import addressing"
+        },
+        {
+          "line": 95,
+          "anchor": "from lib.orchestrator import provider_options"
+        },
+        {
+          "line": 126,
+          "anchor": "from lib import client_chat"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/routes/settings.py",
+      "anchors": [
+        {
+          "line": 9,
+          "anchor": "from lib.outdated_clients import _note_outdated_client"
+        },
+        {
+          "line": 10,
+          "anchor": "from lib import health"
+        },
+        {
+          "line": 11,
+          "anchor": "from lib import agents as agents_db"
+        },
+        {
+          "line": 12,
+          "anchor": "from lib import backends"
+        },
+        {
+          "line": 13,
+          "anchor": "from lib import identity"
+        },
+        {
+          "line": 14,
+          "anchor": "from lib.log import log_exception"
+        },
+        {
+          "line": 15,
+          "anchor": "from lib.herald import DEFAULT_SPEAK_IF_SHORT_CHARS, MAX_SPEAK_IF_SHORT_CHARS, get_settings as get_herald_settings, update_settings as update_herald_settings"
+        },
+        {
+          "line": 16,
+          "anchor": "from lib.personalities import get_settings as get_personality_settings, update_settings as update_personality_settings"
+        },
+        {
+          "line": 21,
+          "anchor": "from lib.server_identity import get_server_info"
+        },
+        {
+          "line": 30,
+          "anchor": "from lib.automation_settings import get"
+        },
+        {
+          "line": 34,
+          "anchor": "from lib.automation_settings import update"
+        },
+        {
+          "line": 41,
+          "anchor": "from lib.avatar_settings import get"
+        },
+        {
+          "line": 45,
+          "anchor": "from lib.avatar_settings import update"
+        },
+        {
+          "line": 52,
+          "anchor": "from lib import tts_queue"
+        },
+        {
+          "line": 72,
+          "anchor": "from lib import diagnostics_settings"
+        },
+        {
+          "line": 78,
+          "anchor": "from lib import diagnostics_settings"
+        },
+        {
+          "line": 91,
+          "anchor": "from lib.launch_paths import recover_user_path"
+        },
+        {
+          "line": 150,
+          "anchor": "from lib import judgments"
+        },
+        {
+          "line": 163,
+          "anchor": "from lib import judgments"
+        },
+        {
+          "line": 173,
+          "anchor": "from lib import judgments"
+        },
+        {
+          "line": 184,
+          "anchor": "from lib.launch_directories import lookup"
+        },
+        {
+          "line": 189,
+          "anchor": "from lib.launch_paths import recover_user_path"
+        },
+        {
+          "line": 223,
+          "anchor": "from lib.server_identity import CLIENT_HEADER, evaluate_client"
+        },
+        {
+          "line": 232,
+          "anchor": "from lib import tool_explanation_settings"
+        },
+        {
+          "line": 236,
+          "anchor": "from lib import tool_explanation_settings"
+        },
+        {
+          "line": 251,
+          "anchor": "from lib import tool_explanation_settings"
+        },
+        {
+          "line": 269,
+          "anchor": "from lib import tool_explanation_learning, tool_explanation_templates"
+        },
+        {
+          "line": 270,
+          "anchor": "from lib.tool_explanations import PROMPT_VERSION"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/routes/teams.py",
+      "anchors": [
+        {
+          "line": 9,
+          "anchor": "from lib import team_store"
+        },
+        {
+          "line": 24,
+          "anchor": "from lib import team_store"
+        },
+        {
+          "line": 39,
+          "anchor": "from lib import team_store"
+        },
+        {
+          "line": 47,
+          "anchor": "from lib import team_store"
+        },
+        {
+          "line": 63,
+          "anchor": "from lib import team_store"
+        },
+        {
+          "line": 78,
+          "anchor": "from lib import team_store"
+        },
+        {
+          "line": 88,
+          "anchor": "from lib import team_store"
+        },
+        {
+          "line": 106,
+          "anchor": "from lib import team_store"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/routes/vocab.py",
+      "anchors": [
+        {
+          "line": 7,
+          "anchor": "from lib.log import log_exception"
+        },
+        {
+          "line": 8,
+          "anchor": "from lib.routes.helpers import _runtime_paths, _truthy_header"
+        },
+        {
+          "line": 13,
+          "anchor": "from lib import vocab_store"
+        },
+        {
+          "line": 17,
+          "anchor": "from lib import vocab_store"
+        },
+        {
+          "line": 35,
+          "anchor": "from lib import stt_providers"
+        },
+        {
+          "line": 36,
+          "anchor": "from lib.vocab_compile import describe_budgets"
+        },
+        {
+          "line": 42,
+          "anchor": "from lib import vocab_store"
+        },
+        {
+          "line": 53,
+          "anchor": "from lib import vocab_store"
+        },
+        {
+          "line": 61,
+          "anchor": "from lib import vocab_store"
+        },
+        {
+          "line": 93,
+          "anchor": "from lib import vocab_store"
+        },
+        {
+          "line": 128,
+          "anchor": "from lib import vocab_store"
+        },
+        {
+          "line": 136,
+          "anchor": "from lib import vocab_store"
+        },
+        {
+          "line": 154,
+          "anchor": "from lib import vocab_store"
+        },
+        {
+          "line": 166,
+          "anchor": "from lib import vocab_store"
+        },
+        {
+          "line": 177,
+          "anchor": "from lib import vocab_store"
+        },
+        {
+          "line": 181,
+          "anchor": "from lib import vocab_store"
+        },
+        {
+          "line": 203,
+          "anchor": "from lib import vocab_store"
+        },
+        {
+          "line": 221,
+          "anchor": "from lib import heard_audio, vocab_store"
+        },
+        {
+          "line": 232,
+          "anchor": "from lib import vocab_store"
+        },
+        {
+          "line": 242,
+          "anchor": "from lib import vocab_store"
+        },
+        {
+          "line": 254,
+          "anchor": "from lib import vocab_store"
+        },
+        {
+          "line": 261,
+          "anchor": "from lib import vocab_store"
+        },
+        {
+          "line": 262,
+          "anchor": "from lib.vocab_generators import estimate_rarity"
+        },
+        {
+          "line": 285,
+          "anchor": "from lib import vocab_store"
+        },
+        {
+          "line": 304,
+          "anchor": "from lib import vocab_store"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/routes/voice.py",
+      "anchors": [
+        {
+          "line": 9,
+          "anchor": "from lib.agent_store import load_agents, save_agent"
+        },
+        {
+          "line": 10,
+          "anchor": "from lib.config import persona_personality"
+        },
+        {
+          "line": 11,
+          "anchor": "from lib import eventlog"
+        },
+        {
+          "line": 12,
+          "anchor": "from lib import agents as agents_db"
+        },
+        {
+          "line": 13,
+          "anchor": "from lib import events"
+        },
+        {
+          "line": 14,
+          "anchor": "from lib import identity"
+        },
+        {
+          "line": 15,
+          "anchor": "from lib.log import log_exception"
+        },
+        {
+          "line": 16,
+          "anchor": "from lib.voices import voices_with_availability"
+        },
+        {
+          "line": 17,
+          "anchor": "from lib.routes.helpers import _runtime_paths, _raw_query_value"
+        },
+        {
+          "line": 18,
+          "anchor": "from lib.cartesia_preview_locks import _cartesia_preview_lock"
+        },
+        {
+          "line": 64,
+          "anchor": "from lib import google_tts"
+        },
+        {
+          "line": 73,
+          "anchor": "from lib.voice import merge_voice, resolve_voice"
+        },
+        {
+          "line": 95,
+          "anchor": "from lib import voice_verbosity"
+        },
+        {
+          "line": 127,
+          "anchor": "from lib.cartesia_voices import ("
+        },
+        {
+          "line": 129,
+          "anchor": "from lib.cartesia_tts import CartesiaError"
+        },
+        {
+          "line": 130,
+          "anchor": "from lib import config as app_config"
+        },
+        {
+          "line": 169,
+          "anchor": "from lib.tts_service import synth_preview"
+        },
+        {
+          "line": 188,
+          "anchor": "from lib.cartesia_voices import catalog"
+        },
+        {
+          "line": 204,
+          "anchor": "from lib import config as app_config"
+        },
+        {
+          "line": 205,
+          "anchor": "from lib import controller_narration"
+        },
+        {
+          "line": 206,
+          "anchor": "from lib.cartesia_tts import CartesiaError"
+        },
+        {
+          "line": 237,
+          "anchor": "from lib.tts_service import synth_preview"
+        },
+        {
+          "line": 264,
+          "anchor": "from lib.google_tts import GoogleIdCollision"
+        },
+        {
+          "line": 283,
+          "anchor": "from lib.voice_catalog import catalog"
+        },
+        {
+          "line": 290,
+          "anchor": "from lib import voice_humanness"
+        },
+        {
+          "line": 296,
+          "anchor": "from lib import voice_humanness"
+        },
+        {
+          "line": 305,
+          "anchor": "from lib import config as app_config"
+        },
+        {
+          "line": 306,
+          "anchor": "from lib.voice_catalog import catalog"
+        },
+        {
+          "line": 312,
+          "anchor": "from lib.google_tts import collision_code"
+        },
+        {
+          "line": 324,
+          "anchor": "from lib.custom_tts_adapters import get as custom_adapter"
+        },
+        {
+          "line": 325,
+          "anchor": "from lib.tts_providers import VALID_IDS"
+        },
+        {
+          "line": 344,
+          "anchor": "from lib.tts_service import synth_preview"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/routes/voice_timeline.py",
+      "anchors": [
+        {
+          "line": 6,
+          "anchor": "from lib import clip_store"
+        },
+        {
+          "line": 7,
+          "anchor": "from lib import eventlog"
+        },
+        {
+          "line": 8,
+          "anchor": "from lib import voice_events"
+        },
+        {
+          "line": 9,
+          "anchor": "from lib.log import log_exception"
+        },
+        {
+          "line": 10,
+          "anchor": "from lib.routes.helpers import _PLAY_EVENTS, _clip_session_and_trace"
+        },
+        {
+          "line": 52,
+          "anchor": "from lib.message_audio import retained_events"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/runtime_events.py",
+      "anchors": [
+        {
+          "line": 83,
+          "anchor": "row = db.conn().execute("
+        }
+      ]
+    },
+    {
+      "path": "server/lib/session_models.py",
+      "anchors": [
+        {
+          "line": 58,
+          "anchor": "with sqlite3.connect(f\"file:{Path(home) / 'state_5.sqlite'}?mode=ro\", uri=True, timeout=0.1) as db:"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/snapshot.py",
+      "anchors": [
+        {
+          "line": 134,
+          "anchor": "db.conn().execute(\"SELECT agent_id,template_id FROM janitor_configs\")}"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/stale_work.py",
+      "anchors": [
+        {
+          "line": 40,
+          "anchor": "return {str(row[\"agent_id\"]): int(row[\"at\"] or 0) for row in db.conn().execute("
+        }
+      ]
+    },
+    {
+      "path": "server/lib/state_watcher.py",
+      "anchors": [
+        {
+          "line": 128,
+          "anchor": "row = db.conn().execute("
+        },
+        {
+          "line": 142,
+          "anchor": "cur = db.conn().execute("
+        }
+      ]
+    },
+    {
+      "path": "server/lib/task_goal_recovery.py",
+      "anchors": [
+        {
+          "line": 113,
+          "anchor": "db.conn()"
+        },
+        {
+          "line": 213,
+          "anchor": "ids = [r[0] for r in db.conn().execute(query, (after,))]"
+        },
+        {
+          "line": 215,
+          "anchor": "ids = [r[0] for r in db.conn().execute(query, (\"\",))]"
+        },
+        {
+          "line": 278,
+          "anchor": "db.conn()"
+        },
+        {
+          "line": 460,
+          "anchor": "db.conn()"
+        },
+        {
+          "line": 490,
+          "anchor": "db.conn()"
+        },
+        {
+          "line": 502,
+          "anchor": "con = db.conn()"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/task_plans.py",
+      "anchors": [
+        {
+          "line": 61,
+          "anchor": "con = db.conn()"
+        },
+        {
+          "line": 141,
+          "anchor": "con = db.conn()"
+        },
+        {
+          "line": 213,
+          "anchor": "con = db.conn()"
+        },
+        {
+          "line": 272,
+          "anchor": "db.conn()"
+        },
+        {
+          "line": 277,
+          "anchor": "db.conn()"
+        },
+        {
+          "line": 284,
+          "anchor": "db.conn().execute("
+        },
+        {
+          "line": 293,
+          "anchor": "db.conn()"
+        },
+        {
+          "line": 305,
+          "anchor": "con = db.conn()"
+        },
+        {
+          "line": 348,
+          "anchor": "db.conn()"
+        },
+        {
+          "line": 356,
+          "anchor": "for row in db.conn().execute("
+        },
+        {
+          "line": 382,
+          "anchor": "bound += _goal_expand(db.conn(), plan_id, data[\"goal\"])"
+        },
+        {
+          "line": 407,
+          "anchor": "for r in db.conn().execute("
+        },
+        {
+          "line": 648,
+          "anchor": "con = db.conn()"
+        },
+        {
+          "line": 1013,
+          "anchor": "db.conn()"
+        },
+        {
+          "line": 1054,
+          "anchor": "con = db.conn()"
+        },
+        {
+          "line": 1129,
+          "anchor": "for r in db.conn().execute("
+        },
+        {
+          "line": 1142,
+          "anchor": "row = db.conn().execute(sql + \" ORDER BY revision DESC LIMIT 1\", params).fetchone()"
+        },
+        {
+          "line": 1154,
+          "anchor": "for r in db.conn().execute("
+        },
+        {
+          "line": 1164,
+          "anchor": "db.conn()"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/telemetry.py",
+      "anchors": [
+        {
+          "line": 155,
+          "anchor": "con = sqlite3.connect(path, timeout=SQLITE_CONNECT_TIMEOUT_SEC,"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/tool_explanation_learning.py",
+      "anchors": [
+        {
+          "line": 67,
+          "anchor": "rows = (connection or _db.conn()).execute("
+        },
+        {
+          "line": 126,
+          "anchor": "rows = (connection or _db.conn()).execute("
+        },
+        {
+          "line": 241,
+          "anchor": "connection = _db.conn()"
+        },
+        {
+          "line": 246,
+          "anchor": "rows = _db.conn().execute("
+        },
+        {
+          "line": 300,
+          "anchor": "connection = _db.conn()"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/tool_explanation_mappings.py",
+      "anchors": [
+        {
+          "line": 41,
+          "anchor": "return {row[0]: row[1] for row in _db.conn().execute("
+        },
+        {
+          "line": 84,
+          "anchor": "db = _db.conn()"
+        },
+        {
+          "line": 139,
+          "anchor": "db = _db.conn()"
+        },
+        {
+          "line": 161,
+          "anchor": "db = _db.conn()"
+        },
+        {
+          "line": 174,
+          "anchor": "return [dict(row) for row in _db.conn().execute(\"SELECT * FROM tool_explanation_mappings ORDER BY updated_at DESC LIMIT 200\")]"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/tool_explanations.py",
+      "anchors": [
+        {
+          "line": 321,
+          "anchor": "admitted = unchanged(db.conn())"
+        },
+        {
+          "line": 918,
+          "anchor": "connection = connection or db.conn()"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/transcript_cursor.py",
+      "anchors": [
+        {
+          "line": 78,
+          "anchor": "row = db.conn().execute("
+        },
+        {
+          "line": 92,
+          "anchor": "row = db.conn().execute("
+        },
+        {
+          "line": 98,
+          "anchor": "db.conn().execute("
+        },
+        {
+          "line": 113,
+          "anchor": "db.conn().execute("
+        },
+        {
+          "line": 128,
+          "anchor": "row = db.conn().execute("
+        },
+        {
+          "line": 199,
+          "anchor": "cur = db.conn().execute("
+        }
+      ]
+    },
+    {
+      "path": "server/lib/transcript_incremental.py",
+      "anchors": [
+        {
+          "line": 762,
+          "anchor": "if load_checkpoint(db.conn(), checkpoint.agent_id, checkpoint.backend_session_id,"
+        },
+        {
+          "line": 789,
+          "anchor": "cp = load_checkpoint(db.conn(), agent_id, backend_session_id, str(path))"
+        },
+        {
+          "line": 1187,
+          "anchor": "database = db.conn()"
+        },
+        {
+          "line": 1278,
+          "anchor": "database = db.conn()"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/transcript_streamer.py",
+      "anchors": [
+        {
+          "line": 474,
+          "anchor": "rows = db.conn().execute("
+        },
+        {
+          "line": 490,
+          "anchor": "row = db.conn().execute("
+        }
+      ]
+    },
+    {
+      "path": "server/lib/transcript_watcher.py",
+      "anchors": [
+        {
+          "line": 175,
+          "anchor": "db.conn().execute("
+        }
+      ]
+    },
+    {
+      "path": "server/lib/transcription_results.py",
+      "anchors": [
+        {
+          "line": 70,
+          "anchor": "row = db.conn().execute("
+        },
+        {
+          "line": 86,
+          "anchor": "con = db.conn()"
+        },
+        {
+          "line": 109,
+          "anchor": "db.conn().execute("
+        }
+      ]
+    },
+    {
+      "path": "server/lib/turn_admission.py",
+      "anchors": [
+        {
+          "line": 278,
+          "anchor": "database = db.conn()"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/turn_command.py",
+      "anchors": [
+        {
+          "line": 193,
+          "anchor": "con = db.conn()"
+        },
+        {
+          "line": 383,
+          "anchor": "return db.conn().execute("
+        }
+      ]
+    },
+    {
+      "path": "server/lib/turn_dispatch.py",
+      "anchors": [
+        {
+          "line": 134,
+          "anchor": "from lib.turn_drain import DrainMixin  # noqa: E402  (s3_apply)"
+        },
+        {
+          "line": 137,
+          "anchor": "from lib.turn_retry import RetryMixin  # noqa: E402  (s3_apply)"
+        },
+        {
+          "line": 140,
+          "anchor": "from lib.turn_recovery import RecoveryMixin  # noqa: E402  (s3_apply)"
+        },
+        {
+          "line": 143,
+          "anchor": "from lib.turn_claim import ClaimMixin  # noqa: E402  (s3_apply)"
+        },
+        {
+          "line": 146,
+          "anchor": "from lib.turn_handoff import HandoffMixin  # noqa: E402  (s3_apply)"
+        },
+        {
+          "line": 149,
+          "anchor": "from lib.turn_launcher import LauncherMixin  # noqa: E402  (s3_apply)"
+        },
+        {
+          "line": 152,
+          "anchor": "from lib.turn_admission import AdmissionMixin  # noqa: E402  (s3_apply)"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/turn_drain.py",
+      "anchors": [
+        {
+          "line": 183,
+          "anchor": "con = db.conn()"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/turn_identity.py",
+      "anchors": [
+        {
+          "line": 36,
+          "anchor": "row = db.conn().execute(\"SELECT agent_id FROM provider_turns WHERE turn_token=?\","
+        }
+      ]
+    },
+    {
+      "path": "server/lib/turn_lifecycle.py",
+      "anchors": [
+        {
+          "line": 979,
+          "anchor": "They reach the database exactly as before: ``lib.db.conn()`` opens the"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/turn_queue.py",
+      "anchors": [
+        {
+          "line": 57,
+          "anchor": "return lk.compare_and_set_where(con or db.conn(), QUEUE_RECEIPT, events, where=where,"
+        },
+        {
+          "line": 65,
+          "anchor": "cursor = db.conn().execute("
+        },
+        {
+          "line": 94,
+          "anchor": "cursor = db.conn().execute("
+        },
+        {
+          "line": 118,
+          "anchor": "cursor = db.conn().execute("
+        },
+        {
+          "line": 145,
+          "anchor": "con = db.conn()"
+        },
+        {
+          "line": 165,
+          "anchor": "cursor = db.conn().execute("
+        },
+        {
+          "line": 185,
+          "anchor": "row = db.conn().execute("
+        },
+        {
+          "line": 210,
+          "anchor": "row = db.conn().execute("
+        },
+        {
+          "line": 215,
+          "anchor": "db.conn().execute("
+        },
+        {
+          "line": 233,
+          "anchor": "con = db.conn()"
+        },
+        {
+          "line": 253,
+          "anchor": "return db.conn().execute("
+        },
+        {
+          "line": 262,
+          "anchor": "cursor = db.conn().execute("
+        },
+        {
+          "line": 270,
+          "anchor": "cursor = db.conn().execute("
+        },
+        {
+          "line": 278,
+          "anchor": "rows = db.conn().execute("
+        },
+        {
+          "line": 283,
+          "anchor": "rows = db.conn().execute("
+        },
+        {
+          "line": 302,
+          "anchor": "return db.conn().execute("
+        },
+        {
+          "line": 311,
+          "anchor": "row = db.conn().execute("
+        },
+        {
+          "line": 353,
+          "anchor": "con = db.conn()"
+        },
+        {
+          "line": 441,
+          "anchor": "con = db.conn()"
+        },
+        {
+          "line": 524,
+          "anchor": "row = db.conn().execute("
+        },
+        {
+          "line": 534,
+          "anchor": "settled = db.conn().execute("
+        },
+        {
+          "line": 564,
+          "anchor": "con = db.conn()"
+        },
+        {
+          "line": 587,
+          "anchor": "con = db.conn()"
+        },
+        {
+          "line": 610,
+          "anchor": "row = db.conn().execute("
+        },
+        {
+          "line": 621,
+          "anchor": "con = db.conn()"
+        },
+        {
+          "line": 674,
+          "anchor": "db.conn().execute(\"UPDATE queued_turns SET allow_paused = 1 WHERE queue_id = ?\", (queue_id,))"
+        },
+        {
+          "line": 701,
+          "anchor": "con, now = db.conn(), db.now_ms()"
+        },
+        {
+          "line": 751,
+          "anchor": "row = db.conn().execute("
+        },
+        {
+          "line": 758,
+          "anchor": "con = db.conn()"
+        },
+        {
+          "line": 784,
+          "anchor": "rows = db.conn().execute("
+        },
+        {
+          "line": 790,
+          "anchor": "rows = db.conn().execute("
+        },
+        {
+          "line": 798,
+          "anchor": "for row in db.conn().execute("
+        },
+        {
+          "line": 807,
+          "anchor": "row = db.conn().execute("
+        },
+        {
+          "line": 817,
+          "anchor": "row = db.conn().execute("
+        },
+        {
+          "line": 841,
+          "anchor": "for row in db.conn().execute("
+        },
+        {
+          "line": 857,
+          "anchor": "row = db.conn().execute("
+        },
+        {
+          "line": 865,
+          "anchor": "row = db.conn().execute("
+        },
+        {
+          "line": 898,
+          "anchor": "con = db.conn()"
+        },
+        {
+          "line": 923,
+          "anchor": "db.conn().execute("
+        },
+        {
+          "line": 928,
+          "anchor": "db.conn().execute("
+        },
+        {
+          "line": 939,
+          "anchor": "db.conn().execute("
+        }
+      ]
+    },
+    {
+      "path": "server/lib/turn_retry.py",
+      "anchors": [
+        {
+          "line": 286,
+          "anchor": "cause = agents_db.conn().execute("
+        }
+      ]
+    },
+    {
+      "path": "server/lib/user_notifications.py",
+      "anchors": [
+        {
+          "line": 92,
+          "anchor": "row = db.conn().execute("
+        },
+        {
+          "line": 110,
+          "anchor": "turn = db.conn().execute("
+        },
+        {
+          "line": 115,
+          "anchor": "bindings = {str(r[0]) for r in db.conn().execute("
+        },
+        {
+          "line": 121,
+          "anchor": "bindings = {str(r[0]) for r in db.conn().execute("
+        },
+        {
+          "line": 171,
+          "anchor": "row = db.conn().execute(select + latest, tuple(params)).fetchone()"
+        },
+        {
+          "line": 175,
+          "anchor": "user = db.conn().execute("
+        },
+        {
+          "line": 180,
+          "anchor": "return db.conn().execute("
+        },
+        {
+          "line": 190,
+          "anchor": "row = db.conn().execute("
+        },
+        {
+          "line": 203,
+          "anchor": "row = db.conn().execute("
+        },
+        {
+          "line": 234,
+          "anchor": "return db.conn().execute("
+        },
+        {
+          "line": 330,
+          "anchor": "database = db.conn()"
+        },
+        {
+          "line": 548,
+          "anchor": "rows = db.conn().execute("
+        }
+      ]
+    },
+    {
+      "path": "server/lib/viz_normalize.py",
+      "anchors": [
+        {
+          "line": 391,
+          "anchor": "con = db.conn()"
+        }
+      ]
+    },
+    {
+      "path": "server/lib/voice_events.py",
+      "anchors": [
+        {
+          "line": 118,
+          "anchor": "cur = db.conn().execute("
+        },
+        {
+          "line": 212,
+          "anchor": "rows = db.conn().execute("
+        }
+      ]
+    },
+    {
+      "path": "server/runtime.py",
+      "anchors": [
+        {
+          "line": 12,
+          "anchor": "from lib.context import ServerContext  # noqa: E402"
+        },
+        {
+          "line": 13,
+          "anchor": "from lib.log import log, log_exception  # noqa: E402"
+        },
+        {
+          "line": 14,
+          "anchor": "from lib.paths import RuntimePaths  # noqa: E402"
+        },
+        {
+          "line": 15,
+          "anchor": "from lib.runtime_bridge import RuntimeRPCServer  # noqa: E402"
+        },
+        {
+          "line": 16,
+          "anchor": "from lib.runtime_events import RuntimeEventStream  # noqa: E402"
+        },
+        {
+          "line": 17,
+          "anchor": "from lib.runtime_release import (  # noqa: E402"
+        },
+        {
+          "line": 25,
+          "anchor": "from lib.runtime_startup import recover_runtime  # noqa: E402"
+        },
+        {
+          "line": 26,
+          "anchor": "from lib.turn_dispatch import TurnDispatchService  # noqa: E402"
+        },
+        {
+          "line": 32,
+          "anchor": "from lib.data_root_locks import seal_inherited_lock_fds"
+        },
+        {
+          "line": 35,
+          "anchor": "from lib.host_generation import ensure_instance_generation"
+        },
+        {
+          "line": 53,
+          "anchor": "from lib import live_hub"
+        },
+        {
+          "line": 77,
+          "anchor": "from lib import turn_dispatch"
+        }
+      ]
+    },
+    {
+      "path": "server/server.py",
+      "anchors": [
+        {
+          "line": 16,
+          "anchor": "from lib import transcript_import_cache as _transcript_import_cache"
+        },
+        {
+          "line": 19,
+          "anchor": "from lib import clip_store"
+        },
+        {
+          "line": 20,
+          "anchor": "from lib import viz_normalize"
+        },
+        {
+          "line": 40,
+          "anchor": "from lib.agent_store import (  # noqa: E402"
+        },
+        {
+          "line": 44,
+          "anchor": "from lib.agent_lifecycle import AgentLifecycleError, AgentLifecycleService  # noqa: E402"
+        },
+        {
+          "line": 45,
+          "anchor": "from lib.config import persona_personality  # noqa: E402"
+        },
+        {
+          "line": 46,
+          "anchor": "from lib.controller_events import (  # noqa: E402"
+        },
+        {
+          "line": 50,
+          "anchor": "from lib.context import ServerContext  # noqa: E402"
+        },
+        {
+          "line": 51,
+          "anchor": "from lib import db  # noqa: E402"
+        },
+        {
+          "line": 52,
+          "anchor": "from lib import eventlog  # noqa: E402"
+        },
+        {
+          "line": 54,
+          "anchor": "from lib.outdated_clients import _note_outdated_client  # noqa: E402"
+        },
+        {
+          "line": 55,
+          "anchor": "from lib.turn_identity import TurnIdentityUnavailable  # noqa: E402"
+        },
+        {
+          "line": 56,
+          "anchor": "from lib import audio_metrics, voice_events  # noqa: E402"
+        },
+        {
+          "line": 57,
+          "anchor": "from lib import health  # noqa: E402"
+        },
+        {
+          "line": 58,
+          "anchor": "from lib import agents as agents_db  # noqa: E402"
+        },
+        {
+          "line": 59,
+          "anchor": "from lib.routes import registry as route_registry  # noqa: E402"
+        },
+        {
+          "line": 60,
+          "anchor": "from lib import backends  # noqa: E402"
+        },
+        {
+          "line": 61,
+          "anchor": "from lib import backend_usage  # noqa: E402"
+        },
+        {
+          "line": 62,
+          "anchor": "from lib import media_store  # noqa: E402"
+        },
+        {
+          "line": 63,
+          "anchor": "from lib.calendar_request import CalendarRequestError, build_calendar_request  # noqa: E402"
+        },
+        {
+          "line": 64,
+          "anchor": "from lib import trace as _trace  # noqa: E402"
+        },
+        {
+          "line": 65,
+          "anchor": "from lib import events  # noqa: E402"
+        },
+        {
+          "line": 66,
+          "anchor": "from lib import identity  # noqa: E402"
+        },
+        {
+          "line": 67,
+          "anchor": "from lib.http_utils import HandlerResponder, Principal, redact_query_secrets  # noqa: E402"
+        },
+        {
+          "line": 68,
+          "anchor": "from lib.log import log, log_exception  # noqa: E402"
+        },
+        {
+          "line": 69,
+          "anchor": "from lib.paths import RuntimePaths, _safe_session  # noqa: E402"
+        },
+        {
+          "line": 70,
+          "anchor": "from lib.focus import current_focus_session  # noqa: E402"
+        },
+        {
+          "line": 71,
+          "anchor": "from lib.send_request import SendRequest, SendRequestError  # noqa: E402"
+        },
+        {
+          "line": 72,
+          "anchor": "from lib.transcription_pipeline import transcribe as run_transcription  # noqa: E402"
+        },
+        {
+          "line": 73,
+          "anchor": "from lib.protocol import AgentState, ClientAction  # noqa: E402"
+        },
+        {
+          "line": 74,
+          "anchor": "from lib import turn_lifecycle  # noqa: E402"
+        },
+        {
+          "line": 75,
+          "anchor": "from lib.turn_lifecycle import TurnEvent  # noqa: E402"
+        },
+        {
+          "line": 76,
+          "anchor": "from lib.orchestrator import (  # noqa: E402"
+        },
+        {
+          "line": 84,
+          "anchor": "from lib.herald import (  # noqa: E402"
+        },
+        {
+          "line": 90,
+          "anchor": "from lib.personalities import (  # noqa: E402"
+        },
+        {
+          "line": 94,
+          "anchor": "from lib.conversation import load_conversation, session_cwd  # noqa: E402"
+        },
+        {
+          "line": 95,
+          "anchor": "from lib.snapshot import build_agent_snapshot  # noqa: E402"
+        },
+        {
+          "line": 96,
+          "anchor": "from lib.timing import SERVER_TIMING  # noqa: E402"
+        },
+        {
+          "line": 97,
+          "anchor": "from lib.turn_dispatch import DispatchCommand, DispatchError, TurnDispatchService  # noqa: E402"
+        },
+        {
+          "line": 98,
+          "anchor": "from lib.voices import voices_with_availability  # noqa: E402"
+        },
+        {
+          "line": 102,
+          "anchor": "from lib.background_job_watcher import BackgroundJobWatcher  # noqa: E402"
+        },
+        {
+          "line": 103,
+          "anchor": "from lib.decision_delivery import DecisionDeliveryWorker  # noqa: E402"
+        },
+        {
+          "line": 104,
+          "anchor": "from lib.dispatch_adapters import DispatchAdapters  # noqa: E402"
+        },
+        {
+          "line": 105,
+          "anchor": "from lib.dreaming import DreamingScheduler  # noqa: E402"
+        },
+        {
+          "line": 106,
+          "anchor": "from lib.heartbeat import HeartbeatScheduler  # noqa: E402"
+        },
+        {
+          "line": 107,
+          "anchor": "from lib.janitor_autonomy import AutonomyJanitors  # noqa: E402"
+        },
+        {
+          "line": 108,
+          "anchor": "from lib.janitor_runner import JanitorRunner  # noqa: E402"
+        },
+        {
+          "line": 109,
+          "anchor": "from lib.maintenance import MaintenanceWorker  # noqa: E402"
+        },
+        {
+          "line": 110,
+          "anchor": "from lib.resource_telemetry import ResourceTelemetryWorker  # noqa: E402"
+        },
+        {
+          "line": 111,
+          "anchor": "from lib.scheduler import AgentScheduleRunner  # noqa: E402"
+        },
+        {
+          "line": 112,
+          "anchor": "from lib.state_watcher import StateLogWatcher  # noqa: E402"
+        },
+        {
+          "line": 113,
+          "anchor": "from lib.team_leader import TeamLeaderScheduler  # noqa: E402"
+        },
+        {
+          "line": 114,
+          "anchor": "from lib.transcript_streamer import TranscriptStreamer  # noqa: E402"
+        },
+        {
+          "line": 115,
+          "anchor": "from lib.tts_worker import TTSWorker  # noqa: E402"
+        },
+        {
+          "line": 116,
+          "anchor": "from lib.workers import BOOT, SERVING, Worker, WorkerSet, started  # noqa: E402"
+        },
+        {
+          "line": 117,
+          "anchor": "from lib.cache_warmup import CacheWarmupWorker  # noqa: E402"
+        },
+        {
+          "line": 120,
+          "anchor": "from lib.config import load as load_config  # noqa: E402"
+        },
+        {
+          "line": 127,
+          "anchor": "from lib.routes.helpers import _runtime_paths, _truthy_header, _raw_query_value, _PLAY_EVENTS, _clip_session_and_trace, _safe_upload_name  # noqa: E402  (s3_apply)"
+        },
+        {
+          "line": 186,
+          "anchor": "from lib.request_security import FailureLimiter"
+        },
+        {
+          "line": 196,
+          "anchor": "row = db.conn().execute("
+        },
+        {
+          "line": 234,
+          "anchor": "from lib.runtime_startup import restore_persisted_agents"
+        },
+        {
+          "line": 244,
+          "anchor": "from lib.cartesia_preview_locks import _cartesia_preview_lock  # noqa: E402"
+        },
+        {
+          "line": 336,
+          "anchor": "from lib.routes.vocab import VocabRoutes  # noqa: E402  (s3_apply)"
+        },
+        {
+          "line": 339,
+          "anchor": "from lib.routes.settings import SettingsRoutes  # noqa: E402  (s3_apply)"
+        },
+        {
+          "line": 342,
+          "anchor": "from lib.routes.providers import ProviderRoutes  # noqa: E402  (s3_apply)"
+        },
+        {
+          "line": 345,
+          "anchor": "from lib.routes.ops import OpsRoutes  # noqa: E402  (s3_apply)"
+        },
+        {
+          "line": 348,
+          "anchor": "from lib.routes.artifacts import ArtifactRoutes  # noqa: E402  (s3_apply)"
+        },
+        {
+          "line": 351,
+          "anchor": "from lib.routes.media import MediaRoutes  # noqa: E402  (s3_apply)"
+        },
+        {
+          "line": 354,
+          "anchor": "from lib.routes.goals import GoalRoutes  # noqa: E402  (s3_apply)"
+        },
+        {
+          "line": 357,
+          "anchor": "from lib.routes.teams import TeamRoutes  # noqa: E402  (s3_apply)"
+        },
+        {
+          "line": 360,
+          "anchor": "from lib.routes.schedules import ScheduleRoutes  # noqa: E402  (s3_apply)"
+        },
+        {
+          "line": 363,
+          "anchor": "from lib.routes.heartbeat import HeartbeatRoutes  # noqa: E402  (s3_apply)"
+        },
+        {
+          "line": 366,
+          "anchor": "from lib.routes.agents import AgentRoutes  # noqa: E402  (s3_apply)"
+        },
+        {
+          "line": 369,
+          "anchor": "from lib.routes.personas import PersonaRoutes  # noqa: E402  (s3_apply)"
+        },
+        {
+          "line": 372,
+          "anchor": "from lib.routes.calls import CallRoutes  # noqa: E402  (s3_apply)"
+        },
+        {
+          "line": 375,
+          "anchor": "from lib.routes.oracle import OracleRoutes  # noqa: E402  (s3_apply)"
+        },
+        {
+          "line": 378,
+          "anchor": "from lib.routes.voice import VoiceRoutes  # noqa: E402  (s3_apply)"
+        },
+        {
+          "line": 381,
+          "anchor": "from lib.routes.voice_timeline import VoiceTimelineRoutes  # noqa: E402  (s3_apply)"
+        },
+        {
+          "line": 384,
+          "anchor": "from lib.routes.send import SendRoutes  # noqa: E402  (s3_apply)"
+        },
+        {
+          "line": 457,
+          "anchor": "from lib import telemetry"
+        },
+        {
+          "line": 754,
+          "anchor": "from lib import diagnostics_settings"
+        },
+        {
+          "line": 957,
+          "anchor": "from lib import static_assets"
+        },
+        {
+          "line": 994,
+          "anchor": "from lib import static_assets"
+        },
+        {
+          "line": 1010,
+          "anchor": "row = db.conn().execute("
+        },
+        {
+          "line": 1089,
+          "anchor": "from lib.request_security import local_request"
+        },
+        {
+          "line": 1131,
+          "anchor": "from lib.device_pairing import authenticate"
+        },
+        {
+          "line": 1175,
+          "anchor": "from lib import controller_actions_http"
+        },
+        {
+          "line": 1183,
+          "anchor": "from lib.request_security import failure_source"
+        },
+        {
+          "line": 1208,
+          "anchor": "from lib.avatar_urls import ("
+        },
+        {
+          "line": 1256,
+          "anchor": "from lib import viz_learning"
+        },
+        {
+          "line": 1266,
+          "anchor": "from lib import viz_learning"
+        },
+        {
+          "line": 1334,
+          "anchor": "from lib.runtime_release import status_view_for"
+        },
+        {
+          "line": 1336,
+          "anchor": "from lib import runtime_attestation"
+        },
+        {
+          "line": 1354,
+          "anchor": "from lib.config import load as load_config"
+        },
+        {
+          "line": 1355,
+          "anchor": "from lib.stt import (DisabledSTT, UnavailableSTT, WhisperSTT,"
+        },
+        {
+          "line": 1388,
+          "anchor": "from lib.stt import SubprocessWhisperSTT"
+        },
+        {
+          "line": 1408,
+          "anchor": "from lib.transcription_models import recover_completed_installs"
+        },
+        {
+          "line": 1426,
+          "anchor": "from lib.vocab import settings_payload"
+        },
+        {
+          "line": 1433,
+          "anchor": "from lib.vocab import update_guidance"
+        },
+        {
+          "line": 1446,
+          "anchor": "from lib import stt_providers"
+        },
+        {
+          "line": 1450,
+          "anchor": "from lib import stt_providers"
+        },
+        {
+          "line": 1471,
+          "anchor": "from lib import heard_audio"
+        },
+        {
+          "line": 1481,
+          "anchor": "from lib.transcription_models import start_install"
+        },
+        {
+          "line": 1482,
+          "anchor": "from lib.server_identity import get_server_info"
+        },
+        {
+          "line": 1496,
+          "anchor": "from lib.transcription_models import remove"
+        },
+        {
+          "line": 1551,
+          "anchor": "from lib import agent_conversations"
+        },
+        {
+          "line": 1552,
+          "anchor": "from lib.message_previews import UnknownHistoryCursor"
+        },
+        {
+          "line": 1577,
+          "anchor": "from lib import server_identity"
+        },
+        {
+          "line": 1595,
+          "anchor": "from lib import runtime_attestation"
+        },
+        {
+          "line": 1627,
+          "anchor": "from lib import runtime_attestation"
+        },
+        {
+          "line": 1673,
+          "anchor": "from lib import runtime_attestation"
+        },
+        {
+          "line": 1684,
+          "anchor": "from lib import launch_receipts, runtime_attestation, server_identity, settings_store"
+        },
+        {
+          "line": 1707,
+          "anchor": "admitted = runtime_attestation.admit(observed, in_transaction=db.conn().in_transaction,"
+        },
+        {
+          "line": 1727,
+          "anchor": "connection = db.conn()"
+        },
+        {
+          "line": 1794,
+          "anchor": "from lib import runtime_attestation"
+        },
+        {
+          "line": 1803,
+          "anchor": "if not runtime_attestation.reserve(in_transaction=db.conn().in_transaction):"
+        },
+        {
+          "line": 1833,
+          "anchor": "from lib import message_store"
+        },
+        {
+          "line": 1856,
+          "anchor": "from lib import live_hub"
+        },
+        {
+          "line": 1878,
+          "anchor": "from lib import tool_explanation_settings"
+        },
+        {
+          "line": 1908,
+          "anchor": "from lib import agent_rings"
+        },
+        {
+          "line": 1909,
+          "anchor": "from lib.http_utils import principal_of"
+        },
+        {
+          "line": 2026,
+          "anchor": "from lib import live_activity"
+        },
+        {
+          "line": 2044,
+          "anchor": "from lib import live_activity"
+        },
+        {
+          "line": 2062,
+          "anchor": "from lib import turn_identity"
+        },
+        {
+          "line": 2063,
+          "anchor": "from lib.provider_background_jobs import TURN_ENV"
+        },
+        {
+          "line": 2075,
+          "anchor": "from lib.agent_ring_live_socket import serve"
+        },
+        {
+          "line": 2079,
+          "anchor": "from lib.oracle_mode import voice_handler"
+        },
+        {
+          "line": 2083,
+          "anchor": "from lib.oracle_realtime import serve"
+        },
+        {
+          "line": 2138,
+          "anchor": "from lib.turn_dispatch import TurnDispatchService"
+        },
+        {
+          "line": 2181,
+          "anchor": "from lib import tts_queue"
+        },
+        {
+          "line": 2182,
+          "anchor": "from lib import turn_dispatch"
+        },
+        {
+          "line": 2183,
+          "anchor": "from lib import turn_queue"
+        },
+        {
+          "line": 2249,
+          "anchor": "from lib import goal_ledger, task_plans"
+        },
+        {
+          "line": 2351,
+          "anchor": "from lib import transcription_results"
+        },
+        {
+          "line": 2363,
+          "anchor": "from lib import html_form_events"
+        },
+        {
+          "line": 2385,
+          "anchor": "from lib import artifacts"
+        },
+        {
+          "line": 2398,
+          "anchor": "from lib import turn_queue"
+        },
+        {
+          "line": 2420,
+          "anchor": "from lib import turn_queue"
+        },
+        {
+          "line": 2447,
+          "anchor": "from lib import turn_queue"
+        },
+        {
+          "line": 2457,
+          "anchor": "from lib import turn_queue"
+        },
+        {
+          "line": 2476,
+          "anchor": "from lib import turn_queue"
+        },
+        {
+          "line": 2508,
+          "anchor": "from lib.background_jobs import MAX_GENERATION"
+        },
+        {
+          "line": 2529,
+          "anchor": "from lib import background_jobs"
+        },
+        {
+          "line": 2595,
+          "anchor": "from lib import goal_ledger"
+        },
+        {
+          "line": 2607,
+          "anchor": "from lib import transcription_results"
+        },
+        {
+          "line": 2622,
+          "anchor": "from lib import group_calls"
+        },
+        {
+          "line": 2623,
+          "anchor": "from lib.http_utils import principal_of"
+        },
+        {
+          "line": 2675,
+          "anchor": "from lib import transcription_results"
+        },
+        {
+          "line": 2724,
+          "anchor": "from lib import agent_rings"
+        },
+        {
+          "line": 2729,
+          "anchor": "from lib import helper_agents"
+        },
+        {
+          "line": 2740,
+          "anchor": "from lib import transcription_results"
+        },
+        {
+          "line": 2793,
+          "anchor": "from lib import call_transcription, group_calls"
+        },
+        {
+          "line": 2835,
+          "anchor": "from lib import client_chat"
+        },
+        {
+          "line": 2879,
+          "anchor": "import lib.turn_dispatch as _turn_dispatch_module"
+        },
+        {
+          "line": 2881,
+          "anchor": "from lib import compaction as _compaction_module"
+        },
+        {
+          "line": 2884,
+          "anchor": "from lib import tool_explanation_commands as _explanation_commands"
+        },
+        {
+          "line": 2893,
+          "anchor": "from lib import personas"
+        },
+        {
+          "line": 2895,
+          "anchor": "from lib.janitor_bootstrap import initialize as initialize_janitors"
+        },
+        {
+          "line": 2911,
+          "anchor": "from lib.relay_connector import ManagedRelay"
+        },
+        {
+          "line": 2918,
+          "anchor": "from lib.tool_explanations import ToolExplanations"
+        },
+        {
+          "line": 2923,
+          "anchor": "from lib.bonjour import BonjourAdvertiser"
+        },
+        {
+          "line": 2924,
+          "anchor": "from lib.server_identity import get_server_info"
+        },
+        {
+          "line": 2933,
+          "anchor": "from lib.runtime_events import RuntimeEventWatcher"
+        },
+        {
+          "line": 2941,
+          "anchor": "from lib import apns, live_activity"
+        },
+        {
+          "line": 2942,
+          "anchor": "from lib.agents import list_agents as agents_db_list"
+        },
+        {
+          "line": 2943,
+          "anchor": "from lib.live_explain import LiveExplainer"
+        },
+        {
+          "line": 2968,
+          "anchor": "from lib import live_hub"
+        },
+        {
+          "line": 2978,
+          "anchor": "from lib import server_identity"
+        },
+        {
+          "line": 2983,
+          "anchor": "from lib import live_hub, server_identity"
+        },
+        {
+          "line": 2988,
+          "anchor": "from lib import live_hub"
+        },
+        {
+          "line": 2998,
+          "anchor": "from lib import agents as agents_db"
+        },
+        {
+          "line": 2999,
+          "anchor": "from lib.log import log_exception"
+        },
+        {
+          "line": 3012,
+          "anchor": "from lib import server_identity"
+        },
+        {
+          "line": 3018,
+          "anchor": "from lib import server_identity"
+        },
+        {
+          "line": 3024,
+          "anchor": "from lib.clip_delivery import build_from_config, DeliveryDeps"
+        },
+        {
+          "line": 3034,
+          "anchor": "from lib import apns"
+        },
+        {
+          "line": 3043,
+          "anchor": "from lib.janitor_http import runtime_available"
+        },
+        {
+          "line": 3049,
+          "anchor": "from lib.local_transport import LocalHTTPS"
+        },
+        {
+          "line": 3064,
+          "anchor": "from lib import bookkeeping_listener"
+        },
+        {
+          "line": 3148,
+          "anchor": "from lib.runtime_bridge import RuntimeUnavailable"
+        },
+        {
+          "line": 3170,
+          "anchor": "from lib import interrupted_turns"
+        },
+        {
+          "line": 3186,
+          "anchor": "from lib import agent_rings"
+        },
+        {
+          "line": 3210,
+          "anchor": "from lib import oracle_handoffs"
+        },
+        {
+          "line": 3233,
+          "anchor": "from lib.data_root_locks import seal_inherited_lock_fds"
+        },
+        {
+          "line": 3236,
+          "anchor": "from lib.host_generation import ensure_instance_generation"
+        },
+        {
+          "line": 3238,
+          "anchor": "from lib.herald import HeraldManager"
+        },
+        {
+          "line": 3239,
+          "anchor": "from lib import reconcile"
+        }
+      ]
+    },
+    {
+      "path": "skills/clarp-adopt/scripts/adopt_session.py",
+      "anchors": [
+        {
+          "line": 137,
+          "anchor": "con = sqlite3.connect(f'file:{db}?mode=ro', uri=True)"
+        }
+      ]
+    },
+    {
+      "path": "skills/clarp-server-admin/scripts/rehearse_state_upgrade.py",
+      "anchors": [
+        {
+          "line": 62,
+          "anchor": "original = sqlite3.connect(source.as_uri() + '?mode=ro', uri=True)"
+        },
+        {
+          "line": 63,
+          "anchor": "rehearsal = sqlite3.connect(output, isolation_level=None)"
+        },
+        {
+          "line": 82,
+          "anchor": "db._migrate(rehearsal)"
+        }
+      ]
+    },
+    {
+      "path": "tools/refactor/rm_n12_latency.py",
+      "anchors": [
+        {
+          "line": 20,
+          "anchor": "from lib import db, telemetry, eventlog"
+        },
+        {
+          "line": 21,
+          "anchor": "from lib import transcript_import_cache as cache, transcript_incremental as inc"
+        },
+        {
+          "line": 22,
+          "anchor": "from lib.conversation import ACTIVE_SNAPSHOT_IMPORT_TIMEOUT_SECONDS"
+        }
+      ]
+    },
+    {
+      "path": "tools/refactor/rm_n14_measure.py",
+      "anchors": [
+        {
+          "line": 30,
+          "anchor": "from lib import db"
+        },
+        {
+          "line": 32,
+          "anchor": "connection = db.conn()"
+        },
+        {
+          "line": 67,
+          "anchor": "with sqlite3.connect(reference) as original, sqlite3.connect(candidate) as clone:"
+        }
+      ]
+    },
+    {
+      "path": "tools/refactor/s3_apply.py",
+      "anchors": [
+        {
+          "line": 527,
+          "anchor": "where `lib` is only ever bound by plain `import lib...`; a string exempt only"
+        }
+      ]
+    },
+    {
+      "path": "tools/refactor/ship877/product_capture.py",
+      "anchors": [
+        {
+          "line": 43,
+          "anchor": "from lib import db"
+        },
+        {
+          "line": 46,
+          "anchor": "connection = db.conn()"
+        }
+      ]
+    }
+  ]
+}
