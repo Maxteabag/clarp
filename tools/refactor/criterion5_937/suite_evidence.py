@@ -8,6 +8,7 @@ from collections import Counter
 import hashlib
 import json
 import math
+from pathlib import PurePosixPath
 
 from .roster import checked
 
@@ -67,7 +68,7 @@ def outcomes(events, cohort):
     return result
 
 
-def timing(config_bytes, starts, finishes, *, actual_exit, outer_seconds, cohort):
+def _run_receipts(config_bytes, starts, finishes, *, actual_exit, outer_seconds, cohort, mode):
     """Verify nine process receipts and worker/controller report agreement.
 
     Prior nonzero remains a failure. The caller retains it; this reducer refuses
@@ -76,7 +77,8 @@ def timing(config_bytes, starts, finishes, *, actual_exit, outer_seconds, cohort
     spec = json.loads(config_bytes)
     wanted = checked(cohort)
     cohort_bytes = (json.dumps(wanted, separators=(',', ':')) + '\n').encode()
-    if (spec['mode'] != 'timing' or spec['expected_workers'] != 8
+    if (mode not in ('timing', 'coverage') or spec['mode'] != mode
+            or type(spec['expected_workers']) is not int or spec['expected_workers'] != 8
             or spec['cohort_sha256'] != hashlib.sha256(cohort_bytes).hexdigest()):
         raise ValueError('wrong mode/worker count/cohort binding')
     if type(actual_exit) is not int or actual_exit != 0:
@@ -85,6 +87,7 @@ def timing(config_bytes, starts, finishes, *, actual_exit, outer_seconds, cohort
         raise ValueError('incomplete or replacement process census')
     config_sha = hashlib.sha256(config_bytes).hexdigest()
     identities = set()
+    coverage_candidates = {}
     controller = finishes['controller']
     collected = None
     omissions = None
@@ -109,9 +112,14 @@ def timing(config_bytes, starts, finishes, *, actual_exit, outer_seconds, cohort
                 or identity in identities):
             raise ValueError('reused or changed process identity')
         identities.add(identity)
-        if (finish['primary_pytest_exit'] != 0 or finish['qualified_exit'] != 0
-                or ('coverage' in finish) or ('coverage_data' in finish)):
-            raise ValueError('failure or instrumented run cannot become timing')
+        if (type(finish['primary_pytest_exit']) is not int or finish['primary_pytest_exit'] != 0
+                or type(finish['qualified_exit']) is not int or finish['qualified_exit'] != 0):
+            raise ValueError('failure cannot become accepted receipt set')
+        if mode == 'timing':
+            if any('coverage' in row or 'coverage_data' in row for row in (start, finish)):
+                raise ValueError('instrumented run cannot become timing')
+        else:
+            coverage_candidates[role] = _coverage_candidate(spec, start, finish, config_sha)
         if role != 'controller' and finish['nodes_selected'] != wanted:
             raise ValueError('worker selected roster drift')
         if role != 'controller':
@@ -150,20 +158,89 @@ def timing(config_bytes, starts, finishes, *, actual_exit, outer_seconds, cohort
     if outer < elapsed:
         raise ValueError('outer interval does not contain pytest session')
     return {'run_id': spec['run_id'], 'arm': spec['arm'], 'pin': spec['pin'],
-            'cohort_sha256': spec['cohort_sha256'], 'node_count': len(wanted),
+            'mode': mode, 'cohort_sha256': spec['cohort_sha256'], 'node_count': len(wanted),
             'full_collected_count': len(collected), 'deselected_nodes': omissions,
             'node_outcomes': labels, 'outcome_counts': dict(Counter(labels.values())),
             'nested_subtests': controller['nested_subtests'],
             'session_hook_seconds': elapsed, 'outer_invocation_seconds': outer,
-            'hook_ms_per_node_outcome': 1000 * elapsed / len(wanted),
-            'outer_ms_per_node_outcome': 1000 * outer / len(wanted),
             'process_scope': {k: controller[k] for k in scope},
-            'claim': 'complete common-cohort point observation only; not full G1 or no-worse verdict'}
+            'coverage_candidates': coverage_candidates}
+
+
+COVERAGE_SCOPE = 'this pytest process only; external Host/runtime/provider children UNOBSERVED'
+B_PIN = '0073254687d22ac5a6c1d01b8af29fa678dcf4a2'
+
+
+def _absolute(value):
+    if (type(value) is not str or not value or not PurePosixPath(value).is_absolute()
+            or str(PurePosixPath(value)) != value or '..' in PurePosixPath(value).parts):
+        raise ValueError('noncanonical absolute declared path')
+    return PurePosixPath(value)
+
+
+def _coverage_candidate(spec, start, finish, config_sha):
+    """Check emitted metadata, NOT original bytes/schema/flush-close custody."""
+    if (spec['arm'] != 'B' or spec['pin'] != B_PIN or spec['coverage_version'] != '7.17.0'):
+        raise ValueError('wrong current-B coverage source/tool declaration')
+    package = _absolute(spec['coverage_package_root'])
+    output = _absolute(spec['output'])
+    for row in (start, finish):
+        meta = row.get('coverage')
+        if (type(meta) is not dict or meta.get('config_sha256') != config_sha
+                or meta.get('version') != '7.17.0' or meta.get('native_core') != 'CTracer'
+                or _absolute(meta.get('module_path')) != package / '__init__.py'
+                or _absolute(meta.get('native_tracer_file')).parent != package
+                or meta.get('scope') != COVERAGE_SCOPE):
+            raise ValueError('coverage metadata/source/tool mismatch')
+    if start['coverage'] != finish['coverage'] or 'coverage_data' in start:
+        raise ValueError('coverage start/finish provenance drift')
+    data = finish.get('coverage_data')
+    if (type(data) is not dict or set(data) != {'file', 'sha256', 'bytes', 'scope'}
+            or data['file'] != 'coverage-pid-' + str(finish['pid']) + '.data'
+            or type(data['bytes']) is not int or data['bytes'] <= 0
+            or type(data['sha256']) is not str or len(data['sha256']) != 64
+            or any(c not in '0123456789abcdef' for c in data['sha256'])
+            or data['scope'] != COVERAGE_SCOPE):
+        raise ValueError('missing or malformed coverage artifact declaration')
+    return {'path': str(output / data['file']), 'sha256': data['sha256'], 'bytes': data['bytes'],
+            'boot': finish['boot'], 'pid': finish['pid'], 'start_ticks': finish['start_ticks'],
+            'artifact_state': 'DECLARED_ONLY_BYTES_SCHEMA_CUSTODY_CLOSE_UNKNOWN'}
+
+
+def timing(config_bytes, starts, finishes, *, actual_exit, outer_seconds, cohort):
+    value = _run_receipts(config_bytes, starts, finishes, actual_exit=actual_exit,
+                          outer_seconds=outer_seconds, cohort=cohort, mode='timing')
+    value.pop('coverage_candidates')
+    value.update(hook_ms_per_node_outcome=1000 * value['session_hook_seconds'] / value['node_count'],
+                 outer_ms_per_node_outcome=1000 * value['outer_invocation_seconds'] / value['node_count'],
+                 claim='complete common-cohort point observation only; not full G1 or no-worse verdict')
+    return value
+
+
+def coverage_inputs(config_bytes, starts, finishes, *, actual_exit, outer_seconds, cohort):
+    """Full unchanged receipt logic -> candidates, never valid-empty/API proof.
+
+    No filesystem/coverage/SQLite use. External producer identity/termination,
+    raw bytes/inode custody, schema/API validity and union must qualify later.
+    Instrumented intervals intentionally cannot be exported as timing results.
+    """
+    value = _run_receipts(config_bytes, starts, finishes, actual_exit=actual_exit,
+                          outer_seconds=outer_seconds, cohort=cohort, mode='coverage')
+    candidates = value['coverage_candidates']
+    if len({row['path'] for row in candidates.values()}) != len(ROLES):
+        raise ValueError('duplicate declared coverage path')
+    return {key: value[key] for key in ('run_id', 'arm', 'pin', 'mode', 'cohort_sha256',
+                                       'node_count', 'node_outcomes', 'outcome_counts',
+                                       'coverage_candidates')} | {
+        'qualification': 'RECEIPT_LOGIC_ONLY_NOT_COVERAGE_DATA_ACCEPTANCE',
+        'process_identity_custody_close_and_data_validated': False,
+        'scope': COVERAGE_SCOPE}
 
 
 def compare_abba(runs):
     """Expose preregistered paired gaps, not a variance-free MET conclusion."""
-    if len(runs) != 4 or [r['arm'] for r in runs] != ['A', 'B', 'B', 'A']:
+    if (len(runs) != 4 or any(r.get('mode') != 'timing' for r in runs)
+            or [r['arm'] for r in runs] != ['A', 'B', 'B', 'A']):
         raise ValueError('incomplete or changed ABBA order')
     if len({r['run_id'] for r in runs}) != 4:
         raise ValueError('not four independent invocations')
