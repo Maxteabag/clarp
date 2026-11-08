@@ -25,7 +25,7 @@ from .native_isolation import Guard
 from .proc_samples import bind
 from .raw_products import capture
 from .recipe import APPEND_EXCHANGES, COUNTS, INITIAL_BYTES, record
-from .seed_paths import audit_initial_paths
+from .seed_paths import a_initial_checkpoint_policy, audit_initial_paths
 
 A_PIN = '4f33cdc9287eafcddd0adfb17b51487c84ace28b'
 EPOCH_MS = 1767225600000
@@ -140,6 +140,7 @@ def build_initial_fixture(*, run_id, pin, mode, source, root, output, source_fil
         namespace = runpy.run_path(str(source / 'server/server.py'), run_name='_criterion5_937_initial_seed')
         db = importlib.import_module('lib.db')
         importer = importlib.import_module('lib.transcript_incremental')
+        config = importlib.import_module('lib.config')
         agents = importlib.import_module('lib.agents')
         diagnostics = importlib.import_module('lib.diagnostics_settings')
         # Unmeasured schema/invariants only; no running server or workers.
@@ -184,13 +185,34 @@ def build_initial_fixture(*, run_id, pin, mode, source, root, output, source_fil
                 except Exception as cleanup:
                     primary.add_note('seed rollback failed: ' + type(cleanup).__name__)
                 raise
+            def shadow_observation():
+                # Unmeasured INITIAL route only, no setting writes or new
+                # admission call. Actual native settings and import return
+                # below distinguish the default disabled route from CP work.
+                config_file = root / 'config/config.toml'
+                try:
+                    config_file.lstat()
+                except FileNotFoundError:
+                    config_state = 'ABSENT'
+                else:
+                    config_state = 'PRESENT'
+                return {'config_file': str(config_file), 'config_file_state': config_state,
+                        'raw_transcript_shadow': dict(config.load().transcript_shadow),
+                        'native_settings': dict(importer.settings())}
+            native_shadow_before = shadow_observation()
             entered = time.monotonic()
-            importer.import_transcript(backend='claude', path=path, agent_id=agent, backend_session_id=backend)
+            native_return = importer.import_transcript(
+                backend='claude', path=path, agent_id=agent, backend_session_id=backend)
+            native_ended = time.monotonic()
+            native_shadow_after = shadow_observation()
             after = path.stat()
             if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) != (
                     after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns):
                 raise RuntimeError('initial immutable transcript changed during native import')
-            imports.append({'agent': agent, 'started_mono': entered, 'ended_mono': time.monotonic(),
+            imports.append({'agent': agent, 'started_mono': entered, 'ended_mono': native_ended,
+                            'backend_session_id': backend, 'source_file': str(path),
+                            'native_shadow_before': native_shadow_before,
+                            'native_shadow_after': native_shadow_after, 'native_return': native_return,
                             'source_sha256': item['sha256'], 'bytes': before.st_size})
             agents.start_runtime(agent, agent)
             agents.bind_backend_session(agent, backend)
@@ -199,8 +221,11 @@ def build_initial_fixture(*, run_id, pin, mode, source, root, output, source_fil
         if sum(row['bytes'] for row in imports) != INITIAL_BYTES[size]:
             raise RuntimeError('initial aggregate corpus mismatch')
         deadline(absolute_deadline)
+        checkpoint_policy = a_initial_checkpoint_policy(
+            pin=pin, mode=mode, root=str(root), source_files=source_files, native_imports=imports)
         products = capture(database, owned_root=root)
-        source_path_census = audit_initial_paths(products, root=str(root))
+        source_path_census = audit_initial_paths(
+            products, root=str(root), checkpoint_route=checkpoint_policy['route'])
         if connection.in_transaction:
             raise RuntimeError('native seed transaction left open')
         versions = {name: connection.execute('PRAGMA ' + name).fetchone()[0]
@@ -230,6 +255,7 @@ def build_initial_fixture(*, run_id, pin, mode, source, root, output, source_fil
                 source_files, sort_keys=True, separators=(',', ':')).encode()).hexdigest(),
             'size': size, 'records': records, 'products': products,
             'source_path_census': source_path_census,
+            'transcript_checkpoint_policy': checkpoint_policy,
             'native_imports': imports, 'native_connection': native_connection,
             'native_versions': versions, 'checkpoint': checkpoint, 'clock': clock_receipt,
             'guard_counts': dict(guard.counts), 'guard_failure_file': str(failure_file),

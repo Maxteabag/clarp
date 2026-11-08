@@ -12,7 +12,7 @@ import stat
 import subprocess
 
 from .raw_products import capture, exact_diff, private_database
-from .seed_paths import audit_initial_paths
+from .seed_paths import a_initial_checkpoint_policy, audit_initial_paths
 
 MAX_DB_BYTES = 512 * 1024 * 1024
 
@@ -85,6 +85,8 @@ def qualify_initial(child, *, expected_argv, launch_identity, expected, terminal
 
     Terminal bytes/hash/publication/launch ownership are outer-runner duties.
     A caller's True flag or plain JSON exit code is not used instead of wait().
+    expected.initial_checkpoint_source_hashes must come from that owner's
+    independently bound immutable INITIAL source inventory, not observed rows.
     """
     root_reaped = require_root_reaped(child, identity=launch_identity, expected_argv=expected_argv)
     if terminal['producer'] != launch_identity or any(terminal[key] != expected[key]
@@ -106,7 +108,16 @@ def qualify_initial(child, *, expected_argv, launch_identity, expected, terminal
     # Also catch logical writes after the constructor snapshot, even when they
     # were flushed/checkpointed before process exit. No table or clock masks.
     closed_products = capture(path, owned_root=root)
-    source_paths = audit_initial_paths(closed_products, root=str(root))
+    # Re-derive the declared operation's policy, never choose zero from absence
+    # in the observed DB. Actual source/terminal authenticity is an outer duty.
+    checkpoint_policy = a_initial_checkpoint_policy(
+        pin=terminal['pin'], mode=terminal['mode'], root=str(root),
+        source_files=expected['initial_checkpoint_source_hashes'],
+        native_imports=terminal['native_imports'])
+    if checkpoint_policy != terminal['transcript_checkpoint_policy']:
+        raise ValueError('INITIAL transcript checkpoint policy changed/missing')
+    source_paths = audit_initial_paths(
+        closed_products, root=str(root), checkpoint_route=checkpoint_policy['route'])
     if source_paths != terminal['source_path_census']:
         raise ValueError('initial native source-path census missing/changed after constructor')
     diff = exact_diff(terminal['products'], closed_products)
@@ -117,6 +128,7 @@ def qualify_initial(child, *, expected_argv, launch_identity, expected, terminal
     return {'root_reaped': root_reaped, 'closed_main': first,
             'closed_products_sha256': diff['after_products_sha256'],
             'source_path_census': source_paths,
+            'transcript_checkpoint_policy': checkpoint_policy,
             'logical_changes_after_constructor': 0,
             'scope': 'initial fixture only, with qualified pinned guard; not measured root reaping'}
 

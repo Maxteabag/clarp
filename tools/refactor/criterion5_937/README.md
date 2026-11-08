@@ -127,9 +127,12 @@ retry or generic remote all-descendant claim. Ancillary/corpus restore and
 end-to-end terminal publication/owner launch binding are still absent.
 
 Physical transcript copies naturally acquire different device/inode identities.
-Both pinned importers check those identities, and their native audit clock also
-sees the initial January checkpoint age. Never rewrite checkpoint identity/time
-to make a copied file look unchanged. Native full import/audit remains observed
+Where a native checkpoint actually exists, both pinned importers can compare
+those identities and native audit age. The declared fresh default-disabled A
+INITIAL seed creates NO transcript checkpoint; its January import clock does
+not imply a January audited_at. Missing-CP/default-disabled and B's distinct
+tail-publication routes require their actual per-pin source/state proof. Never
+rewrite checkpoint identity/time to make a copied file look unchanged. Native full import/audit remains observed
 work, including any resulting scheduling delay/censor. Final checkpoint fields
 need positive correspondence to the actual owned transcript stat/hash/import
 bracket, not a blanket ID/time exclusion. This does not certify180s cell fit.
@@ -158,7 +161,8 @@ cap-exhaustion controls. These controls and the source are UNEXECUTED.
 The earlier unconditional full-import/input-row-count inference was too strong:
 both native upsert paths may retain unchanged payload/trace/phase revision/time,
 and the planned measured/reference roots start from an already populated common
-seed. Full parsing due to copied inode/January age is not itself proof of all-N
+seed. Native full parsing (including default-disabled/no-CP routes, or physical
+identity/audit decisions where a CP exists) is not itself proof of all-N
 allocations. This is a source reassessment, NOT proof all existing rows stay
 unchanged or that8192/512 fits. Neither input rows nor36 appended records is a
 complete mutation/summary/head/CP/actor/lifetime bound. C accepted this source correction (criterion5-937-mutation-volume-reassessment-C.md),
