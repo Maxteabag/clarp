@@ -1,0 +1,303 @@
+{
+  "scope": "SOURCE AST/data only; native API/observer DESIGN not implemented or run",
+  "pins": {
+    "A": {
+      "pin": "4f33cdc9287eafcddd0adfb17b51487c84ace28b",
+      "files": {
+        "server/lib/runtime_bridge.py": {
+          "sha256": "ddc72aba0875a2ae487bfcba50cdbe9cd658408364708171890e4e2e661971c6",
+          "symbols": {
+            "RuntimeClient._connect": {
+              "line": 105,
+              "end_line": 124,
+              "ast_sha256": "13fce16ae4fc9a1f2c838ab1fbd4c3b910face1f2efa8d8abc7d5780c40b75b6"
+            },
+            "RuntimeClient._request": {
+              "line": 126,
+              "end_line": 170,
+              "ast_sha256": "05d4630470ace39b686ac41234b7494fef4e701a81231aad349bd35cc2039758"
+            },
+            "RuntimeClient.status_within": {
+              "line": 220,
+              "end_line": 224,
+              "ast_sha256": "4f5a90f61c26b124b4d740d622f891149a2ac38308d9c149c0ee5a55a41a0730"
+            },
+            "RuntimeRPCServer.__init__": {
+              "line": 479,
+              "end_line": 530,
+              "ast_sha256": "4355682cf1d43519efb5b7c6faa7409c2effda2407bba4d7b9c7439c92b39c17"
+            },
+            "RuntimeRPCServer.dispatch_request": {
+              "line": 537,
+              "end_line": 544,
+              "ast_sha256": "986ff94a8ca9ef3b862ae7097722e5d65e7f41f1f2dca603075a8efbcc6f12a0"
+            }
+          },
+          "absent_requested_symbols": []
+        },
+        "server/lib/runtime_release.py": {
+          "sha256": "090782d9e7cd5724c18d798a4f36f58fd383a2f7ab78dbd871a6a36b69c2d968",
+          "symbols": {
+            "RuntimeStatusView.block": {
+              "line": 474,
+              "end_line": 503,
+              "ast_sha256": "6fdd5c4b89715c29b321ae50713b8a2123ca30812feba9d08d8f9b5873fa0953"
+            },
+            "RuntimeStatusView._unavailable": {
+              "line": 505,
+              "end_line": 520,
+              "ast_sha256": "08f02405024d8b955e4621a82aeb5000ffa2fc03d9af18d464025da9f3bb3875"
+            },
+            "_bounded_status": {
+              "line": 530,
+              "end_line": 538,
+              "ast_sha256": "7f8781b67e06cfb3e22990d27bc5c32450e9e0bbde63e79d64d64f0e4ded62c4"
+            },
+            "status_view_for": {
+              "line": 541,
+              "end_line": 552,
+              "ast_sha256": "6ffc266a03cf2509e7fa6b665acd0cd2d4373d0711096dbbfe925809dbd9591b"
+            }
+          },
+          "absent_requested_symbols": []
+        },
+        "server/lib/runtime_attestation.py": {
+          "sha256": "c5b5b900bd4615cd7fa4815637bbaf311f7ceb7eeda79052067279d82b5f7812",
+          "symbols": {
+            "_valid": {
+              "line": 143,
+              "end_line": 151,
+              "ast_sha256": "b94ea0d3ae96f4f000d82de2a89497ebde90d7e13b380fcd851019222aa07d06"
+            },
+            "self_report": {
+              "line": 154,
+              "end_line": 166,
+              "ast_sha256": "9a6076bf8e535d0977393ba8eb3030bce7971105aeecab9b2b201a8edde76eab"
+            }
+          },
+          "absent_requested_symbols": []
+        },
+        "server/server.py": {
+          "sha256": "29c8429ee8a21d6f13950752cebd210d633ed2589f08b4a7b984b86c152617ae",
+          "symbols": {
+            "Handler._handle_status": {
+              "line": 1880,
+              "end_line": 1915,
+              "ast_sha256": "ec118db7058b2a3f85d0e01545e5e9299a21425ff0ba2176411b602f3f28b583"
+            },
+            "build_server": {
+              "line": 7243,
+              "end_line": 7275,
+              "ast_sha256": "646f5ce9b7eeeaaca5093f4122edbd4e4b0b248c11b66ab3ebd44f36d49ef7ce"
+            },
+            "_server_workers": {
+              "line": 6947,
+              "end_line": 7189,
+              "ast_sha256": "fc56ef759954c83ab0bb2f7d76299ebc0ec7e407bf6b3068ad014a9b4a59eee2"
+            }
+          },
+          "absent_requested_symbols": []
+        },
+        "server/lib/workers.py": {
+          "sha256": "ec7cdf91a579b816d4e508d8887155f14ab8390c828697eb79af327c9d3a3d46",
+          "symbols": {
+            "WorkerSet.start": {
+              "line": 76,
+              "end_line": 101,
+              "ast_sha256": "8500341b47d8246b8c165212717a59ae7e7c88cbc7e68c32db79699fda618941"
+            }
+          },
+          "absent_requested_symbols": []
+        },
+        "server/lib/cache_warmup.py": {
+          "sha256": "310a0348732e43aea6d11e0f6a4b9920a4d99ce731672e489582a0fb13e5730a",
+          "symbols": {
+            "_steps": {
+              "line": 20,
+              "end_line": 27,
+              "ast_sha256": "f4b37852c5be6a46225d9951eba1dee86df6b42c4b7c96e0fa8b6b2eb08c9878"
+            },
+            "CacheWarmupWorker._run": {
+              "line": 42,
+              "end_line": 53,
+              "ast_sha256": "df721c1114e49574c59b1db7256ba285db18ea4baece5fe6d9f36db2d1cc4c2a"
+            }
+          },
+          "absent_requested_symbols": []
+        },
+        "server/lib/log.py": {
+          "sha256": "441e9a26bd41a4b3e2596e5c0ef161502dc5bcd2527af4165f78312af598452f",
+          "symbols": {
+            "log": {
+              "line": 39,
+              "end_line": 55,
+              "ast_sha256": "2ef2768f1d50ae4034b6558ea09bec0800c3b625a185b535b98ce4491fc5fe94"
+            }
+          },
+          "absent_requested_symbols": []
+        },
+        "server/lib/paths.py": {
+          "sha256": "2b695a77c856d27d593142c82b9d2d142672ee1286593654f2551ac49136ad0b",
+          "symbols": {
+            "RuntimePaths.from_home": {
+              "line": 31,
+              "end_line": 58,
+              "ast_sha256": "686072a1c41adcb831a43dc3d167db12c2e11714314bae1a9fc84366237f3ee0"
+            }
+          },
+          "absent_requested_symbols": []
+        }
+      }
+    },
+    "B": {
+      "pin": "0073254687d22ac5a6c1d01b8af29fa678dcf4a2",
+      "files": {
+        "server/lib/runtime_bridge.py": {
+          "sha256": "6995a57d0eea07e8eb17e6056c47c02c94be7f5c94c66454d94345e1fb211c66",
+          "symbols": {
+            "RuntimeClient._connect": {
+              "line": 105,
+              "end_line": 124,
+              "ast_sha256": "13fce16ae4fc9a1f2c838ab1fbd4c3b910face1f2efa8d8abc7d5780c40b75b6"
+            },
+            "RuntimeClient._request": {
+              "line": 126,
+              "end_line": 170,
+              "ast_sha256": "05d4630470ace39b686ac41234b7494fef4e701a81231aad349bd35cc2039758"
+            },
+            "RuntimeClient.status_within": {
+              "line": 220,
+              "end_line": 224,
+              "ast_sha256": "4f5a90f61c26b124b4d740d622f891149a2ac38308d9c149c0ee5a55a41a0730"
+            },
+            "RuntimeRPCServer.__init__": {
+              "line": 479,
+              "end_line": 530,
+              "ast_sha256": "4355682cf1d43519efb5b7c6faa7409c2effda2407bba4d7b9c7439c92b39c17"
+            },
+            "RuntimeRPCServer.dispatch_request": {
+              "line": 537,
+              "end_line": 544,
+              "ast_sha256": "986ff94a8ca9ef3b862ae7097722e5d65e7f41f1f2dca603075a8efbcc6f12a0"
+            }
+          },
+          "absent_requested_symbols": []
+        },
+        "server/lib/runtime_release.py": {
+          "sha256": "090782d9e7cd5724c18d798a4f36f58fd383a2f7ab78dbd871a6a36b69c2d968",
+          "symbols": {
+            "RuntimeStatusView.block": {
+              "line": 474,
+              "end_line": 503,
+              "ast_sha256": "6fdd5c4b89715c29b321ae50713b8a2123ca30812feba9d08d8f9b5873fa0953"
+            },
+            "RuntimeStatusView._unavailable": {
+              "line": 505,
+              "end_line": 520,
+              "ast_sha256": "08f02405024d8b955e4621a82aeb5000ffa2fc03d9af18d464025da9f3bb3875"
+            },
+            "_bounded_status": {
+              "line": 530,
+              "end_line": 538,
+              "ast_sha256": "7f8781b67e06cfb3e22990d27bc5c32450e9e0bbde63e79d64d64f0e4ded62c4"
+            },
+            "status_view_for": {
+              "line": 541,
+              "end_line": 552,
+              "ast_sha256": "6ffc266a03cf2509e7fa6b665acd0cd2d4373d0711096dbbfe925809dbd9591b"
+            }
+          },
+          "absent_requested_symbols": []
+        },
+        "server/lib/runtime_attestation.py": {
+          "sha256": "c5b5b900bd4615cd7fa4815637bbaf311f7ceb7eeda79052067279d82b5f7812",
+          "symbols": {
+            "_valid": {
+              "line": 143,
+              "end_line": 151,
+              "ast_sha256": "b94ea0d3ae96f4f000d82de2a89497ebde90d7e13b380fcd851019222aa07d06"
+            },
+            "self_report": {
+              "line": 154,
+              "end_line": 166,
+              "ast_sha256": "9a6076bf8e535d0977393ba8eb3030bce7971105aeecab9b2b201a8edde76eab"
+            }
+          },
+          "absent_requested_symbols": []
+        },
+        "server/server.py": {
+          "sha256": "3986a8c321030492aa8d237b3a757485c1c448b41f1f8f815b9e3d9d7673736d",
+          "symbols": {
+            "Handler._handle_status": {
+              "line": 1311,
+              "end_line": 1346,
+              "ast_sha256": "ec118db7058b2a3f85d0e01545e5e9299a21425ff0ba2176411b602f3f28b583"
+            },
+            "build_server": {
+              "line": 3201,
+              "end_line": 3233,
+              "ast_sha256": "646f5ce9b7eeeaaca5093f4122edbd4e4b0b248c11b66ab3ebd44f36d49ef7ce"
+            },
+            "_server_workers": {
+              "line": 2905,
+              "end_line": 3147,
+              "ast_sha256": "fc56ef759954c83ab0bb2f7d76299ebc0ec7e407bf6b3068ad014a9b4a59eee2"
+            }
+          },
+          "absent_requested_symbols": []
+        },
+        "server/lib/workers.py": {
+          "sha256": "ec7cdf91a579b816d4e508d8887155f14ab8390c828697eb79af327c9d3a3d46",
+          "symbols": {
+            "WorkerSet.start": {
+              "line": 76,
+              "end_line": 101,
+              "ast_sha256": "8500341b47d8246b8c165212717a59ae7e7c88cbc7e68c32db79699fda618941"
+            }
+          },
+          "absent_requested_symbols": []
+        },
+        "server/lib/cache_warmup.py": {
+          "sha256": "310a0348732e43aea6d11e0f6a4b9920a4d99ce731672e489582a0fb13e5730a",
+          "symbols": {
+            "_steps": {
+              "line": 20,
+              "end_line": 27,
+              "ast_sha256": "f4b37852c5be6a46225d9951eba1dee86df6b42c4b7c96e0fa8b6b2eb08c9878"
+            },
+            "CacheWarmupWorker._run": {
+              "line": 42,
+              "end_line": 53,
+              "ast_sha256": "df721c1114e49574c59b1db7256ba285db18ea4baece5fe6d9f36db2d1cc4c2a"
+            }
+          },
+          "absent_requested_symbols": []
+        },
+        "server/lib/log.py": {
+          "sha256": "441e9a26bd41a4b3e2596e5c0ef161502dc5bcd2527af4165f78312af598452f",
+          "symbols": {
+            "log": {
+              "line": 39,
+              "end_line": 55,
+              "ast_sha256": "2ef2768f1d50ae4034b6558ea09bec0800c3b625a185b535b98ce4491fc5fe94"
+            }
+          },
+          "absent_requested_symbols": []
+        },
+        "server/lib/paths.py": {
+          "sha256": "2b695a77c856d27d593142c82b9d2d142672ee1286593654f2551ac49136ad0b",
+          "symbols": {
+            "RuntimePaths.from_home": {
+              "line": 31,
+              "end_line": 58,
+              "ast_sha256": "686072a1c41adcb831a43dc3d167db12c2e11714314bae1a9fc84366237f3ee0"
+            }
+          },
+          "absent_requested_symbols": []
+        }
+      }
+    }
+  },
+  "source_ready": false,
+  "controls_or_probes_executed": 0
+}
