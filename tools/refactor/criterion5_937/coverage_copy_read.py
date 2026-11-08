@@ -74,8 +74,8 @@ def _retain(primary, secondary):
     return primary
 
 
-def read_closed_copy(*, original_root, copy_root, filename, expected_sha256,
-                     expected_bytes, coverage_data_class):
+def _inspect_closed_copy(*, original_root, copy_root, filename, expected_sha256,
+                         expected_bytes, coverage_data_class, mode, limits=None):
     """One public read/close on a private copy; no valid-empty/union verdict.
 
     Class/interpreter/source/producer-exit/closed-file custody must be qualified
@@ -83,6 +83,13 @@ def read_closed_copy(*, original_root, copy_root, filename, expected_sha256,
     Every API connection for this component is owned by the supplied instance;
     outer containment covers constructor-return/assignment and unknown close.
     """
+    if mode not in ('read', 'capture'):
+        raise ValueError('unknown closed-copy operation')
+    if mode == 'capture':
+        # Tooling import/limit validation before any file/API effect. No
+        # product or coverage import. Limits still need numeric qualification.
+        from .coverage_sets import capture_sets, check_limits
+        check_limits(limits)
     import socket
     if socket.gethostname() == 'laptopstudio':
         raise RuntimeError('BUILDBOX_ONLY; no local control or API execution authority')
@@ -106,13 +113,17 @@ def read_closed_copy(*, original_root, copy_root, filename, expected_sha256,
     # This is a public API construction, not source authentication. No method
     # substitution, private schema decoder, initialization/repair or fallback.
     data = coverage_data_class(basename=str(copy))
-    primary = None
+    primary, sets = None, None
     try:
         # Recheck after constructor and BEFORE read: missing read silently
         # succeeds in the pinned API. Constructor work cannot bypass custody.
         if _snapshot(copy) != pre_b or _snapshot(original) != pre_a:
             raise ValueError('artifact changed before public read')
         data.read()
+        if mode == 'capture':
+            # Same exact object and copy version; no detached later accessor
+            # call authorized by an earlier standalone read/close receipt.
+            sets = capture_sets(data, limits=limits)
     except BaseException as error:
         primary = error
     finally:
@@ -127,8 +138,33 @@ def read_closed_copy(*, original_root, copy_root, filename, expected_sha256,
     post_b, post_a = _snapshot(copy), _snapshot(original)
     if post_b != pre_b or post_a != pre_a:
         raise ValueError('public read mutated/reinitialized data; preserve/PARTIAL')
-    return {'public_read_returned': True, 'public_close_returned': True,
+    receipt = {'public_read_returned': True, 'public_close_returned': True,
             'copy_bytes_unchanged': True, 'original_bytes_unchanged': True,
             'artifact_sha256': expected_sha256, 'artifact_bytes': expected_bytes,
             'schema_valid_empty_union_or_producer_accepted': False,
-            'scope': 'one strict private-copy read only; no update/report/process/drain proof'}
+            'scope': 'one strict same-version copy read/accessor/close only; no update/report/process/drain proof'}
+
+    if mode == 'capture':
+        return {'read_close_receipt': receipt, 'accessor_sets': sets,
+                'qualification': 'SAME_VERSION_COPY_API_CAPTURE_ONLY_NOT_INPUT_ACCEPTANCE',
+                'source_producer_schema_valid_empty_or_union_accepted': False}
+    return receipt
+
+
+def read_closed_copy(*, original_root, copy_root, filename, expected_sha256,
+                     expected_bytes, coverage_data_class):
+    return _inspect_closed_copy(original_root=original_root, copy_root=copy_root, filename=filename,
+                                expected_sha256=expected_sha256, expected_bytes=expected_bytes,
+                                coverage_data_class=coverage_data_class, mode='read')
+
+
+def capture_closed_copy(*, original_root, copy_root, filename, expected_sha256,
+                        expected_bytes, coverage_data_class, limits):
+    """All accessor operations INSIDE one fresh read/version/close envelope.
+
+    No class/producer/input/schema acceptance or nine-input union is implied.
+    No open library object escapes to authorize later update/report calls.
+    """
+    return _inspect_closed_copy(original_root=original_root, copy_root=copy_root, filename=filename,
+                                expected_sha256=expected_sha256, expected_bytes=expected_bytes,
+                                coverage_data_class=coverage_data_class, mode='capture', limits=limits)
