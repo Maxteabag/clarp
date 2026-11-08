@@ -74,3 +74,13 @@ def test_lost_terminal_is_unknown_not_a_complete_prefix():
     with pytest.raises(ValueError):value.append({'revision':9})
     raw[80]^=1
     assert value.partial_segments()['terminal']=={'state':'UNKNOWN','qualified':False}
+
+
+
+def test_second_writer_cannot_overwrite_first_refusal():
+    raw=bytearray(SIZE); first=Terminal(raw); other=Terminal(raw)
+    first.mark('NATIVE_FAILURE',bank=1,published=(2,3,4))
+    saved=bytes(raw)
+    with pytest.raises(ValueError,match='already changed'):
+        other.mark('TIMEOUT',bank=2,published=(5,6,7))
+    assert bytes(raw)==saved and first.read()['code']=='NATIVE_FAILURE'
