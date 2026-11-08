@@ -210,3 +210,113 @@ def test_mode_separation_never_sanitizes_or_treats_coverage_as_timing():
     runs[1]['mode'] = 'coverage'
     with pytest.raises(ValueError):
         compare_abba(runs)
+
+
+# LOWER raw-record decoding table, SOURCE ONLY/UNEXECUTED. These fixture objects
+# are not retained native files, actual plugin/process or source proof.
+DECODE_LIMITS = {'bytes': 1000000, 'nodes': 100000, 'depth': 64, 'string_characters': 1000000}
+
+
+def _decoder_raw(value):
+    return (json.dumps(value, sort_keys=True, ensure_ascii=True, allow_nan=False,
+                       separators=(',', ':')) + '\n').encode()
+
+
+def _decoder_fixture():
+    raw, starts, finishes = receipts('coverage')
+    spec = json.loads(raw)
+    spec.update(source_root='/private/source', cohort='/private/cohort.json',
+                coverage_config='/private/coverage.ini', coverage_config_sha256='d' * 64)
+    raw = _decoder_raw(spec)
+    for phase, container in (('start', starts), ('finish', finishes)):
+        for role, row in container.items():
+            row['spec'] = deepcopy(spec)
+            row['config_sha256'] = hashlib.sha256(raw).hexdigest()
+            row['coverage']['config_sha256'] = row['config_sha256']
+            row['local_numprocesses'] = 8 if role == 'controller' else None
+            if phase == 'start':
+                row.update(started_mono=None, nodes_before=[], nodes_selected=[],
+                           deselected=[], worker_collections={})
+            else:
+                row['timing_scope'] = 'session hooks only; outer pytest invocation/summary separately retained'
+    return raw, starts, finishes
+
+
+@pytest.mark.parametrize('phase', ['start', 'finish'])
+def test_retained_phase_lower_finite_values_and_original_bytes(phase):
+    from .coverage_receipt_decode import decode_phase_record
+    config, starts, finishes = _decoder_fixture()
+    row = starts['gw0'] if phase == 'start' else finishes['gw0']
+    raw = _decoder_raw(row)
+    digest = hashlib.sha256(raw).hexdigest()
+    result = decode_phase_record(raw, config_raw=config, role='gw0', phase=phase,
+                                 artifact_path='/private/coverage-out/gw0.' + phase + '.json',
+                                 limits=DECODE_LIMITS)
+    assert type(result['pid']) is int and result['pid'] == 101
+    if phase == 'finish':
+        assert type(result['events'][0]['duration']) is float
+        assert result['events'][0]['duration'] == 0.125
+        assert type(result['session_hook_elapsed_seconds']) is float
+        assert result['session_hook_elapsed_seconds'] == 8.0
+    else:
+        assert result['started_mono'] is None
+    assert hashlib.sha256(raw).hexdigest() == digest
+
+
+@pytest.mark.parametrize('phase', ['start', 'finish'])
+@pytest.mark.parametrize('fault', ['nested-duplicate', 'pid-bool', 'pid-float',
+                                  'birth-bool', 'affinity-bool', 'embedded-float-worker',
+                                  'wrong-role', 'wrong-phase-channel', 'foreign-output'])
+def test_retained_phase_lower_exact_types_and_channel(phase, fault):
+    from .coverage_receipt_decode import decode_phase_record
+    config, starts, finishes = _decoder_fixture()
+    row = deepcopy(starts['gw0'] if phase == 'start' else finishes['gw0'])
+    path = '/private/coverage-out/gw0.' + phase + '.json'
+    if fault == 'pid-bool':
+        row['pid'] = True
+    elif fault == 'pid-float':
+        row['pid'] = 101.0
+    elif fault == 'birth-bool':
+        row['start_ticks'] = True
+    elif fault == 'affinity-bool':
+        row['affinity'][0] = False
+    elif fault == 'embedded-float-worker':
+        row['spec']['expected_workers'] = 8.0
+    elif fault == 'wrong-role':
+        row['worker'] = 'gw1'
+    elif fault == 'wrong-phase-channel':
+        path = '/private/coverage-out/gw0.' + ('finish' if phase == 'start' else 'start') + '.json'
+    elif fault == 'foreign-output':
+        path = '/different/gw0.' + phase + '.json'
+    raw = _decoder_raw(row)
+    if fault == 'nested-duplicate':
+        assert raw.count(b'"expected_workers":8') == 1
+        raw = raw.replace(b'"expected_workers":8', b'"expected_workers":8,"expected_workers":8', 1)
+    original = hashlib.sha256(raw).hexdigest()
+    with pytest.raises(ValueError):
+        decode_phase_record(raw, config_raw=config, role='gw0', phase=phase,
+                            artifact_path=path, limits=DECODE_LIMITS)
+    assert hashlib.sha256(raw).hexdigest() == original
+
+
+@pytest.mark.parametrize('token', ['NaN', 'Infinity', '-Infinity', '1e999', '-1e999'])
+def test_retained_phase_lower_nested_nonfinite_refuses(token):
+    from .coverage_receipt_decode import decode_phase_record
+    config, _, finishes = _decoder_fixture()
+    raw = _decoder_raw(finishes['gw0'])
+    assert b'"duration":0.125' in raw
+    raw = raw.replace(b'"duration":0.125', b'"duration":' + token.encode(), 1)
+    original = hashlib.sha256(raw).hexdigest()
+    with pytest.raises(ValueError):
+        decode_phase_record(raw, config_raw=config, role='gw0', phase='finish',
+                            artifact_path='/private/coverage-out/gw0.finish.json', limits=DECODE_LIMITS)
+    assert hashlib.sha256(raw).hexdigest() == original
+
+
+def test_retained_phase_lower_boolean_counter_refuses():
+    from .coverage_receipt_decode import decode_phase_record
+    config, _, finishes = _decoder_fixture()
+    row = deepcopy(finishes['gw0']); row['observer_events'] = True
+    with pytest.raises(ValueError):
+        decode_phase_record(_decoder_raw(row), config_raw=config, role='gw0', phase='finish',
+                            artifact_path='/private/coverage-out/gw0.finish.json', limits=DECODE_LIMITS)

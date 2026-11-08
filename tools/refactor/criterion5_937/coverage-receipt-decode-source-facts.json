@@ -1,0 +1,101 @@
+{
+  "scope": "SOURCE_AST_FIELD_AGREEMENT_ONLY_NOT_ACTUAL_PRODUCER_OR_RUNTIME",
+  "producer_path": "tools/refactor/criterion5_937/pytest_plugin/c5_937.py",
+  "producer_sha256": "54a1f1da7dec6dcf1d9a233438675314ced5c51c8ad22fa79a94e0e2b9275d17",
+  "methods": {
+    "publish": {
+      "line": 26,
+      "end": 40,
+      "ast_sha256": "3481c2bba38761739fb285dbeaecbe392744cf8534a27850c8f69076310b6e9c"
+    },
+    "pytest_configure": {
+      "line": 110,
+      "end": 171,
+      "ast_sha256": "e3e4b45539364ed4cc57d962ad28b0bddb54e17d8c3ec6d816060bd0dc8a4a6a"
+    },
+    "pytest_sessionstart": {
+      "line": 174,
+      "end": 175,
+      "ast_sha256": "fddb85bf38133049c4f82c4461b6deacbf657e52cb054d438662589fb3aeacb6"
+    },
+    "pytest_runtest_logreport": {
+      "line": 208,
+      "end": 217,
+      "ast_sha256": "17653ebe1b806e185aec5ca34edffe69e42b61a54cca56687c1789043d5b71c3"
+    },
+    "pytest_sessionfinish": {
+      "line": 224,
+      "end": 300,
+      "ast_sha256": "b0e096240eea83162da8c93d6ae161ce2a7fd805d9eb96e8fb38bdcfa9b577ae"
+    }
+  },
+  "coverage_config_fields": [
+    "arm",
+    "cache_prefix",
+    "cohort",
+    "cohort_sha256",
+    "coverage_config",
+    "coverage_config_sha256",
+    "coverage_package_root",
+    "coverage_version",
+    "expected_workers",
+    "mode",
+    "output",
+    "pin",
+    "run_id",
+    "source_root"
+  ],
+  "start_candidate_fields": [
+    "affinity",
+    "boot",
+    "config_sha256",
+    "coverage",
+    "deselected",
+    "errors",
+    "executable",
+    "local_numprocesses",
+    "nodes_before",
+    "nodes_selected",
+    "pid",
+    "pycache_prefix",
+    "pytest",
+    "python",
+    "spec",
+    "start_ticks",
+    "started_mono",
+    "worker",
+    "worker_collections"
+  ],
+  "complete_successful_coverage_finish_fields": [
+    "affinity",
+    "boot",
+    "config_sha256",
+    "coverage",
+    "coverage_data",
+    "deselected",
+    "ended_mono",
+    "errors",
+    "events",
+    "executable",
+    "local_numprocesses",
+    "nested_subtests",
+    "nodes_before",
+    "nodes_selected",
+    "observer_events",
+    "pid",
+    "primary_pytest_exit",
+    "pycache_prefix",
+    "pytest",
+    "python",
+    "qualified_exit",
+    "session_hook_elapsed_seconds",
+    "spec",
+    "start_ticks",
+    "started_mono",
+    "subtests",
+    "timing_scope",
+    "worker",
+    "worker_collections"
+  ],
+  "limitation": "coverage_data is native-success dependent; incomplete/failing candidate phases may refuse strict usable-shape decoding while their original raw bytes remain retained. This source agreement is not producer/byte/source authentication."
+}
