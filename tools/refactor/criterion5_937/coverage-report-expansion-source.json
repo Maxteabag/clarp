@@ -1,0 +1,3583 @@
+{
+  "scope": "STATIC_SOURCE_AST_DATA_ONLY_NOT_ACTUAL_REPORT_OR_FIT",
+  "B_pin": "0073254687d22ac5a6c1d01b8af29fa678dcf4a2",
+  "archive_sha256": "49d58df8284f40cb16b781d5fc8b1d4fdefe185ce0c691e39e4b73d1f83c575b",
+  "totals": {
+    "source_files": 434,
+    "source_bytes": 5908891,
+    "physical_lines": 131815,
+    "all_ast_function_definitions": 6152,
+    "all_ast_class_definitions": 476,
+    "sum_context_map_calls_upper_bound": 7930,
+    "max_context_map_calls_per_file_upper_bound": 154
+  },
+  "files": {
+    "server/__init__.py": {
+      "source_sha256": "d66de2d40558c4e458a7a0375b7243e4ea0f13abdb8c4e1804f0c6b76d5ae4e7",
+      "bytes": 43,
+      "physical_lines": 1,
+      "all_ast_function_definitions": 0,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 3
+    },
+    "server/lib/__init__.py": {
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "physical_lines": 0,
+      "all_ast_function_definitions": 0,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 3
+    },
+    "server/lib/account_failover.py": {
+      "source_sha256": "2617c44314eec1a7f4a92a455e998ab46140c9de3f14a1d9e80492db3fc22d5b",
+      "bytes": 17693,
+      "physical_lines": 405,
+      "all_ast_function_definitions": 20,
+      "all_ast_class_definitions": 2,
+      "context_map_call_structural_upper_bound": 25
+    },
+    "server/lib/activity.py": {
+      "source_sha256": "6e83b9094fde0ff9453bf06ff009dbb26079b3e97a33502502cb08c3005ecaab",
+      "bytes": 11140,
+      "physical_lines": 295,
+      "all_ast_function_definitions": 9,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 12
+    },
+    "server/lib/addressing.py": {
+      "source_sha256": "e53b06adf5bf21aeb16ebbe78b30a5065de96c5d34487d651984d8cceac71829",
+      "bytes": 3979,
+      "physical_lines": 117,
+      "all_ast_function_definitions": 4,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 8
+    },
+    "server/lib/agent_conversations.py": {
+      "source_sha256": "b91805ab64f85986a86fd89300ae2d4dd1e0997a3a4c2fb398a066981325cbd7",
+      "bytes": 13841,
+      "physical_lines": 277,
+      "all_ast_function_definitions": 12,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 15
+    },
+    "server/lib/agent_files.py": {
+      "source_sha256": "85d461dd77dde0f515a3cb1333139273630ba11e5e2e206e6d45b5567fe3fbc8",
+      "bytes": 6368,
+      "physical_lines": 180,
+      "all_ast_function_definitions": 4,
+      "all_ast_class_definitions": 6,
+      "context_map_call_structural_upper_bound": 13
+    },
+    "server/lib/agent_fork.py": {
+      "source_sha256": "51c37941b315c60369340e05ebc16429c6f0e32530037f42ef840ee9f4635fa6",
+      "bytes": 16142,
+      "physical_lines": 355,
+      "all_ast_function_definitions": 14,
+      "all_ast_class_definitions": 3,
+      "context_map_call_structural_upper_bound": 20
+    },
+    "server/lib/agent_goals.py": {
+      "source_sha256": "28a99926eb7ef35bca2fe9f98de3c84c0a0ef115b3b48bdb15771c85dd379cf1",
+      "bytes": 5802,
+      "physical_lines": 152,
+      "all_ast_function_definitions": 12,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 15
+    },
+    "server/lib/agent_lifecycle.py": {
+      "source_sha256": "7c681ec88c705728e09d48842e443707794cf5ee4d20512a4ac3bc4727542724",
+      "bytes": 13665,
+      "physical_lines": 300,
+      "all_ast_function_definitions": 15,
+      "all_ast_class_definitions": 3,
+      "context_map_call_structural_upper_bound": 21
+    },
+    "server/lib/agent_live_effects.py": {
+      "source_sha256": "7a575dd9b8b30471dd5ddd63cf97ab545a63c48802120e56470e719f2d8d5bf8",
+      "bytes": 4628,
+      "physical_lines": 104,
+      "all_ast_function_definitions": 6,
+      "all_ast_class_definitions": 4,
+      "context_map_call_structural_upper_bound": 13
+    },
+    "server/lib/agent_live_settings.py": {
+      "source_sha256": "940068c9a9fa687110b56c13a79ec49c704f8441ebdb851f6521fc99773b9fb6",
+      "bytes": 12304,
+      "physical_lines": 206,
+      "all_ast_function_definitions": 8,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 11
+    },
+    "server/lib/agent_live_tools.py": {
+      "source_sha256": "503c709a22407ee3a4a17f3b7342247dcca333dbd6976c50abfa98e893c71b44",
+      "bytes": 74946,
+      "physical_lines": 1328,
+      "all_ast_function_definitions": 76,
+      "all_ast_class_definitions": 6,
+      "context_map_call_structural_upper_bound": 85
+    },
+    "server/lib/agent_portraits.py": {
+      "source_sha256": "04c9c39b703a07c929ca6359abc29fdbe3f6bbec9806f86649d1c111d74c3ad2",
+      "bytes": 13854,
+      "physical_lines": 358,
+      "all_ast_function_definitions": 13,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 17
+    },
+    "server/lib/agent_ring_live.py": {
+      "source_sha256": "03272cb3e11535d168f826fb554587bbdc65f16a12b0ece68e08be7a31d00173",
+      "bytes": 35731,
+      "physical_lines": 754,
+      "all_ast_function_definitions": 34,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 37
+    },
+    "server/lib/agent_ring_live_socket.py": {
+      "source_sha256": "291b57323a16094770c250baf5214ec297f0a80712f35703a21bfebe3b4a9729",
+      "bytes": 52174,
+      "physical_lines": 979,
+      "all_ast_function_definitions": 49,
+      "all_ast_class_definitions": 2,
+      "context_map_call_structural_upper_bound": 54
+    },
+    "server/lib/agent_ring_openings.py": {
+      "source_sha256": "6c3a2088bf2b27fcb07e1ea8f4acfea499b9b749d16eb7d3142b4f5e328f98c3",
+      "bytes": 52728,
+      "physical_lines": 1122,
+      "all_ast_function_definitions": 57,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 60
+    },
+    "server/lib/agent_rings.py": {
+      "source_sha256": "1aabe12c46d420ebc225f6a1580b117184ff83ac4e192ef19c915ca114f497f0",
+      "bytes": 52689,
+      "physical_lines": 1019,
+      "all_ast_function_definitions": 50,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 53
+    },
+    "server/lib/agent_rings_base.py": {
+      "source_sha256": "7e1b7e214f56eccad74a396fd7b83e9cbf8e79099618ee426e1dce84569e3158",
+      "bytes": 2650,
+      "physical_lines": 74,
+      "all_ast_function_definitions": 6,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 9
+    },
+    "server/lib/agent_store.py": {
+      "source_sha256": "f99c26bf54adef23f21cb5f9050a730cfbc8fb554967c7c7381551dfe07f08cd",
+      "bytes": 5017,
+      "physical_lines": 127,
+      "all_ast_function_definitions": 6,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 9
+    },
+    "server/lib/agents.py": {
+      "source_sha256": "26ec87fcd1220cff240247d27d922131bbea5d39f90ad42ddf1c65dfc1726f31",
+      "bytes": 48010,
+      "physical_lines": 1198,
+      "all_ast_function_definitions": 82,
+      "all_ast_class_definitions": 2,
+      "context_map_call_structural_upper_bound": 87
+    },
+    "server/lib/agy_transcript.py": {
+      "source_sha256": "85babb4c988d9215c4eeb457623e9156e0b607c9d6367c731eb52e7ccc943f49",
+      "bytes": 20059,
+      "physical_lines": 473,
+      "all_ast_function_definitions": 19,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 22
+    },
+    "server/lib/apns.py": {
+      "source_sha256": "ecb60ac80f89c0efe35ec08cf0bb7fa8af4248ee52405e10077791f7cf5683f6",
+      "bytes": 75851,
+      "physical_lines": 1718,
+      "all_ast_function_definitions": 81,
+      "all_ast_class_definitions": 9,
+      "context_map_call_structural_upper_bound": 93
+    },
+    "server/lib/application_activity.py": {
+      "source_sha256": "405d5d3b366baee32437e19735e0b0a69025dcb97f53f64237f3800b184d214e",
+      "bytes": 2525,
+      "physical_lines": 51,
+      "all_ast_function_definitions": 2,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 5
+    },
+    "server/lib/artifacts.py": {
+      "source_sha256": "218fcb1ff2ab85c53bfb450c288e5d00f3ad5ff7f1d91a55373c8f4f41a92d68",
+      "bytes": 68862,
+      "physical_lines": 1299,
+      "all_ast_function_definitions": 60,
+      "all_ast_class_definitions": 2,
+      "context_map_call_structural_upper_bound": 65
+    },
+    "server/lib/attention_index.py": {
+      "source_sha256": "c76ac1568ad5a062c4d7c6d536bb9239a9c038d18d7b9618a4b9284d7e7052a2",
+      "bytes": 7673,
+      "physical_lines": 122,
+      "all_ast_function_definitions": 7,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 11
+    },
+    "server/lib/audio_bookkeeper.py": {
+      "source_sha256": "c970721be4a5e090bc0411ac2476f4b37849be531c385521445f511814afd366",
+      "bytes": 6161,
+      "physical_lines": 121,
+      "all_ast_function_definitions": 3,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 6
+    },
+    "server/lib/audio_codec.py": {
+      "source_sha256": "a22926781b9e121039a9f0c27903ed06acdb239c9acd43cf16b034ab38b03e0d",
+      "bytes": 1491,
+      "physical_lines": 30,
+      "all_ast_function_definitions": 1,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 4
+    },
+    "server/lib/audio_duration.py": {
+      "source_sha256": "abb01792b02ed30ad9008862637128f9c49ec12412bad84f3957076321653974",
+      "bytes": 2737,
+      "physical_lines": 75,
+      "all_ast_function_definitions": 3,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 6
+    },
+    "server/lib/audio_growing.py": {
+      "source_sha256": "2fbaa041cc4b17f838548fcbedc62a67b8ebf29abe3be1c71ea720611e1a3bd8",
+      "bytes": 4148,
+      "physical_lines": 114,
+      "all_ast_function_definitions": 5,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 8
+    },
+    "server/lib/audio_metrics.py": {
+      "source_sha256": "f06dfbc468ccfb5eda523fc5fdf7ec3cc7d36954eeb00645077772a00b038be4",
+      "bytes": 6137,
+      "physical_lines": 152,
+      "all_ast_function_definitions": 6,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 9
+    },
+    "server/lib/audio_stream.py": {
+      "source_sha256": "f90e533b292409bd690423ea91af26466296d93bd80ea1bfad37987b5713eda9",
+      "bytes": 13426,
+      "physical_lines": 317,
+      "all_ast_function_definitions": 15,
+      "all_ast_class_definitions": 2,
+      "context_map_call_structural_upper_bound": 20
+    },
+    "server/lib/automation_settings.py": {
+      "source_sha256": "321a16704c644c49318a5654d2f94468751e6888b1c8e167e0e7e8a046a50aae",
+      "bytes": 383,
+      "physical_lines": 13,
+      "all_ast_function_definitions": 2,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 5
+    },
+    "server/lib/avatar_settings.py": {
+      "source_sha256": "ff9e6883e393bbd0d09b9804aed2577ae397fc43319eaf4bc835400b6b10b2cf",
+      "bytes": 508,
+      "physical_lines": 15,
+      "all_ast_function_definitions": 2,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 5
+    },
+    "server/lib/avatar_urls.py": {
+      "source_sha256": "0da70db22884ad92478fe3d3c0486a50557fd9f9d9617daf3c0446a02b248547",
+      "bytes": 4762,
+      "physical_lines": 139,
+      "all_ast_function_definitions": 7,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 10
+    },
+    "server/lib/backend/__init__.py": {
+      "source_sha256": "dd00642be4d25228f50b33a62a86fde8a6d2e55d4078cbf6229bb57f0a944959",
+      "bytes": 384,
+      "physical_lines": 8,
+      "all_ast_function_definitions": 0,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 3
+    },
+    "server/lib/backend/agy.py": {
+      "source_sha256": "19ff2554995556b6e6e11d3a29bae7dea6ce945edf0150e279715108df86f40f",
+      "bytes": 55770,
+      "physical_lines": 1201,
+      "all_ast_function_definitions": 44,
+      "all_ast_class_definitions": 2,
+      "context_map_call_structural_upper_bound": 49
+    },
+    "server/lib/backend/agy_hooks.py": {
+      "source_sha256": "e6893c40d121f7238ac5e11136c79460d139c99567b4825fad296c803042e88a",
+      "bytes": 7605,
+      "physical_lines": 189,
+      "all_ast_function_definitions": 6,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 9
+    },
+    "server/lib/backend/base.py": {
+      "source_sha256": "30270a049a007b8df766f2c8761db39f42c24e944567d9f23b4debe616fa7aaf",
+      "bytes": 21252,
+      "physical_lines": 512,
+      "all_ast_function_definitions": 49,
+      "all_ast_class_definitions": 4,
+      "context_map_call_structural_upper_bound": 56
+    },
+    "server/lib/backend/claude.py": {
+      "source_sha256": "54b376f0eced3a98871f55aa1684eacd8901e496587c85f42243029dfc1fcbf1",
+      "bytes": 46062,
+      "physical_lines": 1014,
+      "all_ast_function_definitions": 46,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 50
+    },
+    "server/lib/backend/claude_background_provenance.py": {
+      "source_sha256": "5fb9b81203819f33aa1e385ba392806dc2bd70bb319c4428907d97b7879f2cbe",
+      "bytes": 2703,
+      "physical_lines": 50,
+      "all_ast_function_definitions": 2,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 5
+    },
+    "server/lib/backend/codex.py": {
+      "source_sha256": "fedff61364ea4d89c5a3c4711e60eff9e7369bba3e44afb35884f46339543869",
+      "bytes": 38540,
+      "physical_lines": 857,
+      "all_ast_function_definitions": 36,
+      "all_ast_class_definitions": 2,
+      "context_map_call_structural_upper_bound": 41
+    },
+    "server/lib/backend/deepseek.py": {
+      "source_sha256": "20683a3a18f734da85da114024143559f6b9a0d1906f64e7e99df32fe18e3a53",
+      "bytes": 1472,
+      "physical_lines": 36,
+      "all_ast_function_definitions": 0,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 4
+    },
+    "server/lib/backend/grok.py": {
+      "source_sha256": "75aa0138378720e0fcb26ec28c899f30f7b5e9501d4b3a77771a3d2e76eb847d",
+      "bytes": 19946,
+      "physical_lines": 448,
+      "all_ast_function_definitions": 17,
+      "all_ast_class_definitions": 2,
+      "context_map_call_structural_upper_bound": 22
+    },
+    "server/lib/backend/long_prompt.py": {
+      "source_sha256": "3799fb5781e8df0b40fdf6b40855167eeab3887cdc98eaaf56e6f0c43df2872c",
+      "bytes": 2252,
+      "physical_lines": 67,
+      "all_ast_function_definitions": 6,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 10
+    },
+    "server/lib/backend/muse.py": {
+      "source_sha256": "00760077eaa3e50a05f491f7c906299c47f6398f8d8f48df1ccf55878c3cea1e",
+      "bytes": 27639,
+      "physical_lines": 599,
+      "all_ast_function_definitions": 26,
+      "all_ast_class_definitions": 3,
+      "context_map_call_structural_upper_bound": 32
+    },
+    "server/lib/backend/opencode.py": {
+      "source_sha256": "449e725d5ba09c3e050f21f2bb29a59b76c0ec722e953c07cb82a693d4528018",
+      "bytes": 40539,
+      "physical_lines": 834,
+      "all_ast_function_definitions": 32,
+      "all_ast_class_definitions": 2,
+      "context_map_call_structural_upper_bound": 37
+    },
+    "server/lib/backend/opencode_serve.py": {
+      "source_sha256": "0798c691a9c32abe300b712cdaf177be8aa03f56550613421ca9a74cd8d93c43",
+      "bytes": 10558,
+      "physical_lines": 284,
+      "all_ast_function_definitions": 12,
+      "all_ast_class_definitions": 3,
+      "context_map_call_structural_upper_bound": 18
+    },
+    "server/lib/backend/registry.py": {
+      "source_sha256": "0148f23466a526ce49131af5b0a547620d0112bd601d128af53c3a2eebb92741",
+      "bytes": 1669,
+      "physical_lines": 52,
+      "all_ast_function_definitions": 3,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 6
+    },
+    "server/lib/backend/stream_json.py": {
+      "source_sha256": "d5800daea779766de169758cf076bd4bff11b8b0b1f0830d0d0307ccd15b4d06",
+      "bytes": 19558,
+      "physical_lines": 437,
+      "all_ast_function_definitions": 26,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 30
+    },
+    "server/lib/backend_auth.py": {
+      "source_sha256": "e2bf065d37254feb7b817ef5b5876158b71f95e3c8a9e2087d364991b4c39d4b",
+      "bytes": 23145,
+      "physical_lines": 568,
+      "all_ast_function_definitions": 29,
+      "all_ast_class_definitions": 2,
+      "context_map_call_structural_upper_bound": 34
+    },
+    "server/lib/backend_usage.py": {
+      "source_sha256": "ec7c66308d985159ee364c1b361c8dbc176a06ad997a15d4405b3a0ba7f50b96",
+      "bytes": 18643,
+      "physical_lines": 439,
+      "all_ast_function_definitions": 10,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 14
+    },
+    "server/lib/backend_usage_agy.py": {
+      "source_sha256": "4618adb7059cca8ecedaaa19258ef10ec2594b19caf2f4fce3c7435f745ec9ac",
+      "bytes": 6435,
+      "physical_lines": 137,
+      "all_ast_function_definitions": 5,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 8
+    },
+    "server/lib/backend_usage_claude.py": {
+      "source_sha256": "d980028d371c26a0ee55af5bc720c3935c7b7adc5cd00f8fb3bcdb13d0bbc25b",
+      "bytes": 2508,
+      "physical_lines": 62,
+      "all_ast_function_definitions": 4,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 7
+    },
+    "server/lib/backend_usage_codex.py": {
+      "source_sha256": "c90b13038a041b1a39e7ff899d42c3f14f02575577f66cc547d5ef1e0307a137",
+      "bytes": 19216,
+      "physical_lines": 446,
+      "all_ast_function_definitions": 13,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 16
+    },
+    "server/lib/backend_usage_store.py": {
+      "source_sha256": "3779860ecc32798522de1c0ac30d1d81d546c797b7282ef15f80c083237de388",
+      "bytes": 28494,
+      "physical_lines": 749,
+      "all_ast_function_definitions": 31,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 34
+    },
+    "server/lib/backends.py": {
+      "source_sha256": "ae10995c85a1bd45ee64774a71aac927dc5b80480657e5d95156beb32d0f196c",
+      "bytes": 16673,
+      "physical_lines": 442,
+      "all_ast_function_definitions": 36,
+      "all_ast_class_definitions": 4,
+      "context_map_call_structural_upper_bound": 43
+    },
+    "server/lib/background_job_process.py": {
+      "source_sha256": "4d65c4819d7bf45d617ecc53cdb5f95445b8e31e803ebe67f1e280054276661e",
+      "bytes": 8030,
+      "physical_lines": 223,
+      "all_ast_function_definitions": 10,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 13
+    },
+    "server/lib/background_job_watcher.py": {
+      "source_sha256": "cd6324dd202b8aa65ab8e1d591056a34084ae624812eab219f8f30dc4001aa18",
+      "bytes": 4462,
+      "physical_lines": 102,
+      "all_ast_function_definitions": 6,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 10
+    },
+    "server/lib/background_jobs.py": {
+      "source_sha256": "f52b35168a10600cfad99c74af42b49c53628f5c3695e7ae10240032177c52d4",
+      "bytes": 58703,
+      "physical_lines": 1371,
+      "all_ast_function_definitions": 52,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 55
+    },
+    "server/lib/batched_delete.py": {
+      "source_sha256": "445ea03eb04580bb8016d84fa48413a2781b6dfef515fff2149176eebf5cc355",
+      "bytes": 3926,
+      "physical_lines": 82,
+      "all_ast_function_definitions": 4,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 7
+    },
+    "server/lib/bonjour.py": {
+      "source_sha256": "a5179aa28a8706f2fc96aa1e4e9608d6348ac6d5c3517021c3fdda7d57ce93d6",
+      "bytes": 3054,
+      "physical_lines": 81,
+      "all_ast_function_definitions": 4,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 8
+    },
+    "server/lib/bookkeeping_listener.py": {
+      "source_sha256": "484d47fd598b873495914afea810ecceb0c6fe30c94f83d520582e4d614b2f08",
+      "bytes": 16790,
+      "physical_lines": 355,
+      "all_ast_function_definitions": 17,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 21
+    },
+    "server/lib/cache_warmup.py": {
+      "source_sha256": "310a0348732e43aea6d11e0f6a4b9920a4d99ce731672e489582a0fb13e5730a",
+      "bytes": 1951,
+      "physical_lines": 53,
+      "all_ast_function_definitions": 5,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 9
+    },
+    "server/lib/calendar_request.py": {
+      "source_sha256": "af6ad139b78b2b05f2cf78fcf6344980378e014119f6905de76cf81b9f10703f",
+      "bytes": 2051,
+      "physical_lines": 74,
+      "all_ast_function_definitions": 4,
+      "all_ast_class_definitions": 2,
+      "context_map_call_structural_upper_bound": 9
+    },
+    "server/lib/call_transcription.py": {
+      "source_sha256": "7975716080fcf0520d22f518ccddf2c4052fb65600c60451574fd9f8e7620fae",
+      "bytes": 12981,
+      "physical_lines": 279,
+      "all_ast_function_definitions": 15,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 18
+    },
+    "server/lib/cartesia_preview_locks.py": {
+      "source_sha256": "c9f9a4ae5a91b930e512458da19139831d69a1cfc18ba7679402be862e5f5522",
+      "bytes": 630,
+      "physical_lines": 15,
+      "all_ast_function_definitions": 1,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 4
+    },
+    "server/lib/cartesia_stt.py": {
+      "source_sha256": "9aec5208166b76551972934893851c34ab1ffcfd34b9fff82c3f862dc4c9d1f1",
+      "bytes": 2158,
+      "physical_lines": 54,
+      "all_ast_function_definitions": 1,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 5
+    },
+    "server/lib/cartesia_stt_ws.py": {
+      "source_sha256": "e9eca33193087df810d4eeae1e2de0b6a4097267c802fcc63411d0763636f0ba",
+      "bytes": 6292,
+      "physical_lines": 181,
+      "all_ast_function_definitions": 11,
+      "all_ast_class_definitions": 2,
+      "context_map_call_structural_upper_bound": 16
+    },
+    "server/lib/cartesia_tts.py": {
+      "source_sha256": "27cdf6743c1b2909c0df8ec175498e8c06f5f6c1e32772981f65cc9f5239c2c2",
+      "bytes": 6414,
+      "physical_lines": 167,
+      "all_ast_function_definitions": 2,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 6
+    },
+    "server/lib/cartesia_voices.py": {
+      "source_sha256": "02e89a726167e1c6b6c3ba0d9ae3b87016ae49be3f489d60f91c2f8322e1bedb",
+      "bytes": 3707,
+      "physical_lines": 103,
+      "all_ast_function_definitions": 5,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 8
+    },
+    "server/lib/cartesia_ws.py": {
+      "source_sha256": "51e2b8efc979ad4e23257e5d264b8f9716aafa1b3d5456967a8287c4675d0ffb",
+      "bytes": 16108,
+      "physical_lines": 420,
+      "all_ast_function_definitions": 23,
+      "all_ast_class_definitions": 2,
+      "context_map_call_structural_upper_bound": 28
+    },
+    "server/lib/clarp_guidance.py": {
+      "source_sha256": "b1dd3f60ccf9f0618279fab7ec97c2b52faa8aa90e6872895f9386bd18883004",
+      "bytes": 2305,
+      "physical_lines": 42,
+      "all_ast_function_definitions": 1,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 4
+    },
+    "server/lib/claude_reply_evidence.py": {
+      "source_sha256": "dac6a3ff6788995b4c615b105d0a73637ea01e242b1fd257387ed857ddb1b53e",
+      "bytes": 12983,
+      "physical_lines": 294,
+      "all_ast_function_definitions": 16,
+      "all_ast_class_definitions": 2,
+      "context_map_call_structural_upper_bound": 21
+    },
+    "server/lib/claude_transcript.py": {
+      "source_sha256": "71fc6305c2123b1ae32e7409cb502067580599fd7aca06a1827965445255e4c0",
+      "bytes": 29617,
+      "physical_lines": 727,
+      "all_ast_function_definitions": 27,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 31
+    },
+    "server/lib/client_chat.py": {
+      "source_sha256": "2423ee14080a947a7a46d748afc7dea7b80638d6ef9282fbcdc33bbc582dc13e",
+      "bytes": 1538,
+      "physical_lines": 45,
+      "all_ast_function_definitions": 3,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 6
+    },
+    "server/lib/clip_delivery/__init__.py": {
+      "source_sha256": "bef8bff1e2e64d417f591cb8f58ff55ddccdfa8c8266eec159d83fd92239946e",
+      "bytes": 7100,
+      "physical_lines": 168,
+      "all_ast_function_definitions": 9,
+      "all_ast_class_definitions": 4,
+      "context_map_call_structural_upper_bound": 16
+    },
+    "server/lib/clip_delivery/chunked_file.py": {
+      "source_sha256": "b02b40ff70bbb1189f7a7cfeb76799bb9bd0d9706f6782ba8ab50cadf56479e2",
+      "bytes": 2645,
+      "physical_lines": 72,
+      "all_ast_function_definitions": 4,
+      "all_ast_class_definitions": 2,
+      "context_map_call_structural_upper_bound": 9
+    },
+    "server/lib/clip_delivery/file_session.py": {
+      "source_sha256": "0be423b28d9e30328020dcb99a224c180069974cd0454c2cd6439eea2e4d4669",
+      "bytes": 7496,
+      "physical_lines": 214,
+      "all_ast_function_definitions": 9,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 13
+    },
+    "server/lib/clip_delivery/hls.py": {
+      "source_sha256": "139b0462f6463b25101aa078d08d628a9d3a7840a0fd04aec096e338d3effe7c",
+      "bytes": 17442,
+      "physical_lines": 427,
+      "all_ast_function_definitions": 15,
+      "all_ast_class_definitions": 2,
+      "context_map_call_structural_upper_bound": 20
+    },
+    "server/lib/clip_delivery/raw_pcm.py": {
+      "source_sha256": "faeb1af5763f2759a0486ca99f990f741b39af391c09e721f261f01f9c58400b",
+      "bytes": 2251,
+      "physical_lines": 72,
+      "all_ast_function_definitions": 6,
+      "all_ast_class_definitions": 2,
+      "context_map_call_structural_upper_bound": 11
+    },
+    "server/lib/clip_pacing.py": {
+      "source_sha256": "e051ede467cfc9fe80ac0060d47ba83ef33185b7fc02411d9cfe38c36e7961df",
+      "bytes": 3972,
+      "physical_lines": 113,
+      "all_ast_function_definitions": 5,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 9
+    },
+    "server/lib/clip_store.py": {
+      "source_sha256": "417e274ae7fba230c3d3905298f758ac3efa2834152a6fdbe1e2e98c31f68cd0",
+      "bytes": 7595,
+      "physical_lines": 184,
+      "all_ast_function_definitions": 5,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 8
+    },
+    "server/lib/clip_stream.py": {
+      "source_sha256": "8190f655ef1d17aadef8bdda60708cec0356b720fd9783ee8596ed4b9e3f9b21",
+      "bytes": 17114,
+      "physical_lines": 460,
+      "all_ast_function_definitions": 22,
+      "all_ast_class_definitions": 2,
+      "context_map_call_structural_upper_bound": 27
+    },
+    "server/lib/clips.py": {
+      "source_sha256": "bffada9c1f1143553c4effec062c3d70681d0be0923fa60cd651a8c2b5a8e67d",
+      "bytes": 2194,
+      "physical_lines": 62,
+      "all_ast_function_definitions": 3,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 6
+    },
+    "server/lib/clock.py": {
+      "source_sha256": "24fd170c2d038db458ddf6855c7def4578c2474138a56b0f67f9b4a304befad2",
+      "bytes": 624,
+      "physical_lines": 19,
+      "all_ast_function_definitions": 2,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 5
+    },
+    "server/lib/codex_app_server.py": {
+      "source_sha256": "e1aaf1dadb8f938667b608ea60b52594809ede10b913d142e0259395fb3662c1",
+      "bytes": 88964,
+      "physical_lines": 1873,
+      "all_ast_function_definitions": 97,
+      "all_ast_class_definitions": 7,
+      "context_map_call_structural_upper_bound": 107
+    },
+    "server/lib/codex_tool_cells.py": {
+      "source_sha256": "0fdf9b8ca3371d759ff43451be460ab95ba7750186a7d5e6a4cb285a01635bf7",
+      "bytes": 44944,
+      "physical_lines": 1174,
+      "all_ast_function_definitions": 42,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 45
+    },
+    "server/lib/codex_transcript.py": {
+      "source_sha256": "fb9a3875ce43a97d6d897a2561741b804127517e820dade0a07ac9403d8162f3",
+      "bytes": 30576,
+      "physical_lines": 798,
+      "all_ast_function_definitions": 19,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 22
+    },
+    "server/lib/compaction.py": {
+      "source_sha256": "3675cd2079af24c1757f3f51004847af318c71650249b452c443fb30a40f45d3",
+      "bytes": 6503,
+      "physical_lines": 156,
+      "all_ast_function_definitions": 6,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 9
+    },
+    "server/lib/config.py": {
+      "source_sha256": "84f8c7a8a2b91095045da26919acc65e8ed4d78464bcb06939d3a9283b7850f2",
+      "bytes": 62617,
+      "physical_lines": 1092,
+      "all_ast_function_definitions": 31,
+      "all_ast_class_definitions": 2,
+      "context_map_call_structural_upper_bound": 36
+    },
+    "server/lib/config_writer.py": {
+      "source_sha256": "8dbd30ce8470c8bc97c7473ce7a872c7b4a5a097d3dc4c9da0ad7e1a62feadb8",
+      "bytes": 1670,
+      "physical_lines": 45,
+      "all_ast_function_definitions": 3,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 6
+    },
+    "server/lib/contact_assignment.py": {
+      "source_sha256": "ce496bba8454cce088369d10093aada2fb7f5ceddb3daf77d5345e6ce0587f70",
+      "bytes": 3914,
+      "physical_lines": 70,
+      "all_ast_function_definitions": 3,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 6
+    },
+    "server/lib/context.py": {
+      "source_sha256": "a1a7d054e245c64ded3d46ed3f40d4e6ce29a8072b199fe2272e878c3fc90f8c",
+      "bytes": 14492,
+      "physical_lines": 351,
+      "all_ast_function_definitions": 26,
+      "all_ast_class_definitions": 6,
+      "context_map_call_structural_upper_bound": 35
+    },
+    "server/lib/controller_actions.py": {
+      "source_sha256": "d03ade0f8e2f39127d4174a163e2bf89b1a4aec0a3a43135565ae42f76d5d23c",
+      "bytes": 16010,
+      "physical_lines": 377,
+      "all_ast_function_definitions": 20,
+      "all_ast_class_definitions": 2,
+      "context_map_call_structural_upper_bound": 25
+    },
+    "server/lib/controller_actions_cli.py": {
+      "source_sha256": "d6ed7d45037432e3165137ca61a8a2ba116174434ca3b2551c35dd16d4fd17e7",
+      "bytes": 7571,
+      "physical_lines": 154,
+      "all_ast_function_definitions": 4,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 7
+    },
+    "server/lib/controller_actions_http.py": {
+      "source_sha256": "460efbb98f25107c64266dfba80c1eb52969685d6d1cf88cd04eaa12a836bf37",
+      "bytes": 6392,
+      "physical_lines": 147,
+      "all_ast_function_definitions": 10,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 13
+    },
+    "server/lib/controller_events.py": {
+      "source_sha256": "3370ff4827353087dda5ef9a3a23ad2f80c5dbe5ead7e2bc9bf6fe0dd8984b6f",
+      "bytes": 3650,
+      "physical_lines": 102,
+      "all_ast_function_definitions": 3,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 7
+    },
+    "server/lib/controller_narration.py": {
+      "source_sha256": "5d143e3a20752a72e4d964f34cb1347ae56477936ef675cf4515b9354cc6f008",
+      "bytes": 1203,
+      "physical_lines": 38,
+      "all_ast_function_definitions": 3,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 6
+    },
+    "server/lib/conversation.py": {
+      "source_sha256": "e3202a9ae6eb5b896d3d395d5ac38940f4808f9dd2305bd13a46437d78a3fcfb",
+      "bytes": 9580,
+      "physical_lines": 213,
+      "all_ast_function_definitions": 6,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 9
+    },
+    "server/lib/countdown_attention.py": {
+      "source_sha256": "9ac46f09b66613147ace2b0343353f63fc80e3e7d96b6e21f56889a396368cd5",
+      "bytes": 2709,
+      "physical_lines": 50,
+      "all_ast_function_definitions": 1,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 4
+    },
+    "server/lib/custom_stt_adapters.py": {
+      "source_sha256": "7b170e231d7f11f7b6a35adc0b08ab46b60c6bd472f4a3e3804735f02ca62f3f",
+      "bytes": 16710,
+      "physical_lines": 403,
+      "all_ast_function_definitions": 15,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 19
+    },
+    "server/lib/custom_tts_adapters.py": {
+      "source_sha256": "87b6b97d46dabd69356d86c9343fec16456169241801bd4c1600317d7809d5cd",
+      "bytes": 32539,
+      "physical_lines": 785,
+      "all_ast_function_definitions": 26,
+      "all_ast_class_definitions": 2,
+      "context_map_call_structural_upper_bound": 31
+    },
+    "server/lib/data_root_locks.py": {
+      "source_sha256": "9354db683946aeb99727e80ba492711f0ed01f94ad2acd638be5b10ff099d1d5",
+      "bytes": 17266,
+      "physical_lines": 394,
+      "all_ast_function_definitions": 20,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 24
+    },
+    "server/lib/db.py": {
+      "source_sha256": "9f6007107f7c6cac839355f387e6bdad85272b8adaf1063dcaa154217abf6a6a",
+      "bytes": 31658,
+      "physical_lines": 761,
+      "all_ast_function_definitions": 43,
+      "all_ast_class_definitions": 3,
+      "context_map_call_structural_upper_bound": 49
+    },
+    "server/lib/db_migrations.py": {
+      "source_sha256": "e1f7c8f04f6c8ddc6f1bd68e54b2ae242fb92ebfb9d789fe7b7a37132288565d",
+      "bytes": 43203,
+      "physical_lines": 957,
+      "all_ast_function_definitions": 42,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 45
+    },
+    "server/lib/db_schema.py": {
+      "source_sha256": "4d74818841c9f5aafb624017dfdf203bb47a576288e9587006d09c453864ef1f",
+      "bytes": 51687,
+      "physical_lines": 1398,
+      "all_ast_function_definitions": 0,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 3
+    },
+    "server/lib/decision_delivery.py": {
+      "source_sha256": "6245a7677ee6a01a480db0bba35452924da30975b83b454b664dd4d5765e0db7",
+      "bytes": 2257,
+      "physical_lines": 59,
+      "all_ast_function_definitions": 5,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 9
+    },
+    "server/lib/deepgram_stt.py": {
+      "source_sha256": "51fb7b2be01b78b9b0825d6f16b853a2af3a5fcfb09c586ac14af0575ffe4726",
+      "bytes": 2122,
+      "physical_lines": 49,
+      "all_ast_function_definitions": 1,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 5
+    },
+    "server/lib/deepgram_tts.py": {
+      "source_sha256": "ae69b2012a575767e455f73a3ea47169ae30579fe2a2eff68c914e1c9e238aad",
+      "bytes": 2345,
+      "physical_lines": 64,
+      "all_ast_function_definitions": 1,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 5
+    },
+    "server/lib/deepgram_voices.py": {
+      "source_sha256": "103a91af1b9827bbe7c8814c6616fefef28e2271f5fedf4c180ae0f6fe3d4035",
+      "bytes": 2632,
+      "physical_lines": 77,
+      "all_ast_function_definitions": 4,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 7
+    },
+    "server/lib/deployment.py": {
+      "source_sha256": "6cae297f3cda90427cd628a5a834134ac5b260369203ff8438a7811c27f0ef18",
+      "bytes": 5746,
+      "physical_lines": 133,
+      "all_ast_function_definitions": 7,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 11
+    },
+    "server/lib/desktop_presence.py": {
+      "source_sha256": "3b681d884f0d8ca30d1b13d719e29576c5ad1ed1798adef83b06707ed6ceebe4",
+      "bytes": 2795,
+      "physical_lines": 65,
+      "all_ast_function_definitions": 2,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 5
+    },
+    "server/lib/device_pairing.py": {
+      "source_sha256": "078820ed837edbf4a02eb84e5381f692a148bdb7e05219ebe49db8d3e31a4fe5",
+      "bytes": 5434,
+      "physical_lines": 149,
+      "all_ast_function_definitions": 6,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 10
+    },
+    "server/lib/diagnostics_settings.py": {
+      "source_sha256": "9dfeba8f1ded9e6373db817632c509a61222192dc5a4a7ee1294707ec0b9d89c",
+      "bytes": 4848,
+      "physical_lines": 154,
+      "all_ast_function_definitions": 9,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 13
+    },
+    "server/lib/dispatch_adapters.py": {
+      "source_sha256": "fa7fc83a92ac69e24f6e6e8e2d79beada6e38ab262a14067c51b0314d9a6f0c4",
+      "bytes": 10352,
+      "physical_lines": 214,
+      "all_ast_function_definitions": 18,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 22
+    },
+    "server/lib/dream_seeds.py": {
+      "source_sha256": "430ea5fb02b082191f7e7438b22a5ae11c85ea3e36595f1ecd8c8edfa2fb7bed",
+      "bytes": 8804,
+      "physical_lines": 194,
+      "all_ast_function_definitions": 5,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 8
+    },
+    "server/lib/dreaming.py": {
+      "source_sha256": "5c011bc71e0d36ddcc3fcbc0becaee8a4e1843dd87f35bc6ee5c3cefbb4d36d1",
+      "bytes": 27955,
+      "physical_lines": 672,
+      "all_ast_function_definitions": 25,
+      "all_ast_class_definitions": 2,
+      "context_map_call_structural_upper_bound": 30
+    },
+    "server/lib/dreaming_prompt.py": {
+      "source_sha256": "33d3b177407b396a79f67469ae12c5c033994127d5c95014c60193132efa3bee",
+      "bytes": 19669,
+      "physical_lines": 394,
+      "all_ast_function_definitions": 13,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 16
+    },
+    "server/lib/dreaming_run_lookup.py": {
+      "source_sha256": "88629840a14d3c579aecdeb1fdc1320f16f392fd8defa747b3f85b6b0b358a70",
+      "bytes": 1347,
+      "physical_lines": 35,
+      "all_ast_function_definitions": 2,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 5
+    },
+    "server/lib/dreaming_settings.py": {
+      "source_sha256": "e1281b51e12fcda2c2316dd0a7a8cdd8e1db210f4ca3909ad72b9b8e2cc518d1",
+      "bytes": 10171,
+      "physical_lines": 278,
+      "all_ast_function_definitions": 9,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 13
+    },
+    "server/lib/dreaming_store.py": {
+      "source_sha256": "219d31fcfdf8a3f80d1af8310532101f44dee3c1be5766bdcd568f9b923c70b7",
+      "bytes": 42939,
+      "physical_lines": 1108,
+      "all_ast_function_definitions": 50,
+      "all_ast_class_definitions": 2,
+      "context_map_call_structural_upper_bound": 55
+    },
+    "server/lib/dreaming_worktree.py": {
+      "source_sha256": "21b68d34953a132d81e5ce23a63968ef9e2ee100c1ea6c50e36371cafc126dd3",
+      "bytes": 7167,
+      "physical_lines": 179,
+      "all_ast_function_definitions": 8,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 11
+    },
+    "server/lib/eleven_http.py": {
+      "source_sha256": "5fcdba56355133dc3101ba6422a3218af254db671144b383f1d9d9ed42edcf98",
+      "bytes": 2688,
+      "physical_lines": 88,
+      "all_ast_function_definitions": 1,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 5
+    },
+    "server/lib/eleven_stt.py": {
+      "source_sha256": "df7c09718c4b7a9836794f04547671464325c30de5ce6721c3c1c30deb0e0315",
+      "bytes": 3588,
+      "physical_lines": 85,
+      "all_ast_function_definitions": 3,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 7
+    },
+    "server/lib/eleven_ws.py": {
+      "source_sha256": "1d2d058fb9e3ba9c58f6f9e724a751f15a30e599d9494162463aff3974de1d42",
+      "bytes": 9069,
+      "physical_lines": 219,
+      "all_ast_function_definitions": 3,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 7
+    },
+    "server/lib/elevenlabs_voices.py": {
+      "source_sha256": "774c87f7b68bda5779953af0d738d3b5b034d2cbcff021879741729e14294685",
+      "bytes": 2323,
+      "physical_lines": 67,
+      "all_ast_function_definitions": 2,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 5
+    },
+    "server/lib/error_classify.py": {
+      "source_sha256": "5ab5ff9d7f6e55092b07176831d9283bd567d426e76d0565fe6b7506352b996e",
+      "bytes": 10939,
+      "physical_lines": 248,
+      "all_ast_function_definitions": 4,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 7
+    },
+    "server/lib/eventlog.py": {
+      "source_sha256": "88b0c7fd71793ba3171aa13dcb55334ee52ade2b49ec894275ae85fd94e41119",
+      "bytes": 15949,
+      "physical_lines": 412,
+      "all_ast_function_definitions": 18,
+      "all_ast_class_definitions": 2,
+      "context_map_call_structural_upper_bound": 23
+    },
+    "server/lib/events.py": {
+      "source_sha256": "91266fd83bb6c09b1ab520005f28f6dfa281588de1c2665c964341da077f8b00",
+      "bytes": 21226,
+      "physical_lines": 554,
+      "all_ast_function_definitions": 32,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 36
+    },
+    "server/lib/focus.py": {
+      "source_sha256": "ba34fcc97652693d7e90bb2adcc3cdd3280d9942d4f929cdd8ff243f9d5435a8",
+      "bytes": 824,
+      "physical_lines": 24,
+      "all_ast_function_definitions": 1,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 4
+    },
+    "server/lib/fork.py": {
+      "source_sha256": "0612fabedb47f331b210d5352da98299ad5fab9dfde17efdec9f679656ed54e0",
+      "bytes": 2593,
+      "physical_lines": 63,
+      "all_ast_function_definitions": 2,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 5
+    },
+    "server/lib/gemini_tts.py": {
+      "source_sha256": "53cf47bdbeade86ce4bd9b34145a76f066bad1542c8bfae419b2062a7fc52ff8",
+      "bytes": 8578,
+      "physical_lines": 211,
+      "all_ast_function_definitions": 5,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 9
+    },
+    "server/lib/goal_ledger.py": {
+      "source_sha256": "2b589b28567c73eec507ae44d1e55f681504205434405588bd7bfa141e453398",
+      "bytes": 46801,
+      "physical_lines": 910,
+      "all_ast_function_definitions": 49,
+      "all_ast_class_definitions": 2,
+      "context_map_call_structural_upper_bound": 54
+    },
+    "server/lib/google_stt.py": {
+      "source_sha256": "6943268aa5d7a295c039687acee4abd0a266f99ea70df209c0165829626139f0",
+      "bytes": 9128,
+      "physical_lines": 219,
+      "all_ast_function_definitions": 9,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 13
+    },
+    "server/lib/google_tts.py": {
+      "source_sha256": "e41de7858e5efc7bdb6e27d02ebeb2ea6db395dd6873cfac09c28706efc18a5b",
+      "bytes": 14350,
+      "physical_lines": 323,
+      "all_ast_function_definitions": 16,
+      "all_ast_class_definitions": 4,
+      "context_map_call_structural_upper_bound": 23
+    },
+    "server/lib/grok_transcript.py": {
+      "source_sha256": "1955b024c6f6037b0c5877ce4fe3a973b75ea0bff3f02a41ee2528a5091437b6",
+      "bytes": 9236,
+      "physical_lines": 276,
+      "all_ast_function_definitions": 12,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 15
+    },
+    "server/lib/group_calls.py": {
+      "source_sha256": "853ad13c6bad46544cd57ac7456c4b3bba3a2af3fc0153eb4443b9d34af85377",
+      "bytes": 32136,
+      "physical_lines": 719,
+      "all_ast_function_definitions": 46,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 50
+    },
+    "server/lib/hallucinations.py": {
+      "source_sha256": "1834291be5cc5e43fec267eb7cdfab58674ae14dcb2d0d492a7177eee29ab63f",
+      "bytes": 3946,
+      "physical_lines": 108,
+      "all_ast_function_definitions": 4,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 7
+    },
+    "server/lib/harness_providers.py": {
+      "source_sha256": "d16de639a8250f717580aba728d374eb2eb21483fc644e4f806a0a6ccdadcafd",
+      "bytes": 25972,
+      "physical_lines": 633,
+      "all_ast_function_definitions": 42,
+      "all_ast_class_definitions": 4,
+      "context_map_call_structural_upper_bound": 49
+    },
+    "server/lib/health.py": {
+      "source_sha256": "73994f5d463c51210ab91033b24dafd398fdc2c861bc688ffbbaa6e85c92aef5",
+      "bytes": 1118,
+      "physical_lines": 41,
+      "all_ast_function_definitions": 4,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 8
+    },
+    "server/lib/heard_audio.py": {
+      "source_sha256": "14dd09f50e61f41d2d68ded6d83e7bd1a3fc6845c7ae6843f459f886a84daab8",
+      "bytes": 4161,
+      "physical_lines": 127,
+      "all_ast_function_definitions": 8,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 11
+    },
+    "server/lib/heartbeat.py": {
+      "source_sha256": "8cc8e5e0485e9694d8e5dddef162e1ed3e2f24c56d3bc11e2d465adad5613cf9",
+      "bytes": 32730,
+      "physical_lines": 901,
+      "all_ast_function_definitions": 60,
+      "all_ast_class_definitions": 4,
+      "context_map_call_structural_upper_bound": 67
+    },
+    "server/lib/helper_agents.py": {
+      "source_sha256": "9398fa7cb4a9d40c81ab0b77fa2d6047436aee984d55ee336357bad10a5666af",
+      "bytes": 5165,
+      "physical_lines": 119,
+      "all_ast_function_definitions": 6,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 10
+    },
+    "server/lib/herald.py": {
+      "source_sha256": "74cb108e0204dc24d9a519111669dac032a6a15b011b1587f988b4784114124d",
+      "bytes": 22669,
+      "physical_lines": 520,
+      "all_ast_function_definitions": 23,
+      "all_ast_class_definitions": 5,
+      "context_map_call_structural_upper_bound": 31
+    },
+    "server/lib/hook_runtime.py": {
+      "source_sha256": "22e0b010bc2c5db69dd44ce69a029dfec69610710b560e037d8e1ffea8a772eb",
+      "bytes": 1254,
+      "physical_lines": 40,
+      "all_ast_function_definitions": 3,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 7
+    },
+    "server/lib/host_generation.py": {
+      "source_sha256": "1faa698aa6c0af25cf5ff263581c8b069cdfc0f99466d4ffcb7b13c8e02c7cab",
+      "bytes": 10997,
+      "physical_lines": 302,
+      "all_ast_function_definitions": 13,
+      "all_ast_class_definitions": 3,
+      "context_map_call_structural_upper_bound": 19
+    },
+    "server/lib/hotseat_status.py": {
+      "source_sha256": "5fd97f7c0378493102f64429df7632ca1f97f6274f17b5ffa46c379a5e602a96",
+      "bytes": 31268,
+      "physical_lines": 626,
+      "all_ast_function_definitions": 44,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 48
+    },
+    "server/lib/html_form_events.py": {
+      "source_sha256": "f0a9113646414ebdf9ba83c81ae823b99944fe948cb5189a329ba04c469e4fc3",
+      "bytes": 5187,
+      "physical_lines": 93,
+      "all_ast_function_definitions": 5,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 8
+    },
+    "server/lib/html_forms.py": {
+      "source_sha256": "4dfacba6909c06e7b3761ebbbcaff04192b85c690fab4c361742e162f364821d",
+      "bytes": 10275,
+      "physical_lines": 187,
+      "all_ast_function_definitions": 10,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 14
+    },
+    "server/lib/html_report_revisions.py": {
+      "source_sha256": "3b9924ee5a7a44d8892244e69e034c43ad8420982cd642a2ea1f3b8a4b841959",
+      "bytes": 5612,
+      "physical_lines": 120,
+      "all_ast_function_definitions": 6,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 9
+    },
+    "server/lib/http_utils.py": {
+      "source_sha256": "c1423afaed64363697e230e19e8da8b12c1bd7816d36b67fcf4a1ef204fb1484",
+      "bytes": 4847,
+      "physical_lines": 133,
+      "all_ast_function_definitions": 15,
+      "all_ast_class_definitions": 3,
+      "context_map_call_structural_upper_bound": 21
+    },
+    "server/lib/identity.py": {
+      "source_sha256": "36009352b4e3abc7e264883b8fa8753441d79a68af6076735f121f637a0c1f18",
+      "bytes": 5546,
+      "physical_lines": 164,
+      "all_ast_function_definitions": 12,
+      "all_ast_class_definitions": 2,
+      "context_map_call_structural_upper_bound": 17
+    },
+    "server/lib/instance_backup.py": {
+      "source_sha256": "1211c70706a065914240e08c148f8a5f2ab72ac268280980ae6f0f5ee14f95e8",
+      "bytes": 8463,
+      "physical_lines": 181,
+      "all_ast_function_definitions": 6,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 9
+    },
+    "server/lib/intent.py": {
+      "source_sha256": "de56348586e2f457f5257de0b2930f8dddd496e90e567cac1b838cd9548068d0",
+      "bytes": 5817,
+      "physical_lines": 165,
+      "all_ast_function_definitions": 5,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 9
+    },
+    "server/lib/interrupted_turns.py": {
+      "source_sha256": "b3a426fa1abd9188c0972e9ca0a6964bf6e095bc10912a8cd035c100a291668c",
+      "bytes": 6541,
+      "physical_lines": 161,
+      "all_ast_function_definitions": 4,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 7
+    },
+    "server/lib/ios_diagnostics.py": {
+      "source_sha256": "e62ad365ceadc43fe3d0f32b2e0e692feb7974acb72fc9ae353ae833eab61a00",
+      "bytes": 701,
+      "physical_lines": 23,
+      "all_ast_function_definitions": 1,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 4
+    },
+    "server/lib/janitor_active_interval.py": {
+      "source_sha256": "9a20fa4c674145e0d22d7929622c7b6aff102fd7117ad8b0f5e05d9ec9bab47f",
+      "bytes": 1096,
+      "physical_lines": 27,
+      "all_ast_function_definitions": 1,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 4
+    },
+    "server/lib/janitor_adaptive.py": {
+      "source_sha256": "e60f804b657252f33d555e165e961933e650f81ebc774bd5c62f95246aa150a2",
+      "bytes": 4404,
+      "physical_lines": 90,
+      "all_ast_function_definitions": 5,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 8
+    },
+    "server/lib/janitor_attention.py": {
+      "source_sha256": "0e37e29d2c2b0c229cc66af6a9ed2684306affdc72dc26f8c68e32b934ec8bcb",
+      "bytes": 10924,
+      "physical_lines": 215,
+      "all_ast_function_definitions": 6,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 9
+    },
+    "server/lib/janitor_autonomy.py": {
+      "source_sha256": "d4bef8d83007b4fba6a0dbbeed2933ebd2c4180ee820a2049555e17d0bdef385",
+      "bytes": 33027,
+      "physical_lines": 447,
+      "all_ast_function_definitions": 33,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 37
+    },
+    "server/lib/janitor_bootstrap.py": {
+      "source_sha256": "1ec13dab06b6a05a0bfb3f309bd4746ee2d1514e3cd0bcd66065c64e4da3d630",
+      "bytes": 1149,
+      "physical_lines": 23,
+      "all_ast_function_definitions": 1,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 4
+    },
+    "server/lib/janitor_builtins.py": {
+      "source_sha256": "d397e7aa67216f9fac8ba06dac05d60d7d55d65d3573b9b9bf1fdd559c112fa5",
+      "bytes": 18090,
+      "physical_lines": 332,
+      "all_ast_function_definitions": 17,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 20
+    },
+    "server/lib/janitor_cli.py": {
+      "source_sha256": "68753d08d4763e7a382dde1221c62004a45f869314b77ca63881102fa609c970",
+      "bytes": 13560,
+      "physical_lines": 255,
+      "all_ast_function_definitions": 9,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 12
+    },
+    "server/lib/janitor_context.py": {
+      "source_sha256": "2d40c89135eb8bc4afdd474af0e306e3eaecc5ebac0e2a64e4598c9f9d265e39",
+      "bytes": 11751,
+      "physical_lines": 203,
+      "all_ast_function_definitions": 9,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 12
+    },
+    "server/lib/janitor_design_policy.py": {
+      "source_sha256": "eaacb11ebbaedc16576a62b9f957705b98610d2d1b34c0ff576e6a3682e55f47",
+      "bytes": 3981,
+      "physical_lines": 57,
+      "all_ast_function_definitions": 3,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 6
+    },
+    "server/lib/janitor_hotseat.py": {
+      "source_sha256": "ed91dd026ec1c5e1caa4e76b1ca95f110f75368363fad2accb91f888a3aac140",
+      "bytes": 7925,
+      "physical_lines": 176,
+      "all_ast_function_definitions": 11,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 15
+    },
+    "server/lib/janitor_http.py": {
+      "source_sha256": "f43d27f3fb8a4143fc981a92db926629860d56b3b64382266539c041fe978729",
+      "bytes": 12898,
+      "physical_lines": 249,
+      "all_ast_function_definitions": 11,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 14
+    },
+    "server/lib/janitor_migration.py": {
+      "source_sha256": "fdbc3501180929f2654cd0e8a515f9734669e80c3eed017a395bea06affddb40",
+      "bytes": 21574,
+      "physical_lines": 371,
+      "all_ast_function_definitions": 13,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 16
+    },
+    "server/lib/janitor_policy.py": {
+      "source_sha256": "b0cf99e3f84c74e3790b60f6de4b7adec6d7c7ab10479952cffff7b995065e35",
+      "bytes": 3861,
+      "physical_lines": 80,
+      "all_ast_function_definitions": 4,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 7
+    },
+    "server/lib/janitor_runner.py": {
+      "source_sha256": "61110f929c6a62526f2d24f905e7aa475b828649ec99f1695b2ac8a68bda974d",
+      "bytes": 31344,
+      "physical_lines": 562,
+      "all_ast_function_definitions": 30,
+      "all_ast_class_definitions": 2,
+      "context_map_call_structural_upper_bound": 35
+    },
+    "server/lib/janitor_schedule.py": {
+      "source_sha256": "68da7c2ac45e2a23957f436cb0c91cbb5ceaf96bff5d763f82efbe92b5bf7734",
+      "bytes": 2389,
+      "physical_lines": 52,
+      "all_ast_function_definitions": 3,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 6
+    },
+    "server/lib/janitor_store.py": {
+      "source_sha256": "f08d85b5f2f472b9677c8e7e6f9f23f4e8db849c57ec532056cd4f528f212019",
+      "bytes": 30961,
+      "physical_lines": 613,
+      "all_ast_function_definitions": 94,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 98
+    },
+    "server/lib/janitors.py": {
+      "source_sha256": "3e28dd88910af9c863d6b9a671af27771dda51ed68588c434e6c153e1fb0af36",
+      "bytes": 78972,
+      "physical_lines": 1289,
+      "all_ast_function_definitions": 69,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 72
+    },
+    "server/lib/judgment_sites.py": {
+      "source_sha256": "b4c8a943702740a674c09e5e4a3e2e5ae5d71c29fc1b79fb519e01735d683468",
+      "bytes": 13747,
+      "physical_lines": 279,
+      "all_ast_function_definitions": 6,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 9
+    },
+    "server/lib/judgments.py": {
+      "source_sha256": "5990b8c3da79542acd54cbd12aa62099316634b1512a5abf83f0913b5911eb0f",
+      "bytes": 16169,
+      "physical_lines": 392,
+      "all_ast_function_definitions": 28,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 32
+    },
+    "server/lib/label_audit.py": {
+      "source_sha256": "5a755f95f7e1c9949840ec3aeff9f5cbdf6c118691a198d86f1390ba7ba11288",
+      "bytes": 8093,
+      "physical_lines": 173,
+      "all_ast_function_definitions": 7,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 10
+    },
+    "server/lib/launch_directories.py": {
+      "source_sha256": "9eac472d96489e70807a8de98d3f6ee13fe81452d6f977cbefa7db724bcac3df",
+      "bytes": 2611,
+      "physical_lines": 54,
+      "all_ast_function_definitions": 2,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 5
+    },
+    "server/lib/launch_paths.py": {
+      "source_sha256": "6a45921611df9b6ab6d691c1c7f4bd16ad32f1935097233a15b3209db8360965",
+      "bytes": 2472,
+      "physical_lines": 64,
+      "all_ast_function_definitions": 4,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 7
+    },
+    "server/lib/launch_receipts.py": {
+      "source_sha256": "0473d96ff8be862226656300847d59c378b437bc70d02a82258d07d05eb9008c",
+      "bytes": 29923,
+      "physical_lines": 655,
+      "all_ast_function_definitions": 34,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 38
+    },
+    "server/lib/leader_memory.py": {
+      "source_sha256": "e4172b7ff843d9e9a47880649e3f743bfb7f0bdc34392996afc2645b8b668d30",
+      "bytes": 20573,
+      "physical_lines": 559,
+      "all_ast_function_definitions": 26,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 29
+    },
+    "server/lib/lifecycle.py": {
+      "source_sha256": "d16efb7b22d77f3d73ac2c4a976523d4461e65a6f66a59e805245cb31a5f5a4b",
+      "bytes": 25796,
+      "physical_lines": 526,
+      "all_ast_function_definitions": 24,
+      "all_ast_class_definitions": 11,
+      "context_map_call_structural_upper_bound": 38
+    },
+    "server/lib/live_activity.py": {
+      "source_sha256": "e280887a49a1945c075b6a47f5509257191b12b2578dd59126c6bf2c7184f444",
+      "bytes": 22213,
+      "physical_lines": 489,
+      "all_ast_function_definitions": 33,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 37
+    },
+    "server/lib/live_claude.py": {
+      "source_sha256": "183acc1ad0c3f5e062b1fd932f23d8d7ea69769fec15185be228a80f916d0d3f",
+      "bytes": 7426,
+      "physical_lines": 148,
+      "all_ast_function_definitions": 8,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 12
+    },
+    "server/lib/live_codex.py": {
+      "source_sha256": "054dc27a35b21c0055a8ac8257bd3645d613ea97dc87a27a5a0b195d59c39364",
+      "bytes": 5521,
+      "physical_lines": 108,
+      "all_ast_function_definitions": 4,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 8
+    },
+    "server/lib/live_explain.py": {
+      "source_sha256": "b86a037ae06c4d5602bc8ebb5dd33cd2f3b3c263e245796ea0c0c74b52e59af6",
+      "bytes": 18597,
+      "physical_lines": 415,
+      "all_ast_function_definitions": 17,
+      "all_ast_class_definitions": 2,
+      "context_map_call_structural_upper_bound": 22
+    },
+    "server/lib/live_hub.py": {
+      "source_sha256": "d9a4c511bd0033a2b73536f20b3a56a768e204ac1dd50aede17577c06dca53d3",
+      "bytes": 44015,
+      "physical_lines": 967,
+      "all_ast_function_definitions": 59,
+      "all_ast_class_definitions": 4,
+      "context_map_call_structural_upper_bound": 66
+    },
+    "server/lib/live_items.py": {
+      "source_sha256": "487cf58fa7874241b97f7dd2b24a7c7f421376098f01a743b81fafe5472bca82",
+      "bytes": 4961,
+      "physical_lines": 123,
+      "all_ast_function_definitions": 8,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 12
+    },
+    "server/lib/live_pacing.py": {
+      "source_sha256": "e23de2a08db1f17bc0f2b76cbb71446445e21fd196adf1fefaa1fe1c54f32e10",
+      "bytes": 7955,
+      "physical_lines": 223,
+      "all_ast_function_definitions": 17,
+      "all_ast_class_definitions": 2,
+      "context_map_call_structural_upper_bound": 22
+    },
+    "server/lib/live_tools.py": {
+      "source_sha256": "8c4e077bb4ebf889685b699db149a97b449f218536daebcb56503e85ba4560c3",
+      "bytes": 7186,
+      "physical_lines": 143,
+      "all_ast_function_definitions": 5,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 8
+    },
+    "server/lib/local_transport.py": {
+      "source_sha256": "3eda9f631874e464b7af11eed87330d4ce08f19581aa1d328d8ae4882ecb7cb7",
+      "bytes": 8527,
+      "physical_lines": 187,
+      "all_ast_function_definitions": 12,
+      "all_ast_class_definitions": 3,
+      "context_map_call_structural_upper_bound": 18
+    },
+    "server/lib/location.py": {
+      "source_sha256": "c20259527df996c9e8e3175886886e85be1c64980d1ba2e299cc96cb885c2746",
+      "bytes": 2603,
+      "physical_lines": 72,
+      "all_ast_function_definitions": 3,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 6
+    },
+    "server/lib/log.py": {
+      "source_sha256": "441e9a26bd41a4b3e2596e5c0ef161502dc5bcd2527af4165f78312af598452f",
+      "bytes": 3082,
+      "physical_lines": 87,
+      "all_ast_function_definitions": 5,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 8
+    },
+    "server/lib/maintenance.py": {
+      "source_sha256": "6924ead4d556c314974cbaf12b1a462c5c46eba871fcaa8dcff788ef93a0f837",
+      "bytes": 17907,
+      "physical_lines": 388,
+      "all_ast_function_definitions": 19,
+      "all_ast_class_definitions": 3,
+      "context_map_call_structural_upper_bound": 25
+    },
+    "server/lib/managed_skills.py": {
+      "source_sha256": "fdf9a7b759ff6a987d102bbd9e38b6e6f780e2c1caacf369356bedf6ce6d9681",
+      "bytes": 9707,
+      "physical_lines": 245,
+      "all_ast_function_definitions": 14,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 17
+    },
+    "server/lib/mcp_selection.py": {
+      "source_sha256": "8aa4cd4c45ea290baed36b87b276e404d9aeba7df4c06ab87036c48158509f9e",
+      "bytes": 750,
+      "physical_lines": 23,
+      "all_ast_function_definitions": 2,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 5
+    },
+    "server/lib/media_store.py": {
+      "source_sha256": "4ebb06468e2af253f5bbe66aae904418deb3b32328f61bca6cc6be6a34fb65a0",
+      "bytes": 10379,
+      "physical_lines": 299,
+      "all_ast_function_definitions": 15,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 19
+    },
+    "server/lib/message_audio.py": {
+      "source_sha256": "bb1a89f31f11e2d38af537923f353bb481bd7fee6c83dfa443fb2bacc1d98d7a",
+      "bytes": 5473,
+      "physical_lines": 132,
+      "all_ast_function_definitions": 3,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 6
+    },
+    "server/lib/message_context.py": {
+      "source_sha256": "87d9f9df079d8904bf7164593b8c058f230341f971230108f72bc7437eb859ae",
+      "bytes": 5048,
+      "physical_lines": 121,
+      "all_ast_function_definitions": 6,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 9
+    },
+    "server/lib/message_import_common.py": {
+      "source_sha256": "d13662a4e34d2a058fc04b01bd89b7673f8c383b07ab991e92a0c3e76e30713a",
+      "bytes": 3932,
+      "physical_lines": 111,
+      "all_ast_function_definitions": 10,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 13
+    },
+    "server/lib/message_import_rows.py": {
+      "source_sha256": "4eae1d91f7d868f575cd3ae508f8f2d95eb8391e7ecdcb3b7b9e6dbbd4d14195",
+      "bytes": 25849,
+      "physical_lines": 537,
+      "all_ast_function_definitions": 25,
+      "all_ast_class_definitions": 4,
+      "context_map_call_structural_upper_bound": 32
+    },
+    "server/lib/message_live.py": {
+      "source_sha256": "5cb464e2212b17a60400a5a83abe5e96245ccb81246a2673f28960b15557e13e",
+      "bytes": 34249,
+      "physical_lines": 723,
+      "all_ast_function_definitions": 17,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 20
+    },
+    "server/lib/message_previews.py": {
+      "source_sha256": "f8187439446dd9c3a7f700eed4c2a14ad0ac0b4608e5c7df98ee859998948bdf",
+      "bytes": 22731,
+      "physical_lines": 526,
+      "all_ast_function_definitions": 21,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 25
+    },
+    "server/lib/message_store.py": {
+      "source_sha256": "54901766b26b71663275021ea90fa9390f0d41c25c43d3141359d96585742d5d",
+      "bytes": 2317,
+      "physical_lines": 71,
+      "all_ast_function_definitions": 0,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 3
+    },
+    "server/lib/message_turns.py": {
+      "source_sha256": "fdd70755fbaa1e096fbd0ef8a92de5d1740a70b13c2571514c4386cd460cd242",
+      "bytes": 4414,
+      "physical_lines": 117,
+      "all_ast_function_definitions": 9,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 13
+    },
+    "server/lib/message_writes.py": {
+      "source_sha256": "d51e83c06988de9b5725438be72d35560c3fc5180d5c29acf58ab8991ffe163a",
+      "bytes": 73119,
+      "physical_lines": 1563,
+      "all_ast_function_definitions": 49,
+      "all_ast_class_definitions": 6,
+      "context_map_call_structural_upper_bound": 58
+    },
+    "server/lib/model_avatars.py": {
+      "source_sha256": "2d47ed8f44f923f26a5e8f4f29bef6e2ec3a62dfa702114489fd11d4af3d9e20",
+      "bytes": 3672,
+      "physical_lines": 109,
+      "all_ast_function_definitions": 5,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 8
+    },
+    "server/lib/model_fallbacks.py": {
+      "source_sha256": "761316056209e5ada082257b70b94feb33bbb008f0b5750d29792e2fad4ddd45",
+      "bytes": 12643,
+      "physical_lines": 347,
+      "all_ast_function_definitions": 12,
+      "all_ast_class_definitions": 3,
+      "context_map_call_structural_upper_bound": 18
+    },
+    "server/lib/muse_transcript.py": {
+      "source_sha256": "0fd9a8080f6b1d520e77d9f9fcf9ed89030e7975820e963c5f163310b65c372e",
+      "bytes": 9257,
+      "physical_lines": 257,
+      "all_ast_function_definitions": 13,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 16
+    },
+    "server/lib/opencode_transcript.py": {
+      "source_sha256": "6e9d1a0b4c64ac538858c54d003216775bd49eced9ac76e1b152fb0beb86596a",
+      "bytes": 26106,
+      "physical_lines": 648,
+      "all_ast_function_definitions": 29,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 32
+    },
+    "server/lib/oracle_attention.py": {
+      "source_sha256": "425b7d3f266e0574471f2dcce3287b47509240f17a343ba30073b6f45d201221",
+      "bytes": 17775,
+      "physical_lines": 386,
+      "all_ast_function_definitions": 11,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 14
+    },
+    "server/lib/oracle_calls.py": {
+      "source_sha256": "a3160fdae199be3645a6e9305ff66c5d8799d68a74d484944ad231851767a690",
+      "bytes": 17530,
+      "physical_lines": 348,
+      "all_ast_function_definitions": 21,
+      "all_ast_class_definitions": 2,
+      "context_map_call_structural_upper_bound": 26
+    },
+    "server/lib/oracle_calls_stable.py": {
+      "source_sha256": "a7eb051081f69fba8dfa747e9f4a2ae11594f9e29435a5af6d0d96f10ac74b1e",
+      "bytes": 19668,
+      "physical_lines": 390,
+      "all_ast_function_definitions": 22,
+      "all_ast_class_definitions": 2,
+      "context_map_call_structural_upper_bound": 27
+    },
+    "server/lib/oracle_codex_session.py": {
+      "source_sha256": "901b5a5c2a987e5f3303aff0c250001ef4e47f2ebd1967d378dac8037deec65f",
+      "bytes": 11692,
+      "physical_lines": 207,
+      "all_ast_function_definitions": 11,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 15
+    },
+    "server/lib/oracle_contact.py": {
+      "source_sha256": "892a135fa6ea1a01ee4a01c15c4b950a8df5e2b2eed5beca60008af1dd1eac3a",
+      "bytes": 5435,
+      "physical_lines": 138,
+      "all_ast_function_definitions": 8,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 11
+    },
+    "server/lib/oracle_context.py": {
+      "source_sha256": "2c4bb6fc01efb912b54f55f1a8c42140263bac9fd33a3cb2e4cba50214d55483",
+      "bytes": 2291,
+      "physical_lines": 55,
+      "all_ast_function_definitions": 2,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 5
+    },
+    "server/lib/oracle_delegations.py": {
+      "source_sha256": "86c36f36e9e42c94590debf348d79ee15a87058b426584da988b4d801e341e0f",
+      "bytes": 17739,
+      "physical_lines": 452,
+      "all_ast_function_definitions": 18,
+      "all_ast_class_definitions": 2,
+      "context_map_call_structural_upper_bound": 23
+    },
+    "server/lib/oracle_diagnostics.py": {
+      "source_sha256": "1745b1436f81972570c9eb8d61038ff4d4b39b4b9f2f2a49280eab196ef24bcf",
+      "bytes": 4265,
+      "physical_lines": 97,
+      "all_ast_function_definitions": 4,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 8
+    },
+    "server/lib/oracle_earcons.py": {
+      "source_sha256": "2f5a4ac38c261091be25b769ace55fa5df01d19e2520e0e86277e592d19c7042",
+      "bytes": 3713,
+      "physical_lines": 92,
+      "all_ast_function_definitions": 5,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 8
+    },
+    "server/lib/oracle_gemini_live.py": {
+      "source_sha256": "11263309137316e4342f6484e7b3ef5a536cd610cef2f62750df44ec9e6b046e",
+      "bytes": 17850,
+      "physical_lines": 404,
+      "all_ast_function_definitions": 25,
+      "all_ast_class_definitions": 2,
+      "context_map_call_structural_upper_bound": 30
+    },
+    "server/lib/oracle_handoff.py": {
+      "source_sha256": "fa1c5b2faec518a7d1e6d56473b15270a32090e42b6652913b6daf246f583ad7",
+      "bytes": 1796,
+      "physical_lines": 35,
+      "all_ast_function_definitions": 1,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 4
+    },
+    "server/lib/oracle_handoffs.py": {
+      "source_sha256": "5622537816867079b519d1f8eab2486a267c566cbb3cdad8450101160a545f6c",
+      "bytes": 24318,
+      "physical_lines": 556,
+      "all_ast_function_definitions": 36,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 40
+    },
+    "server/lib/oracle_live.py": {
+      "source_sha256": "612401e7007d25987b53cd25121321041a716332677145ae88bc53d1715b7dab",
+      "bytes": 57172,
+      "physical_lines": 1029,
+      "all_ast_function_definitions": 29,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 33
+    },
+    "server/lib/oracle_live_calls.py": {
+      "source_sha256": "74368c71f050daf357aa7ed2ca359c65fd590beceb3d118497ed5b6ade70f92a",
+      "bytes": 20356,
+      "physical_lines": 375,
+      "all_ast_function_definitions": 13,
+      "all_ast_class_definitions": 2,
+      "context_map_call_structural_upper_bound": 18
+    },
+    "server/lib/oracle_live_provider.py": {
+      "source_sha256": "a097be5f7c29731eca7a6f759da95569a7519a06bec6f3ed22bf7f61431d2564",
+      "bytes": 6877,
+      "physical_lines": 148,
+      "all_ast_function_definitions": 6,
+      "all_ast_class_definitions": 2,
+      "context_map_call_structural_upper_bound": 11
+    },
+    "server/lib/oracle_live_stable.py": {
+      "source_sha256": "6674ad4b9812de0cc9b819a60373b641d3ffbaf82bba556942eaebf609a5d5ff",
+      "bytes": 73351,
+      "physical_lines": 1432,
+      "all_ast_function_definitions": 54,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 58
+    },
+    "server/lib/oracle_live_usage.py": {
+      "source_sha256": "35e0f0032a40c935d9820ffa3521881bbc90957f72fa4c93caa197df6909c72e",
+      "bytes": 2652,
+      "physical_lines": 55,
+      "all_ast_function_definitions": 4,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 8
+    },
+    "server/lib/oracle_live_wire.py": {
+      "source_sha256": "480cc591270d00f4a6dddcc1bee7e2c1044cddf91310405b355269635bdaca7f",
+      "bytes": 4469,
+      "physical_lines": 88,
+      "all_ast_function_definitions": 4,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 8
+    },
+    "server/lib/oracle_memory.py": {
+      "source_sha256": "7e53ab17365d59c9c14a2d91d241b9ba0bd2cc82112382319c30b879b415be5c",
+      "bytes": 15798,
+      "physical_lines": 244,
+      "all_ast_function_definitions": 19,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 23
+    },
+    "server/lib/oracle_mode.py": {
+      "source_sha256": "f4c154db6bb6d085891c8049d2a15e7193507b735c6d8fd6c39eae694ce4a551",
+      "bytes": 398,
+      "physical_lines": 14,
+      "all_ast_function_definitions": 2,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 5
+    },
+    "server/lib/oracle_progress.py": {
+      "source_sha256": "e923a3b3646988c88a9a95ec8a7bee12b784e3b76d9a78882263936bc16a47d1",
+      "bytes": 2863,
+      "physical_lines": 58,
+      "all_ast_function_definitions": 7,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 11
+    },
+    "server/lib/oracle_prompt.py": {
+      "source_sha256": "547de1d00277ef27adaafa4c2b8032147d8207a3e67fb0414879856304627c62",
+      "bytes": 1669,
+      "physical_lines": 31,
+      "all_ast_function_definitions": 0,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 3
+    },
+    "server/lib/oracle_realtime.py": {
+      "source_sha256": "c4975f05c9f8bb530da976078f6e9a75337c15bd278fa78998956d839da35452",
+      "bytes": 22198,
+      "physical_lines": 520,
+      "all_ast_function_definitions": 14,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 17
+    },
+    "server/lib/oracle_relay.py": {
+      "source_sha256": "3e1707041949199d0ed81e45eb901d21bacbde74048c38a42b8d910594eb819b",
+      "bytes": 6557,
+      "physical_lines": 141,
+      "all_ast_function_definitions": 10,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 14
+    },
+    "server/lib/oracle_result_context.py": {
+      "source_sha256": "0ac6ffee3160d96b054522ae620008133618269ddbd6ecb826577753c999959d",
+      "bytes": 1817,
+      "physical_lines": 34,
+      "all_ast_function_definitions": 3,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 6
+    },
+    "server/lib/oracle_router.py": {
+      "source_sha256": "3df7315d8ba2644f683266ff505c073d4a58e0fe7c3148b9952a267e47af41fe",
+      "bytes": 11596,
+      "physical_lines": 233,
+      "all_ast_function_definitions": 6,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 10
+    },
+    "server/lib/oracle_strategy.py": {
+      "source_sha256": "f37ce63c45559fde1259be11bb5f45e6563d61fa03dd850fd3d38f7010f17531",
+      "bytes": 5139,
+      "physical_lines": 103,
+      "all_ast_function_definitions": 7,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 10
+    },
+    "server/lib/oracle_voice_context.py": {
+      "source_sha256": "5040007f0ef60190f9d63d1ae028f1b10296e29ca7e6f4f11b422d173f001da7",
+      "bytes": 2803,
+      "physical_lines": 49,
+      "all_ast_function_definitions": 2,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 5
+    },
+    "server/lib/oracle_voice_provider.py": {
+      "source_sha256": "7466bc4c5c2cdc5bfd9a82bae59f4249faa46ab1be2763b6574e20491cbbf5ca",
+      "bytes": 2345,
+      "physical_lines": 64,
+      "all_ast_function_definitions": 8,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 11
+    },
+    "server/lib/oracle_webrtc.py": {
+      "source_sha256": "28d0235c021bc898069feb0a20c23b928ec935b8bb89b012e004c161b4d21341",
+      "bytes": 7666,
+      "physical_lines": 190,
+      "all_ast_function_definitions": 10,
+      "all_ast_class_definitions": 2,
+      "context_map_call_structural_upper_bound": 15
+    },
+    "server/lib/oracle_work.py": {
+      "source_sha256": "34eb2c2c08aecb3a74c748ec86d833835d2ebb3ccd6f2f2c9c1598410d6871bc",
+      "bytes": 1729,
+      "physical_lines": 30,
+      "all_ast_function_definitions": 1,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 4
+    },
+    "server/lib/orchestrator.py": {
+      "source_sha256": "d912c768bd24d08c9119608f798e455e64586dd6dd2a2ff4d7dca475dce24367",
+      "bytes": 54376,
+      "physical_lines": 1202,
+      "all_ast_function_definitions": 40,
+      "all_ast_class_definitions": 2,
+      "context_map_call_structural_upper_bound": 45
+    },
+    "server/lib/orchestrator_context.py": {
+      "source_sha256": "dfbf9baa3a6752e4a7328e5a235470ed4ecf4977ef830c53d1a6605aced3515a",
+      "bytes": 8036,
+      "physical_lines": 207,
+      "all_ast_function_definitions": 8,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 11
+    },
+    "server/lib/orchestrator_model.py": {
+      "source_sha256": "16cec07d3966e950dab81cac9027db8ae93454a47a86961c3c2e6cda9ec46b31",
+      "bytes": 15392,
+      "physical_lines": 341,
+      "all_ast_function_definitions": 10,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 13
+    },
+    "server/lib/orchestrator_types.py": {
+      "source_sha256": "0d9dbeb5ab70708343ee5ea5f3ec265e530f2a0f6db7313ab4e20198e4c34322",
+      "bytes": 4181,
+      "physical_lines": 127,
+      "all_ast_function_definitions": 0,
+      "all_ast_class_definitions": 3,
+      "context_map_call_structural_upper_bound": 6
+    },
+    "server/lib/origins.py": {
+      "source_sha256": "fbc34c4688495aedba349434350940de6af7de8de3afeaa6983f6cb6823f98ea",
+      "bytes": 3964,
+      "physical_lines": 78,
+      "all_ast_function_definitions": 2,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 5
+    },
+    "server/lib/outdated_clients.py": {
+      "source_sha256": "96fc8688e885040cfb8b465d87030f5ff297b18dd65c6e9cd032a7c7bd9527a2",
+      "bytes": 890,
+      "physical_lines": 21,
+      "all_ast_function_definitions": 1,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 4
+    },
+    "server/lib/paths.py": {
+      "source_sha256": "2b695a77c856d27d593142c82b9d2d142672ee1286593654f2551ac49136ad0b",
+      "bytes": 2579,
+      "physical_lines": 72,
+      "all_ast_function_definitions": 4,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 8
+    },
+    "server/lib/peer_requests.py": {
+      "source_sha256": "b3c47a1118d573f509442b1766b9db02bb1c72ccdfe5889e8134db516f2b0f36",
+      "bytes": 15146,
+      "physical_lines": 293,
+      "all_ast_function_definitions": 18,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 22
+    },
+    "server/lib/persistence/__init__.py": {
+      "source_sha256": "b5ea96b137c7b278d9230c1b7b547af3de3ad38a2e9d2a400b03b1de76e699f9",
+      "bytes": 64,
+      "physical_lines": 1,
+      "all_ast_function_definitions": 0,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 3
+    },
+    "server/lib/persistence/schema.py": {
+      "source_sha256": "3bd32c9a143a529ea0de358b4437fc28b002e5c45d44b885f3054f586efa326b",
+      "bytes": 380,
+      "physical_lines": 11,
+      "all_ast_function_definitions": 0,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 3
+    },
+    "server/lib/persistence/schema_parts/__init__.py": {
+      "source_sha256": "43f65ad69affb53ce7385f69167c37683ab3835c980e3f1b061672d46813e4f8",
+      "bytes": 95,
+      "physical_lines": 1,
+      "all_ast_function_definitions": 0,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 3
+    },
+    "server/lib/persistence/schema_parts/agent_goals.py": {
+      "source_sha256": "4c41df20a966ce42cb8f896a130def5e6889800898bcb15013c836ac528b0c43",
+      "bytes": 554,
+      "physical_lines": 18,
+      "all_ast_function_definitions": 0,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 3
+    },
+    "server/lib/persistence/schema_parts/audio_bookkeeper.py": {
+      "source_sha256": "64db7334245db47c636d5a0d9c66229be665b75d4b8c6b17725c00f9724d6ec7",
+      "bytes": 2038,
+      "physical_lines": 33,
+      "all_ast_function_definitions": 0,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 3
+    },
+    "server/lib/persistence/schema_parts/goal_ledger.py": {
+      "source_sha256": "41e332f4d9452ca8e097d3694fb6ff5c0039d66f03b4daeac2cc6a4f635532b9",
+      "bytes": 3309,
+      "physical_lines": 80,
+      "all_ast_function_definitions": 0,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 3
+    },
+    "server/lib/persistence/schema_parts/html_form_events.py": {
+      "source_sha256": "ca39ccfa6c98e8971a435dbfd48fdf9c2c3ed8f864b2f1fc5ea3e68b8fe311d0",
+      "bytes": 1064,
+      "physical_lines": 24,
+      "all_ast_function_definitions": 0,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 3
+    },
+    "server/lib/persistence/schema_parts/html_forms.py": {
+      "source_sha256": "f2fad962b27e6edb2f374a31ef409125c95ff6c9a9b515418bb8ccc1746d5ea1",
+      "bytes": 684,
+      "physical_lines": 17,
+      "all_ast_function_definitions": 0,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 3
+    },
+    "server/lib/persistence/schema_parts/html_report_revisions.py": {
+      "source_sha256": "a16419d4ac91a7155e56e3b7d43bb71c1f33e5bb21d3d56bb187df13915720c7",
+      "bytes": 434,
+      "physical_lines": 12,
+      "all_ast_function_definitions": 0,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 3
+    },
+    "server/lib/persistence/schema_parts/janitor_autonomy.py": {
+      "source_sha256": "254d7676b70d60d5755b389836f0dd4760151f336c60c42e0bf58250f1999533",
+      "bytes": 531,
+      "physical_lines": 9,
+      "all_ast_function_definitions": 0,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 3
+    },
+    "server/lib/persistence/schema_parts/judgments.py": {
+      "source_sha256": "d7606b9212178c12d570cae1512cd6fd9e9a05158bdb29753a7ff92fc38f02d6",
+      "bytes": 850,
+      "physical_lines": 23,
+      "all_ast_function_definitions": 0,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 3
+    },
+    "server/lib/persistence/schema_parts/model_fallbacks.py": {
+      "source_sha256": "b3d3be824147785c82f83464df53f0d39982a83405aa23c2a95be46954c88e92",
+      "bytes": 554,
+      "physical_lines": 12,
+      "all_ast_function_definitions": 0,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 3
+    },
+    "server/lib/persistence/schema_parts/oracle_memory.py": {
+      "source_sha256": "691aabbab4e31eeb29c49e762d096d819560667a992106da0bf1e54bd3c1f3bf",
+      "bytes": 2253,
+      "physical_lines": 45,
+      "all_ast_function_definitions": 0,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 3
+    },
+    "server/lib/persistence/schema_parts/podcast_history.py": {
+      "source_sha256": "4b346af8961379f80d7696c49e75ae9f9d81880b6b99b332e3f0144b161960d0",
+      "bytes": 2243,
+      "physical_lines": 41,
+      "all_ast_function_definitions": 0,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 3
+    },
+    "server/lib/persistence/schema_parts/provider_background_jobs.py": {
+      "source_sha256": "c4e0cdc633348fefb14d291873f019614828f932aa882563674736e6930c1276",
+      "bytes": 1293,
+      "physical_lines": 27,
+      "all_ast_function_definitions": 0,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 3
+    },
+    "server/lib/persistence/schema_parts/tool_explanation_learning.py": {
+      "source_sha256": "3cf93b5ecb439f19561264ca93ab404b30d872795c2aa883198d49cf01740049",
+      "bytes": 1524,
+      "physical_lines": 41,
+      "all_ast_function_definitions": 0,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 3
+    },
+    "server/lib/persistence/schema_parts/tool_explanation_mappings.py": {
+      "source_sha256": "99d9f10c0e8aba125e378c1ea7c9883f7a27523b7b3926fabca7fb05410f2182",
+      "bytes": 675,
+      "physical_lines": 18,
+      "all_ast_function_definitions": 0,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 3
+    },
+    "server/lib/personal_skills.py": {
+      "source_sha256": "70e8c9af334b91c0e60fcbfad1722bb0a974285f40e2572a596f17dad1ac543b",
+      "bytes": 14020,
+      "physical_lines": 333,
+      "all_ast_function_definitions": 14,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 17
+    },
+    "server/lib/personalities.py": {
+      "source_sha256": "68f5605b5d94abd2ba6ec37bb51baeac1be8a340c4c3c08df1352f1ed8cf088f",
+      "bytes": 677,
+      "physical_lines": 29,
+      "all_ast_function_definitions": 3,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 7
+    },
+    "server/lib/personas.py": {
+      "source_sha256": "05cbc559d688bf9ae91a37ab2c17ecf80907a8e0a1471e8fe73de18c7dd81a0c",
+      "bytes": 7758,
+      "physical_lines": 207,
+      "all_ast_function_definitions": 10,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 13
+    },
+    "server/lib/podcast_history.py": {
+      "source_sha256": "5a78dcec4874d0c1cd78d04dfcae5871a2cdea24630930ddafe993fae148f1cb",
+      "bytes": 16108,
+      "physical_lines": 302,
+      "all_ast_function_definitions": 14,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 17
+    },
+    "server/lib/podcast_history_http.py": {
+      "source_sha256": "9d0087ad908db0b04431ff73b144e7c957b5cf14bbdeb83834efff2b34abdbe6",
+      "bytes": 2175,
+      "physical_lines": 41,
+      "all_ast_function_definitions": 1,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 4
+    },
+    "server/lib/podcast_live.py": {
+      "source_sha256": "bb88d187c575f45c7466709327b6a0ee5f5c68d77d087bb002f4a062d0651ee8",
+      "bytes": 21198,
+      "physical_lines": 378,
+      "all_ast_function_definitions": 23,
+      "all_ast_class_definitions": 4,
+      "context_map_call_structural_upper_bound": 30
+    },
+    "server/lib/policies/__init__.py": {
+      "source_sha256": "e727dc28fbb378d2cda123d08c7f771162202f51eaffe331abac775ca5eb2eeb",
+      "bytes": 805,
+      "physical_lines": 13,
+      "all_ast_function_definitions": 0,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 3
+    },
+    "server/lib/policies/admission.py": {
+      "source_sha256": "f87eccbe38d350174abbd41eeadf4d6cb2f06243c2801d85c7a48b3dc3ff0a1f",
+      "bytes": 8981,
+      "physical_lines": 243,
+      "all_ast_function_definitions": 6,
+      "all_ast_class_definitions": 8,
+      "context_map_call_structural_upper_bound": 17
+    },
+    "server/lib/policies/agent_spec.py": {
+      "source_sha256": "98de42de5f482fa0434bd01c0b71a83283f0ffca211663fc2948befadfc32d21",
+      "bytes": 19969,
+      "physical_lines": 390,
+      "all_ast_function_definitions": 4,
+      "all_ast_class_definitions": 3,
+      "context_map_call_structural_upper_bound": 10
+    },
+    "server/lib/policies/failover.py": {
+      "source_sha256": "c05b1e14f002f415ebc63fc7007322519e739b768a836f93ba53425a6ac4a17e",
+      "bytes": 3409,
+      "physical_lines": 116,
+      "all_ast_function_definitions": 3,
+      "all_ast_class_definitions": 9,
+      "context_map_call_structural_upper_bound": 15
+    },
+    "server/lib/policies/helper_state.py": {
+      "source_sha256": "425b8f061059b27db020ecbd34fbe8612f64fdc18eec062d429d544245fe0efe",
+      "bytes": 5355,
+      "physical_lines": 142,
+      "all_ast_function_definitions": 5,
+      "all_ast_class_definitions": 4,
+      "context_map_call_structural_upper_bound": 12
+    },
+    "server/lib/policies/notifications.py": {
+      "source_sha256": "be721bdf836ef23be39f5b146155137ec120ab55c228a5c4ba47f843e5193f95",
+      "bytes": 4637,
+      "physical_lines": 119,
+      "all_ast_function_definitions": 1,
+      "all_ast_class_definitions": 5,
+      "context_map_call_structural_upper_bound": 9
+    },
+    "server/lib/policies/stale_work.py": {
+      "source_sha256": "2c118dd233022347b34876c31ae5d7241c4a6c17ebdd0382896c1b64eb5610f6",
+      "bytes": 4695,
+      "physical_lines": 112,
+      "all_ast_function_definitions": 5,
+      "all_ast_class_definitions": 3,
+      "context_map_call_structural_upper_bound": 11
+    },
+    "server/lib/portrait_generation.py": {
+      "source_sha256": "80665f166cb888e670de1faf99dcc5a75c91de816e38861e793992295c1666c9",
+      "bytes": 13864,
+      "physical_lines": 317,
+      "all_ast_function_definitions": 9,
+      "all_ast_class_definitions": 2,
+      "context_map_call_structural_upper_bound": 14
+    },
+    "server/lib/proc_util.py": {
+      "source_sha256": "2b4f113fa8c10c782908ce29bd7f471fe310439abc11f918b0499be8ce1784f3",
+      "bytes": 3186,
+      "physical_lines": 84,
+      "all_ast_function_definitions": 5,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 9
+    },
+    "server/lib/process_registry.py": {
+      "source_sha256": "8a2a4f2d67095bac10b211236a64e3aad763691583e4e84dab64f48b4db6a6ef",
+      "bytes": 6089,
+      "physical_lines": 155,
+      "all_ast_function_definitions": 13,
+      "all_ast_class_definitions": 2,
+      "context_map_call_structural_upper_bound": 18
+    },
+    "server/lib/prompt_admissions.py": {
+      "source_sha256": "d1d24e4a5a2088c5ff76b79726f6e210db7bcfb3f52eca489f1f8c598d07da75",
+      "bytes": 8015,
+      "physical_lines": 229,
+      "all_ast_function_definitions": 8,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 12
+    },
+    "server/lib/prompt_history.py": {
+      "source_sha256": "5b3d87d53b87e3b045646e3d786986ee4fe2ff94cd1971151aab1d756b0c9891",
+      "bytes": 14399,
+      "physical_lines": 416,
+      "all_ast_function_definitions": 15,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 18
+    },
+    "server/lib/protocol.py": {
+      "source_sha256": "62745fa004e2014395aaa55b697d97d806cc7ec8201759a0d628fc1e5e5a18d9",
+      "bytes": 7733,
+      "physical_lines": 207,
+      "all_ast_function_definitions": 11,
+      "all_ast_class_definitions": 8,
+      "context_map_call_structural_upper_bound": 22
+    },
+    "server/lib/provider_background_jobs.py": {
+      "source_sha256": "e9befa7066df82daf97179edffb9c37b7dc4159c7de6f38aa1228cd265e8ca01",
+      "bytes": 27164,
+      "physical_lines": 612,
+      "all_ast_function_definitions": 34,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 38
+    },
+    "server/lib/provider_capabilities.py": {
+      "source_sha256": "0697d284fe04af012dd34b042dd0d62db46a3272925e4c7f396e081a90f0843f",
+      "bytes": 38226,
+      "physical_lines": 963,
+      "all_ast_function_definitions": 39,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 42
+    },
+    "server/lib/quiet_agents.py": {
+      "source_sha256": "8ecbeec33a47a0d867981292bd4c3c86fb83cec4668b555e0c36901ca44ba49d",
+      "bytes": 1407,
+      "physical_lines": 34,
+      "all_ast_function_definitions": 3,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 6
+    },
+    "server/lib/reconcile.py": {
+      "source_sha256": "1376e73da7f6a658e276ec8c925b154f6705b310fd4bdd8d9b294c011003999d",
+      "bytes": 12114,
+      "physical_lines": 266,
+      "all_ast_function_definitions": 10,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 13
+    },
+    "server/lib/recovery_backoff.py": {
+      "source_sha256": "d267b0f5c3be423ae93907828b7caebd30e8a90533f93b423d078c82cd6abb64",
+      "bytes": 4435,
+      "physical_lines": 119,
+      "all_ast_function_definitions": 10,
+      "all_ast_class_definitions": 2,
+      "context_map_call_structural_upper_bound": 15
+    },
+    "server/lib/relay_connector.py": {
+      "source_sha256": "b09f2547b8aa4f6107d96db973cbdee98b54cc9c521f3397fd575a0ad90bdd48",
+      "bytes": 22586,
+      "physical_lines": 497,
+      "all_ast_function_definitions": 33,
+      "all_ast_class_definitions": 3,
+      "context_map_call_structural_upper_bound": 39
+    },
+    "server/lib/relay_settings.py": {
+      "source_sha256": "74fd137b26cc572ffd277e32157521d6bb3a38b038daf19295b2120bb68a005b",
+      "bytes": 3475,
+      "physical_lines": 91,
+      "all_ast_function_definitions": 7,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 11
+    },
+    "server/lib/request_security.py": {
+      "source_sha256": "d8d94dca6559a15d4d9750ca5a93de10365a00ae002fc5b8c73e604528bfd203",
+      "bytes": 2878,
+      "physical_lines": 79,
+      "all_ast_function_definitions": 5,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 9
+    },
+    "server/lib/resource_telemetry.py": {
+      "source_sha256": "c3c7887e514319ba5d67ea7323a6cda9eb2cc3d21ea2e32e2a9909c3d3f355a5",
+      "bytes": 2025,
+      "physical_lines": 60,
+      "all_ast_function_definitions": 6,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 10
+    },
+    "server/lib/resume.py": {
+      "source_sha256": "316fbf54b0faac01c68df06e2500a22283fab511c6e90582b726558787d986c9",
+      "bytes": 4681,
+      "physical_lines": 117,
+      "all_ast_function_definitions": 4,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 7
+    },
+    "server/lib/revisioned_cache.py": {
+      "source_sha256": "60d53201d0c113dfe0362e07a1da7e14475e71f735f997a924eb5926d9319056",
+      "bytes": 10137,
+      "physical_lines": 243,
+      "all_ast_function_definitions": 19,
+      "all_ast_class_definitions": 2,
+      "context_map_call_structural_upper_bound": 24
+    },
+    "server/lib/roster.py": {
+      "source_sha256": "16079e0d2477d002e9f1cf5d9536f53bfb8582a43c334c285c6a2806c8c71f90",
+      "bytes": 4961,
+      "physical_lines": 185,
+      "all_ast_function_definitions": 4,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 7
+    },
+    "server/lib/roster_seed.py": {
+      "source_sha256": "6dfb24f55abf7c01f72b5cfcefaf68d078ccb71696c09e5e30c15ec8dcf8ed89",
+      "bytes": 2124,
+      "physical_lines": 54,
+      "all_ast_function_definitions": 1,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 4
+    },
+    "server/lib/routes/__init__.py": {
+      "source_sha256": "9ceb2c1cabf408d2ec158cb94dbbcfb087698df03327e50e2742032955f23cb5",
+      "bytes": 248,
+      "physical_lines": 6,
+      "all_ast_function_definitions": 0,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 3
+    },
+    "server/lib/routes/agents.py": {
+      "source_sha256": "21e0f95f8816de282289a45f01a10159f50959793de547a2ab7a43e422aa8ce2",
+      "bytes": 18659,
+      "physical_lines": 390,
+      "all_ast_function_definitions": 15,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 19
+    },
+    "server/lib/routes/artifacts.py": {
+      "source_sha256": "687ef86d6f499b5f2b20d9a6b4fb9065b7a8bc322ce2c9da492c97fcb9cd7020",
+      "bytes": 15587,
+      "physical_lines": 307,
+      "all_ast_function_definitions": 19,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 23
+    },
+    "server/lib/routes/calls.py": {
+      "source_sha256": "8cfedc7769ebfc10abde2dca1927a51df6c687ddf1594de06f182d5e684efbd2",
+      "bytes": 9936,
+      "physical_lines": 210,
+      "all_ast_function_definitions": 30,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 34
+    },
+    "server/lib/routes/goals.py": {
+      "source_sha256": "f3908f3a6fcde0e5705a3952953c76e4ea22724e792aed6acdb58fd42cfb8207",
+      "bytes": 9415,
+      "physical_lines": 214,
+      "all_ast_function_definitions": 16,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 20
+    },
+    "server/lib/routes/heartbeat.py": {
+      "source_sha256": "aebc9b1731dc4f3ecc0bf8ce2c9841c26d54a0c941a1b35570023860ee5cc26b",
+      "bytes": 10235,
+      "physical_lines": 256,
+      "all_ast_function_definitions": 10,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 14
+    },
+    "server/lib/routes/helpers.py": {
+      "source_sha256": "e7e0a82c38908f91a31086b2525c8489c852c6a97e81b9d369a4cfd21fcc62f8",
+      "bytes": 2618,
+      "physical_lines": 69,
+      "all_ast_function_definitions": 5,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 8
+    },
+    "server/lib/routes/media.py": {
+      "source_sha256": "b6623003c5eddea8794ea69f21da8ae83c4226c61ef20c0f7cd64ddec5db02ca",
+      "bytes": 5976,
+      "physical_lines": 135,
+      "all_ast_function_definitions": 3,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 7
+    },
+    "server/lib/routes/ops.py": {
+      "source_sha256": "7a416c7e35d30b070472a90e64c38c98216ca0b902ba067d3c8d73ac59762455",
+      "bytes": 14055,
+      "physical_lines": 305,
+      "all_ast_function_definitions": 10,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 14
+    },
+    "server/lib/routes/oracle.py": {
+      "source_sha256": "aa4363c239c46ef08b3e815ab98a79823e1ba9a8023be5c370b313a9f29c3d41",
+      "bytes": 11270,
+      "physical_lines": 256,
+      "all_ast_function_definitions": 22,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 26
+    },
+    "server/lib/routes/personas.py": {
+      "source_sha256": "f0f59fde458f7ac2f299c0a2b43a99b16222e03e90112267498b64707c2f0aab",
+      "bytes": 6419,
+      "physical_lines": 144,
+      "all_ast_function_definitions": 9,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 13
+    },
+    "server/lib/routes/providers.py": {
+      "source_sha256": "e74d362cfda3b88a22f4521097810a20de67d45ad27b2df889712aa462208227",
+      "bytes": 12721,
+      "physical_lines": 291,
+      "all_ast_function_definitions": 21,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 25
+    },
+    "server/lib/routes/registry.py": {
+      "source_sha256": "5e216ae5490d75879e2f16fbc699bb2aceabcfe9f87e00ded79a004e4a76948b",
+      "bytes": 17640,
+      "physical_lines": 463,
+      "all_ast_function_definitions": 51,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 55
+    },
+    "server/lib/routes/schedules.py": {
+      "source_sha256": "515288f5627b59089473f4e78f64004114996c902c62066a837603380562839a",
+      "bytes": 4841,
+      "physical_lines": 111,
+      "all_ast_function_definitions": 8,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 12
+    },
+    "server/lib/routes/send.py": {
+      "source_sha256": "87085480a97d82bf021ef1f4ff8fb28cd1c3ff79b63f4855fb3ed6da1b6bee61",
+      "bytes": 9201,
+      "physical_lines": 209,
+      "all_ast_function_definitions": 10,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 14
+    },
+    "server/lib/routes/settings.py": {
+      "source_sha256": "8ed3159bb51588484f1454e855c40419d2914465d8a505ada19cbc4d511ef6ad",
+      "bytes": 11520,
+      "physical_lines": 278,
+      "all_ast_function_definitions": 25,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 29
+    },
+    "server/lib/routes/teams.py": {
+      "source_sha256": "de7c547d40d3958b52f4bceca08ce57aa7d9d0a229e2de9929b907842b19f166",
+      "bytes": 4147,
+      "physical_lines": 108,
+      "all_ast_function_definitions": 8,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 12
+    },
+    "server/lib/routes/vocab.py": {
+      "source_sha256": "a6445cf30957e76d161874a20e300b0ccdc0bc359e5eef54ef7139de58be9c65",
+      "bytes": 13160,
+      "physical_lines": 320,
+      "all_ast_function_definitions": 23,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 27
+    },
+    "server/lib/routes/voice.py": {
+      "source_sha256": "e184af488d54521da4ca6eff76467605f606ec24ac346c98ab426699422ea2a7",
+      "bytes": 17797,
+      "physical_lines": 374,
+      "all_ast_function_definitions": 12,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 16
+    },
+    "server/lib/routes/voice_timeline.py": {
+      "source_sha256": "5c9ddf817251ed81d879110019528499fe81e824343653722f211d7f95b6db5e",
+      "bytes": 6532,
+      "physical_lines": 144,
+      "all_ast_function_definitions": 11,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 15
+    },
+    "server/lib/routing.py": {
+      "source_sha256": "baba63e0dc981c5c896016f0f1fcea7c02c9f21db12ff51a81f38e8eb407902a",
+      "bytes": 4798,
+      "physical_lines": 146,
+      "all_ast_function_definitions": 5,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 8
+    },
+    "server/lib/runtime_attestation.py": {
+      "source_sha256": "c5b5b900bd4615cd7fa4815637bbaf311f7ceb7eeda79052067279d82b5f7812",
+      "bytes": 20458,
+      "physical_lines": 476,
+      "all_ast_function_definitions": 29,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 33
+    },
+    "server/lib/runtime_bridge.py": {
+      "source_sha256": "6995a57d0eea07e8eb17e6056c47c02c94be7f5c94c66454d94345e1fb211c66",
+      "bytes": 49790,
+      "physical_lines": 1046,
+      "all_ast_function_definitions": 59,
+      "all_ast_class_definitions": 6,
+      "context_map_call_structural_upper_bound": 68
+    },
+    "server/lib/runtime_events.py": {
+      "source_sha256": "749d1b805fcb9470654e89cab86bbb19161a7c65ebd0fdfc5b11d5d4930aa174",
+      "bytes": 4192,
+      "physical_lines": 118,
+      "all_ast_function_definitions": 12,
+      "all_ast_class_definitions": 2,
+      "context_map_call_structural_upper_bound": 17
+    },
+    "server/lib/runtime_release.py": {
+      "source_sha256": "090782d9e7cd5724c18d798a4f36f58fd383a2f7ab78dbd871a6a36b69c2d968",
+      "bytes": 23773,
+      "physical_lines": 552,
+      "all_ast_function_definitions": 29,
+      "all_ast_class_definitions": 2,
+      "context_map_call_structural_upper_bound": 34
+    },
+    "server/lib/runtime_startup.py": {
+      "source_sha256": "4765e2a0bf854b6701f452880382d17648c9bd137a543124ce05bb2280bae859",
+      "bytes": 5151,
+      "physical_lines": 123,
+      "all_ast_function_definitions": 5,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 8
+    },
+    "server/lib/scheduler.py": {
+      "source_sha256": "ada6d1079c384ef30a76ba02999aebe4b1b34f50e6fc10d61991ea2c16cd4427",
+      "bytes": 13123,
+      "physical_lines": 380,
+      "all_ast_function_definitions": 16,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 20
+    },
+    "server/lib/send_request.py": {
+      "source_sha256": "aebc8c82be5411654fd108d3f5f977f3ea2add2a051fab7992400861db13c335",
+      "bytes": 9120,
+      "physical_lines": 210,
+      "all_ast_function_definitions": 8,
+      "all_ast_class_definitions": 2,
+      "context_map_call_structural_upper_bound": 13
+    },
+    "server/lib/send_service.py": {
+      "source_sha256": "e54112ad54a1a3230dc7a3c3678ac0aa902e86e7ee215275bfa9acd0d3294adc",
+      "bytes": 2209,
+      "physical_lines": 62,
+      "all_ast_function_definitions": 3,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 7
+    },
+    "server/lib/server_identity.py": {
+      "source_sha256": "cfa5a72eba816f4ca86088d80b55681a745535b846185f102cea3834e328010e",
+      "bytes": 15133,
+      "physical_lines": 397,
+      "all_ast_function_definitions": 12,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 15
+    },
+    "server/lib/server_peers.py": {
+      "source_sha256": "42464546c31ea0bc375bf7031e45f92b5dffe11fbace17d9af09ae9f408dfb1b",
+      "bytes": 2055,
+      "physical_lines": 66,
+      "all_ast_function_definitions": 6,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 9
+    },
+    "server/lib/server_update.py": {
+      "source_sha256": "bacfe49f7b785c3694b85f089814be57202b7f367446d66f86edd1dffabbbf27",
+      "bytes": 12056,
+      "physical_lines": 304,
+      "all_ast_function_definitions": 10,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 13
+    },
+    "server/lib/service_manager.py": {
+      "source_sha256": "9ad939e00a42993e70e98db54b4a3734240e7ce0188664d501dd7f235a73ad56",
+      "bytes": 21018,
+      "physical_lines": 491,
+      "all_ast_function_definitions": 25,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 28
+    },
+    "server/lib/session_catalog.py": {
+      "source_sha256": "8820433402f27228433c433fb4b55e869d3c3a8fa6e029cbbb98a9bcb528593e",
+      "bytes": 7007,
+      "physical_lines": 178,
+      "all_ast_function_definitions": 4,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 7
+    },
+    "server/lib/session_models.py": {
+      "source_sha256": "cf13c7f81be8a58bb1f5e9afb873126bb22847f41738e3be94f69bbb69b03548",
+      "bytes": 3289,
+      "physical_lines": 98,
+      "all_ast_function_definitions": 8,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 11
+    },
+    "server/lib/settings_store.py": {
+      "source_sha256": "af2060e9ef0b0293c5120151cb0860ffff67466214aed808324d5fcc87912d75",
+      "bytes": 11403,
+      "physical_lines": 281,
+      "all_ast_function_definitions": 27,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 30
+    },
+    "server/lib/snapshot.py": {
+      "source_sha256": "0193b43c2547bd42b9d4830d194f07b39cf66ddbe0f8c878610795021731abd5",
+      "bytes": 23074,
+      "physical_lines": 457,
+      "all_ast_function_definitions": 13,
+      "all_ast_class_definitions": 2,
+      "context_map_call_structural_upper_bound": 18
+    },
+    "server/lib/sse_store.py": {
+      "source_sha256": "728a9b7cfb6de3ff530c3bd9af9960a64aed4d297d7ce29797692323cb48a40d",
+      "bytes": 6829,
+      "physical_lines": 155,
+      "all_ast_function_definitions": 6,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 9
+    },
+    "server/lib/stale_work.py": {
+      "source_sha256": "68ec7435f58f206df6b2fc2f6ee7547a44e8ec036ddde141340cccf2c7b4ba38",
+      "bytes": 7166,
+      "physical_lines": 150,
+      "all_ast_function_definitions": 6,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 9
+    },
+    "server/lib/state_watcher.py": {
+      "source_sha256": "89106fb71bfb10ca3acfe81e59ffd0836af51575829606e704221c412790f3ee",
+      "bytes": 7137,
+      "physical_lines": 189,
+      "all_ast_function_definitions": 10,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 14
+    },
+    "server/lib/static_assets.py": {
+      "source_sha256": "c4e1efc13a19f66d223fd75a4339d728682b182ff498554e5138e559aa1b54e7",
+      "bytes": 2836,
+      "physical_lines": 78,
+      "all_ast_function_definitions": 6,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 9
+    },
+    "server/lib/status_labels.py": {
+      "source_sha256": "8596fc614545a90bde2ed2163bdb213834146f71678de8a70b18053e75ddc3d8",
+      "bytes": 932,
+      "physical_lines": 24,
+      "all_ast_function_definitions": 1,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 4
+    },
+    "server/lib/stt.py": {
+      "source_sha256": "d784095098a08daab3573ea7eb070889d05a0e56baac3169b870637e8f3b2b16",
+      "bytes": 40755,
+      "physical_lines": 967,
+      "all_ast_function_definitions": 56,
+      "all_ast_class_definitions": 11,
+      "context_map_call_structural_upper_bound": 70
+    },
+    "server/lib/stt_language.py": {
+      "source_sha256": "7dfe7f2a69ee18cadf0f83c7f3fc65256af3b53a140ed62116e3f73c9376d640",
+      "bytes": 7457,
+      "physical_lines": 207,
+      "all_ast_function_definitions": 18,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 21
+    },
+    "server/lib/stt_providers.py": {
+      "source_sha256": "1b1dfd50852cf9b99ee37eeb17667e3f9ac6dc71a8064c33a7423ea18eca2cff",
+      "bytes": 17251,
+      "physical_lines": 386,
+      "all_ast_function_definitions": 17,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 20
+    },
+    "server/lib/stt_router.py": {
+      "source_sha256": "3e4e8c78126af9a3e408f8d8470d23dcc122a24232727108490d9e8374b859e1",
+      "bytes": 2130,
+      "physical_lines": 43,
+      "all_ast_function_definitions": 2,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 6
+    },
+    "server/lib/stt_stream.py": {
+      "source_sha256": "91a5d0f471109cdb3a72ebb23da274d2fa3182646564709af646030483031cc5",
+      "bytes": 17303,
+      "physical_lines": 430,
+      "all_ast_function_definitions": 17,
+      "all_ast_class_definitions": 2,
+      "context_map_call_structural_upper_bound": 22
+    },
+    "server/lib/stt_worker.py": {
+      "source_sha256": "b21ae633f15e3908313c10ff2ac11468ac2d1cee655a6a1d084b4d0a27bf595e",
+      "bytes": 3459,
+      "physical_lines": 106,
+      "all_ast_function_definitions": 5,
+      "all_ast_class_definitions": 2,
+      "context_map_call_structural_upper_bound": 10
+    },
+    "server/lib/task_goal_recovery.py": {
+      "source_sha256": "cc642e6849e1b99896f67a8ca4e1be0d7eef0eae6a558d07bd506ede47d5efa6",
+      "bytes": 20563,
+      "physical_lines": 510,
+      "all_ast_function_definitions": 15,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 19
+    },
+    "server/lib/task_goal_state.py": {
+      "source_sha256": "b9f84838548544ab8fc75431da1f07ccd66d2592f8a1a9853bc622a48dbd62b8",
+      "bytes": 397,
+      "physical_lines": 12,
+      "all_ast_function_definitions": 0,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 3
+    },
+    "server/lib/task_plans.py": {
+      "source_sha256": "850ec10b3c6533cbe7836d1a733fa1047290c357daf856ec4d9896a9e2e7c396",
+      "bytes": 46960,
+      "physical_lines": 1171,
+      "all_ast_function_definitions": 33,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 36
+    },
+    "server/lib/team_leader.py": {
+      "source_sha256": "bb4bfcddf72a6b761d97d1b46162d71da608aec6a7e1a37459f975053be903d7",
+      "bytes": 8188,
+      "physical_lines": 214,
+      "all_ast_function_definitions": 12,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 16
+    },
+    "server/lib/team_store.py": {
+      "source_sha256": "61ef87b88baffc278cb6c2f7f99f0ad94e3c604fa36bae1b13c64f57871eac05",
+      "bytes": 27763,
+      "physical_lines": 708,
+      "all_ast_function_definitions": 31,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 34
+    },
+    "server/lib/telemetry.py": {
+      "source_sha256": "08f4e640ff8bfcea7e88f3c4796aae0e8100f7489d5e184aa937c66977b5e0b6",
+      "bytes": 13700,
+      "physical_lines": 290,
+      "all_ast_function_definitions": 6,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 9
+    },
+    "server/lib/terminal_ws.py": {
+      "source_sha256": "3729c60aa75ea3813c543fb99934829167167060b92a0269627631a8b351d574",
+      "bytes": 11515,
+      "physical_lines": 317,
+      "all_ast_function_definitions": 12,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 15
+    },
+    "server/lib/text_util.py": {
+      "source_sha256": "16cbbe8f73c787a20cfe7928ef7bf0d1a31ee0731b616a1c44cc8a88e7a4eafc",
+      "bytes": 418,
+      "physical_lines": 14,
+      "all_ast_function_definitions": 1,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 4
+    },
+    "server/lib/timing.py": {
+      "source_sha256": "abdadbace3df737daa905c5488f79263b5feb39a0bf6aca976819019c839585a",
+      "bytes": 1983,
+      "physical_lines": 47,
+      "all_ast_function_definitions": 0,
+      "all_ast_class_definitions": 2,
+      "context_map_call_structural_upper_bound": 5
+    },
+    "server/lib/tool_explanation_cache.py": {
+      "source_sha256": "5a340fe0e47d77d65ccaf55d4ac165612811688b9eaac7344aa9e9281c586696",
+      "bytes": 1281,
+      "physical_lines": 32,
+      "all_ast_function_definitions": 3,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 6
+    },
+    "server/lib/tool_explanation_commands.py": {
+      "source_sha256": "06037dd998d5c084c404602f9ed65b9bd1c83b895159cbec99aaaf78527972a2",
+      "bytes": 7044,
+      "physical_lines": 196,
+      "all_ast_function_definitions": 8,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 12
+    },
+    "server/lib/tool_explanation_learning.py": {
+      "source_sha256": "79d0ba1ea57d6a8f7b08f97866b05855bfa131ed763618dd05443e5bdc67dbf2",
+      "bytes": 21182,
+      "physical_lines": 431,
+      "all_ast_function_definitions": 27,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 31
+    },
+    "server/lib/tool_explanation_mappings.py": {
+      "source_sha256": "8aaf1c8b25de5addd61271e01a0dafa5725733d6ec91f6067c7edfe958f88b3b",
+      "bytes": 8313,
+      "physical_lines": 174,
+      "all_ast_function_definitions": 8,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 11
+    },
+    "server/lib/tool_explanation_queue.py": {
+      "source_sha256": "f21df2321a2ffbf5b1635eeff929a006e0fd0b33eba78662e3ad1dcbbb316d8f",
+      "bytes": 12404,
+      "physical_lines": 202,
+      "all_ast_function_definitions": 9,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 12
+    },
+    "server/lib/tool_explanation_settings.py": {
+      "source_sha256": "65063ac620313d59a780610abc4bd05a9c6b54f105e5a2c511f143fdd880f2ef",
+      "bytes": 1852,
+      "physical_lines": 49,
+      "all_ast_function_definitions": 3,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 6
+    },
+    "server/lib/tool_explanation_shapes.py": {
+      "source_sha256": "c7324049b3bfab5930e0a42056707d1714f05d77dea58cba86e04c53fcac3483",
+      "bytes": 32134,
+      "physical_lines": 744,
+      "all_ast_function_definitions": 33,
+      "all_ast_class_definitions": 2,
+      "context_map_call_structural_upper_bound": 38
+    },
+    "server/lib/tool_explanation_templates.py": {
+      "source_sha256": "af8d0e6e1bcec816b7ab4a9322014578d7936460f6b63754b493a9bf9bbba6db",
+      "bytes": 36792,
+      "physical_lines": 748,
+      "all_ast_function_definitions": 31,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 35
+    },
+    "server/lib/tool_explanations.py": {
+      "source_sha256": "8b02145b9d4520bf9625ee413445877fc023a5639f4a0b1a57b07e55563d47bd",
+      "bytes": 62213,
+      "physical_lines": 1076,
+      "all_ast_function_definitions": 51,
+      "all_ast_class_definitions": 4,
+      "context_map_call_structural_upper_bound": 58
+    },
+    "server/lib/trace.py": {
+      "source_sha256": "79761c670f5bec2c167bd156501325ba5a9da2a3818ddfe44b656f1ccca4240e",
+      "bytes": 1930,
+      "physical_lines": 53,
+      "all_ast_function_definitions": 3,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 6
+    },
+    "server/lib/transcript_cursor.py": {
+      "source_sha256": "a58b520e17f0e1ed4d452aff2692dfb2e8a118d77beca5d0bf90a3a7d547e2ca",
+      "bytes": 9808,
+      "physical_lines": 256,
+      "all_ast_function_definitions": 12,
+      "all_ast_class_definitions": 3,
+      "context_map_call_structural_upper_bound": 18
+    },
+    "server/lib/transcript_import_cache.py": {
+      "source_sha256": "8527af70619dff5d1a8d2236b6cc168f48b15ddf952d0cc78fc105980bef336b",
+      "bytes": 27923,
+      "physical_lines": 636,
+      "all_ast_function_definitions": 23,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 27
+    },
+    "server/lib/transcript_incremental.py": {
+      "source_sha256": "c79e59bd1cd271de569ab4684bd068a4cf6f80c0eff67d5419beefb500efb5ae",
+      "bytes": 59976,
+      "physical_lines": 1338,
+      "all_ast_function_definitions": 66,
+      "all_ast_class_definitions": 8,
+      "context_map_call_structural_upper_bound": 77
+    },
+    "server/lib/transcript_streamer.py": {
+      "source_sha256": "11024dcef702451a56170cc7517e317828845d95313a24d97c48c6efc5d22827",
+      "bytes": 22701,
+      "physical_lines": 501,
+      "all_ast_function_definitions": 19,
+      "all_ast_class_definitions": 2,
+      "context_map_call_structural_upper_bound": 24
+    },
+    "server/lib/transcript_watcher.py": {
+      "source_sha256": "fd8a444f307b748760a1ba5e0c27cedf0926ee2b7ce40bcdad82bf0701acdc48",
+      "bytes": 19940,
+      "physical_lines": 497,
+      "all_ast_function_definitions": 26,
+      "all_ast_class_definitions": 3,
+      "context_map_call_structural_upper_bound": 32
+    },
+    "server/lib/transcription_catalog.py": {
+      "source_sha256": "b3648928bcc7c3c997c62963538e5f8bf4f964f2e247553698fe92872824bd72",
+      "bytes": 2984,
+      "physical_lines": 68,
+      "all_ast_function_definitions": 4,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 7
+    },
+    "server/lib/transcription_models.py": {
+      "source_sha256": "26b1da9f0292650daff429884b09a5ec7cc35c94b46da70919fcc1a820663e8d",
+      "bytes": 26109,
+      "physical_lines": 627,
+      "all_ast_function_definitions": 25,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 28
+    },
+    "server/lib/transcription_pipeline.py": {
+      "source_sha256": "b4f893be7dcf6e583316642951e237e88b458b31908ea3036bceb81cae2c2629",
+      "bytes": 25649,
+      "physical_lines": 495,
+      "all_ast_function_definitions": 12,
+      "all_ast_class_definitions": 2,
+      "context_map_call_structural_upper_bound": 17
+    },
+    "server/lib/transcription_results.py": {
+      "source_sha256": "881fb32565c76aaaa913aa96fd498b020c75edf075b3f16a7efe2cf80f75d903",
+      "bytes": 3325,
+      "physical_lines": 110,
+      "all_ast_function_definitions": 6,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 10
+    },
+    "server/lib/tts_engine.py": {
+      "source_sha256": "de62f741e6d4bca0493dbbb82f4be64dfc1026431b3284d49f34240bab2b3dcd",
+      "bytes": 12853,
+      "physical_lines": 293,
+      "all_ast_function_definitions": 19,
+      "all_ast_class_definitions": 4,
+      "context_map_call_structural_upper_bound": 26
+    },
+    "server/lib/tts_mode.py": {
+      "source_sha256": "c6673049e30874c941775af5e5a0776bddb4515d2fccb4f6b2506fa0f4901780",
+      "bytes": 1076,
+      "physical_lines": 34,
+      "all_ast_function_definitions": 2,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 6
+    },
+    "server/lib/tts_provider.py": {
+      "source_sha256": "2bba8fe5b7079b7e297c3ec1636d42eb5c175746b6ade89cb67ba83e5be59110",
+      "bytes": 574,
+      "physical_lines": 24,
+      "all_ast_function_definitions": 2,
+      "all_ast_class_definitions": 2,
+      "context_map_call_structural_upper_bound": 7
+    },
+    "server/lib/tts_providers.py": {
+      "source_sha256": "07238fbff7bbcd5faa3b188da2dd03110316a56fcbe29d0752124e9941bea2ca",
+      "bytes": 5613,
+      "physical_lines": 120,
+      "all_ast_function_definitions": 4,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 7
+    },
+    "server/lib/tts_queue.py": {
+      "source_sha256": "0f46625a05f0f475a24c1c68988fdbac403a96c9449f639bd535a266a65fa970",
+      "bytes": 6538,
+      "physical_lines": 184,
+      "all_ast_function_definitions": 11,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 14
+    },
+    "server/lib/tts_registry.py": {
+      "source_sha256": "992b0f02c875ba2b5f18ec8499481855e34c9e34fa205677241c245574a2f0f1",
+      "bytes": 10264,
+      "physical_lines": 228,
+      "all_ast_function_definitions": 20,
+      "all_ast_class_definitions": 5,
+      "context_map_call_structural_upper_bound": 28
+    },
+    "server/lib/tts_routing.py": {
+      "source_sha256": "f5d56c5d5bb45eb44a9a4151f6e4558624c0c0d8a606ad8fe835023d13f57a99",
+      "bytes": 746,
+      "physical_lines": 22,
+      "all_ast_function_definitions": 1,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 4
+    },
+    "server/lib/tts_service.py": {
+      "source_sha256": "12ddfa3243e6ec729cb26f8cfaaf60e16e3ae9db99e0643c1fee5565f18cc6ec",
+      "bytes": 9088,
+      "physical_lines": 197,
+      "all_ast_function_definitions": 8,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 11
+    },
+    "server/lib/tts_worker.py": {
+      "source_sha256": "9b0075785d56657c7f2bb32828775701033f841eccb59e40f2ec7f3ae03a6835",
+      "bytes": 27412,
+      "physical_lines": 629,
+      "all_ast_function_definitions": 20,
+      "all_ast_class_definitions": 3,
+      "context_map_call_structural_upper_bound": 26
+    },
+    "server/lib/turn_admission.py": {
+      "source_sha256": "ac7daa33d457a4b87c40807efade957fb74510b4606e5916e2b3f89df725e9f7",
+      "bytes": 35480,
+      "physical_lines": 652,
+      "all_ast_function_definitions": 13,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 17
+    },
+    "server/lib/turn_claim.py": {
+      "source_sha256": "192ec6a19ad3e4703086b11f20dff467279d97e38635b65eee2f8e33270c151e",
+      "bytes": 13982,
+      "physical_lines": 275,
+      "all_ast_function_definitions": 12,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 16
+    },
+    "server/lib/turn_command.py": {
+      "source_sha256": "a40c70eea36d541cf9e7fd3d6cee0cb97affcca425eb4bb52adb417198113223",
+      "bytes": 25577,
+      "physical_lines": 596,
+      "all_ast_function_definitions": 34,
+      "all_ast_class_definitions": 9,
+      "context_map_call_structural_upper_bound": 46
+    },
+    "server/lib/turn_dispatch.py": {
+      "source_sha256": "9acb282642b66f776f000ef9b37dbcefa6d4a4b34e610088939fdec0d6d822db",
+      "bytes": 38951,
+      "physical_lines": 729,
+      "all_ast_function_definitions": 22,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 26
+    },
+    "server/lib/turn_dispatch_state.py": {
+      "source_sha256": "b4e550bee7cc2a303a0fdb85f221b609dda073672fac29ee571df394c0b708bc",
+      "bytes": 12245,
+      "physical_lines": 285,
+      "all_ast_function_definitions": 16,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 19
+    },
+    "server/lib/turn_drain.py": {
+      "source_sha256": "48e11e1a234e3aee9f73c60c9d1158ccbfa95ab6d74c329475226b33d0bd577f",
+      "bytes": 13569,
+      "physical_lines": 269,
+      "all_ast_function_definitions": 9,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 13
+    },
+    "server/lib/turn_handoff.py": {
+      "source_sha256": "e84699985f51da2df91cc3172a410f4a76c688de70eef8efa65c8c4ec76aa8c8",
+      "bytes": 19702,
+      "physical_lines": 376,
+      "all_ast_function_definitions": 11,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 15
+    },
+    "server/lib/turn_identity.py": {
+      "source_sha256": "14fd56f6c7da9d7df09d76dabff9fd6d9b8c6ecd816654448a683df509bd6e8d",
+      "bytes": 1664,
+      "physical_lines": 38,
+      "all_ast_function_definitions": 1,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 5
+    },
+    "server/lib/turn_launcher.py": {
+      "source_sha256": "366662baa7764c191af46c3c7500190a41180937122523e81b370cb5da8088a2",
+      "bytes": 16852,
+      "physical_lines": 316,
+      "all_ast_function_definitions": 16,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 20
+    },
+    "server/lib/turn_lifecycle.py": {
+      "source_sha256": "552a6747031fd76bc72a02d6dc1c7d401e57a9697690f8d9860583eed89297bb",
+      "bytes": 49279,
+      "physical_lines": 994,
+      "all_ast_function_definitions": 51,
+      "all_ast_class_definitions": 6,
+      "context_map_call_structural_upper_bound": 60
+    },
+    "server/lib/turn_queue.py": {
+      "source_sha256": "09f44dff4b96f07ce96000c24d565cb6c51d006a790c8b7dbb461fd469f6e9b3",
+      "bytes": 40498,
+      "physical_lines": 951,
+      "all_ast_function_definitions": 57,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 60
+    },
+    "server/lib/turn_recovery.py": {
+      "source_sha256": "12c5fef49e724e421ab5a5055e6eab78fca1576728ee5a2b8a6135148797728d",
+      "bytes": 21413,
+      "physical_lines": 406,
+      "all_ast_function_definitions": 15,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 19
+    },
+    "server/lib/turn_retry.py": {
+      "source_sha256": "5c8758264e6a5d7af0964f8dd24643f900f8a5bee180dd5ceb8ecadd3d32ed4c",
+      "bytes": 17858,
+      "physical_lines": 309,
+      "all_ast_function_definitions": 6,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 10
+    },
+    "server/lib/turn_slots.py": {
+      "source_sha256": "b3040a0d423ab188c59cf7890a07d8dca0ce61e7d7695f3d5e6a578ba47b5127",
+      "bytes": 23490,
+      "physical_lines": 580,
+      "all_ast_function_definitions": 53,
+      "all_ast_class_definitions": 5,
+      "context_map_call_structural_upper_bound": 61
+    },
+    "server/lib/turn_stop.py": {
+      "source_sha256": "e6723b977fd3c8af186e0c03266edf077f3d067d173f5e68dc549d78e3f4e385",
+      "bytes": 6732,
+      "physical_lines": 165,
+      "all_ast_function_definitions": 11,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 14
+    },
+    "server/lib/turn_usage.py": {
+      "source_sha256": "4cfeb9a0a0c5c6fb5cca1666ede8f274c49fcc49bec52db86a98b2b2486fb2d4",
+      "bytes": 3956,
+      "physical_lines": 92,
+      "all_ast_function_definitions": 3,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 6
+    },
+    "server/lib/upload_results.py": {
+      "source_sha256": "ce2ab761fbe86d65649759d43d72a3c672ca1bd06ef0ce4fb838be4ea6b40beb",
+      "bytes": 4170,
+      "physical_lines": 111,
+      "all_ast_function_definitions": 3,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 7
+    },
+    "server/lib/user_notifications.py": {
+      "source_sha256": "9b1a490228e8da74d37964fcc165b739b9e0e279b05de338c5aec65acf90dab4",
+      "bytes": 24755,
+      "physical_lines": 593,
+      "all_ast_function_definitions": 18,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 21
+    },
+    "server/lib/viz_archetypes.py": {
+      "source_sha256": "8059c3a702a10c0732522b6b8bfe0a261f00d30551af929fc40c7ea7679ebe26",
+      "bytes": 3633,
+      "physical_lines": 81,
+      "all_ast_function_definitions": 3,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 6
+    },
+    "server/lib/viz_avatar_upgrade.py": {
+      "source_sha256": "5a27b2bba6c4ad9b77386f2c906f9a63e19c33ad0057b6ab5a66990ca75a7133",
+      "bytes": 1524,
+      "physical_lines": 21,
+      "all_ast_function_definitions": 1,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 4
+    },
+    "server/lib/viz_corpus.py": {
+      "source_sha256": "d7cbcb9cdb85b34e37721d5ce7f5e95defa4c0407f6fa9e4adcd2b97ebcac5d0",
+      "bytes": 1343,
+      "physical_lines": 33,
+      "all_ast_function_definitions": 1,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 4
+    },
+    "server/lib/viz_learning.py": {
+      "source_sha256": "fb92df40ce990c9f009c5f475b964d6aebc2008217ed3e86d830e9aebc4035d5",
+      "bytes": 5593,
+      "physical_lines": 117,
+      "all_ast_function_definitions": 7,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 10
+    },
+    "server/lib/viz_library.py": {
+      "source_sha256": "d5e5fdd64b40f0c1ac39c6fc2f719bb014a40b10d4f0df916160d8d3d73f53f0",
+      "bytes": 15321,
+      "physical_lines": 281,
+      "all_ast_function_definitions": 9,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 12
+    },
+    "server/lib/viz_native.py": {
+      "source_sha256": "29b1411d7c79704fdba17d200d09864399a0e45f1e6b7fd7af6056d42b211d41",
+      "bytes": 8455,
+      "physical_lines": 154,
+      "all_ast_function_definitions": 7,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 11
+    },
+    "server/lib/viz_normalize.py": {
+      "source_sha256": "42360eaecd1185559471ff68ce5faa65879de809ab980b736d0445063e50f481",
+      "bytes": 22546,
+      "physical_lines": 471,
+      "all_ast_function_definitions": 10,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 13
+    },
+    "server/lib/viz_owner_avatar.py": {
+      "source_sha256": "97a1af2c7e74c0fe4dc6d66954a4b2dc6a3d6dd21581c6929c2224bc530668ce",
+      "bytes": 1962,
+      "physical_lines": 36,
+      "all_ast_function_definitions": 1,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 4
+    },
+    "server/lib/viz_rule_author.py": {
+      "source_sha256": "b04faa018fcf799ef0d056a1adc0c500583854e84ccdbc4e396377185a3c6260",
+      "bytes": 15543,
+      "physical_lines": 317,
+      "all_ast_function_definitions": 14,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 17
+    },
+    "server/lib/viz_work.py": {
+      "source_sha256": "362febe715cdc1a1ecadd64423981f8be6f766bc80744956bb9503dcd35ebae6",
+      "bytes": 12254,
+      "physical_lines": 167,
+      "all_ast_function_definitions": 9,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 12
+    },
+    "server/lib/viz_world.py": {
+      "source_sha256": "93b21582d169c6907e27e144399da83a1f6c39811cd2380fbfc8ea0b037b99f3",
+      "bytes": 15312,
+      "physical_lines": 261,
+      "all_ast_function_definitions": 9,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 12
+    },
+    "server/lib/vocab.py": {
+      "source_sha256": "5bb7a70d68d2541ea3953fbfbfec8a4be27321c0c931f0293d1ffe2efb577665",
+      "bytes": 5313,
+      "physical_lines": 147,
+      "all_ast_function_definitions": 8,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 11
+    },
+    "server/lib/vocab_budget.py": {
+      "source_sha256": "ad74d985048242eb55f4225ec2916b5b46c249403e4a5770995022d9eb423272",
+      "bytes": 10433,
+      "physical_lines": 308,
+      "all_ast_function_definitions": 14,
+      "all_ast_class_definitions": 6,
+      "context_map_call_structural_upper_bound": 23
+    },
+    "server/lib/vocab_compile.py": {
+      "source_sha256": "b5c9c7cef3caf2a61724b6663dd14961241af81c653816be22d836ba4c3ff20a",
+      "bytes": 7689,
+      "physical_lines": 212,
+      "all_ast_function_definitions": 6,
+      "all_ast_class_definitions": 1,
+      "context_map_call_structural_upper_bound": 10
+    },
+    "server/lib/vocab_generators.py": {
+      "source_sha256": "88af999d0aa78fb1af89d7faba2287f0ba3d24b7ebdf4d0c40e5d129f58c74d3",
+      "bytes": 8292,
+      "physical_lines": 220,
+      "all_ast_function_definitions": 8,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 11
+    },
+    "server/lib/vocab_service.py": {
+      "source_sha256": "7c513d4d944d6f277b00983deebe8fb64841b144588b822bb31671639c959e51",
+      "bytes": 10847,
+      "physical_lines": 261,
+      "all_ast_function_definitions": 9,
+      "all_ast_class_definitions": 2,
+      "context_map_call_structural_upper_bound": 14
+    },
+    "server/lib/vocab_store.py": {
+      "source_sha256": "5d9c175910922a56d9667f42fe0884da4969bb609dae7410f6ac9ba36406266c",
+      "bytes": 17849,
+      "physical_lines": 460,
+      "all_ast_function_definitions": 33,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 36
+    },
+    "server/lib/voice.py": {
+      "source_sha256": "6023c497203072dea8ed1b46cfcbfc53c0629e04c65d3ad0f5025a8989d03a82",
+      "bytes": 1861,
+      "physical_lines": 56,
+      "all_ast_function_definitions": 3,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 6
+    },
+    "server/lib/voice_catalog.py": {
+      "source_sha256": "dea85a5d3aaa1f6d1a32ed83bcc109309585d3c4fb6866132bdf4853a61b20e6",
+      "bytes": 14003,
+      "physical_lines": 257,
+      "all_ast_function_definitions": 4,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 7
+    },
+    "server/lib/voice_events.py": {
+      "source_sha256": "f83eb17c612aa3f29c7c14b2bbbbc4cfaf8b8d8a649f9c654abd8a9d0c4d8452",
+      "bytes": 13376,
+      "physical_lines": 319,
+      "all_ast_function_definitions": 14,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 17
+    },
+    "server/lib/voice_humanness.py": {
+      "source_sha256": "b2b2e512e6b900d4fc52afc9951609ff49d84e3f2d18c0238dd4278dd25edd00",
+      "bytes": 8654,
+      "physical_lines": 207,
+      "all_ast_function_definitions": 10,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 13
+    },
+    "server/lib/voice_markup.py": {
+      "source_sha256": "16c703b7cf7bbdc3662fbfee5f535e1b74c30d0e90b0183809d54c1e16ed045e",
+      "bytes": 13070,
+      "physical_lines": 299,
+      "all_ast_function_definitions": 13,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 16
+    },
+    "server/lib/voice_preamble.py": {
+      "source_sha256": "03f06f6656beddcd81c7e881e0fbd0f2fe240f383251d2527755df22aa491c51",
+      "bytes": 8457,
+      "physical_lines": 200,
+      "all_ast_function_definitions": 10,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 13
+    },
+    "server/lib/voice_verbosity.py": {
+      "source_sha256": "7490c4c1b0464e513245d6b0a021c3763413416d3dab47e1c2f6c3da32acbc14",
+      "bytes": 2653,
+      "physical_lines": 75,
+      "all_ast_function_definitions": 3,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 6
+    },
+    "server/lib/voices.py": {
+      "source_sha256": "637d5749b5e342250f4eadce74c76665a27065ccee4044e63b9609afa27a9965",
+      "bytes": 3154,
+      "physical_lines": 59,
+      "all_ast_function_definitions": 1,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 4
+    },
+    "server/lib/whispercpp.py": {
+      "source_sha256": "dbb0529c01535c451fd6f03fad627cd4c4fe0a26730f486eecc74912757f896e",
+      "bytes": 3789,
+      "physical_lines": 92,
+      "all_ast_function_definitions": 3,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 6
+    },
+    "server/lib/workers.py": {
+      "source_sha256": "ec7cdf91a579b816d4e508d8887155f14ab8390c828697eb79af327c9d3a3d46",
+      "bytes": 4632,
+      "physical_lines": 132,
+      "all_ast_function_definitions": 12,
+      "all_ast_class_definitions": 3,
+      "context_map_call_structural_upper_bound": 18
+    },
+    "server/lib/workspace_repos.py": {
+      "source_sha256": "36a9bdaacdec370d0d07ae6b4fa1fe60b93cc9023e4243ba70962c8d6c241dec",
+      "bytes": 1904,
+      "physical_lines": 58,
+      "all_ast_function_definitions": 5,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 8
+    },
+    "server/lib/workspace_vocab.py": {
+      "source_sha256": "ef79f55e718e35ff82b4b53de5c7a3102d44d43432c9fc0e46a2a5632672f365",
+      "bytes": 7654,
+      "physical_lines": 220,
+      "all_ast_function_definitions": 8,
+      "all_ast_class_definitions": 2,
+      "context_map_call_structural_upper_bound": 13
+    },
+    "server/lib/ws.py": {
+      "source_sha256": "6f4d7fbb38f4869e2b3595e33abc89a943da0d9c5c70a1d47242bc32b40084d4",
+      "bytes": 7551,
+      "physical_lines": 213,
+      "all_ast_function_definitions": 10,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 13
+    },
+    "server/lib/xdg.py": {
+      "source_sha256": "c396ff629b0855cf9da6d15530b32ed85259b3bcf0dc48cd50185d5a3abbb6f0",
+      "bytes": 3261,
+      "physical_lines": 84,
+      "all_ast_function_definitions": 8,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 11
+    },
+    "server/runtime.py": {
+      "source_sha256": "6999efdddeeb7755981d67a54933f2f44d6f421ad74c60265ab33180bf3f8c84",
+      "bytes": 3920,
+      "physical_lines": 96,
+      "all_ast_function_definitions": 2,
+      "all_ast_class_definitions": 0,
+      "context_map_call_structural_upper_bound": 5
+    },
+    "server/server.py": {
+      "source_sha256": "3986a8c321030492aa8d237b3a757485c1c448b41f1f8f815b9e3d9d7673736d",
+      "bytes": 160466,
+      "physical_lines": 3276,
+      "all_ast_function_definitions": 147,
+      "all_ast_class_definitions": 4,
+      "context_map_call_structural_upper_bound": 154
+    }
+  },
+  "API_source_facts": {
+    "coverage/jsonreport.py": {
+      "sha256": "f774c2168669ccf7ebaadd45ae9b9e7cd3ddfc6ce44b2a7e1e5c2b15293e3a3d",
+      "methods": [
+        {
+          "name": "report",
+          "line": 71,
+          "end": 110,
+          "ast_sha256": "dee2322c1bca61ae44a554dd1ea33d5a4f5ff75116b2677caf7b1c89aa470e81"
+        },
+        {
+          "name": "report_one_file",
+          "line": 112,
+          "end": 164,
+          "ast_sha256": "0285937d9bc7bc385f5e9bcf23a6c9b7a1ce8d53bf6e3b95c924434e74b85663"
+        },
+        {
+          "name": "make_region_data",
+          "line": 166,
+          "end": 193,
+          "ast_sha256": "0ba71543ac934448ad8e4b9c028114f2ccf4e08d2673cc66c248cd61a1f3b27a"
+        }
+      ]
+    },
+    "coverage/python.py": {
+      "sha256": "9c173dd1c12c02ddd7547e55d785f2d19d41ab66c66c754039df3fa7ae8645c5",
+      "methods": [
+        {
+          "name": "code_regions",
+          "line": 264,
+          "end": 265,
+          "ast_sha256": "d6b1a3e8c183777cd579ccb159304a479216958ebe978e7152e5c1f54ad9a478"
+        },
+        {
+          "name": "code_region_kinds",
+          "line": 267,
+          "end": 271,
+          "ast_sha256": "b75ab77da398c6ad610ca910c2facc8e0c965fd81b581f5ff5c3ec8b793b6244"
+        }
+      ]
+    },
+    "coverage/regions.py": {
+      "sha256": "d04e21b59c3aa5d83bf5cdea54c7d38640cd44225bd0131f9f7822ac907f397f",
+      "methods": [
+        {
+          "name": "code_regions",
+          "line": 112,
+          "end": 135,
+          "ast_sha256": "028d2b1a2345683b50b892c09dd88634e36a5cb5e70082350701c91c0b8fac5b"
+        },
+        {
+          "name": "handle_node",
+          "line": 51,
+          "end": 58,
+          "ast_sha256": "78b4aa196d3b0c69b5d83111ece5a13794cea8f159cdd362a1b7fe662232a93b"
+        },
+        {
+          "name": "handle_node_body",
+          "line": 60,
+          "end": 64,
+          "ast_sha256": "aab78a81970ccd25b6bbd75fad2246e444052dbf6786093f81bc8865c389db9b"
+        },
+        {
+          "name": "handle_FunctionDef",
+          "line": 66,
+          "end": 87,
+          "ast_sha256": "9eb2cedc25825371449f6228f2bb88ef397deb2ca13b1569d487871dd9b3c683"
+        },
+        {
+          "name": "handle_ClassDef",
+          "line": 89,
+          "end": 109,
+          "ast_sha256": "20dab6c8aa629f163511175607f2e16ed5059e409eb66f20dc0d3556d45e4b27"
+        }
+      ]
+    },
+    "coverage/sqldata.py": {
+      "sha256": "c78339d21fe75e063fd204148226668023c5ad9f9d806d0631813419aa21d406",
+      "methods": [
+        {
+          "name": "contexts_by_lineno",
+          "line": 1140,
+          "end": 1189,
+          "ast_sha256": "71c57d6001c07a84bd7ae0a963a1f61b65ff553d76ebab8a30e075a29d8fc576"
+        }
+      ]
+    }
+  },
+  "bound_explanation": "Each format3 file calls contexts_by_lineno once at top and once per native function/class region plus two outside regions. All AST function/class definitions upper-bound native regions; duplicate names may overwrite retained output but do not erase calls. This counts possible full-corpus calls, not actual observed calls, executable statements, context cardinality, output bytes, seconds or peak memory.",
+  "unresolved": [
+    "actual per-file native arc/context records and positive endpoint-context incidence",
+    "parser/analysis/native API/serialization/hash/control costs",
+    "complete package inclusive6000s and process/resource fit"
+  ],
+  "execution_count": 0
+}
