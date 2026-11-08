@@ -127,7 +127,7 @@ def _bounded(value: Any) -> Any:
 
 def _live(agent_id: str, method: str, *args: Any, trace_id: str = "", **kwargs: Any) -> None:
     """Report to the live hub, opening its turn first (docs/live-items.md)."""
-    from .. import live_hub
+    from .. import live_core as live_hub
     hub = live_hub.current()
     if hub is None or not agent_id:
         return
@@ -138,7 +138,7 @@ def _live(agent_id: str, method: str, *args: Any, trace_id: str = "", **kwargs: 
 def _live_tool_output(agent_id: str, part: dict, state: dict, st: Any,
                       trace_id: str = "") -> None:
     """A running tool's output as a live tail; an edit's diff stats."""
-    from .. import live_hub
+    from .. import live_core as live_hub
     from ..live_tools import diff_stats, output_tail
     if live_hub.current() is None:
         return

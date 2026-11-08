@@ -1069,7 +1069,7 @@ class AgyBackend(StreamJsonBackend):
 
         One item per turn, like the one /log row it becomes: the final commit
         writes the reply under the same row id."""
-        from .. import live_hub
+        from .. import live_core as live_hub
         from ..message_live import _live_message_id
         hub = live_hub.current()
         if hub is None or not agent_id or not st.conversation_id:
