@@ -10,7 +10,8 @@ prefixes and per-attempt diagnostics remain separate from this active state root
 `seed_paths.py` reads the existing typed ALL-table snapshot. For each of the
 three synthetic owners it checks the exact backend session, actual messages'
 `source_file` (literal transcript path or the independently seeded
-`client:synthetic`) and exactly one native checkpoint at that transcript path.
+`client:synthetic`) and the explicitly qualified checkpoint policy for that
+operation. It never infers the expected policy from rows present or absent.
 It records observed row counts without calling them allocations or capacities.
 No raw value is rewritten, removed or masked. Other owners and ALL other raw
 fields/tables remain the separate full-product oracle's responsibility.
@@ -21,6 +22,41 @@ compares it with the constructor receipt and retains the entire exact raw diff.
 This is a new UNREVIEWED delta to c691/4f71, not old source approval or executed
 native evidence. Receipt/hash/launch authenticity is still the outer owner's
 responsibility. A forged JSON object is never a process or SQLite certificate.
+
+## Native checkpoint policy correction (C finding F1 at37ea)
+
+The previous unconditional one-transcript-CP requirement was wrong for this
+declared A INITIAL route. Fresh inputs contain no config file; native config's
+transcript_shadow is empty, native settings default enabled=False, and
+ShadowBudget.admit returns disabled. The A import's disabled branch stores
+parsed rows without the shadow checkpoint callback. Its expected transcript
+checkpoint count is therefore ZERO for each fixture owner. WAL checkpoint
+0/0/0 is unrelated and remains required to close the physical database.
+
+`a_initial_checkpoint_policy` binds this zero expectation to exact A pin/mode
+and config/importer source hashes, three exact owner/session/path calls, actual
+native raw config/settings before and after each call and its untouched disabled
+return. The INITIAL constructor obtains these observations without enabling
+shadow, calling admission again, injecting a callback/CP or writing config.
+Closed qualification re-derives the policy against independently supplied
+expected source hashes before accepting the terminal's policy/census. The outer
+runner must bind those hashes/receipt/loaded code to actual source and launch;
+shape validation does not authenticate JSON. These new native observations are
+unmeasured INITIAL-only and need exact review/control qualification.
+
+The census's separate REQUIRED_NATIVE_PUBLICATION consumer route requires
+exactly one correctly bound native CP per owner. That is NOT a producer or a
+launch/reference mode: it requires its own separately qualified source/config/
+native publication evidence before an owner can select it. Missing or duplicate
+CPs still refuse there; unexpected CPs refuse under the current A-zero route.
+Every existing CP still receives raw path/session/full-field validation.
+No generic missing-CP waiver or branch chosen from observed cardinality exists.
+
+The current A seed does NOT establish any January audited_at. Only an actual
+later checkpoint can supply a native audit-age predicate. A copied transcript
+cannot mismatch the inode of a nonexistent CP; native no-checkpoint/disabled
+routes, and B's separately source-qualified tail publication, must be derived
+from their actual state. No CP/date/inode/index repair is permitted.
 
 Before a later operation starts, `require_same_workspace` rejects a different
 initial/operation path, including aliases that look equivalent after resolution.
@@ -45,7 +81,8 @@ initial/closed/measured/reference control remain required before source-ready.
    still UNIMPLEMENTED. Do not move or rewrite stored `source_file` strings.
 4. Only after qualified prior drain, restore physically distinct owned files
    into the same literal active root for each declared cell/reference. Preserve
-   bytes/schema/config/selection. New inode/mtime effects are native importer
+   bytes/schema/config/selection. New inode/mtime effects, where an actual
+   checkpoint exists for comparison, are native importer
    work: do NOT rewrite CPs, indexes, clocks or identities to hide them. Reusing
    an active name is serialized ownership, NOT a symlink/hardlink alias or mount
    namespace adaptation. The latter is not authorized by this plan.
@@ -82,7 +119,9 @@ actual count/epoch/key/cost bounds over repeated imports. No8192/512 fit or
 `test_seed_paths.py` owns the receipt-consumer contract: correct literal native
 paths and distinct client rows survive without mutating input; wrong INITIAL
 message/CP path, wrong session, missing/duplicate CP/transcript evidence,
-wrong storage type, short row, excluded input or missing column refuse. A
+wrong storage type, short row, excluded input or missing column refuse. Valid
+A-default absence, unexpected CP on the zero route, required-publication
+presence/absence and source/config/import-policy mismatches are separate cases. A
 later operation with a different/aliased root refuses. These are synthetic typed
 input controls, NOT actual native persistence or process proof. No existing
 closed-file-copy test covers this logical path contract; no product seam was

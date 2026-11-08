@@ -6,6 +6,60 @@ actor drain, schema fidelity, row equivalence or recorder capacity.
 """
 from pathlib import PurePosixPath
 
+A_PIN = '4f33cdc9287eafcddd0adfb17b51487c84ace28b'
+# These are native source bindings, NOT a runtime loaded-code certificate.
+A_POLICY_SOURCES = {
+    'server/lib/config.py': '84f8c7a8a2b91095045da26919acc65e8ed4d78464bcb06939d3a9283b7850f2',
+    'server/lib/transcript_incremental.py': '3c3c7e6d6591c2c1ffa00ee5b1edca6d43abab6a5c996e5e71249a4a098384f6',
+}
+DISABLED_A_INITIAL = 'A_INITIAL_DEFAULT_DISABLED'
+REQUIRED_PUBLICATION = 'REQUIRED_NATIVE_PUBLICATION'
+
+
+def a_initial_checkpoint_policy(*, pin, mode, root, source_files, native_imports):
+    """Bind zero CPs to the specific fresh A/default-disabled native route.
+
+    The constructor records actual config-file absence, native raw config and
+    native settings on both sides of each real call, plus its untouched return.
+    This validates that receipt's shape/route, not its producer authenticity.
+    No expected count is inferred from the captured checkpoint rows.
+    """
+    if (pin != A_PIN or mode != 'initial_seed'
+            or any(source_files.get(key) != value for key, value in A_POLICY_SOURCES.items())
+            or type(native_imports) is not list or len(native_imports) != 3):
+        raise ValueError('A INITIAL checkpoint policy source/operation binding differs')
+    expected = transcript_paths(root)
+    for agent, item in zip(expected, native_imports, strict=True):
+        if (item['agent'] != agent or item['source_file'] != expected[agent]['source_file']
+                or item['backend_session_id'] != expected[agent]['backend_session_id']
+                or item['native_return']['shadow'] != 'disabled'):
+            raise ValueError('A INITIAL native disabled import result missing/different')
+        for position in ('before', 'after'):
+            observed = item['native_shadow_' + position]
+            if (observed['config_file'] != root + '/config/config.toml'
+                    or observed['config_file_state'] != 'ABSENT'
+                    or observed['raw_transcript_shadow'] != {}
+                    or observed['native_settings']['enabled'] is not False):
+                raise ValueError('A INITIAL native default-disabled configuration differs')
+    return {'route': DISABLED_A_INITIAL, 'pin': pin, 'mode': mode,
+            'source_hashes': dict(A_POLICY_SOURCES),
+            'native_imports': native_imports,
+            'scope': 'source/config/native-return binding; authenticity/lifecycle separate'}
+
+
+def _checkpoint_count(policy):
+    """Closed policy names: a missing CP never selects the zero-count route.
+
+    REQUIRED_PUBLICATION is consumer support for a separately source-qualified
+    operation, NOT a currently implemented producer/reference/launch route.
+    The outer owner must supply its own source/config/native-publication proof.
+    """
+    if policy == DISABLED_A_INITIAL:
+        return 0
+    if policy == REQUIRED_PUBLICATION:
+        return 1
+    raise ValueError('explicit source-qualified checkpoint route required')
+
 
 def literal_root(value):
     if (type(value) is not str or not value.startswith('/') or value.startswith('//')
@@ -63,13 +117,14 @@ def _selected_rows(products, name, fields, owners):
         yield selected
 
 
-def audit_initial_paths(products, *, root):
+def audit_initial_paths(products, *, root, checkpoint_route):
     """Check actual native source_file identities for the three fixture owners.
 
     Durable client rows retain client:synthetic, rather than being rewritten to
     the transcript path. Counts are observations ONLY, never mutation bounds.
     All unrelated rows/tables remain in the raw product and the full oracle.
     """
+    checkpoint_count = _checkpoint_count(checkpoint_route)
     expected = transcript_paths(root)
     census = {agent: {'transcript_rows': 0, 'client_rows': 0, 'checkpoint_rows': 0}
               for agent in expected}
@@ -90,7 +145,8 @@ def audit_initial_paths(products, *, root):
                 raise ValueError('native fixture source_file differs from initial logical path')
             census[agent][key] += 1
     for counts in census.values():
-        if counts['transcript_rows'] < 1 or counts['checkpoint_rows'] != 1:
+        if counts['transcript_rows'] < 1 or counts['checkpoint_rows'] != checkpoint_count:
             raise ValueError('populated native transcript/checkpoint path evidence missing/duplicate')
     return {'logical_root': literal_root(root), 'sources': expected, 'census': census,
+            'checkpoint_route': checkpoint_route,
             'scope': 'literal native path census only; NOT replay equality, drain or capacity'}
