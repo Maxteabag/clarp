@@ -100,7 +100,6 @@ UPWARD_BASELINE = frozenset({
     'lib.backend.agy -> lib.tts_queue',
     'lib.backend.agy -> lib.voice_preamble',
     'lib.backend.agy_hooks -> lib.agy_transcript',
-    'lib.backend.agy_hooks -> lib.provider_background_jobs',
     'lib.backend.claude -> lib.fork',
     'lib.backend.claude -> lib.live_claude',
     'lib.backend.claude -> lib.provider_background_jobs',

@@ -17,7 +17,7 @@ from uuid import UUID
 
 from .. import agents, agy_transcript, turn_lifecycle
 from ..protocol import AgentState
-from ..provider_background_jobs import TURN_ENV
+from ..turn_identity import TURN_ENV
 
 _FAILED_REASONS = frozenset({"ERROR", "USER_CANCELED"})
 # PreInvocation fires on every model call, so a working terminal turn keeps
