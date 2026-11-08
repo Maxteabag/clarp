@@ -87,3 +87,32 @@ differences. This is NOT the still-owed source/writer-specific native-time and
 causal correspondence oracle; it cannot certify readiness or complete work.
 Its actual SQLite controls (including a concurrent WAL commit after the schema
 read) are authored only and must consume admitted remote setup time.
+
+## Initial native seed source slice (not runnable/qualified)
+
+`native_initial.py` now drafts the common INITIAL A fixture through the actual
+composition root (non-main unmeasured setup), native context/invariants, tracked
+SQLite connection, importer and runtime-binding APIs. It preserves three fixed
+synthetic source files, checks exact source/corpus hashes, retains all raw tables
+and requires a native0/0/0 checkpoint plus a positive closed-connection probe.
+No copied seed or measured startup is produced here. Independent reference,
+schema/plan fidelity, detailed field/writer time/causal oracle and external
+process-exit/copy evidence are still missing. Cooperative deadline checks are
+not a hard timeout, containment or drain proof.
+
+`initial_seed_clock.py` is selected before ANY product import and permits only
+INITIAL seed/reference modes. Its loader delegates native module execution;
+the fixed clock applies only within synchronous native importer entry calls.
+Outside those calls the native clock remains active; measured roots/post-ready
+references never install this hook. Retired aliases refuse rather than silently
+freeze later work. An isolated-interpreter synthetic control is authored only;
+it is not actual native compatibility or lifecycle proof.
+
+`native_isolation.py` is an EXACT source copy (SHA256
+`7ef2c33112f84bef00aaeb5646fc19f0ba9c5c5a42d683573444623a3999e46d`)
+from d43d1f96's ship885/isolation.py. Prior certificates are scoped retained
+evidence, not approval of this new composition. The A usage callsite binding is
+server/lib/backend_usage.py; B's future own-root guard must bind its moved
+backend_usage_codex.py separately. Actual immutable absent-provider namespace,
+private paths/endpoints, out-of-band failures and new compatibility controls
+remain owed. No new guard/backend capability or platform campaign is granted.
