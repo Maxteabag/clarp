@@ -154,12 +154,19 @@ certify real importer spans. It also proposes missing/duplicate receipt,
 rollback/reuse, keyed row swap, interleaving, close/destruction, delegation and
 cap-exhaustion controls. These controls and the source are UNEXECUTED.
 
-**The current 8192-record cap cannot cover even the S full-import treatment.**
-This first component must not be wired into a measured root as if corpus fit
-were established. Source-qualified compact/range storage with complete keyed
-bindings, multi-process domain collection, actual alias/caller/SQL decoders,
-connection-incarnation controls, full field/writer rules and measured overhead
-remain required. Do not raise the cap or discard rows to manufacture readiness.
+**The current8192-record cap has NOT established measured integration fit.**
+The earlier unconditional full-import/input-row-count inference was too strong:
+both native upsert paths may retain unchanged payload/trace/phase revision/time,
+and the planned measured/reference roots start from an already populated common
+seed. Full parsing due to copied inode/January age is not itself proof of all-N
+allocations. This is a source reassessment, NOT proof all existing rows stay
+unchanged or that8192/512 fits. Neither input rows nor36 appended records is a
+complete mutation/summary/head/CP/actor/lifetime bound. C's source-direction
+review and actual qualified cardinality proof remain pending; integration stays
+BLOCKED. Do not enlarge caps, discard rows or shrink corpus. Whether compact
+storage is needed must follow that bound, not the mistaken input=event premise.
+Complete keyed/all-producer/source/field/reference/lifecycle proof and observed
+cost remain required regardless of the selected representation.
 The additional single child is capped at25s inside the proposed300s setup
 control allowance; this is arithmetic only, not admitted native fit or drain.
 
