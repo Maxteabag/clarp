@@ -312,7 +312,8 @@ def test_a_tool_the_explainer_never_saw_is_explained_when_the_relay_connects(tmp
     explanation, over the same socket the patches travel."""
     from lib.audio_stream import AudioStream
     from lib.live_hub import LiveFanout, LiveHub, LiveRelay
-    from lib.runtime_bridge import RuntimeClient, RuntimeRPCServer
+    from lib.runtime_bridge import RuntimeClient
+    from lib.runtime_rpc_server import RuntimeRPCServer
 
     class _Dispatch:
         pass

@@ -12,7 +12,7 @@ sys.path.insert(0, str(ROOT))
 from lib.context import ServerContext  # noqa: E402
 from lib.log import log, log_exception  # noqa: E402
 from lib.paths import RuntimePaths  # noqa: E402
-from lib.runtime_bridge import RuntimeRPCServer  # noqa: E402
+from lib.runtime_rpc_server import RuntimeRPCServer  # noqa: E402
 from lib.runtime_events import RuntimeEventStream  # noqa: E402
 from lib.runtime_release import (  # noqa: E402
     RuntimeReleaseMonitor,

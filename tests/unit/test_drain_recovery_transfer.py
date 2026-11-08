@@ -21,7 +21,7 @@ from lib import turn_dispatch as td
 from tests.patching import patch_shared
 from lib.account_failover import AccountFailover
 from lib.protocol import AgentState
-from lib.runtime_bridge import RuntimeRPCServer
+from lib.runtime_rpc_server import RuntimeRPCServer
 from lib.runtime_release import (consume_account_recovery_carry,
                                  write_account_recovery_carry)
 

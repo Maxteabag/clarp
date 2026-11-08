@@ -48,7 +48,7 @@ BASELINE: dict[tuple[str, str], int] = {
     ("lib/oracle_live_stable.py", "wfile"): 6,
     ("lib/oracle_realtime.py", "wfile"): 5,
     # Its own socketserver handler for the runtime RPC socket, not the HTTP one.
-    ("lib/runtime_bridge.py", "wfile"): 4,
+    ("lib/runtime_rpc_server.py", "wfile"): 4,
     ("lib/stt_stream.py", "wfile"): 6,
     ("lib/terminal_ws.py", "wfile"): 6,
 }

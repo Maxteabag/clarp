@@ -331,7 +331,9 @@ synthetic branches:
 
 - `workspace_paths` is a new core primitive owning call-time native/container path confinement and recovery. Feature `launch_paths` preserves exact function exports; lifecycle and the generated Stop helper import the canonical owner through named recipe repoints. Environment/path semantics and Stop ownership remain unchanged.
 
-The first eleven repaired upward edges are removed from the ratchet; this section does not authorize reclassifying any existing module or expanding named exceptions.
+- `runtime_rpc_server` owns the application runtime server and socket handler in the feature layer. Core `runtime_bridge` retains its canonical protocol/client; the runtime entry point constructs the same server from the new owner. Both class bodies and all Stop/admission/drain/cleanup order remain unchanged; there is no reverse core export.
+
+The first seventeen repaired upward edges are removed from the ratchet; this section does not authorize reclassifying any existing module or expanding named exceptions.
 
 ## Wave 2: lead-signed map corrections (937)
 
