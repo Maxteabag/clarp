@@ -45,7 +45,7 @@ PERSISTENCE = frozenset({
 PERSISTENCE_PACKAGES = ("lib.persistence",)
 CORE = frozenset({f"lib.{m}" for m in (
     "agent_mcp_codec", "agent_store", "agents", "backends", "config", "config_writer", "diagnostics_settings",
-    "claude_reply_evidence", "deployment", "error_classify", "eventlog", "events", "hook_runtime",
+    "claude_reply_evidence", "clip_records", "deployment", "error_classify", "eventlog", "events", "hook_runtime",
     "http_utils", "identity", "launch_receipts", "live_core", "live_projection", "log", "message_live", "message_store", "message_turns",
     "message_writes", "message_text", "origins", "proc_util", "process_registry", "prompt_admissions",
     "protocol", "roster", "roster_seed", "runtime_bridge", "runtime_events", "server_identity",
@@ -80,11 +80,9 @@ NAMED_EXCEPTIONS = {
 
 UPWARD_BASELINE = frozenset({
     'lib.agents -> lib.artifacts',
-    'lib.agents -> lib.clip_store',
     'lib.agents -> lib.goal_ledger',
     'lib.agents -> lib.janitor_store',
     'lib.agents -> lib.janitors',
-    'lib.agents -> lib.sse_store',
     'lib.agents -> lib.task_plans',
     'lib.agents -> lib.voice_verbosity',
     'lib.backend.agy -> lib.agy_transcript',

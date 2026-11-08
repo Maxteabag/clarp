@@ -341,7 +341,9 @@ synthetic branches:
 
 - `tool_output` is a new core owner for unchanged pure diff statistics and bounded output-tail helpers. Feature `live_tools` preserves exact helper exports and retains classification policy; OpenCode imports the lower helpers directly, with payload and slicing semantics unchanged.
 
-The first twenty-eight repaired upward edges are removed from the ratchet; this section does not authorize reclassifying any existing module or expanding named exceptions.
+- `persistence.sse_events` owns unchanged durable SSE persistence below the core agents wrappers; `clip_records` is a new core owner for unchanged clip records using canonical protocol enums. Legacy feature modules directly export the canonical functions; transaction, callback and replay semantics remain unchanged.
+
+The first thirty repaired upward edges are removed from the ratchet; this section does not authorize reclassifying any existing module or expanding named exceptions.
 
 ## Wave 2: lead-signed map corrections (937)
 

@@ -15,6 +15,7 @@ import time
 import pytest
 
 from lib import db, sse_store
+from lib.persistence import sse_events
 
 
 def _row(event_id: int):
@@ -24,6 +25,7 @@ def _row(event_id: int):
 
 
 def test_record_returns_rowid_and_embeds_event_id_in_payload():
+    assert sse_store.record_sse_event is sse_events.record_sse_event
     event_id = sse_store.record_sse_event(
         {"type": "agent-state", "session": "theo", "agent_id": "a1",
          "ts": 1234, "state": "working"})
@@ -41,7 +43,7 @@ def test_record_returns_rowid_and_embeds_event_id_in_payload():
 
 
 def test_record_defaults_ts_and_blank_columns(monkeypatch):
-    monkeypatch.setattr(sse_store, "now_ms", lambda: 777_000)
+    monkeypatch.setattr(sse_events, "now_ms", lambda: 777_000)
     event_id = sse_store.record_sse_event({"type": "ping"})
     row = _row(event_id)
     assert row["ts"] == 777_000
@@ -102,7 +104,7 @@ def test_decode_tolerates_corrupt_payload():
 
 def test_recent_events_respects_window(monkeypatch):
     now = 1_000_000
-    monkeypatch.setattr(sse_store, "now_ms", lambda: now)
+    monkeypatch.setattr(sse_events, "now_ms", lambda: now)
     old = sse_store.record_sse_event({"type": "t", "ts": now - 10_000})
     fresh = sse_store.record_sse_event({"type": "t", "ts": now - 1_000})
     ids = [e["event_id"] for e in sse_store.recent_events(5_000)]
@@ -111,7 +113,7 @@ def test_recent_events_respects_window(monkeypatch):
 
 
 def test_recent_events_negative_window_only_keeps_events_at_or_after_now(monkeypatch):
-    monkeypatch.setattr(sse_store, "now_ms", lambda: 500)
+    monkeypatch.setattr(sse_events, "now_ms", lambda: 500)
     sse_store.record_sse_event({"type": "t", "ts": 499})
     kept = sse_store.record_sse_event({"type": "t", "ts": 500})
     assert [e["event_id"] for e in sse_store.recent_events(-100)] == [kept]
@@ -119,7 +121,7 @@ def test_recent_events_negative_window_only_keeps_events_at_or_after_now(monkeyp
 
 @pytest.mark.parametrize("singleton", sorted(sse_store._STATEFUL_SINGLETON_TYPES))
 def test_recent_events_collapses_singleton_types_to_latest(monkeypatch, singleton):
-    monkeypatch.setattr(sse_store, "now_ms", lambda: 10_000)
+    monkeypatch.setattr(sse_events, "now_ms", lambda: 10_000)
     first = sse_store.record_sse_event({"type": singleton, "ts": 9_000, "v": 1})
     plain = sse_store.record_sse_event({"type": "agent-state", "ts": 9_100})
     latest = sse_store.record_sse_event({"type": singleton, "ts": 9_200, "v": 2})
@@ -131,7 +133,7 @@ def test_recent_events_collapses_singleton_types_to_latest(monkeypatch, singleto
 
 
 def test_recent_events_keeps_one_row_per_singleton_type_sorted_by_id(monkeypatch):
-    monkeypatch.setattr(sse_store, "now_ms", lambda: 10_000)
+    monkeypatch.setattr(sse_events, "now_ms", lambda: 10_000)
     focus_a = sse_store.record_sse_event({"type": "agent-focus", "ts": 9_000})
     version = sse_store.record_sse_event({"type": "server-version", "ts": 9_001})
     other = sse_store.record_sse_event({"type": "transcript-updated", "ts": 9_002})
@@ -155,7 +157,7 @@ def test_event_row_is_never_left_without_its_event_id(monkeypatch):
                 raise db.sqlite3.OperationalError("database is locked")
             return real.execute(sql, *args)
 
-    monkeypatch.setattr(sse_store, "conn", lambda: FailingUpdate())
+    monkeypatch.setattr(sse_events, "conn", lambda: FailingUpdate())
     with pytest.raises(db.sqlite3.OperationalError):
         sse_store.record_sse_event({"type": "agent-state", "session": "theo"})
     assert real.execute("SELECT COUNT(*) FROM sse_events").fetchone()[0] == before
@@ -252,7 +254,7 @@ def test_after_insert_failure_never_replays_or_remints(monkeypatch, stage):
                 raise sqlite3.OperationalError("injected uncertain outcome")
             return real.commit()
 
-    monkeypatch.setattr(sse_store, "conn", lambda: Fault())
+    monkeypatch.setattr(sse_events, "conn", lambda: Fault())
     with pytest.raises(sqlite3.OperationalError, match="injected uncertain"):
         sse_store.record_sse_event({"type": "ping", "ts": 7})
     assert len([sql for sql in statements if sql.lstrip().startswith("INSERT INTO sse_events")]) == 1
@@ -275,7 +277,7 @@ def test_first_payload_encoding_precedes_standalone_writer_admission(monkeypatch
             encoded.append(dict(payload))
         return real_dumps(payload, *args, **kwargs)
 
-    monkeypatch.setattr(sse_store.json, "dumps", encode)
+    monkeypatch.setattr(sse_events.json, "dumps", encode)
     event = {"type": "ping", "ts": 123, "n": "prepare-before-lock"}
     event_id = sse_store.record_sse_event(event)
     assert encoded == [event]
@@ -343,7 +345,7 @@ def test_release_acknowledgement_loss_never_replays_and_keeps_outer_ownership(mo
                 raise sqlite3.OperationalError("injected release acknowledgement loss")
             return result
 
-    monkeypatch.setattr(sse_store, "conn", lambda: LostRelease())
+    monkeypatch.setattr(sse_events, "conn", lambda: LostRelease())
     # Baseline rollback-to after a lost RELEASE may itself raise: neither
     # exception is permission to replay or commit a caller-owned transaction.
     with pytest.raises(sqlite3.OperationalError):
