@@ -6,7 +6,7 @@ a DIFFERENT evidence tier: the actual own-pin RuntimeClient talking to a bounded
 synthetic owned Unix listener. No runtime/Host/provider is launched and these
 responses are not native root, startup, source/Popen or readiness proof.
 
-## Four proposed cases, one offered native status each
+## Original four proposed cases, one offered native status each
 
 1. Successful native protocol exchange with real same-socket peer read, native
    result identity, explicit absent attestation and socket-only CAPTURED.
@@ -51,7 +51,7 @@ the return/assignment or return-to-WITH cancellation seams.
 Own synthetic server/client run in the same control process; expected pid/uid/
 gid therefore belong to that fixture, not a declared actual runtime Popen. A
 private physical empty0700 root/output and exact per-case Unix paths are required.
-The future immutable guard manifest must include only these four literal paths;
+The future immutable guard manifest must include only the exact selected literal paths;
 no guard is disabled or generic network/provider policy expanded here. A
 credential-changing interpreter context refuses. No fallback/shortened path is
 invented if the declared address is too long.
@@ -91,7 +91,7 @@ No production seam/exports/API or actual native worker behavior was changed.
 The source/control matrix is UNREVIEWED/UNEXECUTED. Return exact source for C
 qualification before admission. No old control/suite/job is repeated.
 
-Wrong uid/gid, malformed ABI/status/source/birth/instance, preexisting own binding,
+Malformed ABI/source/birth, preexisting own binding,
 concurrency/refusal accounting, owned close failure, actual interpreter cancellation
 boundaries and passive stream/required-work cases remain owed. Actual root/guard/
 loaded-code/Popen/namespace/listener/worker/corpus/actor/drain/oracle/capacity and
@@ -139,3 +139,53 @@ boundary, and the four native transport cases exercise ordinary completion.
 The extracted boundary is used by the actual owner and centralizes its evidence
 publication; no production or native-client test seam is introduced. Whole
 setup/fsync/archive/cleanup cost and finite outer supervision remain OPEN.
+
+
+## Next source table amendment — UNEXECUTED
+
+C independently closed b016's narrow post-join F1 (report
+`criterion5-937-b016dd12-peer-postjoin-F1-C.md`); closure does not qualify new
+cases or execute any old case. The same actual-client/synthetic-server table
+now has ten proposed rows: the original four plus wrong expected UID, wrong
+expected GID, wrong expected instance, boolean protocol version, malformed
+instance and omitted attestation member. Expected credential declarations use
+one-bit uint32 changes; the real socket credentials are read unchanged. For
+status cases only the declared synthetic response input changes. The actual
+own-pin `_status` returns these truthy dictionaries without interpreting the
+metadata fields; the observer must retain that exact native result object and
+reject qualification with the independent named reason, not throw, replace or
+issue another RPC. A boolean protocol value deliberately tests strict typing
+because True compares equal to integer1. Missing attestation is not the same
+as explicit native None; early shape rejection must not manufacture an
+attestation-absence observation. The mismatched instance row tests one
+operation against a predeclared expected value, NOT an actual instance-change
+history or parent process birth/source proof.
+
+Each row still demands one actual public native call/returned socket, exact wire
+request, SAME-socket peer read, restored instance binding, no observer close on
+ordinary return, native context closed socket, full_readiness=False and the
+specific expected rejection reason. The actual kernel pid/uid/gid must remain
+those of this synthetic fixture, including during wrong declarations/status.
+Native class/protocol/deadline/clock/socket globals are unchanged. No copied
+encoder, new RPC, new endpoint fallback or metadata-healing operation is added.
+
+These six rows close DISTINCT false-qualification risks: ignoring one credential
+component, ignoring an expected-instance mismatch, accepting bool as integer,
+accepting an invalid instance format, or equating absent attestation with a
+missing required member. Lower post-join/quiet-mark cases do not exercise the
+actual decoder/transport and cannot cover those risks. No new production seam
+is needed. This is extension of the existing table, not a second transport
+harness or a request to rerun anything. Every row remains SOURCE ONLY.
+
+The proposed endpoint inventory changes from four to ten exact case paths.
+It is NOT guard permission: each path needs exact future manifest qualification;
+no wildcard or policy expansion is inferred. Ten4s I/O/join horizons sum40s only
+as local horizon arithmetic, NOT total time, inclusive fit, or authority to spend
+40s. The existing proposed controls subcap is not extended. Imports, source
+validation, filesystem effects, archive, owned drain and outer hard supervision
+still need whole-package source/cost qualification inside6000s/~17NOK. If that
+faithful package cannot fit, STOP/report before compute; do not drop rows or
+shrink the corpus after results. All ten transport plus three post-join cases
+remain UNEXECUTED. Source-loaded/PID-start/boot/namespace/ABI/ownership-refusal,
+control handoff/close fault, actual root/Host/work and all actor/fidelity/resource
+and whole budget proof remain separate OPEN obligations.
