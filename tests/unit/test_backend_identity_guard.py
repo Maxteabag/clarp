@@ -48,6 +48,8 @@ BASELINE: dict[tuple[str, str], int] = {
     ('lib/backend_usage.py', 'constant'): 3,
     ('lib/codex_app_server.py', 'by_id'): 1,
     ('lib/harness_providers.py', 'collection'): 1,
+    # Hotseat's own provider namespace (claude/codex/muse readers), like janitor_hotseat's PROVIDERS.
+    ('lib/hotseat_status.py', 'dict_key'): 1,
     ('lib/instance_backup.py', 'compare'): 2,
     ('lib/janitor_autonomy.py', 'compare'): 2,
     ('lib/janitor_hotseat.py', 'collection'): 1,

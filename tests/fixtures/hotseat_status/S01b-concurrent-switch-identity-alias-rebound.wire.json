@@ -1,0 +1,17 @@
+{
+  "schema": "clarp.hotseat-status/1",
+  "served_at": 1800000061000,
+  "source": {"cli_version": null, "cost_note": "Numbers come from the Hotseat switcher's own scheduled reads, which may probe or refresh provider quota; opening this view adds no read."},
+  "switcher": {"kind": "deterministic", "model": null, "enabled": true, "lanes": []},
+  "actions": [],
+  "providers": [
+    {"provider": "claude", "inventory": "ok", "observed_at": 1800000060000, "stale": false, "partial": true,
+     "read_state": "ok", "error_code": null, "cadence_s": null, "accounts": [
+      {"alias": "a", "label": "Max 5×", "plan": "Max", "active_default": true, "state": "unknown",
+       "error_code": "provider_error", "last_good_observed_at": null, "windows": []}]},
+    {"provider": "codex", "inventory": "unavailable", "observed_at": null, "stale": true, "partial": false,
+     "read_state": "never", "error_code": null, "cadence_s": null, "accounts": []},
+    {"provider": "muse", "inventory": "unavailable", "observed_at": null, "stale": true, "partial": false,
+     "read_state": "never", "error_code": null, "cadence_s": null, "accounts": []}
+  ]
+}

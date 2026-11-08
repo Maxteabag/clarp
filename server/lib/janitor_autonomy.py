@@ -6,7 +6,7 @@ No model can change accounts, approve decisions, or dispatch outside its snapsho
 from __future__ import annotations
 import hashlib,json,threading,time,subprocess,shutil,os
 from . import agents,db,janitors,janitor_builtins,settings_store,backends,janitor_hotseat
-from . import janitor_store
+from . import janitor_store,hotseat_status
 from .protocol import AgentState
 
 from .persistence.schema_parts.janitor_autonomy import SCHEMA
@@ -87,6 +87,13 @@ def lane_record(lane,owner,base_seconds,activity,summary,now):
     state['next_run_at']=now+interval*1000
     settings_store.set_text(ADAPTIVE_PREFIX+lane,json.dumps(state,sort_keys=True))
     return interval
+
+def _hotseat_receipt(site,record):
+    """Status receipts never break or alter the switcher; a failure is logged by site and class only."""
+    try:record()
+    except Exception as exc:
+        from .log import log
+        log('hotseatStatusReceiptFailed',f'site={site} error={type(exc).__name__}')
 
 def lanes(config):
     """(lane, base seconds, legacy last-check key) for each schedule lane of an autonomy Janitor."""
@@ -267,6 +274,7 @@ class AutonomyJanitors:
                 lane_record(lane,owner,base,'failed','The check could not start',now);continue
             try:accounts=self.hotseat_read(options['hotseat_command'],provider)
             except Exception as exc:
+                _hotseat_receipt('read_failure',lambda:hotseat_status.record_failure(provider,exc,now=now))
                 error=f'{provider}: Hotseat reading unavailable ({type(exc).__name__})'
                 janitor_builtins.complete_run(run['run_id'],'failed',error=error,activity='failed',summary=error)
                 lane_record(lane,owner,base,'failed',error,now);continue
@@ -282,6 +290,7 @@ class AutonomyJanitors:
                     try:backends.by_id(provider).on_credential_change()
                     except Exception:pass
                 else:outcome='failed';error=error or f'{provider}: Hotseat did not confirm the switch'
+            _hotseat_receipt('action',lambda:hotseat_status.record_action(provider,decision,mode=options['mode'],switched=switched,now=now,floor_pct=janitor_hotseat.floor_for(options,provider),cadence_s=base,next_due_at=lane_next_run(lane,owner,base,key)))
             text=janitor_hotseat.preview(provider,decision,mode=options['mode'],switched=switched)
             # Advice and exhaustion repeat every interval; notify once per distinct situation.
             marker=f'hotseat-switcher.{provider}.notified';situation=json.dumps([decision['action'],decision.get('active'),decision.get('target'),switched],sort_keys=True)

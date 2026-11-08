@@ -1,0 +1,29 @@
+{
+  "case": "F20-stale-vs-fresh-duplicate",
+  "janitor_enabled": true,
+  "served_at": 1800000760000,
+  "note": "Read 1 (T0) has model:opus 0.8 and 5h 0.9, more constraining but 760 s old (stale) at serve time. Read 2 (T0+700 s, same exact identity) is fresh: its 5h 0.3 and its model:opus win, and read 2 itself had two opus samples (0.2, 0.3), so 0.3 is kept and partial=true. The stale samples never displace the fresh ones. Read 2's 7d is null (not a sample), so read 1's 7d is retained with its own observed_at and stale=true. Nothing is merged.",
+  "steps": [
+    {"op": "read", "provider": "claude", "received_at": 1800000000000, "payload": {
+      "generated_at": 1800000000.0, "sessions": 1, "error": null,
+      "accounts": [
+        {"alias": "a", "email": "a@example.invalid", "org": null, "plan": "max", "plan_label": "Max 5×",
+         "rate_limit_tier": null, "is_active": true, "error": null, "signin_days_left": 30.0,
+         "usage": {"status": "allowed", "available": true, "limited": false, "severity": "high",
+                   "used_5h": 0.9, "reset_5h": 1800010800.25, "used_7d": 0.5, "reset_7d": 1800500000.5,
+                   "scoped": [{"model": "claude-opus-4", "used": 0.8, "severity": "high", "reset": 1800500000.5, "exhausted": false}],
+                   "blocked_models": [], "extra_usage_enabled": false, "extra_usage_reason": null, "plan": "max"}}
+      ]}},
+    {"op": "read", "provider": "claude", "received_at": 1800000700000, "payload": {
+      "generated_at": 1800000700.0, "sessions": 1, "error": null,
+      "accounts": [
+        {"alias": "a", "email": "a@example.invalid", "org": null, "plan": "max", "plan_label": "Max 5×",
+         "rate_limit_tier": null, "is_active": true, "error": null, "signin_days_left": 30.0,
+         "usage": {"status": "allowed", "available": true, "limited": false, "severity": null,
+                   "used_5h": 0.3, "reset_5h": 1800010800.25, "used_7d": null, "reset_7d": 1800500000.5,
+                   "scoped": [{"model": "claude-opus-4", "used": 0.2, "severity": "low", "reset": 1800500000.5, "exhausted": false},
+                              {"model": "opus-preview", "used": 0.3, "severity": "low", "reset": 1800500000.5, "exhausted": false}],
+                   "blocked_models": [], "extra_usage_enabled": false, "extra_usage_reason": null, "plan": "max"}}
+      ]}}
+  ]
+}

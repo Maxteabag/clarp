@@ -1,0 +1,31 @@
+{
+  "case": "F14-model-window-label-and-unknown-family",
+  "janitor_enabled": true,
+  "served_at": 1800000060000,
+  "note": "Allowlisted families become model:<family> with a server label. An unknown family ('claude-mystery-9', 'zebra weekly') is dropped by the server and never reaches the wire. The Host allowlist is opus, sonnet, haiku, fable, gpt-5, spark; iOS must ignore any model:<family> it does not know.",
+  "steps": [
+    {"op": "read", "provider": "claude", "received_at": 1800000000000, "payload": {
+      "generated_at": 1800000000.0, "sessions": 1, "error": null,
+      "accounts": [
+        {"alias": "main", "email": "main@example.invalid", "org": null, "plan": "max", "plan_label": "Max 5×",
+         "rate_limit_tier": null, "is_active": true, "error": null, "signin_days_left": 30.0,
+         "usage": {"status": "allowed", "available": true, "limited": false, "severity": null,
+                   "used_5h": 0.25, "reset_5h": 1800010800.25, "used_7d": 0.5, "reset_7d": 1800500000.5,
+                   "scoped": [{"model": "claude-opus-4", "used": 0.3, "severity": "low", "reset": 1800500000.5, "exhausted": false},
+                              {"model": "claude-mystery-9", "used": 0.6, "severity": "low", "reset": 1800500000.5, "exhausted": false}],
+                   "blocked_models": [], "extra_usage_enabled": false, "extra_usage_reason": null, "plan": "max"}}
+      ]}},
+    {"op": "read", "provider": "codex", "received_at": 1800000000000, "payload": {
+      "unsaved_live": null, "quota_read": true, "quota_age_s": null,
+      "accounts": [
+        {"provider": "codex", "alias": "p", "is_active": true, "saved": true, "email": "p@example.invalid",
+         "plan": "plus", "account_id": "acct-p", "token_expires_at": 1800864000.0, "token_hours_left": 240.0,
+         "api_key_present": false,
+         "usage": {"usable": true, "blocked": false, "error": null, "worst_used": 0.9, "reset": 1800500000.5,
+                   "reset_window": "weekly",
+                   "windows": [{"label": "codex primary weekly", "used": 0.4, "reset": 1800500000.5},
+                               {"label": "spark weekly", "used": 0.2, "reset": 1800500000.5},
+                               {"label": "zebra weekly", "used": 0.9, "reset": 1800500000.5}]}}
+      ]}}
+  ]
+}

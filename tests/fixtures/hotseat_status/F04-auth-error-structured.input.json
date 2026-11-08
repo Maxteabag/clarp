@@ -1,0 +1,27 @@
+{
+  "case": "F04-auth-error-structured",
+  "janitor_enabled": true,
+  "served_at": 1800000001000,
+  "note": "auth_error comes ONLY from the typed field error_code: \"auth_error\" (a synthetic fixture field; today's Hotseat CLI never emits it). The 'texty' row says 401/sign in in free text and stays unknown/provider_error.",
+  "steps": [
+    {"op": "read", "provider": "claude", "received_at": 1800000000000, "payload": {
+      "generated_at": 1800000000.0, "sessions": 1, "error": null,
+      "accounts": [
+        {"alias": "signed-out", "email": "so@example.invalid", "org": null, "plan": "max", "plan_label": "Max 5×",
+         "rate_limit_tier": null, "is_active": true, "error": "opaque", "error_code": "auth_error", "usage": null,
+         "signin_days_left": 0.0},
+        {"alias": "texty", "email": "texty@example.invalid", "org": null, "plan": "pro", "plan_label": "Pro",
+         "rate_limit_tier": null, "is_active": false, "error": "401 Unauthorized: please sign in again",
+         "usage": null, "signin_days_left": 3.0}
+      ]}},
+    {"op": "read", "provider": "codex", "received_at": 1800000000000, "payload": {
+      "unsaved_live": null, "quota_read": true, "quota_age_s": null,
+      "accounts": [
+        {"provider": "codex", "alias": "expired", "is_active": true, "saved": true, "email": "ex@example.invalid",
+         "plan": "plus", "account_id": "acct-ex", "token_expires_at": 1799990000.0, "token_hours_left": 0.0,
+         "api_key_present": false, "error_code": "auth_error",
+         "usage": {"usable": false, "blocked": false, "error": null, "worst_used": null, "reset": null,
+                   "reset_window": null, "windows": []}}
+      ]}}
+  ]
+}

@@ -472,6 +472,7 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         "/viz": "_send_viz_page",
         "/diagnostics/health": "_handle_diagnostics_health",
         "/backend-usage": "_handle_backend_usage",
+        "/hotseat/status": "_handle_hotseat_status",
         "/backend-auth": "_handle_backend_auth",
         "/harness-providers": "_handle_harness_providers",
         "/harness-providers/models": "_handle_harness_provider_models",
@@ -1503,6 +1504,11 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         except ValueError as exc:
             return self._json_error(400, str(exc))
         self._json_ok({"ok": True, "model_id": model_id})
+
+    def _handle_hotseat_status(self):
+        """The persisted Hotseat snapshot only: no CLI, subprocess or provider read."""
+        from lib import hotseat_status
+        self._send(200, json.dumps(hotseat_status.payload()).encode(), "application/json")
 
     def _handle_backend_usage(self):
         qs = self._query()

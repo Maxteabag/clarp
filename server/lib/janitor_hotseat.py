@@ -17,6 +17,8 @@ import json
 import subprocess
 from typing import Callable
 
+from . import clock, hotseat_status
+
 ROLE = "account-hotseat"
 LADDER_TAIL = (10, 0)
 SWITCH_TIMEOUT = 60
@@ -128,7 +130,10 @@ def read_accounts(command: str, provider: str) -> list[dict]:
     proc = _run(command, list(spec.read_args), spec.read_timeout)
     if proc.returncode:
         raise RuntimeError(f"hotseat exited {proc.returncode}")
-    return spec.parse(json.loads(proc.stdout))
+    payload = json.loads(proc.stdout)
+    # The status view keeps an allowlisted copy of this same read; no extra call.
+    hotseat_status.record_read(provider, payload, clock.now_ms())
+    return spec.parse(payload)
 
 
 def switch_account(command: str, provider: str, alias: str) -> bool:
