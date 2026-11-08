@@ -37,6 +37,7 @@ names = [
     "_AdmissionRefused", "_ADMISSION_REFUSED", "_is_call_opening", "_mark_backend_invoked",
     "_backend_invoked", "_with_team_context", "_with_delivery_context", "_REQUEST_LOCKS",
     "_REQUEST_LOCKS_GUARD", "DispatchCommand", "_serialize_client_retry",
+    "_QueuedReceiptUnavailable", "_PreInvokeFailure", "_mark_preinvoke_failure", "_preinvoke_failure",
 ]
 
 [[split.part]]
