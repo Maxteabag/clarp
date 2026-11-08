@@ -161,8 +161,8 @@ and the planned measured/reference roots start from an already populated common
 seed. Full parsing due to copied inode/January age is not itself proof of all-N
 allocations. This is a source reassessment, NOT proof all existing rows stay
 unchanged or that8192/512 fits. Neither input rows nor36 appended records is a
-complete mutation/summary/head/CP/actor/lifetime bound. C's source-direction
-review and actual qualified cardinality proof remain pending; integration stays
+complete mutation/summary/head/CP/actor/lifetime bound. C accepted this source correction (criterion5-937-mutation-volume-reassessment-C.md),
+but actual qualified cardinality/peak proof remains pending; integration stays
 BLOCKED. Do not enlarge caps, discard rows or shrink corpus. Whether compact
 storage is needed must follow that bound, not the mistaken input=event premise.
 Complete keyed/all-producer/source/field/reference/lifecycle proof and observed
