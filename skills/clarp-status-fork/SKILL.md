@@ -24,9 +24,17 @@ Agents are matched by session slug, slug prefix or persona name.
   `ClaudeBackend.build_cmd`, so model, effort, plugin, MCP scope and persona prompt
   match and the fork reuses the agent's prompt cache. Any difference at the start of
   the request (for example `--tools ""`) is a cache miss that bills the whole context.
-- **Read-only.** `--dangerously-skip-permissions` becomes `--permission-mode dontAsk`:
-  the same tool list (cache-safe), but Bash, Write and Edit are denied. Reads work, so
-  the fork can answer questions about code and files as well as status.
+- **Read-only.** A PreToolUse hook (`scripts/read_only_guard.py`, passed with
+  `--settings`) denies every tool except Read, Grep, Glob, LS and NotebookRead, and a
+  hook's deny wins over inherited `permissions.allow` rules. `dontAsk` replaces
+  `--dangerously-skip-permissions` as a second layer, but on its own it still runs
+  pre-approved tools. Do not swap the hook for deny rules: a bare-tool or `Tool(*)`
+  deny removes the tool from the request and loses the agent's prompt cache. Reads
+  work, so the fork can answer questions about code and files as well as status. The
+  working directory stays the agent's, because `--resume` finds the conversation by it
+  and it is part of the cached system prompt.
+- **Database reads** go only through `sqlite3 -readonly -json`, with values inlined
+  as quoted literals.
 - **No traces.** `--fork-session --no-session-persistence`, with the Clarp session
   variables removed, so nothing is written to disk or to Clarp's messages.
 - **Live fact sheet.** Before forking, it reads the database read-only: the current
