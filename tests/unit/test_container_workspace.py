@@ -2,12 +2,16 @@ import pathlib
 
 import pytest
 
-from lib import agent_lifecycle
+from lib import agent_lifecycle, launch_paths, workspace_paths
 from lib.launch_paths import (existing_workspace_path, recover_user_path,
                               validate_workspace_path)
 
 
 def test_container_defaults_to_workspace(monkeypatch, tmp_path):
+    assert launch_paths.workspace_root is workspace_paths.workspace_root
+    assert launch_paths.validate_workspace_path is workspace_paths.validate_workspace_path
+    assert launch_paths.existing_workspace_path is workspace_paths.existing_workspace_path
+    assert launch_paths.recover_user_path is workspace_paths.recover_user_path
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     monkeypatch.setenv("CLARP_DEPLOYMENT_MODE", "container")
