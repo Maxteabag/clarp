@@ -192,7 +192,10 @@ def test_steered_receipt_with_no_own_turn_is_not_bound_to_the_live_agent_turn():
     assert turn_queue.pending_counts() == {}
 
 
-def test_explicit_notstarted_turn_stays_retryable_until_real_same_trace_attempt():
+def test_explicit_notstarted_turn_stays_retryable_until_real_same_trace_attempt(monkeypatch):
+    from lib import agents
+    clock = [10_000]
+    monkeypatch.setattr(db, "now_ms", lambda: clock[0])
     _receipt()
     _turn(outcome="failed", observed=False)
     db.conn().execute(
@@ -202,7 +205,16 @@ def test_explicit_notstarted_turn_stays_retryable_until_real_same_trace_attempt(
     _tick()
     assert _stored("q") == before
     assert [row["queue_id"] for row in turn_queue.pending_for_dispatch()] == ["q"]
+    assert agents.trace_launch_status("a", "t", client_msg_id="q", origin="agent",
+                                     sender_agent_id="sender") == "retryable"
+    clock[0] += 1_000
     _turn(outcome="completed")  # later attempt's positive state supersedes the marker
+    assert agents.trace_launch_status("a", "t", client_msg_id="q", origin="agent",
+                                     sender_agent_id="sender") == "observed"
+    # The earlier scan passed this row. With one row, one pass can reset the
+    # tail cursor and the next revisits it: require a full bounded cycle,
+    # rather than assuming that a state change resets the maintenance cursor.
+    _tick()
     _tick()
     assert turn_queue.status("q") == "done"
 
