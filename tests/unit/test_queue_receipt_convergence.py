@@ -557,3 +557,28 @@ def test_actual_launched_failed_turn_with_stale_negative_marker_is_not_recovered
     assert db.conn().execute(
         "SELECT COUNT(*) FROM turns WHERE agent_id=? AND trace_id=?",
         (agent, "launched-failure")).fetchone()[0] == 1
+
+
+@pytest.mark.parametrize("embedded_trace", [None, "foreign-trace"])
+@pytest.mark.parametrize("outcome", [None, "completed"])
+def test_receipt_embedded_trace_conflict_protects_payload_and_dispatch(embedded_trace, outcome):
+    from lib import launch_receipts, settings_store
+    _receipt()
+    if outcome:
+        _turn(outcome=outcome)
+    launch_receipts.record_pending(agent_id="a", trace_id="t", client_msg_id="q",
+                                   origin="agent", sender_agent_id="sender")
+    raw = launch_receipts.get("t")
+    if embedded_trace is None:
+        raw.pop("trace_id")
+    else:
+        raw["trace_id"] = embedded_trace
+    settings_store.set_text(launch_receipts._key("t"), json.dumps(raw))
+    before, revision = _stored("q"), turn_queue.revision("a")
+    _tick()
+    assert _stored("q") == before
+    assert turn_queue.revision("a") == revision
+    assert turn_queue.pending_for_dispatch() == []
+    assert not turn_queue.claim_for_dispatch("q")
+    assert turn_queue.claim("q") is None
+    assert _stored("q") == before

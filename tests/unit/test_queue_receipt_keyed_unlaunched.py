@@ -202,3 +202,33 @@ def test_pruned_state_cannot_make_pending_receipt_retry_an_executed_terminal(tmp
                       (outcome, own))
     db.conn().execute("DELETE FROM state_log WHERE agent_id=?", (agent,))
     assert agents.trace_launch_status(agent, "t", client_msg_id="q", origin="user", sender_agent_id="") != "retryable"
+
+
+@pytest.mark.parametrize("malformation", ["numeric-flag", "string-flag", "bool-key", "real-key",
+                                         "string-key", "zero-key", "negative-key", "overflow-key"])
+def test_malformed_keyed_negative_never_grants_retry_or_consumption(tmp_path, malformation):
+    _service, _backend, agent = _make_service(tmp_path)
+    own = _opened(agent)
+    turn_lifecycle.record_unlaunched(agent, "t", turn_id=own)
+    marker = _last(agent)
+    assert marker[KEY] == own and marker["dispatch_not_started"] is True
+    if malformation == "numeric-flag":
+        marker["dispatch_not_started"] = 1
+    elif malformation == "string-flag":
+        marker["dispatch_not_started"] = "true"
+    else:
+        marker[KEY] = {"bool-key": True, "real-key": float(own), "string-key": str(own),
+                       "zero-key": 0, "negative-key": -1, "overflow-key": 9223372036854775808}[malformation]
+    db.conn().execute("UPDATE state_log SET detail=? WHERE state_id=(SELECT MAX(state_id) FROM state_log WHERE agent_id=?)",
+                      (json.dumps(marker), agent))
+    turn_queue.enqueue(queue_id="q", agent_id=agent, session="mike", text="synthetic",
+                       trace_id="t", client_msg_id="q", synthesize_audio=False,
+                       origin="agent", sender_agent_id="")
+    before = dict(db.conn().execute("SELECT * FROM queued_turns WHERE queue_id='q'").fetchone())
+    revision = turn_queue.revision(agent)
+    assert agents.trace_launch_status(agent, "t") != "retryable"
+    turn_queue.reconcile_receipts()
+    assert dict(db.conn().execute("SELECT * FROM queued_turns WHERE queue_id='q'").fetchone()) == before
+    assert turn_queue.revision(agent) == revision
+    assert turn_queue.pending_for_dispatch() == []
+    assert not turn_queue.claim_for_dispatch("q") and turn_queue.claim("q") is None
