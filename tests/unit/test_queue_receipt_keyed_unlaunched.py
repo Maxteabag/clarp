@@ -4,7 +4,7 @@ import sqlite3
 
 import pytest
 
-from lib import agents, backends, db, recovery_backoff, turn_lifecycle, turn_queue
+from lib import agents, db, recovery_backoff, turn_lifecycle, turn_queue
 from lib.protocol import SSEType
 from lib.state_watcher import StateLogWatcher
 from tests.unit.test_state_watcher import FakeStream
@@ -145,3 +145,25 @@ def test_keyless_with_attempted_receipt_is_protected_not_consumed(tmp_path):
     assert agents.trace_launch_status(agent, "t", client_msg_id="q", origin="user", sender_agent_id="") != "retryable"
     assert turn_queue.pending_for_dispatch() == []
     assert not turn_queue.claim_for_dispatch("q") and turn_queue.claim("q") is None
+
+
+def test_late_backdated_marker_retained_after_pruning_cannot_revive_later_turn(tmp_path):
+    from lib import maintenance
+    _service, _backend, agent = _make_service(tmp_path)
+    old = _opened(agent)
+    turn_lifecycle.record_unlaunched(agent, "t", turn_id=old)
+    later = _opened(agent)
+    turn_lifecycle.record_unlaunched(agent, "t", turn_id=old)
+    assert KEY not in _last(agent)
+    maintenance._prune_state_log(db.conn(), db.now_ms() + 1)
+    assert db.conn().execute("SELECT COUNT(*) FROM state_log WHERE agent_id=?", (agent,)).fetchone()[0] == 1
+    assert KEY not in _last(agent)
+    assert db.conn().execute("SELECT settled_at FROM turns WHERE turn_id=?", (later,)).fetchone()[0] is None
+    assert agents.trace_launch_status(agent, "t") != "retryable"
+    turn_queue.enqueue(queue_id="q", agent_id=agent, session="mike", text="synthetic",
+                       trace_id="t", client_msg_id="q", synthesize_audio=False,
+                       origin="agent", sender_agent_id="")
+    before = dict(db.conn().execute("SELECT * FROM queued_turns WHERE queue_id='q'").fetchone())
+    turn_queue.reconcile_receipts()
+    assert dict(db.conn().execute("SELECT * FROM queued_turns WHERE queue_id='q'").fetchone()) == before
+    assert turn_queue.pending_for_dispatch() == []
