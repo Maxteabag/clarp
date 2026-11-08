@@ -27,12 +27,18 @@ def _receipt_failure(event: str, queue_ids, exc: BaseException, *, agents=None) 
             else:
                 log("queueReceiptWriteFail", detail)
         except Exception as diagnostic_error:  # keep the primary write failure
-            print(f"queueReceiptWriteFail {detail} diagnostic={type(diagnostic_error).__name__}",
-                  file=sys.stderr, flush=True)
+            try:
+                print(f"queueReceiptWriteFail {detail} diagnostic={type(diagnostic_error).__name__}",
+                      file=sys.stderr, flush=True)
+            except Exception as fallback_error:
+                # Both sinks failed. Record that loss on the ORIGINAL error;
+                # a diagnostic must never replace SQLite's failure or code.
+                BaseException.add_note(exc, f"queueReceiptDiagnosticLost {detail} "
+                                       f"sink={type(fallback_error).__name__}")
 
 
 @contextlib.contextmanager
-def _receipt_write(event: str, queue_ids):
+def _receipt_write(event: str, queue_ids, *, agent_ids=None):
     """Join a caller transaction, or atomically write a receipt and revision.
 
     BEGIN IMMEDIATE uses db's existing plain-BUSY polling and this connection's
@@ -40,14 +46,15 @@ def _receipt_write(event: str, queue_ids):
     """
     con = db.conn()
     started = time.monotonic()
-    agents = {}
+    agents = dict(agent_ids or {})
     queue_ids = tuple(queue_ids)
     try:
-        for queue_id in queue_ids:
-            row = con.execute("SELECT agent_id FROM queued_turns WHERE queue_id = ?",
-                              (queue_id,)).fetchone()
-            if row:
-                agents[queue_id] = str(row[0])
+        if agent_ids is None:
+            for queue_id in queue_ids:
+                row = con.execute("SELECT agent_id FROM queued_turns WHERE queue_id = ?",
+                                  (queue_id,)).fetchone()
+                if row:
+                    agents[queue_id] = str(row[0])
         if con.in_transaction:
             yield con
         else:
@@ -511,26 +518,40 @@ def reconcile_receipts() -> dict[str, int]:
     if con.in_transaction:
         raise lk.LifecycleError("receipt reconciliation needs its own transaction")
     deadline = time.monotonic() + 0.2
-    after = _reap_cursor("convergence", con) or 0
-    rows = con.execute(
-        """SELECT queue_id, agent_id, trace_id, prompt_admission_id, queue_seq
-             FROM queued_turns
-            WHERE status IN ('queued', 'claimed', 'started') AND queue_seq > ?
-            ORDER BY queue_seq LIMIT 100""", (after,)).fetchall()
+    after = _reap_cursor("convergence", con)
+    rows = []
+    # One equality seek per status: (status, queue_seq) is the existing index.
+    # No global sort or scan through final tombstones precedes LIMIT 100.
+    for status in ("claimed", "queued", "started"):
+        if after and status < after[0]:
+            continue
+        if len(rows) == 100 or time.monotonic() >= deadline:
+            break
+        sequence = after[1] if after and status == after[0] else 0
+        rows.extend(con.execute(
+            """SELECT queue_id, agent_id, trace_id, prompt_admission_id, queue_seq, status
+                 FROM queued_turns INDEXED BY idx_queued_turns_status_seq
+                WHERE status = ? AND queue_seq > ?
+                ORDER BY queue_seq LIMIT ?""", (status, sequence, 100-len(rows))).fetchall())
     if not rows:
-        _save_reap_cursor("convergence", con, None)
+        if time.monotonic() < deadline:
+            _save_reap_cursor("convergence", con, None)
         return {}
     counts: dict[str, int] = {}
     repaired = []
     deferred = []
     changed_agents = set()
     cursor = after
-    with db.busy_timeout_at_most(50):
-        with _receipt_write("reconcile", [str(row["queue_id"]) for row in rows]):
+    admission_ms = min(50, int((deadline - time.monotonic()) * 1000))
+    if admission_ms <= 0:
+        return {}  # no admitted work, so no cursor progress or fresh wait
+    with db.busy_timeout_at_most(admission_ms):
+        with _receipt_write("reconcile", [str(row["queue_id"]) for row in rows],
+                            agent_ids={row["queue_id"]: row["agent_id"] for row in rows}):
             for observed in rows:
                 if time.monotonic() >= deadline:
                     break
-                cursor = observed["queue_seq"]
+                cursor = (observed["status"], observed["queue_seq"])
                 row = con.execute(
                     """SELECT * FROM queued_turns WHERE queue_id = ? AND agent_id = ?
                          AND trace_id = ? AND prompt_admission_id IS ? AND queue_seq = ?
@@ -555,7 +576,10 @@ def reconcile_receipts() -> dict[str, int]:
                         deferred.append((row["queue_id"], row["agent_id"], launch))
                     continue  # NOTSTARTED, Stop fences and unknowns are not consumed proof.
                 running = turn["settled_at"] is None and turn["ended_at"] is None
-                target = "started" if running else _RECEIPT_STATUS.get(turn["outcome"], "ended")
+                target = "started"
+                if not running:
+                    target = (_RECEIPT_STATUS.get(turn["outcome"], "ended")
+                              if turn["settled_at"] is not None else "ended")
                 where = "queue_id = ? AND agent_id = ? AND trace_id = ? AND status = ?"
                 params = (row["queue_id"], row["agent_id"], row["trace_id"], row["status"])
                 moved = 0
@@ -863,7 +887,9 @@ def claim(queue_id: str) -> dict | None:
 
 def release_claim(queue_id: str) -> bool:
     with _receipt_write("release", (queue_id,)):
-        current = get(queue_id)
+        current = db.conn().execute(
+            "SELECT * FROM queued_turns WHERE queue_id = ? AND status = 'claimed'",
+            (queue_id,)).fetchone()
         if current and _consumed_or_uncertain(current):
             return False
         moved = _cas("release", "queue_id = ?", (queue_id,), returning="agent_id",
