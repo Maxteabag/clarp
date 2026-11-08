@@ -303,18 +303,30 @@ def test_actual_accepted_steer_marks_its_receipt_without_a_separate_turn(tmp_pat
     assert turn_queue.pending_counts() == {}
 
 
-def test_recovery_does_not_redispatch_more_than_one_repair_page(tmp_path):
+@pytest.mark.parametrize("terminal", ["completed", "ended-only"])
+def test_recovery_does_not_redispatch_more_than_one_repair_page(tmp_path, terminal):
     from tests.unit.test_turn_dispatch import _make_service
     service, backend, agent = _make_service(tmp_path)
     backend.live = False
     for index in range(105):
         _receipt(str(index), agent=agent, trace=str(index))
-        _turn(agent=agent, trace=str(index), outcome="completed")
+        _turn(agent=agent, trace=str(index),
+              outcome="completed" if terminal == "completed" else None, ended=True)
+    original_turns = [tuple(row) for row in db.conn().execute(
+        "SELECT * FROM turns WHERE agent_id=? ORDER BY turn_id", (agent,))]
+    # The FIRST recovery call must fence even receipts beyond its repair page.
     assert service.recover_queued() == 0
     assert backend.spawned == []
     for _ in range(4):
         _tick()
+    expected = "done" if terminal == "completed" else "ended"
+    assert [turn_queue.status(str(index)) for index in range(105)] == [expected] * 105
     assert turn_queue.pending_counts() == {}
+    # A later boot/recovery cannot resurrect the converged receipt either.
+    assert service.recover_queued() == 0
+    assert backend.spawned == []
+    assert [tuple(row) for row in db.conn().execute(
+        "SELECT * FROM turns WHERE agent_id=? ORDER BY turn_id", (agent,))] == original_turns
 
 
 @pytest.mark.parametrize("stale_outcome", ["completed", "failed", "interrupted"])
