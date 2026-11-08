@@ -61,3 +61,12 @@ No fallback download or rebuild outside the setup allotment is authorized.
 
 Remaining full-package glue, native lifecycle/oracles, coverage aggregation/
 family mapping, priority/budget/drain and exact B/C source readiness remain open.
+
+`suite_evidence.py` is an unexecuted pure consumer for exact config-bound
+controller/eight-worker starts and terminals. It verifies independent identities,
+full collection/deselections, primary/nested report multisets and one complete
+outcome per common node (including setup skips). It keeps hook and outer timing
+separate and rejects nonzero/missing terminals. ABBA exposes opposite-order
+gaps and refuses outcome drift; it deliberately cannot assign MET without the
+still-owed timer/load/source/cache qualifications. Its synthetic record controls
+test receipt interpretation only, not actual pytest participation or lifecycle.
