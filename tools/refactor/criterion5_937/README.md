@@ -162,3 +162,19 @@ connection-incarnation controls, full field/writer rules and measured overhead
 remain required. Do not raise the cap or discard rows to manufacture readiness.
 The additional single child is capped at25s inside the proposed300s setup
 control allowance; this is arithmetic only, not admitted native fit or drain.
+
+`packed_columns.py` now proposes a storage primitive for the compact route.
+It uses explicit little-endian signed/unsigned/optional/native-state columns,
+lossless typed UTF-8/surrogatepass identities, all-column/dictionary reservation,
+sticky partial-append refusal and sealed bulk export with a last-published
+manifest. Bank indices mean append order ONLY. The API's structural seal/domain
+bytes are neither a native commit receipt nor actual producer/exit evidence.
+There is no wrapper integration, allocation-range compaction, event schema,
+producer-domain merger, archive consumer or native partial-order inference yet.
+
+The64MiB primitive safety ceiling is NOT a measured allocation or corpus-fit
+claim. Each actual bank also requires an explicitly lower allocation limit;
+fixed buffers, Python lookup overhead/transients, page-touch effects, ALL
+producer banks and export/consumer peaks still need source-derived arithmetic
+and C/B qualification. Authored storage controls are UNEXECUTED and do not
+replace any native transaction, row, head, lifecycle or measurement controls.
