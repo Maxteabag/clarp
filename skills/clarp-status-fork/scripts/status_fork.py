@@ -2,9 +2,9 @@
 """Ask a Clarp agent for its status through a throwaway fork of its conversation.
 
 The fork reuses Clarp's exact launch argv so it hits the agent's own prompt
-cache, may only read (a PreToolUse guard denies every other tool, whatever the
-inherited permission rules allow), and is not persisted, so the agent itself is
-never interrupted, queued behind, or changed. Claude-backend agents only for now.
+cache, is limited to reads by a PreToolUse guard (a tool-call boundary with the
+limits listed in SKILL.md), and is not persisted, so the agent itself is never
+interrupted, queued behind, or changed. Claude-backend agents only for now.
 
   clarp-status-fork pebble [hobbles ...] [--question TEXT] [--json]
 """
@@ -176,16 +176,36 @@ def _claude_backend():
     return ClaudeBackend()
 
 
+def launch_dir(saved):
+    """The one directory both the settings check and the launch use.
+
+    The agent's saved cwd must be an absolute path to an existing directory; it is
+    resolved through symlinks. There is no fallback: launching anywhere else would
+    inherit project settings that preflight() never examined.
+    """
+    path = Path(saved or "").expanduser()
+    if not saved or not path.is_absolute():
+        raise Refused(f"the agent's working directory {saved!r} is not an absolute path")
+    try:
+        real = path.resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        raise Refused(f"the agent's working directory {saved} does not exist ({exc})")
+    if not real.is_dir():
+        raise Refused(f"the agent's working directory {saved} is not a directory")
+    return path, real
+
+
 def clarp_fork_argv(agent, question):
-    """Clarp's own Claude argv for this agent, turned into a read-only fork.
+    """Clarp's own Claude argv for this agent as a read-only fork, and where to run it.
 
     Raises Refused, before anything is launched, when the guard cannot be guaranteed.
     """
+    saved, real = launch_dir(agent["cwd"])
     cmd = _claude_backend().build_cmd(
         agent["native_id"], model=agent["model"] or "", effort=agent["effort"] or "",
         persona=agent["persona"] or "", session=agent["session"])
-    version = preflight(cmd[0], agent["cwd"])
-    return fork_argv(cmd, question, version)
+    version = preflight(cmd[0], real, alias=saved)
+    return fork_argv(cmd, question, version), real
 
 
 # Verified with this skill: PreToolUse JSON deny, exit-2 blocking, --settings precedence.
@@ -233,21 +253,33 @@ def guard_settings(version):
                        "hooks": {"PreToolUse": [{"matcher": "*", "hooks": [hook]}]}})
 
 
-def _settings_files(cwd):
-    """Settings files the fork inherits, by layer: managed first."""
+def _settings_files(cwd, alias=None):
+    """Settings files the fork inherits, by layer: managed first.
+
+    `cwd` is the resolved launch directory. Project settings are taken from every
+    ancestor of it, and also of the unresolved `alias` path when it differs, so a
+    symlinked path cannot hide settings on either side.
+    """
     managed = Path(os.environ.get("CLARP_STATUS_FORK_MANAGED_DIR", "/etc/claude-code"))
     files = [("managed", managed / "managed-settings.json"),
              *(("managed", p) for p in sorted((managed / "managed-settings.d").glob("*.json")))]
-    user = Path(os.environ.get("CLAUDE_CONFIG_DIR", Path.home() / ".claude"))
+    user = Path(os.environ.get("CLAUDE_CONFIG_DIR", Path.home() / ".claude")).expanduser()
     files += [("user", user / "settings.json"), ("user", user / "settings.local.json")]
-    # Conservative: every ancestor's project settings, not just the project root.
-    for folder in [Path(cwd), *Path(cwd).parents]:
+    folders = []
+    for start in (Path(cwd), Path(alias) if alias else None):
+        if start is None:
+            continue
+        for folder in (start, *start.parents):
+            for candidate in (folder, folder.resolve()):
+                if candidate not in folders:
+                    folders.append(candidate)
+    for folder in folders:
         files += [("project", folder / ".claude/settings.json"),
                   ("project", folder / ".claude/settings.local.json")]
     return files
 
 
-def preflight(binary, cwd):
+def preflight(binary, cwd, alias=None):
     """Refuse (raise Refused) unless the read-only guard is guaranteed to hold."""
     if not os.access(GUARD, os.R_OK):
         raise Refused(f"the read-only guard {GUARD} is missing or unreadable")
@@ -262,7 +294,7 @@ def preflight(binary, cwd):
         got = json.loads(out)["hookSpecificOutput"]["permissionDecision"] if out else None
         if probe.returncode != 0 or got != verdict:
             raise Refused(f"the read-only guard failed its self-test on {tool}")
-    for layer, path in _settings_files(cwd):
+    for layer, path in _settings_files(cwd, alias):
         try:
             data = json.loads(path.read_text())
         except FileNotFoundError:
@@ -317,14 +349,13 @@ def fork_status(agent, question):
         "CLAUDE_PWA_SESSION", "CLARP_SESSION", "CLAUDE_CODE_SESSION_ID",
         "CLAUDECODE", "CLAUDE_CODE_CHILD_SESSION")}
     try:
-        argv = clarp_fork_argv(agent, question)
+        argv, cwd = clarp_fork_argv(agent, question)
     except Refused as exc:
         return {**agent, "ok": False, "seconds": 0.0, "error": f"refused, nothing launched: {exc}"}
     try:
-        proc = subprocess.run(
-            argv,
-            cwd=agent["cwd"] if os.path.isdir(agent["cwd"]) else None,
-            env=env, capture_output=True, text=True, timeout=300)
+        # Exactly the directory preflight() examined; never the caller's.
+        proc = subprocess.run(argv, cwd=cwd, env=env, capture_output=True, text=True,
+                              timeout=300)
     except subprocess.TimeoutExpired:
         return {**agent, "ok": False, "seconds": round(time.monotonic() - started, 1),
                 "error": "the fork did not answer within 300 s"}

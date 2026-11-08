@@ -195,3 +195,80 @@ def test_refused_fork_launches_nothing_and_reports_why(monkeypatch):
     assert launched == []
     assert result["ok"] is False
     assert result["error"] == "refused, nothing launched: managed policy disables hooks"
+
+
+def _fake_backend(monkeypatch):
+    class Backend:
+        def build_cmd(self, native_id, **kwargs):
+            return ["claude", "-p", "--dangerously-skip-permissions", "--resume", native_id]
+    monkeypatch.setattr(status_fork, "_claude_backend", Backend)
+    monkeypatch.setattr(status_fork, "claude_version", lambda binary: (2, 1, 285))
+
+
+def _agent(cwd):
+    return {"backend": "claude", "cwd": cwd, "native_id": "sid-1", "model": "",
+            "effort": "", "persona": "Pebble", "session": "pebble"}
+
+
+@pytest.mark.parametrize("saved, reason", [
+    ("{tmp}/deleted-worktree", "does not exist"),
+    ("{tmp}/a-file", "is not a directory"),
+    ("relative/worktree", "not an absolute path"),
+    ("", "not an absolute path"),
+])
+def test_unusable_saved_cwd_launches_nothing_even_from_a_permissive_caller(
+        isolated_settings, monkeypatch, saved, reason):
+    root, _ = isolated_settings
+    _fake_backend(monkeypatch)
+    caller = root / "caller-project"
+    _write(caller / ".claude/settings.json", {"permissions": {"allow": ["Bash(*)", "Write(*)"]}})
+    (root / "a-file").write_text("x")
+    monkeypatch.chdir(caller)
+    launched = []
+    monkeypatch.setattr(status_fork.subprocess, "run", lambda *a, **k: launched.append(k))
+
+    result = status_fork.fork_status(_agent(saved.format(tmp=root)), "status?")
+
+    assert launched == []
+    assert result["ok"] is False
+    assert result["error"].startswith("refused, nothing launched")
+    assert reason in result["error"]
+
+
+def test_launch_runs_in_exactly_the_resolved_directory_it_checked(isolated_settings, monkeypatch):
+    root, project = isolated_settings
+    _fake_backend(monkeypatch)
+    (root / "alias").symlink_to(project, target_is_directory=True)
+    monkeypatch.chdir(root)
+    real_run, launches = subprocess.run, []
+
+    def run(argv, **kwargs):
+        if argv[0] != "claude":  # the guard self-test runs for real
+            return real_run(argv, **kwargs)
+        launches.append(kwargs["cwd"])
+        return SimpleNamespace(returncode=0, stdout=json.dumps({"result": "ok"}), stderr="")
+    monkeypatch.setattr(status_fork.subprocess, "run", run)
+
+    result = status_fork.fork_status(_agent(str(root / "alias")), "status?")
+
+    assert result["ok"] is True
+    assert launches == [project.resolve()]
+
+
+@pytest.mark.parametrize("allow_on", ["real-side", "alias-side"])
+def test_settings_on_either_side_of_a_symlinked_cwd_are_checked(
+        isolated_settings, monkeypatch, allow_on):
+    root, _ = isolated_settings
+    monkeypatch.setattr(status_fork, "claude_version", lambda binary: (2, 1, 285))
+    real = root / "real-parent" / "worktree"
+    real.mkdir(parents=True)
+    link_parent = root / "link-parent"
+    link_parent.mkdir()
+    (link_parent / "worktree").symlink_to(real, target_is_directory=True)
+    holder = root / "real-parent" if allow_on == "real-side" else link_parent
+    _write(holder / ".claude/settings.json", {"permissions": {"allow": ["Bash(touch *)"]}})
+
+    saved, resolved = status_fork.launch_dir(str(link_parent / "worktree"))
+    assert resolved == real.resolve()
+    with pytest.raises(status_fork.Refused, match="pre-approve"):
+        status_fork.preflight("claude", resolved, alias=saved)
