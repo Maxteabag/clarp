@@ -17,6 +17,8 @@ cwd → most-recent conversation id comes from
 """
 from __future__ import annotations
 
+from .backend.agy_layout import _agy_home
+
 import json
 import os
 import pathlib
@@ -48,12 +50,6 @@ _USER_REQUEST_RE = re.compile(r"<USER_REQUEST>\s*(.*?)\s*</USER_REQUEST>",
                               re.DOTALL | re.IGNORECASE)
 
 
-def _agy_home(brain_root: pathlib.Path | None = None) -> pathlib.Path:
-    if brain_root is not None:
-        return brain_root
-    base = os.environ.get("CLAUDE_PWA_AGY_HOME") or str(
-        pathlib.Path.home() / ".gemini" / "antigravity-cli")
-    return pathlib.Path(base) / "brain"
 
 
 def conversation_exists(conversation_id: str) -> bool:

@@ -43,7 +43,7 @@ from typing import Any, Callable, Optional
 from .. import agents as agents_db
 from .. import config as _config
 from .. import events
-from .. import provider_capabilities
+from .claude_models import claude_model_pin
 from .. import turn_lifecycle
 from ..turn_lifecycle import TurnEvent
 from ..stream_pacing import LivePacer
@@ -418,7 +418,7 @@ class ClaudeBackend(Backend):
                 if scoped:
                     cmd += ["--mcp-config", scoped]
         # Optional per-agent model / reasoning-effort pins. Empty → CLI default.
-        model = provider_capabilities.claude_model_pin(model)
+        model = claude_model_pin(model)
         if model:
             cmd += ["--model", model]
         if effort:

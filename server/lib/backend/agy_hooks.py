@@ -15,7 +15,8 @@ import time
 from pathlib import Path
 from uuid import UUID
 
-from .. import agents, agy_transcript, turn_lifecycle
+from .. import agents, turn_lifecycle
+from .agy_layout import _agy_home
 from ..protocol import AgentState
 from ..turn_identity import TURN_ENV
 
@@ -105,7 +106,7 @@ def has_live_work(agent_id: str) -> bool:
         return False
     try:
         UUID(conversation_id)  # Never use an arbitrary session string as a path.
-        presence = agy_transcript._agy_home().parent / "presence" / f"{conversation_id}.lock"
+        presence = _agy_home().parent / "presence" / f"{conversation_id}.lock"
         with presence.open("rb") as handle:
             try:
                 fcntl.flock(handle, fcntl.LOCK_SH | fcntl.LOCK_NB)
