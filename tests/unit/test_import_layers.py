@@ -44,7 +44,7 @@ PERSISTENCE = frozenset({
 })
 PERSISTENCE_PACKAGES = ("lib.persistence",)
 CORE = frozenset({f"lib.{m}" for m in (
-    "agent_lifecycle", "agent_store", "agents", "backends", "config", "config_writer",
+    "agent_lifecycle", "agent_mcp_codec", "agent_store", "agents", "backends", "config", "config_writer",
     "conversation", "claude_reply_evidence", "deployment", "error_classify", "eventlog", "events", "hook_runtime",
     "http_utils", "identity", "launch_receipts", "log", "message_live", "message_store", "message_turns",
     "message_writes", "origins", "proc_util", "process_registry", "prompt_admissions",
@@ -81,7 +81,6 @@ NAMED_EXCEPTIONS = {
 UPWARD_BASELINE = frozenset({
     'lib.agent_lifecycle -> lib.contact_assignment',
     'lib.agent_lifecycle -> lib.launch_paths',
-    'lib.agent_lifecycle -> lib.mcp_selection',
     'lib.agent_lifecycle -> lib.personas',
     'lib.agent_lifecycle -> lib.session_models',
     'lib.agents -> lib.artifacts',
@@ -106,7 +105,6 @@ UPWARD_BASELINE = frozenset({
     'lib.backend.claude -> lib.fork',
     'lib.backend.claude -> lib.live_claude',
     'lib.backend.claude -> lib.live_pacing',
-    'lib.backend.claude -> lib.mcp_selection',
     'lib.backend.claude -> lib.provider_background_jobs',
     'lib.backend.claude -> lib.provider_capabilities',
     'lib.backend.claude -> lib.resume',

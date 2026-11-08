@@ -66,7 +66,7 @@ def _agent_mcp_servers(session: str, cfg) -> list[str]:
     if session:
         agent = agents_db.get_by_session(session)
         if agent is not None:
-            from ..mcp_selection import decode
+            from ..agent_mcp_codec import decode
             configured, servers = decode(agent.get("mcp_servers"))
             if configured:
                 return servers

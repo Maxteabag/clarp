@@ -17,7 +17,7 @@ from . import agents as agents_db
 from . import backends, events, identity
 from .agent_store import AGENT_ROSTER, load_agents, save_agent
 from .log import log, log_exception
-from .mcp_selection import encode as encode_mcp_selection
+from .agent_mcp_codec import encode as encode_mcp_selection
 from .policies.agent_spec import AgentSpec, RosterView, SpecError
 from . import personas as persona_store
 

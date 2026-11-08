@@ -10,7 +10,7 @@ import json
 
 import pytest
 
-from lib import mcp_selection
+from lib import agent_mcp_codec, mcp_selection
 
 
 def test_encode_shape():
@@ -24,6 +24,8 @@ def test_encode_empty_choice_is_still_configured():
 
 
 def test_round_trip():
+    assert mcp_selection.encode is agent_mcp_codec.encode
+    assert mcp_selection.decode is agent_mcp_codec.decode
     servers = ["a", "b", "c"]
     assert mcp_selection.decode(mcp_selection.encode(servers)) == (True, servers)
 

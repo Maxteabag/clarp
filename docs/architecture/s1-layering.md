@@ -325,4 +325,6 @@ synthetic branches:
 - `janitor_runtime.runtime_available` owns the shared feature-level Janitor capability query. HTTP `janitor_http` re-exports it; the scheduler imports the feature owner, preserving the in-process and fail-closed capability behavior.
 - `turn_identity` owns the unchanged `TURN_ENV` literal and token regex used for both identity lookup and provider evidence. `provider_background_jobs` imports/re-exports that vocabulary; identity lookup no longer imports the feature observer. Token/environment/SQL behavior and layer assignments are unchanged.
 
-The first three repaired upward edges are removed from the ratchet; this section does not authorize reclassifying any existing module or expanding named exceptions.
+- `agent_mcp_codec` is a new core primitive owning the stored MCP selection JSON codec. Feature `mcp_selection` re-exports the exact functions; core lifecycle and backend consumers import the canonical owner. The existing feature module retains its classification and stored JSON semantics.
+
+The first five repaired upward edges are removed from the ratchet; this section does not authorize reclassifying any existing module or expanding named exceptions.
