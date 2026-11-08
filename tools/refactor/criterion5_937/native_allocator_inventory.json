@@ -1,0 +1,1025 @@
+{
+  "state": "STATIC_SOURCE_PREPARATION_NOT_RUNTIME_PROFILE",
+  "purpose": "Exact lexical allocator/alias/callback/counter-write inventory before complete producer and callsite wiring",
+  "limitations": [
+    "Lexical inventory does not prove reachable runtime calls or complete import-order interception.",
+    "Dynamic assignments/aliases and native SQL writers need fail-closed actual coverage, not assumed exclusion.",
+    "Each pin has an independent source profile; global function equality is not inferred."
+  ],
+  "pins": {
+    "A": {
+      "pin": "4f33cdc9287eafcddd0adfb17b51487c84ace28b",
+      "parsed_server_python_files": 360,
+      "relevant_files": [
+        {
+          "path": "server/lib/db_migrations.py",
+          "sha256": "e1f7c8f04f6c8ddc6f1bd68e54b2ae242fb92ebfb9d789fe7b7a37132288565d",
+          "uses": [
+            {
+              "line": 221,
+              "node": "Constant",
+              "name": "literal_allocator_or_counter_writer",
+              "parent_node": "Call",
+              "enclosing": [
+                {
+                  "name": "_create_schema",
+                  "line": 210,
+                  "ast_sha256": "f1722a623825311d06a9b7f1c49f11e24f26f435995c9ca4268e5fed20df689f"
+                }
+              ],
+              "node_ast_sha256": "a5e56b0c08d61e7c3777b9ef7bd992ee08e00d283a112874b425197a497fa588",
+              "literal_sha256": "ab12714b872c6f84487517c8aa113416167fa18b70c8ebf38167b01f3ce24340",
+              "literal_bytes": 71
+            }
+          ]
+        },
+        {
+          "path": "server/lib/db_schema.py",
+          "sha256": "ef809c29ff55c1cf7d08895c33819121d5b346376faae208d44b0748bf8c4f18",
+          "uses": [
+            {
+              "line": 30,
+              "node": "Constant",
+              "name": "literal_allocator_or_counter_writer",
+              "parent_node": "Assign",
+              "enclosing": [],
+              "node_ast_sha256": "2687274db7013e806219f11c9183332852e110b1ffaabe72367cf5aa7dd3d419",
+              "literal_sha256": "b8174324a0f2e0fca1cbd0bc809b236d672020c134a3e3b9973044aabdccab71",
+              "literal_bytes": 41100
+            }
+          ]
+        },
+        {
+          "path": "server/lib/message_live.py",
+          "sha256": "5cb464e2212b17a60400a5a83abe5e96245ccb81246a2673f28960b15557e13e",
+          "uses": [
+            {
+              "line": 16,
+              "node": "alias",
+              "name": "_next_revision",
+              "parent_node": "ImportFrom",
+              "enclosing": [],
+              "node_ast_sha256": "77e52b558dba1727cbb75949745d10c56715f28bc9df34fa451044e01171c395",
+              "asname": null
+            },
+            {
+              "line": 190,
+              "node": "Name",
+              "name": "_next_revision",
+              "parent_node": "Call",
+              "enclosing": [
+                {
+                  "name": "_insert_live_message_atomic",
+                  "line": 174,
+                  "ast_sha256": "fb6826fba42d76cdf8ceb99ebb644ad6f0a4231d07caa4aba840a19966eecb0f"
+                }
+              ],
+              "node_ast_sha256": "8daea20d26ea846856f91f5ec2440d8ce33bb70ea45db0f3b0faf81288f7818c",
+              "use": "CALL_CALLEE"
+            },
+            {
+              "line": 269,
+              "node": "Name",
+              "name": "_next_revision",
+              "parent_node": "Call",
+              "enclosing": [
+                {
+                  "name": "_update_live_message_atomic",
+                  "line": 253,
+                  "ast_sha256": "173c20b73fb149facc074e056db52329e8b86d2c8db52affe7709f466c22e530"
+                }
+              ],
+              "node_ast_sha256": "8daea20d26ea846856f91f5ec2440d8ce33bb70ea45db0f3b0faf81288f7818c",
+              "use": "CALL_CALLEE"
+            },
+            {
+              "line": 308,
+              "node": "Name",
+              "name": "_next_revision",
+              "parent_node": "Call",
+              "enclosing": [
+                {
+                  "name": "mark_live_message_final",
+                  "line": 297,
+                  "ast_sha256": "31da19717ae6bb54f8d2136abdc062f66baf61d84cda866cbfec8d8ab6f9773c"
+                }
+              ],
+              "node_ast_sha256": "8daea20d26ea846856f91f5ec2440d8ce33bb70ea45db0f3b0faf81288f7818c",
+              "use": "CALL_CALLEE"
+            },
+            {
+              "line": 364,
+              "node": "Name",
+              "name": "_next_revision",
+              "parent_node": "Call",
+              "enclosing": [
+                {
+                  "name": "delete_live_assistant_message",
+                  "line": 348,
+                  "ast_sha256": "46b4ec085e0cfacb9dfdebfa2167ee8a74ce15a2b5116c7a2b2055c500fe8275"
+                }
+              ],
+              "node_ast_sha256": "8daea20d26ea846856f91f5ec2440d8ce33bb70ea45db0f3b0faf81288f7818c",
+              "use": "CALL_CALLEE"
+            },
+            {
+              "line": 408,
+              "node": "Name",
+              "name": "_next_revision",
+              "parent_node": "Call",
+              "enclosing": [
+                {
+                  "name": "finalize_live_assistant_message",
+                  "line": 380,
+                  "ast_sha256": "89881e5c8192cc39a07f5e90524d5f31e3ed9f753f107c4e416bd38dc54c9639"
+                }
+              ],
+              "node_ast_sha256": "8daea20d26ea846856f91f5ec2440d8ce33bb70ea45db0f3b0faf81288f7818c",
+              "use": "CALL_CALLEE"
+            },
+            {
+              "line": 461,
+              "node": "Name",
+              "name": "_next_revision",
+              "parent_node": "Call",
+              "enclosing": [
+                {
+                  "name": "_rewrite_streamed_row",
+                  "line": 451,
+                  "ast_sha256": "2156ea406078e2e0d8ee843d42646cf20c871f963ed25060e5d0f1e21ecd6cd9"
+                }
+              ],
+              "node_ast_sha256": "8daea20d26ea846856f91f5ec2440d8ce33bb70ea45db0f3b0faf81288f7818c",
+              "use": "CALL_CALLEE"
+            },
+            {
+              "line": 613,
+              "node": "Name",
+              "name": "_next_revision",
+              "parent_node": "Call",
+              "enclosing": [
+                {
+                  "name": "_restore_assistant_state_txn",
+                  "line": 561,
+                  "ast_sha256": "5f0366812babbfa8d6f362c821b88ca32725df0a5902f7ca22ad999ac10a2bdf"
+                }
+              ],
+              "node_ast_sha256": "8daea20d26ea846856f91f5ec2440d8ce33bb70ea45db0f3b0faf81288f7818c",
+              "use": "CALL_CALLEE"
+            },
+            {
+              "line": 658,
+              "node": "Name",
+              "name": "_next_revision",
+              "parent_node": "Call",
+              "enclosing": [
+                {
+                  "name": "commit_agy_assistant_turn",
+                  "line": 627,
+                  "ast_sha256": "ab4f73855c8134a8f95721de57f4416bb748f930f843524aef29e77f97b46bb2"
+                }
+              ],
+              "node_ast_sha256": "8daea20d26ea846856f91f5ec2440d8ce33bb70ea45db0f3b0faf81288f7818c",
+              "use": "CALL_CALLEE"
+            }
+          ]
+        },
+        {
+          "path": "server/lib/message_writes.py",
+          "sha256": "c82d8f9d14098ebe6c4d49126db474a3be26af73ef8b016efd6cb57ac61584e7",
+          "uses": [
+            {
+              "line": 78,
+              "node": "Name",
+              "name": "_next_revision",
+              "parent_node": "Call",
+              "enclosing": [
+                {
+                  "name": "relink_client_message",
+                  "line": 64,
+                  "ast_sha256": "90931252fa7fe8ab7fe043d82fe67da1ba673b8dc1760fcc7bbb6b842a05fdff"
+                }
+              ],
+              "node_ast_sha256": "8daea20d26ea846856f91f5ec2440d8ce33bb70ea45db0f3b0faf81288f7818c",
+              "use": "CALL_CALLEE"
+            },
+            {
+              "line": 109,
+              "node": "FunctionDef",
+              "name": "_next_revision",
+              "parent_node": "Module",
+              "enclosing": [],
+              "node_ast_sha256": "e1bf1e646dcec83898bcefe5f2817bcf486ed15336e97c65b1cbe20785f639c7"
+            },
+            {
+              "line": 111,
+              "node": "Constant",
+              "name": "literal_allocator_or_counter_writer",
+              "parent_node": "Call",
+              "enclosing": [
+                {
+                  "name": "_next_revision",
+                  "line": 109,
+                  "ast_sha256": "e1bf1e646dcec83898bcefe5f2817bcf486ed15336e97c65b1cbe20785f639c7"
+                }
+              ],
+              "node_ast_sha256": "e0444085107fab45e3f9541faad3dc45788de971641e8f3b34d07ae0ab846fb8",
+              "literal_sha256": "83a19820115e0135a71162e25708ffc25b425229c4476cd97959faeaebe1b834",
+              "literal_bytes": 99
+            },
+            {
+              "line": 268,
+              "node": "Name",
+              "name": "_next_revision",
+              "parent_node": "Call",
+              "enclosing": [
+                {
+                  "name": "record_user_message",
+                  "line": 212,
+                  "ast_sha256": "a3f29a5c25433753d5ce3f1199e0c2015d357c92c46d616048c94d97a52ac41c"
+                }
+              ],
+              "node_ast_sha256": "8daea20d26ea846856f91f5ec2440d8ce33bb70ea45db0f3b0faf81288f7818c",
+              "use": "CALL_CALLEE"
+            },
+            {
+              "line": 384,
+              "node": "Name",
+              "name": "_next_revision",
+              "parent_node": "Call",
+              "enclosing": [
+                {
+                  "name": "record_interruption_marker",
+                  "line": 339,
+                  "ast_sha256": "e95e3bb94bae7c15aa0338661fefd9a4f5e102c4446782b5662b2625d466d3d5"
+                }
+              ],
+              "node_ast_sha256": "8daea20d26ea846856f91f5ec2440d8ce33bb70ea45db0f3b0faf81288f7818c",
+              "use": "CALL_CALLEE"
+            },
+            {
+              "line": 438,
+              "node": "Name",
+              "name": "_next_revision",
+              "parent_node": "Call",
+              "enclosing": [
+                {
+                  "name": "record_call_notice",
+                  "line": 417,
+                  "ast_sha256": "fe247d7acf074ae7421210d07f1bb5adf910d69544b7f7352967f8ff26b1909c"
+                }
+              ],
+              "node_ast_sha256": "8daea20d26ea846856f91f5ec2440d8ce33bb70ea45db0f3b0faf81288f7818c",
+              "use": "CALL_CALLEE"
+            },
+            {
+              "line": 499,
+              "node": "Name",
+              "name": "_next_revision",
+              "parent_node": "Call",
+              "enclosing": [
+                {
+                  "name": "record_dream_digest",
+                  "line": 467,
+                  "ast_sha256": "0f549216b3245d9e4ac001f1c1eff244b5d028c158f46a4dc490a171f9b3f9a4"
+                }
+              ],
+              "node_ast_sha256": "8daea20d26ea846856f91f5ec2440d8ce33bb70ea45db0f3b0faf81288f7818c",
+              "use": "CALL_CALLEE"
+            },
+            {
+              "line": 568,
+              "node": "Name",
+              "name": "_next_revision",
+              "parent_node": "Call",
+              "enclosing": [
+                {
+                  "name": "carry_conversation",
+                  "line": 530,
+                  "ast_sha256": "e21c80e20c3f0c7fd40810b7343c2eaebd87fdbd9efc8345f50208610d734176"
+                }
+              ],
+              "node_ast_sha256": "8daea20d26ea846856f91f5ec2440d8ce33bb70ea45db0f3b0faf81288f7818c",
+              "use": "CALL_CALLEE"
+            },
+            {
+              "line": 994,
+              "node": "Name",
+              "name": "_next_revision",
+              "parent_node": "Call",
+              "enclosing": [
+                {
+                  "name": "_restore_unadopted_parked",
+                  "line": 962,
+                  "ast_sha256": "bfa3dc362ad90b71decb5c54b55da8e04d5f27c4bbd7666c38ebb58abba9ebf5"
+                }
+              ],
+              "node_ast_sha256": "8daea20d26ea846856f91f5ec2440d8ce33bb70ea45db0f3b0faf81288f7818c",
+              "use": "CALL_CALLEE"
+            },
+            {
+              "line": 1322,
+              "node": "Name",
+              "name": "_next_revision",
+              "parent_node": "Call",
+              "enclosing": [
+                {
+                  "name": "_store_transcript_turns_txn",
+                  "line": 1222,
+                  "ast_sha256": "6e956d1581a4339c9d773b9164f844fa4342b7753e3593efff426902e71454a8"
+                },
+                {
+                  "name": "commit_batch",
+                  "line": 1317,
+                  "ast_sha256": "d631388bdfd88328c112e83c92ebe61906b13ee78dd1891160f566b5a409381d"
+                }
+              ],
+              "node_ast_sha256": "8daea20d26ea846856f91f5ec2440d8ce33bb70ea45db0f3b0faf81288f7818c",
+              "use": "CALL_CALLEE"
+            },
+            {
+              "line": 1606,
+              "node": "Name",
+              "name": "_next_revision",
+              "parent_node": "Call",
+              "enclosing": [
+                {
+                  "name": "_store_transcript_turns_txn",
+                  "line": 1222,
+                  "ast_sha256": "6e956d1581a4339c9d773b9164f844fa4342b7753e3593efff426902e71454a8"
+                }
+              ],
+              "node_ast_sha256": "8daea20d26ea846856f91f5ec2440d8ce33bb70ea45db0f3b0faf81288f7818c",
+              "use": "CALL_CALLEE"
+            },
+            {
+              "line": 1690,
+              "node": "Name",
+              "name": "_next_revision",
+              "parent_node": "Call",
+              "enclosing": [
+                {
+                  "name": "_store_transcript_turns_txn",
+                  "line": 1222,
+                  "ast_sha256": "6e956d1581a4339c9d773b9164f844fa4342b7753e3593efff426902e71454a8"
+                }
+              ],
+              "node_ast_sha256": "8daea20d26ea846856f91f5ec2440d8ce33bb70ea45db0f3b0faf81288f7818c",
+              "use": "CALL_ARGUMENT"
+            },
+            {
+              "line": 1710,
+              "node": "Name",
+              "name": "_next_revision",
+              "parent_node": "Call",
+              "enclosing": [
+                {
+                  "name": "_store_transcript_turns_txn",
+                  "line": 1222,
+                  "ast_sha256": "6e956d1581a4339c9d773b9164f844fa4342b7753e3593efff426902e71454a8"
+                }
+              ],
+              "node_ast_sha256": "8daea20d26ea846856f91f5ec2440d8ce33bb70ea45db0f3b0faf81288f7818c",
+              "use": "CALL_CALLEE"
+            },
+            {
+              "line": 1737,
+              "node": "Name",
+              "name": "_next_revision",
+              "parent_node": "Call",
+              "enclosing": [
+                {
+                  "name": "_store_transcript_turns_txn",
+                  "line": 1222,
+                  "ast_sha256": "6e956d1581a4339c9d773b9164f844fa4342b7753e3593efff426902e71454a8"
+                }
+              ],
+              "node_ast_sha256": "8daea20d26ea846856f91f5ec2440d8ce33bb70ea45db0f3b0faf81288f7818c",
+              "use": "CALL_CALLEE"
+            },
+            {
+              "line": 1791,
+              "node": "Name",
+              "name": "_next_revision",
+              "parent_node": "Call",
+              "enclosing": [
+                {
+                  "name": "_attach_authority_tools",
+                  "line": 1768,
+                  "ast_sha256": "9af3b16377ce9808ab75642d4ba5fa517df4f75afd0d386d1a5c582e29afeb18"
+                }
+              ],
+              "node_ast_sha256": "8daea20d26ea846856f91f5ec2440d8ce33bb70ea45db0f3b0faf81288f7818c",
+              "use": "CALL_CALLEE"
+            },
+            {
+              "line": 1799,
+              "node": "arg",
+              "name": "next_revision",
+              "parent_node": "arguments",
+              "enclosing": [
+                {
+                  "name": "stamp_turn",
+                  "line": 1799,
+                  "ast_sha256": "a6850f7ada5e4ba1dbe7016610ec0d5c6809820a3bd8fe5f27e20fbba6b6bd94"
+                }
+              ],
+              "node_ast_sha256": "45135f731ca010daedc5ae87d95603ccf7647688a9af2b59c555593c2971ead3"
+            },
+            {
+              "line": 1836,
+              "node": "Name",
+              "name": "next_revision",
+              "parent_node": "Call",
+              "enclosing": [
+                {
+                  "name": "stamp_turn",
+                  "line": 1799,
+                  "ast_sha256": "a6850f7ada5e4ba1dbe7016610ec0d5c6809820a3bd8fe5f27e20fbba6b6bd94"
+                }
+              ],
+              "node_ast_sha256": "3bdec3bf2f03608a67b9b6d63e0ae6a3e76f5655d7b3446242563c0bf0205c82",
+              "use": "CALL_CALLEE"
+            },
+            {
+              "line": 1854,
+              "node": "alias",
+              "name": "_next_revision",
+              "parent_node": "ImportFrom",
+              "enclosing": [
+                {
+                  "name": "restamp_turn",
+                  "line": 1851,
+                  "ast_sha256": "0f1648c93fda37f3db6d2e963f532d5eeeadf49642450ac3e78cd1e850713335"
+                }
+              ],
+              "node_ast_sha256": "77e52b558dba1727cbb75949745d10c56715f28bc9df34fa451044e01171c395",
+              "asname": null
+            },
+            {
+              "line": 1860,
+              "node": "Name",
+              "name": "_next_revision",
+              "parent_node": "Call",
+              "enclosing": [
+                {
+                  "name": "restamp_turn",
+                  "line": 1851,
+                  "ast_sha256": "0f1648c93fda37f3db6d2e963f532d5eeeadf49642450ac3e78cd1e850713335"
+                }
+              ],
+              "node_ast_sha256": "8daea20d26ea846856f91f5ec2440d8ce33bb70ea45db0f3b0faf81288f7818c",
+              "use": "CALL_ARGUMENT"
+            }
+          ]
+        },
+        {
+          "path": "server/lib/prompt_admissions.py",
+          "sha256": "d1d24e4a5a2088c5ff76b79726f6e210db7bcfb3f52eca489f1f8c598d07da75",
+          "uses": [
+            {
+              "line": 192,
+              "node": "Constant",
+              "name": "literal_allocator_or_counter_writer",
+              "parent_node": "Call",
+              "enclosing": [
+                {
+                  "name": "update_for_queued_edit",
+                  "line": 168,
+                  "ast_sha256": "7a85b50c2f8daefa386a155548d44973c8676e4516703766e8c26430bd257ca4"
+                }
+              ],
+              "node_ast_sha256": "e0444085107fab45e3f9541faad3dc45788de971641e8f3b34d07ae0ab846fb8",
+              "literal_sha256": "83a19820115e0135a71162e25708ffc25b425229c4476cd97959faeaebe1b834",
+              "literal_bytes": 99
+            }
+          ]
+        }
+      ],
+      "actual_runtime_calls": null,
+      "profile_certified": false
+    },
+    "B": {
+      "pin": "0073254687d22ac5a6c1d01b8af29fa678dcf4a2",
+      "parsed_server_python_files": 434,
+      "relevant_files": [
+        {
+          "path": "server/lib/db_migrations.py",
+          "sha256": "e1f7c8f04f6c8ddc6f1bd68e54b2ae242fb92ebfb9d789fe7b7a37132288565d",
+          "uses": [
+            {
+              "line": 221,
+              "node": "Constant",
+              "name": "literal_allocator_or_counter_writer",
+              "parent_node": "Call",
+              "enclosing": [
+                {
+                  "name": "_create_schema",
+                  "line": 210,
+                  "ast_sha256": "f1722a623825311d06a9b7f1c49f11e24f26f435995c9ca4268e5fed20df689f"
+                }
+              ],
+              "node_ast_sha256": "a5e56b0c08d61e7c3777b9ef7bd992ee08e00d283a112874b425197a497fa588",
+              "literal_sha256": "ab12714b872c6f84487517c8aa113416167fa18b70c8ebf38167b01f3ce24340",
+              "literal_bytes": 71
+            }
+          ]
+        },
+        {
+          "path": "server/lib/db_schema.py",
+          "sha256": "4d74818841c9f5aafb624017dfdf203bb47a576288e9587006d09c453864ef1f",
+          "uses": [
+            {
+              "line": 30,
+              "node": "Constant",
+              "name": "literal_allocator_or_counter_writer",
+              "parent_node": "Assign",
+              "enclosing": [],
+              "node_ast_sha256": "2687274db7013e806219f11c9183332852e110b1ffaabe72367cf5aa7dd3d419",
+              "literal_sha256": "b8174324a0f2e0fca1cbd0bc809b236d672020c134a3e3b9973044aabdccab71",
+              "literal_bytes": 41100
+            }
+          ]
+        },
+        {
+          "path": "server/lib/message_import_common.py",
+          "sha256": "d13662a4e34d2a058fc04b01bd89b7673f8c383b07ab991e92a0c3e76e30713a",
+          "uses": [
+            {
+              "line": 33,
+              "node": "FunctionDef",
+              "name": "_next_revision",
+              "parent_node": "Module",
+              "enclosing": [],
+              "node_ast_sha256": "e1bf1e646dcec83898bcefe5f2817bcf486ed15336e97c65b1cbe20785f639c7"
+            },
+            {
+              "line": 35,
+              "node": "Constant",
+              "name": "literal_allocator_or_counter_writer",
+              "parent_node": "Call",
+              "enclosing": [
+                {
+                  "name": "_next_revision",
+                  "line": 33,
+                  "ast_sha256": "e1bf1e646dcec83898bcefe5f2817bcf486ed15336e97c65b1cbe20785f639c7"
+                }
+              ],
+              "node_ast_sha256": "e0444085107fab45e3f9541faad3dc45788de971641e8f3b34d07ae0ab846fb8",
+              "literal_sha256": "83a19820115e0135a71162e25708ffc25b425229c4476cd97959faeaebe1b834",
+              "literal_bytes": 99
+            }
+          ]
+        },
+        {
+          "path": "server/lib/message_import_rows.py",
+          "sha256": "4eae1d91f7d868f575cd3ae508f8f2d95eb8391e7ecdcb3b7b9e6dbbd4d14195",
+          "uses": [
+            {
+              "line": 19,
+              "node": "alias",
+              "name": "_next_revision",
+              "parent_node": "ImportFrom",
+              "enclosing": [],
+              "node_ast_sha256": "77e52b558dba1727cbb75949745d10c56715f28bc9df34fa451044e01171c395",
+              "asname": null
+            },
+            {
+              "line": 81,
+              "node": "Name",
+              "name": "_next_revision",
+              "parent_node": "Call",
+              "enclosing": [
+                {
+                  "name": "_restore_unadopted_parked",
+                  "line": 49,
+                  "ast_sha256": "bfa3dc362ad90b71decb5c54b55da8e04d5f27c4bbd7666c38ebb58abba9ebf5"
+                }
+              ],
+              "node_ast_sha256": "8daea20d26ea846856f91f5ec2440d8ce33bb70ea45db0f3b0faf81288f7818c",
+              "use": "CALL_CALLEE"
+            },
+            {
+              "line": 494,
+              "node": "Name",
+              "name": "_next_revision",
+              "parent_node": "Call",
+              "enclosing": [
+                {
+                  "name": "_upsert_row",
+                  "line": 450,
+                  "ast_sha256": "2cd730b69b81914cf812e026312add7b191e9f0b7a87c2ee12c61e85ae2c138a"
+                }
+              ],
+              "node_ast_sha256": "8daea20d26ea846856f91f5ec2440d8ce33bb70ea45db0f3b0faf81288f7818c",
+              "use": "CALL_CALLEE"
+            }
+          ]
+        },
+        {
+          "path": "server/lib/message_live.py",
+          "sha256": "5cb464e2212b17a60400a5a83abe5e96245ccb81246a2673f28960b15557e13e",
+          "uses": [
+            {
+              "line": 16,
+              "node": "alias",
+              "name": "_next_revision",
+              "parent_node": "ImportFrom",
+              "enclosing": [],
+              "node_ast_sha256": "77e52b558dba1727cbb75949745d10c56715f28bc9df34fa451044e01171c395",
+              "asname": null
+            },
+            {
+              "line": 190,
+              "node": "Name",
+              "name": "_next_revision",
+              "parent_node": "Call",
+              "enclosing": [
+                {
+                  "name": "_insert_live_message_atomic",
+                  "line": 174,
+                  "ast_sha256": "fb6826fba42d76cdf8ceb99ebb644ad6f0a4231d07caa4aba840a19966eecb0f"
+                }
+              ],
+              "node_ast_sha256": "8daea20d26ea846856f91f5ec2440d8ce33bb70ea45db0f3b0faf81288f7818c",
+              "use": "CALL_CALLEE"
+            },
+            {
+              "line": 269,
+              "node": "Name",
+              "name": "_next_revision",
+              "parent_node": "Call",
+              "enclosing": [
+                {
+                  "name": "_update_live_message_atomic",
+                  "line": 253,
+                  "ast_sha256": "173c20b73fb149facc074e056db52329e8b86d2c8db52affe7709f466c22e530"
+                }
+              ],
+              "node_ast_sha256": "8daea20d26ea846856f91f5ec2440d8ce33bb70ea45db0f3b0faf81288f7818c",
+              "use": "CALL_CALLEE"
+            },
+            {
+              "line": 308,
+              "node": "Name",
+              "name": "_next_revision",
+              "parent_node": "Call",
+              "enclosing": [
+                {
+                  "name": "mark_live_message_final",
+                  "line": 297,
+                  "ast_sha256": "31da19717ae6bb54f8d2136abdc062f66baf61d84cda866cbfec8d8ab6f9773c"
+                }
+              ],
+              "node_ast_sha256": "8daea20d26ea846856f91f5ec2440d8ce33bb70ea45db0f3b0faf81288f7818c",
+              "use": "CALL_CALLEE"
+            },
+            {
+              "line": 364,
+              "node": "Name",
+              "name": "_next_revision",
+              "parent_node": "Call",
+              "enclosing": [
+                {
+                  "name": "delete_live_assistant_message",
+                  "line": 348,
+                  "ast_sha256": "46b4ec085e0cfacb9dfdebfa2167ee8a74ce15a2b5116c7a2b2055c500fe8275"
+                }
+              ],
+              "node_ast_sha256": "8daea20d26ea846856f91f5ec2440d8ce33bb70ea45db0f3b0faf81288f7818c",
+              "use": "CALL_CALLEE"
+            },
+            {
+              "line": 408,
+              "node": "Name",
+              "name": "_next_revision",
+              "parent_node": "Call",
+              "enclosing": [
+                {
+                  "name": "finalize_live_assistant_message",
+                  "line": 380,
+                  "ast_sha256": "89881e5c8192cc39a07f5e90524d5f31e3ed9f753f107c4e416bd38dc54c9639"
+                }
+              ],
+              "node_ast_sha256": "8daea20d26ea846856f91f5ec2440d8ce33bb70ea45db0f3b0faf81288f7818c",
+              "use": "CALL_CALLEE"
+            },
+            {
+              "line": 461,
+              "node": "Name",
+              "name": "_next_revision",
+              "parent_node": "Call",
+              "enclosing": [
+                {
+                  "name": "_rewrite_streamed_row",
+                  "line": 451,
+                  "ast_sha256": "2156ea406078e2e0d8ee843d42646cf20c871f963ed25060e5d0f1e21ecd6cd9"
+                }
+              ],
+              "node_ast_sha256": "8daea20d26ea846856f91f5ec2440d8ce33bb70ea45db0f3b0faf81288f7818c",
+              "use": "CALL_CALLEE"
+            },
+            {
+              "line": 613,
+              "node": "Name",
+              "name": "_next_revision",
+              "parent_node": "Call",
+              "enclosing": [
+                {
+                  "name": "_restore_assistant_state_txn",
+                  "line": 561,
+                  "ast_sha256": "5f0366812babbfa8d6f362c821b88ca32725df0a5902f7ca22ad999ac10a2bdf"
+                }
+              ],
+              "node_ast_sha256": "8daea20d26ea846856f91f5ec2440d8ce33bb70ea45db0f3b0faf81288f7818c",
+              "use": "CALL_CALLEE"
+            },
+            {
+              "line": 658,
+              "node": "Name",
+              "name": "_next_revision",
+              "parent_node": "Call",
+              "enclosing": [
+                {
+                  "name": "commit_agy_assistant_turn",
+                  "line": 627,
+                  "ast_sha256": "ab4f73855c8134a8f95721de57f4416bb748f930f843524aef29e77f97b46bb2"
+                }
+              ],
+              "node_ast_sha256": "8daea20d26ea846856f91f5ec2440d8ce33bb70ea45db0f3b0faf81288f7818c",
+              "use": "CALL_CALLEE"
+            }
+          ]
+        },
+        {
+          "path": "server/lib/message_writes.py",
+          "sha256": "d51e83c06988de9b5725438be72d35560c3fc5180d5c29acf58ab8991ffe163a",
+          "uses": [
+            {
+              "line": 29,
+              "node": "alias",
+              "name": "_next_revision",
+              "parent_node": "ImportFrom",
+              "enclosing": [],
+              "node_ast_sha256": "77e52b558dba1727cbb75949745d10c56715f28bc9df34fa451044e01171c395",
+              "asname": null
+            },
+            {
+              "line": 92,
+              "node": "Name",
+              "name": "_next_revision",
+              "parent_node": "Call",
+              "enclosing": [
+                {
+                  "name": "relink_client_message",
+                  "line": 78,
+                  "ast_sha256": "90931252fa7fe8ab7fe043d82fe67da1ba673b8dc1760fcc7bbb6b842a05fdff"
+                }
+              ],
+              "node_ast_sha256": "8daea20d26ea846856f91f5ec2440d8ce33bb70ea45db0f3b0faf81288f7818c",
+              "use": "CALL_CALLEE"
+            },
+            {
+              "line": 244,
+              "node": "Name",
+              "name": "_next_revision",
+              "parent_node": "Call",
+              "enclosing": [
+                {
+                  "name": "record_user_message",
+                  "line": 188,
+                  "ast_sha256": "a3f29a5c25433753d5ce3f1199e0c2015d357c92c46d616048c94d97a52ac41c"
+                }
+              ],
+              "node_ast_sha256": "8daea20d26ea846856f91f5ec2440d8ce33bb70ea45db0f3b0faf81288f7818c",
+              "use": "CALL_CALLEE"
+            },
+            {
+              "line": 360,
+              "node": "Name",
+              "name": "_next_revision",
+              "parent_node": "Call",
+              "enclosing": [
+                {
+                  "name": "record_interruption_marker",
+                  "line": 315,
+                  "ast_sha256": "e95e3bb94bae7c15aa0338661fefd9a4f5e102c4446782b5662b2625d466d3d5"
+                }
+              ],
+              "node_ast_sha256": "8daea20d26ea846856f91f5ec2440d8ce33bb70ea45db0f3b0faf81288f7818c",
+              "use": "CALL_CALLEE"
+            },
+            {
+              "line": 414,
+              "node": "Name",
+              "name": "_next_revision",
+              "parent_node": "Call",
+              "enclosing": [
+                {
+                  "name": "record_call_notice",
+                  "line": 393,
+                  "ast_sha256": "fe247d7acf074ae7421210d07f1bb5adf910d69544b7f7352967f8ff26b1909c"
+                }
+              ],
+              "node_ast_sha256": "8daea20d26ea846856f91f5ec2440d8ce33bb70ea45db0f3b0faf81288f7818c",
+              "use": "CALL_CALLEE"
+            },
+            {
+              "line": 475,
+              "node": "Name",
+              "name": "_next_revision",
+              "parent_node": "Call",
+              "enclosing": [
+                {
+                  "name": "record_dream_digest",
+                  "line": 443,
+                  "ast_sha256": "0f549216b3245d9e4ac001f1c1eff244b5d028c158f46a4dc490a171f9b3f9a4"
+                }
+              ],
+              "node_ast_sha256": "8daea20d26ea846856f91f5ec2440d8ce33bb70ea45db0f3b0faf81288f7818c",
+              "use": "CALL_CALLEE"
+            },
+            {
+              "line": 544,
+              "node": "Name",
+              "name": "_next_revision",
+              "parent_node": "Call",
+              "enclosing": [
+                {
+                  "name": "carry_conversation",
+                  "line": 506,
+                  "ast_sha256": "e21c80e20c3f0c7fd40810b7343c2eaebd87fdbd9efc8345f50208610d734176"
+                }
+              ],
+              "node_ast_sha256": "8daea20d26ea846856f91f5ec2440d8ce33bb70ea45db0f3b0faf81288f7818c",
+              "use": "CALL_CALLEE"
+            },
+            {
+              "line": 1134,
+              "node": "Name",
+              "name": "_next_revision",
+              "parent_node": "Call",
+              "enclosing": [
+                {
+                  "name": "_store_transcript_turns_txn",
+                  "line": 1052,
+                  "ast_sha256": "b4b3370f097180fb395b0f5e4b29467c662b29c0f647569af7d50bcde8c88fa4"
+                },
+                {
+                  "name": "commit_batch",
+                  "line": 1129,
+                  "ast_sha256": "d631388bdfd88328c112e83c92ebe61906b13ee78dd1891160f566b5a409381d"
+                }
+              ],
+              "node_ast_sha256": "8daea20d26ea846856f91f5ec2440d8ce33bb70ea45db0f3b0faf81288f7818c",
+              "use": "CALL_CALLEE"
+            },
+            {
+              "line": 1358,
+              "node": "Name",
+              "name": "_next_revision",
+              "parent_node": "Call",
+              "enclosing": [
+                {
+                  "name": "_store_transcript_turns_txn",
+                  "line": 1052,
+                  "ast_sha256": "b4b3370f097180fb395b0f5e4b29467c662b29c0f647569af7d50bcde8c88fa4"
+                }
+              ],
+              "node_ast_sha256": "8daea20d26ea846856f91f5ec2440d8ce33bb70ea45db0f3b0faf81288f7818c",
+              "use": "CALL_ARGUMENT"
+            },
+            {
+              "line": 1396,
+              "node": "Name",
+              "name": "_next_revision",
+              "parent_node": "Call",
+              "enclosing": [
+                {
+                  "name": "_finish_import",
+                  "line": 1369,
+                  "ast_sha256": "6881f42ae74d036d7bdd3d9fbd6c8a3eea472c8368dab7f702e6cb43771619a8"
+                }
+              ],
+              "node_ast_sha256": "8daea20d26ea846856f91f5ec2440d8ce33bb70ea45db0f3b0faf81288f7818c",
+              "use": "CALL_CALLEE"
+            },
+            {
+              "line": 1423,
+              "node": "Name",
+              "name": "_next_revision",
+              "parent_node": "Call",
+              "enclosing": [
+                {
+                  "name": "_finish_import",
+                  "line": 1369,
+                  "ast_sha256": "6881f42ae74d036d7bdd3d9fbd6c8a3eea472c8368dab7f702e6cb43771619a8"
+                }
+              ],
+              "node_ast_sha256": "8daea20d26ea846856f91f5ec2440d8ce33bb70ea45db0f3b0faf81288f7818c",
+              "use": "CALL_CALLEE"
+            },
+            {
+              "line": 1474,
+              "node": "Name",
+              "name": "_next_revision",
+              "parent_node": "Call",
+              "enclosing": [
+                {
+                  "name": "_attach_authority_tools",
+                  "line": 1451,
+                  "ast_sha256": "9af3b16377ce9808ab75642d4ba5fa517df4f75afd0d386d1a5c582e29afeb18"
+                }
+              ],
+              "node_ast_sha256": "8daea20d26ea846856f91f5ec2440d8ce33bb70ea45db0f3b0faf81288f7818c",
+              "use": "CALL_CALLEE"
+            },
+            {
+              "line": 1509,
+              "node": "arg",
+              "name": "next_revision",
+              "parent_node": "arguments",
+              "enclosing": [
+                {
+                  "name": "stamp_turn",
+                  "line": 1509,
+                  "ast_sha256": "fe39406f7ff1cbd5b019a7fd328fa9d6418d7e27eedff7686dd7a4228fe3f501"
+                }
+              ],
+              "node_ast_sha256": "45135f731ca010daedc5ae87d95603ccf7647688a9af2b59c555593c2971ead3"
+            },
+            {
+              "line": 1533,
+              "node": "Name",
+              "name": "next_revision",
+              "parent_node": "Call",
+              "enclosing": [
+                {
+                  "name": "stamp_turn",
+                  "line": 1509,
+                  "ast_sha256": "fe39406f7ff1cbd5b019a7fd328fa9d6418d7e27eedff7686dd7a4228fe3f501"
+                }
+              ],
+              "node_ast_sha256": "3bdec3bf2f03608a67b9b6d63e0ae6a3e76f5655d7b3446242563c0bf0205c82",
+              "use": "CALL_CALLEE"
+            },
+            {
+              "line": 1551,
+              "node": "alias",
+              "name": "_next_revision",
+              "parent_node": "ImportFrom",
+              "enclosing": [
+                {
+                  "name": "restamp_turn",
+                  "line": 1548,
+                  "ast_sha256": "0f1648c93fda37f3db6d2e963f532d5eeeadf49642450ac3e78cd1e850713335"
+                }
+              ],
+              "node_ast_sha256": "77e52b558dba1727cbb75949745d10c56715f28bc9df34fa451044e01171c395",
+              "asname": null
+            },
+            {
+              "line": 1557,
+              "node": "Name",
+              "name": "_next_revision",
+              "parent_node": "Call",
+              "enclosing": [
+                {
+                  "name": "restamp_turn",
+                  "line": 1548,
+                  "ast_sha256": "0f1648c93fda37f3db6d2e963f532d5eeeadf49642450ac3e78cd1e850713335"
+                }
+              ],
+              "node_ast_sha256": "8daea20d26ea846856f91f5ec2440d8ce33bb70ea45db0f3b0faf81288f7818c",
+              "use": "CALL_ARGUMENT"
+            }
+          ]
+        },
+        {
+          "path": "server/lib/prompt_admissions.py",
+          "sha256": "d1d24e4a5a2088c5ff76b79726f6e210db7bcfb3f52eca489f1f8c598d07da75",
+          "uses": [
+            {
+              "line": 192,
+              "node": "Constant",
+              "name": "literal_allocator_or_counter_writer",
+              "parent_node": "Call",
+              "enclosing": [
+                {
+                  "name": "update_for_queued_edit",
+                  "line": 168,
+                  "ast_sha256": "7a85b50c2f8daefa386a155548d44973c8676e4516703766e8c26430bd257ca4"
+                }
+              ],
+              "node_ast_sha256": "e0444085107fab45e3f9541faad3dc45788de971641e8f3b34d07ae0ab846fb8",
+              "literal_sha256": "83a19820115e0135a71162e25708ffc25b425229c4476cd97959faeaebe1b834",
+              "literal_bytes": 99
+            }
+          ]
+        }
+      ],
+      "actual_runtime_calls": null,
+      "profile_certified": false
+    }
+  }
+}
