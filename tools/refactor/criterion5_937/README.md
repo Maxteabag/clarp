@@ -116,3 +116,20 @@ server/lib/backend_usage.py; B's future own-root guard must bind its moved
 backend_usage_codex.py separately. Actual immutable absent-provider namespace,
 private paths/endpoints, out-of-band failures and new compatibility controls
 remain owed. No new guard/backend capability or platform campaign is granted.
+
+`closed_seed.py` now drafts the closed-image boundary: actual retained Popen
+root wait (not a JSON exit flag), attempt/source/launch identity binding, the
+qualified initial guard's failure/count checks, closed-file header/version/WAL
+and streaming hash checks, and an exact all-table comparison after producer
+exit. Exclusive physical main-file copies use distinct inodes, bounded reads,
+fsync and pre/post bindings. Failure preserves partial outputs; no deletion,
+retry or generic remote all-descendant claim. Ancillary/corpus restore and
+end-to-end terminal publication/owner launch binding are still absent.
+
+Physical transcript copies naturally acquire different device/inode identities.
+Both pinned importers check those identities, and their native audit clock also
+sees the initial January checkpoint age. Never rewrite checkpoint identity/time
+to make a copied file look unchanged. Native full import/audit remains observed
+work, including any resulting scheduling delay/censor. Final checkpoint fields
+need positive correspondence to the actual owned transcript stat/hash/import
+bracket, not a blanket ID/time exclusion. This does not certify180s cell fit.
