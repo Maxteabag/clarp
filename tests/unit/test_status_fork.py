@@ -28,7 +28,7 @@ def test_fork_keeps_the_request_prefix_and_installs_the_read_only_guard():
             "--model", "claude-opus-5-5", "--effort", "max",
             "--append-system-prompt", "You are Pebble.", "--resume", "sid-1"]
 
-    argv = status_fork.fork_argv(turn, "status?")
+    argv = status_fork.fork_argv(turn, "status?", (2, 1, 285))
 
     # Everything that shapes the request stays, in order, so the agent's cache is reused.
     shaping = ["--thinking-display", "summarized", "--plugin-dir", "/p", "--strict-mcp-config",
@@ -43,7 +43,8 @@ def test_fork_keeps_the_request_prefix_and_installs_the_read_only_guard():
     assert "permissions" not in settings
     (entry,) = settings["hooks"]["PreToolUse"]
     assert entry["matcher"] == "*"
-    assert entry["hooks"][0]["command"].endswith("read_only_guard.py")
+    assert entry["hooks"][0]["command"].endswith("read_only_guard.py || exit 2")
+    assert settings["disableAllHooks"] is False
     assert {"--fork-session", "--no-session-persistence"} <= set(argv)
     assert argv[argv.index("--output-format") + 1] == "json"
     assert argv[-1] == "status?"
@@ -81,6 +82,8 @@ def test_guard_denies_when_it_cannot_read_the_call():
      "exit 0: Prompt is too long"),
     (2, json.dumps({"result": "looks fine"}), "", "exit 2: looks fine"),
     (1, "", "No conversation found with session ID: sid-1", "exit 1: No conversation found"),
+    (0, "[]", "", "exit 0: unexpected output"),
+    (0, json.dumps({"result": None, "usage": []}), "", "exit 0: "),
 ])
 def test_failed_fork_is_reported_as_an_error_for_that_agent(returncode, stdout, stderr, expected):
     proc = SimpleNamespace(returncode=returncode, stdout=stdout, stderr=stderr)
@@ -125,3 +128,70 @@ def test_fact_sheet_reports_work_the_agent_has_not_seen_yet(monkeypatch):
     # A name with a quote cannot break out of the read-only query.
     with pytest.raises(SystemExit, match="no Clarp agent matches"):
         status_fork.resolve("x' OR '1'='1")
+
+
+@pytest.mark.parametrize("version, fail_closed", [((2, 1, 285), False), ((2, 1, 295), True)])
+def test_guard_fails_closed_with_every_mechanism_the_version_supports(version, fail_closed):
+    (entry,) = json.loads(status_fork.guard_settings(version))["hooks"]["PreToolUse"]
+    hook = entry["hooks"][0]
+    # Exit 2 blocks a PreToolUse call on every version, so a guard that cannot start blocks.
+    assert hook["command"].endswith(" || exit 2")
+    assert ("onFailure" in hook) is fail_closed
+    if fail_closed:
+        assert hook["onFailure"] == "block"
+
+
+@pytest.fixture
+def isolated_settings(tmp_path, monkeypatch):
+    monkeypatch.setenv("CLARP_STATUS_FORK_MANAGED_DIR", str(tmp_path / "managed"))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "user"))
+    project = tmp_path / "project"
+    (project / ".claude").mkdir(parents=True)
+    return tmp_path, project
+
+
+def _write(path, data):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data))
+
+
+@pytest.mark.parametrize("version, managed, project, refusal", [
+    ((2, 1, 285), None, {"permissions": {"allow": ["Read(*)", "Grep"]}}, None),
+    ((2, 1, 285), None, {"permissions": {"allow": ["Bash(touch *)"]}}, "pre-approve"),
+    ((2, 1, 295), None, {"permissions": {"allow": ["Bash(touch *)"]}}, None),
+    ((2, 1, 295), {"disableAllHooks": True}, None, "managed policy"),
+    ((2, 1, 295), {"allowManagedHooksOnly": True}, None, "managed policy"),
+    ((2, 1, 284), None, None, "older than"),
+])
+def test_preflight_refuses_when_the_guard_cannot_be_guaranteed(
+        isolated_settings, monkeypatch, version, managed, project, refusal):
+    root, project_dir = isolated_settings
+    monkeypatch.setattr(status_fork, "claude_version", lambda binary: version)
+    if managed:
+        _write(root / "managed/managed-settings.json", managed)
+    if project:
+        _write(project_dir / ".claude/settings.json", project)
+    if refusal is None:
+        assert status_fork.preflight("claude", project_dir) == version
+    else:
+        with pytest.raises(status_fork.Refused, match=refusal):
+            status_fork.preflight("claude", project_dir)
+
+
+def test_preflight_refuses_without_the_guard(isolated_settings, monkeypatch):
+    _, project_dir = isolated_settings
+    monkeypatch.setattr(status_fork, "claude_version", lambda binary: (2, 1, 295))
+    monkeypatch.setattr(status_fork, "GUARD", project_dir / "missing_guard.py")
+    with pytest.raises(status_fork.Refused, match="missing or unreadable"):
+        status_fork.preflight("claude", project_dir)
+
+
+def test_refused_fork_launches_nothing_and_reports_why(monkeypatch):
+    launched = []
+    monkeypatch.setattr(status_fork, "clarp_fork_argv", lambda agent, question: (_ for _ in ()).throw(
+        status_fork.Refused("managed policy disables hooks")))
+    monkeypatch.setattr(status_fork.subprocess, "run", lambda *a, **k: launched.append(a))
+    result = status_fork.fork_status({"backend": "claude", "cwd": "/tmp"}, "status?")
+    assert launched == []
+    assert result["ok"] is False
+    assert result["error"] == "refused, nothing launched: managed policy disables hooks"

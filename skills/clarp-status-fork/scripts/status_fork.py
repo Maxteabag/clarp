@@ -177,27 +177,113 @@ def _claude_backend():
 
 
 def clarp_fork_argv(agent, question):
-    """Clarp's own Claude argv for this agent, turned into a read-only fork."""
+    """Clarp's own Claude argv for this agent, turned into a read-only fork.
+
+    Raises Refused, before anything is launched, when the guard cannot be guaranteed.
+    """
     cmd = _claude_backend().build_cmd(
         agent["native_id"], model=agent["model"] or "", effort=agent["effort"] or "",
         persona=agent["persona"] or "", session=agent["session"])
-    return fork_argv(cmd, question)
+    version = preflight(cmd[0], agent["cwd"])
+    return fork_argv(cmd, question, version)
 
 
-def guard_settings():
-    """Settings that deny every non-read tool call at call time.
+# Verified with this skill: PreToolUse JSON deny, exit-2 blocking, --settings precedence.
+MIN_CLAUDE = (2, 1, 285)
+# `onFailure: "block"` (a hook that fails or times out blocks the call) starts here.
+ON_FAILURE_BLOCK = (2, 1, 295)
+GUARD_TIMEOUT_S = 10
+READ_TOOLS = ("Read", "Grep", "Glob", "LS", "NotebookRead")
+
+
+class Refused(Exception):
+    """The fork cannot be guaranteed read-only here; nothing was launched."""
+
+
+def claude_version(binary):
+    proc = subprocess.run([binary, "--version"], capture_output=True, text=True, timeout=30)
+    parts = proc.stdout.split()[0].split(".") if proc.stdout.split() else []
+    try:
+        return tuple(int(p) for p in parts[:3])
+    except ValueError:
+        raise Refused(f"cannot read the Claude Code version from {proc.stdout.strip()!r}")
+
+
+def guard_settings(version):
+    """Settings that deny every non-read tool call at call time, failing closed.
 
     Not deny rules: a bare-tool or `Tool(*)` deny removes the tool from the
     model's context, which changes the request and loses the agent's prompt
     cache (measured: 214k of 424k tokens billed anew). A PreToolUse hook leaves
     the tool list alone and its deny wins over inherited allow rules.
+
+    - `disableAllHooks: false` here outranks a `true` in user, project or local
+      settings (--settings precedence); managed policy is refused in preflight().
+    - Shell form `... || exit 2`: a guard that cannot start or crashes exits 2,
+      which blocks a PreToolUse call on every supported version.
+    - From ON_FAILURE_BLOCK, `onFailure: block` also blocks on a hook timeout.
+      Before it, a timeout falls back to dontAsk, so preflight() refuses when
+      any inherited rule pre-approves a non-read tool.
     """
-    command = f"{shlex.quote(sys.executable)} {shlex.quote(str(GUARD))}"
-    return json.dumps({"hooks": {"PreToolUse": [
-        {"matcher": "*", "hooks": [{"type": "command", "command": command}]}]}})
+    hook = {"type": "command", "timeout": GUARD_TIMEOUT_S,
+            "command": f"{shlex.quote(sys.executable)} {shlex.quote(str(GUARD))} || exit 2"}
+    if version >= ON_FAILURE_BLOCK:
+        hook["onFailure"] = "block"
+    return json.dumps({"disableAllHooks": False,
+                       "hooks": {"PreToolUse": [{"matcher": "*", "hooks": [hook]}]}})
 
 
-def fork_argv(cmd, question):
+def _settings_files(cwd):
+    """Settings files the fork inherits, by layer: managed first."""
+    managed = Path(os.environ.get("CLARP_STATUS_FORK_MANAGED_DIR", "/etc/claude-code"))
+    files = [("managed", managed / "managed-settings.json"),
+             *(("managed", p) for p in sorted((managed / "managed-settings.d").glob("*.json")))]
+    user = Path(os.environ.get("CLAUDE_CONFIG_DIR", Path.home() / ".claude"))
+    files += [("user", user / "settings.json"), ("user", user / "settings.local.json")]
+    # Conservative: every ancestor's project settings, not just the project root.
+    for folder in [Path(cwd), *Path(cwd).parents]:
+        files += [("project", folder / ".claude/settings.json"),
+                  ("project", folder / ".claude/settings.local.json")]
+    return files
+
+
+def preflight(binary, cwd):
+    """Refuse (raise Refused) unless the read-only guard is guaranteed to hold."""
+    if not os.access(GUARD, os.R_OK):
+        raise Refused(f"the read-only guard {GUARD} is missing or unreadable")
+    version = claude_version(binary)
+    if version < MIN_CLAUDE:
+        raise Refused(f"Claude Code {'.'.join(map(str, version))} is older than "
+                      f"{'.'.join(map(str, MIN_CLAUDE))}, the oldest verified with the guard")
+    for verdict, tool in (("deny", "Bash"), (None, "Read")):
+        probe = subprocess.run([sys.executable, str(GUARD)], input=json.dumps({"tool_name": tool}),
+                               capture_output=True, text=True, timeout=GUARD_TIMEOUT_S)
+        out = probe.stdout.strip()
+        got = json.loads(out)["hookSpecificOutput"]["permissionDecision"] if out else None
+        if probe.returncode != 0 or got != verdict:
+            raise Refused(f"the read-only guard failed its self-test on {tool}")
+    for layer, path in _settings_files(cwd):
+        try:
+            data = json.loads(path.read_text())
+        except FileNotFoundError:
+            continue
+        except (OSError, json.JSONDecodeError) as exc:
+            raise Refused(f"cannot read {layer} settings {path}: {exc}")
+        if not isinstance(data, dict):
+            raise Refused(f"{layer} settings {path} is not a JSON object")
+        if layer == "managed" and (data.get("disableAllHooks") or data.get("allowManagedHooksOnly")):
+            raise Refused(f"managed policy {path} disables or restricts hooks; the guard "
+                          "would not run and managed settings cannot be overridden")
+        allowed = (data.get("permissions") or {}).get("allow") or []
+        writable = [r for r in allowed if not str(r).split("(")[0] in READ_TOOLS]
+        if writable and version < ON_FAILURE_BLOCK:
+            raise Refused(f"{layer} settings {path} pre-approve {writable[:3]}; before Claude "
+                          f"Code {'.'.join(map(str, ON_FAILURE_BLOCK))} a timed-out guard "
+                          "would let them run")
+    return version
+
+
+def fork_argv(cmd, question, version):
     """Turn an agent's turn argv into a one-shot, read-only, unsaved fork.
 
     The working directory stays the agent's: `--resume` finds the conversation
@@ -218,7 +304,7 @@ def fork_argv(cmd, question):
             out += ["--permission-mode", "dontAsk"]
             continue
         out.append(arg)
-    return out + ["--settings", guard_settings(), "--fork-session",
+    return out + ["--settings", guard_settings(version), "--fork-session",
                   "--no-session-persistence", "--output-format", "json", question]
 
 
@@ -231,8 +317,12 @@ def fork_status(agent, question):
         "CLAUDE_PWA_SESSION", "CLARP_SESSION", "CLAUDE_CODE_SESSION_ID",
         "CLAUDECODE", "CLAUDE_CODE_CHILD_SESSION")}
     try:
+        argv = clarp_fork_argv(agent, question)
+    except Refused as exc:
+        return {**agent, "ok": False, "seconds": 0.0, "error": f"refused, nothing launched: {exc}"}
+    try:
         proc = subprocess.run(
-            clarp_fork_argv(agent, question),
+            argv,
             cwd=agent["cwd"] if os.path.isdir(agent["cwd"]) else None,
             env=env, capture_output=True, text=True, timeout=300)
     except subprocess.TimeoutExpired:
@@ -242,19 +332,21 @@ def fork_status(agent, question):
 
 
 def fork_result(proc):
-    """ok only for exit 0 with a non-error JSON result; every failure carries 'error'."""
+    """ok only for exit 0 with a non-error, non-empty JSON result; failures carry 'error'."""
     detail = (proc.stderr or proc.stdout or "").strip()[-500:]
     try:
         data = json.loads(proc.stdout)
     except (json.JSONDecodeError, TypeError):
         return {"ok": False, "error": f"exit {proc.returncode}: {detail or 'no output'}"}
-    usage = data.get("usage") or {}
-    result = data.get("result") or ""
+    if not isinstance(data, dict):
+        return {"ok": False, "error": f"exit {proc.returncode}: unexpected output {detail[:200]}"}
+    usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
+    result = data.get("result") if isinstance(data.get("result"), str) else ""
     tokens = {"reused_tokens": usage.get("cache_read_input_tokens", 0),
               "new_tokens": usage.get("input_tokens", 0)
               + usage.get("cache_creation_input_tokens", 0)}
-    if proc.returncode != 0 or data.get("is_error"):
-        reason = result or data.get("subtype") or detail or "unknown error"
+    if proc.returncode != 0 or data.get("is_error") or not result.strip():
+        reason = result or data.get("subtype") or detail or "no answer"
         return {"ok": False, "error": f"exit {proc.returncode}: {reason}", **tokens}
     return {"ok": True, "status": result, **tokens}
 
