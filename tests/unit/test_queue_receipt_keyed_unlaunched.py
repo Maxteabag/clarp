@@ -115,14 +115,22 @@ def test_unlaunched_whole_event_equals_raw_6ad_O_with_attempt_key_stored(kind, n
     stored = {**original_O, KEY: 17}
     stream = FakeStream()
     watcher = StateLogWatcher(stream)
+    watcher._poll_once()  # consume AGENT_CREATED before either controlled comparison
+    stream.events.clear()
     def emit(detail):
         db.conn().execute("INSERT INTO state_log(agent_id,kind,ts,detail) VALUES (?,?,123,?)",
                           (agent, kind, json.dumps(detail)))
         watcher._poll_once()
-        result = json.dumps(next(e for e in stream.events if e["type"] == SSEType.AGENT_STATE)).encode()
+        controlled = [e for e in stream.events if e["type"] == SSEType.AGENT_STATE]
+        assert len(controlled) == 1
+        event = controlled[0]
+        assert (event["agent_id"], event["kind"], event["ts"]) == (agent, kind, 123)
+        result = json.dumps(event).encode()
         stream.events.clear()
         return result
-    expected = emit(original_O if (kind, negative) == ("interrupted", True) else stored)
+    comparator_O = original_O if (kind, negative) == ("interrupted", True) else stored
+    expected = emit(comparator_O)
+    assert json.loads(expected)["detail"] == comparator_O  # independent negative-filter sensitivity
     assert emit(stored) == expected
     assert _last(agent) == stored
 
