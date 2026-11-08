@@ -75,7 +75,7 @@ precedence. No current wire validation or default is redesigned.
 | release_leaked_slots, repair_slot | Existing per-agent exact-owner/liveness guards | Agent repair decision; no provider wait under global admission gate |
 | goal | Canonical agent/native binding plus existing stage2 goal coordinator | Agent effect ownership; no new goal/stop policy or latest-client substitution |
 | compact | Resolve session to actual agent; existing compaction publication/worker | Agent/native-session admission through worker publication, not whole worker lifetime mutex |
-| explanation_command | Can perform native reader work; not a generic read-only RPC | Existing demand/cache owner plus agent effect reservation |
+| explanation_command | Local tool_explanation_commands.answer -> resolve/redact, cache TTL/LRU touches under its existing lock; NO provider RPC | Cache-owner ordering only, no new provider lookup/refusal |
 | cancel_janitor_run | Resolve run to actual agent, retain exact run generation | Agent maintenance/control claim, current user-vs-Janitor permission |
 | recover_janitor_quota | Provider/owner/generation recovery owner | Existing quota coordinator; resumed agents enter their own admission; not a global agent lane |
 
@@ -368,3 +368,21 @@ exception binding plus bounded code/class-only throttled diagnostic retaining
 False fallback and associated two-to-zero ratchet update is outside TP-02's
 proposed seams; its owner/review controls still apply. Refresh source baseline on
 actual landing rather than restoring an older TurnSlots file.
+
+## A first-design review and API supplement
+
+A report reviews/tp02-937-A-design-5ead1becd1f0.md FULLREAD: direction
+accepted for refinement, F1/F2 changes required before implementation. See
+`tp02-rpc-api-937.md` for exact proposed carriers/outcomes/monitor contracts and
+a conditional canonical-binding/target-lifetime solution. In case of conflict,
+its conditional F1/F2 wording replaces the first draft's unbound-cutoff sketch
+for REVIEW ONLY; that semantic interpretation still needs A+fix3 settlement.
+The actual post933/TP-N3 home/owner and preserving Stop adapter remain gates.
+No production/test edits or execution. Explanation command inventory corrected
+to local cache answer/redaction, no native RPC.
+
+933's separately assigned narrow transfer_recovery_parks two UPDATE_HANDOFF
+existing-marker payload edits do not conflict with this design census. Re-pin
+that exact producer after933; do not edit those payloads or borrow A2/B's
+precedence review as a TP-02 source grant.939 settled-trace selection and933
+retry evidence remain with their owners.
