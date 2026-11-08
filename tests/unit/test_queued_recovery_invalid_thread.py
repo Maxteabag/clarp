@@ -3,8 +3,9 @@
 The real dispatcher and Codex app-server client drive tests/qa/fake_codex.py.
 The agent is bound to a thread whose rollout has no session_meta, so every
 thread/resume fails the way Miso's did on 2026-10-10 ("rollout ... is
-empty"). Recovery must stay bounded, keep the queued message, say why it
-stopped, and leave a user pause and an account-recovery wait as they were.
+empty"). A resume error is not proof that native adoption did not happen.
+Under the signed 933 fallback, keep unknown work visible without automatic
+retry; leave user pause and account-recovery wait as they were.
 """
 import itertools
 import json
@@ -13,7 +14,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from lib import activity, codex_app_server, recovery_backoff, turn_lifecycle, turn_queue
+from lib import activity, codex_app_server, db, recovery_backoff, turn_lifecycle, turn_queue
 from lib import agents as agents_db
 from lib.account_failover import Attempt
 from lib.protocol import AgentState
@@ -93,36 +94,39 @@ def broken(tmp_path, monkeypatch):
                            requests=requests, tmp_path=tmp_path)
 
 
-def test_an_unreadable_thread_is_retried_a_bounded_number_of_times(broken):
+def test_an_unreadable_thread_is_protected_visible_and_never_automatically_retried(broken):
     broken.send("t1")
     queued = turn_queue.pending(broken.agent_id)
     assert [row["trace_id"] for row in queued] == ["t1"]
     assert broken.resumes() == 1
+    before = [tuple(row) for row in db.conn().execute(
+        "SELECT * FROM turns WHERE agent_id=? ORDER BY turn_id", (broken.agent_id,))]
+    assert len(before) == 1
 
     broken.run_for(3600)
+    for _ in range(2):
+        assert broken.service.recover_queued() == 0
+        turn_queue.reconcile_receipts()
 
-    # The released runtime made ~3600 attempts an hour; this is the first
-    # send plus eight recovery attempts, then nothing more is scheduled.
-    assert broken.resumes() == 9
+    # A correlated native ERROR may follow adoption. No NOTSTARTED proof is
+    # manufactured from its text or from not having seen a reader event yet.
+    assert broken.resumes() == 1
+    assert broken.requests("turn/start") == []
     assert not broken.timers
-    # Eight identical failures, the real Codex text each time.
-    backoff = _td._RECOVERY_BACKOFF.snapshot()[broken.agent_id]
-    assert backoff["parked"] and backoff["identical"] == 8
-    assert "thread/resume" in backoff["error"] and backoff["error"].endswith("is empty'}")
-    # The message is still queued, exactly as it was.
+    assert not db.conn().execute(
+        """SELECT 1 FROM state_log WHERE agent_id=?
+             AND json_extract(detail,'$.trace_id')='t1'
+             AND json_extract(detail,'$.dispatch_not_started')=1""",
+        (broken.agent_id,)).fetchone()
+    assert agents_db.trace_launch_status(broken.agent_id, "t1") == "unknown"
+    assert turn_queue.pending_for_dispatch() == []
+    assert not turn_queue.claim_for_dispatch(queued[0]["queue_id"])
+    assert turn_queue.claim(queued[0]["queue_id"]) is None
     assert turn_queue.pending(broken.agent_id) == queued
+    assert turn_queue.pending_count(broken.agent_id) == 1
     assert not turn_queue.is_paused(broken.agent_id)
-    # The agent says why it stopped: interrupted, naming the failure, not
-    # thinking and not silent.
-    state = agents_db.latest_state(broken.agent_id)
-    assert state["kind"] == AgentState.INTERRUPTED
-    assert not agents_db.is_busy(broken.agent_id)
-    assert activity.live_state(state["kind"], state["detail"]) == "interrupted"
-    event = activity.state_activity_event(
-        agent_id=broken.agent_id, session="miso", persona="Miso",
-        kind=state["kind"], ts=state["ts"], detail=state["detail"])
-    assert "is empty" in event["summary"]
-    assert "Queued messages are waiting" in event["summary"]
+    assert [tuple(row) for row in db.conn().execute(
+        "SELECT * FROM turns WHERE agent_id=? ORDER BY turn_id", (broken.agent_id,))] == before
 
 
 def test_a_user_paused_queue_stays_paused_and_untried(broken):
@@ -176,11 +180,11 @@ def test_the_codex_unreadable_thread_error_is_one_failure_whatever_the_thread(br
     assert recovery_backoff.signature(errors[0]) == recovery_backoff.signature(errors[1])
 
 
-def test_a_queue_paused_during_backoff_is_neither_resumed_nor_unpaused(broken):
+def test_a_queue_paused_after_an_unknown_failure_is_neither_retried_nor_unpaused(broken):
     broken.send("t1")
     broken.run_for(10)
     tried = broken.resumes()
-    assert 1 < tried < 9
+    assert tried == 1
     turn_queue.set_paused(broken.agent_id, True)
     queued = turn_queue.pending(broken.agent_id)
 
@@ -191,10 +195,10 @@ def test_a_queue_paused_during_backoff_is_neither_resumed_nor_unpaused(broken):
     assert turn_queue.pending(broken.agent_id) == queued
 
 
-def test_clearing_a_park_does_not_start_a_paused_queue(broken):
+def test_slot_repair_does_not_retry_unknown_native_failure_or_unpause_queue(broken):
     broken.send("t1")
     broken.run_for(3600)
-    assert _td._RECOVERY_BACKOFF.snapshot()[broken.agent_id]["parked"]
+    assert _td._RECOVERY_BACKOFF.snapshot() == {}
     turn_queue.set_paused(broken.agent_id, True)
     queued = turn_queue.pending(broken.agent_id)
     tried = broken.resumes()
