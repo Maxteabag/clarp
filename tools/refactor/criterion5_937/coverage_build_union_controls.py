@@ -12,7 +12,10 @@ import shutil
 import socket
 import sys
 
-from .coverage_build_union import build_union
+from .coverage_union_graph import (build_union_with_graph, SOURCE_CATALOG_SHA256,
+                                   COVERAGE_ARCHIVE_SHA256)
+from .coverage_graph_publish import verify_graph
+from .coverage_copy_read import _same_capture
 from .coverage_copy_read import _retain, capture_closed_copy
 from .suite_evidence import ROLES
 from .test_suite_evidence import NODES, receipts
@@ -31,8 +34,9 @@ def run_build_union_storage_control(*, root, coverage_data_class):
     info = root.stat()
     if info.st_uid != os.geteuid() or info.st_mode & 0o077:
         raise ValueError('private owned control root required')
-    original_root, copy_root, aggregate_root, verify_root = [root / n for n in ('original', 'copy', 'aggregate', 'verify')]
-    for path in (original_root, copy_root, aggregate_root, verify_root):
+    original_root, copy_root, aggregate_root, verify_root, graph_root = [
+        root / n for n in ('original', 'copy', 'aggregate', 'verify', 'graph')]
+    for path in (original_root, copy_root, aggregate_root, verify_root, graph_root):
         path.mkdir(mode=0o700)
     raw, starts, finishes = receipts('coverage')  # supplied LOWER consumer records
     spec = json.loads(raw)
@@ -88,10 +92,17 @@ def run_build_union_storage_control(*, root, coverage_data_class):
 
     try:
         sys.setprofile(profile)
-        result = build_union(raw, starts, finishes, actual_exit=0, outer_seconds=10.0,
+        result = build_union_with_graph(raw, starts, finishes, actual_exit=0, outer_seconds=10.0,
                              cohort=NODES, captures=captures, limits=LIMITS,
                              aggregate_root=aggregate_root, verify_root=verify_root,
-                             coverage_data_class=coverage_data_class)
+                             coverage_data_class=coverage_data_class, graph_root=graph_root,
+                             wire_limits={'nodes': 100000, 'depth': 64,
+                                          'string_characters': 100000, 'wire_bytes': 2000000},
+                             bindings={'source_pin': '0073254687d22ac5a6c1d01b8af29fa678dcf4a2',
+                                       'source_catalog_sha256': SOURCE_CATALOG_SHA256,
+                                       'config_sha256': config_sha,
+                                       'coverage_archive_sha256': COVERAGE_ARCHIVE_SHA256,
+                                       'run_receipts_sha256': 'c' * 64})
     except BaseException as error:
         primary = error
     finally:
@@ -111,6 +122,24 @@ def run_build_union_storage_control(*, root, coverage_data_class):
     assert actual['files']['server/negative.py']['values'] == ((-10, -10),)
     assert actual['files']['server/negative.py']['contexts']['context[a].*'] == ()
     assert result['actual_run_source_producer_schema_denominator_accepted'] is False
+    assert result['source_config_tool_run_binding_bytes_authenticated'] is False
+    # Source/tool are frozen digest declarations; run hash is SYNTHETIC.
+    # No declaration above authenticates actual retained/loaded inputs. Actual graph bytes/typed sets are checked here.
+    published = result['published_graph']
+    reopened = verify_graph(
+        root=graph_root, observation=published['observation'],
+        expected_graph=published['decoded_graph'],
+        limits={'nodes': 100000, 'depth': 64, 'string_characters': 100000,
+                'wire_bytes': 2000000})
+    graph = reopened['decoded_graph']
+    assert set(graph['role_captures']) == set(ROLES)
+    for role in ROLES:
+        assert _same_capture(graph['role_captures'][role], captures[role])
+    assert _same_capture(graph['reference_union'], result['reference_union'])
+    assert _same_capture(graph['closed_aggregate_capture'], result['closed_aggregate_capture'])
+    assert graph['closed_aggregate_capture']['accessor_sets']['files'][
+        'server/negative.py']['contexts']['context[a].*'] == []
+    assert graph['bindings']['config_sha256'] == config_sha
     for role in ROLES:
         name = finishes[role]['coverage_data']['file']
         assert (original_root / name).read_bytes() == source_bytes[role]
