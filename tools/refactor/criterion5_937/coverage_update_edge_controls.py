@@ -3,7 +3,9 @@
 Supplied arcs are storage inputs, not traced Python/pytest/process evidence.
 Actual nine-role update/custody/producer/report qualification is not exercised.
 """
+from copy import deepcopy
 import hashlib
+import json
 import os
 from pathlib import Path
 import shutil
@@ -26,7 +28,7 @@ def run_update_edge_storage_controls(*, root, coverage_data_class):
     if info.st_uid != os.geteuid() or info.st_mode & 0o077:
         raise ValueError('private owned control root required')
     results = []
-    for case in ('branch_update', 'changed_target', 'slash_spelling'):
+    for case in ('branch_update', 'changed_target', 'slash_spelling', 'integer_context_key', 'bool_value'):
         home = root / case
         home.mkdir(mode=0o700)
         original_root, copy_root, aggregate_root, verify_root = [home / s for s in ('original', 'copy', 'aggregate', 'verify')]
@@ -36,7 +38,7 @@ def run_update_edge_storage_controls(*, root, coverage_data_class):
         producer = coverage_data_class(basename=str(original))
         primary = None
         try:
-            producer.set_context('context[a].*')
+            producer.set_context('1' if case == 'integer_context_key' else 'context[a].*')
             file = 'server/a\\b.py' if case == 'slash_spelling' else 'server/sentinel.py'
             producer.add_arcs({file: {(-1, 1), (1, -1)}})
             producer.write()
@@ -56,6 +58,15 @@ def run_update_edge_storage_controls(*, root, coverage_data_class):
                                        filename='coverage.data', expected_sha256=digest,
                                        expected_bytes=len(raw), coverage_data_class=coverage_data_class,
                                        limits=LIMITS)
+        # Positive row crosses the actual archive tuple->list shape. Key and
+        # value expectations remain independently checked after target close.
+        expected_sets = json.loads(json.dumps(captured['accessor_sets']))
+        if case == 'integer_context_key':
+            expected_sets = deepcopy(captured['accessor_sets'])
+            row = expected_sets['files']['server/sentinel.py']['contexts']
+            row[1] = row.pop('1')  # global context list stays actual string "1"
+        elif case == 'bool_value':
+            expected_sets['valid_empty_or_source_producer_custody_accepted'] = 0
         destination = aggregate_root / 'coverage-aggregate.data'
         aggregate = coverage_data_class(basename=str(destination))
         before, result, primary, cleanup_error = None, None, None, None
@@ -69,7 +80,7 @@ def run_update_edge_storage_controls(*, root, coverage_data_class):
             result = update_closed_copy(original_root=original_root, copy_root=copy_root,
                                         filename='coverage.data', expected_sha256=digest,
                                         expected_bytes=len(raw), coverage_data_class=coverage_data_class,
-                                        limits=LIMITS, expected_sets=captured['accessor_sets'],
+                                        limits=LIMITS, expected_sets=expected_sets,
                                         aggregate=aggregate, aggregate_root=aggregate_root,
                                         aggregate_before=before)
         except BaseException as error:
@@ -98,6 +109,12 @@ def run_update_edge_storage_controls(*, root, coverage_data_class):
         elif case == 'changed_target':
             assert type(primary) is ValueError and 'target version changed' in str(primary)
             assert result is None
+        elif case in ('integer_context_key', 'bool_value'):
+            assert type(primary) is ValueError and 'fresh accessor sets differ' in str(primary)
+            assert result is None and not destination.exists(), 'malformed expectation reached update'
+            if case == 'integer_context_key':
+                actual_contexts = captured['accessor_sets']['files']['server/sentinel.py']['contexts']
+                assert set(actual_contexts) == {'1'} and captured['accessor_sets']['contexts'] == ['1']
         else:
             assert type(primary) is ValueError and 'normalize slash spelling' in str(primary)
             assert result is None and not destination.exists(), 'refused spelling still mutated target'
