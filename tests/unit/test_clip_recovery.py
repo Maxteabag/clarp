@@ -1,6 +1,6 @@
 """Authoritative recovery for audio interrupted by iOS suspension."""
 
-from lib import agents, clip_store
+from lib import agents, clip_records, clip_store
 
 
 def _audio_event(clip_id: int, session: str, event_id_hint: int = 0) -> dict:
@@ -18,6 +18,7 @@ def _audio_event(clip_id: int, session: str, event_id_hint: int = 0) -> dict:
 
 
 def test_recoverable_events_return_only_nonterminal_recent_session_clips(tmp_path):
+    assert clip_store.record_clip is clip_records.record_clip
     agent_id = agents.create_agent(
         persona="Ada", voice_id="voice", cwd=str(tmp_path), session="ada")
     other_id = agents.create_agent(
