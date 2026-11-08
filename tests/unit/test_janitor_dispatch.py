@@ -148,9 +148,14 @@ def test_stale_sticky_janitor_focus_is_ignored(setup):
 def test_recovery_derives_capability_from_run_and_durable_queue_not_origin(setup):
     s = setup
     enqueue(s)
+    raw = turn_queue.get(s.run["run_id"])
+    assert raw["origin"] == "automation" and raw["trace_id"] == s.run["run_id"]
+    assert raw["agent_id"] == s.janitor_id and raw["client_msg_id"] == s.run["run_id"]
     assert s.service.recover_queued() == 1
     assert len(s.backend.spawned) == 1
     assert s.backend.spawned[0][1]["synthesize_audio"] is False
+    assert db.conn().execute("SELECT origin FROM queued_turns WHERE queue_id=?",
+                             (s.run["run_id"],)).fetchone()[0] == "automation"
 
 
 @pytest.mark.parametrize("bad_queue,bad_trace", [("forged-queue", None), (None, "forged-trace")])
@@ -382,3 +387,38 @@ def test_private_janitor_creation_does_not_mint_a_second_reserved_identity(setup
         AgentLifecycleService(setup.ctx).create_janitor({"name": "Different", "session": "sam",
             "backend": "codex", "cwd": str(setup.service.home)})
     assert db.conn().execute("SELECT count(*) FROM agents WHERE persona=?", ("Different",)).fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("field,replacement", [("origin", "automation"), ("client_msg_id", "conflicting-run")])
+def test_recovery_rechecks_current_raw_identity_after_genuine_janitor_admission(
+        setup, monkeypatch, field, replacement):
+    from lib.policies import admission as policy
+    s = setup
+    rid = s.run["run_id"]
+    turn_queue.enqueue(queue_id=rid, agent_id=s.janitor_id, session="sam",
+        text="Review the bounded candidates", trace_id=rid, client_msg_id=rid,
+        synthesize_audio=True, origin="janitor", sender_agent_id="")
+    before = dict(db.conn().execute("SELECT * FROM queued_turns WHERE queue_id=?", (rid,)).fetchone())
+    revision = turn_queue.revision(s.janitor_id)
+    real_policy = policy.admission
+    reached = []
+    def change_after_real_admission(origin, agent, teams, settings, live_work, queue):
+        decision = real_policy(origin, agent, teams, settings, live_work, queue)
+        if live_work.skip_admission and live_work.durable_queue_id == rid and not reached:
+            assert isinstance(decision, policy.Allow)
+            assert decision.effective.origin == "janitor" and decision.effective.mute_audio
+            assert live_work.janitor_run_id == rid and live_work.janitor_run_active is True
+            # Deliberately conflicting CURRENT durable input, after genuine authority.
+            sql = {"origin": "UPDATE queued_turns SET origin=? WHERE queue_id=?",
+                   "client_msg_id": "UPDATE queued_turns SET client_msg_id=? WHERE queue_id=?"}[field]
+            db.conn().execute(sql, (replacement, rid))
+            reached.append(field)
+        return decision
+    monkeypatch.setattr(policy, "admission", change_after_real_admission)
+    assert s.service.recover_queued() == 0
+    assert reached == [field] and not s.backend.spawned
+    assert dict(db.conn().execute("SELECT * FROM queued_turns WHERE queue_id=?", (rid,)).fetchone()) == {
+        **before, field: replacement}
+    assert turn_queue.revision(s.janitor_id) == revision
+    assert not db.conn().execute("SELECT 1 FROM turns WHERE agent_id=? AND trace_id=?",
+                                 (s.janitor_id, rid)).fetchone()
