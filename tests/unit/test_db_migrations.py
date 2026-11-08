@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import pathlib
+import json
+import os
+import subprocess
 import sqlite3
 import sys
 
@@ -485,3 +488,139 @@ def test_v119_index_migration_is_a_no_op_when_rerun(tmp_path):
     db._migrate_to_v119(con)
     assert con.execute("SELECT COUNT(*) FROM sqlite_master WHERE type = 'index'"
                        " AND name = 'idx_state_log_agent_state'").fetchone()[0] == 1
+
+
+# PT-02 primary owner boundary: an ordinary fresh interpreter opening state is
+# a consumer, even when it is the first process to see an old/absent database.
+# This worker deliberately uses only existing entrypoints, so baseline RED is
+# migration/creation/acceptance, never a missing new helper import.
+_NONOWNER_OPEN = r"""
+import json, sys
+from lib import db
+try:
+    con = db.conn() if sys.argv[1] == 'business' else db._stamp_connection()
+    result = {'accepted': True, 'version': con.execute('PRAGMA user_version').fetchone()[0]}
+except Exception as exc:
+    result = {'accepted': False, 'type': type(exc).__name__}
+finally:
+    db.close_local()
+    db._close_stamp_connection()
+print(json.dumps(result))
+"""
+
+
+def _consumer_process(path, script, *arguments):
+    root = pathlib.Path(__file__).resolve().parents[2] / "server"
+    environment = {**os.environ, "CLAUDE_PWA_DB": str(path),
+                   "PYTHONPATH": str(root)}
+    run = subprocess.run([sys.executable, "-c", script, *arguments],
+                         env=environment, capture_output=True, text=True, timeout=20)
+    assert run.returncode == 0, (run.returncode, run.stderr)
+    return json.loads(run.stdout.splitlines()[-1])
+
+
+@pytest.mark.parametrize("consumer", ["business", "stamp"])
+@pytest.mark.parametrize("shape,expected_error", [
+    ("missing", "SchemaNotReady"),
+    ("blank", "SchemaNotReady"),
+    ("v61", "SchemaNotReady"),
+    ("future", "SchemaUnsupported"),
+    ("too_old", "SchemaUnsupported"),
+])
+def test_nonowner_open_refuses_without_creating_or_migrating(
+        tmp_path, consumer, shape, expected_error):
+    path = tmp_path / "nonowner-parent" / "state.sqlite"
+    if shape != "missing":
+        path.parent.mkdir()
+        if shape == "v61":
+            con = _fresh(path)
+            _shape_as_v61(con)  # real old columns/data, not a stamped modern schema
+        else:
+            con = _connect(path)
+            version = {"blank": 0, "future": 122, "too_old": 60}[shape]
+            con.execute(f"PRAGMA user_version = {version}")
+        con.commit()
+        con.close()
+    before = path.read_bytes() if path.exists() else None
+    result = _consumer_process(path, _NONOWNER_OPEN, consumer)
+    assert result == {"accepted": False, "type": expected_error}
+    if before is None:
+        assert not path.parent.exists(), "a consumer created the absent store/parent"
+    else:
+        assert path.read_bytes() == before, "a refused consumer rewrote the database"
+
+
+@pytest.mark.parametrize("upgraded", [False, True])
+def test_ready_consumer_preserves_fresh_and_upgraded_business_writes(tmp_path, upgraded):
+    path = tmp_path / "ready.sqlite"
+    con = _fresh(path)
+    if upgraded:
+        _shape_as_v61(con)
+        db._migrate(con)
+    # A harmless extra index/table must not turn the two schema goldens into
+    # an admission allowlist. Expected facts are owned by this fixture.
+    con.execute("CREATE TABLE pt02_business (id INTEGER PRIMARY KEY, value TEXT)")
+    con.execute("CREATE INDEX pt02_business_value ON pt02_business(value)")
+    con.execute("INSERT INTO pt02_business VALUES (7, 'before')")
+    con.commit()
+    con.close()
+    result = _consumer_process(path, r"""
+import json
+from lib import db
+con = db.conn()
+seen = con.execute('SELECT value FROM pt02_business WHERE id=7').fetchone()[0]
+con.execute("UPDATE pt02_business SET value='after' WHERE id=7")
+print(json.dumps({'seen': seen, 'version': con.execute('PRAGMA user_version').fetchone()[0]}))
+db.close_local()
+""")
+    assert result == {"seen": "before", "version": 121}
+    with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as observed:
+        assert observed.execute("SELECT value FROM pt02_business WHERE id=7").fetchone() == ("after",)
+
+
+def test_cached_consumer_rechecks_version_before_the_next_unit(tmp_path):
+    path = tmp_path / "cached.sqlite"
+    con = _fresh(path)
+    con.close()
+    result = _consumer_process(path, r"""
+import json, os, sqlite3
+from lib import db
+first = db.conn()
+with sqlite3.connect(os.environ['CLAUDE_PWA_DB']) as foreign:
+    foreign.execute('PRAGMA user_version=122')
+try:
+    db.conn()
+except Exception as exc:
+    result = {'refused': type(exc).__name__}
+else:
+    result = {'accepted': True}
+finally:
+    db.close_local()
+print(json.dumps(result))
+""")
+    assert result == {"refused": "SchemaUnsupported"}
+    with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as observed:
+        assert observed.execute("PRAGMA user_version").fetchone()[0] == 122
+
+
+def test_joined_consumer_does_not_invalidate_its_callers_transaction(tmp_path):
+    path = tmp_path / "joined.sqlite"
+    con = _fresh(path)
+    con.close()
+    result = _consumer_process(path, r"""
+import json
+from lib import db
+con = db.conn()
+con.execute('BEGIN IMMEDIATE')
+con.execute('PRAGMA user_version=122')
+try:
+    same = db.conn()
+    result = {'same_connection': same is con, 'in_transaction': con.in_transaction}
+finally:
+    con.rollback()
+db.close_local()
+print(json.dumps(result))
+""")
+    assert result == {"same_connection": True, "in_transaction": True}
+    with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as observed:
+        assert observed.execute("PRAGMA user_version").fetchone()[0] == 121
