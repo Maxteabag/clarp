@@ -34,7 +34,7 @@ def _turn(*, agent="a", trace="t", outcome=None, ended=False, observed=True):
     if observed:
         db.conn().execute(
             "INSERT INTO state_log(agent_id,kind,ts,detail) VALUES (?,'thinking',?,?)",
-            (agent, now, json.dumps({"trace_id": trace})))
+            (agent, now, json.dumps({"trace_id": trace, "source": "pwa", "dispatch": "claude"})))
     return turn_id
 
 
@@ -137,12 +137,14 @@ def test_missing_or_foreign_turn_and_final_receipts_are_unchanged():
         "SELECT * FROM queued_turns ORDER BY queue_seq")] == before
 
 
-def test_open_retry_outranks_an_older_settled_attempt():
+def test_unattributed_open_retry_is_protected_until_its_later_settlement():
     _receipt()
     _turn(outcome="failed")
     active = _turn()
+    before = _stored("q")
     _tick()
-    assert turn_queue.status("q") == "started"
+    assert _stored("q") == before  # unbound same-trace observations cannot name this attempt
+    assert turn_queue.pending_for_dispatch() == []
     db.conn().execute("UPDATE turns SET ended_at=?,settled_at=?,outcome='completed' WHERE turn_id=?",
                       (db.now_ms(), db.now_ms(), active))
     _tick()
@@ -201,7 +203,7 @@ def test_explicit_notstarted_turn_stays_retryable_until_real_same_trace_attempt(
     turn_id = turn_lifecycle.open_turn(
         agent_id="a", source="pwa", trace_id="t", synthesize_audio=False)
     assert db.conn().execute("SELECT settled_at FROM turns WHERE turn_id=?", (turn_id,)).fetchone()[0] is None
-    agents.record_unlaunched_trace("a", "t")
+    agents.record_unlaunched_trace("a", "t", turn_id=turn_id)
     failed = db.conn().execute(
         "SELECT settled_at,outcome FROM turns WHERE turn_id=?", (turn_id,)).fetchone()
     assert failed["settled_at"] is not None and failed["outcome"] == "failed"
@@ -223,9 +225,14 @@ def test_explicit_notstarted_turn_stays_retryable_until_real_same_trace_attempt(
     assert turn_queue.status("q") == "done"
 
 
-def test_bare_turn_is_uncertain_not_consumed_or_new_replay_permission():
+@pytest.mark.parametrize("generic_state", [False, True])
+def test_bare_turn_is_uncertain_not_consumed_or_new_replay_permission(generic_state):
     _receipt()
     _turn(observed=False)
+    if generic_state:
+        db.conn().execute(
+            "INSERT INTO state_log(agent_id,kind,ts,detail) VALUES ('a','thinking',?,?)",
+            (db.now_ms(), json.dumps({"trace_id": "t"})))
     before = _stored("q")
     _tick()
     assert _stored("q") == before
@@ -351,13 +358,15 @@ def test_latest_ended_only_attempt_and_tied_settlements_use_deterministic_order(
     db.conn().execute("UPDATE turns SET ended_at=?, outcome=? WHERE turn_id=?",
                       (db.now_ms()+1, stale_outcome, ended))
     _tick()
-    assert turn_queue.status("q") == "ended"
+    # A stale FAILED outcome plus unbound multi-attempt observations is not
+    # positive execution proof for that ended attempt; preserve its payload.
+    assert turn_queue.status("q") == ("queued" if stale_outcome == "failed" else "ended")
     _receipt("tie", trace="tie")
     first = _turn(trace="tie", outcome="completed")
-    second = _turn(trace="tie", outcome="failed")
+    second = _turn(trace="tie", outcome="interrupted")
     db.conn().execute("UPDATE turns SET settled_at=123 WHERE turn_id IN (?,?)", (first, second))
     _tick()
-    assert turn_queue.status("tie") == "failed"
+    assert turn_queue.status("tie") == "interrupted"
 
 
 @pytest.mark.parametrize("site,initial,expected", [
@@ -423,7 +432,7 @@ def test_opened_but_explicitly_unlaunched_work_uses_existing_recovery_once(tmp_p
     turn_id = turn_lifecycle.open_turn(agent_id=agent, source="pwa", trace_id="retry-trace",
                                        synthesize_audio=False)
     assert db.conn().execute("SELECT settled_at FROM turns WHERE turn_id=?", (turn_id,)).fetchone()[0] is None
-    agents.record_unlaunched_trace(agent, "retry-trace")
+    agents.record_unlaunched_trace(agent, "retry-trace", turn_id=turn_id)
     failed = db.conn().execute(
         "SELECT settled_at,outcome FROM turns WHERE turn_id=?", (turn_id,)).fetchone()
     assert failed["settled_at"] is not None and failed["outcome"] == "failed"
