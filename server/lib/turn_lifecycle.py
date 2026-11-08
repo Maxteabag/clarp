@@ -178,7 +178,7 @@ _ORIGIN_CARRY_WINDOW_MS = 120_000
 
 
 def _record_outcome(agent_id: str, event: str, kind: str, detail: dict[str, Any] | None,
-                ts: int) -> str | None:
+                ts: int, *, unlaunched_turn_id: int | None = None) -> str | None:
     """Record how the agent's current turn ended; the first terminal change
     wins. Returns the settled trace id (then its rows are re-stamped)."""
     from .message_turns import outcome_for
@@ -188,7 +188,16 @@ def _record_outcome(agent_id: str, event: str, kind: str, detail: dict[str, Any]
     database = conn()
     trace = str((detail or {}).get("trace_id") or "")
     row = None
-    if trace:
+    if unlaunched_turn_id is not None:
+        if event != TurnEvent.UNLAUNCHED or unlaunched_turn_id <= 0:
+            return None
+        row = database.execute(
+            """SELECT turn_id,trace_id FROM turns WHERE turn_id=? AND agent_id=?
+                 AND trace_id=? AND settled_at IS NULL""",
+            (unlaunched_turn_id, agent_id, trace)).fetchone()
+        if row is None:
+            return None
+    elif trace:
         row = database.execute(
             """SELECT turn_id, trace_id FROM turns WHERE agent_id = ? AND trace_id = ?
                   AND settled_at IS NULL ORDER BY started_at DESC LIMIT 1""",
@@ -206,8 +215,35 @@ def _record_outcome(agent_id: str, event: str, kind: str, detail: dict[str, Any]
     return str(row["trace_id"] or "")
 
 
+def _unlaunched_write_detail(database, agent_id: str, event: str, detail):
+    """Bind opt-in UNLAUNCHED to its original attempt under the existing writer.
+
+    Zero is an INTERNAL request for an unknown attempt, never a stored key.
+    A generic transition without this request retains its existing behaviour.
+    """
+    key = "dispatch_not_started_turn_id"
+    if event != TurnEvent.UNLAUNCHED or not isinstance(detail, dict) or key not in detail:
+        return detail, None
+    stored = dict(detail)
+    requested = stored.pop(key)
+    if type(requested) is not int or not 1 <= requested <= 9223372036854775807:
+        return stored, 0
+    trace = str(detail.get("trace_id") or "")
+    own = database.execute(
+        """SELECT 1 FROM turns WHERE turn_id=? AND agent_id=? AND trace_id=?
+             AND settled_at IS NULL AND NOT EXISTS (
+                 SELECT 1 FROM turns newer WHERE newer.agent_id=? AND newer.trace_id=?
+                   AND newer.turn_id>?)""",
+        (requested, agent_id, trace, agent_id, trace, requested)).fetchone()
+    if own is None:
+        return stored, 0
+    stored[key] = requested
+    return stored, requested
+
+
 def _settle_turn(agent_id: str, event: str, target: str,
-                 detail: dict[str, Any] | None, stamp: int) -> None:
+                 detail: dict[str, Any] | None, stamp: int, *,
+                 unlaunched_turn_id: int | None = None) -> None:
     """A terminal change records the turn's outcome and re-stamps its /log
     rows (lib.message_turns); bookkeeping never fails a transition. Used
     inside a caller's transaction; a transition of its own writes the outcome
@@ -215,8 +251,11 @@ def _settle_turn(agent_id: str, event: str, target: str,
     if target not in TERMINAL:
         return
     try:
-        trace = _record_outcome(agent_id, event, target, detail, stamp)
+        trace = _record_outcome(agent_id, event, target, detail, stamp,
+                                unlaunched_turn_id=unlaunched_turn_id)
     except Exception as exc:  # noqa: BLE001
+        if unlaunched_turn_id is not None:
+            raise  # the opt-in proof and its settlement must not partially commit
         log_exception("turnSettleFail", exc, detail=f"agent={agent_id} event={event}")
         return
     _after_settle(agent_id, event, target, trace)
@@ -430,12 +469,14 @@ class TurnStateMachine:
                     return Transition(agent_id=agent_id, event=event, from_state=from_state,
                                       to_state=target, ts=stamp, detail=detail, forced=force)
             else:
+                stored_detail, unlaunched_target = _unlaunched_write_detail(conn(), agent_id, event, detail)
                 cursor = conn().execute(
                     """INSERT INTO state_log (agent_id, runtime_id, ts, kind, detail)
                        VALUES (?, ?, ?, ?, ?)""",
                     (agent_id, runtime_id, stamp, target,
-                     json.dumps(detail) if detail else None))
-                _settle_turn(agent_id, event, target, detail, stamp)
+                     json.dumps(stored_detail) if stored_detail else None))
+                _settle_turn(agent_id, event, target, stored_detail, stamp,
+                             unlaunched_turn_id=unlaunched_target)
         from . import live_hub
         live_hub.observe_transition(agent_id, event, target,
                                     {**(detail or {}), "_state_id": int(cursor.lastrowid or 0)})
@@ -507,12 +548,14 @@ class TurnStateMachine:
                 if not rows["foreign_row"]:
                     stamp = max(stamp, int(rows["newest"] or 0),
                                 now_ms() if recheck is not None else 0)
+            stored_detail, unlaunched_target = _unlaunched_write_detail(database, agent_id, event, detail)
             cursor = database.execute(
                 """INSERT INTO state_log (agent_id, runtime_id, ts, kind, detail)
                    VALUES (?, ?, ?, ?, ?)""",
                 (agent_id, runtime_id, stamp, target,
-                 json.dumps(detail) if detail else None))
-            trace = _record_outcome(agent_id, event, target, detail, stamp)
+                 json.dumps(stored_detail) if stored_detail else None))
+            trace = _record_outcome(agent_id, event, target, stored_detail, stamp,
+                                    unlaunched_turn_id=unlaunched_target)
             database.execute("COMMIT")
         except BaseException:
             if database.in_transaction:
@@ -811,7 +854,7 @@ class TurnStateMachine:
                 ORDER BY t.turn_id""").fetchall()
         return [dict(row) for row in rows]
 
-    def record_unlaunched(self, agent_id: str, trace_id: str) -> Transition:
+    def record_unlaunched(self, agent_id: str, trace_id: str, *, turn_id: int | None = None) -> Transition:
         """Historical failure receipt, ordered before any newer turn's state.
 
         Recording a late launch failure at wall-clock now could replace the
@@ -825,6 +868,7 @@ class TurnStateMachine:
         return self.transition(
             agent_id, TurnEvent.UNLAUNCHED,
             {"trace_id": trace_id, "dispatch_not_started": True,
+             "dispatch_not_started_turn_id": turn_id if turn_id is not None else 0,
              "message": "Message saved; backend did not start. Retry is safe."},
             force=True, ts=ts)
 
@@ -954,8 +998,8 @@ def enable_latest_turn_audio(agent_id: str) -> None:
     MACHINE.enable_latest_turn_audio(agent_id)
 
 
-def record_unlaunched(agent_id: str, trace_id: str) -> Transition:
-    return MACHINE.record_unlaunched(agent_id, trace_id)
+def record_unlaunched(agent_id: str, trace_id: str, *, turn_id: int | None = None) -> Transition:
+    return MACHINE.record_unlaunched(agent_id, trace_id, turn_id=turn_id)
 
 
 def illegal_counts() -> dict[tuple[str, str], int]:

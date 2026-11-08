@@ -17,7 +17,7 @@ from .prompt_admissions import PromptAdmission
 from . import prompt_admissions
 from .send_service import SendTarget, resolve_send_target
 from .turn_dispatch_state import _SLOTS, _RECOVERY_RESUMING_ORIGINS, _ADMISSION
-from .turn_command import DispatchResult, _with_delivery, _resolve_llm, _TurnSpec, _pause_exempt_on_arrival, DispatchError, _refuse_oversized, JanitorDispatchError, UNCONFIRMED_DELIVERY, GoalWakeDispatchError, _validate_goal_dispatch, _janitor_run_active, _admission_facts, _admit, _UNLAUNCHED_MARKER_RETRY_SEC, _unlaunched_marked, _ADMISSION_REFUSED, _is_call_opening, _backend_invoked, DispatchCommand, _serialize_client_retry
+from .turn_command import DispatchResult, _with_delivery, _resolve_llm, _TurnSpec, _pause_exempt_on_arrival, DispatchError, _refuse_oversized, JanitorDispatchError, UNCONFIRMED_DELIVERY, GoalWakeDispatchError, _validate_goal_dispatch, _janitor_run_active, _admission_facts, _admit, _UNLAUNCHED_MARKER_RETRY_SEC, _unlaunched_marked, _ADMISSION_REFUSED, _is_call_opening, _backend_invoked, DispatchCommand, _serialize_client_retry, _PreInvokeFailure, _mark_preinvoke_failure, _preinvoke_failure, _QueuedReceiptUnavailable
 from .turn_stop import _existing_cwd
 
 
@@ -264,6 +264,12 @@ class AdmissionMixin:
         # transaction, preserving client_msg_id idempotency even if concurrent
         # retries switch between normal and queue delivery.
         if skip_admission:
+            if spec.queue_id and not turn_queue.dispatchable(
+                    spec.queue_id, agent_id=spec.agent_id, trace_id=spec.trace_id,
+                    session=spec.session, client_msg_id=spec.client_msg_id,
+                    origin=spec.origin, sender_agent_id=spec.sender_agent_id,
+                    prompt_admission_id=spec.prompt_admission_id):
+                raise _QueuedReceiptUnavailable(409, "queued message is no longer dispatchable")
             admission = True
         else:
             # Lock order: _TURN_LOCK is taken before SQLite writes everywhere
@@ -431,6 +437,7 @@ class AdmissionMixin:
                     queue_depth=queue_state["count"],
                     queue_revision=queue_state["revision"])
         turn_id = 0
+        launch_entered = False
         try:
             turn_id = turn_lifecycle.open_turn(
                 agent_id=agent_id, source="pwa", trace_id=trace_id,
@@ -441,13 +448,16 @@ class AdmissionMixin:
                 spec = replace(spec, s_open=turn_lifecycle.state_generation(agent_id))
             agents_db.set_trace_for_session(session, trace_id)
             try:
+                launch_entered = True
                 spawned = self._spawn_attempt(spec, attempt=1)
                 if spawned is _ADMISSION_REFUSED:
                     # The final call-open check refused it and settled the turn: never spawned,
                     # and not superseded either (its receipt stands).
                     return DispatchResult(session=session, backend=backend)
                 if not spawned:
-                    raise DispatchError(409, "turn superseded before spawn")
+                    unsent = DispatchError(409, "turn superseded before spawn")
+                    _mark_preinvoke_failure(unsent, agent_id=spec.agent_id, trace_id=spec.trace_id)
+                    raise unsent
             except JanitorDispatchError:
                 self._discard_fenced_janitor(spec)
                 raise
@@ -479,6 +489,8 @@ class AdmissionMixin:
         except (DispatchError, JanitorDispatchError):
             raise
         except BaseException as e:
+            if not launch_entered:
+                _mark_preinvoke_failure(e, agent_id=spec.agent_id, trace_id=spec.trace_id)
             # Anything else (2026-09-20: sqlite "database is locked" under a
             # long transcript import) used to leave a phantom in-flight slot
             # with an open turn row and no process. Codex is steerable, so
@@ -517,14 +529,21 @@ class AdmissionMixin:
             log_exception("callOpenReleaseFail", exc, detail=spec.session)
 
     def _abandon_unlaunched(self, spec: _TurnSpec, turn_id: int, error: BaseException) -> None:
-        """A turn that was admitted and claimed but never reached the backend."""
+        """Release an abandoned slot; negative proof requires a known phase."""
         _SLOTS.release(spec.agent_id, spec.trace_id)
         log_exception("spawnAbandonedUnlaunched", error, detail=spec.session)
         eventlog.emit("server", "spawnAbandonedUnlaunched", context=spec.context,
                       detail={"error": str(error)[:200]})
+        proof = _preinvoke_failure(error)
+        if proof is None or (proof.agent_id, proof.trace_id) != (spec.agent_id, spec.trace_id):
+            log("unlaunchedMarkerDeferred", f"agent={spec.agent_id} trace={spec.trace_id} reason=phase_unknown")
+            return
+        known = turn_id if type(turn_id) is int and turn_id > 0 else None
+        _mark_preinvoke_failure(error, agent_id=spec.agent_id, trace_id=spec.trace_id, turn_id=known)
+        proof = _preinvoke_failure(error)
         marked = False
         try:
-            turn_lifecycle.record_unlaunched(spec.agent_id, spec.trace_id)
+            turn_lifecycle.record_unlaunched(spec.agent_id, spec.trace_id, turn_id=known)
             marked = True
             if turn_id:
                 turn_lifecycle.close_turn(turn_id)
@@ -533,9 +552,16 @@ class AdmissionMixin:
             if not marked:
                 # As before, a failed marker skips the close: no second write
                 # waits before the 500. The marker is retried in the background.
-                self._retry_unlaunched_marker(spec, len(_UNLAUNCHED_MARKER_RETRY_SEC))
+                try:
+                    self._retry_unlaunched_marker(
+                        spec, len(_UNLAUNCHED_MARKER_RETRY_SEC), turn_id=known, proof=proof)
+                except Exception as scheduling_error:
+                    # Preserve the original launch failure even if proof capture fails.
+                    BaseException.add_note(error, f"unlaunchedRetryCaptureFailed agent={spec.agent_id} trace={spec.trace_id} type={type(scheduling_error).__name__}")
 
-    def _retry_unlaunched_marker(self, spec: _TurnSpec, attempts_left: int) -> None:
+    def _retry_unlaunched_marker(self, spec: _TurnSpec, attempts_left: int, *,
+                                 turn_id: int | None = None, frontier: int | None = None,
+                                 proof: _PreInvokeFailure | None = None) -> None:
         """The 'never started' marker is what lets the client's same-id resend
         launch this message once; without it the resend is refused for ever
         (CLIENT-SEND-500). Write it again in the background, never delaying
@@ -543,15 +569,43 @@ class AdmissionMixin:
         committed before the error (CLIENT-SEND-500, reviewer B)."""
         if attempts_left <= 0:
             return
+        if (not isinstance(proof, _PreInvokeFailure)
+                or (proof.agent_id, proof.trace_id) != (spec.agent_id, spec.trace_id)):
+            log("unlaunchedMarkerDeferred", f"agent={spec.agent_id} trace={spec.trace_id} reason=phase_unknown")
+            return
+        if turn_id != proof.turn_id:
+            log("unlaunchedMarkerDeferred", f"agent={spec.agent_id} trace={spec.trace_id} reason=attempt_mismatch")
+            return
+        if frontier is None:
+            # A read fault is not an empty frontier. Let the owner preserve its primary error.
+            frontier = int(db.conn().execute(
+                "SELECT COALESCE(MAX(turn_id),0) FROM turns WHERE agent_id=? AND trace_id=?",
+                (spec.agent_id, spec.trace_id)).fetchone()[0])
+        original_turn = turn_id if type(turn_id) is int and turn_id > 0 else None
+        captured_frontier = frontier
         delay = _UNLAUNCHED_MARKER_RETRY_SEC[-attempts_left]
 
         def retry() -> None:
             try:
-                if not _unlaunched_marked(spec.agent_id, spec.trace_id):
-                    turn_lifecycle.record_unlaunched(spec.agent_id, spec.trace_id)
+                if original_turn is not None:
+                    marked = db.conn().execute(
+                        """SELECT 1 FROM state_log WHERE agent_id=?
+                             AND json_extract(detail,'$.trace_id')=?
+                             AND json_extract(detail,'$.dispatch_not_started')
+                             AND json_type(detail,'$.dispatch_not_started_turn_id')='integer'
+                             AND json_extract(detail,'$.dispatch_not_started_turn_id')=?
+                             AND COALESCE(json_extract(detail,'$.reason'),'')<>'update_handoff' LIMIT 1""",
+                        (spec.agent_id, spec.trace_id, original_turn)).fetchone() is not None
+                else:
+                    marked = _unlaunched_marked(spec.agent_id, spec.trace_id)
+                if not marked:
+                    eligible = original_turn if original_turn is not None and original_turn <= captured_frontier else None
+                    turn_lifecycle.record_unlaunched(spec.agent_id, spec.trace_id, turn_id=eligible)
             except Exception as error:  # noqa: BLE001 - logged; one more try if left
                 log_exception("spawnAbandonedMarkerFail", error, detail=spec.session)
-                self._retry_unlaunched_marker(spec, attempts_left - 1)
+                self._retry_unlaunched_marker(
+                    spec, attempts_left - 1, turn_id=original_turn,
+                    frontier=captured_frontier, proof=proof)
         try:
             self.retry_scheduler(delay, retry)
         except Exception as error:  # noqa: BLE001 - never a second abandonment

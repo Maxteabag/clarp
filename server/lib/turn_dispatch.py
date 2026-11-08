@@ -80,7 +80,7 @@ from .turn_command import (  # noqa: E402,F401  (split_apply: turn-dispatch-modu
     _default_retry_scheduler, OPENING_NOT_CONFIRMED, OPENING_WITHDRAWN, _AdmissionRefused,
     _ADMISSION_REFUSED, _is_call_opening, _mark_backend_invoked, _backend_invoked,
     _with_team_context, _with_delivery_context, _REQUEST_LOCKS, _REQUEST_LOCKS_GUARD,
-    DispatchCommand, _serialize_client_retry,
+    DispatchCommand, _serialize_client_retry, _mark_preinvoke_failure,
 )
 _DELIVERY_STREAM = None   # the turn owner's stream (set by TurnDispatchService)
 
@@ -404,166 +404,173 @@ class TurnDispatchService(AdmissionMixin, LauncherMixin, HandoffMixin, ClaimMixi
         timer thread and just mark the agent INTERRUPTED on failure.
         _ADMISSION_REFUSED only when the final call-open check refused it; False
         when a retry lost its slot before its handoff."""
-        from . import task_goal_recovery, task_plans
-        if spec.origin == "heartbeat" and task_plans.recovery_owns_agent(spec.agent_id):
-            raise DispatchError(409, "Durable goal owns continuation")
-        _validate_goal_dispatch(
-            agents_db.get_by_agent_id(spec.agent_id) or {}, spec.client_msg_id,
-            native_session_id=spec.backend_session_id)
-        _validate_janitor_target(
-            agents_db.get_by_agent_id(spec.agent_id) or {},
-            spec.janitor_run_id, spec.trace_id)
-        if (spec.origin == "leader_tick" and not admission_policy.leader_nudge_allowed(
-                spec.agent_id, team_store.list_teams())):
-            raise DispatchError(409, admission_policy.LEADER_NUDGE_DISABLED)
-        digest, inbox_ids = team_store.pending_digest(spec.agent_id)
-        spec = replace(spec, team_digest=digest, team_inbox_ids=tuple(inbox_ids),
-                       team_protocol=team_store.team_protocol_instruction(spec.agent_id, turn_origin=spec.origin))
-        # Re-arm the Claude pwa-voice source marker for THIS attempt, with a
-        # fresh timestamp. The marker is single-use (the UserPromptSubmit hook
-        # consumes it), so without re-writing here a retry — or a redispatch
-        # after preempting an in-flight turn — would fire its hook with no
-        # marker, tag the turn `local`, and the Stop hook would skip TTS.
-        backend = backends.by_id(spec.backend)
-        backend.arm_source_marker(spec.session, spec.trace_id, spec.synthesize_audio,
-                                  home=self.home, now=self.now)
-        # Mutable across this attempt's callbacks: did system.init land?
-        # A retry of a never-initialised new session must keep --session-id.
-        state = {"saw_init": False, "backend_session_id": spec.backend_session_id, "spawn_ready": threading.Event()}
-        account_attempt = None
-        if (backend.account_pool()
-                and (account_selector(spec.backend) or account_failover(spec.backend).recovering)):
-            coordinator = account_failover(spec.backend)
+        invocation_started = False
+        try:
+            from . import task_goal_recovery, task_plans
+            if spec.origin == "heartbeat" and task_plans.recovery_owns_agent(spec.agent_id):
+                raise DispatchError(409, "Durable goal owns continuation")
+            _validate_goal_dispatch(
+                agents_db.get_by_agent_id(spec.agent_id) or {}, spec.client_msg_id,
+                native_session_id=spec.backend_session_id)
+            _validate_janitor_target(
+                agents_db.get_by_agent_id(spec.agent_id) or {},
+                spec.janitor_run_id, spec.trace_id)
+            if (spec.origin == "leader_tick" and not admission_policy.leader_nudge_allowed(
+                    spec.agent_id, team_store.list_teams())):
+                raise DispatchError(409, admission_policy.LEADER_NUDGE_DISABLED)
+            digest, inbox_ids = team_store.pending_digest(spec.agent_id)
+            spec = replace(spec, team_digest=digest, team_inbox_ids=tuple(inbox_ids),
+                           team_protocol=team_store.team_protocol_instruction(spec.agent_id, turn_origin=spec.origin))
+            # Re-arm the Claude pwa-voice source marker for THIS attempt, with a
+            # fresh timestamp. The marker is single-use (the UserPromptSubmit hook
+            # consumes it), so without re-writing here a retry — or a redispatch
+            # after preempting an in-flight turn — would fire its hook with no
+            # marker, tag the turn `local`, and the Stop hook would skip TTS.
+            backend = backends.by_id(spec.backend)
+            backend.arm_source_marker(spec.session, spec.trace_id, spec.synthesize_audio,
+                                      home=self.home, now=self.now)
+            # Mutable across this attempt's callbacks: did system.init land?
+            # A retry of a never-initialised new session must keep --session-id.
+            state = {"saw_init": False, "backend_session_id": spec.backend_session_id, "spawn_ready": threading.Event()}
+            account_attempt = None
+            if (backend.account_pool()
+                    and (account_selector(spec.backend) or account_failover(spec.backend).recovering)):
+                coordinator = account_failover(spec.backend)
 
-            def pause():
-                # Called with the coordinator's lock held (and maybe
-                # _TURN_LOCK): mark the slot spawning and record the wait
-                # only once both are released.
-                defer_on(coordinator.lock, lambda: self._pause_for_account(spec))
+                def pause():
+                    # Called with the coordinator's lock held (and maybe
+                    # _TURN_LOCK): mark the slot spawning and record the wait
+                    # only once both are released.
+                    defer_on(coordinator.lock, lambda: self._pause_for_account(spec))
 
-            account_attempt = FailoverAttempt(
-                agent_id=spec.agent_id, trace_id=spec.trace_id, model=spec.model,
-                state=state, owned=lambda: (
-                    # Lock-free: the coordinator calls this under its own lock
-                    # and must never wait for _TURN_LOCK there.
-                    _INFLIGHT.get(spec.agent_id) == spec.trace_id
-                    and not self._superseded(spec, locked=False)), pause=pause,
-                resume=lambda: defer_on(
-                    coordinator.lock,
-                    lambda: self._resume_after_account_switch(spec, attempt, state)),
-                work=(spec, attempt))
-            if coordinator.register(account_attempt):
-                return
-        on_init, on_result, on_error = self._attempt_callbacks(spec, attempt, state)
-        def run_if_owned(action) -> bool:
-            with _TURN_LOCK:
-                if _INFLIGHT.get(spec.agent_id) != spec.trace_id:
-                    return False
+                account_attempt = FailoverAttempt(
+                    agent_id=spec.agent_id, trace_id=spec.trace_id, model=spec.model,
+                    state=state, owned=lambda: (
+                        # Lock-free: the coordinator calls this under its own lock
+                        # and must never wait for _TURN_LOCK there.
+                        _INFLIGHT.get(spec.agent_id) == spec.trace_id
+                        and not self._superseded(spec, locked=False)), pause=pause,
+                    resume=lambda: defer_on(
+                        coordinator.lock,
+                        lambda: self._resume_after_account_switch(spec, attempt, state)),
+                    work=(spec, attempt))
+                if coordinator.register(account_attempt):
+                    return
+            on_init, on_result, on_error = self._attempt_callbacks(spec, attempt, state)
+            def run_if_owned(action) -> bool:
+                with _TURN_LOCK:
+                    if _INFLIGHT.get(spec.agent_id) != spec.trace_id:
+                        return False
+                    try:
+                        _validate_janitor_target(
+                            agents_db.get_by_agent_id(spec.agent_id) or {},
+                            spec.janitor_run_id, spec.trace_id)
+                    except JanitorDispatchError:
+                        return False
+                    try:
+                        # The conversation bound at init: a backend that continued a
+                        # lost conversation in a new one carried the goal over to it.
+                        task_goal_recovery.validate_dispatch(
+                            agents_db.get_by_agent_id(spec.agent_id) or {}, spec.client_msg_id,
+                            native_session_id=state.get("backend_session_id")
+                            or spec.backend_session_id)
+                    except ValueError:
+                        return False
+                    action()
+                    return True
+            try:
                 try:
+                    prompt = _with_team_context(
+                        _with_delivery_context(
+                            spec.recovery_text or spec.text, unheard_audio=spec.unheard_audio),
+                        digest=spec.team_digest, protocol=spec.team_protocol)
+                    if spec.recovery_text:
+                        # The outer envelope is filtered by the native transcript
+                        # importer, including when team/delivery context is present.
+                        prompt = f"<clarp-account-recovery>\n{prompt}\n</clarp-account-recovery>"
                     _validate_janitor_target(
                         agents_db.get_by_agent_id(spec.agent_id) or {},
                         spec.janitor_run_id, spec.trace_id)
-                except JanitorDispatchError:
-                    return False
-                try:
-                    # The conversation bound at init: a backend that continued a
-                    # lost conversation in a new one carried the goal over to it.
-                    task_goal_recovery.validate_dispatch(
-                        agents_db.get_by_agent_id(spec.agent_id) or {}, spec.client_msg_id,
-                        native_session_id=state.get("backend_session_id")
-                        or spec.backend_session_id)
-                except ValueError:
-                    return False
-                action()
-                return True
-        try:
-            try:
-                prompt = _with_team_context(
-                    _with_delivery_context(
-                        spec.recovery_text or spec.text, unheard_audio=spec.unheard_audio),
-                    digest=spec.team_digest, protocol=spec.team_protocol)
-                if spec.recovery_text:
-                    # The outer envelope is filtered by the native transcript
-                    # importer, including when team/delivery context is present.
-                    prompt = f"<clarp-account-recovery>\n{prompt}\n</clarp-account-recovery>"
-                _validate_janitor_target(
-                    agents_db.get_by_agent_id(spec.agent_id) or {},
-                    spec.janitor_run_id, spec.trace_id)
-                if _is_call_opening(spec) and not self._admit_opening_launch(spec, attempt):
-                    # L2 r3: the final call-open fence re-check, immediately before the flag on
-                    # every launch path. A breach here is proven unsent (withdrawn, cancelled);
-                    # an unprovable identity ends unknown. This NARROWS, it does not close, the
-                    # window: a write after this check and before the provider handoff still
-                    # launches once. The flag below is possibly-sent bookkeeping, not delivery.
-                    return _ADMISSION_REFUSED
-                if attempt == 1:
-                    # Later attempts follow a handoff already recorded here.
-                    _record_launch_attempt(spec)
-                elif not self._still_owns(spec):
-                    # A retry runs outside the runtime's admission mutex: a Stop
-                    # may have taken the slot while it was prepared (TP-N1).
-                    log("spawnAbandoned",
-                        f"agent={spec.agent_id} trace={spec.trace_id or '∅'} — "
-                        "ownership lost before the retry's handoff")
-                    return False
-                state["spawn_started"] = True
-                handle = self.backends.spawn_turn(
-                    spec.backend,
-                    text=prompt,
-                    cwd=spec.cwd,
-                    backend_session_id=spec.backend_session_id,
-                    is_new_session=spec.is_new_session,
-                    session=spec.session,
-                    agent_id=spec.agent_id,
-                    on_session_init=on_init,
-                    on_result=on_result,
-                    on_error=on_error,
-                    trace_id=spec.trace_id,
-                    stream=self.ctx.stream,
-                    voice_preamble=spec.synthesize_audio,
-                    synthesize_audio=spec.synthesize_audio,
-                    model=spec.model,
-                    effort=spec.effort,
-                    run_if_owned=run_if_owned,
-                )
-                state["handle"] = handle
-                if handle is not None and not self._still_owns(spec):
-                    # A Stop during the handoff found no handle to interrupt yet;
-                    # one after this check finds it (TP-N1).
-                    self._interrupt_unowned(spec, handle)
-                team_store.mark_injected(spec.agent_id, spec.team_inbox_ids)
-                if account_attempt is not None:
-                    account_attempt.handle = handle
-                # N4 A: the hint comes after the handoff AND after the launch's
-                # own bookkeeping (handle, injected team inbox) is recorded.
-                if attempt == 1 and launch_receipts.eligible(
-                        origin=spec.origin, client_msg_id=spec.client_msg_id,
-                        call_opening=_is_call_opening(spec)):
-                    _announce_delivery(spec.trace_id)
-            except (JanitorDispatchError, _LaunchReceiptUnrecorded, _LaunchReceiptRefused):
-                raise
-            except FileNotFoundError as e:
-                if attempt == 1:
-                    log("backendMissing", str(e))
-                    raise DispatchError(500, str(e)) from e
-                log_exception("retrySpawnMissing", e, detail=spec.session)
-                self._mark_interrupted(spec, error_classify.CONNECTION, str(e),
-                                       attempts=attempt)
-            except Exception as e:
-                if attempt == 1:
-                    log_exception("backendSpawnFail", e, detail=spec.session)
-                    raise DispatchError(500, f"{spec.backend} spawn failed: {e}") from e
-                log_exception("retrySpawnFail", e, detail=spec.session)
-                self._mark_interrupted(spec, error_classify.CONNECTION, str(e),
-                                       attempts=attempt)
+                    if _is_call_opening(spec) and not self._admit_opening_launch(spec, attempt):
+                        # L2 r3: the final call-open fence re-check, immediately before the flag on
+                        # every launch path. A breach here is proven unsent (withdrawn, cancelled);
+                        # an unprovable identity ends unknown. This NARROWS, it does not close, the
+                        # window: a write after this check and before the provider handoff still
+                        # launches once. The flag below is possibly-sent bookkeeping, not delivery.
+                        return _ADMISSION_REFUSED
+                    if attempt == 1:
+                        # Later attempts follow a handoff already recorded here.
+                        _record_launch_attempt(spec)
+                    elif not self._still_owns(spec):
+                        # A retry runs outside the runtime's admission mutex: a Stop
+                        # may have taken the slot while it was prepared (TP-N1).
+                        log("spawnAbandoned",
+                            f"agent={spec.agent_id} trace={spec.trace_id or '∅'} — "
+                            "ownership lost before the retry's handoff")
+                        return False
+                    state["spawn_started"] = True
+                    invocation_started = True
+                    handle = self.backends.spawn_turn(
+                        spec.backend,
+                        text=prompt,
+                        cwd=spec.cwd,
+                        backend_session_id=spec.backend_session_id,
+                        is_new_session=spec.is_new_session,
+                        session=spec.session,
+                        agent_id=spec.agent_id,
+                        on_session_init=on_init,
+                        on_result=on_result,
+                        on_error=on_error,
+                        trace_id=spec.trace_id,
+                        stream=self.ctx.stream,
+                        voice_preamble=spec.synthesize_audio,
+                        synthesize_audio=spec.synthesize_audio,
+                        model=spec.model,
+                        effort=spec.effort,
+                        run_if_owned=run_if_owned,
+                    )
+                    state["handle"] = handle
+                    if handle is not None and not self._still_owns(spec):
+                        # A Stop during the handoff found no handle to interrupt yet;
+                        # one after this check finds it (TP-N1).
+                        self._interrupt_unowned(spec, handle)
+                    team_store.mark_injected(spec.agent_id, spec.team_inbox_ids)
+                    if account_attempt is not None:
+                        account_attempt.handle = handle
+                    # N4 A: the hint comes after the handoff AND after the launch's
+                    # own bookkeeping (handle, injected team inbox) is recorded.
+                    if attempt == 1 and launch_receipts.eligible(
+                            origin=spec.origin, client_msg_id=spec.client_msg_id,
+                            call_opening=_is_call_opening(spec)):
+                        _announce_delivery(spec.trace_id)
+                except (JanitorDispatchError, _LaunchReceiptUnrecorded, _LaunchReceiptRefused):
+                    raise
+                except FileNotFoundError as e:
+                    if attempt == 1:
+                        log("backendMissing", str(e))
+                        raise DispatchError(500, str(e)) from e
+                    log_exception("retrySpawnMissing", e, detail=spec.session)
+                    self._mark_interrupted(spec, error_classify.CONNECTION, str(e),
+                                           attempts=attempt)
+                except Exception as e:
+                    if attempt == 1:
+                        log_exception("backendSpawnFail", e, detail=spec.session)
+                        raise DispatchError(500, f"{spec.backend} spawn failed: {e}") from e
+                    log_exception("retrySpawnFail", e, detail=spec.session)
+                    self._mark_interrupted(spec, error_classify.CONNECTION, str(e),
+                                           attempts=attempt)
 
-            finally:
-                state["spawn_ready"].set()
-                if account_attempt is not None:
-                    account_attempt.spawned.set()
+                finally:
+                    state["spawn_ready"].set()
+                    if account_attempt is not None:
+                        account_attempt.spawned.set()
+            except BaseException as exc:
+                if state.get("spawn_started"):
+                    _mark_backend_invoked(exc)
+                raise
         except BaseException as exc:
-            if state.get("spawn_started"):
-                _mark_backend_invoked(exc)
+            if not invocation_started:
+                _mark_preinvoke_failure(exc, agent_id=spec.agent_id, trace_id=spec.trace_id)
             raise
 
 

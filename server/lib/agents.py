@@ -825,9 +825,9 @@ def open_turn(*, agent_id: str, source: str, trace_id: str,
         synthesize_audio=synthesize_audio)
 
 
-def record_unlaunched_trace(agent_id: str, trace_id: str) -> None:
-    """Historical failure receipt, ordered before any newer turn's state."""
-    turn_lifecycle.record_unlaunched(agent_id, trace_id)
+def record_unlaunched_trace(agent_id: str, trace_id: str, *, turn_id: int | None = None) -> None:
+    """Historical failure receipt, scoped to the positively known attempt."""
+    turn_lifecycle.record_unlaunched(agent_id, trace_id, turn_id=turn_id)
 
 
 def trace_launch_status(agent_id: str, trace_id: str, *,
@@ -854,12 +854,69 @@ def trace_launch_status(agent_id: str, trace_id: str, *,
         (agent_id, trace_id),
     ).fetchone()
     if row is None:
+        attempt = _receipt_attempt_status(agent_id, trace_id)
+        if attempt is not None:
+            return attempt  # pruned state cannot turn a completed attempt back into pending
         return "retryable" if receipt == "retryable" else "unknown"
     detail = json.loads(row["detail"] or "{}")
     # Administrative transfer is queue-owned, never direct-resend authority.
     if detail.get("reason") == "update_handoff":
         return "observed"
-    return "retryable" if detail.get("dispatch_not_started") else "observed"
+    if detail.get("dispatch_not_started"):
+        attempt = _receipt_attempt_status(agent_id, trace_id)
+        if attempt is None:
+            # A matching PENDING receipt independently proves a pre-open failure.
+            return "retryable" if receipt == "retryable" else "unknown"
+        return attempt
+    return "observed"
+
+
+def _receipt_attempt_status(agent_id: str, trace_id: str) -> str | None:
+    """Durable per-attempt evidence, shared by global retry and queue recovery.
+
+    Completed/interrupted outcomes prove execution. A FAILED negative needs
+    its producer's exact attempt key. The post-spawn state signature is
+    attributable only when this trace has exactly one durable attempt;
+    multiple unbound observations remain protected, never guessed current.
+    """
+    database = conn()
+    turn = database.execute(
+        """SELECT turn_id,ended_at,settled_at,outcome FROM turns
+            WHERE agent_id=? AND trace_id=? ORDER BY turn_id DESC LIMIT 1""",
+        (agent_id, trace_id)).fetchone()
+    if turn is None:
+        return None
+    terminal = turn["ended_at"] is not None or turn["settled_at"] is not None
+    if terminal and turn["outcome"] in ("completed", "interrupted"):
+        return "observed"
+    if database.execute(
+            """SELECT 1 FROM turns WHERE agent_id=? AND trace_id=?
+                 AND (settled_at IS NOT NULL OR ended_at IS NOT NULL)
+                 AND outcome IN ('completed','interrupted') LIMIT 1""",
+            (agent_id, trace_id)).fetchone():
+        return "unknown"  # an older execution is not proof about the new payload
+    unique = database.execute(
+        "SELECT 1 FROM turns WHERE agent_id=? AND trace_id=? AND turn_id<>? LIMIT 1",
+        (agent_id, trace_id, turn["turn_id"])).fetchone() is None
+    execution_state = database.execute(
+        """SELECT 1 FROM state_log WHERE agent_id=?
+             AND json_extract(detail,'$.trace_id')=? AND kind='thinking'
+             AND json_extract(detail,'$.source')='pwa'
+             AND json_type(detail,'$.dispatch')='text'
+             AND length(json_extract(detail,'$.dispatch'))>0 LIMIT 1""",
+        (agent_id, trace_id)).fetchone() is not None
+    executed = unique and execution_state
+    negative = database.execute(
+        """SELECT 1 FROM state_log WHERE agent_id=? AND kind='interrupted'
+             AND json_extract(detail,'$.trace_id')=?
+             AND json_extract(detail,'$.dispatch_not_started')=1
+             AND COALESCE(json_extract(detail,'$.reason'),'')<>'update_handoff'
+             AND json_type(detail,'$.dispatch_not_started_turn_id')='integer'
+             AND json_extract(detail,'$.dispatch_not_started_turn_id')=? LIMIT 1""",
+        (agent_id, trace_id, turn["turn_id"])).fetchone() is not None
+    if negative and turn["settled_at"] is not None and turn["outcome"] == "failed":
+        return "unknown" if execution_state else "retryable"
+    return "observed" if executed else "unknown"
 
 
 def close_turn(turn_id: int) -> None:
