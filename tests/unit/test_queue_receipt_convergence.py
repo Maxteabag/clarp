@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import sqlite3
 import threading
+import json
 
 import pytest
 
@@ -22,13 +23,18 @@ def _receipt(queue_id="q", *, agent="a", trace="t", status="queued"):
         db.conn().execute("UPDATE queued_turns SET status=? WHERE queue_id=?", (status, queue_id))
 
 
-def _turn(*, agent="a", trace="t", outcome=None, ended=False):
+def _turn(*, agent="a", trace="t", outcome=None, ended=False, observed=True):
     now = db.now_ms()
-    return db.conn().execute(
+    turn_id = db.conn().execute(
         "INSERT INTO turns(agent_id,source,trace_id,started_at,ended_at,settled_at,outcome) "
         "VALUES (?,'synthetic',?,?,?,?,?)",
         (agent, trace, now, now if ended or outcome else None,
          now if outcome else None, outcome)).lastrowid
+    if observed:
+        db.conn().execute(
+            "INSERT INTO state_log(agent_id,kind,ts,detail) VALUES (?,'thinking',?,?)",
+            (agent, now, json.dumps({"trace_id": trace})))
+    return turn_id
 
 
 def _tick():
@@ -176,3 +182,79 @@ def test_steered_receipt_with_no_own_turn_is_not_bound_to_the_live_agent_turn():
     turn_queue.mark_started("steer")
     assert turn_queue.status("steer") == "started"
     assert turn_queue.pending_counts() == {}
+
+
+def test_explicit_notstarted_turn_stays_retryable_until_real_same_trace_attempt():
+    _receipt()
+    _turn(outcome="failed", observed=False)
+    db.conn().execute(
+        "INSERT INTO state_log(agent_id,kind,ts,detail) VALUES ('a','failed',?,?)",
+        (db.now_ms(), json.dumps({"trace_id": "t", "dispatch_not_started": True})))
+    before = turn_queue.get("q")
+    _tick()
+    assert turn_queue.get("q") == before
+    assert [row["queue_id"] for row in turn_queue.pending_for_dispatch()] == ["q"]
+    _turn(outcome="completed")  # later attempt's positive state supersedes the marker
+    _tick()
+    assert turn_queue.status("q") == "done"
+
+
+def test_bare_turn_is_uncertain_not_consumed_or_new_replay_permission():
+    _receipt()
+    _turn(observed=False)
+    before = turn_queue.get("q")
+    _tick()
+    assert turn_queue.get("q") == before
+    assert turn_queue.claim("q") is None
+    assert turn_queue.pending_for_dispatch() == []
+
+
+def test_start_and_revision_rollback_together_on_revision_failure(monkeypatch):
+    _receipt()
+    before = turn_queue.state("a")
+    def fail(_agent):
+        raise sqlite3.OperationalError("synthetic revision fault")
+    with monkeypatch.context() as patch:
+        patch.setattr(turn_queue, "_bump_revision", fail)
+        with pytest.raises(sqlite3.OperationalError, match="synthetic revision fault"):
+            turn_queue.mark_started("q")
+    assert turn_queue.status("q") == "queued"
+    assert turn_queue.get("q")["text"] == "synthetic work"
+    assert turn_queue.state("a") == before
+    assert not db.conn().in_transaction
+
+
+def test_start_joins_caller_transaction_without_committing_or_rolling_it_back():
+    _receipt()
+    before = turn_queue.state("a")
+    con = db.conn()
+    con.execute("BEGIN IMMEDIATE")
+    try:
+        turn_queue.mark_started("q")
+        assert con.in_transaction
+        assert turn_queue.status("q") == "started"
+    finally:
+        con.execute("ROLLBACK")
+    assert turn_queue.status("q") == "queued"
+    assert turn_queue.state("a") == before
+
+
+def test_normal_newer_settlement_still_corrects_terminal_receipt():
+    _receipt(status="started")
+    assert turn_queue.settle_receipt("a", "t", "failed") == 1
+    assert turn_queue.settle_receipt("a", "t", "completed") == 1
+    assert turn_queue.status("q") == "done"
+
+
+def test_reconciliation_preserves_pauses_final_siblings_and_unrelated_admission():
+    _receipt()
+    _receipt("final", status="failed")
+    _turn(outcome="completed")
+    turn_queue.set_paused("a", True, user_stop=True)
+    stop = (turn_queue.is_paused("a"), turn_queue.stop_generation("a"),
+            turn_queue.user_stop_generation("a"))
+    _tick()
+    assert turn_queue.status("q") == "done"
+    assert turn_queue.status("final") == "failed"
+    assert (turn_queue.is_paused("a"), turn_queue.stop_generation("a"),
+            turn_queue.user_stop_generation("a")) == stop
