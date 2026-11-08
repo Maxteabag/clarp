@@ -136,10 +136,12 @@ class NativePeerObserver:
             self.mark('multiple_connects')
             self.ownership_refusal = True
             raise ObserverOwnershipRefusal('multiple connect delegations refused')
-        native_socket = self.native_connect(*args, **kwargs)
-        # Native failure before return leaves cleanup to original _connect.
-        # From here to wrapper return we own this exact returned socket.
+        native_socket = None
         try:
+            # Cover delegation/assignment itself as well as metadata. Until a
+            # returned object is bound locally, original native/interpreter
+            # cleanup applies; the return-to-assignment gap is NOT certified.
+            native_socket = self.native_connect(*args, **kwargs)
             self.socket_returns += 1
             try:
                 self.peer = self._read_peer(native_socket)
@@ -150,6 +152,10 @@ class NativePeerObserver:
             self.return_intent = True
             return native_socket  # SAME object, no socket proxy/extra RPC
         except BaseException:
+            if native_socket is None:
+                # No known returned socket to close/retry. Preserve original
+                # connect failure or unqualified interpreter-boundary control.
+                raise
             # Control prevents handoff. Close this exact owned object ONCE.
             # A close error/control cannot replace the pending primary. No
             # raw-fd fallback or repeated cleanup; ownership then UNKNOWN.
@@ -302,5 +308,5 @@ class NativePeerObserver:
                 'started_ns': self.started_ns, 'ended_ns': self.ended_ns,
                 'source_path_declaration': self.source_file,
                 'scope': 'socket observation only; parent/source/namespace/instance brackets still owed',
-                'handoff_and_drain': 'NOT_CERTIFIED; wrapper-return/native-with gap and outer containment owed',
+                'handoff_and_drain': 'NOT_CERTIFIED; connect-return/assignment and native-with gaps/outer containment owed',
                 'full_readiness': False}
