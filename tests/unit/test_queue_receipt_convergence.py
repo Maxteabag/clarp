@@ -207,6 +207,9 @@ def test_explicit_notstarted_turn_stays_retryable_until_real_same_trace_attempt(
     failed = db.conn().execute(
         "SELECT settled_at,outcome FROM turns WHERE turn_id=?", (turn_id,)).fetchone()
     assert failed["settled_at"] is not None and failed["outcome"] == "failed"
+    marker = json.loads(db.conn().execute(
+        "SELECT detail FROM state_log WHERE json_extract(detail,'$.trace_id')=? ORDER BY state_id DESC LIMIT 1", ("t",)).fetchone()[0])
+    assert marker["dispatch_not_started_turn_id"] == turn_id
     before = _stored("q")
     _tick()
     assert _stored("q") == before
@@ -436,6 +439,9 @@ def test_opened_but_explicitly_unlaunched_work_uses_existing_recovery_once(tmp_p
     failed = db.conn().execute(
         "SELECT settled_at,outcome FROM turns WHERE turn_id=?", (turn_id,)).fetchone()
     assert failed["settled_at"] is not None and failed["outcome"] == "failed"
+    marker = json.loads(db.conn().execute(
+        "SELECT detail FROM state_log WHERE agent_id=? ORDER BY state_id DESC LIMIT 1", (agent,)).fetchone()[0])
+    assert marker["dispatch_not_started_turn_id"] == turn_id
     assert agents.trace_launch_status(agent, "retry-trace", client_msg_id="retry",
                                      origin="user", sender_agent_id="") == "retryable"
     _tick()
