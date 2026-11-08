@@ -7,8 +7,10 @@ or any measured roots. Cooperative checks here are NOT a kill/drain certificate.
 Real runtime/Host and independent reference/plan oracles remain unwritten.
 """
 import datetime as dt
+from dataclasses import asdict
 import hashlib
 import importlib
+import json
 import math
 import os
 from pathlib import Path
@@ -20,6 +22,7 @@ import time
 
 from .initial_seed_clock import initial_fixture_clock
 from .native_isolation import Guard
+from .proc_samples import bind
 from .raw_products import capture
 from .recipe import APPEND_EXCHANGES, COUNTS, INITIAL_BYTES, record
 
@@ -71,7 +74,7 @@ def environment(root, source):
     return expected
 
 
-def build_initial_fixture(*, pin, mode, source, root, output, source_files,
+def build_initial_fixture(*, run_id, pin, mode, source, root, output, source_files,
                           corpus_manifest, absolute_deadline):
     """Actual native schema/context/importer on the common A physical fixture.
 
@@ -81,6 +84,8 @@ def build_initial_fixture(*, pin, mode, source, root, output, source_files,
     """
     if pin != A_PIN or mode != 'initial_seed':
         raise ValueError('only exact common A INITIAL seed operation implemented')
+    if type(run_id) is not str or not run_id or len(run_id) > 128:
+        raise ValueError('missing immutable seed attempt identity')
     if socket.gethostname() == 'laptopstudio':
         raise RuntimeError('BUILDBOX_ONLY')
     source, root, output = map(Path, (source, root, output))
@@ -109,6 +114,7 @@ def build_initial_fixture(*, pin, mode, source, root, output, source_files,
     if actual_inputs != expected_inputs:
         raise ValueError('fresh private seed contains files beyond the three synthetic inputs')
     expected_env = environment(root, source)
+    producer = asdict(bind(os.getpid()))
     cache = Path(sys.pycache_prefix)
     if (not cache.is_absolute() or cache.is_symlink() or cache.resolve(strict=True) != cache
             or not cache.is_dir() or any(cache.iterdir())
@@ -217,7 +223,10 @@ def build_initial_fixture(*, pin, mode, source, root, output, source_files,
     if guard.failed or failure_file.exists():
         raise RuntimeError('native private isolation failed, including swallowed errors')
     deadline(absolute_deadline)
-    return {'mode': mode, 'pin': pin, 'size': size, 'records': records, 'products': products,
+    return {'run_id': run_id, 'mode': mode, 'pin': pin, 'producer': producer,
+            'source_manifest_sha256': hashlib.sha256(json.dumps(
+                source_files, sort_keys=True, separators=(',', ':')).encode()).hexdigest(),
+            'size': size, 'records': records, 'products': products,
             'native_imports': imports, 'native_connection': native_connection,
             'native_versions': versions, 'checkpoint': checkpoint, 'clock': clock_receipt,
             'guard_counts': dict(guard.counts), 'private_environment_keys': sorted(expected_env),
