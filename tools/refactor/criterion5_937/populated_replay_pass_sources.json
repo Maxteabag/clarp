@@ -1,0 +1,212 @@
+{
+  "scope": "source AST/literal pass-path facts only; no native/helper/SQL/config/control/test/VM execution",
+  "pins": {
+    "A": {
+      "pin": "4f33cdc9287eafcddd0adfb17b51487c84ace28b",
+      "files": {
+        "server/lib/transcript_incremental.py": {
+          "sha256": "3c3c7e6d6591c2c1ffa00ee5b1edca6d43abab6a5c996e5e71249a4a098384f6",
+          "symbols": {
+            "write_checkpoint": {
+              "line": 425,
+              "end_line": 460,
+              "ast_sha256": "820af25cce367dcd3f7534255d12da6e47336e786983d6ccc304cfe40d9c5a4e"
+            },
+            "decide": {
+              "line": 501,
+              "end_line": 529,
+              "ast_sha256": "3fa6ad2e666a226a9111c5e6e30cae76f4090bfda62c26b3a0722de9ac51513b"
+            },
+            "import_transcript": {
+              "line": 640,
+              "end_line": 684,
+              "ast_sha256": "965de9237cb91f1c37792ad3125dfed7fb5906a896a1f401771f138c297abc24"
+            }
+          },
+          "absent_requested_top_level_symbols": [
+            "_prefix_has_effects",
+            "_store_full_with_tail_checkpoint",
+            "_try_tail"
+          ]
+        },
+        "server/lib/message_writes.py": {
+          "sha256": "c82d8f9d14098ebe6c4d49126db474a3be26af73ef8b016efd6cb57ac61584e7",
+          "symbols": {
+            "_row_phases": {
+              "line": 120,
+              "end_line": 137,
+              "ast_sha256": "c4c689a49e3a2b77dab21eb4aca2c3826e3e53d79f40442b532617c956973a75"
+            },
+            "_ImportWriter": {
+              "line": 614,
+              "end_line": 685,
+              "ast_sha256": "0b3c724b8600eb3249628fda8ff8fc2aeb4a6dc9d2aac2ef2500052e5d064a1b"
+            },
+            "store_transcript_turns": {
+              "line": 688,
+              "end_line": 755,
+              "ast_sha256": "ceebc574acaa5b899956f52de800cfd9842d8f9d5306d1f37d4e446bcd3e7e4c"
+            },
+            "_write_checkpoint": {
+              "line": 764,
+              "end_line": 788,
+              "ast_sha256": "23f8ca14db1ade89d774e1f825fdc5378442546927c50eb85d9300dcb583b838"
+            }
+          },
+          "absent_requested_top_level_symbols": []
+        },
+        "server/lib/claude_transcript.py": {
+          "sha256": "71fc6305c2123b1ae32e7409cb502067580599fd7aca06a1827965445255e4c0",
+          "symbols": {
+            "parse_turns": {
+              "line": 334,
+              "end_line": 431,
+              "ast_sha256": "db18007885c2ebc2ae499c25bb31aaf5912a37706691c664d1ac864086f1fca8"
+            }
+          },
+          "absent_requested_top_level_symbols": []
+        },
+        "server/lib/backend/claude.py": {
+          "sha256": "13e6f53cec8bdaf5cc2ec204837bd106f4c6d340056f3b6ba7c7e8242cb94d08",
+          "symbols": {
+            "ClaudeBackend": {
+              "line": 295,
+              "end_line": 978,
+              "ast_sha256": "ed13ee15fbba11b715cb3e6ddaf95860a2604958d4caccb7fbe22396d7185f2e"
+            }
+          },
+          "absent_requested_top_level_symbols": []
+        },
+        "server/lib/db.py": {
+          "sha256": "9f6007107f7c6cac839355f387e6bdad85272b8adaf1063dcaa154217abf6a6a",
+          "symbols": {
+            "_TrackedConnection": {
+              "line": 374,
+              "end_line": 528,
+              "ast_sha256": "c504b5e57445f07cb0e75beed5fe06d2ffd9f2668dc0eeac5e4ab6b773aedf61"
+            }
+          },
+          "absent_requested_top_level_symbols": []
+        }
+      }
+    },
+    "B": {
+      "pin": "0073254687d22ac5a6c1d01b8af29fa678dcf4a2",
+      "files": {
+        "server/lib/transcript_incremental.py": {
+          "sha256": "c79e59bd1cd271de569ab4684bd068a4cf6f80c0eff67d5419beefb500efb5ae",
+          "symbols": {
+            "write_checkpoint": {
+              "line": 431,
+              "end_line": 466,
+              "ast_sha256": "820af25cce367dcd3f7534255d12da6e47336e786983d6ccc304cfe40d9c5a4e"
+            },
+            "decide": {
+              "line": 507,
+              "end_line": 535,
+              "ast_sha256": "3fa6ad2e666a226a9111c5e6e30cae76f4090bfda62c26b3a0722de9ac51513b"
+            },
+            "_prefix_has_effects": {
+              "line": 678,
+              "end_line": 703,
+              "ast_sha256": "6c58e51cd4bd499d7f06003efd76786b1bccd10e83ca9318853d8881d1dd5648"
+            },
+            "_try_tail": {
+              "line": 779,
+              "end_line": 835,
+              "ast_sha256": "a5fa93e4ae8a6f2bbdca629728c6ccb50582d889748ccd06eb12e7c8633f70e4"
+            },
+            "_store_full_with_tail_checkpoint": {
+              "line": 838,
+              "end_line": 906,
+              "ast_sha256": "82752bdd4215ce5d82d2b48bd64383a3a5b8f62b7770baf487e852afef67deb5"
+            },
+            "import_transcript": {
+              "line": 909,
+              "end_line": 992,
+              "ast_sha256": "2d41eefb5a924f025f5f97400bce77dd648514483ace009ea194efd48ba1f01b"
+            }
+          },
+          "absent_requested_top_level_symbols": []
+        },
+        "server/lib/message_writes.py": {
+          "sha256": "d51e83c06988de9b5725438be72d35560c3fc5180d5c29acf58ab8991ffe163a",
+          "symbols": {
+            "_row_phases": {
+              "line": 122,
+              "end_line": 139,
+              "ast_sha256": "c4c689a49e3a2b77dab21eb4aca2c3826e3e53d79f40442b532617c956973a75"
+            },
+            "_ImportWriter": {
+              "line": 594,
+              "end_line": 713,
+              "ast_sha256": "b113d7a2a4b03d18252cd127d6a15545b96e2bb932c547518439d1f8c786cb2d"
+            },
+            "store_transcript_turns": {
+              "line": 716,
+              "end_line": 784,
+              "ast_sha256": "67e72ce22ccbaa815670f18106c2cd1951caf5353c37c07b2162d32b1f8de46d"
+            },
+            "_write_checkpoint": {
+              "line": 793,
+              "end_line": 817,
+              "ast_sha256": "23f8ca14db1ade89d774e1f825fdc5378442546927c50eb85d9300dcb583b838"
+            }
+          },
+          "absent_requested_top_level_symbols": []
+        },
+        "server/lib/claude_transcript.py": {
+          "sha256": "71fc6305c2123b1ae32e7409cb502067580599fd7aca06a1827965445255e4c0",
+          "symbols": {
+            "parse_turns": {
+              "line": 334,
+              "end_line": 431,
+              "ast_sha256": "db18007885c2ebc2ae499c25bb31aaf5912a37706691c664d1ac864086f1fca8"
+            }
+          },
+          "absent_requested_top_level_symbols": []
+        },
+        "server/lib/backend/claude.py": {
+          "sha256": "54b376f0eced3a98871f55aa1684eacd8901e496587c85f42243029dfc1fcbf1",
+          "symbols": {
+            "ClaudeBackend": {
+              "line": 295,
+              "end_line": 1014,
+              "ast_sha256": "486b2c368ff0072c1fd0f82e0662f477fc4d87cc1ba5928189b5d47476ec1b32"
+            }
+          },
+          "absent_requested_top_level_symbols": []
+        },
+        "server/lib/db.py": {
+          "sha256": "9f6007107f7c6cac839355f387e6bdad85272b8adaf1063dcaa154217abf6a6a",
+          "symbols": {
+            "_TrackedConnection": {
+              "line": 374,
+              "end_line": 528,
+              "ast_sha256": "c504b5e57445f07cb0e75beed5fe06d2ffd9f2668dc0eeac5e4ab6b773aedf61"
+            }
+          },
+          "absent_requested_top_level_symbols": []
+        }
+      }
+    }
+  },
+  "qualified_actual_passes": null,
+  "total_event_or_connection_bound": null,
+  "capacity_fit": null,
+  "component_source_comparisons": {
+    "parse_turns": true,
+    "_row_phases": true
+  },
+  "source_findings": [
+    "A default-disabled import calls store_transcript_turns without on_stored; B disabled native parse may try per-process tail or full bootstrap with optional on_stored.",
+    "B _try_tail refuses no_frontier before loading a durable CP when this process-local frontier is missing. Native decide(no_checkpoint) is not necessarily the first route.",
+    "Both _write_checkpoint implementations call on_stored with actual database, not ImportWriter; probe snapshot can upgrade/write CP without taking locked replay.",
+    "B CP/bootstrap publication conditional on unchanged input identity, safe boundary/effect predicate/carry and native final checkpoint checks. Missing CP cannot choose zero policy for a required-publication route.",
+    "An unchanged-row full parse does not establish no DB writes: CP callback can write. A CP write does not prove message allocations or locked replay occurred.",
+    "Conditional no-mutation A/no-callback native probe has one BEGIN/COMMIT on that connection; B successful single CP savepoint on same probe adds SAVEPOINT/RELEASE. These are selected boundary shapes, NOT total bank or actor bounds.",
+    "Probe WriteNeeded is a normal native transition: original read transaction rolls back, then locked revalidation/replay occurs. Locked batches can yield by elapsed hold time as well as sequence.",
+    "Callback exceptions can be logged/rolled back behind savepoint while outer import still returns; import return alone cannot prove CP publication or classify all work/counters.",
+    "Real raw seed payload/client-provenance/summary/tie/state and all actual writers/retries/connection lifetimes remain unproved; no actual row mutation/resource bound follows from these source paths."
+  ]
+}
