@@ -133,3 +133,32 @@ to make a copied file look unchanged. Native full import/audit remains observed
 work, including any resulting scheduling delay/censor. Final checkpoint fields
 need positive correspondence to the actual owned transcript stat/hash/import
 bracket, not a blanket ID/time exclusion. This does not certify180s cell fit.
+
+## Native transaction witness component (source preparation only)
+
+`transaction_witness.py` drafts observation of the actual pinned
+`lib.db._TrackedConnection` methods. It delegates each native call once and
+preserves cursor/return/primary-exception identity, adds no SQL, and changes no
+clock. Weak connection references and distinct connection/transaction/savepoint
+incarnations keep pending allocations separate. Positive native commit returns
+with transaction state, rollback suffixes, C context-manager closure and unknown
+acknowledgements remain distinct in the raw receipt. Scripts, explicit cursor
+factories, implicit transitions, missing aliases and exhausted bounds refuse
+proof. A plan-only revision is never a durable allocation.
+
+The keyed revision consumer is a SUB-ORACLE for finite components. It is not a
+production SQL decoder or full conversation-head/replace/payload/time oracle.
+The finite control driver exercises real pinned SQLite/allocator components
+against small disposable tables; its controlled owner/caller labels do not
+certify real importer spans. It also proposes missing/duplicate receipt,
+rollback/reuse, keyed row swap, interleaving, close/destruction, delegation and
+cap-exhaustion controls. These controls and the source are UNEXECUTED.
+
+**The current 8192-record cap cannot cover even the S full-import treatment.**
+This first component must not be wired into a measured root as if corpus fit
+were established. Source-qualified compact/range storage with complete keyed
+bindings, multi-process domain collection, actual alias/caller/SQL decoders,
+connection-incarnation controls, full field/writer rules and measured overhead
+remain required. Do not raise the cap or discard rows to manufacture readiness.
+The additional single child is capped at25s inside the proposed300s setup
+control allowance; this is arithmetic only, not admitted native fit or drain.
