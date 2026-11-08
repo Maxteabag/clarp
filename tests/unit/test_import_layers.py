@@ -50,7 +50,7 @@ CORE = frozenset({f"lib.{m}" for m in (
     "message_writes", "origins", "proc_util", "process_registry", "prompt_admissions",
     "protocol", "roster", "roster_seed", "runtime_bridge", "runtime_events", "server_identity",
     "settings_store", "status_labels", "telemetry", "text_util", "trace", "turn_dispatch",
-    "turn_identity", "turn_lifecycle", "turn_queue", "turn_slots", "turn_usage", "ws",
+    "turn_identity", "turn_lifecycle", "turn_queue", "turn_slots", "turn_usage", "terminal_presence", "ws",
 )})
 CORE_PACKAGES = ("lib.backend", "lib.policies")
 HTTP = frozenset({"server", "runtime", "__init__"} | {f"lib.{m}" for m in (
@@ -140,7 +140,6 @@ UPWARD_BASELINE = frozenset({
     'lib.backend.stream_json -> lib.voice_markup',
     'lib.conversation -> lib.transcript_import_cache',
     'lib.conversation -> lib.transcript_incremental',
-    'lib.dispatch_adapters -> lib.janitor_http',
     'lib.eventlog -> lib.diagnostics_settings',
     'lib.message_live -> lib.dreaming',
     'lib.message_live -> lib.heartbeat',
@@ -191,7 +190,6 @@ UPWARD_BASELINE = frozenset({
     'lib.turn_identity -> lib.provider_background_jobs',
     'lib.turn_lifecycle -> lib.live_hub',
     'lib.turn_slots -> lib.compaction',
-    'lib.turn_slots -> lib.terminal_ws',
 })
 
 

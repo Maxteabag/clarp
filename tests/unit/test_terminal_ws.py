@@ -19,7 +19,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from lib import backends, terminal_ws, ws
+from lib import backends, terminal_presence, terminal_ws, ws
 from lib.backend import registry
 
 _KEY = "dGhlIHNhbXBsZSBub25jZQ=="
@@ -57,11 +57,11 @@ class FakeHandler:
 
 @pytest.fixture(autouse=True)
 def _reset_live_counter():
-    with terminal_ws._live_lock:
-        terminal_ws._live.clear()
+    with terminal_presence._live_lock:
+        terminal_presence._live.clear()
     yield
-    with terminal_ws._live_lock:
-        terminal_ws._live.clear()
+    with terminal_presence._live_lock:
+        terminal_presence._live.clear()
 
 
 @pytest.fixture
@@ -126,7 +126,7 @@ def test_live_counter_marks_and_never_goes_negative():
     terminal_ws._mark("a", -1)
     assert terminal_ws.has_live_terminal("a") is False
     terminal_ws._mark("a", -1)
-    assert terminal_ws._live == {}  # clamped at zero and evicted
+    assert terminal_presence._live == {}  # clamped at zero and evicted
 
 
 # ---- pre-spawn error replies ---------------------------------------------

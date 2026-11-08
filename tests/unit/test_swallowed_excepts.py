@@ -56,7 +56,7 @@ BASELINE: dict[str, int] = {
     'lib/eventlog.py': 1,
     'lib/hook_runtime.py': 1,
     'lib/janitor_autonomy.py': 1,
-    'lib/janitor_http.py': 1,
+    'lib/janitor_runtime.py': 1,
     'lib/live_activity.py': 2,
     'lib/live_explain.py': 1,
     'lib/live_hub.py': 3,

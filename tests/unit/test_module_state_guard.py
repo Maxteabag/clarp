@@ -159,7 +159,7 @@ ALLOWED: dict[tuple[str, str], str] = {
     ("lib/server_update.py", "_cache"): CACHE,
     ("lib/telemetry.py", "TELEMETRY_PATH"): PATHS,
     ("lib/telemetry.py", "_SCHEMA_READY_PATHS"): PATHS,
-    ("lib/terminal_ws.py", "_live"): JOBS,
+    ("lib/terminal_presence.py", "_live"): JOBS,
     ("lib/tool_explanation_commands.py", "_counts"): THROTTLE,
     ("lib/tool_explanation_commands.py", "_misses"): THROTTLE,
     ("lib/tool_explanation_commands.py", "_peer"): "the runtime-bridge lookup bound once by the server composition root (configure)",

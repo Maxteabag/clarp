@@ -139,7 +139,7 @@ class DispatchAdapters:
     def janitor_run(self, run: dict, prompt: str) -> dict:
         """JanitorRunner: an admitted maintenance run, queued behind the
         janitor's own busy turn rather than dropped."""
-        from .janitor_http import runtime_available
+        from .janitor_runtime import runtime_available
         if not runtime_available(self.ctx):
             raise RuntimeError("Janitor runtime support is unavailable")
         result = self._dispatch(

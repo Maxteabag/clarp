@@ -6,6 +6,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 from . import agents, db, events, janitors
 from .agent_lifecycle import AgentLifecycleError, AgentLifecycleService
 from .http_utils import responder_of
+from .janitor_runtime import runtime_available
 
 
 def handles(path: str) -> bool:
@@ -78,16 +79,6 @@ def _revision(value) -> int:
     if number < 1 or (isinstance(value, float) and value != number):
         raise ValueError("expected_revision must be a positive integer")
     return number
-
-
-def runtime_available(ctx) -> bool:
-    runtime = getattr(ctx, "runtime_client", None)
-    if runtime is None:
-        return True
-    try:
-        return runtime.status().get("capabilities", {}).get("janitor_runs") is True
-    except Exception:
-        return False
 
 
 def _require_runtime(ctx) -> None:
