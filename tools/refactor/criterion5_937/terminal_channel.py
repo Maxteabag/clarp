@@ -42,6 +42,8 @@ class Terminal:
             if self.latched:
                 return
             self.latched = True
+            if any(self.buffer):
+                raise ValueError('UNKNOWN terminal already changed by another writer')
             if (code not in CODES or type(bank) is not int or not 0 <= bank < (1 << 64)
                     or type(published) is not tuple or len(published) != 3
                     or any(type(v) is not int or not 0 <= v < (1 << 64) for v in published)

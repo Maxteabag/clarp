@@ -306,11 +306,15 @@ class Bank:
                 destination = Path(directory)
                 if destination.is_symlink() or destination.resolve(strict=True) != destination or any(destination.iterdir()):
                     raise ValueError('export destination not physical/fresh')
+                terminal = self.terminal.read()
+                if terminal.get('state') != 'UNRECORDED' or self.terminal_unknown:
+                    raise ValueError('complete bank has refused/unknown terminal channel')
                 files = {}
                 buffers = [(f'column-{i}.bin', memoryview(self.columns[name])[:self.used * WIDTH[kind]])
                            for i, (name, kind) in enumerate(self.schema)]
                 buffers += [('dictionary.bin', memoryview(self.dictionary)[:self.bytes_used]),
-                            ('offsets.bin', memoryview(self.offsets)[:(self.entries + 1) * 4])]
+                            ('offsets.bin', memoryview(self.offsets)[:(self.entries + 1) * 4]),
+                            ('refusal.bin', self.terminal.buffer.toreadonly())]
                 for name, data in buffers:
                     digest = hashlib.sha256()
                     with (destination / name).open('xb', buffering=0) as stream:
@@ -328,7 +332,7 @@ class Bank:
                             'dictionary_entries': self.entries, 'entry_capacity': self.entry_capacity,
                             'dictionary_bytes_used': self.bytes_used, 'dictionary_byte_capacity': len(self.dictionary),
                             'fixed_buffer_bytes': self.fixed_buffer_bytes, 'storage_limit_bytes': self.storage_limit_bytes,
-                            'files': files, 'structurally_sealed': True,
+                            'files': files, 'structurally_sealed': True, 'terminal_state': terminal['state'],
                             'scope': 'structural bank only; no native order/commit/process completeness certificate'}
                 encoded = json.dumps(manifest, sort_keys=True).encode('ascii')
                 if len(encoded) > 65536:
