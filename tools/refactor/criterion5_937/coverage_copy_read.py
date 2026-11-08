@@ -5,7 +5,6 @@ pinned public class and closed-producer source artifact. These checks do not
 establish producer/source authenticity, valid empty data, union or readiness.
 """
 import hashlib
-import json
 import os
 from pathlib import Path
 import stat
@@ -73,6 +72,26 @@ def _retain(primary, secondary):
         primary.__cause__ = secondary if prior is None else BaseExceptionGroup(
             'coverage API cleanup failures', [prior, secondary])
     return primary
+
+
+def _same_capture(actual, expected):
+    """Exact supported primitive structure; tuple/list wire shape ONLY.
+
+    String dictionary keys never pass through an encoder. Unsupported values
+    refuse; bool and int remain distinct. The actual reader supplies a finite
+    acyclic built-in snapshot, so comparison follows that bounded structure.
+    """
+    if type(actual) is dict:
+        if (type(expected) is not dict or any(type(k) is not str for k in actual)
+                or any(type(k) is not str for k in expected) or actual.keys() != expected.keys()):
+            return False
+        return all(_same_capture(v, expected[k]) for k, v in actual.items())
+    if type(actual) in (tuple, list):
+        return (type(expected) in (tuple, list) and len(actual) == len(expected)
+                and all(_same_capture(a, b) for a, b in zip(actual, expected)))
+    if type(actual) not in (str, int, bool, type(None)):
+        return False
+    return type(actual) is type(expected) and actual == expected
 
 
 def _inspect_closed_copy(*, original_root, copy_root, filename, expected_sha256,
@@ -165,11 +184,9 @@ def _inspect_closed_copy(*, original_root, copy_root, filename, expected_sha256,
             # call authorized by an earlier standalone read/close receipt.
             sets = capture_sets(data, limits=limits)
         if mode == 'update':
-            # Typed JSON wire equality only (tuple/list transport shape), not
-            # value/string/path normalization. Bool differs from int here.
-            wire = lambda value: json.dumps(value, sort_keys=True, separators=(',', ':'),
-                                             ensure_ascii=True, allow_nan=False)
-            if wire(sets) != wire(expected_sets) or sets['mode'] != 'branch':
+            # Structural equality permits tuple/list archive shape only;
+            # identity keys and primitive types are never encoder-coerced.
+            if not _same_capture(sets, expected_sets) or sets['mode'] != 'branch':
                 raise ValueError('fresh accessor sets differ or branch mode unresolved')
             if any('\\' in file for file in sets['files']):
                 raise ValueError('public update would normalize slash spelling; no remap')

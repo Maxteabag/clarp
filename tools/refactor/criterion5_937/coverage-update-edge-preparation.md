@@ -75,3 +75,38 @@ UNKNOWN; no input/corpus/context/control shrink/cap inflation to fit.6000s/~17NO
 inclusiveALLsetup/controls/copy/fetch/drain/tails LOWEST everygate/noFUND/preempt/
 delay/full exactB/C+fresh rfcomputec/captain gap unchanged. No extra job/run/
 allowance/Actions measurement or herald931 resume.
+
+## 86ae C1 typed-structure amendment — SOURCE ONLY
+
+B found json.dumps coerces dictionary key int1 to string"1". Update expectation
+comparison now walks the finite actual accessor snapshot directly. All dict
+keys must have exact type str on BOTH sides and keys must match; primitive
+str/int/bool/None types and values must match exactly; unsupported values refuse.
+Tuple/list sequence container shape is the ONLY equivalence, preserving the
+existing JSON archive transport. Dictionary order is immaterial, but no key
+stringification, regex, name normalization or bool/int coercion occurs. The
+actual source-qualified reader supplies a finite acyclic built-in graph under
+its limits; no general-purpose recursive serialization framework is introduced.
+External parsed-input/stack/cost and whole numeric fit qualification remain owed.
+The previous JSON wire-equality wording above describes the superseded86ae
+method; this structural method is the current contract.
+
+The existing API storage owner gains the requested integer_context_key row:
+actual pinned producer stores native context string"1", the real positive
+capture is kept, only its copied EXPECTED per-file mapping changes that key to
+integer1 while the global list remains string"1". The actual owner must refuse
+at comparison before public update/target creation. A bool-value preservation
+row changes expected False to integer0; that already-refused property must stay
+refused. The existing branch positive now supplies a genuine JSON tuple/list
+roundtrip, with independent literal target arcs/context after outer close still
+required. Original changed-target and slash-refusal rows remain. Only the
+integer-key negative is the claimed86ae regression; preservation cases need not
+fail baseline. No new row invents an accepted accessor/API/process result.
+
+These five same-owner STORAGE cases remain UNEXECUTED: no baseline RED/current
+GREEN, local helper/API/SQLite/test or extra job/run. The assertion boundary is
+unchanged read/capture/update/close, no duplicated decision helper or production
+seam. Distinct risk is identity-type loss during expectation comparison, which
+the old valid-input/target/spelling cases cannot expose. Selector/cost remains
+UNQUALIFIED inside the one6000s/~17NOK inclusive cap; no allowance expansion,
+compute/Actions admission, wholeReady or herald931 resume.
