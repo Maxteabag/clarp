@@ -49,7 +49,7 @@ CORE = frozenset({f"lib.{m}" for m in (
     "http_utils", "identity", "launch_receipts", "live_core", "live_projection", "log", "message_live", "message_store", "message_turns",
     "message_writes", "message_text", "origins", "proc_util", "process_registry", "prompt_admissions",
     "protocol", "roster", "roster_seed", "runtime_bridge", "runtime_events", "server_identity",
-    "settings_store", "status_labels", "stream_pacing", "telemetry", "text_util", "trace", "turn_dispatch",
+    "settings_store", "status_labels", "stream_pacing", "telemetry", "text_util", "tool_output", "trace", "turn_dispatch",
     "turn_identity", "turn_lifecycle", "turn_queue", "turn_slots", "turn_usage", "terminal_presence", "voice", "voice_markup", "workspace_paths", "ws",
 )})
 CORE_PACKAGES = ("lib.backend", "lib.policies")
@@ -115,7 +115,6 @@ UPWARD_BASELINE = frozenset({
     'lib.backend.muse -> lib.provider_background_jobs',
     'lib.backend.muse -> lib.tts_queue',
     'lib.backend.muse -> lib.voice_preamble',
-    'lib.backend.opencode -> lib.live_tools',
     'lib.backend.opencode -> lib.opencode_transcript',
     'lib.backend.opencode -> lib.provider_background_jobs',
     'lib.backend.opencode -> lib.tool_explanation_commands',
