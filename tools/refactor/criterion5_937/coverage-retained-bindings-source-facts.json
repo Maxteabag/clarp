@@ -1,0 +1,23 @@
+{
+  "scope": "SOURCE_AST_ONLY_NOT_ACTUAL_PUBLICATION_OR_RUNTIME",
+  "path": "tools/refactor/criterion5_937/pytest_plugin/c5_937.py",
+  "sha256": "54a1f1da7dec6dcf1d9a233438675314ced5c51c8ad22fa79a94e0e2b9275d17",
+  "methods": {
+    "publish": {
+      "line": 26,
+      "end": 40,
+      "ast_sha256": "3481c2bba38761739fb285dbeaecbe392744cf8534a27850c8f69076310b6e9c"
+    },
+    "pytest_configure": {
+      "line": 110,
+      "end": 171,
+      "ast_sha256": "e3e4b45539364ed4cc57d962ad28b0bddb54e17d8c3ec6d816060bd0dc8a4a6a"
+    },
+    "pytest_sessionfinish": {
+      "line": 224,
+      "end": 300,
+      "ast_sha256": "b0e096240eea83162da8c93d6ae161ce2a7fd805d9eb96e8fb38bdcfa9b577ae"
+    }
+  },
+  "producer_contract": "start/finish names are fixed native worker role suffixes; publish json.dumps sort_keys=True ensure_ascii=True plus newline; raw original bytes and metadata floats retained, not rewritten. Lifecycle/runtime/source identity unqualified."
+}
