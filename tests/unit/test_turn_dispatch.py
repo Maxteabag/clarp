@@ -2458,14 +2458,16 @@ def test_retry_after_a_launch_that_died_on_a_locked_database_is_delivered_once(t
     _assert_retry_delivers_once(service, backends, agent_id)
 
 
-def test_retry_after_a_spawn_failure_is_delivered_once(tmp_path):
-    # The same guarantee when the backend itself fails to start (a clean 500).
+def test_unknown_native_spawn_failure_protects_same_id_without_reinvocation(tmp_path):
+    # A generic exception inside the registry carries no safe pre-invoke proof.
     class _SpawnDiesOnce(_CodexSteerable):
         def __init__(self):
             super().__init__()
             self.failures_left = 1
+            self.entries = 0
 
         def spawn_turn(self, backend, **kwargs):
+            self.entries += 1
             if self.failures_left:
                 self.failures_left -= 1
                 raise RuntimeError("codex app-server unreachable")
@@ -2473,13 +2475,39 @@ def test_retry_after_a_spawn_failure_is_delivered_once(tmp_path):
 
     backends = _SpawnDiesOnce()
     service, agent_id = _codex_service(tmp_path, backends)
-    with pytest.raises(DispatchError):
+    with pytest.raises(DispatchError) as first:
         service.dispatch(text="full control over the pipeline",
                          requested_session="cipher", trace_id="t-died",
                          client_msg_id="u-lost")
-    assert backends.spawned == []
+    assert first.value.status == 500
+    assert backends.entries == 1 and backends.spawned == [] and backends.steered == []
     assert _td._INFLIGHT.get(agent_id) is None
-    _assert_retry_delivers_once(service, backends, agent_id)
+    con = agents_db.conn()
+    users = [dict(row) for row in con.execute(
+        "SELECT * FROM messages WHERE role='user' AND agent_id=? ORDER BY message_id", (agent_id,))]
+    turns = [dict(row) for row in con.execute(
+        "SELECT * FROM turns WHERE agent_id=? ORDER BY turn_id", (agent_id,))]
+    assert len(users) == len(turns) == 1
+    assert users[0]["message_id"] == "u-lost" and users[0]["trace_id"] == "t-died"
+    assert turns[0]["trace_id"] == "t-died"
+    assert turns[0]["outcome"] is None and turns[0]["settled_at"] is None and turns[0]["ended_at"] is None
+    assert not con.execute(
+        """SELECT 1 FROM state_log WHERE agent_id=? AND json_extract(detail,'$.trace_id')='t-died'
+             AND json_extract(detail,'$.dispatch_not_started')=1""", (agent_id,)).fetchone()
+    for trace in ("t-retry", "t-again"):
+        with pytest.raises(DispatchError) as retry:
+            service.dispatch(text="full control over the pipeline", requested_session="cipher",
+                             trace_id=trace, client_msg_id="u-lost")
+        assert retry.value.status == 503
+        assert backends.entries == 1 and backends.spawned == [] and backends.steered == []
+        assert _td._INFLIGHT.get(agent_id) is None
+        assert [dict(row) for row in con.execute(
+            "SELECT * FROM messages WHERE role='user' AND agent_id=? ORDER BY message_id", (agent_id,))] == users
+        assert [dict(row) for row in con.execute(
+            "SELECT * FROM turns WHERE agent_id=? ORDER BY turn_id", (agent_id,))] == turns
+        assert not con.execute(
+            """SELECT 1 FROM state_log WHERE agent_id=? AND json_extract(detail,'$.dispatch_not_started')=1""",
+            (agent_id,)).fetchone()
 
 
 def test_phantom_inflight_slot_is_never_steered_into(tmp_path):

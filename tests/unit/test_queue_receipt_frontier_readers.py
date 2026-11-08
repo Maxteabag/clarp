@@ -109,15 +109,22 @@ def test_whole_handoff_sse_matches_raw_6ad_event_O_while_storage_keeps_proof(kin
     stored = {**baseline_O, "dispatch_not_started": True, F: 17}
     stream = FakeStream()
     watcher = StateLogWatcher(stream)
+    watcher._poll_once()  # consume AGENT_CREATED before either controlled comparison
+    stream.events.clear()
     def write(detail):
         db.conn().execute(
             "INSERT INTO state_log(agent_id,kind,ts,detail) VALUES (?,?,123,?)",
             (agent, kind, json.dumps(detail)))
         watcher._poll_once()
-        event = next(e for e in stream.events if e["type"] == SSEType.AGENT_STATE)
+        controlled = [e for e in stream.events if e["type"] == SSEType.AGENT_STATE]
+        assert len(controlled) == 1
+        event = controlled[0]
+        assert (event["agent_id"], event["kind"], event["ts"]) == (agent, kind, 123)
         stream.events.clear()
         return json.dumps(event).encode()  # AudioStream's whole-event wire encoding
-    expected = write(baseline_O if (kind, reason) == ("idle", "update_handoff") else stored)
+    comparator_O = baseline_O if (kind, reason) == ("idle", "update_handoff") else stored
+    expected = write(comparator_O)
+    assert json.loads(expected)["detail"] == comparator_O  # independent negative-filter sensitivity
     assert write(stored) == expected
     raw = db.conn().execute(
         "SELECT detail FROM state_log WHERE agent_id=? ORDER BY state_id DESC LIMIT 1",
