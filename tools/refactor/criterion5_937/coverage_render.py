@@ -138,7 +138,9 @@ def render_report(*, coverage_module, source_root, aggregate_capture, input_root
             raise ValueError('report remapped/replaced its data')
         for name in sorted(inventory['files']):
             filename, statements, excluded, missing, _ = cov.analysis2(str(source_root / name))
-            if filename != str(source_root / name):
+            # Frozen relative_files=True maps the absolute morf to this
+            # exact inventory identity; do not normalize a foreign result.
+            if type(filename) is not str or filename != name:
                 raise ValueError('public analysis filename remapped')
             stats = cov.branch_stats(str(source_root / name))
             analyses[name] = {'source_sha256': inventory['files'][name]['sha256'],
