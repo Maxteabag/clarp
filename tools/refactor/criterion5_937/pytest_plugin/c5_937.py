@@ -87,6 +87,8 @@ def pytest_load_initial_conftests(early_config, parser, args):
     profile = Path(spec['coverage_config'])
     if sha(profile.read_bytes()) != spec['coverage_config_sha256']:
         raise pytest.UsageError('937 coverage config changed')
+    if os.environ.get('COVERAGE_CORE') not in (None, 'ctrace'):
+        raise pytest.UsageError('937 external coverage core override')
     import coverage
     if Path(coverage.__file__).resolve().parent != Path(spec['coverage_package_root']).resolve():
         raise pytest.UsageError('937 coverage import from unexpected tool source')
@@ -96,8 +98,13 @@ def pytest_load_initial_conftests(early_config, parser, args):
     cov = coverage.Coverage(data_file=str(output / name), data_suffix=False,
                             config_file=str(profile), source=[str(root / 'server')], branch=True)
     cov.start()
+    if cov._collector.core.tracer_class.__name__ != 'CTracer':
+        cov.stop()
+        raise pytest.UsageError('937 pinned native coverage core unavailable; no fallback')
     _EARLY_COVERAGE = {'object': cov, 'file': output / name, 'config_sha256': sha(raw),
                        'version': coverage.__version__, 'module_path': coverage.__file__,
+                       'native_core': cov._collector.core.tracer_class.__name__,
+                       'native_tracer_file': coverage.core.CTRACER_FILE,
                        'scope': 'this pytest process only; external Host/runtime/provider children UNOBSERVED'}
 
 def pytest_configure(config):
