@@ -33,21 +33,32 @@ def _snapshot(path):
     if (not stat.S_ISREG(before.st_mode) or before.st_nlink != 1
             or before.st_uid != os.geteuid() or not 0 < before.st_size <= MAX_INPUT_BYTES):
         raise ValueError('missing/aliased/empty/oversized regular artifact')
-    fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
-    with os.fdopen(fd, 'rb') as stream:
-        opened = os.fstat(stream.fileno())
+    fd, primary = None, None
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+        opened = os.fstat(fd)
         if (opened.st_dev, opened.st_ino, opened.st_size) != (before.st_dev, before.st_ino, before.st_size):
             raise ValueError('artifact changed while opening')
         digest, count = hashlib.sha256(), 0
         while True:
-            raw = stream.read(min(CHUNK, before.st_size - count + 1))
+            raw = os.read(fd, min(CHUNK, before.st_size - count + 1))
             if not raw:
                 break
             count += len(raw)
             if count > before.st_size:
                 raise ValueError('artifact grew during snapshot')
             digest.update(raw)
-        after_fd = os.fstat(stream.fileno())
+        after_fd = os.fstat(fd)
+    except BaseException as error:
+        primary = error
+    finally:
+        if fd is not None:
+            try:
+                os.close(fd)  # one owned attempt; no retry after unknown close
+            except BaseException as cleanup:
+                primary = _retain(primary, cleanup)
+    if primary is not None:
+        raise primary  # no post-read pathname/hash/sidecar work on failure/control
     after = path.lstat()
     fields = ('st_dev', 'st_ino', 'st_size', 'st_mtime_ns', 'st_ctime_ns', 'st_nlink')
     if (count != before.st_size or any(getattr(row, k) != getattr(before, k)
