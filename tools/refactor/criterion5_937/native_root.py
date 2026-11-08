@@ -209,20 +209,22 @@ def run_native_root(*, attempt, pin, role, source, root, output, files, port, ab
         except Exception as error:
             partial('owned_control_'+type(error).__name__)
 
-    socketserver.BaseServer.serve_forever=serving
-    threading.excepthook=thread_error
     owner=threading.Thread(target=control,name='criterion5-owned-stop',daemon=True)
     primary=None
+    control_pending=False
+    retained_control=None
     native_primary=None
     tool_primary=None
     entry_driver_primary=None
     native_completion=None
-    phase='OWNER_HELPER_START'
+    phase='OBSERVER_INSTALL'
     native_entry_state='ROOT_NOT_STARTED'
     failure_origin=None
     native_call_attempted=False
     product=source/'server'/('server.py' if role=='host' else 'runtime.py')
     old_argv=sys.argv[:]
+    restorations=((socketserver.BaseServer,'serve_forever',original_serve),
+                  (threading,'excepthook',original_exception),(sys,'argv',old_argv))
 
     def has_native_frame(error):
         # Bound the evidence walk; do not retain frames/tracebacks in diagnostics.
@@ -240,6 +242,9 @@ def run_native_root(*, attempt, pin, role, source, root, output, files, port, ab
             cursor=None
 
     try:
+        socketserver.BaseServer.serve_forever=serving
+        threading.excepthook=thread_error
+        phase='OWNER_HELPER_START'
         owner.start()
         phase='ENTRY_PREPARATION'
         sys.argv=[str(product)]
@@ -279,6 +284,10 @@ def run_native_root(*, attempt, pin, role, source, root, output, files, port, ab
                         native_entry_state='ENTERED_EXCEPTION'
                         failure_origin='NATIVE_ENTRY'
                 except BaseException as secondary:
+                    if not isinstance(secondary,Exception):
+                        control_pending=True
+                        if retained_control is None:
+                            retained_control=secondary
                     # Failure while inspecting provenance cannot replace the
                     # exact delegated primary. Provenance remains UNKNOWN.
                     raise delegated_error from secondary
@@ -300,6 +309,8 @@ def run_native_root(*, attempt, pin, role, source, root, output, files, port, ab
         phase='NATIVE_RETURNED'
     except BaseException as error:
         primary=error
+        if not isinstance(error,Exception):
+            control_pending=True
         if error is not native_primary and error is not entry_driver_primary:
             tool_primary=error
             if native_call_attempted:
@@ -307,12 +318,17 @@ def run_native_root(*, attempt, pin, role, source, root, output, files, port, ab
             else:
                 native_entry_state='ROOT_NOT_STARTED'
                 failure_origin='TOOL_SETUP'
-        try:
-            partial('root_failure_'+failure_origin)
-        except BaseException as secondary:
-            # A control interruption during diagnosis cannot replace a primary
-            # already unwinding; retain it as the cause, and do not restart root.
-            raise primary from secondary
+        if not control_pending:
+            try:
+                partial('root_failure_'+failure_origin)
+            except BaseException as secondary:
+                if not isinstance(secondary,Exception):
+                    control_pending=True
+                    if retained_control is None:
+                        retained_control=secondary
+                # Preserve exact primary and first retained control cause;
+                # no native work is restarted after a diagnostic interruption.
+                raise primary from secondary
         raise
     finally:
         final_error=None
@@ -320,49 +336,60 @@ def run_native_root(*, attempt, pin, role, source, root, output, files, port, ab
         alive_count=None
         try:
             done.set()
-            if owner.ident is not None:
+            # The primary or its retained secondary may already be a
+            # process-control exception. Do not start waits/probes/I/O in that
+            # case: only the in-memory done notification and binding restores
+            # are required before propagating the selected exact exception.
+            if not control_pending:
+                if owner.ident is not None:
+                    try:
+                        owner.join(min(1.0,max(0.,absolute_deadline-time.monotonic())))
+                    except Exception:
+                        partial('owned_control_join_unknown')
+                if owner.is_alive():
+                    partial('owned_control_not_joined')
+                if socketserver.BaseServer.serve_forever is not serving or threading.excepthook is not thread_error:
+                    partial('observer_binding_changed')
+                if state['observation_failed']:
+                    partial('observer_metadata_unknown')
                 try:
-                    owner.join(min(1.0,max(0.,absolute_deadline-time.monotonic())))
+                    if guard.failed or failure.exists():
+                        partial('native_guard_refused')
                 except Exception:
-                    partial('owned_control_join_unknown')
-            if owner.is_alive():
-                partial('owned_control_not_joined')
-            if socketserver.BaseServer.serve_forever is not serving or threading.excepthook is not thread_error:
-                partial('observer_binding_changed')
-            if state['observation_failed']:
-                partial('observer_metadata_unknown')
-            try:
-                if guard.failed or failure.exists():
-                    partial('native_guard_refused')
-            except Exception:
-                partial('native_guard_result_unknown')
-            # Diagnostic only, never actor/child/exit/drain evidence.
-            try:
-                alive_count=sum(t is not threading.current_thread() for t in threading.enumerate())
-            except Exception:
-                partial('thread_census_unknown')
-            if not entered.is_set() or not state['stop_requested']:
-                partial('no_observed_serve_or_owner_stop')
+                    partial('native_guard_result_unknown')
+                # Diagnostic only, never actor/child/exit/drain evidence.
+                try:
+                    alive_count=sum(t is not threading.current_thread() for t in threading.enumerate())
+                except Exception:
+                    partial('thread_census_unknown')
+                if not entered.is_set() or not state['stop_requested']:
+                    partial('no_observed_serve_or_owner_stop')
         except BaseException as error:
             # Temporarily defer ONLY to attempt binding restoration below.
             # Never return to native work or turn cancellation into metadata.
             final_error=error
+            if not isinstance(error,Exception):
+                control_pending=True
+                if retained_control is None:
+                    retained_control=error
         finally:
             # Independent restoration attempts even after a new cancellation.
             # Keep the first process-control error in preference to an ordinary
             # metadata error; all failures still make this attempt unqualified.
-            for restore in (lambda:setattr(socketserver.BaseServer,'serve_forever',original_serve),
-                            lambda:setattr(threading,'excepthook',original_exception),
-                            lambda:setattr(sys,'argv',old_argv)):
+            for target,name,original in restorations:
                 try:
-                    restore()
+                    setattr(target,name,original)
                 except BaseException as error:
                     restoration_ok=False
+                    if not isinstance(error,Exception):
+                        control_pending=True
+                        if retained_control is None:
+                            retained_control=error
                     if final_error is None or isinstance(final_error,Exception) and not isinstance(error,Exception):
                         final_error=error
         # Do not start more diagnostic I/O while a process-control exception is
         # pending. The outer owner records missing terminal evidence as UNKNOWN.
-        if final_error is None or isinstance(final_error,Exception):
+        if not control_pending and (final_error is None or isinstance(final_error,Exception)):
             try:
                 write_new(output/'root-return.json',{'attempt':attempt,'pin':pin,'role':role,
                           'pid':me.pid,'start_ticks':me.start_ticks,'boot_id':me.boot_id,
@@ -379,13 +406,17 @@ def run_native_root(*, attempt, pin, role, source, root, output, files, port, ab
                           'other_live_thread_count':alive_count,'guard_counts':dict(guard.counts),
                           'qualified':False,'scope':'diagnostics ONLY; no work/readiness/actor/exit certificate'})
             except BaseException as error:
+                if not isinstance(error,Exception):
+                    control_pending=True
+                    if retained_control is None:
+                        retained_control=error
                 if final_error is None or isinstance(final_error,Exception) and not isinstance(error,Exception):
                     final_error=error
         if final_error is not None:
             if primary is not None:
                 # Exact original primary identity survives; a new cancellation
                 # or finalization failure remains visible as its explicit cause.
-                raise primary from final_error
+                raise primary from (retained_control if retained_control is not None else final_error)
             raise final_error
     if state['partial']:
         raise RuntimeError('root diagnostics partial; no retry or qualification')
