@@ -14,7 +14,7 @@ from contextlib import contextmanager
 from typing import Any
 
 from . import origins, turn_lifecycle
-from . import voice_verbosity as voice_verbosity_lib
+from .voice_levels import clamp as _clamp_voice_verbosity
 from .policies import helper_state as helper_policy
 from .db import conn, now_ms
 from .protocol import AgentBackend, AgentState, ClipStatus, TurnSource
@@ -456,7 +456,7 @@ def update_agent(agent_id: str, *, persona: str | None = None,
         values.append(personality)
     if voice_verbosity is not None:
         fields.append("voice_verbosity = ?")
-        values.append(voice_verbosity_lib.clamp(voice_verbosity))
+        values.append(_clamp_voice_verbosity(voice_verbosity))
     if avatar_path is not None:
         fields.append("avatar_path = ?")
         values.append(avatar_path)
