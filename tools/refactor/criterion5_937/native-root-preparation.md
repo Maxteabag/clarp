@@ -93,3 +93,34 @@ need their own bounded remote cases and full raw work oracle. No synthetic
 server stand-in may be labelled actual root/source/boot coverage. Existing
 terminal, source/clock, native transaction and packed-storage controls remain
 unexecuted. No full suite, new capture, measurement or retry is requested here.
+
+## F1/F2 source repair after C7f review (controls not executed)
+
+Ordinary observer/helper failures are caught as Exception. Process-control
+BaseExceptions leave serve publication/handoff directly and do not proceed to
+original serve; native signal handlers are unchanged. During finalization only,
+a control exception is temporarily held to attempt independent binding restores,
+then re-raised. If an original primary is already unwinding, its exact object
+survives with the finalization/control exception as explicit cause. No further
+diagnostic I/O is initiated while a control exception is pending. This is not
+an all-signals/backend/drain certificate; missing terminal evidence is UNKNOWN.
+
+Pre-entry metadata is now entrypoint-intent.json, explicitly ROOT_NOT_STARTED.
+Owner-helper start, entry preparation, intent publication, delegated entry and
+return/exception-metadata phases are separate. Only the delegated runpy call's
+exception can populate the native-primary candidate. A bounded target-path
+traceback walk distinguishes entered exceptions from driver/load UNKNOWN;
+filename evidence alone is NOT loaded-code/source provenance. Inspection or
+post-return observation failure cannot turn into native-primary. The temporary
+returned namespace is released rather than retaining product actors/globals.
+
+The diagnostic record includes launch_phase, native_call_attempted,
+native_entry_state, failure_origin, native_completion, native/tool/driver and
+finalization error types, and restoration_ok separately. Normal native return
+and SystemExit(None/0) conventions are explicit, but neither is metric or actor
+success. Owner-start and entry-publication counterexamples must prove zero
+runpy invocations and ROOT_NOT_STARTED/tool origin. Cancellation publication
+must prove zero delegated serves; ordinary publication OSError must still prove
+one exact delegated serve. Native error plus finalization failure must preserve
+the original primary identity and separate cause. All C7f finite controls remain
+owed/unexecuted; no source finding is self-closed and no permission is inferred.
