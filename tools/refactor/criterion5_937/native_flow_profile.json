@@ -1,0 +1,317 @@
+{
+  "state": "PREREGISTERED_SOURCE_CLASSIFICATION_PROPOSAL_UNEXECUTED",
+  "default": "Unresolved condition => sticky PARTIAL/STOP; native call/result/primary preserved, no outcome-based reclassification",
+  "rules": [
+    {
+      "id": "normal_write_needed_probe",
+      "decision": "SOURCE_CONTROL_FLOW_ONLY_IF_PROVED",
+      "modules": {
+        "server/lib/message_writes.py": [
+          "_WriteNeeded",
+          "_ImportWriter.execute",
+          "store_transcript_turns",
+          "store_transcript_tail"
+        ]
+      },
+      "conditions": [
+        "Exact native _WriteNeeded object/source raised by the unlocked _ImportWriter before forwarding a write.",
+        "Read-probe transaction ending and subsequent locked pass belong to the same native import attempt, no unknown acknowledgement.",
+        "Retain observed BEGIN/read/ROLLBACK and all later native writes; no discarded committed batches."
+      ],
+      "not_allowed": "No generic exception-message match or all probe exceptions ignored."
+    },
+    {
+      "id": "native_admission_poll",
+      "decision": "SOURCE_BOUNDED_RETRY_ONLY_IF_PROVED",
+      "modules": {
+        "server/lib/db.py": [
+          "_TrackedConnection._only_acquires_lock",
+          "_TrackedConnection._execute_polled",
+          "_TrackedConnection.execute",
+          "_is_lock_contention"
+        ]
+      },
+      "conditions": [
+        "Actual source _only_acquires_lock admits this call; exact plain SQLITE_BUSY predicate, not any OperationalError or extended BUSY code.",
+        "Original statement/result/cursor/fetch/call count unchanged; no observer retry or prefetch.",
+        "Include actual native polling/timeout cost and the successful outer statement, or classify final native failure before qualifying cell."
+      ],
+      "not_allowed": "No treating statement return as an autocommit RETURNING finalization certificate."
+    },
+    {
+      "id": "native_whole_operation_lock_retry",
+      "decision": "SOURCE_GROUPED_ATTEMPTS_ONLY_IF_PROVED",
+      "modules": {
+        "server/lib/db.py": [
+          "retry_locked",
+          "is_locked_error"
+        ],
+        "server/lib/transcript_import_cache.py": [
+          "_import_admitted"
+        ]
+      },
+      "conditions": [
+        "Actual source-qualified retry_locked invocation and retries argument; default is three attempts, not permission for uninspected overrides.",
+        "Each actual attempt/exception/native transaction outcome retained, including earlier commits; bind all attempts to the same logical owner/source operation.",
+        "Last successful result does not excuse unknown acknowledgement, incomplete capture, wrong field/source or an unrelated caught failure."
+      ],
+      "not_allowed": "No global locked-string acceptance outside the actual retry helper/caller."
+    },
+    {
+      "id": "native_tail_invalidated_fallback",
+      "decision": "CANDIDATE_NATIVE_FALLBACK_PROFILE_UNQUALIFIED",
+      "modules": {
+        "server/lib/message_writes.py": [
+          "_TailInvalidated",
+          "store_transcript_tail"
+        ],
+        "server/lib/transcript_incremental.py": [
+          "_try_tail",
+          "_refuse_tail",
+          "import_transcript"
+        ]
+      },
+      "conditions": [
+        "Bind exact native class/raise/catch/fallback source and actual transaction state.",
+        "Retain invalidated attempt and native subsequent full import, source identity/counter/fields and actual final work coverage.",
+        "Do not force a tail hit, repair checkpoints or bypass native full import to fit a cell."
+      ],
+      "not_allowed": "No claim that every refused checkpoint/tail or logged exception is a qualified successful path."
+    },
+    {
+      "id": "approved_native_usage_enoent",
+      "decision": "SOURCE_GUARD_ELIGIBILITY_ONLY_IF_PROVED",
+      "modules": {},
+      "conditions": [
+        "Exact per-pin fetch_codex_usage_app_server source/hash and native Popen argv/kwargs/cwd/inherited private namespace match Guard.",
+        "Actual immutable executable namespace contains no allowed provider; genuine native FileNotFoundError errnoENOENT filenamecodex, no returned process.",
+        "Qualified attempt and native ENOENT counts, unchanged original exception, zero out-of-band guard failures and no unexpected child."
+      ],
+      "not_allowed": "No manufactured ENOENT, generic missing CLI fallback, provider execution, process allowlist or old certificate transfer."
+    }
+  ],
+  "pins": {
+    "A": {
+      "pin": "4f33cdc9287eafcddd0adfb17b51487c84ace28b",
+      "refs": {
+        "server/lib/message_writes.py": {
+          "sha256": "c82d8f9d14098ebe6c4d49126db474a3be26af73ef8b016efd6cb57ac61584e7",
+          "symbols": {
+            "_ImportWriter.execute": {
+              "line": 637,
+              "end_line": 658,
+              "ast_sha256": "ca87bf0dfeb96de57c4046a8d59de1678c47a6bcd65234dacfcba3c7ff9cc7f1"
+            },
+            "_TailInvalidated": null,
+            "_WriteNeeded": {
+              "line": 610,
+              "end_line": 611,
+              "ast_sha256": "49368f8434fbbe3909361af59ceef5387a2fecfb788c06262112aaad9526e4c9"
+            },
+            "store_transcript_tail": {
+              "line": 791,
+              "end_line": 817,
+              "ast_sha256": "362a3b9df215df6f242f159396a4c4616b9bfe0af497ca6313de2385e76d040a"
+            },
+            "store_transcript_turns": {
+              "line": 688,
+              "end_line": 755,
+              "ast_sha256": "ceebc574acaa5b899956f52de800cfd9842d8f9d5306d1f37d4e446bcd3e7e4c"
+            }
+          }
+        },
+        "server/lib/db.py": {
+          "sha256": "9f6007107f7c6cac839355f387e6bdad85272b8adaf1063dcaa154217abf6a6a",
+          "symbols": {
+            "_TrackedConnection._execute_polled": {
+              "line": 386,
+              "end_line": 431,
+              "ast_sha256": "5dd781ea7cebbe5f2893c3daeab3e3c064f25d91628275905f50f456dd924d57"
+            },
+            "_TrackedConnection._only_acquires_lock": {
+              "line": 377,
+              "end_line": 384,
+              "ast_sha256": "f361792c63172c6940c4afae08270d1617a5f77aac2bc0d8028b16e73da6ed7f"
+            },
+            "_TrackedConnection.execute": {
+              "line": 433,
+              "end_line": 463,
+              "ast_sha256": "9aad7cbad25f0fc7ec511e2c3334e1105f28f21b17f0a253919a9decde2a377c"
+            },
+            "_is_lock_contention": {
+              "line": 350,
+              "end_line": 358,
+              "ast_sha256": "2419a3014ac2fb4042df6f78549dfcce25fcd71997dc7b1e2e0fc87b9856b08d"
+            },
+            "is_locked_error": {
+              "line": 588,
+              "end_line": 590,
+              "ast_sha256": "97e78fff5a935e06db67059b25d3f21f5673439228bc0be792ce53298b960d2d"
+            },
+            "retry_locked": {
+              "line": 687,
+              "end_line": 704,
+              "ast_sha256": "671b4b3d8a54be7c273661dde541e8df9bdcf8b8730de465522be4c705e21501"
+            }
+          }
+        },
+        "server/lib/transcript_import_cache.py": {
+          "sha256": "8527af70619dff5d1a8d2236b6cc168f48b15ddf952d0cc78fc105980bef336b",
+          "symbols": {
+            "_import_admitted": {
+              "line": 95,
+              "end_line": 125,
+              "ast_sha256": "f57f585b45131b1d790b776e2ff5a4951f5430f95e10a556e20351687380e2f1"
+            }
+          }
+        },
+        "server/lib/transcript_incremental.py": {
+          "sha256": "3c3c7e6d6591c2c1ffa00ee5b1edca6d43abab6a5c996e5e71249a4a098384f6",
+          "symbols": {
+            "_refuse_tail": null,
+            "_try_tail": null,
+            "import_transcript": {
+              "line": 640,
+              "end_line": 684,
+              "ast_sha256": "965de9237cb91f1c37792ad3125dfed7fb5906a896a1f401771f138c297abc24"
+            }
+          }
+        },
+        "server/lib/backend_usage.py": {
+          "sha256": "14b7121140796674382c7c4cf2f8df841d01d26fbba00bb8400eaf56a31a1947",
+          "symbols": {
+            "fetch_codex_usage_app_server": {
+              "line": 1413,
+              "end_line": 1447,
+              "ast_sha256": "7f124de8dc81b5b045b3f0077c1047341a9f6d3d57ff27e1e89a39e156667808"
+            }
+          }
+        }
+      },
+      "usage_source": "server/lib/backend_usage.py",
+      "tail_fast_path_scope": {
+        "present": false,
+        "evidence": "Exact per-pin symbol ASTs plus A whole-server Git lexical search for _TailInvalidated/_try_tail/_refuse_tail returned no matches; B uses native fallback into full import.",
+        "qualification": "SOURCE ONLY, not actual runtime reachability or complete exception-profile proof"
+      }
+    },
+    "B": {
+      "pin": "0073254687d22ac5a6c1d01b8af29fa678dcf4a2",
+      "refs": {
+        "server/lib/message_writes.py": {
+          "sha256": "d51e83c06988de9b5725438be72d35560c3fc5180d5c29acf58ab8991ffe163a",
+          "symbols": {
+            "_ImportWriter.execute": {
+              "line": 643,
+              "end_line": 675,
+              "ast_sha256": "67693c2ef76f571946031c2e1c553330afb6e6462f7f7d0c913ac1dd96c85616"
+            },
+            "_TailInvalidated": {
+              "line": 586,
+              "end_line": 587,
+              "ast_sha256": "5698fc67c561125550eea135a1d27dda68bbe5f2f9055136bf47fb7fe96cde0a"
+            },
+            "_WriteNeeded": {
+              "line": 590,
+              "end_line": 591,
+              "ast_sha256": "49368f8434fbbe3909361af59ceef5387a2fecfb788c06262112aaad9526e4c9"
+            },
+            "store_transcript_tail": {
+              "line": 820,
+              "end_line": 881,
+              "ast_sha256": "15cc3bdf91753af93ea74a8e00c5ebc7e25be70f981010dd6d131ac8a1675741"
+            },
+            "store_transcript_turns": {
+              "line": 716,
+              "end_line": 784,
+              "ast_sha256": "67e72ce22ccbaa815670f18106c2cd1951caf5353c37c07b2162d32b1f8de46d"
+            }
+          }
+        },
+        "server/lib/db.py": {
+          "sha256": "9f6007107f7c6cac839355f387e6bdad85272b8adaf1063dcaa154217abf6a6a",
+          "symbols": {
+            "_TrackedConnection._execute_polled": {
+              "line": 386,
+              "end_line": 431,
+              "ast_sha256": "5dd781ea7cebbe5f2893c3daeab3e3c064f25d91628275905f50f456dd924d57"
+            },
+            "_TrackedConnection._only_acquires_lock": {
+              "line": 377,
+              "end_line": 384,
+              "ast_sha256": "f361792c63172c6940c4afae08270d1617a5f77aac2bc0d8028b16e73da6ed7f"
+            },
+            "_TrackedConnection.execute": {
+              "line": 433,
+              "end_line": 463,
+              "ast_sha256": "9aad7cbad25f0fc7ec511e2c3334e1105f28f21b17f0a253919a9decde2a377c"
+            },
+            "_is_lock_contention": {
+              "line": 350,
+              "end_line": 358,
+              "ast_sha256": "2419a3014ac2fb4042df6f78549dfcce25fcd71997dc7b1e2e0fc87b9856b08d"
+            },
+            "is_locked_error": {
+              "line": 588,
+              "end_line": 590,
+              "ast_sha256": "97e78fff5a935e06db67059b25d3f21f5673439228bc0be792ce53298b960d2d"
+            },
+            "retry_locked": {
+              "line": 687,
+              "end_line": 704,
+              "ast_sha256": "671b4b3d8a54be7c273661dde541e8df9bdcf8b8730de465522be4c705e21501"
+            }
+          }
+        },
+        "server/lib/transcript_import_cache.py": {
+          "sha256": "8527af70619dff5d1a8d2236b6cc168f48b15ddf952d0cc78fc105980bef336b",
+          "symbols": {
+            "_import_admitted": {
+              "line": 95,
+              "end_line": 125,
+              "ast_sha256": "f57f585b45131b1d790b776e2ff5a4951f5430f95e10a556e20351687380e2f1"
+            }
+          }
+        },
+        "server/lib/transcript_incremental.py": {
+          "sha256": "c79e59bd1cd271de569ab4684bd068a4cf6f80c0eff67d5419beefb500efb5ae",
+          "symbols": {
+            "_refuse_tail": {
+              "line": 737,
+              "end_line": 739,
+              "ast_sha256": "d8c64c6db3add835f2d7df046d3134889249667ab21d0684314f03703abbc1f7"
+            },
+            "_try_tail": {
+              "line": 779,
+              "end_line": 835,
+              "ast_sha256": "a5fa93e4ae8a6f2bbdca629728c6ccb50582d889748ccd06eb12e7c8633f70e4"
+            },
+            "import_transcript": {
+              "line": 909,
+              "end_line": 992,
+              "ast_sha256": "2d41eefb5a924f025f5f97400bce77dd648514483ace009ea194efd48ba1f01b"
+            }
+          }
+        },
+        "server/lib/backend_usage_codex.py": {
+          "sha256": "c90b13038a041b1a39e7ff899d42c3f14f02575577f66cc547d5ef1e0307a137",
+          "symbols": {
+            "fetch_codex_usage_app_server": {
+              "line": 121,
+              "end_line": 155,
+              "ast_sha256": "7f124de8dc81b5b045b3f0077c1047341a9f6d3d57ff27e1e89a39e156667808"
+            }
+          }
+        }
+      },
+      "usage_source": "server/lib/backend_usage_codex.py",
+      "tail_fast_path_scope": {
+        "present": true,
+        "evidence": "Exact per-pin symbol ASTs plus A whole-server Git lexical search for _TailInvalidated/_try_tail/_refuse_tail returned no matches; B uses native fallback into full import.",
+        "qualification": "SOURCE ONLY, not actual runtime reachability or complete exception-profile proof"
+      }
+    }
+  },
+  "runtime_classifier_implemented": false,
+  "source_ready": false
+}
