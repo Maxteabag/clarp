@@ -3046,7 +3046,7 @@ def _server_workers(ctx: ServerContext, srv: "ContextHTTPServer", cfg,
             recover=adapters.recover_janitor_quota))
 
     def start_janitor_runner():
-        from lib.janitor_http import runtime_available
+        from lib.janitor_runtime import runtime_available
         return started(JanitorRunner(
             adapters.janitor_run, admission_ready=lambda: runtime_available(ctx),
             after_tick=adapters.janitor_after_tick))

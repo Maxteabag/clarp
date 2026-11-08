@@ -43,28 +43,9 @@ from . import ws
 from .backend.base import Unsupported
 from .http_utils import send_plain_http_error
 from .log import log, log_exception
+from .terminal_presence import _mark, has_live_terminal
 
 _READ_CHUNK = 65536
-
-# agent_id -> number of live terminals (0/1 in practice). turn_dispatch reads
-# has_live_terminal() to decide whether to serialize a same-agent turn.
-_live: dict[str, int] = {}
-_live_lock = threading.Lock()
-
-
-def has_live_terminal(agent_id: str) -> bool:
-    with _live_lock:
-        return _live.get(agent_id, 0) > 0
-
-
-def _mark(agent_id: str, delta: int) -> None:
-    with _live_lock:
-        n = max(0, _live.get(agent_id, 0) + delta)
-        if n:
-            _live[agent_id] = n
-        else:
-            _live.pop(agent_id, None)
-
 
 def _set_winsize(fd: int, cols: int, rows: int) -> None:
     try:

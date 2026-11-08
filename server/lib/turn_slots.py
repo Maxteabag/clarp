@@ -566,8 +566,8 @@ class TurnSlots:
 
 def _terminal_live(agent_id: str) -> bool:
     try:
-        from . import terminal_ws
-        return terminal_ws.has_live_terminal(agent_id)
+        from . import terminal_presence
+        return terminal_presence.has_live_terminal(agent_id)
     except Exception:  # noqa: BLE001
         return False
 
