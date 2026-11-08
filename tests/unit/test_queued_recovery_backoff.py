@@ -43,8 +43,6 @@ class _Backends:
         return ["handle"] if agent_id in self.live else []
 
     def spawn_turn(self, backend, **kwargs):
-        if kwargs["agent_id"] in self.broken:
-            raise RuntimeError("thread/resume: failed to read thread 019a-x")
         self.spawned.append(kwargs)
         self.live.add(kwargs["agent_id"])
 
@@ -110,16 +108,24 @@ def _run_until(clock, timers, until):
 
 
 def _count_launches(monkeypatch, backends, clock):
-    """Times of every launch attempt for a broken agent."""
+    """Count positive pre-invoke preparation failures, never unknown RPC failures.
+
+    The real native unreadable-thread owner remains in its integration module;
+    these cadence controls fail before calling the fake provider at all.
+    """
+    from lib import backends as registry
     attempts = []
-    real = backends.spawn_turn
+    runner = registry.by_id("claude")
+    real = runner.arm_source_marker
 
-    def counted(backend, **kwargs):
-        if kwargs["agent_id"] in backends.broken:
+    def prepare(session, trace_id, synthesize_audio, **kwargs):
+        agent = agents_db.get_by_session(session)
+        if agent and agent["agent_id"] in backends.broken:
             attempts.append(clock.t)
-        return real(backend, **kwargs)
+            raise DispatchError(500, "preparation: failed to read thread 019a-x")
+        return real(session, trace_id, synthesize_audio, **kwargs)
 
-    monkeypatch.setattr(backends, "spawn_turn", counted)
+    monkeypatch.setattr(runner, "arm_source_marker", prepare)
     return attempts
 
 
