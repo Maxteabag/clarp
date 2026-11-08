@@ -49,7 +49,7 @@ CORE = frozenset({f"lib.{m}" for m in (
     "http_utils", "identity", "launch_receipts", "log", "message_live", "message_store", "message_turns",
     "message_writes", "origins", "proc_util", "process_registry", "prompt_admissions",
     "protocol", "roster", "roster_seed", "runtime_bridge", "runtime_events", "server_identity",
-    "settings_store", "status_labels", "telemetry", "text_util", "trace", "turn_dispatch",
+    "settings_store", "status_labels", "stream_pacing", "telemetry", "text_util", "trace", "turn_dispatch",
     "turn_identity", "turn_lifecycle", "turn_queue", "turn_slots", "turn_usage", "terminal_presence", "voice", "voice_markup", "ws",
 )})
 CORE_PACKAGES = ("lib.backend", "lib.policies")
@@ -103,7 +103,6 @@ UPWARD_BASELINE = frozenset({
     'lib.backend.agy_hooks -> lib.provider_background_jobs',
     'lib.backend.claude -> lib.fork',
     'lib.backend.claude -> lib.live_claude',
-    'lib.backend.claude -> lib.live_pacing',
     'lib.backend.claude -> lib.provider_background_jobs',
     'lib.backend.claude -> lib.provider_capabilities',
     'lib.backend.claude -> lib.resume',
@@ -133,7 +132,6 @@ UPWARD_BASELINE = frozenset({
     'lib.backend.opencode -> lib.tts_queue',
     'lib.backend.opencode -> lib.voice_preamble',
     'lib.backend.stream_json -> lib.live_hub',
-    'lib.backend.stream_json -> lib.live_pacing',
     'lib.message_live -> lib.dreaming',
     'lib.message_live -> lib.heartbeat',
     'lib.message_live -> lib.message_context',
@@ -155,7 +153,6 @@ UPWARD_BASELINE = frozenset({
     'lib.runtime_bridge -> lib.runtime_release',
     'lib.runtime_bridge -> lib.tool_explanation_commands',
     'lib.runtime_events -> lib.live_hub',
-    'lib.runtime_events -> lib.live_pacing',
     'lib.turn_dispatch -> lib.account_failover',
     'lib.turn_dispatch -> lib.agent_rings',
     'lib.turn_dispatch -> lib.backend_usage',

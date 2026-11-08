@@ -327,7 +327,9 @@ synthetic branches:
 
 - `agent_mcp_codec` is a new core primitive owning the stored MCP selection JSON codec. Feature `mcp_selection` re-exports the exact functions; core lifecycle and backend consumers import the canonical owner. The existing feature module retains its classification and stored JSON semantics.
 
-The first five repaired upward edges are removed from the ratchet; this section does not authorize reclassifying any existing module or expanding named exceptions.
+- `stream_pacing` is a new core primitive owning generic markdown prefix pacing, per-instance timer generations and trailing throttling. Feature `live_pacing` preserves exact object exports; provider/runtime core consumers use the canonical owner. The existing feature module retains its classification. Muse timer observers patch the canonical scheduler read by the moved classes.
+
+The first eight repaired upward edges are removed from the ratchet; this section does not authorize reclassifying any existing module or expanding named exceptions.
 
 ## Wave 2: lead-signed map corrections (937)
 
