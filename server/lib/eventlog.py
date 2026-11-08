@@ -49,6 +49,8 @@ import time
 import traceback
 from dataclasses import dataclass
 
+from .log import log_fault
+
 
 LOG_DIR = pathlib.Path(os.environ.get(
     "CLAUDE_PWA_LOG_DIR",
@@ -362,8 +364,8 @@ def emit(source: str, event: str, *,
             agent = _agents.get_by_session(session)
             if agent:
                 trace_id = _agents.get_trace(agent["agent_id"]) or None
-        except Exception:
-            pass
+        except Exception as exc:
+            log_fault("eventlogTraceLookupFailed", exc, structured=False)
 
     if session:     record["session"] = session
     if agent_id:    record["agent_id"] = agent_id
