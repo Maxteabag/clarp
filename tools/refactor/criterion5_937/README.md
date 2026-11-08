@@ -178,3 +178,13 @@ fixed buffers, Python lookup overhead/transients, page-touch effects, ALL
 producer banks and export/consumer peaks still need source-derived arithmetic
 and C/B qualification. Authored storage controls are UNEXECUTED and do not
 replace any native transaction, row, head, lifecycle or measurement controls.
+
+
+`terminal_channel.py` adds a fixed128-byte refusal channel independent of main
+bank capacity. It retains first condition, last-publication watermark and
+explicit gap/unknown-suffix flags; a checksum catches torn publication but is
+not native evidence. UNRECORDED never means success. Bank partial segments are
+read-only diagnostic views, not complete histories. Default bytearray storage
+is memory-only; actual owner-bound sharing/persistence/lifetime/export and all
+in-flight drain proofs remain unwritten/unqualified. No new process, backend
+capability, control or measurement is authorized by this source.
