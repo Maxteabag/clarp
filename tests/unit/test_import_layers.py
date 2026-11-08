@@ -50,7 +50,7 @@ CORE = frozenset({f"lib.{m}" for m in (
     "message_writes", "message_text", "origins", "proc_util", "process_registry", "prompt_admissions",
     "protocol", "roster", "roster_seed", "runtime_bridge", "runtime_events", "server_identity",
     "settings_store", "status_labels", "stream_pacing", "telemetry", "text_util", "tool_output", "trace", "turn_dispatch",
-    "turn_identity", "turn_lifecycle", "turn_queue", "turn_slots", "turn_usage", "terminal_presence", "voice", "voice_markup", "workspace_paths", "ws",
+    "turn_identity", "turn_lifecycle", "turn_queue", "turn_slots", "turn_usage", "terminal_presence", "voice", "voice_levels", "voice_markup", "workspace_paths", "ws",
 )})
 CORE_PACKAGES = ("lib.backend", "lib.policies")
 HTTP = frozenset({"server", "runtime", "__init__"} | {f"lib.{m}" for m in (
@@ -84,7 +84,6 @@ UPWARD_BASELINE = frozenset({
     'lib.agents -> lib.janitor_store',
     'lib.agents -> lib.janitors',
     'lib.agents -> lib.task_plans',
-    'lib.agents -> lib.voice_verbosity',
     'lib.backend.agy -> lib.agy_transcript',
     'lib.backend.agy -> lib.provider_background_jobs',
     'lib.backend.agy -> lib.provider_capabilities',
