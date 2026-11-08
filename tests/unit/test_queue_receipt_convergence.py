@@ -193,14 +193,18 @@ def test_steered_receipt_with_no_own_turn_is_not_bound_to_the_live_agent_turn():
 
 
 def test_explicit_notstarted_turn_stays_retryable_until_real_same_trace_attempt(monkeypatch):
-    from lib import agents
+    from lib import agents, turn_lifecycle
     clock = [10_000]
     monkeypatch.setattr(db, "now_ms", lambda: clock[0])
+    monkeypatch.setattr(turn_lifecycle, "now_ms", lambda: clock[0])
     _receipt()
-    _turn(outcome="failed", observed=False)
-    db.conn().execute(
-        "INSERT INTO state_log(agent_id,kind,ts,detail) VALUES ('a','failed',?,?)",
-        (db.now_ms(), json.dumps({"trace_id": "t", "dispatch_not_started": True})))
+    turn_id = turn_lifecycle.open_turn(
+        agent_id="a", source="pwa", trace_id="t", synthesize_audio=False)
+    assert db.conn().execute("SELECT settled_at FROM turns WHERE turn_id=?", (turn_id,)).fetchone()[0] is None
+    agents.record_unlaunched_trace("a", "t")
+    failed = db.conn().execute(
+        "SELECT settled_at,outcome FROM turns WHERE turn_id=?", (turn_id,)).fetchone()
+    assert failed["settled_at"] is not None and failed["outcome"] == "failed"
     before = _stored("q")
     _tick()
     assert _stored("q") == before
@@ -416,9 +420,13 @@ def test_opened_but_explicitly_unlaunched_work_uses_existing_recovery_once(tmp_p
         queue_id="retry", agent_id=agent, session="mike", text="retry unsent",
         trace_id="retry-trace", client_msg_id="retry", synthesize_audio=False,
         origin="user", sender_agent_id="")
-    turn_lifecycle.open_turn(agent_id=agent, source="pwa", trace_id="retry-trace",
-                             synthesize_audio=False)
+    turn_id = turn_lifecycle.open_turn(agent_id=agent, source="pwa", trace_id="retry-trace",
+                                       synthesize_audio=False)
+    assert db.conn().execute("SELECT settled_at FROM turns WHERE turn_id=?", (turn_id,)).fetchone()[0] is None
     agents.record_unlaunched_trace(agent, "retry-trace")
+    failed = db.conn().execute(
+        "SELECT settled_at,outcome FROM turns WHERE turn_id=?", (turn_id,)).fetchone()
+    assert failed["settled_at"] is not None and failed["outcome"] == "failed"
     assert agents.trace_launch_status(agent, "retry-trace", client_msg_id="retry",
                                      origin="user", sender_agent_id="") == "retryable"
     _tick()
@@ -504,3 +512,33 @@ def test_expired_preliminary_read_budget_never_acquires_a_writer(monkeypatch):
         con.set_trace_callback(None)
     assert expired[0] and not begins
     assert turn_queue.status("q") == "queued"
+
+
+def test_actual_launched_failed_turn_with_stale_negative_marker_is_not_recovered(tmp_path):
+    from lib import agents
+    from tests.unit.test_turn_dispatch import _make_service
+    service, backend, agent = _make_service(tmp_path)
+    service.dispatch(text="synthetic work", requested_session="mike", trace_id="launched-failure",
+                     client_msg_id="launched-failure", origin="agent", synthesize_audio=False)
+    assert len(backend.spawned) == 1
+    backend.spawned[0][1]["on_error"]("some unexpected parser crash")
+    failed = db.conn().execute(
+        "SELECT turn_id,settled_at,outcome FROM turns WHERE agent_id=? AND trace_id=?",
+        (agent, "launched-failure")).fetchone()
+    assert failed["settled_at"] is not None and failed["outcome"] == "failed"
+    # Model the stale receipt independently; actual dispatch/callback supplied execution evidence.
+    turn_queue.enqueue(queue_id="launched-failure", agent_id=agent, session="mike",
+                       text="synthetic work", trace_id="launched-failure",
+                       client_msg_id="launched-failure", synthesize_audio=False,
+                       origin="agent", sender_agent_id="")
+    agents.record_unlaunched_trace(agent, "launched-failure")
+    assert "launched-failure" not in [r["queue_id"] for r in turn_queue.pending_for_dispatch()]
+    assert not turn_queue.claim_for_dispatch("launched-failure")
+    assert turn_queue.claim("launched-failure") is None
+    backend.live = False
+    assert service.recover_queued() == 0
+    assert len(backend.spawned) == 1
+    assert turn_queue.status("launched-failure") == "failed"
+    assert db.conn().execute(
+        "SELECT COUNT(*) FROM turns WHERE agent_id=? AND trace_id=?",
+        (agent, "launched-failure")).fetchone()[0] == 1
