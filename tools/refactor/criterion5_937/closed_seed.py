@@ -12,6 +12,7 @@ import stat
 import subprocess
 
 from .raw_products import capture, exact_diff, private_database
+from .seed_paths import audit_initial_paths
 
 MAX_DB_BYTES = 512 * 1024 * 1024
 
@@ -105,6 +106,9 @@ def qualify_initial(child, *, expected_argv, launch_identity, expected, terminal
     # Also catch logical writes after the constructor snapshot, even when they
     # were flushed/checkpointed before process exit. No table or clock masks.
     closed_products = capture(path, owned_root=root)
+    source_paths = audit_initial_paths(closed_products, root=str(root))
+    if source_paths != terminal['source_path_census']:
+        raise ValueError('initial native source-path census missing/changed after constructor')
     diff = exact_diff(terminal['products'], closed_products)
     if diff['changes']:
         raise ValueError('logical seed changed after constructor snapshot; no usable fixture')
@@ -112,6 +116,7 @@ def qualify_initial(child, *, expected_argv, launch_identity, expected, terminal
         raise ValueError('closed seed changed during raw validation')
     return {'root_reaped': root_reaped, 'closed_main': first,
             'closed_products_sha256': diff['after_products_sha256'],
+            'source_path_census': source_paths,
             'logical_changes_after_constructor': 0,
             'scope': 'initial fixture only, with qualified pinned guard; not measured root reaping'}
 
