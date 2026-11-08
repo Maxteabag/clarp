@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-from types import SimpleNamespace
 
 import pytest
 
@@ -46,22 +45,45 @@ def test_handoff_never_grants_global_retry_or_substitutes_for_failure_marker(
     assert not _unlaunched_marked(agent, "t")
 
 
-def test_actual_marker_retry_records_fresh_failure_despite_historical_handoff(tmp_path):
+@pytest.mark.parametrize("later_attempt", [False, True])
+def test_actual_marker_retry_records_fresh_failure_despite_historical_handoff(tmp_path, monkeypatch, later_attempt):
+    from lib import backends
     callbacks = []
-    service, _backend, agent = _make_service(
+    service, backend, agent = _make_service(
         tmp_path, retry_scheduler=lambda delay, fn: callbacks.append(fn))
     _handoff(agent)
-    turn_lifecycle.open_turn(agent_id=agent, source="pwa", trace_id="t", synthesize_audio=False)
+    real_record = turn_lifecycle.record_unlaunched
+    calls = []
+    def fail_first_marker(*args, **kwargs):
+        calls.append(kwargs.get("turn_id"))
+        if len(calls) == 1:
+            raise OSError("synthetic marker write failure")
+        return real_record(*args, **kwargs)
+    def preinvoke(*args, **kwargs):
+        raise OSError("synthetic source-marker preparation failure")
+    monkeypatch.setattr(turn_lifecycle, "record_unlaunched", fail_first_marker)
+    monkeypatch.setattr(backends.by_id("claude"), "arm_source_marker", preinvoke)
+    with pytest.raises(OSError, match="source-marker preparation"):
+        service.dispatch(text="synthetic", requested_session="mike", trace_id="t",
+                         client_msg_id="retry", synthesize_audio=False)
+    assert backend.spawned == [] and len(callbacks) == 1
+    newer = (turn_lifecycle.open_turn(agent_id=agent, source="pwa", trace_id="t", synthesize_audio=False)
+             if later_attempt else None)
     before = db.conn().execute("SELECT MAX(state_id) FROM state_log").fetchone()[0]
-    service._retry_unlaunched_marker(
-        SimpleNamespace(agent_id=agent, trace_id="t", session="mike"), 2)
-    assert len(callbacks) == 1
     callbacks[0]()
     rows = db.conn().execute(
         "SELECT detail FROM state_log WHERE agent_id=? AND state_id>?", (agent, before)).fetchall()
     assert len(rows) == 1
     fresh = json.loads(rows[0]["detail"])
     assert fresh["dispatch_not_started"] is True and fresh["trace_id"] == "t"
+    assert calls[0] == calls[1]
+    if later_attempt:
+        assert "dispatch_not_started_turn_id" not in fresh
+        assert db.conn().execute("SELECT settled_at FROM turns WHERE turn_id=?", (newer,)).fetchone()[0] is None
+        assert db.conn().execute("SELECT settled_at FROM turns WHERE turn_id=?", (calls[0],)).fetchone()[0] is None
+        assert agents.trace_launch_status(agent, "t") != "retryable"
+    else:
+        assert fresh["dispatch_not_started_turn_id"] == calls[0]
     assert fresh.get("reason") != "update_handoff"
     # record_unlaunched backdates ts: insertion, not latest timestamp, is the oracle.
     assert _unlaunched_marked(agent, "t")
@@ -69,7 +91,8 @@ def test_actual_marker_retry_records_fresh_failure_despite_historical_handoff(tm
 
 def test_genuine_nonhandoff_marker_retains_its_existing_historical_semantics(tmp_path):
     _service, _backend, agent = _make_service(tmp_path)
-    turn_lifecycle.record_unlaunched(agent, "t")
+    own = turn_lifecycle.open_turn(agent_id=agent, source="pwa", trace_id="t", synthesize_audio=False)
+    turn_lifecycle.record_unlaunched(agent, "t", turn_id=own)
     assert agents.trace_launch_status(agent, "t") == "retryable"
     assert _unlaunched_marked(agent, "t")
     _handoff(agent)
