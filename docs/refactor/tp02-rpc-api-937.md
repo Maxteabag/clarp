@@ -2,7 +2,7 @@
 
 DOCS ONLY, provisional f666fb0db240513ae6dae1eda8227046b4001088.
 Responds to A reviews/tp02-937-A-design-5ead1becd1f0.md, F1/F2. This is a
-concrete proposed API for review, NOT agreement to change shipped Stop policy,
+concrete proposed API for review, NOT authority to change shipped Stop policy,
 code authority, actual post933/TP-N3 home certification or execution permission.
 Parent design5ead1bec retains lead937 four-method seal/Stop rulings.
 
@@ -32,30 +32,40 @@ Concrete histories (all calls genuinely overlap):
 - A causally later R2 submitted only after R1 returned must observe R1's durable
   outcome. This proposal changes no completed-before-invoked ordering.
 
-### Explicit review question, not a silently dropped condition
+### Written A disposition: canonical binding, not prelookup intent
 
-For an UNBOUND R1 with NO existing durable agent admission/receipt, suppose
-Stop A completes BEFORE R1 ever binds A. Proposed canonical interpretation:
-its first agent decision linearizes AFTER Stop, exactly as a fresh overlapping
-admission can in an admissible serial history. Global reserve did not grant
-an earlier A decision. Existing old durable receipt/queued work is NEVER made
-fresh this way: its saved USER generation, producer identity, pause rights,
-launch classification and933 fence remain authoritative regardless of lookup.
+A accepted this exact interpretation in
+`reviews/tp02-937-A-binding-refinement.md` (request rcba6cb9b4c83), read in full.
+For a genuinely effect-free UNBOUND R1 with NO existing durable agent authority,
+Stop A may complete BEFORE R1 ever binds A. Its first agent decision can then
+linearize AFTER Stop, taking the existing fresh overlapping USER outcome. Initial
+socket/reservation order grants no earlier A decision. This supersedes A's old
+upfront/first-draft requirement and that DESIGN-only part of288; no additional
+lead policy decision is needed for this interpretation.
 
-This replaces the first draft's speculative rule that every unbound reservation
-preceding any later-resolved agent Stop is necessarily old intent. That rule
-also appears in retained288's DESIGN-only conditions. S4 has explicitly asked A
-and fix3 to settle this interpretation, rather than silently deleting it. This
-proposal is conditional on their source/preservation assessment under lead937.
-If A requires that stronger original-unbound intent rule to preserve shipped
-semantics, this supplement DOES NOT claim F2 solved or permit implementation.
-Return the exact necessity/authority boundary; do not add new refusals, an
-unbounded cutoff cache, timeout-based expiry or a new durable field to hide it.
-No new lead policy request is made unless A establishes a concrete necessity.
+Crucial classifier: UNBOUND is an evidence condition, not `ticket.agent is None`.
+Before treating work as fresh, the EXISTING owner examines client/trace,
+durable_queue_id, launch receipt, prompt admission and any producer/owner claim.
+An existing receipt/queued item/Host producer keeps its ORIGINAL identity, USER
+generation, pause rights and933 launch classification through lookup/rekey. A
+fresh RPC context cannot relabel it. Identity unknown/error falls through ONLY
+to the existing authoritative owner decision, never a new safe-retry/success rule.
+
+The first bind hook is before recovery-backoff changes, focus/herald effects,
+session binding, receipt writes, claim and provider work, not merely before
+open_turn/spawn. Bound preparation still needs an actual owner-ordered final
+Stop check and publication; metadata version + unlocked later write is NOT that
+proof. Successful USER Stop, provisional failed Stop, post-durable interrupt
+failure and maintenance Stop retain their distinct existing authority.
+
+A's disposition addresses F1/F2 IN PRINCIPLE, not a code/API/source acceptance.
+Concrete evidence/owner hooks and the deterministic histories still require
+exact review on actual post933/TP-N3 main. fix3's earlier conditional owner view
+is resolved by forwarding this written A disposition, not by editing its diagram.
 
 ## 2. F2: target records owned by live bound work, no historical cutoff map
 
-Conditional on section1's interpretation, initial reservation sequence is NOT
+Under section1's written A interpretation, initial reservation sequence is NOT
 used to retain a Stop-cutoff history for unknown future targets. Delete the
 oldest-unbound-watermark pruning algorithm from the proposed implementation.
 
@@ -92,8 +102,10 @@ arbitrary targets stopped during R1's unresolved lifetime. A single oldest
 watermark does not bound that information, and a domain-wide per-agent cache
 with soft-deleted/resurrectable IDs is NOT presented as a fix. Source f666
 agents.create_agent can reuse a soft-deleted agent_id; deletion alone is not a
-safe necessary-fence GC argument. This is why the explicit section1 joint
-interpretation is a PRE-CODE condition, not an implementation detail.
+safe necessary-fence GC argument. A expressly does NOT require that stronger rule for genuinely effect-free
+unbound work. It remains invalid to apply the fresh interpretation to prior
+producer/receipt authority or bound effects; prove those source classifications
+before code rather than reintroducing the old unbounded structure.
 
 ## 3. Exact proposed carriers and operations
 
@@ -123,6 +135,14 @@ queue/admission DB error -> existing DispatchError/outer500 path without replay;
 backend timeout -> native owner uncertainty/hold, not unsent; invalidated prepared
 owner -> existing receipt/slot refusal or durable queued result; known successful
 native effect -> never release its owner because later bookkeeping/flush failed.
+The identity classifier above is an owner hook, not a second registry of receipt
+truth: it returns FreshCandidate, ExistingAuthority or ExistingOwnerDecision,
+with evidence current to that owner; presence/absence of RPC fields alone is not
+the classifier. ExistingAuthority carries its saved USER generation unchanged.
+FreshCandidate can sample the current generation only at its owner admission
+boundary. Provisional Stop control is pinned in the same target record while
+its durable commit/rollback is unresolved; no target-version reset launders it.
+
 Concrete message/status mapping for each new hook MUST be pinned to the actual
 post933/TP-N3 source before A can accept the adapter. This table is not permission
 to invent a refusal at a previously non-refusing point.
@@ -222,7 +242,8 @@ Add distinct controls to existing owner fixtures, not table-self oracle:
   retroactive reorder; original same-ID/queue/steer/durable outcomes checked.
 - Bound-before-Stop vs unbound-before-Stop histories separately, actual queue and
   existing USER generations; old durable receipt always fenced. Canonical-first
-  interpretation itself awaits joint review before either is an expected test.
+  interpretation is accepted by A only for proven effect-free unbound work; both
+  prior durable authority and already-bound preparation require their old fence.
 - Stalled lookup plus1000 target stop/create/delete/resurrection cycles: live-only
   target state returns to0 and later binding honors durable receipt/generation.
 - Parent decision -> nested defer -> child published; seal at every gap, exception
@@ -236,7 +257,7 @@ Add distinct controls to existing owner fixtures, not table-self oracle:
   ignore popped completion owner, turn PENDING into{}, or drop a referenced target.
 
 A's first review architecture direction is accepted, not implementation. F1/F2
-are offered a concrete conditional resolution here; the changed unbound-intent
-interpretation is explicitly NOT presumed agreed. Actual post933/TP-N3 pin,
+have a concrete canonical/lifetime choice accepted IN PRINCIPLE by A; this is
+not concrete API/implementation acceptance or execution proof. Actual post933/TP-N3 pin,
 canonical outcome matrix, owner hooks/transfer handshake and preserving Stop
 adapter remain exact pre-code gates. No generic source/atomicity/runtime grant.

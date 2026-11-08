@@ -107,8 +107,10 @@ Operations remain visible until work completes or ownership has transferred to
 an existing slot, durable queue, compaction/recovery owner or Stop lease. The
 parent survives until a deferred child is registered, BEFORE parent retirement;
 no callback-publication gap. No global forever-growing history: reference-count
-live operations/lanes; prune per-agent Stop cutoff metadata only below the oldest
-outstanding bindable reservation sequence, never an arbitrary age timeout.
+live operations/target references; remove target epochs only at zero bound,
+control, lease, completion and child references. Unbound reservations do not
+anchor a completed-target cutoff history. This is A's accepted binding refinement
+in the API supplement, not the old global-watermark design.
 No operation context is serialized into RPC/DB/auth or confused with TurnSlots'
 slot identity. Existing U10/TP02 parent-to-child agreement applies.
 
@@ -129,14 +131,17 @@ After publishing the exact slot/spawning/effect owner, ordinary lane ownership
 ends BEFORE native session/start/steer/interrupt/selector/worker I/O. A physical
 per-agent RLock across submit/spawn or goal RPC is explicitly rejected.
 
-A dispatch initially reserved before a USER Stop must not resolve later, sample
-a new generation and masquerade as fresh post-Stop intent. Retain original
-sequence and compare it to the successful USER cutoff plus current existing
-receipt/user-stop generation. Failed pre-durable Stop can undo only its own
-provisional cutoff; durable user-stop/receipt fence remains after interruption
-failure, as current code does. Maintenance Stop never publishes a USER cutoff.
-Use current DispatchError/fenced/queued outcomes, never a new safe-resend rule.
-Exact outcome mapping is a reviewer-required pre-code matrix, not invented here.
+A genuinely effect-free unresolved operation has no agent admission position
+until canonical bind, so an overlapping Stop can linearize first. This is A's
+written937 refinement, not a new socket-order guarantee. Before treating it as
+fresh, existing client/queue/receipt/prompt/producer authority must be classified
+by its actual owner: old work keeps its saved USER generation and pause rights,
+never a refreshed post-Stop stamp. Bound preparation still needs the current
+owner fence and existing queued/refusal outcome at the actual write/handoff.
+Provisional failed Stop, committed USER fence despite interrupt failure, and
+maintenance Stop remain distinct. See the supplement's exact histories and
+zero-reference lifetime bound; the original global unbound-cutoff sketch is
+superseded for review, not an accepted production API.
 
 Minimum non-runtime seams likely required for COMPLETE TP-02: actual canonical
 binding/admission boundaries in `AdmissionMixin._dispatch_owned`; the final
@@ -232,7 +237,7 @@ No local sockets/tests. Reviewer A upfront request rf3c135e9d46e is fulfilled; c
 |---|---|
 | Block A after real dispatch enters slow provider; request status/live snapshot and dispatch B | Responses/B provider entry occur while A's release event remains unset; restoring global whole-RPC lock fails |
 | Hold A1 before durable admission; submit A2 and same client-ID retry | One receipt/user row/native writer, existing queue order and steer behavior; wrong lane key or early lane release fails |
-| Hold A's original reservation before target resolution; Stop A; then resolve | Old intent cannot reappear as fresh; reverse Stop then new request follows normal USER policy; resetting sequence after lookup fails |
+| Hold effect-free unbound lookup; bind independentB; StopA then resolve; repeat oldreceipt/bound preparation | B progresses and canonical lane order is not retroactive; truly fresh bind-after-Stop follows existing policy, old authority stays fenced; laundering old receipt fails |
 | Stop during A's pending native start, plus unrelated B | Existing TP-N3 exact late-ID/timeout holds and durable paused follow-up preserved; Stop does not wait for ordinary RPC lane; bypassed fence fails |
 | Hold admitted RPC before first visible slot; attempt fast drain/seal | Not sealed/no shutdown; releasing request yields existing owned/queued/refused result; omitted reservation fails |
 | Mutate reservation/release epoch during outside-lock blocker scan/carry | Stale scan cannot seal; cancel/revert preserves held FIFO once; omitted epoch recheck fails |
@@ -374,9 +379,9 @@ actual landing rather than restoring an older TurnSlots file.
 A report reviews/tp02-937-A-design-5ead1becd1f0.md FULLREAD: direction
 accepted for refinement, F1/F2 changes required before implementation. See
 `tp02-rpc-api-937.md` for exact proposed carriers/outcomes/monitor contracts and
-a conditional canonical-binding/target-lifetime solution. In case of conflict,
-its conditional F1/F2 wording replaces the first draft's unbound-cutoff sketch
-for REVIEW ONLY; that semantic interpretation still needs A+fix3 settlement.
+a canonical-binding/target-lifetime solution accepted IN PRINCIPLE in A's
+written binding-refinement report. Its F1/F2 wording supersedes the first draft's
+unbound-cutoff sketch for REVIEW; exact concrete owner/API proof remains pending.
 The actual post933/TP-N3 home/owner and preserving Stop adapter remain gates.
 No production/test edits or execution. Explanation command inventory corrected
 to local cache answer/redaction, no native RPC.
