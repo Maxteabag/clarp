@@ -2692,7 +2692,7 @@ def cmd_uninstall(args) -> int:
             "clarp-admin", "clarp-tui", "clarp-goal", "clarp-agent-tasks", "clarp-agent-artifacts",
             "clarp-podcast-history",
             "clarp-media-publish", "clarp-agent-bg", "clarp-sub-agent", "clarp-message-watch",
-            "clarp-adopt",
+            "clarp-adopt", "clarp-status-fork",
             "clarp-github-workflow-artifact"]),):
         for name in names:
             path = root / name
