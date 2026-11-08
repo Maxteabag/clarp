@@ -1282,12 +1282,13 @@ def test_r6_an_unknown_end_never_lands_between_a_stops_row_and_its_settlement(en
     stopper = threading.Thread(target=lambda: errors.append(None) if _user_stop(env.agent_id) is None
                                else None, name="r6-stopper")
 
-    def gated(agent_id, event, target, detail, stamp):
+    def gated(agent_id, event, target, detail, stamp, *, unlaunched_turn_id=None):
         if event == _td.TurnEvent.STOP_REQUESTED and threading.current_thread() is stopper:
             inserted.set()
             if not go.wait(10):
                 errors.append("the Stop's transaction was never released")
-        return real_record(agent_id, event, target, detail, stamp)
+        return real_record(agent_id, event, target, detail, stamp,
+                           unlaunched_turn_id=unlaunched_turn_id)
     monkeypatch.setattr(_td.turn_lifecycle, "_record_outcome", gated)
 
     def stop_row_without_settlement(_trace):

@@ -18,16 +18,38 @@ from tests.unit.test_turn_dispatch import (  # noqa: F401 - autouse fixture
     _assert_retry_delivers_once, _codex_service, _CodexSteerable, _local_dispatch_runtime)
 
 
-class _SpawnDiesOnce(_CodexSteerable):
-    def __init__(self):
-        super().__init__()
-        self.failures_left = 1
+def _preinvoke_failure_service(tmp_path, monkeypatch):
+    """The actual preparation boundary supplies proof, before registry entry."""
+    provider = _CodexSteerable()
+    service, agent_id = _codex_service(tmp_path, provider)
+    runner = backends_module.by_id("codex")
+    real_prepare, real_spawn = runner.arm_source_marker, provider.spawn_turn
+    original_error = DispatchError(500, "synthetic pre-invoke preparation failure")
+    facts = {"preparations": 0, "provider_entries": 0}
+    def prepare(*args, **kwargs):
+        facts["preparations"] += 1
+        if facts["preparations"] == 1:
+            raise original_error
+        return real_prepare(*args, **kwargs)
+    def spawned(*args, **kwargs):
+        facts["provider_entries"] += 1
+        return real_spawn(*args, **kwargs)
+    monkeypatch.setattr(runner, "arm_source_marker", prepare)
+    monkeypatch.setattr(provider, "spawn_turn", spawned)
+    return service, provider, agent_id, original_error, facts
 
-    def spawn_turn(self, backend, **kwargs):
-        if self.failures_left:
-            self.failures_left -= 1
-            raise RuntimeError("codex app-server unreachable")
-        super().spawn_turn(backend, **kwargs)
+
+def _assert_one_exact_keyed_marker(agent_id):
+    markers = agents.conn().execute(
+        """SELECT json_extract(detail,'$.dispatch_not_started_turn_id') AS attempt,
+                  json_type(detail,'$.dispatch_not_started_turn_id') AS key_type
+             FROM state_log WHERE agent_id=? AND json_extract(detail,'$.trace_id')='t-died'
+               AND json_extract(detail,'$.dispatch_not_started')=1""", (agent_id,)).fetchall()
+    turns = agents.conn().execute(
+        "SELECT * FROM turns WHERE agent_id=? AND trace_id='t-died'", (agent_id,)).fetchall()
+    assert len(markers) == len(turns) == 1
+    assert markers[0]["key_type"] == "integer" and markers[0]["attempt"] == turns[0]["turn_id"] > 0
+    assert turns[0]["outcome"] == "failed" and turns[0]["settled_at"] is not None
 
 
 def test_a_marker_write_that_fails_once_still_lets_the_resend_launch_once(tmp_path, monkeypatch):
@@ -40,16 +62,19 @@ def test_a_marker_write_that_fails_once_still_lets_the_resend_launch_once(tmp_pa
             raise sqlite3.OperationalError("database is locked")
         return real(*args, **kwargs)
     monkeypatch.setattr(turn_lifecycle, "record_unlaunched", locked_once)
-    backends = _SpawnDiesOnce()
-    service, agent_id = _codex_service(tmp_path, backends)
+    service, backends, agent_id, original_error, facts = _preinvoke_failure_service(tmp_path, monkeypatch)
     service.retry_scheduler = lambda _delay, fn: fn()   # the background retry, run now
-    with pytest.raises(DispatchError):
+    with pytest.raises(DispatchError) as caught:
         service.dispatch(text="full control over the pipeline",
                          requested_session="cipher", trace_id="t-died",
                          client_msg_id="u-lost")
+    assert caught.value is original_error and caught.value.status == 500
+    assert facts == {"preparations": 1, "provider_entries": 0} and calls["n"] == 2
     assert backends.spawned == []
     assert _td._INFLIGHT.get(agent_id) is None
+    _assert_one_exact_keyed_marker(agent_id)
     _assert_retry_delivers_once(service, backends, agent_id)
+    assert facts["provider_entries"] == 1
 
 
 def test_a_marker_that_landed_before_its_error_is_not_written_again(tmp_path, monkeypatch):
@@ -58,9 +83,11 @@ def test_a_marker_that_landed_before_its_error_is_not_written_again(tmp_path, mo
     The retry must find the marker, not write a second one."""
     original = live_hub.observe_transition
     original_start = threading.Thread.start
+    forward_faults = []
 
     def no_forward_worker(self):
         if self.name == "live-forward":
+            forward_faults.append(self.name)
             raise RuntimeError("synthetic thread creation failure")
         return original_start(self)
 
@@ -74,17 +101,21 @@ def test_a_marker_that_landed_before_its_error_is_not_written_again(tmp_path, mo
             failure.setattr(threading.Thread, "start", no_forward_worker)
             return original(agent_id, event, target, detail)
     monkeypatch.setattr(live_hub, "observe_transition", observe)
-    provider = _SpawnDiesOnce()
-    service, agent_id = _codex_service(tmp_path, provider)
+    service, provider, agent_id, original_error, facts = _preinvoke_failure_service(tmp_path, monkeypatch)
     service.retry_scheduler = lambda _delay, fn: fn()
-    with pytest.raises(DispatchError):
+    with pytest.raises(DispatchError) as caught:
         service.dispatch(text="synthetic request", requested_session="cipher",
                          trace_id="t-died", client_msg_id="u-lost")
     rows = agents.conn().execute(
         "SELECT COUNT(*) AS n FROM state_log WHERE agent_id=? AND json_extract(detail,'$.trace_id')='t-died' "
         "AND json_extract(detail,'$.dispatch_not_started')=1", (agent_id,)).fetchone()["n"]
+    assert caught.value is original_error and caught.value.status == 500
+    assert facts == {"preparations": 1, "provider_entries": 0}
+    assert forward_faults == ["live-forward"]
     assert rows == 1
+    _assert_one_exact_keyed_marker(agent_id)
     _assert_retry_delivers_once(service, provider, agent_id)
+    assert facts["provider_entries"] == 1
 
 
 
@@ -94,9 +125,11 @@ def test_a_failed_retry_scheduling_keeps_one_marker_and_the_dispatch_failure(tmp
     abandonment: no second abandonment, no second marker, the original error."""
     original = live_hub.observe_transition
     original_start = threading.Thread.start
+    forward_faults = []
 
     def no_forward_worker(self):
         if self.name == "live-forward":
+            forward_faults.append(self.name)
             raise RuntimeError("synthetic thread creation failure")
         return original_start(self)
 
@@ -110,39 +143,53 @@ def test_a_failed_retry_scheduling_keeps_one_marker_and_the_dispatch_failure(tmp
             failure.setattr(threading.Thread, "start", no_forward_worker)
             return original(agent_id, event, target, detail)
     monkeypatch.setattr(live_hub, "observe_transition", observe)
-    provider = _SpawnDiesOnce()
-    service, agent_id = _codex_service(tmp_path, provider)
+    service, provider, agent_id, original_error, facts = _preinvoke_failure_service(tmp_path, monkeypatch)
 
+    timer_faults = []
     def no_timer(_delay, _fn):
+        timer_faults.append(_delay)
         raise RuntimeError("synthetic timer thread creation failure")
     service.retry_scheduler = no_timer
-    with pytest.raises(DispatchError):
+    with pytest.raises(DispatchError) as caught:
         service.dispatch(text="synthetic request", requested_session="cipher",
                          trace_id="t-died", client_msg_id="u-lost")
     rows = agents.conn().execute(
         "SELECT COUNT(*) AS n FROM state_log WHERE agent_id=? AND json_extract(detail,'$.trace_id')='t-died' "
         "AND json_extract(detail,'$.dispatch_not_started')=1", (agent_id,)).fetchone()["n"]
+    assert caught.value is original_error and caught.value.status == 500
+    assert facts == {"preparations": 1, "provider_entries": 0}
+    assert forward_faults == ["live-forward"]
+    assert timer_faults == [_td._UNLAUNCHED_MARKER_RETRY_SEC[0]]
     assert rows == 1
+    _assert_one_exact_keyed_marker(agent_id)
     service.retry_scheduler = lambda _delay, fn: None
     _assert_retry_delivers_once(service, provider, agent_id)
+    assert facts["provider_entries"] == 1
 
 
 def test_a_failed_marker_adds_no_database_write_before_the_500(tmp_path, monkeypatch):
     """Reviewer B on ca75ed42: as before the fix, a failed marker skips the
     turn's close, so a locked database costs no second critical-write wait on
     the way to the 500; the marker is retried in the background only."""
+    marker_faults = []
     def locked(*args, **kwargs):
+        marker_faults.append(kwargs.get("turn_id"))
         raise sqlite3.OperationalError("database is locked")
     monkeypatch.setattr(turn_lifecycle, "record_unlaunched", locked)
     closed = []
     monkeypatch.setattr(turn_lifecycle, "close_turn", lambda turn_id: closed.append(turn_id))
-    backends = _SpawnDiesOnce()
-    service, _agent_id = _codex_service(tmp_path, backends)
+    service, backends, _agent_id, original_error, facts = _preinvoke_failure_service(tmp_path, monkeypatch)
     scheduled = []
     service.retry_scheduler = lambda delay, fn: scheduled.append(delay)
-    with pytest.raises(DispatchError):
+    with pytest.raises(DispatchError) as caught:
         service.dispatch(text="full control over the pipeline",
                          requested_session="cipher", trace_id="t-died",
                          client_msg_id="u-lost")
+    assert caught.value is original_error and caught.value.status == 500
+    assert facts == {"preparations": 1, "provider_entries": 0}
+    assert len(marker_faults) == 1 and marker_faults[0] > 0
     assert closed == []
     assert scheduled == [_td._UNLAUNCHED_MARKER_RETRY_SEC[0]]
+    assert not agents.conn().execute(
+        "SELECT 1 FROM state_log WHERE agent_id=? AND json_extract(detail,'$.dispatch_not_started')=1",
+        (_agent_id,)).fetchone()
