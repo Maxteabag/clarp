@@ -69,10 +69,15 @@ def _receipt_write(event: str, queue_ids, *, agent_ids=None):
 
 def _launch_status(row) -> str:
     from . import agents, launch_receipts
-    raw = launch_receipts.settings_store.get_text(launch_receipts._key(str(row["trace_id"])))
-    receipt = launch_receipts.get(str(row["trace_id"]))
-    if raw is not None and receipt is None:
-        return "unknown"  # malformed is not missing/unsent
+    raw = launch_receipts.settings_store.get(launch_receipts._key(str(row["trace_id"])))
+    receipt = None
+    if raw is not None:
+        try:
+            receipt = json.loads(raw)
+        except ValueError:
+            return "unknown"  # present malformed is not missing/unsent
+        if not isinstance(receipt, dict):
+            return "unknown"
     if receipt is not None and (receipt.get("agent_id") != row["agent_id"]
                     or receipt.get("trace_id") != row["trace_id"]
                     or receipt.get("client_msg_id") != row["client_msg_id"]
