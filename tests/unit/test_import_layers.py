@@ -44,13 +44,13 @@ PERSISTENCE = frozenset({
 })
 PERSISTENCE_PACKAGES = ("lib.persistence",)
 CORE = frozenset({f"lib.{m}" for m in (
-    "agent_lifecycle", "agent_mcp_codec", "agent_store", "agents", "backends", "config", "config_writer",
-    "conversation", "claude_reply_evidence", "deployment", "error_classify", "eventlog", "events", "hook_runtime",
+    "agent_lifecycle", "agent_mcp_codec", "agent_store", "agents", "backends", "config", "config_writer", "diagnostics_settings",
+    "claude_reply_evidence", "deployment", "error_classify", "eventlog", "events", "hook_runtime",
     "http_utils", "identity", "launch_receipts", "log", "message_live", "message_store", "message_turns",
     "message_writes", "origins", "proc_util", "process_registry", "prompt_admissions",
     "protocol", "roster", "roster_seed", "runtime_bridge", "runtime_events", "server_identity",
     "settings_store", "status_labels", "telemetry", "text_util", "trace", "turn_dispatch",
-    "turn_identity", "turn_lifecycle", "turn_queue", "turn_slots", "turn_usage", "terminal_presence", "ws",
+    "turn_identity", "turn_lifecycle", "turn_queue", "turn_slots", "turn_usage", "terminal_presence", "voice", "voice_markup", "ws",
 )})
 CORE_PACKAGES = ("lib.backend", "lib.policies")
 HTTP = frozenset({"server", "runtime", "__init__"} | {f"lib.{m}" for m in (
@@ -98,7 +98,6 @@ UPWARD_BASELINE = frozenset({
     'lib.backend.agy -> lib.provider_capabilities',
     'lib.backend.agy -> lib.task_plans',
     'lib.backend.agy -> lib.tts_queue',
-    'lib.backend.agy -> lib.voice_markup',
     'lib.backend.agy -> lib.voice_preamble',
     'lib.backend.agy_hooks -> lib.agy_transcript',
     'lib.backend.agy_hooks -> lib.provider_background_jobs',
@@ -135,17 +134,12 @@ UPWARD_BASELINE = frozenset({
     'lib.backend.opencode -> lib.voice_preamble',
     'lib.backend.stream_json -> lib.live_hub',
     'lib.backend.stream_json -> lib.live_pacing',
-    'lib.backend.stream_json -> lib.voice_markup',
-    'lib.conversation -> lib.transcript_import_cache',
-    'lib.conversation -> lib.transcript_incremental',
-    'lib.eventlog -> lib.diagnostics_settings',
     'lib.message_live -> lib.dreaming',
     'lib.message_live -> lib.heartbeat',
     'lib.message_live -> lib.message_context',
     'lib.message_live -> lib.oracle_delegations',
     'lib.message_live -> lib.team_leader',
     'lib.message_live -> lib.team_store',
-    'lib.message_live -> lib.voice_markup',
     'lib.message_store -> lib.message_context',
     'lib.message_store -> lib.message_previews',
     'lib.message_writes -> lib.dreaming',
@@ -154,8 +148,6 @@ UPWARD_BASELINE = frozenset({
     'lib.message_writes -> lib.oracle_delegations',
     'lib.message_writes -> lib.team_leader',
     'lib.message_writes -> lib.team_store',
-    'lib.message_writes -> lib.voice_markup',
-    'lib.policies.agent_spec -> lib.voice',
     'lib.runtime_bridge -> lib.compaction',
     'lib.runtime_bridge -> lib.janitor_autonomy',
     'lib.runtime_bridge -> lib.live_hub',

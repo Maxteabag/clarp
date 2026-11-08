@@ -328,3 +328,14 @@ synthetic branches:
 - `agent_mcp_codec` is a new core primitive owning the stored MCP selection JSON codec. Feature `mcp_selection` re-exports the exact functions; core lifecycle and backend consumers import the canonical owner. The existing feature module retains its classification and stored JSON semantics.
 
 The first five repaired upward edges are removed from the ratchet; this section does not authorize reclassifying any existing module or expanding named exceptions.
+
+## Wave 2: lead-signed map corrections (937)
+
+These are the four existing-module corrections signed by Hobbles for assignment 937, paired with removal of their eight baseline edges in this commit. No other existing module is reclassified.
+
+- `conversation`: core → features because it is the HTTP-called application importer/query service; no library importer acquires a new upward edge.
+- `voice_markup`: features → core because its shared text normalization imports only `re`, independently of synthesis and delivery.
+- `diagnostics_settings`: features → core because cross-cutting logging capture settings depend only on standard library code and core `settings_store`.
+- `voice`: features → core because it is a pure JSON codec/constants module for `voice_id`, independently of voice providers and playback.
+
+The seven named exceptions and two aliases are unchanged. A3 source approval and captain remote architecture/gate receipts remain required before landing.
