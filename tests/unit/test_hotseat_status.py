@@ -770,3 +770,338 @@ def test_positive_wire_files_keep_the_closed_codes_and_unique_kinds(case):
         for acct in p["accounts"]:
             kinds = [w["kind"] for w in acct["windows"]]
             assert len(kinds) == len(set(kinds)), (case, acct["alias"])
+
+
+# --- B review fff49208, F1: an error row contributes no samples ----------------------------
+
+LATER_RESET_S = FUTURE_S + 7 * 24 * 3600
+
+
+def _codex_error_row(alias, *, used, reset_s, kind, account_id=None):
+    """A same-alias Codex row whose read failed but still carries a numeric (cached) window."""
+    row = codex_row(alias, active=True, used=used)
+    row["usage"]["windows"] = [{"label": "codex primary weekly", "used": used, "reset": reset_s}]
+    row["usage"]["worst_used"] = used
+    if account_id is not None:
+        row["account_id"] = account_id
+    if kind == "usage_error":
+        row["usage"]["error"] = SENTINEL_ERROR + " " + SENTINEL_TOKEN
+    elif kind == "row_auth":
+        row["error_code"] = "auth_error"
+    else:  # usage-level typed auth
+        row["usage"]["error_code"] = "auth_error"
+    return row
+
+
+@pytest.mark.parametrize("kind, state, code", [("usage_error", "unknown", "provider_error"),
+                                               ("row_auth", "auth_error", "auth_error"),
+                                               ("usage_auth", "auth_error", "auth_error")])
+def test_a_codex_error_row_with_numeric_windows_keeps_the_same_identity_last_good(enabled, capsys, kind, state, code):
+    status.record_read("codex", {"accounts": [codex_row("p", active=True, used=0.25)]}, T0)
+    status.record_read("codex", {"accounts": [_codex_error_row("p", used=0.9, reset_s=LATER_RESET_S, kind=kind)]},
+                       T0 + 60_000)
+    served = status.payload(served_at=T0 + 61_000)
+    p = account(served, "codex", "p")
+    assert (p["state"], p["error_code"]) == (state, code)
+    assert p["last_good_observed_at"] == T0
+    w = window(p, "7d")
+    assert (w["used_ratio"], w["resets_at"], w["observed_at"], w["stale"]) == (0.25, int(FUTURE_S * 1000), T0, True)
+    assert [x["kind"] for x in p["windows"]] == ["7d"]
+    stored = json.dumps({k: settings_store.get(k) for k in settings_store.keys_with_prefix("hotseat-status.")})
+    logs = capsys.readouterr()
+    for blob in (json.dumps(served), stored, logs.out + logs.err):
+        assert "SENTINELERR" not in blob and "Qz9Qz9" not in blob
+    assert '"used":0.9' not in stored and "0.9," not in json.dumps(served)  # the error row's number is no sample
+    # A healthy newer read of the same identity still wins.
+    status.record_read("codex", {"accounts": [codex_row("p", active=True, used=0.4)]}, T0 + 120_000)
+    w = window(account(status.payload(served_at=T0 + 121_000), "codex", "p"), "7d")
+    assert (w["used_ratio"], w["observed_at"], w["stale"]) == (0.4, T0 + 120_000, False)
+
+
+@pytest.mark.parametrize("kind", ["usage_error", "row_auth", "usage_auth"])
+def test_a_codex_error_row_without_a_previous_good_value_invents_none(enabled, kind):
+    status.record_read("codex", {"accounts": [_codex_error_row("p", used=0.9, reset_s=LATER_RESET_S, kind=kind)]}, T0)
+    p = account(status.payload(served_at=T0 + 1000), "codex", "p")
+    assert p["windows"] == [] and p["last_good_observed_at"] is None
+
+
+@pytest.mark.parametrize("kind", ["usage_error", "row_auth", "usage_auth"])
+def test_a_codex_error_row_of_another_identity_inherits_nothing(enabled, kind):
+    status.record_read("codex", {"accounts": [codex_row("p", active=True, used=0.25)]}, T0)
+    other = _codex_error_row("p", used=0.9, reset_s=LATER_RESET_S, kind=kind, account_id="acct-someone-else")
+    status.record_read("codex", {"accounts": [other]}, T0 + 60_000)
+    p = account(status.payload(served_at=T0 + 61_000), "codex", "p")
+    assert p["windows"] == [] and p["last_good_observed_at"] is None
+
+
+def _stored_no_reset(alias, provider="codex"):
+    accounts = json.loads(settings_store.get(status.SNAPSHOT_PREFIX + provider))["accounts"]
+    return next(a.get("no_reset") for a in accounts if a["alias"] == alias)
+
+
+@pytest.mark.parametrize("prior_hint, error_hint, served_reset", [
+    (None, "no credits", int(FUTURE_S * 1000)),  # the failed row's hint must not hide the good reset
+    ("no credits", None, None),                  # a missing hint must not expose a withheld reset
+    ("spend cap", "no credits", None),           # conflicting hints: the last-good semantics stay
+])
+def test_a_failed_row_keeps_the_last_good_no_reset_semantics(enabled, prior_hint, error_hint, served_reset):
+    good = codex_row("p", active=True, used=0.25)
+    if prior_hint:
+        good["usage"]["no_reset_reason"] = prior_hint
+    status.record_read("codex", {"accounts": [good]}, T0)
+    bad = _codex_error_row("p", used=0.9, reset_s=LATER_RESET_S, kind="usage_error")
+    if error_hint:
+        bad["usage"]["no_reset_reason"] = error_hint
+    status.record_read("codex", {"accounts": [bad]}, T0 + 60_000)
+    w = window(account(status.payload(served_at=T0 + 61_000), "codex", "p"), "7d")
+    assert (w["used_ratio"], w["resets_at"], w["observed_at"], w["stale"]) == (0.25, served_reset, T0, True)
+    assert _stored_no_reset("p") == {None: None, "no credits": "no_credits", "spend cap": "spend_cap"}[prior_hint]
+
+
+@pytest.mark.parametrize("other_identity", [False, True])
+def test_a_failed_row_without_a_same_identity_prior_carries_no_hint(enabled, other_identity):
+    if other_identity:
+        status.record_read("codex", {"accounts": [codex_row("p", active=True, used=0.25)]}, T0)
+    bad = _codex_error_row("p", used=0.9, reset_s=LATER_RESET_S, kind="usage_error",
+                           account_id="acct-someone-else" if other_identity else None)
+    bad["usage"]["no_reset_reason"] = "no credits"
+    status.record_read("codex", {"accounts": [bad]}, T0 + 60_000)
+    p = account(status.payload(served_at=T0 + 61_000), "codex", "p")
+    assert p["windows"] == [] and p["last_good_observed_at"] is None
+    assert _stored_no_reset("p") is None
+
+
+def test_a_healthy_row_still_sets_its_own_no_reset_hint(enabled):
+    status.record_read("codex", {"accounts": [codex_row("p", active=True, used=0.25)]}, T0)
+    healthy = codex_row("p", active=True, blocked=True, used=1.0)
+    healthy["usage"]["no_reset_reason"] = "no credits"
+    status.record_read("codex", {"accounts": [healthy]}, T0 + 60_000)
+    p = account(status.payload(served_at=T0 + 61_000), "codex", "p")
+    assert p["state"] == "exhausted" and window(p, "7d")["resets_at"] is None
+    assert _stored_no_reset("p") == "no_credits"
+
+
+def test_a_claude_typed_auth_row_with_numeric_usage_keeps_the_last_good(enabled):
+    status.record_read("claude", claude(claude_row("a", active=True, used_5h=0.25)), T0)
+    row = claude_row("a", active=True, used_5h=0.9, used_7d=0.95, reset_5h=LATER_RESET_S, error_code="auth_error")
+    status.record_read("claude", claude(row), T0 + 60_000)
+    a = account(status.payload(served_at=T0 + 61_000), "claude", "a")
+    assert (a["state"], a["error_code"], a["last_good_observed_at"]) == ("auth_error", "auth_error", T0)
+    w = window(a, "5h")
+    assert (w["used_ratio"], w["resets_at"], w["observed_at"], w["stale"]) == (0.25, int(FUTURE_S * 1000), T0, True)
+
+
+# --- B review fff49208, F2: a failing diagnostic sink never reaches the switcher ----------------
+# No-DB evidence: a broken log sink falls back to the structured eventlog (the second half log()
+# itself writes), never to a settings/state write. The read-only GET writes nothing on any fault.
+
+SETTINGS_WRITERS = ("set_text", "set_text_if_blank", "set_int", "set_bool", "increment", "delete")
+
+
+@pytest.fixture
+def broken_status_sink(monkeypatch):
+    """stderr fails for the status hooks' own events only; the Janitor's logging is untouched."""
+    from lib import log as log_module
+    real = log_module.log
+
+    def sink(event, detail=""):
+        if event.startswith("hotseatStatus"):
+            raise BrokenPipeError(32, "Broken pipe " + SENTINEL_ERROR)
+        return real(event, detail)
+    monkeypatch.setattr(log_module, "log", sink)
+    monkeypatch.setattr(status, "log", sink)
+
+
+@pytest.fixture
+def status_eventlog(monkeypatch):
+    """Records what the status hooks hand to the structured eventlog; `fail` makes that fail too."""
+    from lib import log as log_module
+    real = log_module._eventlog_emit
+    seen, mode = [], {"fail": False}
+
+    def emit(event, level, detail):
+        if event.startswith("hotseatStatus"):
+            if mode["fail"]:
+                raise OSError(5, "eventlog down " + SENTINEL_PATH)
+            seen.append((event, level, detail))
+            return None
+        return real(event, level, detail)
+    monkeypatch.setattr(log_module, "_eventlog_emit", emit)
+    return seen, mode
+
+
+def _fail_store(monkeypatch, *, keys):
+    real = settings_store.set_text
+
+    def set_text(key, value, **kwargs):
+        if any(key.startswith(k) for k in keys):
+            raise OSError(28, "No space left on device " + SENTINEL_PATH)
+        return real(key, value, **kwargs)
+    monkeypatch.setattr(settings_store, "set_text", set_text)
+
+
+@pytest.mark.parametrize("eventlog", ["returns", "raises"])
+def test_diagnose_reports_an_attempt_never_a_delivery(monkeypatch, eventlog):
+    """Contract-review C4: after a log-sink failure the eventlog fallback is only an attempt (its helper
+    swallows its own sink errors), so the result never claims the event was stored or accepted."""
+    from lib import log as log_module
+
+    def broken(event, detail=""):
+        raise BrokenPipeError(32, "Broken pipe " + SENTINEL_ERROR)
+    monkeypatch.setattr(status, "log", broken)
+    seen = []
+
+    def emit(event, level, detail):
+        if eventlog == "raises":
+            raise OSError(5, "down")
+        seen.append((event, level, detail))
+    monkeypatch.setattr(log_module, "_eventlog_emit", emit)
+    result = status.diagnose("hotseatStatusRecordFailed", "site=record_read error=OSError")
+    assert result == ("eventlog_attempted" if eventlog == "returns" else "dropped")
+    assert result not in ("stored", "accepted", "delivered", "eventlog")
+    if eventlog == "returns":
+        assert seen == [("hotseatStatusRecordFailed", "warning",
+                         "site=record_read error=OSError sink_error=BrokenPipeError")]
+
+
+def _codes_only(seen):
+    blob = json.dumps(seen)
+    assert seen and "SENTINEL" not in blob and "Broken pipe" not in blob and "/home/" not in blob
+    return blob
+
+
+def _no_diagnostic_state():
+    assert [k for k in settings_store.keys_with_prefix("hotseat-status.") if "diagnostic" in k] == []
+
+
+def _read_accounts_with(monkeypatch, stdout):
+    from lib import janitor_hotseat
+
+    class Proc:
+        returncode = 0
+        stderr = ""
+    Proc.stdout = stdout
+    monkeypatch.setattr(janitor_hotseat.subprocess, "run", lambda *_a, **_k: Proc())
+    return janitor_hotseat.read_accounts("hotseat", "claude")
+
+
+def test_read_accounts_survives_a_persistence_failure_and_a_broken_diagnostic_sink(monkeypatch, broken_status_sink,
+                                                                                    status_eventlog):
+    from lib import janitor_hotseat
+    seen, _ = status_eventlog
+    payload = claude(claude_row("a", active=True, used_5h=0.5))
+    _fail_store(monkeypatch, keys=("hotseat-status.",))
+    assert _read_accounts_with(monkeypatch, json.dumps(payload)) == janitor_hotseat.parse_claude(payload)
+    assert settings_store.keys_with_prefix("hotseat-status.") in ([], ["hotseat-status.salt.v1"])
+    blob = _codes_only(seen)
+    assert "site=record_read" in blob and "OSError" in blob and "sink_error=BrokenPipeError" in blob
+
+
+def test_read_accounts_survives_a_rejected_payload_and_a_broken_diagnostic_sink(monkeypatch, broken_status_sink,
+                                                                                status_eventlog):
+    from lib import janitor_hotseat
+    seen, _ = status_eventlog
+    assert _read_accounts_with(monkeypatch, "[]") == janitor_hotseat.parse_claude([]) == []
+    snapshot = json.loads(settings_store.get(status.SNAPSHOT_PREFIX + "claude"))
+    assert (snapshot["read_state"], snapshot["error_code"]) == ("failed", "parse_failed")
+    blob = _codes_only(seen)
+    assert "code=parse_failed" in blob and "sink_error=BrokenPipeError" in blob
+    _no_diagnostic_state()
+
+
+def test_read_accounts_survives_when_every_diagnostic_channel_fails(monkeypatch, broken_status_sink, status_eventlog):
+    from lib import janitor_hotseat
+    _, mode = status_eventlog
+    mode["fail"] = True
+    payload = claude(claude_row("a", active=True, used_5h=0.5))
+    _fail_store(monkeypatch, keys=(status.SNAPSHOT_PREFIX,))
+    assert _read_accounts_with(monkeypatch, json.dumps(payload)) == janitor_hotseat.parse_claude(payload)
+    _no_diagnostic_state()
+
+
+def _switcher(monkeypatch):
+    from lib import agents, janitor_builtins, janitors
+    from lib import janitor_autonomy as service
+    monkeypatch.setattr(service.backends, "active_handles", lambda *a: [])
+    janitor_builtins.ensure_builtins()
+    agents.create_agent(persona="Hotseat switcher", voice_id="v", cwd="/tmp", session="hotseat", backend="codex")
+    cfg = janitors.create("hotseat", template_id="account-hotseat")
+    owner = janitors.set_enabled("hotseat", cfg["revision"], True)
+    service.setup()
+    return service, owner
+
+
+@pytest.mark.parametrize("fallback", ["works", "fails"])
+def test_receipt_failures_with_a_broken_diagnostic_sink_leave_the_switcher_unchanged(monkeypatch, broken_status_sink,
+                                                                                       status_eventlog, fallback):
+    from lib import janitor_hotseat, janitors
+    seen, mode = status_eventlog
+    mode["fail"] = fallback == "fails"
+    service, owner = _switcher(monkeypatch)
+
+    def explode(*_a, **_k):
+        raise RuntimeError(SENTINEL_ERROR)
+    monkeypatch.setattr(status, "record_action", explode)
+    monkeypatch.setattr(status, "record_failure", explode)
+    switches, sent = [], []
+
+    def read(command, name):
+        if name == "codex":
+            raise RuntimeError("hotseat exited 1")
+        return janitor_hotseat.parse_claude(claude(claude_row("a", active=True, used_5h=0.9),
+                                                   claude_row("b", used_5h=0.1)))
+    worker = service.AutonomyJanitors(lambda *_: True, lambda p: sent.append(p) or {"sent": 1}, hotseat_read=read,
+                                      hotseat_switch=lambda c, p, alias: switches.append(alias) or True)
+    worker.hotseat_once()
+    assert switches == ["b"] and len(sent) == 1 and sent[0]["preview"].startswith("Claude: switched to b")
+    assert sorted(r["outcome"] for r in janitors.list_runs(owner["session"])) == ["completed", "failed"]
+    for lane in ("claude", "codex"):
+        state = json.loads(settings_store.get_text(f"janitor-adaptive.hotseat-switcher.{lane}", default="") or "{}")
+        assert state.get("next_run_at", 0) > 0
+    _no_diagnostic_state()
+    if fallback == "works":
+        blob = _codes_only(seen)
+        assert "site=action" in blob and "site=read_failure" in blob and "RuntimeError" in blob
+    else:
+        assert seen == []
+
+
+def test_the_read_only_route_writes_nothing_even_on_a_log_fault(monkeypatch, no_processes):
+    """A corrupt stored snapshot, a registry fault and a broken log sink: GET still answers from what
+    is stored and never writes settings/state."""
+    from lib import janitor_store
+    from lib import log as log_module
+    status.record_read("claude", claude(claude_row("a", active=True)), T0)
+    settings_store.set_text(status.SNAPSHOT_PREFIX + "codex", "{not json")
+
+    def registry_fault(*_a, **_k):
+        raise OSError(5, "registry unreadable " + SENTINEL_PATH)
+    monkeypatch.setattr(janitor_store, "janitor_agent_ids", registry_fault)
+    real_log = log_module.log
+
+    def sink(event, detail=""):
+        if event.startswith("hotseatStatus"):
+            raise BrokenPipeError(32, "Broken pipe " + SENTINEL_ERROR)
+        return real_log(event, detail)
+    monkeypatch.setattr(log_module, "log", sink)
+    monkeypatch.setattr(status, "log", sink)
+    seen = []
+    monkeypatch.setattr(log_module, "_eventlog_emit", lambda event, level, detail: seen.append((event, level, detail)))
+
+    def refuse(name):
+        def write(*_a, **_k):
+            pytest.fail(f"GET wrote settings via {name}")
+        return write
+    for writer in SETTINGS_WRITERS:
+        monkeypatch.setattr(settings_store, writer, refuse(writer))
+    handler = _handler("/hotseat/status")  # the authenticated route, not just the builder
+    handler._authorized = lambda: True
+    handler.do_GET()
+    [(code, body)] = handler.sent
+    assert code == 200
+    served = json.loads(body)
+    assert served["schema"] == "clarp.hotseat-status/1" and served["switcher"]["enabled"] is False
+    assert provider(served, "claude")["accounts"][0]["alias"] == "a"
+    assert provider(served, "codex")["read_state"] == "never"
+    blob = _codes_only([s for s in seen if s[0].startswith("hotseatStatus")])
+    assert "site=load" in blob and "site=janitor_enabled" in blob and "sink_error=BrokenPipeError" in blob
