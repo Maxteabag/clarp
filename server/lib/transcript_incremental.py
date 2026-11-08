@@ -59,7 +59,7 @@ _VERSION_SOURCES = {
 }
 _COMMON_SOURCES = ("transcript_incremental.py", "backend/base.py", "message_writes.py",
                    "message_import_rows.py", "message_import_common.py",
-                   "message_context.py", "message_turns.py", "voice_markup.py",
+                   "message_context.py", "message_text.py", "message_turns.py", "voice_markup.py",
                    # The store's ack-token decisions (AUT-07).
                    "origins.py", "heartbeat.py", "dreaming.py", "team_leader.py",
                    "team_store.py", "oracle_delegations.py")
