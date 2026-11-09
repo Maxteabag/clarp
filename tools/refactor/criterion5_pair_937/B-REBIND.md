@@ -1,29 +1,43 @@
-# Explicit SOURCE-ONLY B/main rebind after936 landing
+# Explicit SOURCE-ONLY current-main pair rebind after release DONE
 
-Reviewed driver parent ff97e6d111d17dc4370bc1e71ac8e2000ceeef37.
-Prior B a5fd6db9db6c12125e4d98389e22571f8f9bbb9a is stale and must refuse.
-New proposed B 1ca5a5a69cba322e311968f20298c1db36f31eac is actualmain
-at this readback. A4f33, sample counts, synthetic workload, validity predicates,
-cleanup, dependency policy, budgets, thresholds and workflow remain unchanged.
-Only plan.B and explanatory protocol binding change. B re-review required;
-source_reviewed/execution_admitted remain false declarations. No autonomous
-retarget or native retry/healing. If main moves again before setup, refuse.
+Parent driver f6d4d61403abde6088dce372858694e6f5b3f5c3 is qualified ONLY for
+old B1ca5a5a69cba322e311968f20298c1db36f31eac and must now refuse as stale.
+Proposed exact B9e695b4e1ae764bac80bce6b2dc7217b2c1a5c08 is actualmain by
+public read-only ref response this turn. A4f33 and every other plan value stay
+unchanged. No automatic retarget: this explicit pair requires B exact review
+before captain's fresh handoff. If main moves again, refuse/rebind/review.
 
-This isolated driver derives from exactff97, not later nightly HEAD. All driver
-code/workflow is unchanged from B356196 source closure. The actual product delta
-from A5 consists of reconcile.py/turn_lifecycle.py and five test files for936.
-It adds the busy-repair temporal grace/observation map and expected-state guard;
-those real changes may affect suite/startup/memory and remain part of target B.
-No product edits or copied metrics occur here. Frozen dependency files, existing
-native entries, containment and replay source bindings compared byte-for-byte
-in source facts; equality is not runtime compatibility or a measured result.
+Lead actual RELEASE DONE/soft quiet lifted is now controlling; the prior owner
+release unfinished/B-critical no-parallel-review rationale is superseded, not
+an execution grant. Reuse the existing rebind worktree. SAME rec7c513cb879
+remains ONE push UNSPENT; no duplicate request, published branch, trial/probe/job.
+This is a narrow source/pair rebind, not another method or policy campaign.
 
-SAME captain request rec7c513cb879 stays open and ONEpush remains UNSPENT.
-No new execution request, branch publication, dispatch, probe or job. After
-exact B rebind review, captain alone reconciles replacement driver/branch with
-freshmain/source/trigger/priorrun and LOWEST priority behind933I4, DISK15 and
-readylandings. Source rebind does not clear that priority blocker. Inclusive
-100min/about17NOK/noFUNDpreemptdelay; finalprogrammain rerun separatelyrequired,
-not preapproved here. Retired native/execnet/coverage certification barriers
-stay retired under lead rf1c82b9c1d49. Herald HOLD and historical raw evidence
-stay unchanged. Nightly activation is separate and not part of this driver.
+Actual1ca->9e target delta comprises16 paths including DECISION artifact/route,
+config/identity/server wiring and related tests/docs. All are retained as the
+real B target; source entry server.py CHANGED, not an equal-byte carry claim.
+Source facts record equality/inequality of each native/dependency/replay binding.
+No candidate import/test/parser/SQL/process measurement occurred. The fixed
+synthetic /log + /status read workload, health predicate, seed, counts, cleanup,
+all full suites/pairs/samples/thresholds and workflow are unchanged in the driver.
+
+Historical fit worksheet belongs to retained B1ca850s/2workers/3.14.4, NOT current
+B9e. Its four-worker441.7955 estimate remains explicitly conditional occupancy
+arithmetic, no speedup/A/new-B forecast/fit assurance. New full B tests remain;
+no omission, automatic standing failure addition, retry or false performance claim.
+4workers BOTHarms/480suite/internal5280; setup8+wrapper89+upload2+margin1=100min,
+about17NOK inclusive. No cap extension/FUND/preempt/delay/force-trial/shrink.
+
+Captain still owns fresh LOWEST gap behind actual ready priority work plus
+actualmain/ref/priorrun/source/trigger/config/environment/time qualification.
+DISK15+5+ONE completed; I4 explicitly SKIPPED byPeter/NOTPASS; do not resurrect
+those old blockers. Final-program-main rerun remains separately required.
+Retired native-worker/execnet/teardown/coverage certification stays retired.
+Heavy FREEZE remains ABSOLUTE. Actions ONLY/no local suites; minimal hashes/index
+and source reads, no new worktree or bulk copies. From00:30CET startnothingnew.
+
+New archive/capsule rule remains binding before any seal/use: actual names/count/
+permemberSHA plus B confirmation. Rejected714d must never be used/copied/transferred/
+extracted. No archive/capsule was built, copied, sealed or used in this rebind.
+B review must flag any impact of this rule on later existing Git-source staging;
+a prior aggregate hash alone is not a new capsule seal. No Host/native action.
