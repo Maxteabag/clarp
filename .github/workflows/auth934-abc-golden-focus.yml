@@ -1,0 +1,63 @@
+name: AUTH934 ABC golden and associated focus
+'on':
+  push:
+    branches: [refactor/ci/auth934-abc-33fa-golden-focus-r2]
+permissions:
+  contents: read
+jobs:
+  generator-focus:
+    if: ${{ github.repository == 'Maxteabag/clarp' && github.event_name == 'push' && github.ref == 'refs/heads/refactor/ci/auth934-abc-33fa-golden-focus-r2' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 2
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e
+        with:
+          enable-cache: true
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Existing test audio dependency
+        timeout-minutes: 12
+        run: bash .github/scripts/install-test-ffmpeg.sh
+      - run: uv sync --frozen --group dev
+      - name: Existing prepared web dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund && npm run build
+      - name: Fixed generator then UPDATE-unset focus and validation
+        timeout-minutes: 16
+        shell: bash
+        env:
+          AUTH934_RUNNER_ENVIRONMENT: ${{ runner.environment }}
+        run: /usr/bin/timeout --signal=TERM --kill-after=30s 900s /usr/bin/bash .github/scripts/auth934-abc-golden-focus.sh
+      - name: Minimal evidence index even on failure
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          test -d auth934-abc-evidence || mkdir -m700 auth934-abc-evidence
+          /usr/bin/python3 -B - <<'PY'
+          from pathlib import Path
+          import hashlib,json,stat
+          root=Path('auth934-abc-evidence');rows=[];total=0
+          for p in sorted(root.rglob('*')):
+              mode=p.lstat().st_mode
+              assert not stat.S_ISLNK(mode)
+              if stat.S_ISDIR(mode):continue
+              assert stat.S_ISREG(mode)
+              b=p.read_bytes();total+=len(b)
+              assert len(rows)<128 and total<=16*1024*1024
+              rows.append(dict(path=str(p.relative_to(root)),bytes=len(b),sha256=hashlib.sha256(b).hexdigest()))
+          with (root/'INDEX.json').open('x') as f:json.dump(dict(files=rows,missing='UNKNOWN_NOT_PASS',scope='ABC_GENERATION_FOCUS_ONLY_NOT_G1'),f,indent=2)
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: ${{ always() }}
+        with:
+          name: auth934-abc-golden-focus-${{ github.run_id }}-${{ github.run_attempt }}
+          path: auth934-abc-evidence/
+          if-no-files-found: error
+          retention-days: 45
