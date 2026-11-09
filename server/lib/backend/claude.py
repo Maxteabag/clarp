@@ -328,6 +328,7 @@ class ClaudeBackend(Backend):
         ('opus', 'Opus'),
         ('sonnet', 'Sonnet'),
         ('haiku', 'Haiku'),
+        ('claude-fable-5-2', 'Claude Fable 5.2'),
         ('claude-fable-5-1', 'Claude Fable 5.1'),
         ('claude-opus-5-5', 'Claude Opus 5.5'),
         ('claude-opus-5', 'Claude Opus 5'),
