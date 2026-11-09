@@ -203,5 +203,11 @@ def run_originals_storage_control(*, root, coverage_archive_path):
                                   'file_fsync_control', 'directory_fsync_close_control',
                                   'short_write', 'file_close_control', 'both_close']
     assert faults['actual_process_or_producer_accepted'] is False
+    from .coverage_inventory_fault_controls import run_inventory_fault_controls
+    inventory_fault_root = root / 'inventory-faults'
+    inventory_fault_root.mkdir(mode=0o700)
+    inventory_faults = run_inventory_fault_controls(root=inventory_fault_root)
+    assert inventory_faults['outcomes'] == ['control_enumeration', 'control_close', 'ordinary_pair']
+    assert inventory_faults['actual_process_or_producer_accepted'] is False
     return {'scope': 'ACTUAL31_TO_DECODER_INDEX_STORAGE_SYNTHETIC_PROCESSES_NOT_SQLITE_OR_PRODUCER_PROOF',
             'all_controls_unexecuted_at_authoring': True}
