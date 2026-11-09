@@ -13,9 +13,15 @@ from . import coverage_retained_bytes as reader
 
 
 def run_retained_reader_fault_table(observation, *, operation='read'):
-    if operation not in ('read', 'hash'):
+    if operation not in ('read', 'hash', 'observe_read', 'observe_hash'):
         raise ValueError('fixed reader control operation required')
-    target = reader.read_retained_bytes if operation == 'read' else reader.hash_retained_bytes
+    if operation.startswith('observe_'):
+        from . import coverage_observe_file as selected
+        def target(observed, **limits):
+            return selected.observe_file(observed['path'], retain_bytes=operation == 'observe_read', **limits)
+    else:
+        selected = reader
+        target = reader.read_retained_bytes if operation == 'read' else reader.hash_retained_bytes
     # Same real file established by the existing storage owner. No fabricated
     # successful receipt, new file creation or independent native API workload.
     info = Path(observation['path']).stat()
@@ -42,7 +48,7 @@ def run_retained_reader_fault_table(observation, *, operation='read'):
             ('ordinary_pair', ValueError('retained read'), OSError('retained close'), True)):
         calls = {'open': 0, 'read': 0, 'close': 0, 'root': 0,
                  'hexdigest': 0, 'next_input_or_decode': 0}
-        original_os, original_hashlib, original_root = reader.os, reader.hashlib, reader._root
+        original_os, original_hashlib, original_root = selected.os, selected.hashlib, selected._root
 
         def opened(path, flags):
             calls['open'] += 1
@@ -73,16 +79,16 @@ def run_retained_reader_fault_table(observation, *, operation='read'):
                 calls['hexdigest'] += 1
                 return self.real.hexdigest()
 
-        fake_os = SimpleNamespace(path=os.path, open=opened, read=read, close=close, fstat=lambda fd: info,
+        fake_os = SimpleNamespace(path=os.path, geteuid=os.geteuid, open=opened, read=read, close=close, fstat=lambda fd: info,
                                   O_RDONLY=os.O_RDONLY, O_CLOEXEC=os.O_CLOEXEC,
                                   O_NOFOLLOW=os.O_NOFOLLOW)
         caught, ordinary = None, False
         try:
             # Only owned tool-module aliases change, not the global OS or
             # shared snapshot module. Isolated/no-concurrent-reader setup owed.
-            reader.os = fake_os
-            reader.hashlib = SimpleNamespace(sha256=Digest)
-            reader._root = root
+            selected.os = fake_os
+            selected.hashlib = SimpleNamespace(sha256=Digest)
+            selected._root = root
             try:
                 try:
                     target(observation, **limits)
@@ -92,11 +98,11 @@ def run_retained_reader_fault_table(observation, *, operation='read'):
             except BaseException as error:
                 caught = error
         finally:
-            reader.os = original_os
-            reader.hashlib = original_hashlib
-            reader._root = original_root
-        assert reader.os is original_os and reader.hashlib is original_hashlib
-        assert reader._root is original_root
+            selected.os = original_os
+            selected.hashlib = original_hashlib
+            selected._root = original_root
+        assert selected.os is original_os and selected.hashlib is original_hashlib
+        assert selected._root is original_root
         assert ordinary is ordinary_expected
         assert contains(caught, primary) and contains(caught, cleanup)
         if label != 'control_close':
