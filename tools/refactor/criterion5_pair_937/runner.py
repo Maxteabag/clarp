@@ -315,6 +315,8 @@ def main():
                                     'plan_sha256': digest(Path(__file__).parent / 'plan.json')})
     runs, startups = [], []
     try:
+        if len(os.sched_getaffinity(0)) < plan['workers']:
+            raise ValueError('reviewed worker count exceeds eligible CPU affinity')
         for cycle in range(plan['suite_pairs']):
             for arm in ('A', 'B'):
                 if time.monotonic() >= deadline:

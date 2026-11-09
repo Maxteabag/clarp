@@ -17,7 +17,7 @@ results; the durable outcome cannot close on the first run alone.
 One GitHub-hosted ubuntu24.04 job, same session/machine/CPython3.12.14/Node22/
 B-frozen Python+Node dependencies for BOTH source archives. No floating product
 checkout. Both product trees are exact git archives; the driver is the reviewed
-immutable CI branch. Same full pytest invocation/workers2 on both, source web
+immutable CI branch. Same full pytest invocation/workers4 on both, source web
 assets built per pin using shared dependencies. No application secrets/runtime
 configuration/live data or transcripts enter this PUBLIC-repo workflow. Existing
 ci_contained.sh keeps tests/product processes loopback-only, hides runner home/
@@ -68,8 +68,9 @@ not changes to the timing validity predicate. Normal owned-group TERM/KILL is
 bounded cleanup, not a nine-actor/native-wait certificate. No gate reruns.
 
 Caps: same inclusive100VMmin/about17NOK retained; Actions job hard100min. Setup
-actions+prepare at most15min, experiment step77min (internal runner75min including
-all fixture/measurement/report work), artifact upload5min,3min job margin. No
+actions+prepare at most8min, experiment step89min (internal runner88min including
+all fixture/measurement/report work; wrapper88m30s+killafter30s), artifact upload2min,
+1min job margin. Four workers in BOTH arms, per-suite refusal480s; no rows/pairs/tests omitted. No
 heavyVM wake/tail in the Actions route. Heavy route needs separate ordinary
 compute tail accounting before admission. All run timeouts clip to the same
 absolute runner end; no phase clock reset extends the total. Source time budgets
