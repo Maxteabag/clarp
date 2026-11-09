@@ -28,11 +28,15 @@ COVERAGE_FIELDS = {'config_sha256', 'version', 'module_path', 'native_core',
 TIMING_SCOPE = 'session hooks only; outer pytest invocation/summary separately retained'
 
 
-def decode_json(raw, *, limits):
+def check_json_limits(limits):
     if (type(limits) is not dict or set(limits) != {'bytes', 'nodes', 'depth', 'string_characters'}
             or any(type(v) is not int or v <= 0 for v in limits.values())
             or limits['bytes'] > MAX_INPUT_BYTES):
         raise ValueError('explicit finite JSON limits required')
+
+
+def decode_json(raw, *, limits):
+    check_json_limits(limits)
     if type(raw) is not bytes or not raw or len(raw) > limits['bytes']:
         raise ValueError('missing/oversized retained JSON bytes')
 
