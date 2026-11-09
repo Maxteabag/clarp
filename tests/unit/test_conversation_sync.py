@@ -41,6 +41,77 @@ def _store(agent_id: str, turns: list[dict], *, session_id="conversation-1"):
     )
 
 
+@pytest.mark.parametrize("background", [False, True])
+def test_deferred_native_import_serves_committed_history_without_success_metrics(
+        tmp_path, monkeypatch, background):
+    """The native result is INPUT; real conversation/cache decide completion."""
+    import threading
+    from lib import eventlog, transcript_import_cache as cache, transcript_incremental
+
+    cache.reset_for_tests()
+    agent_id = _agent(tmp_path)
+    _store(agent_id, [{"role": "user", "text": "committed history",
+                      "timestamp": "2026-01-01T00:00:00Z"}])
+    source = tmp_path / "deferred.jsonl"
+    source.write_text("{}\n")
+    entered = threading.Event()
+    success_events = []
+    monkeypatch.setattr(backends, "find_session_jsonl", lambda *args: source)
+
+    def deferred_native_import(**kwargs):
+        entered.set()
+        # Keep every old metrics key, so baseline reaches unwanted-success
+        # publication rather than a missing-key/API/setup failure.
+        return {"rows": 0, "parse_s": 0.0, "store_s": 0.0,
+                "_clarp_transcript_completion_v1": "deferred"}
+
+    original_emit = eventlog.emit
+
+    def observe_success(category, event, **kwargs):
+        if (category, event) == ("transcript", "import"):
+            success_events.append(event)
+        return original_emit(category, event, **kwargs)
+
+    monkeypatch.setattr(transcript_incremental, "import_transcript", deferred_native_import)
+    monkeypatch.setattr(eventlog, "emit", observe_success)
+    try:
+        response = _load("reliable", background_import=background)
+        assert [turn["text"] for turn in response["turns"]] == ["committed history"]
+        assert response["conversation_id"] == "conversation-1"
+        assert entered.wait(2), "the real import closure did not consume its native input"
+        assert cache.wait_for_background(2)
+        assert success_events == [], "expected deferral was emitted as completed import"
+        key = f"{agent_id}\0{source}"
+        assert key not in cache._imported
+        assert not cache._validated_at.get(key, cache._epoch)[0]
+    finally:
+        assert cache.reset_for_tests()
+
+
+def test_true_first_open_still_imports_native_history_before_responding(tmp_path, monkeypatch):
+    from tests.readmodel import rm_n14_harness as harness
+    from lib import db, transcript_import_cache as cache
+
+    cache.reset_for_tests()
+    agent_id = _agent(tmp_path)
+    source = tmp_path / "first-open.jsonl"
+    source.write_bytes(harness.append_bytes("claude", 0))
+    claude = backends.by_id("claude")
+    monkeypatch.setattr(claude, "parse_transcript",
+                        type(claude).parse_transcript.__get__(claude))
+    monkeypatch.setattr(backends, "find_session_jsonl", lambda *args: source)
+    try:
+        response = _load("reliable", background_import=True)
+        assert any(turn["text"] == "synthetic request 0" for turn in response["turns"])
+        assert any("synthetic answer 0" in turn["text"] for turn in response["turns"])
+        assert db.conn().execute(
+            "SELECT count(*) FROM messages WHERE agent_id=? AND source_file=?",
+            (agent_id, str(source))).fetchone()[0] > 0
+        assert cache._imported[f"{agent_id}\0{source}"] == cache._signature(source)
+    finally:
+        assert cache.reset_for_tests()
+
+
 def test_hidden_automation_does_not_consume_visible_snapshot_limit(tmp_path):
     agent_id = _agent(tmp_path)
     turns = [{"role": "user", "text": "old", "timestamp": "2026-01-01T00:00:00Z"}]

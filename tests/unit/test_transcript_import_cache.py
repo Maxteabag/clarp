@@ -14,6 +14,138 @@ def _bump_mtime(path: pathlib.Path) -> None:
     os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000))
 
 
+class _TranscriptCompletionInput:
+    """Audit INPUT double; the real cache owns all freshness/publication.
+
+    This explicit private callable protocol is production-facing groundwork,
+    not a positive native file/DB certificate supplied by the fixture.
+    """
+    _clarp_transcript_completion_v1 = True
+
+    def __init__(self, path, owner, *, outcome="completed-changed"):
+        self.context = (str(path), owner, "claude", "synthetic-session", "synthetic-db-epoch")
+        self.generation = 1
+        self.eligible = True
+        self.outcome = outcome
+        self.calls = 0
+        self.before_return = None
+
+    def _clarp_transcript_eligibility(self):
+        return self.context, self.generation, self.eligible
+
+    def __call__(self):
+        self.calls += 1
+        result = {"_clarp_transcript_completion_v1":
+                  (self.context, self.generation, self.outcome)}
+        if self.before_return is not None:
+            self.before_return()
+        return result
+
+
+@pytest.mark.parametrize("entry", ["direct", "schedule", "snapshot"])
+def test_due_transcript_authority_precedes_each_cached_signature_shortcut(tmp_path, entry):
+    cache = transcript_import_cache
+    cache.reset_for_tests()
+    path = tmp_path / "audit-due.jsonl"
+    path.write_text("{}\n")
+    importer = _TranscriptCompletionInput(path, "audit-owner")
+    key = f"audit-owner\0{path}"
+    try:
+        assert cache.import_if_changed(path, importer, owner="audit-owner")
+        found, previous_validation = cache._validated_at.get(key, cache._epoch)
+        assert found and previous_validation is not None
+        importer.generation += 1
+        importer.eligible = False
+        if entry == "schedule":
+            assert cache.schedule_import(path, importer, owner="audit-owner"), (
+                "an unchanged signature discarded the due source's pending work")
+        elif entry == "snapshot":
+            assert not cache.import_for_snapshot(path, importer, owner="audit-owner", timeout=.02), (
+                "an old signature certified a new audit-due generation")
+        else:
+            assert not cache.import_if_changed(path, importer, owner="audit-owner")
+        assert cache._validated_at.get(key, cache._epoch) == (True, previous_validation), (
+            "a deferred source acquired a new successful validation timestamp")
+    finally:
+        assert cache.reset_for_tests()
+
+
+@pytest.mark.parametrize("outcome", ["deferred", "completed-unchanged"])
+def test_worker_completion_state_controls_after_and_freshness(tmp_path, outcome, monkeypatch):
+    cache = transcript_import_cache
+    cache.reset_for_tests()
+    monkeypatch.setattr(cache, "_BACKGROUND_MIN_INTERVAL", 0.0)
+    path = tmp_path / "completion.jsonl"
+    path.write_text("{}\n")
+    importer = _TranscriptCompletionInput(path, "audit-owner", outcome=outcome)
+    after = []
+    key = f"audit-owner\0{path}"
+    try:
+        assert cache.schedule_import(path, importer, owner="audit-owner",
+                                     after=lambda: after.append("completed"))
+        assert cache.wait_for_background(2), "the worker must not wait for denied audit IO"
+        assert after == ([] if outcome == "deferred" else ["completed"])
+        if outcome == "deferred":
+            assert key not in cache._imported
+            assert not cache._validated_at.get(key, cache._epoch)[0]
+            completed = cache._last_started.get("audit-owner")
+            assert completed is None or completed[0] is None
+        else:
+            assert cache._validated_at.get(key, cache._epoch)[0]
+    finally:
+        assert cache.reset_for_tests()
+
+
+@pytest.mark.parametrize("entry", ["direct", "snapshot"])
+def test_new_audit_generation_before_publication_cannot_satisfy_freshness(tmp_path, entry):
+    cache = transcript_import_cache
+    cache.reset_for_tests()
+    path = tmp_path / "generation-race.jsonl"
+    path.write_text("{}\n")
+    importer = _TranscriptCompletionInput(path, "audit-owner")
+    key = f"audit-owner\0{path}"
+    try:
+        assert cache.import_if_changed(path, importer, owner="audit-owner")
+        previous_signature = cache._imported[key]
+        previous_validation = cache._validated_at.get(key, cache._epoch)
+        path.write_text("{}\n{}\n")
+
+        def audit_became_due():
+            importer.generation += 1
+            importer.eligible = False
+
+        importer.before_return = audit_became_due
+        if entry == "direct":
+            assert not cache.import_if_changed(path, importer, owner="audit-owner"), (
+                "an old admission published completion after its audit generation changed")
+        else:
+            assert not cache.import_for_snapshot(path, importer, owner="audit-owner", timeout=.02), (
+                "snapshot wait accepted a completion from a superseded audit generation")
+        assert cache._imported[key] == previous_signature
+        assert cache._validated_at.get(key, cache._epoch) == previous_validation
+    finally:
+        assert cache.reset_for_tests()
+
+
+@pytest.mark.parametrize("value", [None, 0, False,
+    {"_clarp_transcript_completion_v1": "deferred"}])
+def test_unopted_callback_results_keep_legacy_completion(tmp_path, value, monkeypatch):
+    cache = transcript_import_cache
+    cache.reset_for_tests()
+    monkeypatch.setattr(cache, "_BACKGROUND_MIN_INTERVAL", 0.0)
+    path = tmp_path / "legacy.jsonl"
+    path.write_text("{}\n")
+    after = []
+    try:
+        assert cache.schedule_import(path, lambda: value, owner="legacy",
+                                     after=lambda: after.append("completed"))
+        assert cache.wait_for_background(2)
+        assert after == ["completed"]
+        assert cache._validated_at.get(f"legacy\0{path}", cache._epoch)[0]
+    finally:
+        assert cache.reset_for_tests()
+
+
 def test_pseudo_path_signature_tracks_the_database(tmp_path):
     transcript_import_cache.reset_for_tests()
     db = tmp_path / "opencode.db"
