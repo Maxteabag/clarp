@@ -625,3 +625,202 @@ def test_missing_receipt_is_distinct_from_present_malformed_record(stored, outco
         assert turn_queue.pending_for_dispatch() == []
         assert not turn_queue.claim_for_dispatch("q")
         assert turn_queue.claim("q") is None
+
+
+# Backlog58 Track A: normal terminal bookkeeping must not depend on the sweeper.
+def _dispatch_receipt_for_terminal_test(tmp_path):
+    from lib import agents
+    from tests.unit.test_turn_dispatch import _make_service
+    service, backend, agent = _make_service(tmp_path)
+    backend.live = False
+    # An existing idle agent, not a fabricated execution/NOTSTARTED receipt.
+    agents.record_state(agent, "idle")
+    return service, backend, agent
+
+
+def _send_terminal_test_receipt(service):
+    return service.dispatch(
+        text="Complete the queued request", requested_session="mike",
+        trace_id="terminal-owned-trace", client_msg_id="terminal-owned-q",
+        queue_if_busy=True, synthesize_audio=False)
+
+
+def _terminal_test_turns(agent):
+    return [dict(row) for row in db.conn().execute(
+        "SELECT * FROM turns WHERE agent_id=? ORDER BY turn_id", (agent,))]
+
+
+def test_normal_completion_finishes_a_receipt_after_real_start_write_exhaustion(
+        tmp_path, monkeypatch):
+    service, backend, agent = _dispatch_receipt_for_terminal_test(tmp_path)
+    real_start = turn_queue.mark_started
+    faults, diagnostics = [], []
+    monkeypatch.setattr(turn_queue, "log", lambda event, detail:
+                        diagnostics.append((event, detail)))
+
+    def start_under_contention(queue_id):
+        assert queue_id == "terminal-owned-q"
+        assert len(backend.spawned) == 1  # the provider was actually handed work
+        holder = sqlite3.connect(str(db.DB_PATH), isolation_level=None)
+        try:
+            holder.execute("BEGIN IMMEDIATE")
+            with db.busy_timeout_at_most(0):
+                try:
+                    return real_start(queue_id)
+                except sqlite3.OperationalError as exc:
+                    faults.append(exc)
+                    raise
+        finally:
+            holder.rollback()
+            holder.close()
+
+    monkeypatch.setattr(turn_queue, "mark_started", start_under_contention)
+    with pytest.raises(sqlite3.OperationalError) as failure:
+        _send_terminal_test_receipt(service)
+    assert faults == [failure.value]
+    assert db.is_locked_error(failure.value)
+    assert any(event == "queueReceiptWriteFail" and "queue=terminal-owned-q" in detail
+               for event, detail in diagnostics)
+    queued = _stored("terminal-owned-q")
+    assert queued["status"] == "queued" and queued["claimed_at"] is None
+    assert queued["agent_id"] == agent and queued["trace_id"] == "terminal-owned-trace"
+    assert queued["client_msg_id"] == "terminal-owned-q"
+    before = _terminal_test_turns(agent)
+    assert len(before) == 1 and before[0]["settled_at"] is None
+    revision = turn_queue.revision(agent)
+    # The real provider callback and terminal lifecycle run after lock release.
+    backend.spawned[0][1]["on_result"]({"result": "Finished", "duration_ms": 1})
+    after = _terminal_test_turns(agent)
+    assert [row["turn_id"] for row in after] == [before[0]["turn_id"]]
+    assert after[0]["outcome"] == "completed" and after[0]["settled_at"] is not None
+    assert len(backend.spawned) == 1
+    # No boot/periodic reconciliation, manual settlement or another dispatch.
+    assert turn_queue.status("terminal-owned-q") == "done"
+    terminal = _stored("terminal-owned-q")
+    assert terminal["text"] == terminal["sender_agent_id"] == ""
+    assert terminal["trace_id"] == queued["trace_id"]
+    assert terminal["client_msg_id"] == queued["client_msg_id"]
+    assert turn_queue.pending_count(agent) == 0
+    assert turn_queue.revision(agent) == revision + 1
+    stable = (terminal, turn_queue.state(agent), _terminal_test_turns(agent))
+    backend.spawned[0][1]["on_result"]({"result": "duplicate terminal callback"})
+    assert (_stored("terminal-owned-q"), turn_queue.state(agent),
+            _terminal_test_turns(agent)) == stable
+    assert len(backend.spawned) == 1
+
+
+@pytest.mark.parametrize("joined", [False, True])
+@pytest.mark.parametrize("receipt_failure", [False, True])
+def test_restamp_failure_does_not_skip_independent_terminal_receipt(
+        tmp_path, monkeypatch, joined, receipt_failure):
+    from lib import message_writes, turn_lifecycle
+    service, backend, agent = _dispatch_receipt_for_terminal_test(tmp_path)
+    _send_terminal_test_receipt(service)
+    assert len(backend.spawned) == 1
+    assert turn_queue.status("terminal-owned-q") == "started"
+    turn_queue.set_paused(agent, True)
+    original = _stored("terminal-owned-q")
+    state = turn_queue.state(agent)
+    turns = _terminal_test_turns(agent)
+    assert len(turns) == 1 and turns[0]["settled_at"] is None
+    primary = RuntimeError("restamp sentinel")
+    restamped, errors, denied = [], [], []
+
+    def fail_restamp(agent_id, trace_id):
+        restamped.append((agent_id, trace_id))
+        raise primary
+
+    monkeypatch.setattr(message_writes, "restamp_turn", fail_restamp)
+    monkeypatch.setattr(turn_lifecycle, "log_exception",
+                        lambda event, error, **kwargs: errors.append((event, error)))
+    con = db.conn()
+
+    def deny_receipt(action, table, column, database, trigger):
+        if receipt_failure and action == sqlite3.SQLITE_UPDATE and table == "queued_turns":
+            denied.append(column)
+            return sqlite3.SQLITE_DENY
+        return sqlite3.SQLITE_OK
+
+    if joined:
+        con.execute("BEGIN IMMEDIATE")
+    con.set_authorizer(deny_receipt)
+    try:
+        backend.spawned[0][1]["on_result"]({"result": "Finished", "duration_ms": 1})
+        if joined:
+            assert con.in_transaction
+            con.commit()  # the ACTUAL caller commits after the bookkeeping catch
+    except BaseException:
+        if joined and con.in_transaction:
+            con.rollback()
+        raise
+    finally:
+        con.set_authorizer(None)
+    final_turns = _terminal_test_turns(agent)
+    assert [row["turn_id"] for row in final_turns] == [turns[0]["turn_id"]]
+    assert final_turns[0]["outcome"] == "completed"
+    assert final_turns[0]["settled_at"] is not None
+    assert len(backend.spawned) == 1
+    assert restamped == [(agent, "terminal-owned-trace")]
+    assert any(error is primary for _, error in errors)
+    if receipt_failure:
+        assert denied  # independent receipt SQL was REALLY attempted after restamp failed
+        assert any(isinstance(error, sqlite3.DatabaseError) for _, error in errors)
+        assert _stored("terminal-owned-q") == original
+    else:
+        assert turn_queue.status("terminal-owned-q") == "done"
+    assert turn_queue.state(agent) == state  # no ordinary-settlement bump or pause effect
+
+
+def test_exhausted_normal_terminal_receipt_write_keeps_atomic_repair_fallback(
+        tmp_path, monkeypatch):
+    from lib import turn_lifecycle
+    service, backend, agent = _dispatch_receipt_for_terminal_test(tmp_path)
+    _send_terminal_test_receipt(service)
+    turn_queue.set_paused(agent, True)
+    original = _stored("terminal-owned-q")
+    assert original["status"] == "started"
+    state = turn_queue.state(agent)
+    turns = _terminal_test_turns(agent)
+    real_settle = turn_queue.settle_receipt
+    faults, diagnostics, errors = [], [], []
+    monkeypatch.setattr(turn_queue, "log", lambda event, detail:
+                        diagnostics.append((event, detail)))
+    monkeypatch.setattr(turn_lifecycle, "log_exception",
+                        lambda event, error, **kwargs: errors.append((event, error)))
+
+    def settle_under_contention(agent_id, trace_id, outcome):
+        # This owner is AFTER the real state+outcome commit, not its blocker.
+        committed = _terminal_test_turns(agent_id)
+        assert committed[0]["outcome"] == "completed" and committed[0]["settled_at"] is not None
+        holder = sqlite3.connect(str(db.DB_PATH), isolation_level=None)
+        try:
+            holder.execute("BEGIN IMMEDIATE")
+            with db.busy_timeout_at_most(0):
+                try:
+                    return real_settle(agent_id, trace_id, outcome)
+                except sqlite3.OperationalError as exc:
+                    faults.append(exc)
+                    raise
+        finally:
+            holder.rollback()
+            holder.close()
+
+    monkeypatch.setattr(turn_queue, "settle_receipt", settle_under_contention)
+    backend.spawned[0][1]["on_result"]({"result": "Finished", "duration_ms": 1})
+    assert len(faults) == 1 and db.is_locked_error(faults[0])
+    assert any(error is faults[0] for _, error in errors)
+    assert any(event == "queueReceiptWriteFail" and "queue=terminal-owned-q" in detail
+               and "code=" in detail for event, detail in diagnostics)
+    assert _stored("terminal-owned-q") == original
+    assert turn_queue.state(agent) == state
+    assert not db.conn().in_transaction
+    # Release was in finally BEFORE the callback returned; the existing repair
+    # is now the fallback, never another provider entry or replay.
+    _tick()
+    assert turn_queue.status("terminal-owned-q") == "done"
+    assert turn_queue.is_paused(agent)
+    stable = (_stored("terminal-owned-q"), turn_queue.state(agent))
+    _tick()
+    assert (_stored("terminal-owned-q"), turn_queue.state(agent)) == stable
+    assert [row["turn_id"] for row in _terminal_test_turns(agent)] == [turns[0]["turn_id"]]
+    assert len(backend.spawned) == 1
