@@ -53,7 +53,7 @@
         {
           "name": "One matched interleaved contained experiment",
           "timeout-minutes": 89,
-          "run": "timeout --signal=TERM --kill-after=30s 88m30s bash scripts/ci_contained.sh .venv/bin/python tools/refactor/criterion5_pair_937/runner.py --workspace \"$PWD\""
+          "run": "timeout --signal=TERM --kill-after=30s 5310s bash scripts/ci_contained.sh .venv/bin/python tools/refactor/criterion5_pair_937/runner.py --workspace \"$PWD\""
         },
         {
           "uses": "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",

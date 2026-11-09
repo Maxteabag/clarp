@@ -7,15 +7,18 @@ suite/test/pair/native workload/sample. No timing probe or prior execution of
 this driver has occurred. Source approval alone is not measured fit assurance.
 
 Retained exact-B1ca Tests42561521868 used CPython3.14.4, two xdist workers, four
-eligible CPUs and16GB RAM. It passed the full suite in850s. Its independently
+reported CPUs (os.cpu_count, NOT retained affinity) and16GB RAM. Historical
+affinity, CPU quota and competing load were not observed. It passed the full suite in850s. Its independently
 hash-verified JUnit testcase elapsed sum is1632.818s. The retained elapsed minus
 sum/2 is33.591s. This confirms the old360s cap cannot be justified by citing that
 run or silently assuming a Python3.12 speedup. These are retained observations,
 not a new run, and the testcase sum is elapsed occupancy, not measured CPU work.
 
 Propose FOUR pytest workers, fixed identically for A and B on the same runner,
-and a480s per-suite refusal. This uses the four CPUs observed in the comparable
-Actions machine without adding a job/machine or reducing scope. Refuse before
+and a480s per-suite refusal. This matches the four reported CPUs in the retained
+Actions metadata without adding a job/machine or reducing scope. The NEW
+affinity guard checks the actual future runner; it does not establish CPU
+quota, load, memory capacity or a speedup guarantee. Refuse before
 measurement if the actual common runner's CPU affinity is smaller than the
 reviewed worker count. Keep all outcomes/JUnit/summary/xdist-error validity and
 standing-failure sets unchanged; no skip, quarantine, retry or load-failure waiver.
@@ -35,8 +38,8 @@ if insufficient, keep the existing request held and return a source disposition,
 not a trial or declaration of platform impossibility.
 
 Hard whole-job allocation (minutes): setup8 (checkout1+uv1+node1+prepare5),
-experiment wrapper89, upload2, margin1 =100. The experiment wrapper is88m30s
-plus30s kill bound; internal runner is88m/5280s. Runner phase ceilings:
+experiment wrapper89, upload2, margin1 =100. The experiment wrapper uses the literal5310s
+(88 minutes30 seconds), plus30s kill bound; internal runner is88m/5280s. Runner phase ceilings:
 6*480 suite =2880s;10*(runtime90+Host60+plateau60) =2100s; seed120s;
 remaining180s for copies/HTTP overhead/hygiene/log/index/report and other runner
 work. All share one deadline; no reset or extra tail. Faster phases leave their
@@ -54,3 +57,9 @@ request, publication, branch creation remotely, allocation or priority clearance
 and review, never autonomous retarget. Final-main rerun remains separate and not
 preapproved. Retired native/execnet/coverage certification stays retired. Herald
 HOLD; no FUND/preempt/delay/corpus shrink/cap extension beyond reviewed authority.
+
+Bounded B source corrections after811a review61da1417: operative GNUtimeout
+literal5310s replaces INVALID compound88m30s. No timeout invocation or trial
+performed. Historical CPU wording now names os.cpu_count and explicitly leaves
+past affinity/quota/load unknown; the future actual-affinity guard is unchanged.
+No cap/worker/threshold/fixture/measurement change beyond the pending proposal.

@@ -69,7 +69,7 @@ bounded cleanup, not a nine-actor/native-wait certificate. No gate reruns.
 
 Caps: same inclusive100VMmin/about17NOK retained; Actions job hard100min. Setup
 actions+prepare at most8min, experiment step89min (internal runner88min including
-all fixture/measurement/report work; wrapper88m30s+killafter30s), artifact upload2min,
+all fixture/measurement/report work; wrapper5310s+killafter30s), artifact upload2min,
 1min job margin. Four workers in BOTH arms, per-suite refusal480s; no rows/pairs/tests omitted. No
 heavyVM wake/tail in the Actions route. Heavy route needs separate ordinary
 compute tail accounting before admission. All run timeouts clip to the same
