@@ -4,13 +4,16 @@ Derived state (state_log kind, bound session, in-flight slot) must agree with
 reality (live process / terminal / transcript on disk). These are
 fault-injection tests: each one breaks an invariant and expects the repair."""
 import pathlib
+import sqlite3
 import sys
+import threading
+from types import SimpleNamespace
 
 import pytest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "server"))
 from lib import agents as agents_db  # noqa: E402
-from lib import reconcile, turn_dispatch  # noqa: E402
+from lib import db, message_store, reconcile, turn_dispatch, turn_lifecycle  # noqa: E402
 from lib.audio_stream import AudioStream  # noqa: E402
 from lib.context import ServerContext, StubSTT  # noqa: E402
 from lib.snapshot import build_agent_snapshot  # noqa: E402
@@ -39,17 +42,30 @@ def _clean_dispatcher_state():
     turn_dispatch._INFLIGHT.clear()
     turn_dispatch._QUEUED.clear()
     turn_dispatch._CLAIMED_AT.clear()
+    getattr(reconcile, "_BUSY_OBSERVATIONS", {}).clear()
     yield
     turn_dispatch._INFLIGHT.clear()
     turn_dispatch._QUEUED.clear()
     turn_dispatch._CLAIMED_AT.clear()
+    getattr(reconcile, "_BUSY_OBSERVATIONS", {}).clear()
 
 
-def test_inv1_stuck_thinking_without_process_is_repaired_at_snapshot_time(tmp_path):
+@pytest.fixture
+def reconcile_clock(monkeypatch):
+    clock = SimpleNamespace(now=1000.0)
+    monkeypatch.setattr(reconcile, "time", SimpleNamespace(monotonic=lambda: clock.now))
+    return clock
+
+
+def test_inv1_stuck_thinking_without_process_is_repaired_at_snapshot_time(tmp_path, reconcile_clock):
     """Handoff fault #2: a turn died without its terminal callback. The
     snapshot must report busy=False and the stuck row must be repaired."""
     agent_id = _agent(tmp_path)
     agents_db.record_state(agent_id, "thinking")
+    first = build_agent_snapshot(_ctx(tmp_path, "mike"))
+    assert next(a for a in first["agents"] if a["session"] == "mike")["busy"] is True
+    assert agents_db.latest_state(agent_id)["kind"] == "thinking"
+    reconcile_clock.now += 60
     snap = build_agent_snapshot(_ctx(tmp_path, "mike"))
     row = next(a for a in snap["agents"] if a["session"] == "mike")
     assert row["busy"] is False
@@ -82,6 +98,366 @@ def test_inv1_background_is_not_a_process_claim(tmp_path):
     agents_db.record_state(agent_id, "background", {"label": "Watching CI"})
     assert reconcile.reconcile_agent(agent_id, "claude", home=tmp_path) == {}
     assert agents_db.latest_state(agent_id)["kind"] == "background"
+
+
+def _busy_turn(tmp_path):
+    agent_id = _agent(tmp_path)
+    agents_db.set_trace(agent_id, "reconcile-test")
+    turn_id = turn_lifecycle.open_turn(
+        agent_id=agent_id, source="pwa", trace_id="reconcile-test")
+    turn_lifecycle.transition(agent_id, turn_lifecycle.TurnEvent.SPAWN_STARTED,
+                              {"trace_id": "reconcile-test", "source": "pwa"})
+    message_store.record_user_message(
+        agent_id=agent_id, backend_session_id="reconcile-session",
+        client_msg_id="reconcile-user", text="fixture request", trace_id="reconcile-test")
+    db.conn().execute(
+        """INSERT INTO queued_turns(queue_id,agent_id,session,text,trace_id,status,enqueued_at,started_at)
+           VALUES ('busy-receipt',?,'mike','','reconcile-test','started',?,?)""",
+        (agent_id, db.now_ms(), db.now_ms()))
+    return agent_id, turn_id
+
+
+def _turn_row(turn_id):
+    return dict(db.conn().execute("SELECT * FROM turns WHERE turn_id = ?", (turn_id,)).fetchone())
+
+
+def _agent_products(agent_id):
+    return {table: [tuple(row) for row in db.conn().execute(
+        f"SELECT * FROM {table} WHERE agent_id = ? ORDER BY rowid", (agent_id,))]
+        for table in ("state_log", "turns", "queued_turns", "messages", "conversation_heads")}
+
+
+def test_inv1_grace_boundary_repairs_the_open_turn_exactly_once(
+        tmp_path, monkeypatch, reconcile_clock):
+    agent_id, turn_id = _busy_turn(tmp_path)
+    logs = []
+    monkeypatch.setattr(reconcile, "log", lambda event, detail: logs.append((event, detail)))
+    before = _agent_products(agent_id)
+    assert "state" not in reconcile.reconcile_agent(agent_id, "claude", home=tmp_path)
+    assert _agent_products(agent_id) == before
+    assert _turn_row(turn_id)["outcome"] is None
+    reconcile_clock.now += 59.999
+    assert "state" not in reconcile.reconcile_agent(agent_id, "claude", home=tmp_path)
+    assert _agent_products(agent_id) == before
+    assert _turn_row(turn_id)["ended_at"] is None
+    reconcile_clock.now = 1060.0
+    assert reconcile.reconcile_agent(agent_id, "claude", home=tmp_path)["state"] == "thinking"
+    assert _turn_row(turn_id)["outcome"] == "interrupted"
+    assert "state" not in reconcile.reconcile_agent(agent_id, "claude", home=tmp_path)
+    assert [item for item in logs if item[0] == "reconcileStuckBusy"] == [
+        ("reconcileStuckBusy", f"agent={agent_id} was=thinking → idle")]
+
+
+def test_inv1_real_done_inside_grace_survives_stale_snapshot_observation(
+        tmp_path, monkeypatch, reconcile_clock):
+    agent_id, turn_id = _busy_turn(tmp_path)
+    stale = agents_db.dashboard_states()[agent_id]
+    repairs = []
+    original = turn_lifecycle.transition
+
+    def transition(aid, event, *args, **kwargs):
+        if event == turn_lifecycle.TurnEvent.RECONCILE_REPAIR:
+            repairs.append(aid)
+        return original(aid, event, *args, **kwargs)
+
+    monkeypatch.setattr(turn_lifecycle, "transition", transition)
+    assert "state" not in reconcile.reconcile_agent(
+        agent_id, "claude", home=tmp_path, observed_state=stale)
+    reconcile_clock.now += 19
+    turn_lifecycle.transition(agent_id, turn_lifecycle.TurnEvent.PROCESS_EXITED_OK,
+                              {"trace_id": "reconcile-test"})
+    reconcile_clock.now += 60
+    assert "state" not in reconcile.reconcile_agent(
+        agent_id, "claude", home=tmp_path, observed_state=stale)
+    snap = build_agent_snapshot(_ctx(tmp_path, "mike"))
+    assert next(a for a in snap["agents"] if a["session"] == "mike")["busy"] is False
+    assert agents_db.latest_state(agent_id)["kind"] == "done"
+    assert _turn_row(turn_id)["outcome"] == "completed"
+    assert repairs == []
+
+
+def test_inv1_new_busy_row_with_identical_timestamp_and_detail_restarts_grace(
+        tmp_path, reconcile_clock):
+    agent_id = _agent(tmp_path)
+    agents_db.record_state(agent_id, "thinking")
+    assert "state" not in reconcile.reconcile_agent(agent_id, "claude", home=tmp_path)
+    stamp = agents_db.latest_state(agent_id)["ts"]
+    reconcile_clock.now += 59
+    db.conn().execute("INSERT INTO state_log(agent_id,kind,ts) VALUES (?,?,?)",
+                      (agent_id, "thinking", stamp))
+    reconcile_clock.now += 1
+    assert "state" not in reconcile.reconcile_agent(agent_id, "claude", home=tmp_path)
+    reconcile_clock.now += 60
+    assert reconcile.reconcile_agent(agent_id, "claude", home=tmp_path)["state"] == "thinking"
+
+
+def test_inv1_live_work_returning_discards_prior_absence(
+        tmp_path, monkeypatch, reconcile_clock):
+    agent_id = _agent(tmp_path)
+    agents_db.record_state(agent_id, "thinking")
+    live = []
+    monkeypatch.setattr(reconcile.backends, "active_handles", lambda *_: live)
+    assert "state" not in reconcile.reconcile_agent(agent_id, "claude", home=tmp_path)
+    reconcile_clock.now += 59
+    live.append("process")
+    assert "state" not in reconcile.reconcile_agent(agent_id, "claude", home=tmp_path)
+    live.clear()
+    reconcile_clock.now += 1
+    assert "state" not in reconcile.reconcile_agent(agent_id, "claude", home=tmp_path)
+    reconcile_clock.now += 60
+    assert reconcile.reconcile_agent(agent_id, "claude", home=tmp_path)["state"] == "thinking"
+
+
+@pytest.mark.parametrize("invalid_time", [-1.0, float("nan"), float("inf")])
+def test_inv1_invalid_or_regressed_clock_discards_eligibility(
+        tmp_path, reconcile_clock, invalid_time):
+    agent_id = _agent(tmp_path)
+    agents_db.record_state(agent_id, "thinking")
+    reconcile_clock.now = 0.0
+    assert "state" not in reconcile.reconcile_agent(agent_id, "claude", home=tmp_path)
+    reconcile_clock.now = invalid_time
+    assert "state" not in reconcile.reconcile_agent(agent_id, "claude", home=tmp_path)
+    reconcile_clock.now = 60.0
+    assert "state" not in reconcile.reconcile_agent(agent_id, "claude", home=tmp_path)
+    reconcile_clock.now = 120.0
+    assert reconcile.reconcile_agent(agent_id, "claude", home=tmp_path)["state"] == "thinking"
+
+
+def test_inv1_backdated_new_row_does_not_replace_latest_busy_identity(
+        tmp_path, reconcile_clock):
+    agent_id = _agent(tmp_path)
+    agents_db.record_state(agent_id, "thinking")
+    assert "state" not in reconcile.reconcile_agent(agent_id, "claude", home=tmp_path)
+    latest = agents_db.latest_state(agent_id)
+    db.conn().execute("INSERT INTO state_log(agent_id,kind,ts) VALUES (?,?,?)",
+                      (agent_id, "tool", latest["ts"] - 1))
+    reconcile_clock.now += 60
+    assert reconcile.reconcile_agent(agent_id, "claude", home=tmp_path)["state"] == "thinking"
+
+
+def test_inv1_each_agent_has_its_own_absence_grace(tmp_path, reconcile_clock):
+    first = _agent(tmp_path, "mike")
+    second = _agent(tmp_path, "rachel")
+    for agent_id in (first, second):
+        agents_db.record_state(agent_id, "thinking")
+    assert "state" not in reconcile.reconcile_agent(first, "claude", home=tmp_path)
+    reconcile_clock.now += 59
+    assert "state" not in reconcile.reconcile_agent(second, "claude", home=tmp_path)
+    reconcile_clock.now += 1
+    assert reconcile.reconcile_agent(first, "claude", home=tmp_path)["state"] == "thinking"
+    assert "state" not in reconcile.reconcile_agent(second, "claude", home=tmp_path)
+    reconcile_clock.now += 59
+    assert reconcile.reconcile_agent(second, "claude", home=tmp_path)["state"] == "thinking"
+
+
+def test_inv1_database_switch_cannot_reuse_same_agents_old_grace(tmp_path, reconcile_clock):
+    agent_id = _agent(tmp_path)
+    agents_db.record_state(agent_id, "thinking")
+    assert "state" not in reconcile.reconcile_agent(agent_id, "claude", home=tmp_path)
+    copy_path = tmp_path / "other-state.sqlite"
+    copied = sqlite3.connect(copy_path)
+    try:
+        db.conn().backup(copied)
+    finally:
+        copied.close()
+    db.reset_for_tests(copy_path)
+    reconcile_clock.now += 60
+    assert "state" not in reconcile.reconcile_agent(agent_id, "claude", home=tmp_path)
+    reconcile_clock.now += 60
+    assert reconcile.reconcile_agent(agent_id, "claude", home=tmp_path)["state"] == "thinking"
+
+
+def test_inv1_database_connection_reset_cannot_reuse_old_grace(tmp_path, reconcile_clock):
+    agent_id = _agent(tmp_path)
+    agents_db.record_state(agent_id, "thinking")
+    assert "state" not in reconcile.reconcile_agent(agent_id, "claude", home=tmp_path)
+    db.reset_for_tests(db.DB_PATH)
+    reconcile_clock.now += 60
+    assert "state" not in reconcile.reconcile_agent(agent_id, "claude", home=tmp_path)
+    reconcile_clock.now += 60
+    assert reconcile.reconcile_agent(agent_id, "claude", home=tmp_path)["state"] == "thinking"
+
+
+def test_inv1_capacity_bound_never_accelerates_new_candidate(
+        tmp_path, monkeypatch, reconcile_clock):
+    monkeypatch.setattr(reconcile, "_BUSY_MAX_OBSERVATIONS", 2, raising=False)
+    agent_ids = [_agent(tmp_path, name) for name in ("one", "two", "three")]
+    for agent_id in agent_ids:
+        agents_db.record_state(agent_id, "thinking")
+        assert "state" not in reconcile.reconcile_agent(agent_id, "claude", home=tmp_path)
+        assert len(reconcile._BUSY_OBSERVATIONS) <= 2
+    reconcile_clock.now += 59.999
+    for agent_id in agent_ids:
+        assert "state" not in reconcile.reconcile_agent(agent_id, "claude", home=tmp_path)
+        assert len(reconcile._BUSY_OBSERVATIONS) <= 2
+
+
+def test_inv1_concurrent_confirmations_repair_only_once(tmp_path, monkeypatch, reconcile_clock):
+    agent_id, turn_id = _busy_turn(tmp_path)
+    assert "state" not in reconcile.reconcile_agent(agent_id, "claude", home=tmp_path)
+    reconcile_clock.now += 60
+    gate = threading.Barrier(2)
+    first_probe = threading.local()
+    results, errors, logs = [], [], []
+
+    def absent(*args):
+        if not getattr(first_probe, "seen", False):
+            first_probe.seen = True
+            gate.wait(5)
+        return False
+
+    def confirm():
+        try:
+            results.append(reconcile.reconcile_agent(agent_id, "claude", home=tmp_path))
+        except BaseException as exc:
+            errors.append(exc)
+        finally:
+            db.close_local()
+
+    monkeypatch.setattr(reconcile, "has_live_work", absent)
+    monkeypatch.setattr(reconcile, "log", lambda *args: logs.append(args))
+    workers = [threading.Thread(target=confirm) for _ in range(2)]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join(5)
+    assert all(not worker.is_alive() for worker in workers) and not errors
+    assert sum("state" in result for result in results) == 1
+    assert sum(event == "reconcileStuckBusy" for event, _ in logs) == 1
+    assert _turn_row(turn_id)["outcome"] == "interrupted"
+
+
+def test_inv1_failed_settlement_rolls_back_without_success_or_reusing_grace(
+        tmp_path, monkeypatch, reconcile_clock):
+    agent_id, _ = _busy_turn(tmp_path)
+    assert "state" not in reconcile.reconcile_agent(agent_id, "claude", home=tmp_path)
+    reconcile_clock.now += 60
+    before = _agent_products(agent_id)
+    logs = []
+    monkeypatch.setattr(reconcile, "log", lambda *args: logs.append(args))
+
+    def failed_settlement(*args, **kwargs):
+        raise RuntimeError("settlement failed")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(turn_lifecycle, "_record_outcome", failed_settlement)
+        with pytest.raises(RuntimeError, match="settlement failed"):
+            reconcile.reconcile_agent(agent_id, "claude", home=tmp_path)
+    assert _agent_products(agent_id) == before
+    assert not any(event == "reconcileStuckBusy" for event, _ in logs)
+    assert "state" not in reconcile.reconcile_agent(agent_id, "claude", home=tmp_path)
+
+
+@pytest.mark.parametrize("broken_check", ["terminal", "spawning"])
+def test_inv1_unknown_liveness_logs_and_keeps_open_turn(
+        tmp_path, monkeypatch, reconcile_clock, broken_check):
+    agent_id, turn_id = _busy_turn(tmp_path)
+    monkeypatch.setattr(reconcile.backends, "active_handles", lambda *_: [])
+    monkeypatch.setattr(reconcile.backends, "external_live_work", lambda *_: False)
+    logs = []
+    monkeypatch.setattr(reconcile, "log_exception",
+                        lambda event, exc, detail="": logs.append((event, str(exc), detail)))
+
+    def broken(*args):
+        raise RuntimeError("liveness unavailable")
+
+    if broken_check == "terminal":
+        monkeypatch.setattr(turn_dispatch, "live_work", broken)
+    else:
+        monkeypatch.setattr(turn_dispatch, "live_work", lambda *_: SimpleNamespace(terminal=False))
+        monkeypatch.setattr(reconcile, "_slot_is_spawning", broken)
+    assert reconcile.has_live_work(agent_id, "claude") is True
+    assert "state" not in reconcile.reconcile_agent(agent_id, "claude", home=tmp_path)
+    reconcile_clock.now += 61
+    assert "state" not in reconcile.reconcile_agent(agent_id, "claude", home=tmp_path)
+    assert _turn_row(turn_id)["outcome"] is None
+    assert logs and all(message == "liveness unavailable" and detail == agent_id
+                        for _, message, detail in logs)
+
+
+@pytest.mark.parametrize("successor", ["done", "busy_same_timestamp"])
+def test_inv1_independent_row_before_writer_admission_refuses_repair(
+        tmp_path, monkeypatch, reconcile_clock, successor):
+    agent_id, turn_id = _busy_turn(tmp_path)
+    assert "state" not in reconcile.reconcile_agent(agent_id, "claude", home=tmp_path)
+    reconcile_clock.now += 60
+    original_conn = turn_lifecycle.conn
+    reader_thread = threading.get_ident()
+    injected, errors, committed = [], [], []
+    logs = []
+    monkeypatch.setattr(reconcile, "log", lambda *args: logs.append(args))
+
+    def write_successor():
+        try:
+            if successor == "done":
+                turn_lifecycle.transition(agent_id, turn_lifecycle.TurnEvent.PROCESS_EXITED_OK,
+                                          {"trace_id": "reconcile-test"})
+            else:
+                latest = agents_db.latest_state(agent_id)
+                db.conn().execute("INSERT INTO state_log(agent_id,kind,ts) VALUES (?,?,?)",
+                                  (agent_id, "thinking", latest["ts"]))
+            committed.append(_agent_products(agent_id))
+        except BaseException as exc:
+            errors.append(exc)
+        finally:
+            db.close_local()
+
+    class BeforeAdmission:
+        def __init__(self, database):
+            self.database = database
+
+        def __getattr__(self, name):
+            return getattr(self.database, name)
+
+        def execute(self, sql, *args, **kwargs):
+            if sql.strip().upper() == "BEGIN IMMEDIATE" and not injected:
+                injected.append(True)
+                writer = threading.Thread(target=write_successor)
+                writer.start()
+                writer.join(5)
+                assert not writer.is_alive() and not errors
+            return self.database.execute(sql, *args, **kwargs)
+
+    def connection():
+        database = original_conn()
+        return BeforeAdmission(database) if threading.get_ident() == reader_thread else database
+
+    monkeypatch.setattr(turn_lifecycle, "conn", connection)
+    assert "state" not in reconcile.reconcile_agent(agent_id, "claude", home=tmp_path)
+    assert injected == [True] and len(committed) == 1
+    assert _agent_products(agent_id) == committed[0]
+    assert not any(event == "reconcileStuckBusy" for event, _ in logs)
+    assert _turn_row(turn_id)["outcome"] == ("completed" if successor == "done" else None)
+
+
+@pytest.mark.parametrize("broken_check", ["terminal", "spawning"])
+def test_runtime_idle_receipt_keeps_started_on_unknown_reconcile_probe(
+        tmp_path, monkeypatch, broken_check):
+    agent_id = _agent(tmp_path)
+    now = db.now_ms()
+    agents_db.record_state(agent_id, "done")
+    db.conn().execute("UPDATE state_log SET ts = ? WHERE agent_id = ?",
+                      (now - 120_000, agent_id))
+    db.conn().execute(
+        """INSERT INTO queued_turns(queue_id,agent_id,session,text,trace_id,status,enqueued_at,started_at)
+           VALUES ('reconcile-receipt',?,'mike','','receipt-trace','started',?,?)""",
+        (agent_id, now - 240_000, now - 240_000))
+    monkeypatch.setattr(reconcile.backends, "active_handles", lambda *_: [])
+    monkeypatch.setattr(reconcile.backends, "external_live_work", lambda *_: False)
+    logs = []
+    monkeypatch.setattr(reconcile, "log_exception", lambda *args, **kwargs: logs.append(args))
+
+    def broken(*args):
+        raise RuntimeError("unknown receipt liveness")
+
+    if broken_check == "terminal":
+        monkeypatch.setattr(turn_dispatch, "live_work", broken)
+    else:
+        monkeypatch.setattr(turn_dispatch, "live_work", lambda *_: SimpleNamespace(terminal=False))
+        monkeypatch.setattr(reconcile, "_slot_is_spawning", broken)
+    assert reconcile.end_idle_agent_receipts({}) == {}
+    assert db.conn().execute("SELECT status FROM queued_turns WHERE queue_id = 'reconcile-receipt'").fetchone()[0] == "started"
+    assert logs and all(str(args[1]) == "unknown receipt liveness" for args in logs)
 
 
 def test_inv2_ghost_claude_session_is_unbound(tmp_path):
@@ -278,11 +654,13 @@ def test_inv3_logs_a_failed_runtime_release(tmp_path, runtime_owned, monkeypatch
     assert logged == [("reconcileSlotFail", "runtime went away")]
 
 
-def test_reconcile_all_covers_every_agent(tmp_path):
+def test_reconcile_all_covers_every_agent(tmp_path, reconcile_clock):
     a = _agent(tmp_path, "mike")
     b = _agent(tmp_path, "rachel")
     agents_db.record_state(a, "thinking")
     agents_db.record_state(b, "compacting")
+    assert reconcile.reconcile_all(home=tmp_path) == 0
+    reconcile_clock.now += 60
     assert reconcile.reconcile_all(home=tmp_path) == 2
     assert agents_db.latest_state(a)["kind"] == "idle"
     assert agents_db.latest_state(b)["kind"] == "idle"
