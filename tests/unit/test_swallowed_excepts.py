@@ -63,7 +63,6 @@ BASELINE: dict[str, int] = {
     'lib/live_pacing.py': 1,
     'lib/log.py': 2,
     'lib/maintenance.py': 2,
-    'lib/message_writes.py': 1,
     'lib/oracle_calls.py': 1,
     'lib/oracle_calls_stable.py': 1,
     'lib/oracle_gemini_live.py': 2,
