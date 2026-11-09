@@ -1,0 +1,125 @@
+# The critical gate: `make test-critical`, and the Tests workflow on every pull request.
+# Only what can brick the live Host or lose data. It runs serially in about a minute;
+# keep it there. Add a test here only when its failure would mean that, and take one
+# out before letting the gate grow past ~90 s on a busy laptop.
+#
+# One pytest argument per entry: a file, a node id, or a --deselect for a slow case
+# inside a file that is otherwise kept. `#` starts a comment.
+
+# State database: fresh schema, every upgrade path, settings and identity
+tests/unit/test_db_migrations.py
+tests/unit/test_migration_matrix.py
+tests/unit/test_migration_rehearsal.py
+tests/unit/test_schema_golden.py
+tests/unit/test_server_state_rehearsal.py
+tests/unit/test_runtime_db_lifetime.py
+--deselect=tests/unit/test_runtime_db_lifetime.py::test_handler_finish_closes_both_and_preserves_transaction_outcome
+--deselect=tests/unit/test_runtime_db_lifetime.py::test_early_request_cleanup_opens_neither_store
+tests/integration/test_db_concurrency.py
+tests/unit/test_settings_store.py
+tests/unit/test_identity.py
+tests/unit/test_server_identity.py
+tests/unit/test_client_contract.py
+
+# Server boot, dependency wiring, route registry
+tests/unit/test_runtime_startup.py
+tests/unit/test_startup_import_bootstrap.py
+tests/unit/test_module_import_cycles.py
+tests/unit/test_lazy_imports_resolve.py
+tests/unit/test_server_context.py
+tests/unit/test_health.py
+tests/integration/test_route_registry.py
+tests/integration/test_server_di.py::test_build_server_starts_the_worker_registry_in_order
+tests/integration/test_server_di.py::test_server_info_is_stable
+tests/integration/test_server_di.py::test_get_snapshot_returns_seeded_data
+tests/integration/test_server_di.py::test_status_reports_external_runtime_health
+tests/integration/test_server_di.py::test_post_agents_opens_runtime_row
+
+# Authentication, device tokens, limited-device scope
+tests/unit/test_request_security.py
+tests/unit/test_limited_device_scope.py
+tests/unit/test_device_pairing.py
+--deselect=tests/unit/test_device_pairing.py::test_busy_last_seen_is_silent_and_keeps_the_lock_report_window
+tests/integration/test_server_di.py::test_one_time_pairing_issues_revocable_device_credential
+tests/integration/test_server_di.py::test_host_file_browsing_requires_full_device_scope[limited-bearer-/agent-file]
+tests/integration/test_server_di.py::test_host_file_browsing_requires_full_device_scope[limited-cookie-/agent-files]
+tests/integration/test_server_di.py::test_host_file_browsing_requires_full_device_scope[limited-query-/agent-file]
+tests/integration/test_server_di.py::test_host_file_browsing_requires_full_device_scope[full-bearer-/agent-files]
+tests/integration/test_server_di.py::test_auth_accepts_cookie_for_headerless_transports
+tests/integration/test_server_di.py::test_limited_device_cannot_read_or_stream_oracle
+tests/integration/test_server_di.py::test_revoking_a_device_closes_its_existing_event_stream
+tests/integration/test_server_di.py::test_a_turn_cannot_send_as_another_agent
+
+# Turn dispatch and lifecycle: the happy path, queue, stop, repair, restart
+tests/unit/test_turn_lifecycle.py
+--deselect=tests/unit/test_turn_lifecycle.py::test_every_legal_edge_writes_its_target
+tests/unit/test_turn_queue.py
+tests/unit/test_turn_slots.py
+tests/unit/test_stop_holds_queue.py
+tests/unit/test_queue_reaper.py
+tests/unit/test_restart_interrupted_turns.py
+tests/unit/test_send_service.py
+tests/unit/test_send_request.py
+tests/unit/test_turn_dispatch.py::test_dispatch_service_is_mockable_without_http_or_processes
+tests/unit/test_turn_dispatch.py::test_new_codex_session_persists_client_message_after_init
+tests/unit/test_turn_dispatch.py::test_retry_after_init_resumes_initialized_backend_session
+tests/unit/test_turn_dispatch.py::test_dispatch_threads_origin_and_sender_onto_user_row
+tests/unit/test_turn_dispatch.py::test_existing_session_is_resumed
+tests/unit/test_turn_dispatch.py::test_ghost_session_resets_to_fresh
+tests/unit/test_turn_dispatch.py::test_stale_inflight_slot_is_freed_on_next_send
+tests/unit/test_turn_dispatch.py::test_client_message_id_is_idempotent_across_normal_and_queue_modes
+tests/unit/test_turn_dispatch.py::test_user_followup_queues_without_killing_a_nonsteerable_turn
+tests/unit/test_turn_dispatch.py::test_busy_agent_send_preempts_inflight_turn
+tests/unit/test_turn_dispatch.py::test_busy_codex_send_steers_active_turn_without_interrupting
+tests/unit/test_turn_dispatch.py::test_explicit_queue_waits_for_current_turn_without_interrupting
+tests/unit/test_turn_dispatch.py::test_manual_send_of_a_paused_item_still_works
+tests/unit/test_turn_dispatch.py::test_normal_send_admitted_during_stop_runs_after_interrupt
+tests/unit/test_turn_dispatch.py::test_durable_queue_recovers_after_dispatch_state_loss
+tests/unit/test_turn_dispatch.py::test_failed_direct_send_can_retry_via_durable_queue
+tests/unit/test_turn_dispatch.py::test_a_failed_turn_keeps_its_prompt_and_runs_what_queued_behind_it
+tests/unit/test_turn_dispatch.py::test_connection_drop_is_silently_retried
+tests/unit/test_turn_dispatch.py::test_nonzero_runner_exit_notifies_without_retry
+tests/unit/test_turn_dispatch.py::test_usage_limit_notifies_without_retry
+tests/unit/test_turn_dispatch.py::test_send_parked_behind_stop_survives_a_runtime_restart
+tests/unit/test_turn_dispatch.py::test_parked_send_is_unparked_when_the_stop_finishes
+tests/unit/test_turn_dispatch.py::test_restart_rehydrates_an_open_turn_whose_process_is_alive
+tests/unit/test_turn_dispatch.py::test_no_second_process_starts_while_the_agents_last_turn_process_still_runs
+tests/unit/test_turn_dispatch.py::test_crash_after_spawn_is_never_launched_again
+tests/unit/test_turn_dispatch.py::test_real_stop_during_handoff_never_launches_after_stop
+tests/unit/test_turn_dispatch.py::test_leaked_slot_hands_over_to_queued_work
+tests/unit/test_turn_dispatch.py::test_slot_with_live_work_is_never_released
+tests/integration/test_server_di.py::test_post_send_dispatches_text_via_claude_backend
+tests/integration/test_server_di.py::test_post_send_retry_with_same_client_id_dispatches_once
+tests/integration/test_server_di.py::test_turn_queue_can_be_listed_edited_deleted_and_paused_by_stop
+tests/integration/test_server_di.py::test_stop_barrier_is_executed_by_external_runtime
+tests/integration/test_server_di.py::test_repair_slot_needs_a_reason_and_never_pauses
+tests/integration/test_server_di.py::test_production_restart_marks_interrupted_turns_without_new_assistant_prompt
+
+# Update, rollback, installer, agent toolchain manifest
+tests/unit/test_server_update.py
+tests/unit/test_server_update_job.py
+tests/unit/test_runtime_release.py
+tests/unit/test_agent_toolchain_installer.py
+tests/integration/test_versioned_installer.py
+tests/unit/test_graceful_release_drain.py::test_a_rollback_between_seal_and_shutdown_unseals
+tests/unit/test_clarp_admin.py::test_releases_only_returns_completed_installs
+tests/unit/test_clarp_admin.py::test_setup_restores_live_configuration_when_install_fails
+tests/unit/test_clarp_admin.py::test_cmd_update_clones_recorded_remote_for_tarball_install
+tests/unit/test_clarp_admin.py::test_cmd_update_never_refuses_for_missing_remote_record
+tests/unit/test_clarp_admin.py::test_managed_toolchain_is_passed_to_installer_without_global_mutation
+tests/integration/test_server_di.py::test_server_update_http_registers_default_owner_session
+
+# Transcript import and message storage: nothing lost, nothing duplicated
+tests/unit/test_transcript_import_cache.py
+tests/unit/test_transcript_import_coalescing.py
+tests/unit/test_transcript_incremental.py
+--deselect=tests/unit/test_transcript_incremental.py::test_incremental_matches_full_import_at_every_cut[agy]
+--deselect=tests/unit/test_transcript_incremental.py::test_incremental_matches_full_import_at_every_cut[codex]
+--deselect=tests/unit/test_transcript_incremental.py::test_the_carried_store_state_reproduces_the_full_import_at_every_split
+tests/unit/test_transcript_writer_contention.py
+--deselect=tests/unit/test_transcript_writer_contention.py::test_transcript_import_yields_to_independent_writer
+tests/unit/test_transcript_cursor_save.py
+tests/unit/test_claude_transcript.py
+tests/unit/test_codex_transcript.py
+tests/unit/test_conversation_sync.py
+tests/unit/test_message_store_preview.py
