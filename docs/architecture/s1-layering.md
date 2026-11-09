@@ -361,3 +361,5 @@ These are the four existing-module corrections signed by Hobbles for assignment 
 The seven named exceptions and two aliases are unchanged. A3 source approval and captain remote architecture/gate receipts remain required before landing.
 
 Additional explicit lead S1 signature (937): `agent_lifecycle` is classified core → features because it orchestrates application create/relaunch/fork/delete, persona/model/contact selection, roster persistence and announcements; all seven current incoming importers are application/HTTP, with no core/persistence importer.
+
+Additional explicit lead S1 signature (937): `janitor_store` is classified features → persistence because it owns Janitor table storage, transactions and JSON codecs, imports only standard library code and persistence `db`, and leaves application policy in its callers.
