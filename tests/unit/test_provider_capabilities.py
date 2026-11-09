@@ -569,6 +569,7 @@ def test_claude_fallback_names_current_models_and_cli_aliases():
     bundled = [model_id for model_id, _ in capabilities._fallback_model_rows("claude")]
     # Retired ids must not be offered: the API rejects them with a 400.
     assert "claude-fable-5" not in bundled
+    assert "claude-fable-5-2" in bundled
     assert "claude-fable-5-1" in bundled
     # The aliases Claude Code resolves itself; "default" is not one of them.
     assert "fable" in bundled
