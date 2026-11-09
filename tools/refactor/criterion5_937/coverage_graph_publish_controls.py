@@ -3,6 +3,7 @@
 Supplied records are NOT semantic captures, traced coverage or producer proof.
 """
 import hashlib
+import json
 from pathlib import Path
 
 from .coverage_graph_publish import publish_graph, verify_graph, NAME
@@ -119,6 +120,33 @@ def run_graph_publication_storage_control(*, root):
         faults = run_retained_reader_fault_table(result['observation'], operation=operation)
         assert faults['boolean_observation_refusals'] == 0
         assert faults['fault_outcomes'] == ['control_read', 'control_close', 'ordinary_pair']
+    assert actual.read_bytes() == before
+    # SAME filesystem owner: one early-index FS publication, NOT a real
+    # collector/31receipt/indexproducer/kernel positive. Observations supplied.
+    from .coverage_publish_index import _publish_index
+    from .coverage_receipt_index import FORMAT as INDEX_FORMAT
+    index_root = Path(root) / 'index-storage'
+    index_root.mkdir(mode=0o700)
+    index = {'format': INDEX_FORMAT, 'pin': B_PIN, 'run_id': 'SYNTHETIC_STORAGE_ONLY',
+             'config_sha256': 'a' * 64,
+             'roles': {r: {p: dict(result['observation']) for p in ('start', 'finish')}
+                       for r in ROLES}}
+    index_limits = {'nodes': 10000, 'depth': 64, 'string_characters': 10000, 'wire_bytes': 200000}
+    json_limits = {'bytes': 200000, 'nodes': 10000, 'depth': 64, 'string_characters': 10000}
+    observed_index = _publish_index(root=index_root, index=index, index_limits=index_limits,
+                                    json_limits=json_limits, path_bytes_limit=4096)
+    index_raw = (index_root / 'index.json').read_bytes()
+    assert json.loads(index_raw) == index
+    assert observed_index['sha256'] == hashlib.sha256(index_raw).hexdigest()
+    assert observed_index['bytes'] == len(index_raw)
+    try:
+        _publish_index(root=index_root, index=index, index_limits=index_limits,
+                       json_limits=json_limits, path_bytes_limit=4096)
+    except ValueError as error:
+        assert 'unexpected original' in str(error)
+    else:
+        raise AssertionError('existing early index overwritten/reused')
+    assert (index_root / 'index.json').read_bytes() == index_raw
     assert actual.read_bytes() == before
     return {'scope': 'FILESYSTEM_WIRE_STORAGE_ONLY_NOT_GRAPH_OR_PRODUCER_PROOF',
             'outcomes': 3, 'actual_coverage_or_report_accepted': False}
