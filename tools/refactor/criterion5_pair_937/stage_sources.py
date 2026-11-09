@@ -163,7 +163,7 @@ def main():
     local_filters = subprocess.run(['git', 'config', '--local', '--name-only',
                                     '--get-regexp', r'^filter\.'], cwd=root, env=env,
                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
-    if local_filters.returncode != 1 or local_filters.stdout:
+    if local_filters.returncode != 1 or local_filters.stdout or local_filters.stderr:
         raise ValueError('unqualified local Git filter configuration')
     # No .gitattributes is part of either declared source tree. Global/system
     # attributes/config are disabled; actual bytes are still verified after checkout.
