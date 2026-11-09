@@ -8,6 +8,7 @@ import stat
 import traceback
 from writer_policy import validate_workers, classify_post, read_exit
 from controller import Controller, SHARE
+from roster import load_receipt
 
 
 def capture_registry(observer, workers, protected):
@@ -23,7 +24,7 @@ def capture_registry(observer, workers, protected):
     after=db.stat()
     if (after.st_dev,after.st_ino)!=identity:raise SystemExit(11)
     rows=json.loads(text)
-    if len(rows)>12 or len({r['job_id'] for r in rows})!=len(rows):raise SystemExit(11)
+    if len(rows)>len(workers) or len({r['job_id'] for r in rows})!=len(rows):raise SystemExit(11)
     return {r['job_id']:r for r in rows}
 
 
@@ -45,7 +46,11 @@ def main():
         os.close(fd)
     data = json.loads(raw)
     if data['schema'] != 'clarp.disk-writer-post-metadata/1': raise SystemExit(11)
-    binding=data['controller_binding']
+    frozen=load_receipt(data['roster_receipt']['path'],data['roster_receipt']['sha256'])
+    if data['original_binding_sha256']!=frozen['original_binding_sha256']:
+        raise SystemExit('post_roster_authority_mismatch')
+    binding=frozen['controller_binding']
+    if data['pre_ms']!=frozen['end_epoch_ms']:raise SystemExit('post_roster_epoch_mismatch')
     workers = validate_workers(binding['tolerated_workers'],binding['auxiliary_units']+binding['timers']+['clarp.service','clarp-runtime.service'])
     native_root=Path(sys.argv[3]+'.native');native_root.mkdir(mode=0o700)
     observer=Controller(binding,native_root)

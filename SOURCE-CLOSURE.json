@@ -1,48 +1,52 @@
 {
   "bindings": {
     ".disk-maintenance-proof/SHA256SUMS": {
-      "bytes": 736,
-      "sha256": "e40fbb419783bc5465f48f30f37a2f5dc914a13d6b5bf939b45272988849e044"
+      "bytes": 812,
+      "sha256": "cbc6840cefe1d958bad79589d12751f6425ca80822ba3f6a2860f4f739265de5"
     },
     ".disk-maintenance-proof/SOURCE_COMMIT": {
       "bytes": 41,
-      "sha256": "105df6e1341a6cdfd388c8fdb52447f8289eb09ecc494dfa55ebb20e9dc81bd4"
+      "sha256": "1eb96702da51e8972adfd4af72539b049909d19e5b3eca4c11d6a45714bf81d0"
     },
     ".disk-maintenance-proof/child_exec.py": {
       "bytes": 903,
       "sha256": "4725312887f7a518910ab555e88db25b9f29396189f6340ef9a10c8362691754"
     },
     ".disk-maintenance-proof/controller.py": {
-      "bytes": 28776,
-      "sha256": "38f7f9bf10a256ab144355ae9db40dac50ac233a72aa0199dec2782571d5d087"
+      "bytes": 29829,
+      "sha256": "f339c09f2f242881588c4e17f9c3be69baf613923eacfc0a31ad63b0c0b2a533"
     },
     ".disk-maintenance-proof/owned.py": {
       "bytes": 10195,
       "sha256": "e3aee22000f3c6c19efefa72fe7d358f36a29276d8ab5685e26cfc4af10f5c55"
     },
     ".disk-maintenance-proof/post_check.py": {
-      "bytes": 4247,
-      "sha256": "f78a3143800af54d59b77a6068257a2b02c97b464f59cc00585ad139696bd9bd"
+      "bytes": 4607,
+      "sha256": "9ef4f254b28184ef0dc6f615e6161ae92310c58dd0ff43577a5cfa4d2d5ed164"
+    },
+    ".disk-maintenance-proof/roster.py": {
+      "bytes": 19193,
+      "sha256": "bffdc3648211b80e401314cfd9b0691439b98c4b4f50428b74321f0896495584"
     },
     ".disk-maintenance-proof/run-proof.sh": {
-      "bytes": 1693,
-      "sha256": "ae5978583ba83be8916ecdb6b065f9b111a45eda1b32717d46a9e93f80f1fa32"
+      "bytes": 1694,
+      "sha256": "e073407389687b8c2e877c83864f9ec002aaf2396f04ec383670697eb6c484fd"
     },
     ".disk-maintenance-proof/run-selected.sh": {
-      "bytes": 2328,
-      "sha256": "b25216e865ea0decffb7709dba93681c3358a7f349e7dfb14c58085ed15d1b77"
+      "bytes": 1977,
+      "sha256": "04ec7981f074bed58a0afb148ffbccf0da2c967b40f8b2775ff1acaaad32941d"
     },
-    ".disk-maintenance-proof/test_balance_timing.py": {
-      "bytes": 13915,
-      "sha256": "8a4ba0c75558663a1ffe6f691fce7bab29e3bed8497774da1a9314978b77192a"
+    ".disk-maintenance-proof/test_current_roster.py": {
+      "bytes": 17135,
+      "sha256": "b70bf7f9d2c032f6b128f32b12d7246482d1820822fc7379eb81e99f20e827fb"
     },
     ".disk-maintenance-proof/test_writer_focus.py": {
       "bytes": 10200,
       "sha256": "6815e1fcb52ffcebb3a5a5e94d37fe4a75fb531aa44ca0b8a983fd1557baefe3"
     },
     ".disk-maintenance-proof/writer_policy.py": {
-      "bytes": 7720,
-      "sha256": "3a1f478f54e0f9f3de1a4fd2e1ccab099caad65d2259111b83ed15c11162c8e3"
+      "bytes": 8089,
+      "sha256": "5e322a996bcbaeb81abb32fc758faa848db4d6ba0df1a7fa94c30dc0d1cd73dd"
     },
     "scripts/ci_contained.sh": {
       "bytes": 4376,
@@ -54,13 +58,10 @@
     }
   },
   "containment_source": "1ca5a5a69cba322e311968f20298c1db36f31eac",
-  "controller_source": "684555326522175c2bdab42e908cfc5c1ecc8b21",
-  "scope": "SAME4_WRITER_PLUS_ONE_TIMING_SYNTHETIC_ONLY_NO15_REPEAT",
+  "controller_source": "c7386577c9f8bcf22fb880d72834ace0e645a78c",
+  "implementation_bytes": "8fb79da3",
+  "scope": "ONE_ADDITIONAL_CURRENT_ROSTER_CONTROL_NO5_NO15_REPEAT",
   "selected_methods": [
-    "test_writer_focus.WriterFocus.test_exact_tolerated_set_accepted_without_stopping_units",
-    "test_writer_focus.WriterFocus.test_unlisted_db_fd_including_listener_is_rejected",
-    "test_writer_focus.WriterFocus.test_changed_pid_start_or_unit_generation_rejected",
-    "test_writer_focus.WriterFocus.test_postcheck_heartbeat_finished_and_mismark_are_distinct_no_edit",
-    "test_balance_timing.TimingFocus.test_actual_controller_shared_phase_cancel_order_and_420_narrow_recovery"
+    "test_current_roster.CurrentRosterFocus.test_actual_current_roster_freeze_new_writer_refusal_and_admission"
   ]
 }
