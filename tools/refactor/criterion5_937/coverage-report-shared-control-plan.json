@@ -1,0 +1,26 @@
+{
+  "scope": "SOURCE_SELECTION_PROPOSAL_UNEXECUTED_NOT_ADMISSION",
+  "combined_entry": "coverage_render_controls.run_render_storage_control",
+  "required_operands": ["coverage_module", "source_root", "root", "coverage_archive_path"],
+  "same_selection_excludes": ["coverage_build_union_controls.run_build_union_storage_control"],
+  "reason": "Combined entry executes the shared nine-input fixture once and retains all nine-union and full434-report oracles; do not dispatch the standalone union wrapper again in this same measurement selection.",
+  "positive_native_union_invocations": 1,
+  "expected_public_update_calls": {"union": 9, "report_copy": 1},
+  "preserved_contracts": [
+    "original raw data/copy byte preservation",
+    "actual nine update path/order witness",
+    "independent literal aggregate arcs and negative-only empty attribution",
+    "actual full role/reference/closed-aggregate graph reopening",
+    "actual retained catalog/archive/profile/config/raw18receipt/index byte linkage",
+    "full434 native report/source-analysis and region identity/outside scope",
+    "False projection at all native JSON levels with no raw attribution loss",
+    "required API/warning/descriptor cleanup and post-artifact version fences",
+    "all source/process/kernel/coverage acceptance flags stay false in STORAGE fixtures"
+  ],
+  "standalone_union_wrapper": "Retained for separately reviewed targeted use; not an additional default case in this combined selection.",
+  "all_other_required_lower_lifecycle_record_controls": "Remain mandatory in the full reviewed package; not silently removed by fixture sharing.",
+  "selection_qualified": false,
+  "execution_authorized": false,
+  "whole_source_ready": false,
+  "numeric_fit_qualified": false
+}

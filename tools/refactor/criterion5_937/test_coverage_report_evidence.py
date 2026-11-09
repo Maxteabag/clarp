@@ -16,15 +16,14 @@ def records():
         'server/empty.py': {'sha256': 'b' * 64, 'bytes': 0, 'physical_lines': 0}}}
     counts = dict(zip(COUNTS, (2, 3, 1, 1, 2, 2, 0, 0)))
     zero = dict.fromkeys(COUNTS, 0)
-    report = {'meta': {'format': 3, 'version': '7.17.0', 'branch_coverage': True, 'show_contexts': True},
+    report = {'meta': {'format': 3, 'version': '7.17.0', 'branch_coverage': True, 'show_contexts': False},
               'files': {
                   'server/a.py': {'executed_lines': [1, 2], 'missing_lines': [3], 'excluded_lines': [4],
                                   'executed_branches': [[2, -1], [2, 4]], 'missing_branches': [],
-                                  'contexts': {'1': ['ctx[.*]'], '2': ['1'], '4': ['ctx[.*]']},
                                   'summary': counts},
                   'server/empty.py': {'executed_lines': [], 'missing_lines': [], 'excluded_lines': [],
                                       'executed_branches': [], 'missing_branches': [],
-                                      'contexts': {}, 'summary': zero}},
+                                      'summary': zero}},
               'totals': deepcopy(counts)}
     analyses = {
         'server/a.py': {'source_sha256': 'a' * 64, 'statements': [1, 2, 3], 'excluded': [4], 'missing': [3],
@@ -53,7 +52,7 @@ def test_statement_denominator_exclusion_credits_and_empty_units_are_separate():
 @pytest.mark.parametrize('fault', ['missing-file', 'extra-file', 'missing-analysis', 'duplicate-statement',
                                   'wrong-source', 'bool-count', 'wrong-statements', 'excluded-statement',
                                   'wrong-branch-credit', 'wrong-missing-branch', 'bool-branch',
-                                  'wrong-totals', 'excluded-executed', 'excluded-branch-source', 'noncanonical-line-context'])
+                                  'wrong-totals', 'excluded-executed', 'excluded-branch-source', 'unexpected-file-context'])
 def test_missing_inventory_or_inconsistent_units_cannot_be_report_consistent(fault):
     report, analyses, inventory = records()
     row = report['files']['server/a.py']
@@ -87,7 +86,7 @@ def test_missing_inventory_or_inconsistent_units_cannot_be_report_consistent(fau
     elif fault == 'wrong-totals':
         report['totals']['missing_lines'] = 0
     else:
-        row['contexts']['01'] = row['contexts'].pop('1')
+        row['contexts'] = {'01': ['ctx[.*]']}  # every JSON context map now refuses
     reason = 'excluded source cannot be a public branch-statistics source' if fault == 'excluded-branch-source' else None
     with pytest.raises(ValueError, match=reason):
         reconcile_report(report, analyses, inventory=inventory)
