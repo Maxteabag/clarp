@@ -13,24 +13,45 @@ LOG="$LOGDIR/$DAY.log"
 HANDLE=$(clarp-agent-bg "$SESSION" job-upsert "rf-harnessc-nightly-rolling-$DAY" nightly "Rolling main replay nightly $DAY")
 export CLARP_NIGHTLY_JOB_HANDLE="$HANDLE"
 clarp-agent-bg "$SESSION" job-log "$HANDLE" "$LOG"
-clarp-agent-bg "$SESSION" job-active "$HANDLE"
+ownership() {
+  local status pause
+  for pause in 5 10 20 40 60; do
+    status=0
+    clarp-agent-bg "$SESSION" job-active "$HANDLE" || status=$?
+    if [ "$status" = 0 ]; then return 0; fi
+    if [ "$status" = 1 ]; then return 1; fi
+    printf '%s\n' 'Ownership UNKNOWN; same handle, consequential work paused' >> "$LOG"
+    sleep "$pause" & wait $!
+  done
+  return 2
+}
+ownership
 clarp-agent-bg "$SESSION" job-heartbeat "$HANDLE"
 python "$SOURCE_DIR/controller.py" daily >> "$LOG" 2>&1 &
 CHILD=$!
 while kill -0 "$CHILD" 2>/dev/null; do
-  if ! clarp-agent-bg "$SESSION" job-active "$HANDLE"; then
+  STATUS=0
+  ownership || STATUS=$?
+  if [ "$STATUS" = 1 ]; then
     kill "$CHILD" 2>/dev/null || true
     wait "$CHILD" || true
     exit 1
+  fi
+  if [ "$STATUS" != 0 ]; then
+    # Same handle; no cancellation/re-registration/result delivery on UNKNOWN.
+    # Controller independently fences remote writes and pointer publication.
+    printf '%s\n' 'Ownership remains UNKNOWN; service stops without success/cancel claim' >> "$LOG"
+    exit 2
   fi
   clarp-agent-bg "$SESSION" job-heartbeat "$HANDLE"
   sleep 30 & wait $!
 done
 RC=0
 wait "$CHILD" || RC=$?
+export CLARP_NIGHTLY_CONTROLLER_RC="$RC"
 TEXT=$(python "$SOURCE_DIR/controller.py" report)
 printf '%s\n' "$TEXT" >> "$LOG"
-clarp-agent-bg "$SESSION" job-active "$HANDLE"
+ownership
 # One requested nightly result. Failed/uncertain message is retained, not resent.
 if ! clarp-admin prompt --to hobbles-18b0 --from "$SESSION" --text "$TEXT" >> "$LOG" 2>&1; then
   printf '%s\n' 'Result delivery uncertain; reconcile before any resend' >> "$LOG"

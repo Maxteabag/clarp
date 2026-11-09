@@ -37,12 +37,14 @@ def read(p):
     return json.loads(p.read_bytes())
 
 
-def persist(p, value, replace=False):
-    """Exclusive immutable receipt first; pointer replacement only under outer lock."""
-    data = encode(value)
+def retain(p, data, replace=False):
+    """Own bounded raw publication: file+directory fsync, exact readback."""
+    if type(data) is not bytes or len(data) > 64 * 1024 * 1024:
+        raise ValueError('retained payload bound/type')
     q = p.with_name(p.name + '.pending') if replace else p
     with q.open('xb') as f:
-        f.write(data)
+        if f.write(data) != len(data):
+            raise OSError('short retained write')
         f.flush()
         os.fsync(f.fileno())
     if replace:
@@ -56,6 +58,26 @@ def persist(p, value, replace=False):
         raise RuntimeError('publication readback mismatch; HOLD')
 
 
+def persist(p, value, replace=False):
+    retain(p, encode(value), replace)
+
+
+def owned():
+    handle = os.environ.get('CLARP_NIGHTLY_JOB_HANDLE')
+    if not handle:
+        raise RuntimeError('missing managed job handle; HOLD')
+    for pause in (5, 10, 20, 40, 60):
+        code = subprocess.run(['clarp-agent-bg', 'rf-harnessc-4a4a',
+                               'job-active', handle], stdout=subprocess.DEVNULL).returncode
+        if code == 0:
+            return
+        if code == 1:
+            raise RuntimeError('confirmed terminal ownership; STOP')
+        # Unknown preserves the same handle and pauses consequential operations.
+        time.sleep(pause)
+    raise RuntimeError('ownership UNKNOWN; HOLD same attempt/handle')
+
+
 def gh(args, payload=None, binary=False):
     # Never alter global account or persist a token. Child environment only.
     token = subprocess.check_output(['gh', 'auth', 'token', '-h', 'github.com', '-u', 'Maxteabag'], text=True).strip()
@@ -65,9 +87,8 @@ def gh(args, payload=None, binary=False):
 
 
 def api(path, payload=None, binary=False):
-    if payload is not None and os.environ.get('CLARP_NIGHTLY_JOB_HANDLE'):
-        subprocess.run(['clarp-agent-bg', 'rf-harnessc-4a4a', 'job-active',
-                        os.environ['CLARP_NIGHTLY_JOB_HANDLE']], check=True, stdout=subprocess.DEVNULL)
+    if payload is not None:
+        owned()
     args = ['api', f'repos/{REPO}/{path}']
     if payload is not None:
         args += ['--method', 'POST', '--input', '-']
@@ -94,12 +115,12 @@ def run_receipt(folder, lane, run, target):
     z = api(f"actions/artifacts/{items[0]['id']}/zip", binary=True)
     if items[0].get('digest') != 'sha256:' + sha(z):
         raise ValueError('artifact digest mismatch/missing')
-    (folder / f'{lane}.zip').write_bytes(z)
+    retain(folder / f'{lane}.zip', z)
     with zipfile.ZipFile(io.BytesIO(z)) as archive:
         if archive.namelist() != ['report.txt'] or archive.getinfo('report.txt').file_size > 16_000_000:
             raise ValueError('unexpected report archive')
         report = archive.read('report.txt')
-    (folder / f'{lane}-raw.txt').write_bytes(report)
+    retain(folder / f'{lane}-raw.txt', report)
     jobs = api(f"actions/runs/{run['id']}/jobs?per_page=100")
     persist(folder / f'{lane}-jobs.json', jobs)
     if jobs['total_count'] != 1 or len(jobs['jobs']) != 1:
@@ -108,10 +129,40 @@ def run_receipt(folder, lane, run, target):
     bad = [s for s in steps if s['conclusion'] not in ('success', 'skipped')]
     if any(s['name'] != 'Replay' or s['conclusion'] != 'failure' for s in bad):
         raise ValueError('infrastructure/other step failure')
+    log = api(f"actions/jobs/{jobs['jobs'][0]['id']}/logs", binary=True)
+    retain(folder / f'{lane}-job.log', log)
+    step = [s for s in steps if s['name'] == 'Replay']
+    if len(step) != 1 or step[0]['status'] != 'completed':
+        raise ValueError('missing actual completed Replay step')
+    full_log = log.decode('utf-8-sig')
+    errors = re.findall(r'##\[error\](.*)', full_log)
+    exits = re.findall(r'##\[error\]Process completed with exit code (\d+)\.', full_log)
+    if step[0]['conclusion'] == 'success':
+        # GitHub runner's completed-success shell result is exit0; unlike failure
+        # it emits no Process-completed error marker. Require both to agree.
+        if errors or exits or run['conclusion'] != 'success':
+            raise ValueError('exit0 runner/log disagreement')
+        replay_exit = 0
+        exit_origin = 'completed runner Replay shell success (pipefail); no error markers'
+    elif step[0]['conclusion'] == 'failure':
+        if exits != ['1'] or errors != ['Process completed with exit code 1.']:
+            raise ValueError('Replay exit unknown/non-diff error')
+        replay_exit = 1
+        exit_origin = 'actual runner Process completed with exit code 1 log'
+    else:
+        raise ValueError('Replay cancelled/unknown')
+    if re.search(r'Traceback \(most recent call last\)|Exception ignored|^.*(?:RUN ERROR|BUILD ERROR|INTERNALERROR|base is not reproducible|FATAL)', full_log, re.M):
+        raise ValueError('unhandled/run/build/noise error in full job log')
     text = report.decode()
     if re.search(r'^(RUN ERROR|BUILD ERROR|INTERNALERROR)', text, re.M):
         raise ValueError('replay error')
-    return text, {'run': run['id'], 'url': run['html_url'], 'zip_sha256': sha(z),
+    # This native line is printed only AFTER run.release returns. A stdout
+    # report preceding a cleanup exception is therefore not a complete result.
+    if not re.search(r'^run directory: /var/tmp/rfh/r/[^\n]+ \((?:kept|removed)\)\n?$', text.splitlines()[-1] + '\n'):
+        raise ValueError('missing native post-release terminal line')
+    return text, {'replay_exit': replay_exit, 'exit_origin': exit_origin,
+                  'job_log_sha256': sha(log), 'job_id': jobs['jobs'][0]['id'],
+                  'run': run['id'], 'url': run['html_url'], 'zip_sha256': sha(z),
                   'report_sha256': sha(report), 'conclusion': run['conclusion']}
 
 
@@ -128,7 +179,7 @@ def self_valid(text, target, conclusion):
         raise ValueError('missing proof')
 
 
-def disposition(text, run, base, head, registry):
+def disposition(text, run, base, head, registry, folder):
     """Accept only exact run/pair/report + typed EACH-ID proof named in registry.
 
     A signed entry must contain run<ID>/attempt1, literal pins, report SHA,
@@ -154,6 +205,7 @@ def disposition(text, run, base, head, registry):
             raw = (P / rel).read_bytes()
             if sha(raw) != digest:
                 raise ValueError('registry proof bytes mismatch')
+            retain(folder / ('proof-' + digest + '.json'), raw)
             proof = json.loads(raw)
             if (proof['base'], proof['head'], proof['run']) != (base, head, run):
                 raise ValueError('proof pair/run mismatch')
@@ -169,10 +221,17 @@ def disposition(text, run, base, head, registry):
 
 
 def advance(folder, old, current, receipt):
-    receipt.update(previous=old, verified_main=pin(current))
+    owned()
+    # Every retained evidence byte must be durable before accepted/pointer.
+    inventory = {p.name: {'sha256': sha(p.read_bytes()), 'size': p.stat().st_size}
+                 for p in sorted(folder.iterdir()) if p.is_file()}
+    persist(folder / 'inventory.json', inventory)
+    receipt.update(previous=old, verified_main=pin(current), inventory=inventory,
+                   inventory_sha256=sha((folder / 'inventory.json').read_bytes()))
     persist(folder / 'accepted.json', receipt)
     pointer = {'verified_main': current, 'receipt': str(folder / 'accepted.json'),
                'receipt_sha256': sha((folder / 'accepted.json').read_bytes())}
+    owned()
     persist(ROOT / 'state.json', pointer, replace=True)
 
 
@@ -189,7 +248,7 @@ def daily():
     folder = ROOT / day
     folder.mkdir()  # Existing/uncertain day is HOLD, never redispatch.
     registry = REGISTRY.read_bytes()
-    (folder / 'differences.before.md').write_bytes(registry)
+    retain(folder / 'differences.before.md', registry)
     persist(folder / 'frozen.json', {'base': base, 'head': head, 'executor': 'actions', 'registry_sha256': sha(registry)})
     lanes = {}
     for lane in ('self-check', 'compare'):
@@ -221,9 +280,9 @@ def daily():
                 self_ok = False
         else:
             registry = REGISTRY.read_bytes()
-            (folder / 'differences.after.md').write_bytes(registry)
-            classification = disposition(text, run['id'], base, head, registry)
-            if evidence['conclusion'] not in ('success', 'failure') or (not classification['intended'] and evidence['conclusion'] != 'success'):
+            retain(folder / 'differences.after.md', registry)
+            classification = disposition(text, run['id'], base, head, registry, folder)
+            if evidence['replay_exit'] != (1 if classification['intended'] else 0):
                 raise ValueError('invalid compare conclusion')
     if not self_ok:
         raise ValueError('failed self-check; anchor unchanged')
@@ -239,7 +298,10 @@ def seed():
         evidence / 'self-check-artifact/report.txt': '0e3010940e4ad2137ada621c815ba3b7af648793739ef1575f8fa0b2e0eb4ecb',
         evidence / 'self-check-replay-report.zip': '75224c46b208953edafff5e8e7cfe10a7144c55af845c6e67028a8c5dc0dfa5e',
         evidence / 'compare-artifact/report.txt': '15d47accbb66a81215ea586d309b0d8216fae99fda9141261508053c70e49901',
+        evidence / 'self-check-actions.log': 'b6e4c6117f70f45893a02dde54f3867c2c323a7b47790ad77ec4957d060b144b',
+        evidence / 'compare-actions.log': 'f9af4d64477a5ba7c0580370a3bb5d02828dcf7639aa29bd109928b04d5af522',
         evidence / 'compare-replay-report.zip': 'a345d06a90096827c1ef598fb57041f89504c1345b8e8d4d600b88453b361d97',
+        c / 'CAPTAIN-R1-READBACK.json': 'e35037cedea9dcb91587f33f099a485ee835b315dff50ed6a3a8bb6307dec781',
         c / 'per-ID-confirmation.json': '561937ec60485dd4eebeb2a283a6dad7086f08e47d240f53194ad67a897deace',
     }
     for path, digest in expected.items():
@@ -254,15 +316,19 @@ def seed():
     entry = [line for line in registry.decode().splitlines() if 'HOTSEAT-931/A1 captain R1 exact nightly registration' in line]
     if len(entry) != 1 or sha(entry[0].encode()) != '4cbc2c72d6f377096b276327d09b12132cf5a8e4bf16c6eee6d521f5e21a5a88':
         raise ValueError('exact captain R1 missing/changed')
-    result = disposition((evidence / 'compare-artifact/report.txt').read_text(), 42557146346,
-                         A5, '780cd5022f87e512262add5340d0127590ce4dcd', registry)
-    if result['intended'] != 186 or cmp_run['conclusion'] != 'failure':
-        raise ValueError('seed disposition mismatch')
     if (ROOT / 'state.json').exists():
         raise ValueError('seed already exists; no overwrite')
     folder = ROOT / 'seed-2026-11-09'
     folder.mkdir()
-    (folder / 'differences.md').write_bytes(registry)
+    result = disposition((evidence / 'compare-artifact/report.txt').read_text(), 42557146346,
+                         A5, '780cd5022f87e512262add5340d0127590ce4dcd', registry, folder)
+    if result['intended'] != 186 or cmp_run['conclusion'] != 'failure':
+        raise ValueError('seed disposition mismatch')
+    retain(folder / 'differences.md', registry)
+    for path, digest in expected.items():
+        retain(folder / (digest + '-' + path.name), path.read_bytes())
+    persist(folder / 'self-run.json', self_run)
+    persist(folder / 'compare-run.json', cmp_run)
     advance(folder, None, A5, {'day': '2026-11-09', 'kind': 'explicit-registered-seed',
             'raw_compare_exit': 1, 'classification': result,
             'evidence': {str(p): h for p, h in expected.items()},
@@ -273,7 +339,23 @@ def report():
     day = dt.datetime.now(ZoneInfo('Europe/Oslo')).date().isoformat()
     folder = ROOT / day
     frozen = read(folder / 'frozen.json') if (folder / 'frozen.json').exists() else {}
-    accepted = read(folder / 'accepted.json') if (folder / 'accepted.json').exists() else None
+    accepted = None
+    # Presence alone is not acceptance: publication may have failed after receipt.
+    if os.environ.get('CLARP_NIGHTLY_CONTROLLER_RC') == '0':
+        try:
+            pointer = read(ROOT / 'state.json')
+            raw = (folder / 'accepted.json').read_bytes()
+            candidate = json.loads(raw)
+            if (pointer['receipt'] == str(folder / 'accepted.json')
+                    and pointer['receipt_sha256'] == sha(raw)
+                    and pointer['verified_main'] == candidate['verified_main']
+                    and sha((folder / 'inventory.json').read_bytes()) == candidate['inventory_sha256']
+                    and all((folder / name).stat().st_size == item['size']
+                            and sha((folder / name).read_bytes()) == item['sha256']
+                            for name, item in candidate['inventory'].items())):
+                accepted = candidate
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
     parts = [f"rf-harness NIGHTLY {day} " + ('VERIFIED' if accepted else 'HOLD; anchor unchanged unless publication requires reconciliation'),
              f"rolling main {frozen.get('base', 'UNKNOWN')} -> {frozen.get('head', 'UNKNOWN')}"]
     for lane in ('self-check', 'compare'):
