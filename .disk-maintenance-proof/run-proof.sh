@@ -22,7 +22,10 @@ PY
 /usr/bin/python3 -m venv --without-pip .venv
 # Reuse the exact public writer-proof containment and its unmodified self-check.
 set +e
-bash scripts/ci_contained.sh /usr/bin/bash -c 'cd .disk-maintenance-proof && exec /usr/bin/bash run-selected.sh' > proof-results/contained.raw 2>&1
+(
+  umask 022
+  bash scripts/ci_contained.sh /usr/bin/bash -c 'cd .disk-maintenance-proof && exec /usr/bin/bash run-selected.sh'
+) > proof-results/contained.raw 2>&1
 primary=$?
 printf '%s\n' "$primary" > proof-results/contained.rc
 receipt=$?

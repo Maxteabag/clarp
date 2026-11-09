@@ -23,7 +23,7 @@ jobs:
         run: |
           set -euo pipefail
           umask 077
-          echo '48d0beab07dc3c5129e5236a5cc907c3357545d65e39de636378717ec7f90c8f  SOURCE-CLOSURE.json' | sha256sum -c -
+          echo 'ae39a91da86e901261acad8513aea3cc244ad88065674c624823f7ecb3311e7a  SOURCE-CLOSURE.json' | sha256sum -c -
           /usr/bin/timeout --signal=TERM --kill-after=30s 570s /usr/bin/bash .disk-maintenance-proof/run-proof.sh
       - name: Retain evidence even when refused or failed
         if: ${{ always() }}

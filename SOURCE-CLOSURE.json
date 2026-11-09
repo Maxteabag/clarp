@@ -21,8 +21,8 @@
       "sha256": "e3aee22000f3c6c19efefa72fe7d358f36a29276d8ab5685e26cfc4af10f5c55"
     },
     ".disk-maintenance-proof/run-proof.sh": {
-      "bytes": 1669,
-      "sha256": "2bb6b92c2ba94437ce86270d1d69873b50affcc363e3bfead837a305a28759bf"
+      "bytes": 1687,
+      "sha256": "273ef3afe77403fda19b3d78b6647a8a661f4866b866dea0ab3b363f9f3292dd"
     },
     ".disk-maintenance-proof/run-selected.sh": {
       "bytes": 3319,
