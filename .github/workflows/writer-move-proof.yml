@@ -1,0 +1,101 @@
+name: Writer missing move proofs
+'on':
+  push:
+    branches: [refactor/ci/writer-missing-moveproof-r2]
+permissions:
+  contents: read
+jobs:
+  move-proof:
+    if: ${{ github.repository == 'Maxteabag/clarp' && github.event_name == 'push' && github.ref == 'refs/heads/refactor/ci/writer-missing-moveproof-r2' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 17fa034b92d170430de202137e51dddfe4599e0a
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Existing native dependency setup
+        timeout-minutes: 12
+        run: bash .github/scripts/install-test-ffmpeg.sh
+      - run: uv sync --frozen --group dev
+      - name: Exact source preflight and ONLY missing move commands
+        shell: bash
+        env:
+          WORKFLOW_CARRIER_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          umask 077
+          test "$GITHUB_RUN_ATTEMPT" = 1
+          test "$(git rev-parse HEAD)" = 17fa034b92d170430de202137e51dddfe4599e0a
+          mkdir -m 700 move-proof-results
+          .venv/bin/python - <<'PYVERIFY'
+          from pathlib import Path
+          import hashlib,json,os,subprocess
+          expected={'scripts/refactor/ast_identity.py': {'sha256': 'c5dc606315d7ad5a32dac2574040195d8bfd0858b522805d13db34f533cd1397', 'bytes': 36434}, 'tools/refactor/split_apply.py': {'sha256': '9f0a7b72f29071ccd0117b296ffefdf59c0cd4a9cfb50fa04d4c25bfcfa7386a', 'bytes': 29118}, 'tools/refactor/splits/wave2-message-writes.toml': {'sha256': 'dced118140e98412f231c0dbc608775339c6baed5e42f16d56711fe460df753c', 'bytes': 1185}, 'scripts/ci_contained.sh': {'sha256': '07f228044e915297a84a52201e68e40a34809928fcf0ecb8d300b692ee5d067f', 'bytes': 4376}, 'scripts/ci_containment_selfcheck.py': {'sha256': '91a5b503b559eb6e7f1ceaf495199496c65851627e361cffdf47dc4be60546fb', 'bytes': 6816}, 'pyproject.toml': {'sha256': '67161d5a23d3a6db7a5c2580f4338059ae983f5f8b5082acedf2f8e23e740ad5', 'bytes': 1261}, 'uv.lock': {'sha256': '74df07b1c87379354c79639c8309f834080b0ce2028927f1c07ad2b0ae5922da', 'bytes': 164778}}
+          for name,record in expected.items():
+              b=Path(name).read_bytes()
+              assert len(b)==record['bytes'] and hashlib.sha256(b).hexdigest()==record['sha256']
+          for ref in ('0073254687d22ac5a6c1d01b8af29fa678dcf4a2','77bf3554169b5c435ed06ed7318f115275b49b48','17fa034b92d170430de202137e51dddfe4599e0a'):
+              subprocess.run(['git','cat-file','-e',ref+'^{commit}'],check=True)
+          Path('move-proof-results/source.json').write_text(json.dumps(dict(product='17fa034b92d170430de202137e51dddfe4599e0a',move='77bf3554169b5c435ed06ed7318f115275b49b48',base='0073254687d22ac5a6c1d01b8af29fa678dcf4a2',carrier=os.environ['WORKFLOW_CARRIER_SHA'],run=os.environ['GITHUB_RUN_ID'],attempt=os.environ['GITHUB_RUN_ATTEMPT'],bindings=expected),indent=2)+'\n')
+          PYVERIFY
+          # No full suite or new owner test; unchanged repository gate commands.
+          set +e
+          (
+            umask 022
+            bash scripts/ci_contained.sh /usr/bin/timeout --signal=TERM --kill-after=15s 300s \
+              .venv/bin/python scripts/refactor/ast_identity.py \
+              0073254687d22ac5a6c1d01b8af29fa678dcf4a2 77bf3554169b5c435ed06ed7318f115275b49b48 \
+              lib/message_writes.py=lib/message_writes.py,lib/message_import_writer.py
+          ) >move-proof-results/ast-identity.raw 2>&1
+          primary=$?
+          printf '%s\n' "$primary" >move-proof-results/ast-identity.rc
+          receipt=$?
+          cat move-proof-results/ast-identity.raw
+          display=$?
+          if [ "$primary" -ne 0 ]; then exit "$primary"; fi
+          if [ "$receipt" -ne 0 ] || [ "$display" -ne 0 ]; then exit 11; fi
+          (
+            umask 022
+            bash scripts/ci_contained.sh /usr/bin/timeout --signal=TERM --kill-after=15s 120s \
+              .venv/bin/python tools/refactor/split_apply.py --check --split message-import-writer
+          ) >move-proof-results/recipe-check.raw 2>&1
+          primary=$?
+          printf '%s\n' "$primary" >move-proof-results/recipe-check.rc
+          receipt=$?
+          cat move-proof-results/recipe-check.raw
+          display=$?
+          if [ "$primary" -ne 0 ]; then exit "$primary"; fi
+          if [ "$receipt" -ne 0 ] || [ "$display" -ne 0 ]; then exit 11; fi
+          exit 0
+      - name: Retain missing-gate evidence index
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          test -d move-proof-results || mkdir -m 700 move-proof-results
+          /usr/bin/python3 - <<'PYINDEX'
+          from pathlib import Path
+          import hashlib,json,stat
+          root=Path('move-proof-results');records=[];total=0
+          for p in sorted(root.iterdir()):
+              assert stat.S_ISREG(p.lstat().st_mode) and not p.is_symlink()
+              b=p.read_bytes();total+=len(b)
+              assert len(records)<32 and total<=16*1024*1024
+              records.append(dict(path=p.name,sha256=hashlib.sha256(b).hexdigest(),bytes=len(b)))
+          with (root/'index.json').open('x') as f:
+              json.dump(dict(files=records,self_excluded='index.json',missing_gate='NOT_RUN_OR_UNKNOWN_NOT_PASS'),f,indent=2);f.write('\n')
+          PYINDEX
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: ${{ always() }}
+        with:
+          name: writer-move-proofs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: move-proof-results/
+          retention-days: 45
+          if-no-files-found: error
