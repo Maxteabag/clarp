@@ -194,5 +194,14 @@ def run_originals_storage_control(*, root, coverage_archive_path):
         current = _snapshot(Path(paths[label]))
         assert current['bytes'] == expected[label]['bytes']
         assert current['sha256'] == expected[label]['sha256']
+    from .coverage_index_fault_controls import run_index_publication_fault_controls
+    fault_root = root / 'publication-faults'
+    fault_root.mkdir(mode=0o700)
+    faults = run_index_publication_fault_controls(root=fault_root, index=expected_index,
+                                                 index_limits=index_limits, json_limits=DECODE_LIMITS)
+    assert faults['outcomes'] == ['write_control', 'write_ordinary_close_control',
+                                  'file_fsync_control', 'directory_fsync_close_control',
+                                  'short_write', 'file_close_control', 'both_close']
+    assert faults['actual_process_or_producer_accepted'] is False
     return {'scope': 'ACTUAL31_TO_DECODER_INDEX_STORAGE_SYNTHETIC_PROCESSES_NOT_SQLITE_OR_PRODUCER_PROOF',
             'all_controls_unexecuted_at_authoring': True}
