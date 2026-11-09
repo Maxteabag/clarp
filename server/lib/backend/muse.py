@@ -22,7 +22,7 @@ from typing import Any, Callable, Optional
 
 from .. import agents as agents_db
 from .. import muse_transcript
-from .. import tts_queue
+from ..tts_queue_records import enqueue as enqueue_tts
 from ..log import log, log_exception
 from ..proc_util import stderr_text
 from ..process_registry import TurnHandle
@@ -308,7 +308,7 @@ class MuseBackend(StreamJsonBackend):
                 backend_session_id=backend_session_id, minted=bool(minted),
                 on_session_init=on_session_init, on_result=on_result,
                 on_error=on_error, stream=stream,
-                enqueue=enqueue or tts_queue.enqueue, retry_spawn=retry_spawn,
+                enqueue=enqueue or enqueue_tts, retry_spawn=retry_spawn,
             )
         except BaseException:
             # Until the drain owns it, nothing else removes the prompt file.

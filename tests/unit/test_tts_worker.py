@@ -59,6 +59,8 @@ def patch_eleven(monkeypatch):
 
 
 def test_enqueue_then_drain_lands_clip_on_disk(env, patch_eleven):
+    from lib import tts_queue_records
+    assert tts_queue.enqueue is tts_queue_records.enqueue
     qid = tts_queue.enqueue(
         agent_id=env["agent_id"],
         text="hello",

@@ -208,7 +208,7 @@ STATUS_WRITERS: dict[tuple[str, str], set[str]] = {
     ("team_inbox", "status"): {"lib/team_store.py"},
     ("tool_explanation_jobs", "status"): {"lib/tool_explanation_queue.py"},
     ("tool_explanation_mappings", "status"): {"lib/tool_explanation_mappings.py"},
-    ("tts_queue", "status"): {"lib/tts_queue.py"},
+    ("tts_queue", "status"): {"lib/tts_queue_records.py"},
     ("user_value_facts", "status"): {"lib/leader_memory.py"},
 }
 

@@ -77,15 +77,33 @@ def test_spawn_turn_reads_json_events(tmp_path, monkeypatch):
         bin_dir, "".join(json.dumps(row) + "\n" for row in events))
     results: list[dict] = []
     sessions: list[str] = []
+    agent_id = agents_db.create_agent(
+        persona="Opencode", voice_id="voice-opencode", cwd=str(tmp_path),
+        session="opencode-queue", backend="opencode")
+    trace_id = "opencode-queue-trace"
+    agents_db.open_turn(agent_id=agent_id, source="pwa", trace_id=trace_id)
+    agents_db.set_focus(agent_id)
     handle = OPENCODE.start_turn(
-        text="hello", cwd=tmp_path,
+        text="hello", cwd=tmp_path, agent_id=agent_id,
+        session="opencode-queue", trace_id=trace_id,
         on_session_init=lambda sid: sessions.append(sid) or True,
-        on_result=results.append, enqueue=lambda **_k: 1,
+        on_result=results.append,
     )
-    handle.drain_thread.join(timeout=5)
-    assert results
-    assert "OpenCode here" in results[0]["last_agent_message"]
-    assert sessions == ["ses_abc"]
+    try:
+        handle.wait(timeout=5)
+        assert results
+        assert "OpenCode here" in results[0]["last_agent_message"]
+        assert sessions == ["ses_abc"]
+        rows = agents_db.conn().execute(
+            "SELECT agent_id, text, voice_id, session, trace_id, source, status "
+            "FROM tts_queue WHERE agent_id = ? ORDER BY queue_id", (agent_id,)).fetchall()
+        assert [tuple(row) for row in rows] == [(
+            agent_id, "OpenCode here.", "voice-opencode", "opencode-queue",
+            trace_id, "pwa", "queued")]
+    finally:
+        if handle.is_alive():
+            handle.kill()
+        handle.wait(timeout=5)
 
 
 def test_missing_opencode_raises(tmp_path, monkeypatch):

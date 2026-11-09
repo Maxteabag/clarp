@@ -345,7 +345,9 @@ synthetic branches:
 
 - `voice_levels` is a new core owner for unchanged narration level constants and coercion. Feature `voice_verbosity` retains spoken prompt and catalogue policy while exporting the canonical values and function; agent metadata normalization imports the lower callable directly.
 
-The first thirty-one repaired upward edges are removed from the ratchet; this section does not authorize reclassifying any existing module or expanding named exceptions.
+- `tts_queue_records` is a new core owner for unchanged durable TTS queue records and statuses. Feature `tts_queue` exports the canonical objects; five provider runners bind its enqueue function directly, while worker, streamer and dispatcher facade lookups retain their original ownership.
+
+The first thirty-six repaired upward edges are removed from the ratchet; this section does not authorize reclassifying any existing module or expanding named exceptions.
 
 ## Wave 2: lead-signed map corrections (937)
 
