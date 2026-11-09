@@ -399,27 +399,128 @@ def test_owner_message_leaves_open_requests_open(host, tmp_path, monkeypatch):
     assert still_open["decision"]["status"] == "pending"
     assert still_open["decision"]["resolved_choice"] == ""
     assert artifacts.pending_deliveries() == []
+    # Older/native clients carry no agent turn header and still resolve as the user.
+    status, result = _request(host, f"/decisions/{question['decision']['decision_id']}/resolve",
+        {"expected_revision": 1, "answer": {"option_id": "keep"}})
+    assert status == 200 and result["changed"] is True
+    assert result["artifact"]["decision"]["resolved_by"] == "user"
+    assert artifacts.get(question["artifact_id"])["decision"]["resolved_by"] == "user"
+    assert result["delivery_pending"] is False
+    assert artifacts.delivery_pending(question["decision"]["decision_id"]) is False
 
 
-def test_designated_agent_resolves_on_behalf_over_http_with_verified_turn(host, tmp_path):
+@pytest.fixture
+def on_behalf_callers(host, tmp_path):
     import os
-    from pathlib import Path
 
     from lib import config, provider_background_jobs
 
-    mia = agents.create_agent(persona="Mia", voice_id="V", cwd=str(tmp_path), session="mia")
+    tokens = {}
+    for session in ("theo", "mia", "ava", "noah"):
+        agent = agents.get_by_session(session)
+        if agent is None:
+            agent_id = agents.create_agent(persona=session, voice_id="V", cwd=str(tmp_path),
+                                           session=session)
+        else:
+            agent_id = agent["agent_id"]
+        token, _ = provider_background_jobs.identity_env(agent_id)
+        provider_background_jobs.record_identity(
+            token, agent_id=agent_id, provider="claude", pid=os.getpid())
+        tokens[session] = token
     Path(os.environ["CLAUDE_PWA_CONFIG"]).write_text(
-        '[agents]\ndecision_on_behalf_sessions = ["mia"]\n')
+        '[agents]\ndecision_on_behalf_sessions = ["theo", "mia", "ava"]\n')
     config.reset_cache()
-    token, _ = provider_background_jobs.identity_env(mia)
-    provider_background_jobs.record_identity(
-        token, agent_id=mia, provider="claude", pid=os.getpid())
+    return tokens
+
+
+def _resolution_snapshot(host, question):
+    from lib import db
+
+    artifact_id = question["artifact_id"]
+    decision_id = question["decision"]["decision_id"]
+    con = db.conn()
+    return (
+        tuple(con.execute("SELECT * FROM artifacts WHERE artifact_id=?", (artifact_id,)).fetchone()),
+        tuple(con.execute("SELECT * FROM artifact_decisions WHERE decision_id=?", (decision_id,)).fetchone()),
+        [tuple(row) for row in con.execute(
+            "SELECT * FROM decision_deliveries WHERE decision_id=?", (decision_id,))],
+        list(host.deliveries), list(host.events),
+    )
+
+
+@pytest.mark.parametrize("actor_field", [{}, {"on_behalf_session": None}], ids=["omitted", "null"])
+def test_asking_agent_token_cannot_resolve_as_user(host, on_behalf_callers, actor_field):
+    question = _question(host)
+    before = _resolution_snapshot(host, question)
+    status, result = _request(host, f"/decisions/{question['decision']['decision_id']}/resolve",
+        {"expected_revision": 1, "answer": {"option_id": "keep"}, **actor_field},
+        headers={"X-Clarp-Turn": on_behalf_callers["theo"]})
+    assert status == 403, result
+    assert _resolution_snapshot(host, question) == before
+
+
+@pytest.mark.parametrize("actor_field", [{}, {"on_behalf_session": "noah"}],
+                         ids=["omitted", "supplied"])
+def test_non_designated_agent_token_cannot_resolve(host, on_behalf_callers, actor_field):
+    question = _question(host)
+    before = _resolution_snapshot(host, question)
+    status, result = _request(host, f"/decisions/{question['decision']['decision_id']}/resolve",
+        {"expected_revision": 1, "answer": {"option_id": "keep"}, **actor_field},
+        headers={"X-Clarp-Turn": on_behalf_callers["noah"]})
+    assert status == 403, result
+    assert _resolution_snapshot(host, question) == before
+
+
+@pytest.mark.parametrize("token_kind", ["malformed", "unrecognized", "lookup_failure"])
+def test_unverified_turn_never_falls_through_to_user(
+        host, on_behalf_callers, monkeypatch, token_kind):
+    import sqlite3
+
+    from lib import turn_identity
+
+    token = {"malformed": "not-a-turn-token", "unrecognized": "f" * 24,
+             "lookup_failure": on_behalf_callers["mia"]}[token_kind]
+    attempted = []
+    if token_kind == "lookup_failure":
+        def unavailable(environ):
+            attempted.append(environ)
+            raise sqlite3.OperationalError("isolated turn lookup unavailable")
+        monkeypatch.setattr(turn_identity, "caller_agent_id", unavailable)
+    question = _question(host)
+    before = _resolution_snapshot(host, question)
+    status, result = _request(host, f"/decisions/{question['decision']['decision_id']}/resolve",
+        {"expected_revision": 1, "answer": {"option_id": "keep"}},
+        headers={"X-Clarp-Turn": token})
+    assert status == (503 if token_kind == "lookup_failure" else 403), result
+    if token_kind == "lookup_failure":
+        assert result["retryable"] is True
+        assert len(attempted) == 1
+    assert _resolution_snapshot(host, question) == before
+
+
+def test_designated_agent_resolves_on_behalf_over_http_with_verified_turn(host, on_behalf_callers):
+    token = on_behalf_callers["mia"]
     question = _question(host)
     decision_id = question["decision"]["decision_id"]
     body = {"expected_revision": 1, "answer": {"option_id": "keep"}, "on_behalf_session": "mia"}
+    before = _resolution_snapshot(host, question)
     status, _ = _request(host, f"/decisions/{decision_id}/resolve", body)
     assert status == 403
+    assert _resolution_snapshot(host, question) == before
+    # Both actors are designated non-requesters: only the actual token identity may act.
+    status, result = _request(host, f"/decisions/{decision_id}/resolve",
+        {**body, "on_behalf_session": "ava"}, headers={"X-Clarp-Turn": token})
+    assert status == 403, result
+    assert _resolution_snapshot(host, question) == before
+    status, result = _request(host, f"/decisions/{decision_id}/resolve",
+        {"expected_revision": 1, "answer": {"option_id": "keep"}},
+        headers={"X-Clarp-Turn": token})
+    assert status == 403, result
+    assert _resolution_snapshot(host, question) == before
     status, result = _request(host, f"/decisions/{decision_id}/resolve", body,
                               headers={"X-Clarp-Turn": token})
     assert status == 200 and result["changed"] is True
     assert result["artifact"]["decision"]["resolved_by"] == "agent:mia"
+    assert artifacts.get(question["artifact_id"])["decision"]["resolved_by"] == "agent:mia"
+    assert len(host.deliveries) == 1
+    assert "Resolved by: agent:mia" in host.deliveries[0]["text"]
