@@ -12,20 +12,18 @@ class WriterUnknown(RuntimeError):
 
 
 def validate_workers(workers, stopped):
-    if len(workers) != 12:
-        raise WriterUnknown('exact_twelve_worker_bindings_required')
+    if not isinstance(workers,list) or not 0<len(workers)<=64:
+        raise WriterUnknown('current_active_collection_missing_or_over_cap')
     names = [w['unit'] for w in workers]
-    if len(set(names)) != 12 or set(names) & set(stopped):
+    if len(set(names)) != len(workers) or set(names) & set(stopped):
         raise WriterUnknown('tolerated_stop_overlap_or_duplicate')
     for w in workers:
         if not w['unit'].startswith('clarp-job-') or not w['unit'].endswith('.service'):
             raise WriterUnknown('not_classified_job_unit')
         if not (w['pid'] > 0 and w['start'] and w['invocation'] and w['cgroup'] and w['boot'] and w['job_id'] and w['owner']):
             raise WriterUnknown('incomplete_native_job_binding')
-        if w.get('phase', 'ACTIVE') not in ('ACTIVE', 'PREFINISHED'):
-            raise WriterUnknown('worker_partition_unknown')
-        if w.get('phase','ACTIVE')=='PREFINISHED' and (not w.get('log_exit',{}).get('sealed') or not w.get('pre_registry')):
-            raise WriterUnknown('prefinished_not_sealed')
+        if w.get('phase')!='ACTIVE':
+            raise WriterUnknown('retired_history_not_current_tolerance')
         if w['uid'] != os.getuid():
             raise WriterUnknown('foreign_worker_uid')
     return {w['unit']: w for w in workers}
@@ -85,8 +83,17 @@ def read_exit(binding, expected, reference_ms):
         if binding['version']!=version_of(after) or binding['sha256']!=digest:
             raise WriterUnknown('exit_version_hash_changed')
         if expected.get('phase','ACTIVE')=='ACTIVE':
-            if expected['log_exit']['pre_state']!='ABSENT' or before.st_mtime_ns < reference_ms*1000000:
-                raise WriterUnknown('exit_stale_or_not_pre_absent')
+            pre=expected['log_exit']
+            if before.st_mtime_ns < reference_ms*1000000:
+                raise WriterUnknown('exit_before_frozen_roster_epoch')
+            if pre['pre_state']=='HISTORICAL':
+                old=pre['historical']
+                if old['context']!=context_of(expected) or old['path']!=str(path):
+                    raise WriterUnknown('historical_exit_context')
+                if version_of(before)==old['version'] or before.st_mtime_ns<=old['version'][3]:
+                    raise WriterUnknown('unchanged_historical_exit_not_new_completion')
+            elif pre['pre_state']!='ABSENT':
+                raise WriterUnknown('exit_prestate_UNKNOWN')
         else:
             seal=expected['log_exit']['sealed']
             if seal['version']!=version_of(after) or seal['sha256']!=digest:

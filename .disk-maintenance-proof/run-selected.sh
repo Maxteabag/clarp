@@ -7,24 +7,20 @@ export PYTHONDONTWRITEBYTECODE=1 LC_ALL=C
 ROOT=$(pwd -P)
 [ ! -e results ] || exit 11
 sha256sum -c SHA256SUMS
-[ "$(cat SOURCE_COMMIT)" = 684555326522175c2bdab42e908cfc5c1ecc8b21 ] || exit 11
+[ "$(cat SOURCE_COMMIT)" = c7386577c9f8bcf22fb880d72834ace0e645a78c ] || exit 11
 mkdir -m700 results results/fixtures
 export TMPDIR="$ROOT/results/fixtures"
 /usr/bin/python3 --version > results/python.txt 2>&1
 uname -srvmo > results/kernel.txt
 set +e
 /usr/bin/timeout --signal=TERM --kill-after=5s 240s /usr/bin/python3 -B -m unittest -v \
-  test_writer_focus.WriterFocus.test_exact_tolerated_set_accepted_without_stopping_units \
-  test_writer_focus.WriterFocus.test_unlisted_db_fd_including_listener_is_rejected \
-  test_writer_focus.WriterFocus.test_changed_pid_start_or_unit_generation_rejected \
-  test_writer_focus.WriterFocus.test_postcheck_heartbeat_finished_and_mismark_are_distinct_no_edit \
-  test_balance_timing.TimingFocus.test_actual_controller_shared_phase_cancel_order_and_420_narrow_recovery > results/unittest.raw 2>&1
+  test_current_roster.CurrentRosterFocus.test_actual_current_roster_freeze_new_writer_refusal_and_admission > results/unittest.raw 2>&1
 selected=$?
 printf "%s\n" "$selected" > results/selected.rc
 receipt_rc=$?
 /usr/bin/ps -eo pid,ppid,pgid,sid,uid,stat,comm > results/post-process-census.txt
 census_rc=$?
-sha256sum SHA256SUMS SOURCE_COMMIT controller.py owned.py child_exec.py writer_policy.py post_check.py test_writer_focus.py test_balance_timing.py > results/executed.sha256
+sha256sum SHA256SUMS SOURCE_COMMIT controller.py owned.py child_exec.py writer_policy.py post_check.py roster.py test_writer_focus.py test_current_roster.py > results/executed.sha256
 hash_rc=$?
 /usr/bin/python3 -B - <<'INDEX'
 import hashlib,json,os,stat

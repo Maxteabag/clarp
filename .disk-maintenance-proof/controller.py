@@ -13,6 +13,7 @@ from writer_policy import validate_workers, require_same_worker, classify_fd, Wr
 import sys
 import time
 import traceback
+from roster import admit as admit_current_roster, check_admission, FirstStopPermit
 
 BASE = Path('/var/tmp/clarp-refactor-program')
 SHARE = Path('/home/peter/.local/share/clarp')
@@ -47,6 +48,9 @@ class Controller:
         self.command_deadline = None
         self.last_gate_bracket = None
         self.target300_missed = False
+        self.protected_root = SHARE
+        self.roster_admission = None
+        self.first_stop_dispatch_deadline = None
 
     def log(self, kind, **values):
         try:
@@ -90,7 +94,11 @@ class Controller:
         self.seq+=1;output=self.e/('command-%03d.log'%self.seq)
         with output.open('xb') as f:
             before=time.monotonic()
-            permit=DispatchPermit(deadline,self if self.phase=='work' else CleanupPermitOwner()) if deadline is not None else None
+            permit_deadline=deadline
+            if self.first_stop_dispatch_deadline is not None:
+                permit_deadline=min(permit_deadline,self.first_stop_dispatch_deadline) if permit_deadline is not None else self.first_stop_dispatch_deadline
+            permit=DispatchPermit(permit_deadline,self if self.phase=='work' else CleanupPermitOwner()) if permit_deadline is not None else None
+            if self.first_stop_dispatch_deadline is not None:permit=FirstStopPermit(permit_deadline,self)
             try:
                 child=Owned(argv,f,ENV,native_sources=self.b.get('native_sources'),work_permit=permit)
             except CustodyUnknown as exc:
@@ -240,6 +248,7 @@ class Controller:
             raise Refused('writer_classification:' + str(exc)) from exc
 
     def stop(self):
+        check_admission(self)
         if self.abort_requested:
             raise Refused('abort_before_any_stop')
         # Mark before first stop: partial stop still needs restoration.
@@ -247,8 +256,10 @@ class Controller:
         self.offline_start = time.monotonic()
         self.work_deadline = self.offline_start + 600
         self.phase = 'work'
-        for name in self.b['timers'] + self.b['auxiliary_units'] + MAIN:
-            self.require(['/usr/bin/systemctl', '--user', 'stop', name], 45)
+        for index,name in enumerate(self.b['timers'] + self.b['auxiliary_units'] + MAIN):
+            if index==0:self.first_stop_dispatch_deadline=self.roster_admission['deadline']
+            try:self.require(['/usr/bin/systemctl', '--user', 'stop', name], 45)
+            finally:self.first_stop_dispatch_deadline=None
         for name in self.b['auxiliary_units'] + MAIN:
             state = self.unit(name)
             if state.get('ActiveState') not in ('inactive', 'failed') or state.get('MainPID') != '0':
@@ -451,7 +462,9 @@ class Controller:
             for name in self.b['timers']:
                 if self.unit(name).get('ActiveState') != 'active':
                     raise Refused('timer_preflight_changed_' + name)
-            validate_heartbeat_age(self.b['tolerated_workers'],int(time.time()*1000))
+            # Actual native/registry/image/FD capture after all prerequisites.
+            # Cached caller registry rows cannot admit the first stop.
+            admit_current_roster(self)
             self.stop()
             self.pass_balance(10)
             if not self.cancel_attempted:
@@ -502,7 +515,9 @@ def main():
     for name in b['auxiliary_units'] + b['timers']:
         if not re.fullmatch(r'[A-Za-z0-9_.@:-]+\.(service|timer)', name) or name in MAIN:
             raise Refused('unit_name')
-    validate_workers(b['tolerated_workers'], MAIN + b['auxiliary_units'] + b['timers'])
+    if not isinstance(b.get('retired_worker_history'),list) or not b.get('roster_policy_review'):
+        raise Refused('current_roster_policy_or_history_unbound')
+    if 'tolerated_workers' in b:raise Refused('caller_cached_tolerated_set_not_admission')
     if set(b['expected_active_invocations']) != set(MAIN + b['auxiliary_units']):
         raise Refused('unit_inventory_binding')
     cgroup = Path('/proc/self/cgroup').read_text()
