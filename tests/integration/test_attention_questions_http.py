@@ -56,8 +56,8 @@ def host(tmp_path, monkeypatch):
         thread.join(timeout=2)
 
 
-def _request(host, path, body=None, *, authenticated=True):
-    headers = {"Content-Type": "application/json"}
+def _request(host, path, body=None, *, authenticated=True, headers=None):
+    headers = {"Content-Type": "application/json", **(headers or {})}
     if authenticated:
         headers["Authorization"] = "Bearer " + TOKEN
     request = urllib.request.Request(host.base + path, headers=headers,
@@ -362,7 +362,7 @@ def test_asking_agent_withdraws_its_own_request_without_any_delivery(host):
     assert host.deliveries == [] and artifacts.pending_deliveries() == []
 
 
-def test_owner_message_supersedes_open_requests_but_agent_messages_do_not(host, tmp_path, monkeypatch):
+def test_owner_message_leaves_open_requests_open(host, tmp_path, monkeypatch):
     from lib import turn_dispatch
 
     class Backend:
@@ -394,8 +394,32 @@ def test_owner_message_supersedes_open_requests_but_agent_messages_do_not(host, 
     assert _request(host, "/attention?decision_format=2")[1]["count"] == 1
     status, _ = _request(host, "/send", {"session": "theo", "text": "Never mind, keep it", "force_session": True})
     assert status == 200
-    assert _request(host, "/attention?decision_format=2&include_archived=1")[1]["count"] == 0
-    closed = artifacts.get(question["artifact_id"])
-    assert closed["decision"]["resolved_choice"] == "superseded"
-    assert closed["decision"]["resolved_by"] == "user_message"
+    assert _request(host, "/attention?decision_format=2&include_archived=1")[1]["count"] == 1
+    still_open = artifacts.get(question["artifact_id"])
+    assert still_open["decision"]["status"] == "pending"
+    assert still_open["decision"]["resolved_choice"] == ""
     assert artifacts.pending_deliveries() == []
+
+
+def test_designated_agent_resolves_on_behalf_over_http_with_verified_turn(host, tmp_path):
+    import os
+    from pathlib import Path
+
+    from lib import config, provider_background_jobs
+
+    mia = agents.create_agent(persona="Mia", voice_id="V", cwd=str(tmp_path), session="mia")
+    Path(os.environ["CLAUDE_PWA_CONFIG"]).write_text(
+        '[agents]\ndecision_on_behalf_sessions = ["mia"]\n')
+    config.reset_cache()
+    token, _ = provider_background_jobs.identity_env(mia)
+    provider_background_jobs.record_identity(
+        token, agent_id=mia, provider="claude", pid=os.getpid())
+    question = _question(host)
+    decision_id = question["decision"]["decision_id"]
+    body = {"expected_revision": 1, "answer": {"option_id": "keep"}, "on_behalf_session": "mia"}
+    status, _ = _request(host, f"/decisions/{decision_id}/resolve", body)
+    assert status == 403
+    status, result = _request(host, f"/decisions/{decision_id}/resolve", body,
+                              headers={"X-Clarp-Turn": token})
+    assert status == 200 and result["changed"] is True
+    assert result["artifact"]["decision"]["resolved_by"] == "agent:mia"
