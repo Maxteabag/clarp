@@ -65,6 +65,9 @@ def gh(args, payload=None, binary=False):
 
 
 def api(path, payload=None, binary=False):
+    if payload is not None and os.environ.get('CLARP_NIGHTLY_JOB_HANDLE'):
+        subprocess.run(['clarp-agent-bg', 'rf-harnessc-4a4a', 'job-active',
+                        os.environ['CLARP_NIGHTLY_JOB_HANDLE']], check=True, stdout=subprocess.DEVNULL)
     args = ['api', f'repos/{REPO}/{path}']
     if payload is not None:
         args += ['--method', 'POST', '--input', '-']
@@ -266,10 +269,33 @@ def seed():
             'self_run': self_run['html_url'], 'compare_run': cmp_run['html_url']})
 
 
+def report():
+    day = dt.datetime.now(ZoneInfo('Europe/Oslo')).date().isoformat()
+    folder = ROOT / day
+    frozen = read(folder / 'frozen.json') if (folder / 'frozen.json').exists() else {}
+    accepted = read(folder / 'accepted.json') if (folder / 'accepted.json').exists() else None
+    parts = [f"rf-harness NIGHTLY {day} " + ('VERIFIED' if accepted else 'HOLD; anchor unchanged unless publication requires reconciliation'),
+             f"rolling main {frozen.get('base', 'UNKNOWN')} -> {frozen.get('head', 'UNKNOWN')}"]
+    for lane in ('self-check', 'compare'):
+        p = folder / f'{lane}-run.json'
+        if p.exists():
+            run = read(p)
+            parts.append(f"{lane}: {run['conclusion']} {run['html_url']}")
+        else:
+            parts.append(lane + ': incomplete/unknown; no retry')
+    if accepted:
+        parts.append('intended ' + str(accepted['classification']['intended']) + '; unexplained 0')
+    parts.append('Raw reports/Actions conclusions retained; TP-N3 separately not counted. Evidence: ' + str(folder))
+    print('. '.join(parts))
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('command', choices=['daily', 'seed'])
+    parser.add_argument('command', choices=['daily', 'seed', 'report'])
     args = parser.parse_args()
+    if args.command == 'report':
+        report()
+        return
     ROOT.mkdir(mode=0o700, parents=True, exist_ok=True)
     with (ROOT / 'lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)

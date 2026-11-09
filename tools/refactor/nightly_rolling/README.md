@@ -46,6 +46,7 @@ Proposed activation after C review:
    remains selected until explicit heavy-restoration confirmation and route
    update; no heavy status query/admission attempt here.
 
-Open before activation: C exact source review, managed worker logging/result
-notification integration and verified installation/seed/timer readbacks. No
+Open before activation: C exact source review, verified installation/seed/timer readbacks. Managed worker log/result notification
+is authored and unexecuted; it delivers one nightly result, retains uncertain
+delivery without resend, and checks job ownership before GitHub mutations. No
 activation receipt exists yet. Syntax/AST checks alone do not qualify runtime.
