@@ -1,0 +1,96 @@
+{
+  "scope": "STATIC_SOURCE_DATA_ONLY_NOT_EXECUTED",
+  "head_before": "dad42d3937d16b39bec6d61efd3d415edb0f1aef",
+  "files": {
+    "pytest_plugin/c5_937.py": {
+      "sha256": "54a1f1da7dec6dcf1d9a233438675314ced5c51c8ad22fa79a94e0e2b9275d17",
+      "bytes": 16322,
+      "functions": {
+        "publish": {
+          "first_line": 26,
+          "last_line": 40,
+          "ast_sha256": "3481c2bba38761739fb285dbeaecbe392744cf8534a27850c8f69076310b6e9c"
+        },
+        "pytest_configure": {
+          "first_line": 110,
+          "last_line": 171,
+          "ast_sha256": "e3e4b45539364ed4cc57d962ad28b0bddb54e17d8c3ec6d816060bd0dc8a4a6a"
+        },
+        "pytest_sessionfinish": {
+          "first_line": 224,
+          "last_line": 300,
+          "ast_sha256": "b0e096240eea83162da8c93d6ae161ce2a7fd805d9eb96e8fb38bdcfa9b577ae"
+        },
+        "pytest_unconfigure": {
+          "first_line": 303,
+          "last_line": 313,
+          "ast_sha256": "79dc4b59e8de59ea9ed6e2333aa9dd8ca288a707be10138b3ad8b4aaebacae2b"
+        }
+      }
+    },
+    "suite_evidence.py": {
+      "sha256": "0d14546e63e5fdb0b3990542235dd5279abbbf527a80c5305f62ac6d00c898ab",
+      "bytes": 14328,
+      "functions": {
+        "_run_receipts": {
+          "first_line": 71,
+          "last_line": 167,
+          "ast_sha256": "1df355752e89cc77595180d4bb7d95fdb020f49c598fcec5a28a665d21d0c87e"
+        },
+        "_coverage_candidate": {
+          "first_line": 181,
+          "last_line": 207,
+          "ast_sha256": "8360914a021c07dccda5bbc51e9820da774f17a8bd6fdbe9cd36af1c65276992"
+        }
+      }
+    },
+    "coverage_receipt_index.py": {
+      "sha256": "62d0ddb9539af58be104c8c86b66228729ebbdaf13054038ec559b3b26dbeff9",
+      "bytes": 6813,
+      "functions": {
+        "preflight_inputs": {
+          "first_line": 22,
+          "last_line": 88,
+          "ast_sha256": "a4a8ba3def773c2df98488d7eaec29a70a2e29ab50be265d238430c66b8ea8b8"
+        },
+        "decode_receipt_index": {
+          "first_line": 91,
+          "last_line": 112,
+          "ast_sha256": "165d63128facf6e3cdfde9b48c0ce110fc7d54c4cec9aaab555ac8f6110a380b"
+        }
+      }
+    },
+    "coverage_bound_union.py": {
+      "sha256": "8f8d130f6103836fce30bad1941f43d26b91907940d20f8ae82abc5c3fc03325",
+      "bytes": 6094,
+      "functions": {
+        "build_bound_union_graph": {
+          "first_line": 21,
+          "last_line": 100,
+          "ast_sha256": "589cf1b2169f5a54baaf09e384854984a11c3e67455b5e859ff5a4e3997a7f16"
+        }
+      }
+    },
+    "coverage_bound_report.py": {
+      "sha256": "5236d7054a0e764cd4f0a9ca6b4385fb2aa40694a531617cea7b22f886a97ac6",
+      "bytes": 5106,
+      "functions": {
+        "render_bound_report": {
+          "first_line": 20,
+          "last_line": 83,
+          "ast_sha256": "09825e3794fa2577d2b75d802a5ed1c68b3aa8c86a045cb81979b0a0e794957e"
+        }
+      }
+    }
+  },
+  "facts": {
+    "plugin_finish": "stop/save/hash precedes finish publication; no explicit CoverageData.close in hook",
+    "unconfigure": "later hook stop and global reset, not actual process exit receipt",
+    "publication": "hardlink temporary then unlink and parent fsync; no independent observer process",
+    "consumer": "actual_exit/cohort/outer_seconds supplied by external owner; not kernel proof",
+    "index": "roles bind start/finish artifact observations; contains no process-drain attestation",
+    "report": "final accepted evidence index absent; conditional intermediate result only"
+  },
+  "source_ready": false,
+  "execution_count": 0
+}
