@@ -40,7 +40,7 @@ LAYERS = ("persistence", "core", "features", "http")
 
 PERSISTENCE = frozenset({
     "lib", "lib.batched_delete", "lib.clock", "lib.db", "lib.db_migrations", "lib.db_schema",
-    "lib.lifecycle", "lib.paths", "lib.revisioned_cache", "lib.timing", "lib.xdg",
+    "lib.janitor_store", "lib.lifecycle", "lib.paths", "lib.revisioned_cache", "lib.timing", "lib.xdg",
 })
 PERSISTENCE_PACKAGES = ("lib.persistence",)
 CORE = frozenset({f"lib.{m}" for m in (
@@ -81,7 +81,6 @@ NAMED_EXCEPTIONS = {
 UPWARD_BASELINE = frozenset({
     'lib.agents -> lib.artifacts',
     'lib.agents -> lib.goal_ledger',
-    'lib.agents -> lib.janitor_store',
     'lib.agents -> lib.janitors',
     'lib.agents -> lib.task_plans',
     'lib.backend.agy -> lib.agy_transcript',
