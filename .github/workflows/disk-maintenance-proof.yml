@@ -1,12 +1,12 @@
-name: Disk maintenance disposable controls
+name: Disk writer and timing disposable controls
 'on':
   push:
-    branches: [refactor/ci/disk-maintenance-f226-proof-r1]
+    branches: [refactor/ci/disk-writer-timing-68455532-proof-r1]
 permissions:
   contents: read
 jobs:
   disposable-controls:
-    if: ${{ github.repository == 'Maxteabag/clarp' && github.event_name == 'push' && github.ref == 'refs/heads/refactor/ci/disk-maintenance-f226-proof-r1' }}
+    if: ${{ github.repository == 'Maxteabag/clarp' && github.event_name == 'push' && github.ref == 'refs/heads/refactor/ci/disk-writer-timing-68455532-proof-r1' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -16,14 +16,14 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
           fetch-depth: 1
-      - name: Exactly fifteen synthetic controls under existing containment
+      - name: Exactly five writer and timing controls under existing containment
         shell: bash
         env:
           PROOF_RUNNER_ENVIRONMENT: ${{ runner.environment }}
         run: |
           set -euo pipefail
           umask 077
-          echo 'ae39a91da86e901261acad8513aea3cc244ad88065674c624823f7ecb3311e7a  SOURCE-CLOSURE.json' | sha256sum -c -
+          echo '6d0d68c8c041adfa6fef5f6ff676e65e9e84b15ebc10bddb057e6116a4d3731d  SOURCE-CLOSURE.json' | sha256sum -c -
           /usr/bin/timeout --signal=TERM --kill-after=30s 570s /usr/bin/bash .disk-maintenance-proof/run-proof.sh
       - name: Retain evidence even when refused or failed
         if: ${{ always() }}
@@ -52,7 +52,7 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: ${{ always() }}
         with:
-          name: disk-maintenance-f226-${{ github.run_id }}-${{ github.run_attempt }}
+          name: disk-writer-timing-684-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             proof-results/
             .disk-maintenance-proof/results/

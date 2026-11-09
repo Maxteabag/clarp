@@ -7,34 +7,24 @@ export PYTHONDONTWRITEBYTECODE=1 LC_ALL=C
 ROOT=$(pwd -P)
 [ ! -e results ] || exit 11
 sha256sum -c SHA256SUMS
-[ "$(cat SOURCE_COMMIT)" = f226950b3b1748e4b6d9a208b9ac2f8bbbcfc852 ] || exit 11
+[ "$(cat SOURCE_COMMIT)" = 684555326522175c2bdab42e908cfc5c1ecc8b21 ] || exit 11
 mkdir -m700 results results/fixtures
 export TMPDIR="$ROOT/results/fixtures"
 /usr/bin/python3 --version > results/python.txt 2>&1
 uname -srvmo > results/kernel.txt
 set +e
 /usr/bin/timeout --signal=TERM --kill-after=5s 240s /usr/bin/python3 -B -m unittest -v \
-  test_controls.Controls.test_partial_stop_faults_do_not_balance_and_attempt_both_starts \
-  test_controls.Controls.test_runtime_start_and_log_fault_still_attempts_host_and_is_not_green \
-  test_controls.Controls.test_single_clock_expiry_after_census_prevents_every_balance_spawn \
-  test_controls.Controls.test_pass_threshold_no_third_pass_and_expiry_after_stop \
-  test_controls.Controls.test_unknown_cancel_terminal_blocks_starts_and_no_cancel_retry \
-  test_controls.Controls.test_confirmed_cancel_with_logging_fault_still_restores_and_retains_failure \
-  test_controls.Controls.test_owned_real_exit_timeout_and_no_signals_after_reap_or_ECHILD \
-  test_controls.BindingAndWriterControls.test_actual_main_refuses_approval_stale_inventory_and_self_cgroup_before_controller \
-  test_controls.BindingAndWriterControls.test_actual_writer_census_refuses_named_holder_and_permission_unknown \
-  test_controls.FollowupControls.test_real_gate_restores_child_mask_and_normal_TERM_is_not_forced_KILL \
-  test_controls.FollowupControls.test_actual_observe_credential_transition_requires_exact_gated_lineage \
-  test_controls.FollowupControls.test_registered_abort_during_actual_work_log_prevents_25_and_restores \
-  test_controls.GateAndCleanupControls.test_setup_ages_original_permit_and_private_effect_never_executes \
-  test_controls.GateAndCleanupControls.test_gate_own_expiry_check_refuses_lower_exec_effect \
-  test_controls.GateAndCleanupControls.test_each_close_failure_preserves_primary_both_attempts_and_parent_mask > results/unittest.raw 2>&1
+  test_writer_focus.WriterFocus.test_exact_tolerated_set_accepted_without_stopping_units \
+  test_writer_focus.WriterFocus.test_unlisted_db_fd_including_listener_is_rejected \
+  test_writer_focus.WriterFocus.test_changed_pid_start_or_unit_generation_rejected \
+  test_writer_focus.WriterFocus.test_postcheck_heartbeat_finished_and_mismark_are_distinct_no_edit \
+  test_balance_timing.TimingFocus.test_actual_controller_shared_phase_cancel_order_and_420_narrow_recovery > results/unittest.raw 2>&1
 selected=$?
 printf "%s\n" "$selected" > results/selected.rc
 receipt_rc=$?
 /usr/bin/ps -eo pid,ppid,pgid,sid,uid,stat,comm > results/post-process-census.txt
 census_rc=$?
-sha256sum SHA256SUMS SOURCE_COMMIT controller.py owned.py child_exec.py test_controls.py > results/executed.sha256
+sha256sum SHA256SUMS SOURCE_COMMIT controller.py owned.py child_exec.py writer_policy.py post_check.py test_writer_focus.py test_balance_timing.py > results/executed.sha256
 hash_rc=$?
 /usr/bin/python3 -B - <<'INDEX'
 import hashlib,json,os,stat
