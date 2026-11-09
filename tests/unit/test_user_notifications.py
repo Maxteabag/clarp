@@ -894,3 +894,27 @@ def test_same_cause_with_a_new_reply_source_still_publishes(monkeypatch):
     assert {item["cause_message_id"] for item in pushes} == {cause}
     assert len(stream.events) == 2
     assert sum(row["notify"] for row in _notification_rows(aid)) == 2
+
+
+@pytest.mark.parametrize("begin", ["BEGIN", "BEGIN IMMEDIATE"])
+def test_notification_persistence_preserves_the_callers_rollback(monkeypatch, begin):
+    monkeypatch.setattr(user_notifications, "SETTLE_TIMEOUT_S", 0)
+    aid, trace, _, _, done = _completion_reply()
+    con = db.conn()
+    original = dict(con.execute("SELECT * FROM agents WHERE agent_id=?", (aid,)).fetchone())
+    con.execute(begin)
+    try:
+        result = user_notifications.classify_completed_turn(
+            agent_id=aid, session="arnold", persona="Arnold",
+            backend_session_id="bs-1", trace_id=trace, done_ts=done)
+        assert result["notify"] is True
+        assert con.in_transaction
+        con.execute("UPDATE agents SET persona='Caller-owned change' WHERE agent_id=?", (aid,))
+    finally:
+        con.rollback()
+    assert _notification_rows(aid) == []
+    assert dict(con.execute("SELECT * FROM agents WHERE agent_id=?", (aid,)).fetchone()) == original
+    # Rolled-back admission cannot consume the later publication right.
+    assert user_notifications.classify_completed_turn(
+        agent_id=aid, session="arnold", persona="Arnold",
+        backend_session_id="bs-1", trace_id=trace, done_ts=done)["notify"] is True
