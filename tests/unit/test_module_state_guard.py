@@ -83,6 +83,11 @@ ALLOWED: dict[tuple[str, str], str] = {
     # fetched before a reconfigure / invalidate.
     ("lib/backends.py", "_STATUS_GENERATION"): CACHE,
     ("lib/reconcile.py", "_LEAK_CHECK_ASKED"): THROTTLE,
+    ("lib/reconcile.py", "_BUSY_OBSERVATIONS"): (
+        "bounded (1024 entries, 300s idle expiry on access), lock-protected process-local "
+        "DB-epoch-object/agent/same-row temporal history for the signed60s debounce; "
+        "mature evidence is consumed under the lock; eviction/restart only delays repair, "
+        "never supplies durable or cached liveness authority"),
     ("lib/cartesia_voices.py", "_cache"): CACHE,
     ("lib/codex_app_server.py", "_CLIENTS"): CLIENT,
     # Recycled app-server clients whose process has not been seen to exit;
