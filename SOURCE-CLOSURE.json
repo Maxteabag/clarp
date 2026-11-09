@@ -1,0 +1,67 @@
+{
+  "bindings": {
+    ".disk-maintenance-proof/SHA256SUMS": {
+      "bytes": 838,
+      "sha256": "dad6420c2440491e22739ec56fe4e6f17af9b521220052dc7788b9d21a6e76f4"
+    },
+    ".disk-maintenance-proof/SOURCE_COMMIT": {
+      "bytes": 41,
+      "sha256": "c1a4dff9ac1ab587e931a7a2c0c293e9042f8fc55f2b41419f21f41444ee7924"
+    },
+    ".disk-maintenance-proof/controller-r17/child_exec.py": {
+      "bytes": 903,
+      "sha256": "4725312887f7a518910ab555e88db25b9f29396189f6340ef9a10c8362691754"
+    },
+    ".disk-maintenance-proof/controller-r17/controller.py": {
+      "bytes": 39265,
+      "sha256": "281eb5679539749ce05d174273652eb9a08e2a0f100b74c74e3a11662efaee0d"
+    },
+    ".disk-maintenance-proof/controller-r17/effective_class.py": {
+      "bytes": 10662,
+      "sha256": "52c24d44662e4fdd7ce680674e83288b42889171aaa1d389534cfd768fa1bfa7"
+    },
+    ".disk-maintenance-proof/controller-r17/owned.py": {
+      "bytes": 10195,
+      "sha256": "e3aee22000f3c6c19efefa72fe7d358f36a29276d8ab5685e26cfc4af10f5c55"
+    },
+    ".disk-maintenance-proof/controller-r17/post_check.py": {
+      "bytes": 4607,
+      "sha256": "9ef4f254b28184ef0dc6f615e6161ae92310c58dd0ff43577a5cfa4d2d5ed164"
+    },
+    ".disk-maintenance-proof/controller-r17/roster.py": {
+      "bytes": 31153,
+      "sha256": "3dfc8117011bd42d48aa7ac3fae7da55146125cd7f8e88d0acabe036bc6c85d7"
+    },
+    ".disk-maintenance-proof/controller-r17/writer_policy.py": {
+      "bytes": 8089,
+      "sha256": "5e322a996bcbaeb81abb32fc758faa848db4d6ba0df1a7fa94c30dc0d1cd73dd"
+    },
+    ".disk-maintenance-proof/run-proof.sh": {
+      "bytes": 1694,
+      "sha256": "f4e383d9346ee20ff7ce0544fc89bf7707bdedb0e5082a724f6fd419013cc476"
+    },
+    ".disk-maintenance-proof/run-selected.sh": {
+      "bytes": 2074,
+      "sha256": "6669d956a91b761b05ceb5dd7b3eaf5675a2bbe687d46fd53d7a3ed196ebd116"
+    },
+    ".disk-maintenance-proof/test_bookkeeping_restore.py": {
+      "bytes": 16023,
+      "sha256": "ca0017d1fe97a8f49388f36f4a8a27fab3b18a18714d2ce87923f810fc55a069"
+    },
+    "scripts/ci_contained.sh": {
+      "bytes": 4376,
+      "sha256": "07f228044e915297a84a52201e68e40a34809928fcf0ecb8d300b692ee5d067f"
+    },
+    "scripts/ci_containment_selfcheck.py": {
+      "bytes": 6816,
+      "sha256": "91a5b503b559eb6e7f1ceaf495199496c65851627e361cffdf47dc4be60546fb"
+    }
+  },
+  "containment_source": "1ca5a5a69cba322e311968f20298c1db36f31eac",
+  "controller_source": "e6238b14740c9a83c6f47a5d007eb8cb171b7a4f",
+  "production_bytes_source": "3a45ae2dc8c996122ae7882199bf77447354c509",
+  "scope": "ONE_BOOKKEEPING_RESTORE_TABLE_SYNTHETIC_ONLY_NO15_5_ONE_REPEAT",
+  "selected_methods": [
+    "test_bookkeeping_restore.BookkeepingRestoreFocus.test_host_recreated_listener_restore_contract"
+  ]
+}
