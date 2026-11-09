@@ -1,3 +1,9 @@
+> Historical source-only method archive. Lead decision rf1c82b9c1d49 replaces
+> this package as the measurement path. Native worker/execnet/teardown certification
+> and hotspot coverage are not measurement gates. Current proposal:
+> [../criterion5_pair_937/PROTOCOL.md](../criterion5_pair_937/PROTOCOL.md).
+> Existing source/controls remain unexecuted; no old verdict is an execution grant.
+
 # Criterion-5 matched measurement (937), source preparation
 
 Baseline A `4f33cdc9287eafcddd0adfb17b51487c84ace28b`; B
