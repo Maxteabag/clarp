@@ -73,7 +73,7 @@ BASELINE: dict[str, int] = {
     'lib/oracle_realtime.py': 2,
     'lib/oracle_webrtc.py': 1,
     'lib/provider_capabilities.py': 4,
-    'lib/reconcile.py': 3,
+    'lib/reconcile.py': 1,
     'lib/relay_connector.py': 2,
     'lib/runtime_bridge.py': 2,
     'lib/server_identity.py': 2,
