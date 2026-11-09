@@ -2386,20 +2386,6 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
     def _deliver_pending_decisions(self) -> set[str]:
         return _dispatch_adapters(self.ctx).deliver_pending_decisions()
 
-    def _close_requests_for_user_message(self, session: str) -> None:
-        """A message from the owner answers whatever the agent asked before."""
-        from lib import artifacts
-        try:
-            agent = identity.resolve(session) if session else None
-            if agent is None:
-                return
-            for artifact_id in artifacts.close_for_user_message(agent.agent_id):
-                row = artifacts.get(artifact_id)
-                if row:
-                    self._broadcast_artifact(row)
-        except Exception as e:  # noqa: BLE001 - never fail an admitted send
-            log_exception("decisionSupersedeFail", e, detail=session)
-
     def _handle_turn_queue(self):
         from lib import turn_queue
         query = self._query()
@@ -2664,9 +2650,6 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
             body["error"] = orchestrated.error
         if orchestrated.ok and req.transcription_id:
             transcription_results.delete(req.transcription_id)
-        if (orchestrated.ok and orchestrated.session and req.origin == "user"
-                and not req.sender_agent_id):
-            self._close_requests_for_user_message(orchestrated.session)
         if orchestrated.ok and req.voice_utterance_id:
             self._record_voice(
                 "send", session=orchestrated.session or None,
@@ -2699,8 +2682,6 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
             self._greeting_admitted(opening, req, ok=True)
         if req.origin == "agent" and req.sender_agent_id:
             self._note_helper_message(req.sender_agent_id, result.session)
-        if req.origin == "user" and not req.sender_agent_id:
-            self._close_requests_for_user_message(result.session)
         if req.transcription_id:
             transcription_results.delete(req.transcription_id)
         # File the timeline row before answering: a client that reads
