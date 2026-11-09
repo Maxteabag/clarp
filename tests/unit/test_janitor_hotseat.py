@@ -638,12 +638,12 @@ def test_candidate_set_and_all_fingerprints_are_rechecked_at_receipt_transaction
                 prior = _ownership_persisted_frame()[sibling["agent_id"]]
                 configured = janitors.configure(sibling["session"], sibling["revision"], scope={})
                 paused = _ownership_persisted_frame()[sibling["agent_id"]]
-                assert paused["enabled"] == 0 and json.loads(paused["scope_json"]) == {}
+                assert paused["enabled"] == 0 and json.loads(paused["scope_json"]) == {"agent_ids": [], "exclude_agent_ids": []}
                 assert paused["revision"] == prior["revision"] + 1
                 assert paused["generation"] == prior["generation"] + 1
                 _restore_enabled_overlap(configured)
                 restored = _ownership_persisted_frame()[sibling["agent_id"]]
-                assert restored["enabled"] == 1 and json.loads(restored["scope_json"]) == {}
+                assert restored["enabled"] == 1 and json.loads(restored["scope_json"]) == {"agent_ids": [], "exclude_agent_ids": []}
                 assert restored["revision"] == prior["revision"] + 2
                 assert restored["generation"] == prior["generation"] + 2
                 assert {k: v for k, v in restored.items() if k not in
