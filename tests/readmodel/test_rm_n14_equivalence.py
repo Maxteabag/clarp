@@ -311,6 +311,106 @@ def test_running_importer_applies_only_guarded_tail_and_matches_all_product_rows
 
 
 @pytest.mark.parametrize("backend", harness.BACKENDS)
+def test_warm_append_digest_reads_only_new_bytes_and_bounded_guard(tmp_path, backend, monkeypatch):
+    """Count real source reads; a small parse range must not hide a prefix scan."""
+    import builtins
+    import io
+    import os
+    from lib import transcript_incremental as inc
+
+    reference, candidate = _clones(tmp_path, backend)
+    transcript = tmp_path / "synthetic.jsonl"
+    transcript.write_bytes(b"".join(
+        harness.append_bytes(backend, i, size=64 * 1024) for i in range(20)))
+    harness.run_lane(reference, transcript, backend, "reference", tick=0)
+    first = harness.run_lane(candidate, transcript, backend, "candidate", tick=0, close=False)
+    assert first["apply_mode"] == "full"
+    delta = harness.append_bytes(backend, 20)
+    with transcript.open("ab") as output:
+        output.write(delta)
+
+    counts = {"source_bytes": 0, "digest_bytes": 0, "digest_calls": 0}
+    digest_active = False
+    original_hashes = inc._tail_file_hashes
+
+    class CountedFile:
+        def __init__(self, native):
+            self.native = native
+
+        def __getattr__(self, name):
+            return getattr(self.native, name)
+
+        def __enter__(self):
+            self.native.__enter__()
+            return self
+
+        def __exit__(self, *args):
+            return self.native.__exit__(*args)
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            value = self.readline()
+            if not value:
+                raise StopIteration
+            return value
+
+        def measured(self, method, *args):
+            value = getattr(self.native, method)(*args)
+            size = (value or 0) if method == "readinto" else len(
+                value.encode("utf-8") if isinstance(value, str) else value)
+            counts["source_bytes"] += size
+            if digest_active:
+                counts["digest_bytes"] += size
+            return value
+
+        def read(self, *args):
+            return self.measured("read", *args)
+
+        def readline(self, *args):
+            return self.measured("readline", *args)
+
+        def readinto(self, *args):
+            return self.measured("readinto", *args)
+
+    def counted_open(original):
+        def opened(file, *args, **kwargs):
+            native = original(file, *args, **kwargs)
+            if isinstance(file, (str, os.PathLike)) and os.fspath(file) == str(transcript):
+                return CountedFile(native)
+            return native
+        return opened
+
+    def measured_hashes(*args, **kwargs):
+        nonlocal digest_active
+        counts["digest_calls"] += 1
+        digest_active = True
+        try:
+            return original_hashes(*args, **kwargs)
+        finally:
+            digest_active = False
+
+    try:
+        with monkeypatch.context() as measured:
+            measured.setattr(builtins, "open", counted_open(builtins.open))
+            measured.setattr(io, "open", counted_open(io.open))
+            measured.setattr(inc, "_tail_file_hashes", measured_hashes)
+            report = harness.run_lane(candidate, transcript, backend, "candidate",
+                                      tick=1, initialize=False, close=False)
+        assert report["apply_mode"] == "tail"
+        assert counts["digest_calls"] == 1
+        assert counts["source_bytes"] >= counts["digest_bytes"] > 0
+        assert counts["digest_bytes"] <= len(delta) + 128 * 1024, counts
+        # Other range/sample/parser reads are counted above, but are not called
+        # O(new bytes). The unchanged full-product oracle owns result parity.
+        harness.run_lane(reference, transcript, backend, "reference", tick=1)
+        harness.assert_product_equal(reference, candidate)
+    finally:
+        db.close_local()
+
+
+@pytest.mark.parametrize("backend", harness.BACKENDS)
 @pytest.mark.parametrize("change", ["prefix_edit", "truncate", "rotate", "late_result"])
 def test_guarded_dispatch_falls_back_on_history_change(tmp_path, backend, change):
     reference, candidate = _clones(tmp_path, backend)
