@@ -581,8 +581,10 @@ def test_deferred_native_import_keeps_intent_until_worker_completes_once(streame
             assert agent_id not in streamer._dirty
         assert len(streamer._stream.events) == 1
     finally:
-        streamer.stop(timeout=2)
-        assert cache.reset_for_tests()
+        try:
+            streamer.stop(timeout=2)
+        finally:
+            assert cache.reset_for_tests()
 
 
 def _recording_submissions(monkeypatch):
