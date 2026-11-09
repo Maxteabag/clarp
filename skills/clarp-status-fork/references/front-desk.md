@@ -45,13 +45,14 @@ treat the front's messages as the user's.
 
 ## Why relaying is safe
 
-Only messages with origin `user` close a worker's pending cards
-(`_close_requests_for_user_message` in `server/server.py`). Prompts relayed by an
-agent do not, so the front can steer without wiping the worker's questions. The user
-typing in the worker's chat still closes them.
+Chat messages never close a worker's pending cards (Host contract 79 removed
+the old supersede-on-chat rule). Prompts relayed by the front therefore steer
+without wiping the worker's questions, and so does the user typing in the
+worker's chat; a card closes only when answered, dismissed, withdrawn or
+expired.
 
 ## Measure
 
 Before starting, record a one-week baseline: status pings in worker chats, the share
-of cards answered rather than superseded by a chat message, time to a status, and the
+of cards answered rather than left to expire or withdrawn, time to a status, and the
 user's messages per day. Compare after a week.

@@ -34,10 +34,11 @@ shows a readable error. Archived items can be restored.
 - **Agents withdraw stale requests.** `POST /decisions/{id}/withdraw` with
   `{"session": ...}` (only the asking session) closes the card as
   `resolved_choice: withdrawn`, `resolved_by: agent`, with no delivery.
-- **Chat supersedes.** When the owner sends an agent a message through
-  `POST /send` (origin `user`, no sending agent), every pending request of that
-  agent closes as `superseded` / `user_message`. Agent-to-agent messages,
-  automation and decision deliveries do not.
+- **Chat no longer supersedes.** An ordinary owner message through
+  `POST /send` leaves pending requests open until they are answered,
+  dismissed, withdrawn or expired (Host contract 79). The contract-28 rule
+  that closed them as `superseded` / `user_message` was removed: an unrelated
+  chat must not silently discard a waiting decision.
 - **CI is not attention.** `workflow_run` artifacts are excluded from
   `GET /attention/inbox`; an agent blocked by a failure asks a question.
 - **Interruptions are earned.** Turn-done pushes are always `active`. A new

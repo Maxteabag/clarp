@@ -29,6 +29,10 @@ def _request(method: str, path: str, body: dict | None = None) -> dict:
     request = urllib.request.Request(base + path, data=data, method=method)
     request.add_header("Content-Type", "application/json")
     if token: request.add_header("Authorization", "Bearer " + token)
+    # The Host-issued identity of the turn running this command, so the
+    # Host can verify which agent is acting (lib.turn_identity).
+    if os.environ.get("CLARP_PROVIDER_TURN"):
+        request.add_header("X-Clarp-Turn", os.environ["CLARP_PROVIDER_TURN"])
     with urllib.request.urlopen(request, timeout=20) as response:
         return json.load(response)
 
@@ -125,6 +129,35 @@ def _decision_request(cmd: str, args: list[str]) -> dict:
         if capability.get("decision_format") != 2:
             raise ValueError("this Host does not support native questions; ask in ordinary text instead")
     return _request("POST", "/decisions", body)["artifact"]
+
+
+def _answer_on_behalf(args: list[str]) -> dict:
+    parser = _Parser(prog="clarp-agent-artifacts answer-on-behalf")
+    parser.add_argument("session", help="the designated agent relaying the user's recorded answer")
+    parser.add_argument("decision_id")
+    parser.add_argument("expected_revision", type=int)
+    parser.add_argument("body_json",
+                        help='JSON object with exactly one of "choice" or "answer"')
+    parsed = parser.parse_args(args)
+    body = json.loads(parsed.body_json)
+    if not isinstance(body, dict):
+        raise ValueError("answer body must be a JSON object")
+    if ("choice" in body) == ("answer" in body):
+        raise ValueError('answer body needs exactly one of "choice" or "answer"')
+    if parsed.expected_revision < 1:
+        raise ValueError("expected_revision must be positive")
+    body = {key: body[key] for key in ("choice", "answer") if key in body}
+    body.update(expected_revision=parsed.expected_revision,
+                on_behalf_session=parsed.session)
+    info = _request("GET", "/server-info")
+    features = (info.get("contract") or {}).get("features") or {}
+    if "decision_on_behalf" not in features:
+        raise ValueError(
+            "this Host does not support answering on the user's behalf; "
+            "relay the answer and let the asking agent withdraw its card instead")
+    return _request(
+        "POST", "/decisions/" + urllib.parse.quote(parsed.decision_id) + "/resolve",
+        body)["artifact"]
 
 
 def _wait(args: list[str]) -> tuple[dict, int]:
@@ -306,6 +339,7 @@ def main(argv: list[str]) -> int:
              "input SESSION TITLE PROMPT [--hint one_time_code] [--expires-in S] [OPTIONS] | "
              "wait ARTIFACT_ID [--timeout S] | "
              "attention [--session SESSION] [--include-archived] | withdraw SESSION DECISION_ID | "
+             "answer-on-behalf SESSION DECISION_ID EXPECTED_REVISION JSON_BODY | "
              "update ARTIFACT_ID STATUS [JSON_PAYLOAD] | progress ARTIFACT_ID VALUE [CONTENT] | list SESSION")
     try:
         cmd = argv[1]
@@ -332,6 +366,8 @@ def main(argv: list[str]) -> int:
         elif cmd == "withdraw" and len(argv) == 4:
             result = _request("POST", "/decisions/" + urllib.parse.quote(argv[3]) + "/withdraw",
                               {"session": argv[2]})["artifact"]
+        elif cmd == "answer-on-behalf":
+            result = _answer_on_behalf(argv[2:])
         elif cmd == "update" and len(argv) in {4, 5}:
             body = {"status": argv[3]}
             if len(argv) == 5: body["payload"] = json.loads(argv[4])

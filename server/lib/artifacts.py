@@ -934,18 +934,46 @@ def _queue_delivery(con, row, *, choice: str, answer: dict | None, now: int) -> 
 
 
 def resolve(decision_id: str, *, expected_revision: int,
-            choice: str | None = None, answer: Any = None) -> tuple[dict, bool]:
+            choice: str | None = None, answer: Any = None,
+            on_behalf_session: str | None = None,
+            designated_sessions=(), verified_session: str = "") -> tuple[dict, bool]:
     _integer(expected_revision, "expected_revision", minimum=1)
+    if verified_session and on_behalf_session is None:
+        raise PermissionError("agent resolution requires on_behalf_session")
+    acting_session = ""
+    if on_behalf_session is not None:
+        if not isinstance(on_behalf_session, str) or not on_behalf_session.strip():
+            raise ValueError("on_behalf_session must be a nonempty session")
+        acting_session = on_behalf_session.strip()
+        designated = {str(v).strip() for v in designated_sessions or ()
+                      if isinstance(v, str) and v.strip()}
+        if acting_session not in designated:
+            raise PermissionError("session is not designated to answer on the user's behalf")
+        if (verified_session or "").strip() != acting_session:
+            raise PermissionError(
+                "on-behalf answer requires the designated agent's verified turn identity")
+    resolved_by = f"agent:{acting_session}" if acting_session else "user"
     _expire_decisions()
     con = db.conn(); con.execute("BEGIN IMMEDIATE")
     try:
         row = con.execute("SELECT * FROM artifact_decisions WHERE decision_id=?", (decision_id,)).fetchone()
         if not row: raise ValueError("decision not found")
         outcome, normalized = _answer(row, choice=choice, answer=answer)
+        if acting_session:
+            artifact_row = con.execute(
+                "SELECT session FROM artifacts WHERE artifact_id=?", (row["artifact_id"],)).fetchone()
+            if not artifact_row: raise ValueError("artifact not found")
+            if artifact_row["session"] == acting_session:
+                raise PermissionError("the asking agent may not answer its own request")
+            if not con.execute(
+                    "SELECT 1 FROM agents WHERE session=? AND deleted_at IS NULL",
+                    (acting_session,)).fetchone():
+                raise ValueError("on-behalf session not found")
         if row["status"] != "pending":
             if row["status"] == "expired":
                 raise ValueError("decision expired")
-            if row["status"] != outcome or json.loads(row["answer_json"] or "null") != normalized:
+            if (row["status"] != outcome or row["resolved_by"] != resolved_by
+                    or json.loads(row["answer_json"] or "null") != normalized):
                 raise ValueError("decision already resolved with a different choice or answer")
             con.execute("COMMIT"); return get(row["artifact_id"]) or {}, False
         if row["expires_at"] is not None and row["expires_at"] <= db.now_ms():
@@ -955,8 +983,9 @@ def resolve(decision_id: str, *, expected_revision: int,
         if not artifact: raise ValueError("artifact not found")
         now = max(db.now_ms(), artifact["updated_at"] + 1)
         con.execute("""UPDATE artifact_decisions SET status=?,resolved_choice=?,answer_json=?,resolved_at=?,
-                     resolved_by='user',revision=revision+1 WHERE decision_id=?""",
-                    (outcome, outcome, json.dumps(normalized, ensure_ascii=False), now, decision_id))
+                     resolved_by=?,revision=revision+1 WHERE decision_id=?""",
+                    (outcome, outcome, json.dumps(normalized, ensure_ascii=False), now,
+                     resolved_by, decision_id))
         con.execute("UPDATE artifacts SET status='completed',updated_at=?,completed_at=? WHERE artifact_id=?",
                     (now, now, row["artifact_id"]))
         _queue_delivery(con, row, choice=outcome, answer=normalized, now=now)
@@ -1031,23 +1060,6 @@ def withdraw(decision_id: str, *, session: str) -> tuple[dict, bool]:
         if row["status"] != "pending": raise ValueError("decision is no longer pending")
         _close_pending(con, [row], choice="withdrawn", by="agent", now=db.now_ms())
         con.execute("COMMIT"); return get(row["artifact_id"]) or {}, True
-    except BaseException:
-        con.execute("ROLLBACK"); raise
-
-
-def close_for_user_message(agent_id: str) -> list[str]:
-    """The owner wrote to the agent after it asked: their message supersedes
-    every request the agent still has open. Returns the closed artifact IDs."""
-    agent_id = (agent_id or "").strip()
-    if not agent_id: return []
-    con = db.conn(); con.execute("BEGIN IMMEDIATE")
-    try:
-        rows = con.execute(
-            """SELECT d.decision_id,d.artifact_id FROM artifact_decisions d JOIN artifacts a
-                ON a.artifact_id=d.artifact_id WHERE a.agent_id=? AND d.status='pending'""",
-            (agent_id,)).fetchall()
-        closed = _close_pending(con, rows, choice="superseded", by="user_message", now=db.now_ms())
-        con.execute("COMMIT"); return closed
     except BaseException:
         con.execute("ROLLBACK"); raise
 
@@ -1196,7 +1208,9 @@ def attention(*, include_questions: bool = False, include_archived: bool = False
 def pending_deliveries() -> list[dict]:
     return [{**dict(row), "answer": json.loads(row["answer_json"] or "null")}
             for row in db.conn().execute(
-        """SELECT x.* FROM decision_deliveries x JOIN agents g ON g.session=x.session
+        """SELECT x.*,d.resolved_by FROM decision_deliveries x
+            JOIN agents g ON g.session=x.session
+            JOIN artifact_decisions d ON d.decision_id=x.decision_id
             WHERE x.status='pending' AND g.deleted_at IS NULL ORDER BY x.created_at""")]
 
 
@@ -1204,6 +1218,9 @@ def format_delivery_prompt(delivery: dict) -> str:
     """One durable snapshot interpretation for foreground and retry delivery."""
     choice = delivery["choice"]
     response_type = delivery.get("response_type", "approval")
+    resolved_by = str(delivery.get("resolved_by") or "user")
+    actor = (f"The user, through agent {resolved_by[6:]}" if resolved_by.startswith("agent:")
+             else "The user")
     answer = delivery.get("answer")
     if answer is None:
         answer = json.loads(delivery.get("answer_json") or "null")
@@ -1214,16 +1231,17 @@ def format_delivery_prompt(delivery: dict) -> str:
         outcome = ("The user discarded this request. This is not an answer or approval. Do not "
                    "guess permission or repeat the unchanged request. Continue independent work only.")
     elif response_type in ("single_choice", "text_input") and choice == "answered" and isinstance(answer, dict):
-        outcome = ("The user answered this clarification: " + json.dumps(answer, ensure_ascii=False)
+        outcome = (f"{actor} answered this clarification: " + json.dumps(answer, ensure_ascii=False)
                    + ". Continue using this answer. This does not grant approval for unrelated protected actions.")
     elif response_type == "approval" and choice in {"accepted", "rejected"}:
-        outcome = (f"The user chose: {choice}. " + (
+        outcome = (f"{actor} chose: {choice}. " + (
             "Approval applies only to the described action. Revalidate it before acting."
             if choice == "accepted" else "Do not perform the protected action."))
     else:
         raise ValueError("invalid durable decision delivery")
     return ("[Clarp decision resolved]\n"
             f"Decision ID: {delivery['decision_id']}\nArtifact ID: {delivery['artifact_id']}\n"
+            f"Resolved by: {resolved_by}\n"
             f"Question: {delivery['question']}\nContext: {delivery['context']}\n"
             f"Reference: {delivery['reference_id']}\nPayload: {delivery['payload_json']}\n{outcome}")
 

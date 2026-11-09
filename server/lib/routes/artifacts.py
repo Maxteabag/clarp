@@ -251,12 +251,19 @@ class ArtifactRoutes:
         from lib import artifacts
         # This is a cooperative consent workflow, not a hostile-code sandbox:
         # local agents already share the host and SQLite file. `resolved_by`
-        # records the user-facing API action; skills are required to stop and
-        # await it rather than self-resolve.
+        # records the direct user action by default. An on-behalf resolve is
+        # enforced here: the acting session must be owner-configured in
+        # [agents] decision_on_behalf_sessions and must present its own
+        # verified turn identity; the artifacts layer also refuses the
+        # asking agent itself.
         data = self._read_json()
         if not isinstance(data, dict): return self._json_error(400, "json object required")
         choice = data.get("choice")
         answer = data.get("answer")
+        on_behalf_session = data.get("on_behalf_session")
+        if on_behalf_session is not None and (
+                not isinstance(on_behalf_session, str) or not on_behalf_session.strip()):
+            return self._json_error(400, "on_behalf_session must be a nonempty session")
         if (choice is None) == (answer is None):
             return self._json_error(400, "exactly one of choice or answer is required")
         if choice is not None:
@@ -267,9 +274,27 @@ class ArtifactRoutes:
         if isinstance(raw_revision, bool) or not isinstance(raw_revision, int):
             return self._json_error(400, "expected_revision must be an integer")
         revision = raw_revision
+        # Turn identity is independent of the optional body field. A supplied
+        # token must verify, and an identified agent can never resolve as user.
+        caller_id = self._turn_caller()  # lookup failures remain retryable 503
+        if self.headers.get("X-Clarp-Turn") is not None and not caller_id:
+            return self._json_error(403, "verified turn identity required")
+        if caller_id and on_behalf_session is None:
+            return self._json_error(403, "agent resolution requires on_behalf_session")
+        designated_sessions = ()
+        verified_session = ""
+        if on_behalf_session is not None:
+            from lib import config, identity
+            designated_sessions = config.load().decision_on_behalf_sessions
+            caller = identity.lookup(caller_id) if caller_id else None
+            verified_session = str(caller["session"]) if caller else ""
         try:
             row, changed = artifacts.resolve(
-                decision_id, choice=choice, answer=answer, expected_revision=revision)
+                decision_id, choice=choice, answer=answer, expected_revision=revision,
+                on_behalf_session=on_behalf_session,
+                designated_sessions=designated_sessions, verified_session=verified_session)
+        except PermissionError as exc:
+            return self._json_error(403, str(exc))
         except ValueError as exc:
             return self._json_error(409, str(exc))
         self._broadcast_artifact(row)
