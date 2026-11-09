@@ -1,13 +1,28 @@
 import pathlib
 import sys
+from types import SimpleNamespace
+
+import pytest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "server"))
 from lib import agents as agents_db  # noqa: E402
-from lib import db, turn_queue  # noqa: E402
+from lib import db, reconcile, turn_queue  # noqa: E402
 from lib.audio_stream import AudioStream  # noqa: E402
 from lib.context import ServerContext, StubSTT  # noqa: E402
 from lib.snapshot import build_agent_snapshot  # noqa: E402
 from lib.tts_engine import FakeTTSEngine  # noqa: E402
+
+
+@pytest.fixture
+def _reconcile_clock(monkeypatch):
+    """Isolate only INV1's monotonic clock and bounded observation history."""
+    clock = SimpleNamespace(now=1000.0)
+    with reconcile._BUSY_LOCK:
+        reconcile._BUSY_OBSERVATIONS.clear()
+    monkeypatch.setattr(reconcile, "time", SimpleNamespace(monotonic=lambda: clock.now))
+    yield clock
+    with reconcile._BUSY_LOCK:
+        reconcile._BUSY_OBSERVATIONS.clear()
 
 
 def test_snapshot_is_read_model_with_roster(tmp_path, monkeypatch):
@@ -79,7 +94,7 @@ def test_snapshot_roster_deduplicates_persona_case_insensitively(tmp_path):
     assert [name.casefold() for name in snap["roster"]].count("diego") == 1
 
 
-def test_snapshot_emits_persisted_custom_status_across_state_changes(tmp_path):
+def test_snapshot_emits_persisted_custom_status_across_state_changes(tmp_path, _reconcile_clock):
     agent_id = agents_db.create_agent(
         persona="Arnold", voice_id="V", cwd=str(tmp_path), session="arnold")
     agents_db.set_custom_status(agent_id, "Awaiting Domi: notif policy")
@@ -102,9 +117,12 @@ def test_snapshot_emits_persisted_custom_status_across_state_changes(tmp_path):
 
     agents_db.record_state(agent_id, "thinking")
     busy_snap = build_agent_snapshot(ctx)
-    # No live process backs that 'thinking' row: the reconciler (INV1) repairs
-    # it at read time instead of rendering a phantom "working" badge. The
-    # custom status must survive the repair.
+    # No live process backs this row. The custom status survives both the
+    # first grace observation and its eventual INV1 repair.
+    assert busy_snap["agents"][0]["busy"] is True
+    assert busy_snap["agents"][0]["status_text"] == "Awaiting Domi: notif policy"
+    _reconcile_clock.now += 60
+    busy_snap = build_agent_snapshot(ctx)
     assert busy_snap["agents"][0]["busy"] is False
     assert agents_db.latest_state(agent_id)["kind"] == "idle"
     assert busy_snap["agents"][0]["status_text"] == "Awaiting Domi: notif policy"
