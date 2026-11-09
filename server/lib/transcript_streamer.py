@@ -241,15 +241,18 @@ class TranscriptStreamer:
             if latest is None:
                 return False
 
-            def import_latest() -> None:
-                transcript_incremental.import_transcript(
+            def import_latest():
+                return transcript_incremental.import_transcript(
                     backend=backend.id, path=latest,
                     agent_id=agent_id,
                     backend_session_id=intent.bsid,
                     parse=backend.parse_transcript)
 
+            importer = transcript_incremental._completion_import(
+                import_latest, backend=backend.id, path=latest,
+                agent_id=agent_id, backend_session_id=intent.bsid)
             return transcript_import_cache.schedule_import(
-                latest, import_latest, owner=agent_id,
+                latest, importer, owner=agent_id,
                 after=lambda: self._after_import(agent_id, intent.bsid, intent.gen, intent.seq))
         except Exception as e:
             log_exception("transcriptStreamerImportFail", e, detail=agent_id)
