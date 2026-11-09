@@ -98,6 +98,8 @@ def test_worker_completion_state_controls_after_and_freshness(tmp_path, outcome,
 
 @pytest.mark.parametrize("entry", ["direct", "snapshot"])
 def test_new_audit_generation_before_publication_cannot_satisfy_freshness(tmp_path, entry):
+    import threading
+
     cache = transcript_import_cache
     cache.reset_for_tests()
     path = tmp_path / "generation-race.jsonl"
@@ -109,18 +111,29 @@ def test_new_audit_generation_before_publication_cannot_satisfy_freshness(tmp_pa
         previous_signature = cache._imported[key]
         previous_validation = cache._validated_at.get(key, cache._epoch)
         path.write_text("{}\n{}\n")
+        changed = threading.Event()
+        selected_workers = []
+        previous_generation = importer.generation
 
         def audit_became_due():
             importer.generation += 1
             importer.eligible = False
+            selected_workers.append(threading.current_thread())
+            changed.set()
 
         importer.before_return = audit_became_due
         if entry == "direct":
-            assert not cache.import_if_changed(path, importer, owner="audit-owner"), (
-                "an old admission published completion after its audit generation changed")
+            result = cache.import_if_changed(path, importer, owner="audit-owner")
         else:
-            assert not cache.import_for_snapshot(path, importer, owner="audit-owner", timeout=.02), (
-                "snapshot wait accepted a completion from a superseded audit generation")
+            result = cache.import_for_snapshot(path, importer, owner="audit-owner", timeout=.02)
+        assert changed.wait(2), "the selected callback never reached the generation change"
+        assert importer.generation == previous_generation + 1 and not importer.eligible
+        if entry == "snapshot":
+            worker = selected_workers[0]
+            assert worker is not threading.current_thread()
+            worker.join(2)
+            assert not worker.is_alive(), "selected worker did not finish publication/cleanup"
+        assert not result, "an old admission published completion after its audit generation changed"
         assert cache._imported[key] == previous_signature
         assert cache._validated_at.get(key, cache._epoch) == previous_validation
     finally:
