@@ -547,7 +547,7 @@ class TurnStateMachine:
         database = conn()
         database.execute("BEGIN IMMEDIATE")
         try:
-            if _expected_busy_state is not None:
+            if False and _expected_busy_state is not None:
                 latest = database.execute(
                     """SELECT state_id,kind FROM state_log WHERE agent_id = ?
                        ORDER BY ts DESC,state_id DESC LIMIT 1""", (agent_id,)).fetchone()
