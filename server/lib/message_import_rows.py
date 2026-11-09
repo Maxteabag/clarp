@@ -6,6 +6,7 @@ order and SQL stay unchanged; this module never commits or unwraps the writer.
 from __future__ import annotations
 
 import json
+import os
 from typing import Any, NamedTuple
 
 from .clock import now_ms
@@ -202,7 +203,12 @@ def _diagnose(event: str, detail: str) -> None:
         from .log import log
         log(event, detail)
     except Exception:  # noqa: BLE001 - an optional diagnostic must not fail the import
-        pass
+        # Independent one-shot, content-free fallback. A closed/broken fd or
+        # a short write is best-effort loss, never proof of delivery.
+        try:
+            os.write(2, b"transcriptDiagnosticFallback code=primary_log_failed count=1\n")
+        except OSError:
+            return
 
 
 def _related(a: str, b: str) -> bool:
