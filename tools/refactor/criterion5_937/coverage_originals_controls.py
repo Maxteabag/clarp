@@ -17,7 +17,7 @@ from .test_suite_evidence import NODES, DECODE_LIMITS, _decoder_fixture, _decode
 from .suite_evidence import ROLES
 
 
-def run_originals_storage_control(*, root, coverage_archive_path):
+def _prepare_originals_storage_fixture(*, root, coverage_archive_path):
     root = _root(root)
     if any(root.iterdir()):
         raise ValueError('fresh EMPTY original storage fixture root required')
@@ -71,6 +71,14 @@ def run_originals_storage_control(*, root, coverage_archive_path):
                               for label in collector.LABELS},
               'total_bytes': sum(v['bytes'] for v in expected.values()) + len(owner_before),
               'path_bytes': 4096, 'inventory_entries': 32, 'metadata_bytes': 4096}
+    return (root, receipt_root, index_root, paths, expected, original_bytes,
+            owner, owner_before, limits, config_raw, spec)
+
+
+def run_originals_storage_control(*, root, coverage_archive_path):
+    (root, receipt_root, index_root, paths, expected, original_bytes,
+     owner, owner_before, limits, config_raw, spec) = _prepare_originals_storage_fixture(
+         root=root, coverage_archive_path=coverage_archive_path)
     # Negatives must refuse at complete preflight/inventory BEFORE any stream.
     original_observer = collector.observe_file
     calls = []
@@ -209,5 +217,71 @@ def run_originals_storage_control(*, root, coverage_archive_path):
     inventory_faults = run_inventory_fault_controls(root=inventory_fault_root)
     assert inventory_faults['outcomes'] == ['control_enumeration', 'control_close', 'ordinary_pair']
     assert inventory_faults['actual_process_or_producer_accepted'] is False
+    mutation_root = root / 'postpublication-mutation'
+    mutation_root.mkdir(mode=0o700)
+    mutation = run_postpublication_input_change_control(root=mutation_root,
+                                                       coverage_archive_path=coverage_archive_path)
+    assert mutation['outcome'] == 'POSTPUBLICATION_INPUT_REFUSED_AND_PARTIALS_PRESERVED'
+    assert mutation['actual_process_or_producer_accepted'] is False
     return {'scope': 'ACTUAL31_TO_DECODER_INDEX_STORAGE_SYNTHETIC_PROCESSES_NOT_SQLITE_OR_PRODUCER_PROOF',
             'all_controls_unexecuted_at_authoring': True}
+
+
+def run_postpublication_input_change_control(*, root, coverage_archive_path):
+    """Actual retained-file mutation STORAGE control, synthetic process metadata."""
+    from . import coverage_publish_index as publisher
+    (root, receipt_root, index_root, paths, expected, original_bytes,
+     owner, owner_before, limits, config_raw, spec) = _prepare_originals_storage_fixture(
+         root=root, coverage_archive_path=coverage_archive_path)
+    target_label = 'gw7.finish'
+    target = Path(paths[target_label])
+    marker = b'\nMUTATED_AFTER_REQUIRED_INDEX_PUBLICATION\n'
+    original_publish = publisher._publish_index
+    stages = {'publication_returned': 0, 'mutation': 0, 'next_phase': 0}
+    published = []
+
+    def publish_then_mutate(**kwargs):
+        observation = original_publish(**kwargs)  # real write/fsync/close/reopen completed
+        stages['publication_returned'] += 1
+        published.append(observation)
+        with target.open('ab') as stream:
+            assert stream.write(marker) == len(marker)
+        stages['mutation'] += 1
+        return observation  # unchanged real publication result, no fake success
+
+    caught = None
+    try:
+        publisher._publish_index = publish_then_mutate
+        try:
+            publisher.publish_original_index(
+                paths=paths, receipt_root=str(receipt_root), index_root=str(index_root),
+                limits=limits, json_limits=DECODE_LIMITS,
+                index_limits={'nodes': 10000, 'depth': 64, 'string_characters': 10000, 'wire_bytes': 200000},
+                actual_exit=0, outer_seconds=10.0, cohort=NODES)
+            stages['next_phase'] += 1
+        except ValueError as error:
+            caught = error
+    finally:
+        publisher._publish_index = original_publish
+    assert publisher._publish_index is original_publish
+    assert caught is not None and 'original input/root fence changed' in str(caught)
+    assert stages == {'publication_returned': 1, 'mutation': 1, 'next_phase': 0}
+    assert len(published) == 1
+    # Both the original changed bytes and already-published index remain. The
+    # collector must neither heal/delete them nor return a usable observation.
+    assert target.read_bytes() == original_bytes[target_label] + marker
+    index_raw = (index_root / 'index.json').read_bytes()
+    assert published[0]['sha256'] == hashlib.sha256(index_raw).hexdigest()
+    assert published[0]['bytes'] == len(index_raw)
+    assert set(p.name for p in index_root.iterdir()) == {'index.json'}
+    assert owner.read_bytes() == owner_before
+    for label, raw in original_bytes.items():
+        if label != target_label:
+            assert Path(paths[label]).read_bytes() == raw
+    for label in ('catalog', 'profile', 'archive'):
+        actual = _snapshot(Path(paths[label]))
+        assert actual['bytes'] == expected[label]['bytes']
+        assert actual['sha256'] == expected[label]['sha256']
+    return {'outcome': 'POSTPUBLICATION_INPUT_REFUSED_AND_PARTIALS_PRESERVED',
+            'scope': 'ACTUAL_FS_MUTATION_STORAGE_NOT_KERNEL_PROCESS_OR_PRODUCER_PROOF',
+            'actual_process_or_producer_accepted': False}
