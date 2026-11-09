@@ -43,3 +43,11 @@ and RSS remain UNEXECUTED. Exact repaired workflow source review before captain
 handoff/ONEpush execution request, LOWEST after933/disk proof/ready landings.
 Inclusive100min/about17NOK/noFUND/preempt/delay. Final program-main rerun required;
 herald931 HOLD unchanged. Old stop/native source documents remain historical only.
+
+Second C2 repair after exactff564284 review422b15fd: ordinary primary plus
+cleanup control now raises a TOP-LEVEL BaseExceptionGroup containing the exact
+primary and every cleanup error, without mutating the primary original cause.
+All known child/log cleanup still precedes selection. Original control-primary
+identity/ordinary-only policy unchanged. Source AST inspection only; no candidate
+import/control execution or new campaign. Nightly source is separate and grants
+no937 execution authority. Exact bounded re-review still required.

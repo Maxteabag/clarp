@@ -69,6 +69,10 @@ def cleanup(children, streams, primary=None):
             errors.append(error)
             findings.append({'log_close_fault': type(error).__name__ + ': ' + str(error)})
     if primary is not None:
+        if isinstance(primary, Exception) and any(not isinstance(error, Exception) for error in errors):
+            # A cause cannot export a control through an except Exception caller.
+            # Keep both exact objects and the primary's existing cause untouched.
+            raise BaseExceptionGroup('primary failure and cleanup control', [primary, *errors])
         if errors:
             if primary.__cause__ is not None:
                 errors.insert(0, primary.__cause__)
