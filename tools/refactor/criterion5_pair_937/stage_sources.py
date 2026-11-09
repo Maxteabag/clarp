@@ -154,7 +154,8 @@ def main():
             raise ValueError('exact40 pins required')
         validate(roster['arms'][arm], plan[arm])
     env = {**{k: v for k, v in os.environ.items() if not k.startswith('GIT_')},
-           'GIT_CONFIG_NOSYSTEM': '1', 'GIT_CONFIG_GLOBAL': '/dev/null'}
+           'GIT_CONFIG_NOSYSTEM': '1', 'GIT_CONFIG_GLOBAL': '/dev/null',
+           'GIT_ATTR_NOSYSTEM': '1'}
     driver = git(root, ['rev-parse', 'HEAD'], env, text=True).strip()
     if os.environ.get('GITHUB_REF_NAME') != 'ci/criterion5-937-' + driver[:12]:
         raise ValueError('immutable branch must encode exact reviewed driver')

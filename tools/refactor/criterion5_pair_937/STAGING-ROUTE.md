@@ -26,8 +26,8 @@ B independently qualifies exact Git closure/roster/verifier/rule applicability.
 Before materialization both pin/tree identities, full actual Git object paths,
 kinds/OIDs and directory lists must match the declared roster. Submodules,
 unsupported kinds, noncanonical paths, .git and .gitattributes refuse. Both
-current trees have no attributes files. System/global Git config/attributes and
-inherited GIT_* overrides are excluded; local filter definitions or info/attributes
+current trees have no attributes files. System Git attributes are explicitly disabled with GIT_ATTR_NOSYSTEM=1;
+system/global Git config, user attributes and inherited GIT_* overrides are excluded; local filter definitions or info/attributes
 refuse before checkout. Git commands set no CRLF conversion, symlinks true, and
 sparseCheckout false. There is no force/retry/ignore/export-ignore omission.
 Actual post-checkout bytes still must match all declared content, irrespective
@@ -60,3 +60,12 @@ route+closure acceptance, then SAMErec7 captain fresh handoff/LOWEST gap is stil
 required. If this alternative is outside the permitted member rule, HOLD and
 return the concrete gap; never self-label a filesystem tree an exemption.
 Heavy freeze/disk discipline/00:30 boundary and final-main rerun remain binding.
+
+Bounded review follow-up to5cab reportc1eb41dc: add the separate explicit system
+attribute guard GIT_ATTR_NOSYSTEM=1 to every constructed Git environment. Preserve
+post-checkout verification as additional protection. The C1 alleged doubled raw
+regex was checked against the exact5cab Git blob (SHA0bc7379e): its AST constant
+codepoints are94,102,105,108,116,101,114,92,46 — ONE backslash before the dot.
+That already-correct literal-dot predicate is unchanged; exact byte/AST evidence
+is returned to B for independent reconciliation, without running the stage or
+Git config command. No new filter whitelist or permissive behavior is introduced.
