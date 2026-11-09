@@ -1,0 +1,46 @@
+{
+  "bindings": {
+    ".disk-maintenance-proof/SHA256SUMS": {
+      "bytes": 480,
+      "sha256": "1be23977cf13e93e6e17d3ac9da98cba366df8322ca4502484a5af7903e2dffe"
+    },
+    ".disk-maintenance-proof/SOURCE_COMMIT": {
+      "bytes": 41,
+      "sha256": "95ae2e45569625ad2ed1a7035405a77e869927f2af96d631ef73875ca031360a"
+    },
+    ".disk-maintenance-proof/child_exec.py": {
+      "bytes": 903,
+      "sha256": "4725312887f7a518910ab555e88db25b9f29396189f6340ef9a10c8362691754"
+    },
+    ".disk-maintenance-proof/controller.py": {
+      "bytes": 15801,
+      "sha256": "4dca2ac25d9561a37fb74ac818fd073b4ca342770f7193c73599b8941d4e0ff2"
+    },
+    ".disk-maintenance-proof/owned.py": {
+      "bytes": 10195,
+      "sha256": "e3aee22000f3c6c19efefa72fe7d358f36a29276d8ab5685e26cfc4af10f5c55"
+    },
+    ".disk-maintenance-proof/run-proof.sh": {
+      "bytes": 1669,
+      "sha256": "2bb6b92c2ba94437ce86270d1d69873b50affcc363e3bfead837a305a28759bf"
+    },
+    ".disk-maintenance-proof/run-selected.sh": {
+      "bytes": 3319,
+      "sha256": "4dbc7b9820a4216547bfb55615cd3dd3d75b03c95d005e5e28385d7e62eb968b"
+    },
+    ".disk-maintenance-proof/test_controls.py": {
+      "bytes": 22245,
+      "sha256": "b1a45d9a49c28fcd7c0983cd59e3b858697c4f21739ce597ff1bacfd51f42f83"
+    },
+    "scripts/ci_contained.sh": {
+      "bytes": 4376,
+      "sha256": "07f228044e915297a84a52201e68e40a34809928fcf0ecb8d300b692ee5d067f"
+    },
+    "scripts/ci_containment_selfcheck.py": {
+      "bytes": 6816,
+      "sha256": "91a5b503b559eb6e7f1ceaf495199496c65851627e361cffdf47dc4be60546fb"
+    }
+  },
+  "containment_source": "1ca5a5a69cba322e311968f20298c1db36f31eac",
+  "controller_source": "f226950b3b1748e4b6d9a208b9ac2f8bbbcfc852"
+}
