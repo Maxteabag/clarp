@@ -543,6 +543,48 @@ def test_an_unresolved_intent_is_resubmitted_on_the_backoff_schedule(streamer_en
     assert agent_id in streamer._dirty                            # never dropped while bound
 
 
+def test_deferred_native_import_keeps_intent_until_worker_completes_once(streamer_env, monkeypatch):
+    """Real submit/cache/worker/after path; never supply a completion receipt."""
+    import threading
+    from lib import transcript_import_cache as cache, transcript_incremental
+
+    cache.reset_for_tests()
+    streamer, tmp_path = streamer_env
+    agent_id, _tx = _build_agent_with_transcript(tmp_path, backend_session_id="cs-audit")
+    streamer._stream = _FakeStream()
+    entered = threading.Event()
+    result = {"state": "deferred"}
+
+    def native_import(**kwargs):
+        entered.set()
+        return {"rows": 0, "parse_s": 0.0, "store_s": 0.0,
+                "_clarp_transcript_completion_v1": result["state"]}
+
+    monkeypatch.setattr(transcript_incremental, "import_transcript", native_import)
+    monkeypatch.setattr(cache, "_BACKGROUND_MIN_INTERVAL", 0.0)
+    try:
+        streamer.reconcile_once()
+        agent = agents_db.get_by_agent_id(agent_id)
+        generation = streamer._bind_generation[agent_id]
+        intent = streamer._note_change(agent, "cs-audit", generation)
+        assert intent is not None
+        assert streamer._submit(agent, intent)
+        assert entered.wait(2)
+        assert cache.wait_for_background(2)
+        with streamer._dirty_lock:
+            assert streamer._dirty.get(agent_id) is intent, "deferred import cleared its intent"
+        assert streamer._stream.events == [], "deferred import ran the completion broadcast"
+        result["state"] = "completed-unchanged"
+        assert streamer._submit(agent, intent)
+        assert cache.wait_for_background(2)
+        with streamer._dirty_lock:
+            assert agent_id not in streamer._dirty
+        assert len(streamer._stream.events) == 1
+    finally:
+        streamer.stop(timeout=2)
+        assert cache.reset_for_tests()
+
+
 def _recording_submissions(monkeypatch):
     from lib import transcript_import_cache
     submitted: list[str] = []
