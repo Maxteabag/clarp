@@ -58,6 +58,7 @@ _VERSION_SOURCES = {
             "claude_transcript.py", "claude_reply_evidence.py", "backend/agy.py"),
 }
 _COMMON_SOURCES = ("transcript_incremental.py", "backend/base.py", "message_writes.py",
+                   "message_import_writer.py",
                    "message_import_rows.py", "message_import_common.py",
                    "message_context.py", "message_turns.py", "voice_markup.py",
                    # The store's ack-token decisions (AUT-07).
