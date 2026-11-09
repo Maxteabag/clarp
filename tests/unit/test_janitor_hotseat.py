@@ -259,6 +259,47 @@ def test_real_hotseat_calls_are_bounded_and_parse_json(monkeypatch):
     assert all(kwargs_timeout <= 150 for _, kwargs_timeout in seen)
 
 
+def _ownership_persisted_frame():
+    """Actual durable candidates, including fields the public guard must preserve."""
+    return {row["agent_id"]: dict(row) for row in db.conn().execute(
+        "SELECT j.*,a.backend,a.model,a.effort,a.archived_at,a.deleted_at "
+        "FROM janitor_configs j JOIN agents a ON a.agent_id=j.agent_id "
+        "WHERE j.template_id=? ORDER BY j.agent_id", (hotseat.ROLE,))}
+
+
+def _restore_enabled_overlap(config):
+    """Deliberately inconsistent persisted fixture, NOT public-admissible config.
+
+    Keep the real admission refusal, then seed only this named test row through
+    the original storage boundary. No guard/resolver/owner result is mocked.
+    """
+    assert not db.conn().in_transaction
+    before = _ownership_persisted_frame()
+    row = before[config["agent_id"]]
+    assert row["enabled"] == 0
+    assert (row["revision"], row["generation"]) == (config["revision"], config["generation"])
+    with pytest.raises(janitors.JanitorError) as refusal:
+        janitors.set_enabled(config["session"], config["revision"], True)
+    assert refusal.value.code == "scope_conflict"
+    assert _ownership_persisted_frame() == before
+    now = db.now_ms()
+    # Independent fixture transaction, before capture/the real receipt writer;
+    # use the original store context, not the transaction hook under test.
+    with service.janitor_store.write() as c:
+        service.janitor_store.set_config_enabled(c, config["agent_id"], True, now)
+    assert not db.conn().in_transaction
+    expected = {aid: dict(value) for aid, value in before.items()}
+    expected[config["agent_id"]].update(enabled=1, revision=row["revision"] + 1,
+        generation=row["generation"] + 1, last_error="", updated_at=now)
+    assert _ownership_persisted_frame() == expected
+    restored = janitors.get(config["session"])
+    for key in ("agent_id", "template_id", "backend", "model", "effort", "revision", "generation"):
+        assert restored[key] == expected[config["agent_id"]][key]
+    assert restored["enabled"] is True
+    assert restored["scope"] == json.loads(row["scope_json"])
+    return restored
+
+
 @pytest.fixture
 def notification_ownership(switcher, monkeypatch):
     """Real configured owners and one deterministic scheduler tick; all I/O is synthetic."""
@@ -353,7 +394,7 @@ def test_threshold_notice_remains_when_no_automatic_provider_owner(notification_
     elif state == "ambiguous":
         agents.create_agent(persona="Other switcher", voice_id="v", cwd="/tmp", session="other-hotseat", backend="codex")
         cfg = janitors.create("other-hotseat", template_id="account-hotseat")
-        janitors.set_enabled(cfg["session"], cfg["revision"], True)
+        _restore_enabled_overlap(cfg)
     elif state == "restricted":
         aid = agents.create_agent(persona="Scope fixture", voice_id="v", cwd="/tmp", session="scope-fixture", backend="codex")
         cfg = janitors.configure(owner["session"], owner["revision"], scope={"agent_ids": [aid]})
@@ -535,7 +576,7 @@ def _restricted_ownership_sibling():
     target = agents.create_agent(persona="Scope target", voice_id="v", cwd="/tmp",
                                  session="restricted-target", backend="codex")
     cfg = janitors.create("restricted-hotseat", template_id="account-hotseat", scope={"agent_ids": [target]})
-    return janitors.set_enabled(cfg["session"], cfg["revision"], True)
+    return _restore_enabled_overlap(cfg)
 
 
 def test_one_unrestricted_owner_still_suppresses_with_restricted_sibling(notification_ownership):
@@ -558,7 +599,15 @@ def test_candidate_set_and_all_fingerprints_are_rechecked_at_receipt_transaction
         if change == "enable":
             sibling = janitors.configure(sibling["session"], sibling["revision"], scope={})
             sibling = janitors.set_enabled(sibling["session"], sibling["revision"], False)
+    capture_frame = _ownership_persisted_frame()
+    assert capture_frame[c["owner"]["agent_id"]]["enabled"] == 1
+    if sibling is not None:
+        actual = capture_frame[sibling["agent_id"]]
+        assert bool(actual["enabled"]) == sibling["enabled"]
+        assert json.loads(actual["scope_json"]) == sibling["scope"]
+        assert (actual["revision"], actual["generation"]) == (sibling["revision"], sibling["generation"])
     assert janitor_builtins.resolve(hotseat.ROLE)["agent_id"] == c["owner"]["agent_id"]
+    assert _ownership_persisted_frame() == capture_frame
     original_tx = settings_store.transaction
     changed = []
     @contextmanager
@@ -571,9 +620,9 @@ def test_candidate_set_and_all_fingerprints_are_rechecked_at_receipt_transaction
             if change == "new_candidate":
                 agents.create_agent(persona="New switcher", voice_id="v", cwd="/tmp", session="new-hotseat", backend="codex")
                 new = janitors.create("new-hotseat", template_id="account-hotseat")
-                janitors.set_enabled(new["session"], new["revision"], True)
+                _restore_enabled_overlap(new)
             elif change == "enable":
-                janitors.set_enabled(sibling["session"], sibling["revision"], True)
+                _restore_enabled_overlap(sibling)
             elif change == "delete": agents.soft_delete(owner["agent_id"])
             elif change == "archive": agents.set_archived(owner["agent_id"], True)
             elif change == "mode": janitors.configure(owner["session"], owner["revision"], options={"mode": "notify"})
@@ -582,7 +631,26 @@ def test_candidate_set_and_all_fingerprints_are_rechecked_at_receipt_transaction
                 janitors.configure(owner["session"], owner["revision"], scope={"agent_ids": [target]})
             elif change == "effort":
                 janitors.configure(owner["session"], owner["revision"], effort="high" if owner["effort"] != "high" else "low")
-            else: janitors.configure(sibling["session"], sibling["revision"], scope={})
+            else:
+                # configure pauses and bumps both clocks; restore enabled state
+                # explicitly. This is scope + revision/generation change, not
+                # a fictional scope-only public transition.
+                prior = _ownership_persisted_frame()[sibling["agent_id"]]
+                configured = janitors.configure(sibling["session"], sibling["revision"], scope={})
+                paused = _ownership_persisted_frame()[sibling["agent_id"]]
+                assert paused["enabled"] == 0 and json.loads(paused["scope_json"]) == {}
+                assert paused["revision"] == prior["revision"] + 1
+                assert paused["generation"] == prior["generation"] + 1
+                _restore_enabled_overlap(configured)
+                restored = _ownership_persisted_frame()[sibling["agent_id"]]
+                assert restored["enabled"] == 1 and json.loads(restored["scope_json"]) == {}
+                assert restored["revision"] == prior["revision"] + 2
+                assert restored["generation"] == prior["generation"] + 2
+                assert {k: v for k, v in restored.items() if k not in
+                        {"scope_json", "enabled", "revision", "generation", "last_error", "updated_at"}} == {
+                        k: v for k, v in prior.items() if k not in
+                        {"scope_json", "enabled", "revision", "generation", "last_error", "updated_at"}}
+        assert not db.conn().in_transaction
         with original_tx():
             yield
     monkeypatch.setattr(settings_store, "transaction", change_before_writer)
