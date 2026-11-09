@@ -61,7 +61,7 @@
           "timeout-minutes": 2,
           "with": {
             "name": "criterion5-937-matched-evidence",
-            "path": "measurement-results/\nmeasurement-setup.log\nmeasurement-source.json",
+            "path": "measurement-results/\nmeasurement-setup.log\nmeasurement-source.json\nmeasurement-source-*.json",
             "if-no-files-found": "error",
             "retention-days": 30,
             "include-hidden-files": true

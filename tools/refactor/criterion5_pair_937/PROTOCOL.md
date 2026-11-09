@@ -16,7 +16,8 @@ results; the durable outcome cannot close on the first run alone.
 
 One GitHub-hosted ubuntu24.04 job, same session/machine/CPython3.12.14/Node22/
 B-frozen Python+Node dependencies for BOTH source archives. No floating product
-checkout. Both product trees are exact git archives; the driver is the reviewed
+checkout. Both product trees are direct Git-index checkouts verified against the reviewed
+full source roster (no archive/capsule creation or extraction); the driver is the reviewed
 immutable CI branch. Same full pytest invocation/workers4 on both, source web
 assets built per pin using shared dependencies. No application secrets/runtime
 configuration/live data or transcripts enter this PUBLIC-repo workflow. Existing
@@ -99,3 +100,10 @@ independently. Unknown survivors remain separate hygiene. Uploader explicitly
 includes the synthetic hidden payloads indexed by SHA256.json; only generated
 measurement results + setup/source metadata, never external HOME/secrets, are
 retained. Exact B source re-review required; no push/job has occurred.
+
+Staging-route revision after Bpair93917: prepare invokes stage_sources.py, using
+fresh per-arm GIT_INDEX_FILE/read-tree/checkout-index and source-roster.json.
+Actual full paths/directories/modes/blobOID/size/permemberSHA256 are checked before
+any dependency build/test; identity indexes are uploaded even on later failure.
+This is NOT an archive seal or B confirmation of an unbuilt archive. Exact B
+qualification of this new route and declared source roster is REQUIRED beforeuse.
