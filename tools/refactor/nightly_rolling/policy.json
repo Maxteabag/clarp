@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "owner": "rf-harnessc-4a4a",
+  "schedule": "04:30 Europe/Oslo, from 2026-11-10",
+  "executor": "Actions until explicit heavy restoration confirmation; no automatic heavy probe",
+  "workflow": "replay.yml unchanged",
+  "pair": "previous nightly-verified main -> frozen current main",
+  "seed_proposal": "a5fd6db9db6c12125e4d98389e22571f8f9bbb9a",
+  "seed_requires": "Nov9 self-check receipt + exact captain R1 registry entry + C EACH186 typed proof + artifact digest readback",
+  "activation": "BLOCKED pending C exact source review; no state seed or scheduler replacement performed",
+  "failure": "No anchor advance on unexplained, noise, error, failed self-check, incomplete artifacts or uncertain writes/dispatch. Preserve all files. No retry or fallback anchor.",
+  "history": "Nov9 raw compare report/exit1 immutable; signed classification separate",
+  "advance": "Under single flock: immutable accepted.json fsync/readback first, then atomic state.json replacement and parent fsync/readback. Publication uncertainty holds for reconciliation.",
+  "registry": "registers/differences.md; exact run/attempt/pair/report and typed EACH-ID proof, no blanket A1 waiver",
+  "remaining": "C exact source review and actual managed activation receipt pending. Seed utility/timer/worker are authored, UNEXECUTED."
+}

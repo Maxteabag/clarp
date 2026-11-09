@@ -1,0 +1,8 @@
+[Unit]
+Description=Rolling nightly at 04:30 Europe/Oslo
+[Timer]
+OnCalendar=*-*-* 04:30:00 Europe/Oslo
+Persistent=false
+Unit=nightly-rolling.service
+[Install]
+WantedBy=timers.target
