@@ -1,0 +1,257 @@
+{
+  "scope": "PRECODE_SOURCE_DATA_ONLY_NO_IMPORTED_DEPENDENCY",
+  "parent_source": "ce6794fe5ea5b5a2d5dbcc3c7cf7919921fe6e31",
+  "dependency_lock": {
+    "path": "uv.lock",
+    "sha256": "74df07b1c87379354c79639c8309f834080b0ce2028927f1c07ad2b0ae5922da",
+    "execnet_version": "2.1.2",
+    "xdist_version": "3.8.0",
+    "locked_wheels": {
+      "execnet": "67fba928dd5a544b783f6056f449e5e3931a5c378b128bc18501f7ea79e296ec",
+      "xdist": "202ca578cfeb7370784a8c33d6d05bc6e13b4f25b5053c30a152269fd10f0b88"
+    }
+  },
+  "dependency_sources": {
+    "execnet": {
+      "cache_root": "/home/peter/.cache/uv/archive-v0/xb1v_eeasope1HC2",
+      "metadata_name_version": [
+        "Name: execnet",
+        "Version: 2.1.2"
+      ],
+      "metadata_sha256": "7343015d62b2eaa1841ec06a7c7c132aeb482921f73ab6e0fd18331495684c61",
+      "RECORD_sha256": "22b18aafbfd4df08e3474283065920b8b65e3a8d0f268935514d8388d2b86429",
+      "files": {
+        "execnet/gateway_io.py": {
+          "bytes": 8052,
+          "sha256": "724705d252297c888481135f57fa97fd12158beb932f361f865917c0aa01bb91",
+          "cache_RECORD_matches": true,
+          "AST": {
+            "32:__init__": {
+              "line": 32,
+              "end": 35,
+              "ast_sha256": "0d57d7826ea211ff7ac11f186a4ced5a95d4339d84dbf4933f0092f0fc635ac9"
+            },
+            "37:wait": {
+              "line": 37,
+              "end": 41,
+              "ast_sha256": "79c25b81282960d502924e3ea50184022fca2a330e5d136160d5b1f837602ada"
+            },
+            "147:__init__": {
+              "line": 147,
+              "end": 154,
+              "ast_sha256": "3d792e314e48b4836ae435034a4ad1a0430b7f57cfa18cc7cc0d118e2ba0d979"
+            },
+            "177:wait": {
+              "line": 177,
+              "end": 180,
+              "ast_sha256": "2f52405a9197e86736b2d4e95bc0d030372f1e28f3c372efc518e91f1646c5bf"
+            },
+            "193:__init__": {
+              "line": 193,
+              "end": 194,
+              "ast_sha256": "7c4cf053e5d8076caf418f0d95aaca23acd02638fd0fc4a3554fe4b3c5bad462"
+            }
+          }
+        },
+        "execnet/multi.py": {
+          "bytes": 11713,
+          "sha256": "adb8715003372cdd430179135053093bb7766ea7fea14d4f17c243037a57eaaa",
+          "cache_RECORD_matches": true,
+          "AST": {
+            "43:__init__": {
+              "line": 43,
+              "end": 62,
+              "ast_sha256": "30552d940e41315d0baff4b9fa0e46e04f660bf6c39ef2f80f1ee48e761c2820"
+            },
+            "210:terminate": {
+              "line": 210,
+              "end": 245,
+              "ast_sha256": "b7543bfd8eb2886844dc65159a39acced97d5528239490c7c122f8521b5d0117"
+            },
+            "261:__init__": {
+              "line": 261,
+              "end": 262,
+              "ast_sha256": "3cfa786a80eba804193b26eb3125fc32043cfe55d6b8016ce2d0fb369eed1523"
+            }
+          }
+        },
+        "execnet/gateway_base.py": {
+          "bytes": 59089,
+          "sha256": "bc91d2c7f6dc7172d4c6c02f9cee49fed743a47f2ad14e8e3cd5d9d7cd0378dc",
+          "cache_RECORD_matches": true,
+          "AST": {
+            "51:wait": {
+              "line": 51,
+              "end": 51,
+              "ast_sha256": "7f1418bab6b4c85ff48e404a89b9674fe69ab592cf2af7322b8d5ceb6da841a2"
+            },
+            "65:wait": {
+              "line": 65,
+              "end": 65,
+              "ast_sha256": "6dfd8f9f6e50133e52ee53c92923e513bd0d4a35f0ee96b8bae362ae5907f4ca"
+            },
+            "316:__init__": {
+              "line": 316,
+              "end": 319,
+              "ast_sha256": "fbab34475191bcac3aeba1e706fe52fc488324aef6a9fcaf457c7f5fdb5a8cdb"
+            },
+            "364:__init__": {
+              "line": 364,
+              "end": 375,
+              "ast_sha256": "55c3b118fcbf067d2b103ba855ce9166f2eaf20994beab4a833ca766a6f9abd1"
+            },
+            "455:terminate": {
+              "line": 455,
+              "end": 458,
+              "ast_sha256": "d2a60b2e042688d0df2c9db0b657b245682749bf2dce5e39880a604b6b0628ca"
+            },
+            "514:__init__": {
+              "line": 514,
+              "end": 527,
+              "ast_sha256": "e7fe721642cd24cb59be33fa74b36e8b0c9aae360666632ae50684a8f70ea77c"
+            },
+            "559:__init__": {
+              "line": 559,
+              "end": 562,
+              "ast_sha256": "ad8e8061252485a3c7948e2d14968d49387f75a5dfa39f20ba776d0631d5419e"
+            },
+            "679:__init__": {
+              "line": 679,
+              "end": 681,
+              "ast_sha256": "a4abf4fa1f0f5632f7c6eeca24f19e00a4d5678d1b8c2613f6aaa7e908db506f"
+            },
+            "710:__init__": {
+              "line": 710,
+              "end": 721,
+              "ast_sha256": "c8f6761bbfe6652bec411925b40937ade63ecb49f20430697abdfbf975a7ad96"
+            },
+            "970:__init__": {
+              "line": 970,
+              "end": 982,
+              "ast_sha256": "3db9764b765035168b0e6b3d97c7902e0f5fe4e84678f4c01fc6b345b485222b"
+            },
+            "1070:__init__": {
+              "line": 1070,
+              "end": 1072,
+              "ast_sha256": "06530fd0222fd7e3fab567df10d71a2f4a6571819326c0b43ba594e41ef9ce20"
+            },
+            "1095:__init__": {
+              "line": 1095,
+              "end": 1097,
+              "ast_sha256": "18a469064926bab0e2281f9f34821c296be6f26c9cf3987d7bb45f5e3c458db9"
+            },
+            "1134:__init__": {
+              "line": 1134,
+              "end": 1144,
+              "ast_sha256": "1f3d6fc697e978c1a0d783598ce10dd673a18a6fb1f6b479787291c91dd399c4"
+            },
+            "1209:join": {
+              "line": 1209,
+              "end": 1212,
+              "ast_sha256": "0a93b05a404016d3f3e19cbda88d2da7357ed1082d4e6193814e658ae4e6015f"
+            },
+            "1384:__init__": {
+              "line": 1384,
+              "end": 1402,
+              "ast_sha256": "dafcca2c44efa82fe777a19604292b2b18fa8ddeab13b0090da9487e3ffd9cd4"
+            },
+            "1635:__init__": {
+              "line": 1635,
+              "end": 1639,
+              "ast_sha256": "146f584714745c8ad7dc3039a02f88834a6733be63c8bbb7910807725f346fe3"
+            }
+          }
+        }
+      }
+    },
+    "xdist": {
+      "cache_root": "/home/peter/.cache/uv/archive-v0/1XnxWrUBCUWauaUY",
+      "metadata_name_version": [
+        "Name: pytest-xdist",
+        "Version: 3.8.0"
+      ],
+      "metadata_sha256": "298f16af52794d340c358fc2eb20b054a29db2922f22fea90a35b459ecbcc18f",
+      "RECORD_sha256": "4a65824446fad10f397c52ad8ee9396764b3a1f2f33ae3be344ad5f455ef92db",
+      "files": {
+        "xdist/workermanage.py": {
+          "bytes": 18850,
+          "sha256": "efbca7d514fb94bd16ef566862a435dc7a541cb1ffd1d3826fc0cf2026fca3de",
+          "cache_RECORD_matches": true,
+          "AST": {
+            "48:__init__": {
+              "line": 48,
+              "end": 83,
+              "ast_sha256": "6d31572799af9ba7841ed02b47270081b9f2cf1c47e026a1f9a53b2259029f55"
+            },
+            "99:setup_node": {
+              "line": 99,
+              "end": 114,
+              "ast_sha256": "9e47a1b11fb6b4a1c48f9dc043972807d3c49f2639f20df3ecc9be439982fde6"
+            },
+            "116:teardown_nodes": {
+              "line": 116,
+              "end": 117,
+              "ast_sha256": "5a25d93b9c8118cfc90f637e5d8a930f0aa5ea01da7c2b957d7a51ef70b32999"
+            },
+            "215:__init__": {
+              "line": 215,
+              "end": 225,
+              "ast_sha256": "dcfd1cbfa4692aac0002822608e7dc8c4a6909e57afce6185ccae7c52664cb81"
+            },
+            "296:__init__": {
+              "line": 296,
+              "end": 316,
+              "ast_sha256": "b2123c571f7de0cb5af37cc79ec75cc7cadc93d7fa2aca77d678bc9ed2b595d8"
+            }
+          }
+        },
+        "xdist/remote.py": {
+          "bytes": 14693,
+          "sha256": "86d2f8132b3ef7e190f622c2b3cfd83cde464a4dd07ccd75486b27b161336b3d",
+          "cache_RECORD_matches": true,
+          "AST": {
+            "47:__init__": {
+              "line": 47,
+              "end": 49,
+              "ast_sha256": "d48521ad1372f8b3091bf4e0d513de2614cf7ebd489aefc5161440be552c6579"
+            },
+            "79:__init__": {
+              "line": 79,
+              "end": 82,
+              "ast_sha256": "f0037c45a48bd1169462f89d240b8e164f58e800600b27c0eed8d68c9d5441fe"
+            },
+            "113:__init__": {
+              "line": 113,
+              "end": 122,
+              "ast_sha256": "a02fe86657b0b62c577cf832ffb7270a778fb249508d3573ad6beba018189efe"
+            },
+            "142:pytest_sessionfinish": {
+              "line": 142,
+              "end": 149,
+              "ast_sha256": "eb6377c13802bff0e6628fa8d381d622dbbf1d44e599ddeb1f2311a2b457c2d5"
+            }
+          }
+        }
+      }
+    }
+  },
+  "cache_to_independently_locked_wheel_authentication": "OPEN; local RECORD consistency alone is not independent archive proof",
+  "compute_disposition": {
+    "path": "/var/tmp/clarp-refactor-program/rf-compute/measurement937/ORDINARY-PARENT-SOURCE-DISPOSITION-R1.md",
+    "sha256": "359ebb38ae48d0608c9d6f539c2b0f5b4e2d189ba17ff8dd8ac37d57339b183f",
+    "refs_path": "/var/tmp/clarp-refactor-program/rf-compute/measurement937/ORDINARY-PARENT-SOURCE-DISPOSITION-R1-REFS.json",
+    "refs_sha256": "4b69581741581164ec541d22833f448983e1f3b1c77f0901bf7f60982eab9631",
+    "all10_retained_ref_hashes_verified": true,
+    "scope": "Declared nine-actor+collector enforcement not established, not impossibility"
+  },
+  "facts": [
+    "xdist.setup_node makes gateway then newgateway hook BEFORE WorkerController.setup remote_exec",
+    "execnet Popen2IOMaster retains real subprocess.Popen on self.popen",
+    "Group.terminate join_wait calls gw.join then gw._io.wait; current body discards wait result",
+    "Popen2IOMaster.wait delegates self.popen.wait; OSError returns None, no success inference",
+    "No live birth/wait/actor evidence recorded by this source readback"
+  ],
+  "implemented": false,
+  "executed": false,
+  "source_ready": false
+}
