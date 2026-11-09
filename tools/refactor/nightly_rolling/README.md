@@ -50,3 +50,29 @@ Open before activation: C exact source review, verified installation/seed/timer 
 is authored and unexecuted; it delivers one nightly result, retains uncertain
 delivery without resend, and checks job ownership before GitHub mutations. No
 activation receipt exists yet. Syntax/AST checks alone do not qualify runtime.
+
+## C findings repair (source only)
+
+F1: retain the full actual job log and actual jobs/step receipt, not stdout ZIP
+alone. Failure requires the sole runner error to be exact Process-completed
+exit1; any other exit/error/traceback/noise is HOLD. Success requires completed
+runner Replay-shell success (the runner's exit0 result) plus no error markers.
+The unchanged pipefail workflow stays unchanged. Both require the native final
+`run directory` line printed after `run.release` returns, so a report followed
+by a cleanup exception cannot qualify. Step/run/log/artifact identity and hashes
+are bound in evidence. No explicit exit0 marker is invented: GitHub does not emit
+one for a successful shell step; this exit origin is named in the receipt.
+
+F2: all ZIP/raw/job-log/registry/proof and metadata files use exclusive bounded
+write+file fsync+directory fsync+exact readback. accepted.json binds the retained
+inventory hash/size and is written only after all those publications succeed.
+Seed copies its exact reviewed historical bytes/receipts into its own durable
+inventory before pointer publication. Incomplete writes stop without retry.
+
+F3: unknown ownership preserves the SAME handle and pauses with bounded backoff;
+it never means cancellation or a new generation. Controller checks before each
+remote mutation and immediately before pointer replacement. Report VERIFIED
+requires actual controller rc0 AND exact pointer/accepted/inventory/full-evidence
+agreement. A receipt alone, failed pointer publication or unreadable state is
+HOLD/publication UNKNOWN. The worker retains its own log and single-result policy.
+All repairs are source only; no replay/helper/seed/job/timer activation executed.
