@@ -1,0 +1,86 @@
+{
+  "operator_source": "7466afefe410579e855c38f2e3afa3c4a96b7eec",
+  "subset": "BYTE_EXACT12_SOURCE_DEPENDENCIES_ONLY_NOT_FULL36MF",
+  "selected": [
+    "test_natural_zero933.NaturalZero933.test_natural_zero_positive_join_completion_and_ordinary_policies",
+    "test_natural_zero933.NaturalZero933.test_natural_zero_without_positive_join_is_unknown_not_admission",
+    "test_natural_zero933.NaturalZero933.test_actual_one_real_registry_validator_and_policy_path_retained"
+  ],
+  "bindings": {
+    ".queue933-natural0-proof/SHA256SUMS": {
+      "bytes": 1088,
+      "sha256": "a2f3b90cf358e8b0d01f159a7e26e355531cac61f684a2bef63f9dadca305039"
+    },
+    ".queue933-natural0-proof/SOURCE_COMMIT": {
+      "bytes": 41,
+      "sha256": "6b02206d209ffbb5a939a582476698612ba5fe78260b6dca6f3ff0b362bdba8b"
+    },
+    ".queue933-natural0-proof/ops/baseline-reuse904.py": {
+      "bytes": 12877,
+      "sha256": "7dccb3f61c39e6ba22d3b27810fd7f1d6fd28b3e10cc7425c4490ed2cb1273f5"
+    },
+    ".queue933-natural0-proof/ops/eligibility-watch.py": {
+      "bytes": 11216,
+      "sha256": "c3ef7d1e3918394b44fe575c34aa02dd865a6e09f5a2771316330e6ceb8a3c3a"
+    },
+    ".queue933-natural0-proof/ops/error-window927.py": {
+      "bytes": 11086,
+      "sha256": "b12126478792a978bf3db3e65c77cebadceca936887d2fb3a4fe85a79070a05f"
+    },
+    ".queue933-natural0-proof/ops/live-watch.py": {
+      "bytes": 8900,
+      "sha256": "d92600d9d4ca7fb6fa4fa07d34958222ee2b9a6574b3249982603a187bd42420"
+    },
+    ".queue933-natural0-proof/ops/natural-runtime933.py": {
+      "bytes": 15522,
+      "sha256": "bb49b7b391b2d619a3b65c0dec6b69842fdc454abbb6e884eb599d3938226a71"
+    },
+    ".queue933-natural0-proof/ops/release-metrics.py": {
+      "bytes": 22965,
+      "sha256": "f2c900bc2c271ce10de7b52f44547c26cf12d9e30b4ddd7118a7ec4e2366e6f0"
+    },
+    ".queue933-natural0-proof/ops/reship-operator.py": {
+      "bytes": 33366,
+      "sha256": "3c265e7832a99f25855dccdda17cc393b41a077e1dfa3291e19edfa0b13ec500"
+    },
+    ".queue933-natural0-proof/ops/rss-continuity911.py": {
+      "bytes": 4338,
+      "sha256": "14650bff03eb124a836b407b25fb99f41e64ec91d1db61d6fe8b7141193adea1"
+    },
+    ".queue933-natural0-proof/ops/runtime-availability.py": {
+      "bytes": 9016,
+      "sha256": "f3ab6daf3d1bdb7a8a2aa1bc9125dda2ce10403bcbb30bda491ff2386ed9ac87"
+    },
+    ".queue933-natural0-proof/ops/transition933.py": {
+      "bytes": 47019,
+      "sha256": "2a30afbf2c40e1f2bad9d042c84628110b64084d64e6bc14e03cd662f0a6636b"
+    },
+    ".queue933-natural0-proof/run-proof.sh": {
+      "bytes": 1689,
+      "sha256": "8a20954153e9bb530835262c8fa2368ba04f78427e241f90fa7933f1c252e156"
+    },
+    ".queue933-natural0-proof/run-selected.sh": {
+      "bytes": 2388,
+      "sha256": "0bb7ce7c3e15ca25b606f4019a15dce1389b06d98333fdca1f4c0f3245e09699"
+    },
+    ".queue933-natural0-proof/support/runtime_bridge931.py": {
+      "bytes": 49790,
+      "sha256": "6995a57d0eea07e8eb17e6056c47c02c94be7f5c94c66454d94345e1fb211c66"
+    },
+    ".queue933-natural0-proof/tests/test_natural_zero933.py": {
+      "bytes": 16225,
+      "sha256": "c83223c55b1aace7c4d9ee31de4a09d3fd07e1940a422d82918bd3befdeb1aa0"
+    },
+    "scripts/ci_contained.sh": {
+      "bytes": 4376,
+      "sha256": "07f228044e915297a84a52201e68e40a34809928fcf0ecb8d300b692ee5d067f"
+    },
+    "scripts/ci_containment_selfcheck.py": {
+      "bytes": 6816,
+      "sha256": "91a5b503b559eb6e7f1ceaf495199496c65851627e361cffdf47dc4be60546fb"
+    }
+  },
+  "effect_scope": "syntheticprivatefixtureconsumersONLY/no main/helper/native/checker execution; NO ATTEMPT/registry/native/PRE/config/approval/output captures",
+  "frozen_helpers": "exact1ca containment2 unchanged;022call only, outer077/results0700",
+  "proof_scope": "THREEfocusedcontrols only; notI4/15/5/ONE repeat or nativeproof"
+}
