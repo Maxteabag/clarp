@@ -86,6 +86,8 @@ def observe_originals(*, paths, receipt_root, limits):
                 if (path.name != 'coverage-pid-' + pid + '.data' or not pid.isascii()
                         or not pid.isdecimal() or int(pid) <= 0 or str(int(pid)) != pid):
                     raise ValueError('native PID data basename required')
+        if any(os.path.lexists(text + suffix) for suffix in ('-wal', '-shm', '-journal')):
+            raise ValueError('original associated sidecar before streams')
         info = path.lstat()
         identity = info.st_dev, info.st_ino
         if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_uid != os.geteuid()

@@ -61,10 +61,11 @@ def run_originals_storage_control(*, root):
                               ('wrong_channel', 'role/phase'),
                               ('inventory_cap', 'entry bound'),
                               ('partial', 'unexpected original'),
-                              ('existing_index', 'unexpected original')):
+                              ('existing_index', 'unexpected original'),
+                              ('declared_sidecar', 'original associated sidecar')):
             bad_paths = dict(paths)
             bad_limits = {**limits, 'file_bytes': dict(limits['file_bytes'])}
-            extra = None
+            extra, moved_archive = None, None
             if label == 'small_file':
                 bad_limits['file_bytes']['catalog'] = 1
             elif label == 'small_total':
@@ -75,6 +76,12 @@ def run_originals_storage_control(*, root):
                 bad_paths['gw0.start'] = paths['controller.start']
             elif label == 'inventory_cap':
                 bad_limits['inventory_entries'] = 1
+            elif label == 'declared_sidecar':
+                # Valid declared binding basename hides a different original's
+                # sidecar from an ordinary exact-name inventory. No new file.
+                moved_archive = root / 'gw7.finish.json-wal'
+                Path(paths['archive']).rename(moved_archive)
+                bad_paths['archive'] = str(moved_archive)
             else:
                 extra = root / ('controller.finish.json.partial' if label == 'partial' else 'index.json')
                 with extra.open('xb') as stream:
@@ -91,6 +98,8 @@ def run_originals_storage_control(*, root):
             finally:
                 # Only the fixture removes its own newly introduced diagnostic.
                 # The collector never deletes/retries/repairs any candidate.
+                if moved_archive is not None:
+                    moved_archive.rename(paths['archive'])
                 if extra is not None:
                     extra.unlink()
     finally:
