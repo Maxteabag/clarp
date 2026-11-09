@@ -12,20 +12,23 @@ from types import SimpleNamespace
 from . import coverage_retained_bytes as reader
 
 
-def run_retained_reader_fault_table(observation):
+def run_retained_reader_fault_table(observation, *, operation='read'):
+    if operation not in ('read', 'hash'):
+        raise ValueError('fixed reader control operation required')
+    target = reader.read_retained_bytes if operation == 'read' else reader.hash_retained_bytes
     # Same real file established by the existing storage owner. No fabricated
     # successful receipt, new file creation or independent native API workload.
     info = Path(observation['path']).stat()
     limits = {'byte_limit': 200000, 'path_bytes_limit': 4096}
-    for field in ('dev', 'ino', 'bytes', 'mtime_ns', 'ctime_ns'):
-        bad = dict(observation); bad[field] = True
-        try:
-            reader.check_observation(bad, **limits)
-        except ValueError:
-            pass
-        else:
-            raise AssertionError('boolean physical identity accepted')
-
+    if operation == 'read':  # one shared metadata owner; do not duplicate these rows
+        for field in ('dev', 'ino', 'bytes', 'mtime_ns', 'ctime_ns'):
+            bad = dict(observation); bad[field] = True
+            try:
+                reader.check_observation(bad, **limits)
+            except ValueError:
+                pass
+            else:
+                raise AssertionError('boolean physical identity accepted')
     def contains(root, target):
         return (root is target or root is not None and
                 (contains(root.__cause__, target)
@@ -82,7 +85,7 @@ def run_retained_reader_fault_table(observation):
             reader._root = root
             try:
                 try:
-                    reader.read_retained_bytes(observation, **limits)
+                    target(observation, **limits)
                     calls['next_input_or_decode'] += 1
                 except Exception as error:
                     caught, ordinary = error, True
@@ -104,4 +107,4 @@ def run_retained_reader_fault_table(observation):
                          'hexdigest': 0, 'next_input_or_decode': 0}
         labels.append(label)
     return {'scope': 'LOWER_ACTUAL_READER_FAULT_ADAPTER_NOT_REAL_SIGNAL_OR_PRODUCER_PROOF',
-            'fault_outcomes': labels, 'boolean_observation_refusals': 5}
+            'fault_outcomes': labels, 'boolean_observation_refusals': 5 if operation == 'read' else 0}

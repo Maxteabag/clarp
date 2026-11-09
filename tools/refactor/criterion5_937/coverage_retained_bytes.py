@@ -46,7 +46,9 @@ def check_observation(observation, *, byte_limit, path_bytes_limit):
     return path
 
 
-def read_retained_bytes(observation, *, byte_limit, path_bytes_limit):
+def _consume_retained(observation, *, byte_limit, path_bytes_limit, retain_bytes):
+    if type(retain_bytes) is not bool:
+        raise ValueError('fixed retained-byte operation required')
     if socket.gethostname() == 'laptopstudio':
         raise RuntimeError('BUILDBOX_ONLY; no local reader/control authority')
     path = check_observation(observation, byte_limit=byte_limit, path_bytes_limit=path_bytes_limit)
@@ -58,20 +60,24 @@ def read_retained_bytes(observation, *, byte_limit, path_bytes_limit):
         raise ValueError('retained artifact has unresolved sidecars')
     if not _opened_matches(path.lstat(), expected):
         raise ValueError('retained artifact differs before bounded read')
-    fd, primary, raw, digest = None, None, bytearray(), hashlib.sha256()
+    fd, primary, count = None, None, 0
+    raw = bytearray() if retain_bytes else None
+    digest = hashlib.sha256()
     try:
         fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
         if not _opened_matches(os.fstat(fd), expected):
             raise ValueError('retained read descriptor changed from observed file')
         while True:
-            chunk = os.read(fd, min(CHUNK, expected['bytes'] - len(raw) + 1))
+            chunk = os.read(fd, min(CHUNK, expected['bytes'] - count + 1))
             if not chunk:
                 break
-            if len(raw) + len(chunk) > expected['bytes']:
+            if count + len(chunk) > expected['bytes']:
                 raise ValueError('retained artifact grew during read')
-            raw.extend(chunk)
+            count += len(chunk)
+            if retain_bytes:
+                raw.extend(chunk)
             digest.update(chunk)
-        if len(raw) != expected['bytes'] or not _opened_matches(os.fstat(fd), expected):
+        if count != expected['bytes'] or not _opened_matches(os.fstat(fd), expected):
             raise ValueError('retained artifact short read/version mismatch')
     except BaseException as error:
         primary = error
@@ -84,11 +90,32 @@ def read_retained_bytes(observation, *, byte_limit, path_bytes_limit):
     if primary is not None:
         raise primary  # no post-snapshot/hash/decode/next input on failure/control
     current = _root(root).stat()
+    after = path.lstat()
     if ((current.st_dev, current.st_ino) != root_identity
-            or not _opened_matches(path.lstat(), expected)):
+            or not _opened_matches(after, expected)):
         raise ValueError('retained root/file epoch changed during read')
     if any(os.path.lexists(str(path) + suffix) for suffix in ('-wal', '-shm', '-journal')):
         raise ValueError('sidecar appeared during retained read')
-    if digest.hexdigest() != expected['sha256']:
+    actual_hash = digest.hexdigest()
+    if actual_hash != expected['sha256']:
         raise ValueError('actual retained bytes differ from observed digest')
-    return bytes(raw)  # actual bytes, NOT semantic/source/producer acceptance
+    if retain_bytes:
+        return bytes(raw)  # original bytes, NOT source/producer acceptance
+    return {'path': str(path), 'dev': after.st_dev, 'ino': after.st_ino,
+            'bytes': count, 'mtime_ns': after.st_mtime_ns, 'ctime_ns': after.st_ctime_ns,
+            'sha256': actual_hash}  # actual observation, NOT provenance acceptance
+
+
+def read_retained_bytes(observation, *, byte_limit, path_bytes_limit):
+    return _consume_retained(observation, byte_limit=byte_limit,
+                             path_bytes_limit=path_bytes_limit, retain_bytes=True)
+
+
+def hash_retained_bytes(observation, *, byte_limit, path_bytes_limit):
+    """Same exact-version owner; chunks hashed without a whole-file buffer.
+
+    This does not bound kernel page cache/IO/CPU or all memory/whole-package fit.
+    No extraction/import/JSON decode or source/producer authentication.
+    """
+    return _consume_retained(observation, byte_limit=byte_limit,
+                             path_bytes_limit=path_bytes_limit, retain_bytes=False)
