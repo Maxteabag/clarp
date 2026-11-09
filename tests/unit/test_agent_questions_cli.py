@@ -193,3 +193,36 @@ def test_wait_times_out_while_still_pending(monkeypatch, capsys):
     monkeypatch.setattr(time, "sleep", lambda seconds: None)
     assert cli.main(["cli", "wait", "artifact-1", "--timeout", "4"]) == 4
     assert json.loads(capsys.readouterr().out)["timeout"] is True
+
+
+def test_answer_on_behalf_checks_support_and_sends_provenance(monkeypatch):
+    calls = []
+
+    def request(method, path, body=None):
+        calls.append((method, path, body))
+        if method == "GET":
+            return {"contract": {"features": {"decision_on_behalf": 79}}}
+        return {"artifact": {"decision": {"resolved_by": "agent:nori"}}}
+
+    monkeypatch.setattr(cli, "_request", request)
+    assert cli.main(["cli", "answer-on-behalf", "nori", "decision-1", "3",
+                     json.dumps({"answer": {"option_id": "keep"}})]) == 0
+    assert calls[0] == ("GET", "/server-info", None)
+    method, path, body = calls[1]
+    assert (method, path) == ("POST", "/decisions/decision-1/resolve")
+    assert body == {"answer": {"option_id": "keep"}, "expected_revision": 3,
+                    "on_behalf_session": "nori"}
+
+
+def test_answer_on_behalf_refuses_old_host_before_any_mutation(monkeypatch, capsys):
+    calls = []
+
+    def old_host(method, path, body=None):
+        calls.append(method)
+        return {"contract": {"features": {}}}
+
+    monkeypatch.setattr(cli, "_request", old_host)
+    assert cli.main(["cli", "answer-on-behalf", "nori", "decision-1", "1",
+                     json.dumps({"choice": "accepted"})]) == 1
+    assert calls == ["GET"]
+    assert "does not support answering on the user's behalf" in capsys.readouterr().err
