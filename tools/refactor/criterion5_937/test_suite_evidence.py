@@ -320,3 +320,118 @@ def test_retained_phase_lower_boolean_counter_refuses():
     with pytest.raises(ValueError):
         decode_phase_record(_decoder_raw(row), config_raw=config, role='gw0', phase='finish',
                             artifact_path='/private/coverage-out/gw0.finish.json', limits=DECODE_LIMITS)
+
+
+# LOWER index/declaration fixtures only. Physical versions/digests below are
+# synthetic except config/index byte hashes; there are NO actual source files.
+def _index_fixture():
+    config, _, _ = _decoder_fixture()
+    spec = json.loads(config)
+    spec['coverage_config'] = '/private/bindings/coverage.ini'
+    spec['coverage_config_sha256'] = '3cc8a9f20b04a5bd3e287364480ddfc039e996954da359540f1fe24472cf7de7'
+    config = _decoder_raw(spec)
+    numbers = iter(range(1, 100))
+
+    def observed(path, *, size=100, digest='a' * 64):
+        return {'path': path, 'dev': 1, 'ino': next(numbers), 'bytes': size,
+                'mtime_ns': 0, 'ctime_ns': 0, 'sha256': digest}
+
+    bindings = {
+        'catalog': observed('/private/bindings/catalog.json', digest=
+                            'c060901c910043552254a72d5c727646a84ac77bbca58a7bc61d10ea685d9f19'),
+        'archive': observed('/private/bindings/coverage.tar.gz', digest=
+                            '49d58df8284f40cb16b781d5fc8b1d4fdefe185ce0c691e39e4b73d1f83c575b'),
+        'profile': observed(spec['coverage_config'], digest=spec['coverage_config_sha256']),
+        'config': observed('/private/bindings/config.json', size=len(config),
+                           digest=hashlib.sha256(config).hexdigest()),
+        'index': observed('/private/bindings/run-index.json')}
+    receipts_index = {role: {phase: observed('/private/coverage-out/' + role + '.' + phase + '.json')
+                              for phase in ('start', 'finish')} for role in ROLES}
+    data = {role: {kind: observed(parent + '/coverage-pid-' + str(100 + i) + '.data')
+                   for kind, parent in (('original_observation', '/private/coverage-out'),
+                                        ('copy_observation', '/private/copies'))}
+            for i, role in enumerate(ROLES)}
+    index = {'format': 'criterion5-937-run-receipt-index-v1', 'pin': spec['pin'],
+             'run_id': spec['run_id'], 'config_sha256': hashlib.sha256(config).hexdigest(),
+             'roles': deepcopy(receipts_index)}
+    raw = _decoder_raw(index)
+    bindings['index'].update(bytes=len(raw), sha256=hashlib.sha256(raw).hexdigest())
+    names = set(bindings) | {role + '.' + phase for role in ROLES for phase in ('start', 'finish')}
+    return {'raw': raw, 'config_raw': config, 'bindings': bindings, 'receipts': receipts_index,
+            'data_observations': data, 'receipt_root': '/private/coverage-out',
+            'output_roots': {key: '/private/' + key for key in ('aggregate', 'verify', 'graph', 'report')},
+            'limits': {'artifact_bytes': {name: 1000000 for name in names},
+                       'total_artifact_bytes': 10000000, 'path_bytes': 4096,
+                       'data_file_bytes': 1000000, 'total_data_bytes': 18000000},
+            'json_limits': DECODE_LIMITS}
+
+
+def test_retained_index_lower_complete_declarations_not_authentication():
+    from .coverage_receipt_index import decode_receipt_index, preflight_inputs
+    args = _index_fixture()
+    index = decode_receipt_index(**args)
+    assert set(index['roles']) == set(ROLES)
+    assert index['roles']['gw0']['start']['path'] == '/private/coverage-out/gw0.start.json'
+    preflight = preflight_inputs(**{key: args[key] for key in (
+        'bindings', 'receipts', 'data_observations', 'receipt_root', 'output_roots', 'limits')})
+    assert preflight['declared_artifact_count'] == 23
+    assert preflight['declared_protected_data_count'] == 18
+    assert preflight['actual_source_run_or_byte_authentication_accepted'] is False
+
+
+@pytest.mark.parametrize('fault', ['missing-profile', 'missing-role', 'bool-observation',
+                                  'shared-inode', 'wrong-phase-path', 'data-alias',
+                                  'output-overlap', 'artifact-total', 'data-total',
+                                  'wrong-profile-hash', 'extra-observation', 'missing-copy'])
+def test_retained_index_lower_prefile_declarations_refuse(fault):
+    from .coverage_receipt_index import preflight_inputs
+    args = _index_fixture()
+    if fault == 'missing-profile':
+        del args['bindings']['profile']
+    elif fault == 'missing-role':
+        del args['receipts']['gw7']
+    elif fault == 'bool-observation':
+        args['receipts']['gw0']['start']['ino'] = True
+    elif fault == 'shared-inode':
+        args['receipts']['gw0']['start']['ino'] = args['receipts']['gw1']['start']['ino']
+    elif fault == 'wrong-phase-path':
+        args['receipts']['gw0']['start']['path'] = '/private/coverage-out/gw0.other.json'
+    elif fault == 'data-alias':
+        args['data_observations']['gw0']['copy_observation']['ino'] = args['bindings']['catalog']['ino']
+    elif fault == 'output-overlap':
+        args['output_roots']['graph'] = '/private/coverage-out'
+    elif fault == 'artifact-total':
+        args['limits']['total_artifact_bytes'] = 1
+    elif fault == 'data-total':
+        args['limits']['total_data_bytes'] = 1
+    elif fault == 'wrong-profile-hash':
+        args['bindings']['profile']['sha256'] = 'd' * 64
+    elif fault == 'extra-observation':
+        args['bindings']['config']['accepted'] = True
+    elif fault == 'missing-copy':
+        del args['data_observations']['gw0']['copy_observation']
+    with pytest.raises(ValueError):
+        preflight_inputs(**{key: args[key] for key in (
+            'bindings', 'receipts', 'data_observations', 'receipt_root', 'output_roots', 'limits')})
+
+
+@pytest.mark.parametrize('fault', ['run', 'config-hash', 'format', 'index-bool-identity'])
+def test_retained_index_lower_actual_raw_linkage_types(fault):
+    from .coverage_receipt_index import decode_receipt_index
+    args = _index_fixture()
+    index = json.loads(args['raw'])
+    if fault == 'run':
+        index['run_id'] = 'another-run'
+    elif fault == 'config-hash':
+        index['config_sha256'] = 'f' * 64
+    elif fault == 'format':
+        index['format'] = 'unknown'
+    else:
+        assert index['roles']['gw0']['start']['dev'] == 1
+        index['roles']['gw0']['start']['dev'] = True  # ordinary equality would hide this
+    args['raw'] = _decoder_raw(index)
+    args['bindings']['index'].update(bytes=len(args['raw']), sha256=hashlib.sha256(args['raw']).hexdigest())
+    original = hashlib.sha256(args['raw']).hexdigest()
+    with pytest.raises(ValueError):
+        decode_receipt_index(**args)
+    assert hashlib.sha256(args['raw']).hexdigest() == original
