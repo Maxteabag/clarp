@@ -174,13 +174,19 @@ def run_originals_storage_control(*, root, coverage_archive_path):
     assert result['index_observation']['sha256'] == hashlib.sha256(index_raw).hexdigest()
     assert result['index_observation']['bytes'] == len(index_raw)
     try:
-        publish_original_index(paths=paths, receipt_root=str(receipt_root), index_root=str(index_root),
-                               limits=limits, json_limits=DECODE_LIMITS, index_limits=index_limits,
-                               actual_exit=0, outer_seconds=10.0, cohort=NODES)
-    except ValueError as error:
-        assert 'unexpected original' in str(error)
-    else:
-        raise AssertionError('existing early index overwritten/reused')
+        collector.observe_file = forbidden_stream
+        try:
+            publish_original_index(paths=paths, receipt_root=str(receipt_root), index_root=str(index_root),
+                                   limits=limits, json_limits=DECODE_LIMITS, index_limits=index_limits,
+                                   actual_exit=0, outer_seconds=10.0, cohort=NODES)
+        except ValueError as error:
+            assert 'unexpected original' in str(error)
+        else:
+            raise AssertionError('existing early index overwritten/reused')
+    finally:
+        collector.observe_file = original_observer
+    assert not calls
+    assert collector.observe_file is original_observer
     assert (index_root / 'index.json').read_bytes() == index_raw
     assert owner.read_bytes() == owner_before
     assert all(Path(paths[label]).read_bytes() == raw for label, raw in original_bytes.items())
