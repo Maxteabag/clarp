@@ -2,7 +2,11 @@
 from __future__ import annotations
 
 import itertools
+import json
+import threading
 import time
+
+import pytest
 
 from lib import agents as agents_db
 from lib import artifacts, db, message_store, user_notifications
@@ -722,3 +726,171 @@ def test_reclassify_checks_admit_before_each_selected_row(monkeypatch):
         agent_id=aid, backend_session_id=backend, now_ms_value=done_ts + 1000,
         admit=lambda: next(answers))
     assert flipped == []
+
+
+# Backlog 55: repeated completion observations must publish a reply only once.
+class _NotificationStream:
+    def __init__(self):
+        self.events = []
+
+    def broadcast(self, event, **kwargs):
+        self.events.append(dict(event))
+
+
+def _notification_publisher(monkeypatch):
+    from lib import apns, state_watcher
+    monkeypatch.setattr(user_notifications, "SETTLE_TIMEOUT_S", 0)
+    pushes = []
+    monkeypatch.setattr(apns, "on_user_notification",
+                        lambda notification: pushes.append(dict(notification)))
+    stream = _NotificationStream()
+    watcher = state_watcher.StateLogWatcher(stream)
+    return watcher, stream, pushes
+
+
+def _completion_reply():
+    """A durable execution whose final import lands just after its first DONE."""
+    aid = _agent()
+    trace = f"completion-{next(_IDS)}"
+    agents_db.open_turn(agent_id=aid, source="pwa", trace_id=trace)
+    user = message_store.record_user_message(
+        agent_id=aid, backend_session_id="bs-1", client_msg_id=trace,
+        text="Please finish this", origin="user", trace_id=trace)
+    done = db.now_ms() + 1000
+    source = f"reply-{trace}"
+    db.conn().execute(
+        """INSERT INTO messages (message_id, agent_id, backend_session_id,
+               seq, role, text, tools_json, updated_at, origin, trace_id)
+           VALUES (?, ?, 'bs-1', 1, 'assistant', 'Finished.', '[]', ?, 'user', ?)""",
+        (source, aid, done + 100, trace))
+    return aid, trace, user["id"], source, done
+
+
+def _publish_completion(watcher, aid, trace, done):
+    watcher._classify_completed_turn(
+        agent_id=aid, session="arnold", persona="Arnold", done_ts=done,
+        detail={"trace_id": trace, "backend_session_id": "bs-1"})
+
+
+def _notification_rows(aid):
+    return [dict(row) for row in db.conn().execute(
+        "SELECT * FROM user_notifications WHERE agent_id=? ORDER BY done_ts", (aid,))]
+
+
+@pytest.mark.parametrize("identities", [
+    ("known", "known"), ("", ""), ("unknown", "unknown"),
+    ("known", "unknown"), ("unknown", "known"),
+])
+def test_repeated_completion_publishes_one_source_across_identities(monkeypatch, identities):
+    watcher, stream, pushes = _notification_publisher(monkeypatch)
+    aid, trace, cause, source, done = _completion_reply()
+    for index, identity in enumerate(identities):
+        _publish_completion(watcher, aid, trace if identity == "known" else identity,
+                            done + index * 1000)
+        if identities == ("known", "known") and index == 0:
+            # Reproduce the prior-DONE boundary, with the same imported source
+            # still inside the second selector floor. Own cause predates DONE.
+            db.conn().execute(
+                "INSERT INTO state_log (agent_id, ts, kind, detail) VALUES (?, ?, 'done', ?)",
+                (aid, done, json.dumps({"trace_id": trace, "backend_session_id": "bs-1"})))
+    rows = _notification_rows(aid)
+    assert {r["cause_message_id"] for r in rows} == {cause}
+    assert {r["source_message_id"] for r in rows} == {source}
+    assert len(pushes) == 1
+    assert len(stream.events) == 1
+    assert stream.events[0]["source_message_id"] == source
+    assert sum(r["notify"] for r in rows) == 1
+    assert sum(r["unread"] for r in rows) == 1
+
+
+def test_same_completion_preserves_a_read_original_without_republication(monkeypatch):
+    watcher, stream, pushes = _notification_publisher(monkeypatch)
+    aid, trace, _, _, done = _completion_reply()
+    _publish_completion(watcher, aid, trace, done)
+    db.conn().execute("UPDATE user_notifications SET unread=0 WHERE agent_id=?", (aid,))
+    original = _notification_rows(aid)
+    _publish_completion(watcher, aid, trace, done)
+    assert _notification_rows(aid) == original
+    assert len(pushes) == len(stream.events) == 1
+
+
+def test_default_completion_clock_does_not_create_another_publication(monkeypatch):
+    watcher, stream, pushes = _notification_publisher(monkeypatch)
+    aid, trace, _, _, done = _completion_reply()
+    for observed in (done, done + 1000):
+        monkeypatch.setattr(db, "now_ms", lambda: observed)
+        _publish_completion(watcher, aid, trace, 0)
+    assert len(pushes) == len(stream.events) == 1
+    assert sum(row["notify"] for row in _notification_rows(aid)) == 1
+
+
+def test_concurrent_completion_connections_admit_one_publication(monkeypatch):
+    watcher, stream, pushes = _notification_publisher(monkeypatch)
+    aid, trace, _, source, done = _completion_reply()
+    ready = threading.Barrier(2)
+    connections, errors = [], []
+
+    def settle(select, timeout):
+        selected = select()
+        assert selected[0]["message_id"] == source
+        connections.append(id(db.conn()))
+        ready.wait(timeout=5)
+        return selected
+
+    monkeypatch.setattr(user_notifications, "_settle_wait", settle)
+
+    def complete(timestamp):
+        try:
+            _publish_completion(watcher, aid, trace, timestamp)
+        except BaseException as exc:
+            errors.append(exc)
+        finally:
+            db.close_local()
+
+    workers = [threading.Thread(target=complete, args=(done + index * 1000,))
+               for index in range(2)]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join(timeout=10)
+    assert all(not worker.is_alive() for worker in workers)
+    assert errors == []
+    assert len(set(connections)) == 2
+    assert len(pushes) == len(stream.events) == 1
+    assert sum(row["notify"] for row in _notification_rows(aid)) == 1
+
+
+def test_late_content_promotes_only_one_of_two_suppressed_completions(monkeypatch):
+    watcher, stream, pushes = _notification_publisher(monkeypatch)
+    aid, trace, _, source, done = _completion_reply()
+    db.conn().execute("UPDATE messages SET text='' WHERE message_id=?", (source,))
+    for timestamp in (done, done + 1000):
+        _publish_completion(watcher, aid, trace, timestamp)
+    assert pushes == stream.events == []
+    assert len(_notification_rows(aid)) == 2
+    assert all(not row["notify"] for row in _notification_rows(aid))
+    db.conn().execute("UPDATE messages SET text='Finished.' WHERE message_id=?", (source,))
+    flipped = user_notifications.reclassify_recent_suppressed(
+        agent_id=aid, backend_session_id="bs-1", now_ms_value=done + 2000)
+    assert [item["source_message_id"] for item in flipped] == [source]
+    assert user_notifications.reclassify_recent_suppressed(
+        agent_id=aid, backend_session_id="bs-1", now_ms_value=done + 2000) == []
+    _publish_completion(watcher, aid, trace, done + 2000)
+    assert pushes == stream.events == []  # already handed to the reclassify consumer
+    assert sum(row["notify"] for row in _notification_rows(aid)) == 1
+
+
+def test_same_cause_with_a_new_reply_source_still_publishes(monkeypatch):
+    watcher, stream, pushes = _notification_publisher(monkeypatch)
+    aid, trace, cause, source, done = _completion_reply()
+    _publish_completion(watcher, aid, trace, done)
+    db.conn().execute(
+        """INSERT INTO messages (message_id, agent_id, backend_session_id,
+               seq, role, text, tools_json, updated_at, origin, trace_id)
+           VALUES (?, ?, 'bs-1', 2, 'assistant', 'An additional result.', '[]', ?, 'user', ?)""",
+        (source + "-next", aid, done + 500, trace))
+    _publish_completion(watcher, aid, trace, done + 1000)
+    assert [item["source_message_id"] for item in pushes] == [source, source + "-next"]
+    assert {item["cause_message_id"] for item in pushes} == {cause}
+    assert len(stream.events) == 2
+    assert sum(row["notify"] for row in _notification_rows(aid)) == 2
