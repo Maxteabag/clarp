@@ -1,36 +1,48 @@
 {
   "bindings": {
     ".disk-maintenance-proof/SHA256SUMS": {
-      "bytes": 480,
-      "sha256": "1be23977cf13e93e6e17d3ac9da98cba366df8322ca4502484a5af7903e2dffe"
+      "bytes": 736,
+      "sha256": "e40fbb419783bc5465f48f30f37a2f5dc914a13d6b5bf939b45272988849e044"
     },
     ".disk-maintenance-proof/SOURCE_COMMIT": {
       "bytes": 41,
-      "sha256": "95ae2e45569625ad2ed1a7035405a77e869927f2af96d631ef73875ca031360a"
+      "sha256": "105df6e1341a6cdfd388c8fdb52447f8289eb09ecc494dfa55ebb20e9dc81bd4"
     },
     ".disk-maintenance-proof/child_exec.py": {
       "bytes": 903,
       "sha256": "4725312887f7a518910ab555e88db25b9f29396189f6340ef9a10c8362691754"
     },
     ".disk-maintenance-proof/controller.py": {
-      "bytes": 15801,
-      "sha256": "4dca2ac25d9561a37fb74ac818fd073b4ca342770f7193c73599b8941d4e0ff2"
+      "bytes": 28776,
+      "sha256": "38f7f9bf10a256ab144355ae9db40dac50ac233a72aa0199dec2782571d5d087"
     },
     ".disk-maintenance-proof/owned.py": {
       "bytes": 10195,
       "sha256": "e3aee22000f3c6c19efefa72fe7d358f36a29276d8ab5685e26cfc4af10f5c55"
     },
+    ".disk-maintenance-proof/post_check.py": {
+      "bytes": 4247,
+      "sha256": "f78a3143800af54d59b77a6068257a2b02c97b464f59cc00585ad139696bd9bd"
+    },
     ".disk-maintenance-proof/run-proof.sh": {
-      "bytes": 1687,
-      "sha256": "273ef3afe77403fda19b3d78b6647a8a661f4866b866dea0ab3b363f9f3292dd"
+      "bytes": 1693,
+      "sha256": "ae5978583ba83be8916ecdb6b065f9b111a45eda1b32717d46a9e93f80f1fa32"
     },
     ".disk-maintenance-proof/run-selected.sh": {
-      "bytes": 3319,
-      "sha256": "4dbc7b9820a4216547bfb55615cd3dd3d75b03c95d005e5e28385d7e62eb968b"
+      "bytes": 2328,
+      "sha256": "b25216e865ea0decffb7709dba93681c3358a7f349e7dfb14c58085ed15d1b77"
     },
-    ".disk-maintenance-proof/test_controls.py": {
-      "bytes": 22245,
-      "sha256": "b1a45d9a49c28fcd7c0983cd59e3b858697c4f21739ce597ff1bacfd51f42f83"
+    ".disk-maintenance-proof/test_balance_timing.py": {
+      "bytes": 13915,
+      "sha256": "8a4ba0c75558663a1ffe6f691fce7bab29e3bed8497774da1a9314978b77192a"
+    },
+    ".disk-maintenance-proof/test_writer_focus.py": {
+      "bytes": 10200,
+      "sha256": "6815e1fcb52ffcebb3a5a5e94d37fe4a75fb531aa44ca0b8a983fd1557baefe3"
+    },
+    ".disk-maintenance-proof/writer_policy.py": {
+      "bytes": 7720,
+      "sha256": "3a1f478f54e0f9f3de1a4fd2e1ccab099caad65d2259111b83ed15c11162c8e3"
     },
     "scripts/ci_contained.sh": {
       "bytes": 4376,
@@ -42,5 +54,13 @@
     }
   },
   "containment_source": "1ca5a5a69cba322e311968f20298c1db36f31eac",
-  "controller_source": "f226950b3b1748e4b6d9a208b9ac2f8bbbcfc852"
+  "controller_source": "684555326522175c2bdab42e908cfc5c1ecc8b21",
+  "scope": "SAME4_WRITER_PLUS_ONE_TIMING_SYNTHETIC_ONLY_NO15_REPEAT",
+  "selected_methods": [
+    "test_writer_focus.WriterFocus.test_exact_tolerated_set_accepted_without_stopping_units",
+    "test_writer_focus.WriterFocus.test_unlisted_db_fd_including_listener_is_rejected",
+    "test_writer_focus.WriterFocus.test_changed_pid_start_or_unit_generation_rejected",
+    "test_writer_focus.WriterFocus.test_postcheck_heartbeat_finished_and_mismark_are_distinct_no_edit",
+    "test_balance_timing.TimingFocus.test_actual_controller_shared_phase_cancel_order_and_420_narrow_recovery"
+  ]
 }

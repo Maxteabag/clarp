@@ -4,7 +4,7 @@ umask 077
 # This shell itself is under the outer570TERM+30KILL envelope.
 test "$GITHUB_REPOSITORY" = Maxteabag/clarp
 test "$GITHUB_EVENT_NAME" = push
-test "$GITHUB_REF" = refs/heads/refactor/ci/disk-maintenance-f226-proof-r1
+test "$GITHUB_REF" = refs/heads/refactor/ci/disk-writer-timing-68455532-proof-r1
 test "$GITHUB_RUN_ATTEMPT" = 1
 test "$PROOF_RUNNER_ENVIRONMENT" = github-hosted
 test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
