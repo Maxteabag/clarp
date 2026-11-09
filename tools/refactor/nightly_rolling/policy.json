@@ -12,5 +12,5 @@
   "history": "Nov9 raw compare report/exit1 immutable; signed classification separate",
   "advance": "Under single flock: immutable accepted.json fsync/readback first, then atomic state.json replacement and parent fsync/readback. Publication uncertainty holds for reconciliation.",
   "registry": "registers/differences.md; exact run/attempt/pair/report and typed EACH-ID proof, no blanket A1 waiver",
-  "remaining": "C exact source review and actual managed activation receipt pending. Seed utility/timer/worker are authored, UNEXECUTED."
+  "remaining": "C exact source review and actual managed activation receipt pending. Seed/timer/worker log/result delivery authored, UNEXECUTED."
 }
