@@ -136,5 +136,32 @@ def observe_originals(*, paths, receipt_root, limits):
                               metadata_bytes=limits['metadata_bytes']) != inventories[root]):
             raise ValueError('original inventory/root changed after streams')
     return {'observations': observed, 'raw': payloads,
+            'inventory_fence': {str(root): {'root_epoch': row['epoch'],
+                                            'entries': inventories[root]}
+                                for root, row in roots.items()},
             'qualification': 'ACTUAL31_ORIGINAL_OBSERVATIONS_NOT_INDEX_OR_PROVENANCE',
             'source_process_or_closed_writer_authenticated': False}
+
+
+def recheck_originals(originals, *, limits):
+    """Actual later-owner recheck; conditional, not a producer custody claim."""
+    from .coverage_retained_bytes import hash_retained_bytes
+    from .coverage_copy_read import _same_capture
+    for text, fence in originals['inventory_fence'].items():
+        root = _root(text)
+        if (_epoch(root.stat()) != fence['root_epoch']
+                or _inventory(root, set(fence['entries']), entry_limit=limits['inventory_entries'],
+                              metadata_bytes=limits['metadata_bytes']) != fence['entries']):
+            raise ValueError('original input/root fence changed')
+    for label in LABELS:
+        observed = originals['observations'][label]
+        actual = hash_retained_bytes(observed, byte_limit=limits['file_bytes'][label],
+                                     path_bytes_limit=limits['path_bytes'])
+        if not _same_capture(actual, observed):
+            raise ValueError('original byte/version changed at publication boundary')
+    for text, fence in originals['inventory_fence'].items():
+        root = _root(text)
+        if (_epoch(root.stat()) != fence['root_epoch']
+                or _inventory(root, set(fence['entries']), entry_limit=limits['inventory_entries'],
+                              metadata_bytes=limits['metadata_bytes']) != fence['entries']):
+            raise ValueError('original input/root changed during recheck')
