@@ -1,0 +1,8 @@
+[Unit]
+Description=rf-harness rolling main nightly (reviewed immutable install required)
+[Service]
+Type=oneshot
+WorkingDirectory=/var/tmp/clarp-refactor-program/rf-harness
+ExecStart=/bin/bash /var/tmp/clarp-refactor-program/rf-harness/nightly-rolling-source/worker.sh
+TimeoutStartSec=4000
+KillMode=control-group
