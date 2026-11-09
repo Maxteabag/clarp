@@ -39,6 +39,8 @@
       "^\\s*while (True|1|False|0):",
       "^\\s*if (True|1|False|0):"
     ],
-    "report:partial_also": []
+    "report:partial_also": [],
+    "json:show_contexts": false,
+    "json:pretty_print": false
   }
 }

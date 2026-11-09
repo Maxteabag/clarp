@@ -20,7 +20,7 @@ def reconcile_report(report, analyses, *, inventory):
         raise ValueError('missing/extra report or public-analysis source file; no disappearing denominator')
     meta = report['meta']
     if (type(meta['format']) is not int or meta['format'] != 3 or meta['version'] != '7.17.0'
-            or meta['branch_coverage'] is not True or meta['show_contexts'] is not True):
+            or meta['branch_coverage'] is not True or meta['show_contexts'] is not False):
         raise ValueError('wrong frozen report format/version/branch/context profile')
     totals = {k: 0 for k in COUNTS}
     files = {}
@@ -105,14 +105,8 @@ def reconcile_report(report, analyses, *, inventory):
                        or sum(1 for a, b in counted_executed if a == line) > v['taken']
                        for line, v in by_line.items())):
             raise ValueError('JSON branch sets/public statistics disagree')
-        if type(row['contexts']) is not dict:
-            raise ValueError('missing explicit per-file line-context map')
-        for line, contexts in row['contexts'].items():
-            if (type(line) is not str or not line.isascii() or not line.isdecimal()
-                    or str(int(line)) != line or not 0 < int(line) <= source['physical_lines']
-                    or type(contexts) is not list or any(type(c) is not str for c in contexts)
-                    or len(set(contexts)) != len(contexts)):
-                raise ValueError('invalid exact source line/context identity')
+        if 'contexts' in row:
+            raise ValueError('report context map forbidden; full attribution must remain in graph')
         for key in COUNTS:
             totals[key] += counts[key]
         files[name] = {'source_sha256': source['sha256'], 'statement_units': sorted(statements),

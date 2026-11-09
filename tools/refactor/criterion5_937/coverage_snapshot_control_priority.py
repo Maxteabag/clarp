@@ -12,7 +12,13 @@ from types import SimpleNamespace
 from . import coverage_copy_read as adapter
 
 
-def run_snapshot_priority_controls():
+def run_snapshot_priority_controls(*, owner='snapshot'):
+    if owner not in ('snapshot', 'report_source'):
+        raise ValueError('fixed source fault-control owner required')
+    if owner == 'report_source':
+        from . import coverage_render as selected
+    else:
+        selected = adapter
     def contains(root, target):
         if root is target:
             return True
@@ -88,23 +94,26 @@ def run_snapshot_priority_controls():
                                   open=opened, read=read, close=close, fstat=lambda fd: info,
                                   fdopen=lambda fd, mode: OldStream(), O_RDONLY=os.O_RDONLY,
                                   O_CLOEXEC=os.O_CLOEXEC, O_NOFOLLOW=os.O_NOFOLLOW)
-        original_os, original_hashlib = adapter.os, adapter.hashlib
+        original_os, original_hashlib = selected.os, selected.hashlib
         caught, ordinary = None, False
         try:
-            adapter.os = fake_os
-            adapter.hashlib = SimpleNamespace(sha256=Digest)
+            selected.os = fake_os
+            selected.hashlib = SimpleNamespace(sha256=Digest)
             try:
                 try:
-                    adapter._snapshot(PathFixture())  # actual owned helper
+                    if owner == 'snapshot':
+                        selected._snapshot(PathFixture())
+                    else:
+                        selected._source_version(PathFixture(), {'bytes': 4, 'sha256': 'a' * 64})
                     calls['next_phase'] += 1
                 except Exception as error:
                     caught, ordinary = error, True
             except BaseException as error:
                 caught = error
         finally:
-            adapter.os = original_os
-            adapter.hashlib = original_hashlib
-        assert adapter.os is original_os and adapter.hashlib is original_hashlib
+            selected.os = original_os
+            selected.hashlib = original_hashlib
+        assert selected.os is original_os and selected.hashlib is original_hashlib
         assert ordinary is ordinary_expected
         assert contains(caught, primary) and contains(caught, cleanup)
         if label != 'control_cleanup':

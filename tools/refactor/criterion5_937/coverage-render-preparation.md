@@ -1,3 +1,7 @@
+> Historical d292/08a True-profile preparation; retained as prior scoped evidence.
+> Superseded by the current False graph-bound source proposal, not an executed
+> result or a transferred verdict. See coverage-false-report-preparation.md.
+
 # 937 public report-only owner — SOURCE ONLY, UNEXECUTED
 
 B exactb86 source C1 closure is consumed with corrected verified report digest

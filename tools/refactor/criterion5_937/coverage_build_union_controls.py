@@ -95,7 +95,8 @@ def _binding_preflight_faults(owner_args):
         assert unions == []
 
 
-def run_build_union_storage_control(*, root, coverage_data_class, coverage_archive_path):
+def _run_build_union_storage_fixture(*, root, coverage_data_class, coverage_archive_path,
+                                     report_module=None, source_root=None):
     if socket.gethostname() == 'laptopstudio':
         raise RuntimeError('BUILDBOX_ONLY; no local control execution authority')
     root = Path(root)
@@ -118,6 +119,8 @@ def run_build_union_storage_control(*, root, coverage_data_class, coverage_archi
     raw, starts, finishes = _decoder_fixture()  # full schema, SYNTHETIC process records
     spec = json.loads(raw)
     spec['output'] = str(original_root)
+    if source_root is not None:
+        spec['source_root'] = str(source_root)
     spec['coverage_config'] = str(binding_root / 'coverage.ini')
     spec['coverage_config_sha256'] = _snapshot(binding_root / 'coverage.ini')['sha256']
     raw = json.dumps(spec).encode()
@@ -204,7 +207,15 @@ def run_build_union_storage_control(*, root, coverage_data_class, coverage_archi
 
     try:
         sys.setprofile(profile)
-        result = build_bound_union_graph(**owner_args)
+        if report_module is None:
+            result = build_bound_union_graph(**owner_args)
+            combined = None
+        else:
+            from .coverage_bound_report import render_bound_report
+            report_args = {k: v for k, v in owner_args.items() if k != 'coverage_data_class'}
+            combined = render_bound_report(coverage_module=report_module, source_root=source_root,
+                                           **report_args)
+            result = combined['union']
     except BaseException as error:
         primary = error
     finally:
@@ -214,7 +225,10 @@ def run_build_union_storage_control(*, root, coverage_data_class, coverage_archi
             primary = _retain(primary, cleanup)
     if primary is not None:
         raise primary
-    assert calls == [str(copy_root / finishes[role]['coverage_data']['file']) for role in ROLES]
+    expected_updates = [str(copy_root / finishes[role]['coverage_data']['file']) for role in ROLES]
+    if report_module is not None:
+        expected_updates.append(str(report_root / 'input' / 'coverage-aggregate.data'))
+    assert calls == expected_updates  #9union, plus ONE report-copy update when requested
     assert [edge['role'] for edge in result['edges']] == list(ROLES)
     actual = result['closed_aggregate_capture']['accessor_sets']
     shared = actual['files']['server/shared.py']
@@ -250,5 +264,13 @@ def run_build_union_storage_control(*, root, coverage_data_class, coverage_archi
         name = finishes[role]['coverage_data']['file']
         assert (original_root / name).read_bytes() == source_bytes[role]
         assert (copy_root / name).read_bytes() == source_bytes[role]
+    return {'union': result, 'combined_report': combined,
+            'bindings': bindings, 'receipts': raw_observations, 'captures': captures,
+            'owner_args': owner_args}
+
+
+def run_build_union_storage_control(*, root, coverage_data_class, coverage_archive_path):
+    _run_build_union_storage_fixture(root=root, coverage_data_class=coverage_data_class,
+                                    coverage_archive_path=coverage_archive_path)
     return {'result': 'EXPECTED_NINE_API_STORAGE_UNION',
             'scope': 'SYNTHETIC run metadata+stored API arcs only; not actual pytest/process/measurement proof'}
