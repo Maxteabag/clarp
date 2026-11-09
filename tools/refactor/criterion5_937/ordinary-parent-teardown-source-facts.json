@@ -1,0 +1,194 @@
+{
+  "head_before": "3a2f284540106cf4c3312c1bb47c251248ba0a0c",
+  "scope": "PRECODE_TEARDOWN_WRITER_SOURCE_AUDIT_NO_IMPORT_OR_EXECUTION",
+  "review_report_sha256": "ecf693513abd3a99159c6cf8e148c6ebad3b763dc85ce90e8eda76e3446fe242",
+  "source_dependencies": {
+    "pytest": {
+      "root": "/home/peter/.cache/uv/archive-v0/ijHiVqeOpaGtSAWA",
+      "METADATA_sha256": "c5d032518012789cabc870d46589aca3aeda36cf9fa4399ee88bda3d10438451",
+      "metadata_name_version": [
+        "Name: pytest",
+        "Version: 9.1.1"
+      ],
+      "RECORD_sha256": "ad0d3d038c4359485335c115e714092b66cfa30887dbf8a20b376715befc30bd",
+      "files": {
+        "_pytest/main.py": {
+          "bytes": 42771,
+          "sha256": "8ee2725057ff1811e2ae9ebdf1befb7518195f8f333f9f8ca024d76a4b80780e",
+          "cache_RECORD_matches": true,
+          "AST": {
+            "317:wrap_session": {
+              "end": 373,
+              "ast_sha256": "9dffd620eb04477165a99d320f1d431afe55272636dd664439f84b81c94ee7c2"
+            }
+          }
+        },
+        "_pytest/config/__init__.py": {
+          "bytes": 80947,
+          "sha256": "98b05c2c37d09e1d5c05975efc2d9af98d4aff6ea47de410a8e93956420873c1",
+          "cache_RECORD_matches": true,
+          "AST": {
+            "1207:_ensure_unconfigure": {
+              "end": 1219,
+              "ast_sha256": "61cd65687485be50b7fb250dbaa8df7ff0e2f857b7ab30910e1d8b3e75fb4aae"
+            }
+          }
+        }
+      }
+    },
+    "xdist": {
+      "root": "/home/peter/.cache/uv/archive-v0/1XnxWrUBCUWauaUY",
+      "METADATA_sha256": "298f16af52794d340c358fc2eb20b054a29db2922f22fea90a35b459ecbcc18f",
+      "metadata_name_version": [
+        "Name: pytest-xdist",
+        "Version: 3.8.0"
+      ],
+      "RECORD_sha256": "4a65824446fad10f397c52ad8ee9396764b3a1f2f33ae3be344ad5f455ef92db",
+      "files": {
+        "xdist/remote.py": {
+          "bytes": 14693,
+          "sha256": "86d2f8132b3ef7e190f622c2b3cfd83cde464a4dd07ccd75486b27b161336b3d",
+          "cache_RECORD_matches": true,
+          "AST": {
+            "142:pytest_sessionfinish": {
+              "end": 149,
+              "ast_sha256": "eb6377c13802bff0e6628fa8d381d622dbbf1d44e599ddeb1f2311a2b457c2d5"
+            }
+          }
+        },
+        "xdist/workermanage.py": {
+          "bytes": 18850,
+          "sha256": "efbca7d514fb94bd16ef566862a435dc7a541cb1ffd1d3826fc0cf2026fca3de",
+          "cache_RECORD_matches": true,
+          "AST": {
+            "325:setup": {
+              "end": 353,
+              "ast_sha256": "b82e0198ed1debc0bde863a30910898c85e927678a4ec3bcecbfcd98f0fe1430"
+            },
+            "392:process_from_remote": {
+              "end": 467,
+              "ast_sha256": "6ebba881244556be6632498d44e6070c0b91caae005a24534d43f80b30cf2d9f"
+            }
+          }
+        },
+        "xdist/newhooks.py": {
+          "bytes": 3509,
+          "sha256": "14b53ea2371c243a316924b7c0d1d772d8d62ed9818e0d2fdacadb9f1ac7930c",
+          "cache_RECORD_matches": true,
+          "AST": {
+            "74:pytest_configure_node": {
+              "end": 75,
+              "ast_sha256": "95c272d0b2509a1cb8b2be407ee4befb03920e2b9bb3f1640af0b504a841d298"
+            }
+          }
+        }
+      }
+    },
+    "execnet": {
+      "root": "/home/peter/.cache/uv/archive-v0/xb1v_eeasope1HC2",
+      "METADATA_sha256": "7343015d62b2eaa1841ec06a7c7c132aeb482921f73ab6e0fd18331495684c61",
+      "metadata_name_version": [
+        "Name: execnet",
+        "Version: 2.1.2"
+      ],
+      "RECORD_sha256": "22b18aafbfd4df08e3474283065920b8b65e3a8d0f268935514d8388d2b86429",
+      "files": {
+        "execnet/gateway_base.py": {
+          "bytes": 59089,
+          "sha256": "bc91d2c7f6dc7172d4c6c02f9cee49fed743a47f2ad14e8e3cd5d9d7cd0378dc",
+          "cache_RECORD_matches": true,
+          "AST": {
+            "455:terminate": {
+              "end": 458,
+              "ast_sha256": "d2a60b2e042688d0df2c9db0b657b245682749bf2dce5e39880a604b6b0628ca"
+            },
+            "796:_getremoteerror": {
+              "end": 804,
+              "ast_sha256": "ada2317719c94033a651a735125bc8163bfa6a26f524f0465dd98be924823038"
+            },
+            "877:waitclose": {
+              "end": 899,
+              "ast_sha256": "2610ec2736e0a6e2bd87560e82ad4a1ec33bca2b90d47284d2e4c31f976bd2e5"
+            },
+            "1280:executetask": {
+              "end": 1315,
+              "ast_sha256": "a0b74e3c615ef1f094893d5bafe54521cd5cb1ff41d5ecfb91759e7d2e5d04ca"
+            }
+          }
+        },
+        "execnet/multi.py": {
+          "bytes": 11713,
+          "sha256": "adb8715003372cdd430179135053093bb7766ea7fea14d4f17c243037a57eaaa",
+          "cache_RECORD_matches": true,
+          "AST": {
+            "210:terminate": {
+              "end": 245,
+              "ast_sha256": "b7543bfd8eb2886844dc65159a39acced97d5528239490c7c122f8521b5d0117"
+            },
+            "319:waitclose": {
+              "end": 328,
+              "ast_sha256": "39a0582e62cba93be5d7eee8d159ca7b5dbbdd94df3ab8a7b670d9208c9f8f4c"
+            }
+          }
+        }
+      }
+    }
+  },
+  "lock_packages": {
+    "execnet": {
+      "version": "2.1.2",
+      "wheel_hashes": [
+        "sha256:67fba928dd5a544b783f6056f449e5e3931a5c378b128bc18501f7ea79e296ec"
+      ]
+    },
+    "pytest": {
+      "version": "9.1.1",
+      "wheel_hashes": [
+        "sha256:37a86b45efb9a47a61a36449063e8e18d0cab3161329fc099eb21783169c4f0c"
+      ]
+    },
+    "pytest-xdist": {
+      "version": "3.8.0",
+      "wheel_hashes": [
+        "sha256:202ca578cfeb7370784a8c33d6d05bc6e13b4f25b5053c30a152269fd10f0b88"
+      ]
+    }
+  },
+  "coverage": {
+    "archive_sha256": "49d58df8284f40cb16b781d5fc8b1d4fdefe185ce0c691e39e4b73d1f83c575b",
+    "member": "coverage/control.py",
+    "source_sha256": "f1448bd8b9237766d2f693c2626bb6888c4865e049b9f2b8f9ec3b29d1d4da3d",
+    "methods": {
+      "1445:process_startup": {
+        "end": 1508,
+        "ast_sha256": "dba7ca1456756bc3665d9bd953a375ae68d3fd02c78ee187180401ae4a090ca8"
+      },
+      "1511:_after_fork_in_child": {
+        "end": 1515,
+        "ast_sha256": "7d6864b5d74820a3a7a032c66067b9a832b33647b4bacf55050b51b4930d07b2"
+      },
+      "142:__init__": {
+        "end": 350,
+        "ast_sha256": "f3b52d923ad88d390777a4c13d9efcdb9340fadecbe8597381232383ceddd912"
+      },
+      "745:_atexit": {
+        "end": 754,
+        "ast_sha256": "1621e29e4692f7d4d0d178db9003270e440ab18a567fdf648671c0d36e038a56"
+      }
+    }
+  },
+  "concrete_source_gap": [
+    "xdist WorkerInteractor.pytest_sessionfinish sends workerfinished before pytest Config._ensure_unconfigure",
+    "Config._ensure_unconfigure invokes pytest_unconfigure then cleanup_stack.close; hook completion alone is not whole cleanup",
+    "execnet executetask catches BaseException and closes channel with remote error for ordinary teardown exceptions",
+    "WorkerController workerfinished sets _down True; subsequent Marker.END calls _getremoteerror but only notifies errordown if not _down",
+    "Channel._getremoteerror destructively pops stored error; a new later waitclose cannot reconstruct consumed remote error"
+  ],
+  "potential_component_boundary": "pytest_configure_node before channel/callback setup permits source-reviewed per-instance process_from_remote + same-channel original _getremoteerror observation without extra destructive read; NOT implemented/approved",
+  "native_wait_origin": "CPython3.12.14 ECHILD synthetic0 caveat from B primary-source review, not newly fetched/ABI-authenticated here",
+  "writers": "Coverage auto_save derives auto_data; _atexit may stop/save(force on sigterm) and close deferreddata; this alone does not close concrete fork/atexit writer domain",
+  "independent_cache_to_locked_wheel_loaded_authentication": false,
+  "native_teardown_or_writer_proof": false,
+  "executed": false,
+  "source_ready": false
+}
