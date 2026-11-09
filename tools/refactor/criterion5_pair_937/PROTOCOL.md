@@ -8,7 +8,7 @@ S/L factorial/full-table oracle or complete coverage architecture is a dependenc
 of this method. Coverage/hotspot mapping is INFORMATIONAL, not a gate.
 
 A=4f33cdc9287eafcddd0adfb17b51487c84ace28b. B=main at the execution handoff,
-recorded full SHA in plan.json. Proposed source review B=1ca5a5a69cba322e311968f20298c1db36f31eac
+recorded full SHA in plan.json. Proposed source review B=9e695b4e1ae764bac80bce6b2dc7217b2c1a5c08
 (public main read-only API response at this explicit source-only rebind). If main moves, rebind
 that exact plan/pin for review/handoff; runner refuses an autonomous retarget.
 A final experiment on the program's final main remains REQUIRED after initial

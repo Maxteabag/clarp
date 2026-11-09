@@ -1,7 +1,7 @@
 {
   "authority": "Lead response rf1c82b9c1d49; method replaces native certification campaign",
   "A": "4f33cdc9287eafcddd0adfb17b51487c84ace28b",
-  "B": "1ca5a5a69cba322e311968f20298c1db36f31eac",
+  "B": "9e695b4e1ae764bac80bce6b2dc7217b2c1a5c08",
   "suite_pairs": 3,
   "startup_pairs": 5,
   "workers": 4,
