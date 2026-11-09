@@ -183,11 +183,14 @@ def test_free_text_errors_are_unknown_provider_error_never_auth_error(enabled):
 
 
 def test_auth_error_only_from_a_structured_field(enabled):
-    status.record_read("claude", claude(claude_row("a", error="opaque", error_code="auth_error")), T0)
+    status.record_read("claude", claude(claude_row("a", error="opaque", error_code="auth_error",
+                                                    org_uuid="PRIVATE_ORG_UUID_SENTINEL")), T0)
     status.record_read("codex", {"accounts": [codex_row("p", error_code="auth_error")]}, T0)
     served = status.payload(served_at=T0)
     assert account(served, "claude", "a")["state"] == "auth_error"
     assert account(served, "codex", "p")["error_code"] == "auth_error"
+    assert "PRIVATE_ORG_UUID_SENTINEL" not in json.dumps(served)
+    assert "org_uuid" not in json.dumps(served)
 
 
 def test_a_missing_number_is_null_never_zero(enabled):
@@ -358,7 +361,7 @@ def test_actions_are_closed_codes(enabled):
 
 
 def test_payload_has_the_contract_shape(enabled):
-    status.record_read("claude", claude(claude_row("a", active=True)), T0)
+    status.record_read("claude", claude(claude_row("a", active=True, org_uuid="PRIVATE_ORG_UUID_SENTINEL", error_code=None)), T0)
     lane("claude", 300)
     served = status.payload(served_at=T0)
     assert served["schema"] == "clarp.hotseat-status/1"
@@ -419,7 +422,8 @@ def test_the_route_refuses_without_auth(no_processes):
     assert handler.sent == [(401, "unauthorized")]
 
 
-def test_the_route_serves_the_allowlisted_snapshot_without_a_process(enabled, no_processes):
+def test_the_route_serves_the_allowlisted_snapshot_without_a_process(enabled, no_processes, monkeypatch):
+    monkeypatch.setattr(status, "now_ms", lambda: T0)
     status.record_read("claude", claude(claude_row(SENTINEL_EMAIL, active=True, email=SENTINEL_EMAIL)), T0)
     handler = _handler("/hotseat/status")
     handler._authorized = lambda: True
@@ -429,6 +433,18 @@ def test_the_route_serves_the_allowlisted_snapshot_without_a_process(enabled, no
     assert code == 200 and served["schema"] == "clarp.hotseat-status/1"
     assert provider(served, "claude")["accounts"][0]["alias"] == "s…@l…"
     assert SENTINEL_EMAIL not in body.decode()
+    # Repair journal contents are private, even if malformed or hostile. GET
+    # does not consult that key, run reconciliation or expose new status keys.
+    from lib import janitor_hotseat
+    settings_store.set_text(janitor_hotseat.REPAIR_STATE_KEY, SENTINEL_TOKEN)
+    original_get = settings_store.get
+    def no_repair_journal(key):
+        assert key != janitor_hotseat.REPAIR_STATE_KEY, "GET consulted private repair state"
+        return original_get(key)
+    monkeypatch.setattr(settings_store, "get", no_repair_journal)
+    handler.sent.clear()
+    handler.do_GET()
+    assert handler.sent == [(200, body)]
 
 
 def test_the_feature_is_advertised_with_its_number():
