@@ -428,6 +428,8 @@ def test_inv1_independent_row_before_writer_admission_refuses_repair(
     assert _agent_products(agent_id) == committed[0]
     assert not any(event == "reconcileStuckBusy" for event, _ in logs)
     assert _turn_row(turn_id)["outcome"] == ("completed" if successor == "done" else None)
+    assert "state" not in reconcile.reconcile_agent(agent_id, "claude", home=tmp_path)
+    assert _agent_products(agent_id) == committed[0]
 
 
 @pytest.mark.parametrize("broken_check", ["terminal", "spawning"])
@@ -458,6 +460,152 @@ def test_runtime_idle_receipt_keeps_started_on_unknown_reconcile_probe(
     assert reconcile.end_idle_agent_receipts({}) == {}
     assert db.conn().execute("SELECT status FROM queued_turns WHERE queue_id = 'reconcile-receipt'").fetchone()[0] == "started"
     assert logs and all(str(args[1]) == "unknown receipt liveness" for args in logs)
+
+
+def test_inv1_confirming_live_probe_discards_mature_candidate(
+        tmp_path, monkeypatch, reconcile_clock):
+    agent_id, _ = _busy_turn(tmp_path)
+    assert "state" not in reconcile.reconcile_agent(agent_id, "claude", home=tmp_path)
+    reconcile_clock.now += 60
+    answers = iter((False, True))
+    monkeypatch.setattr(reconcile, "has_live_work", lambda *_: next(answers))
+    before = _agent_products(agent_id)
+    assert "state" not in reconcile.reconcile_agent(agent_id, "claude", home=tmp_path)
+    assert _agent_products(agent_id) == before
+    monkeypatch.setattr(reconcile, "has_live_work", lambda *_: False)
+    assert "state" not in reconcile.reconcile_agent(agent_id, "claude", home=tmp_path)
+    reconcile_clock.now += 60
+    assert reconcile.reconcile_agent(agent_id, "claude", home=tmp_path)["state"] == "thinking"
+
+
+def test_inv1_pruned_observation_restarts_grace(tmp_path, monkeypatch, reconcile_clock):
+    monkeypatch.setattr(reconcile, "_BUSY_IDLE_SECONDS", 120)
+    agent_id = _agent(tmp_path)
+    agents_db.record_state(agent_id, "thinking")
+    assert "state" not in reconcile.reconcile_agent(agent_id, "claude", home=tmp_path)
+    reconcile_clock.now += 121
+    assert "state" not in reconcile.reconcile_agent(agent_id, "claude", home=tmp_path)
+    reconcile_clock.now += 60
+    assert reconcile.reconcile_agent(agent_id, "claude", home=tmp_path)["state"] == "thinking"
+
+
+@pytest.mark.parametrize("options", [
+    {"force": False}, {"event": turn_lifecycle.TurnEvent.PROCESS_EXITED_OK},
+    {"ts": 1}, {"kind": "idle"}, {"expect_trace": "other"},
+    {"anchor": 1}, {"s_open": 1}, {"begun_at": 1},
+    {"_expected_busy_state": (True, "thinking")},
+    {"_expected_busy_state": (0, "thinking")},
+    {"_expected_busy_state": ("1", "thinking")},
+    {"_expected_busy_state": (1, "done")},
+    {"_expected_busy_state": [1, "thinking"]},
+])
+def test_inv1_writer_token_rejects_unsupported_combinations_without_effects(tmp_path, options):
+    agent_id, _ = _busy_turn(tmp_path)
+    row = db.conn().execute(
+        "SELECT state_id,kind FROM state_log WHERE agent_id=? ORDER BY ts DESC,state_id DESC LIMIT 1",
+        (agent_id,)).fetchone()
+    arguments = {"event": turn_lifecycle.TurnEvent.RECONCILE_REPAIR, "force": True,
+                 "_expected_busy_state": (row["state_id"], row["kind"])}
+    arguments.update(options)
+    before = _agent_products(agent_id)
+    with pytest.raises(ValueError):
+        turn_lifecycle.transition(agent_id, **arguments)
+    assert _agent_products(agent_id) == before
+    assert not db.conn().in_transaction
+
+
+def test_inv1_writer_token_rejects_nested_transaction_without_effects(tmp_path):
+    agent_id, _ = _busy_turn(tmp_path)
+    row = db.conn().execute(
+        "SELECT state_id,kind FROM state_log WHERE agent_id=? ORDER BY ts DESC,state_id DESC LIMIT 1",
+        (agent_id,)).fetchone()
+    before = _agent_products(agent_id)
+    db.conn().execute("BEGIN IMMEDIATE")
+    try:
+        with pytest.raises(ValueError, match="caller transaction"):
+            turn_lifecycle.transition(agent_id, turn_lifecycle.TurnEvent.RECONCILE_REPAIR,
+                                      force=True, _expected_busy_state=tuple(row))
+        assert _agent_products(agent_id) == before
+        assert db.conn().in_transaction
+    finally:
+        db.conn().rollback()
+
+
+@pytest.mark.parametrize("successor", [False, True])
+def test_inv1_native_busy_retry_preserves_expected_row_guard(
+        tmp_path, monkeypatch, reconcile_clock, successor):
+    agent_id, turn_id = _busy_turn(tmp_path)
+    assert "state" not in reconcile.reconcile_agent(agent_id, "claude", home=tmp_path)
+    reconcile_clock.now += 60
+    stamp = agents_db.latest_state(agent_id)["ts"]
+    held, release, done = threading.Event(), threading.Event(), threading.Event()
+    errors, native_busy, committed = [], [], []
+
+    def writer():
+        database = db.conn()
+        try:
+            database.execute("BEGIN IMMEDIATE")
+            held.set()
+            assert release.wait(5)
+            if successor:
+                database.execute("INSERT INTO state_log(agent_id,kind,ts) VALUES (?,?,?)",
+                                 (agent_id, "thinking", stamp))
+            database.execute("COMMIT")
+            committed.append(_agent_products(agent_id))
+        except BaseException as exc:
+            errors.append(exc)
+        finally:
+            if database.in_transaction:
+                database.rollback()
+            db.close_local()
+            done.set()
+
+    original_conn = turn_lifecycle.conn
+    reader_thread = threading.get_ident()
+
+    class Admission:
+        def __init__(self, database):
+            self.database = database
+
+        def __getattr__(self, name):
+            return getattr(self.database, name)
+
+        def execute(self, sql, *args, **kwargs):
+            try:
+                return self.database.execute(sql, *args, **kwargs)
+            except sqlite3.OperationalError as exc:
+                if sql.strip().upper() == "BEGIN IMMEDIATE" and db.is_locked_error(exc):
+                    native_busy.append(True)
+                    release.set()
+                    assert done.wait(5) and not errors
+                raise
+
+    def connection():
+        database = original_conn()
+        return Admission(database) if threading.get_ident() == reader_thread else database
+
+    database = db.conn()
+    previous_timeout = database.execute("PRAGMA busy_timeout").fetchone()[0]
+    database.execute("PRAGMA busy_timeout = 0")
+    monkeypatch.setattr(turn_lifecycle, "SQLITE_CRITICAL_BUSY_TIMEOUT_MS", 0)
+    monkeypatch.setattr(turn_lifecycle, "conn", connection)
+    worker = threading.Thread(target=writer)
+    worker.start()
+    try:
+        assert held.wait(5) and not errors
+        result = reconcile.reconcile_agent(agent_id, "claude", home=tmp_path)
+    finally:
+        release.set()
+        worker.join(5)
+        database.execute(f"PRAGMA busy_timeout = {previous_timeout}")
+    assert not worker.is_alive() and not errors and native_busy == [True]
+    if successor:
+        assert "state" not in result
+        assert _agent_products(agent_id) == committed[0]
+        assert _turn_row(turn_id)["outcome"] is None
+    else:
+        assert result["state"] == "thinking"
+        assert _turn_row(turn_id)["outcome"] == "interrupted"
 
 
 def test_inv2_ghost_claude_session_is_unbound(tmp_path):

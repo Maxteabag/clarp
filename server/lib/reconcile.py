@@ -26,7 +26,10 @@ All repairs are idempotent and logged.
 """
 from __future__ import annotations
 
+import collections
+import math
 import pathlib
+import sqlite3
 import threading
 import time
 from typing import Any
@@ -37,6 +40,112 @@ from .log import log, log_exception
 
 # Kinds that assert a live process. Intentionally excludes "background".
 _PROCESS_BUSY_KINDS = turn_lifecycle.BUSY
+
+# Three times the longest observed process-exit/done gap (19s), with margin.
+# Snapshot reads may be adjacent or sparse: only a later confirming read counts.
+_BUSY_GRACE_SECONDS = 60.0
+_BUSY_MAX_OBSERVATIONS = 1024
+_BUSY_IDLE_SECONDS = 300.0
+# ((shared DB epoch, path, device, inode), agent) -> (row token, first, last).
+# Strong, bounded epoch references prevent object-id reuse across DB resets.
+_BUSY_OBSERVATIONS: collections.OrderedDict = collections.OrderedDict()
+_BUSY_LOCK = threading.Lock()
+
+
+def _busy_database_identity() -> tuple | None:
+    """Borrow the shared stamp connection's identity, never its change counter.
+
+    Request connections are short-lived. The shared object survives them but
+    reset_for_tests closes/replaces it. Missing/replaced files are unknown.
+    An unsupported in-place restore preserving inode and open objects needs
+    a process restart/reset; file mtime/size are not database epochs.
+    """
+    try:
+        path = db.DB_PATH.resolve(strict=True)
+        before = path.stat()
+        with db._STAMP_LOCK:
+            epoch = db._stamp_connection()
+            after = path.stat()
+            if (db.DB_PATH.resolve(strict=True) != path
+                    or (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino)):
+                return None
+        return epoch, str(path), after.st_dev, after.st_ino
+    except (OSError, sqlite3.Error):
+        return None
+
+
+def _forget_busy(agent_id: str) -> None:
+    with _BUSY_LOCK:
+        for key in list(_BUSY_OBSERVATIONS):
+            if key[1] == agent_id:
+                del _BUSY_OBSERVATIONS[key]
+
+
+def _observe_busy(agent_id: str, identity: tuple | None,
+                  token: tuple[int, str]) -> bool:
+    """Consume one matured observation; eviction/refusal can only delay it."""
+    now = time.monotonic()
+    with _BUSY_LOCK:
+        if (type(now) not in (int, float) or not math.isfinite(now)
+                or any(last > now for _, _, last in _BUSY_OBSERVATIONS.values())):
+            _BUSY_OBSERVATIONS.clear()
+            return False
+        for key, (_, _, last) in list(_BUSY_OBSERVATIONS.items()):
+            if now - last > _BUSY_IDLE_SECONDS or (key[1] == agent_id and key[0] != identity):
+                del _BUSY_OBSERVATIONS[key]
+        if identity is None:
+            return False
+        key = (identity, agent_id)
+        previous = _BUSY_OBSERVATIONS.pop(key, None)
+        if previous is not None and previous[0] == token:
+            if now - previous[1] >= _BUSY_GRACE_SECONDS:
+                return True
+            first = previous[1]
+        else:
+            first = now
+        if _BUSY_MAX_OBSERVATIONS <= 0:
+            return False
+        while len(_BUSY_OBSERVATIONS) >= _BUSY_MAX_OBSERVATIONS:
+            _BUSY_OBSERVATIONS.popitem(last=False)
+        _BUSY_OBSERVATIONS[key] = token, first, now
+        return False
+
+
+def _latest_busy_token(agent_id: str) -> tuple[int, str] | None:
+    row = db.conn().execute(
+        """SELECT state_id,kind FROM state_log WHERE agent_id = ?
+           ORDER BY ts DESC,state_id DESC LIMIT 1""", (agent_id,)).fetchone()
+    if row is None or row["kind"] not in _PROCESS_BUSY_KINDS:
+        return None
+    return int(row["state_id"]), str(row["kind"])
+
+
+def _repair_busy(agent_id: str, backend: str) -> tuple[str | None, bool]:
+    token = _latest_busy_token(agent_id)
+    if token is None:
+        _forget_busy(agent_id)
+        return None, False
+    identity = _busy_database_identity()
+    if not _observe_busy(agent_id, identity, token):
+        return None, False
+    # Neither the map lock nor a SQLite writer is held during provider probes.
+    live = has_live_work(agent_id, backend)
+    if live or identity != _busy_database_identity() or token != _latest_busy_token(agent_id):
+        _forget_busy(agent_id)
+        return None, live
+    kind = token[1]
+    try:
+        turn_lifecycle.transition(
+            agent_id, turn_lifecycle.TurnEvent.RECONCILE_REPAIR,
+            {"reason": "reconcile", "was": kind}, force=True,
+            _expected_busy_state=token)
+    except turn_lifecycle.TransitionNotWritten:
+        return None, False
+    finally:
+        # A refusal/failure never restores old age or arms a successor here.
+        _forget_busy(agent_id)
+    log("reconcileStuckBusy", f"agent={agent_id} was={kind} → idle")
+    return kind, False
 
 # agent_id → monotonic time the runtime was last asked to check its slot.
 _LEAK_CHECK_ASKED: dict[str, float] = {}
@@ -66,13 +175,15 @@ def has_live_work(agent_id: str, backend: str) -> bool:
         from . import turn_dispatch
         if turn_dispatch.live_work(agent_id).terminal:
             return True
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as e:  # noqa: BLE001
+        log_exception("reconcileTerminalWorkFail", e, detail=agent_id)
+        return True  # can't tell → don't repair
     try:
         if _slot_is_spawning(agent_id):
             return True
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as e:  # noqa: BLE001
+        log_exception("reconcileSpawningFail", e, detail=agent_id)
+        return True  # can't tell → don't repair
     return False
 
 
@@ -168,19 +279,12 @@ def reconcile_agent(agent_id: str, backend: str | None = None, *,
     state = observed_state if observed_state is not None else (agents_db.latest_state(agent_id) or {})
     kind = str(state.get("kind") or "")
     if kind in _PROCESS_BUSY_KINDS and not live:
-        # Batch projections can predate a transition to background/done or a
-        # newly spawned turn. Revalidate only the rare would-repair path.
-        if observed_state is not None:
-            state = agents_db.latest_state(agent_id) or {}
-            kind = str(state.get('kind') or '')
-            live = has_live_work(agent_id, backend)
-        if kind in _PROCESS_BUSY_KINDS and not live:
-            # A repair is the one write the table would refuse on its own.
-            turn_lifecycle.transition(
-                agent_id, turn_lifecycle.TurnEvent.RECONCILE_REPAIR,
-                {"reason": "reconcile", "was": kind}, force=True)
-            log("reconcileStuckBusy", f"agent={agent_id} was={kind} → idle")
-            repaired["state"] = kind
+        fixed_kind, confirmed_live = _repair_busy(agent_id, backend)
+        live = live or confirmed_live
+        if fixed_kind is not None:
+            repaired["state"] = fixed_kind
+    else:
+        _forget_busy(agent_id)
 
     # INV2 — bound session ⇔ something to resume. A CLI that resumes by
     # transcript file answers None for a session whose file is gone (a ghost

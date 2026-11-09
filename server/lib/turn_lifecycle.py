@@ -371,7 +371,8 @@ class TurnStateMachine:
                    kind: str | None = None, force: bool = False,
                    ts: int | None = None, expect_trace: str | None = None,
                    anchor: int | None = None, s_open: int | None = None,
-                   begun_at: int | None = None) -> Transition:
+                   begun_at: int | None = None,
+                   _expected_busy_state: tuple[int, str] | None = None) -> Transition:
         """Apply ``event`` to ``agent_id`` and write its ``state_log`` row.
 
         ``kind`` is only read for :attr:`TurnEvent.RECORDED`, the compatibility
@@ -382,6 +383,18 @@ class TurnStateMachine:
         causal baseline (a state_generation read when it decided to write);
         a traced non-terminal write is refused if its trace ended after it.
         """
+        if _expected_busy_state is not None:
+            if (type(_expected_busy_state) is not tuple or len(_expected_busy_state) != 2
+                    or type(_expected_busy_state[0]) is not int
+                    or not 1 <= _expected_busy_state[0] <= 9223372036854775807
+                    or type(_expected_busy_state[1]) is not str
+                    or _expected_busy_state[1] not in BUSY
+                    or event != TurnEvent.RECONCILE_REPAIR or force is not True
+                    or any(value is not None for value in
+                           (kind, ts, expect_trace, anchor, s_open, begun_at))):
+                raise ValueError("expected busy state requires a top-level forced reconcile repair")
+            if conn().in_transaction:
+                raise ValueError("expected busy state cannot use a caller transaction")
         if expect_trace is not None:
             return self._conditional_transition(agent_id, event, detail, expect_trace=expect_trace,
                                                 anchor=anchor, s_open=s_open)
@@ -459,7 +472,9 @@ class TurnStateMachine:
                     return self._write_terminal(
                         agent_id, event, target, detail, runtime_id, stamp,
                         recheck=fence if len(attempts) > 1 else None, force=force,
-                        own_since=fence if ts is None else None)
+                        own_since=fence if ts is None else None,
+                        **({"_expected_busy_state": _expected_busy_state}
+                           if _expected_busy_state is not None else {}))
                 cursor, trace, stamp = db.retry_locked(write)
                 _after_settle(agent_id, event, target, trace)
             elif late_fence is not None and target not in TERMINAL:
@@ -520,7 +535,8 @@ class TurnStateMachine:
     def _write_terminal(self, agent_id: str, event: str, target: str,
                         detail: dict[str, Any] | None, runtime_id, stamp: int, *,
                         recheck: int | None = None, force: bool = False,
-                        own_since: int | None = None):
+                        own_since: int | None = None,
+                        _expected_busy_state: tuple[int, str] | None = None):
         """A terminal row and its turn's settlement in one write transaction:
         the settlement attributes a Stop to its turn (the start guard reads it),
         so a row without it would be a Stop of unknown turn (TP-N1b). A failure
@@ -531,6 +547,13 @@ class TurnStateMachine:
         database = conn()
         database.execute("BEGIN IMMEDIATE")
         try:
+            if _expected_busy_state is not None:
+                latest = database.execute(
+                    """SELECT state_id,kind FROM state_log WHERE agent_id = ?
+                       ORDER BY ts DESC,state_id DESC LIMIT 1""", (agent_id,)).fetchone()
+                if (latest is None or latest["kind"] not in BUSY
+                        or (latest["state_id"], latest["kind"]) != _expected_busy_state):
+                    raise TransitionNotWritten(agent_id, event, "reconcile_busy_superseded")
             if recheck is not None:
                 self._recheck_terminal(agent_id, event, detail, since=recheck, force=force)
             if own_since is not None:
@@ -929,10 +952,13 @@ def transition(agent_id: str, event: str, detail: dict[str, Any] | None = None,
                *, kind: str | None = None, force: bool = False,
                ts: int | None = None, expect_trace: str | None = None,
                anchor: int | None = None, s_open: int | None = None,
-               begun_at: int | None = None) -> Transition:
+               begun_at: int | None = None,
+               _expected_busy_state: tuple[int, str] | None = None) -> Transition:
     return MACHINE.transition(agent_id, event, detail, kind=kind, force=force,
                               ts=ts, expect_trace=expect_trace, anchor=anchor,
-                              s_open=s_open, begun_at=begun_at)
+                              s_open=s_open, begun_at=begun_at,
+                              **({"_expected_busy_state": _expected_busy_state}
+                                 if _expected_busy_state is not None else {}))
 
 
 def try_transition(agent_id: str, event: str,
