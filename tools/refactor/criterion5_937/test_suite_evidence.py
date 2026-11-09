@@ -435,3 +435,105 @@ def test_retained_index_lower_actual_raw_linkage_types(fault):
     with pytest.raises(ValueError):
         decode_receipt_index(**args)
     assert hashlib.sha256(args['raw']).hexdigest() == original
+
+
+def _originals_lower_fixture():
+    """Supplied observations/bytes ONLY, not physical files or actual producer."""
+    from .coverage_originals import LABELS
+    from .coverage_receipt_index import PROFILE_SHA256
+    from .coverage_union_graph import SOURCE_CATALOG_SHA256, COVERAGE_ARCHIVE_SHA256
+    config, starts, finishes = _decoder_fixture()
+    spec = json.loads(config)
+    spec['coverage_config_sha256'] = PROFILE_SHA256
+    config = _decoder_raw(spec)
+    payloads = {'config': config}
+    for phase, rows in (('start', starts), ('finish', finishes)):
+        for role, row in rows.items():
+            row['spec'] = deepcopy(spec)
+            row['config_sha256'] = hashlib.sha256(config).hexdigest()
+            row['coverage']['config_sha256'] = row['config_sha256']
+            payloads[role + '.' + phase] = _decoder_raw(row)
+    observations = {}
+    for i, label in enumerate(LABELS):
+        if label in ('catalog', 'archive', 'profile', 'config'):
+            path = spec['coverage_config'] if label == 'profile' else '/private/' + label
+        else:
+            role, phase = label.split('.')
+            name = ('coverage-pid-' + str(finishes[role]['pid']) + '.data'
+                    if phase == 'data' else role + '.' + phase + '.json')
+            path = spec['output'] + '/' + name
+        raw = payloads.get(label)
+        observations[label] = {'path': path, 'dev': 1, 'ino': i + 1,
+                               'mtime_ns': 0, 'ctime_ns': 0,
+                               'bytes': len(raw) if raw is not None else 4096,
+                               'sha256': hashlib.sha256(raw).hexdigest() if raw is not None else 'a' * 64}
+    observations['catalog']['sha256'] = SOURCE_CATALOG_SHA256
+    observations['archive']['sha256'] = COVERAGE_ARCHIVE_SHA256
+    observations['profile']['sha256'] = PROFILE_SHA256
+    return {'observations': observations, 'raw': payloads}, {k: v['path'] for k, v in observations.items()}
+
+
+@pytest.mark.parametrize('fault,reason', [
+    (None, None), ('data_hash', 'native PID data'), ('data_size', 'native PID data'),
+    ('data_path', 'native PID data'), ('raw_payload', 'payload differs'),
+    ('profile', 'frozen source/tool/profile'), ('omission', 'not full declared B')])
+def test_originals_lower_actual_byte_binding_semantics(fault, reason):
+    from .coverage_decode_originals import _decode_originals
+    from .coverage_originals import LABELS
+    originals, paths = _originals_lower_fixture()
+    if fault == 'data_hash':
+        originals['observations']['gw0.data']['sha256'] = 'b' * 64
+    elif fault == 'data_size':
+        originals['observations']['gw0.data']['bytes'] += 1
+    elif fault == 'data_path':
+        paths['gw0.data'] = '/private/coverage-out/coverage-pid-999.data'
+        originals['observations']['gw0.data']['path'] = paths['gw0.data']
+    elif fault == 'raw_payload':
+        originals['raw']['gw0.start'] += b' '
+    elif fault == 'profile':
+        originals['observations']['profile']['sha256'] = 'e' * 64
+    elif fault == 'omission':
+        for role in ROLES[1:]:
+            key = role + '.finish'
+            row = json.loads(originals['raw'][key])
+            row['nodes_before'] = sorted(NODES + ['tests/test_sample.py::test_omitted'])
+            row['deselected'] = ['tests/test_sample.py::test_omitted']
+            raw = _decoder_raw(row)
+            originals['raw'][key] = raw
+            originals['observations'][key].update(bytes=len(raw), sha256=hashlib.sha256(raw).hexdigest())
+    before = deepcopy(originals)
+    kwargs = {'receipt_root': '/private/coverage-out', 'paths': paths,
+              'limits': {'file_bytes': {k: 1000000 for k in LABELS}, 'path_bytes': 4096},
+              'json_limits': DECODE_LIMITS, 'actual_exit': 0, 'outer_seconds': 10.0, 'cohort': NODES}
+    if reason is not None:
+        with pytest.raises(ValueError, match=reason):
+            _decode_originals(originals, **kwargs)
+    else:
+        result = _decode_originals(originals, **kwargs)
+        assert result['receipt_logic']['node_outcomes'] == {NODES[0]: 'passed', NODES[1]: 'skipped'}
+        assert set(result['starts']) == set(result['finishes']) == set(ROLES)
+        assert result['source_process_or_closed_writer_authenticated'] is False
+        assert result['receipt_logic']['process_identity_custody_close_and_data_validated'] is False
+    assert originals == before
+
+
+@pytest.mark.parametrize('raw_exit', [1, 4, -15])
+def test_raw_outer_failure_stops_original_collection_without_replacement(raw_exit):
+    from . import coverage_decode_originals as owner
+    original = owner.observe_originals
+    calls = []
+    def forbidden_collection(**kwargs):
+        calls.append(True)
+        raise AssertionError('raw failure started optional byte collection')
+    try:
+        owner.observe_originals = forbidden_collection
+        result = owner.collect_decoded_originals(
+            paths=None, receipt_root=None, limits=None, json_limits=None,
+            actual_exit=raw_exit, outer_seconds=None, cohort=None)
+    finally:
+        owner.observe_originals = original
+    assert not calls and owner.observe_originals is original
+    assert result['actual_exit'] == raw_exit
+    assert result['collector_started'] is False
+    assert 'originals' not in result and 'decoded' not in result
+    assert result['source_process_or_closed_writer_authenticated'] is False
