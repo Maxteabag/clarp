@@ -634,6 +634,60 @@ class ShadowBudget:
 BUDGET = ShadowBudget()
 
 
+def _completion_state(result) -> str:
+    """Private native result, interpreted only by an opted-in import adapter."""
+    if not isinstance(result, dict) or "_clarp_transcript_completion_v1" not in result:
+        return "completed-changed"  # existing strict importer / legacy test callers
+    state = result["_clarp_transcript_completion_v1"]
+    return state if state in ("completed-changed", "completed-unchanged", "deferred") else "deferred"
+
+
+class _CompletionImport:
+    """Completion transport; NOT an audit or native file/DB certificate.
+
+    The default remains strict legacy admission. The later audit implementation
+    must supply its real epoch/generation probe AND publication fence before
+    enabling warm hash reuse. This groundwork does not enable that optimization.
+    A native authority's fence must be reentrant and shared by all its debt /
+    generation mutations; importer IO is always outside that fence.
+    """
+    _clarp_transcript_completion_v1 = True
+
+    def __init__(self, callback, context, *, eligibility=None, fence=None, after_complete=None):
+        self._callback = callback
+        self._context = context
+        self._eligibility = eligibility
+        self._fence = fence
+        self._after_complete = after_complete
+
+    def _clarp_transcript_eligibility(self):
+        if self._eligibility is None:
+            return self._context, None, True  # legacy, not an audit generation
+        return self._eligibility()
+
+    def _clarp_transcript_fence(self):
+        from contextlib import nullcontext
+        return self._fence() if self._fence is not None else nullcontext()
+
+    def __call__(self):
+        context, generation, eligible = self._clarp_transcript_eligibility()
+        value = self._callback() if eligible else None
+        state = _completion_state(value) if eligible else "deferred"
+        return {"_clarp_transcript_completion_v1": (context, generation, state),
+                "_native_result": value}
+
+    def _clarp_transcript_completed(self, envelope):
+        if self._after_complete is not None:
+            self._after_complete(envelope["_native_result"])
+
+
+def _completion_import(callback, *, backend, path, agent_id, backend_session_id,
+                       after_complete=None):
+    from . import db
+    context = (str(db.DB_PATH), str(path), backend, agent_id, backend_session_id)
+    return _CompletionImport(callback, context, after_complete=after_complete)
+
+
 # ---- the import ------------------------------------------------------------
 
 _ROW_FIELDS = ("id", "role", "text", "origin", "sender_agent_id", "timestamp",
