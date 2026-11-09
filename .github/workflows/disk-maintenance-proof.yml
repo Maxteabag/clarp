@@ -1,0 +1,61 @@
+name: Disk maintenance disposable controls
+'on':
+  push:
+    branches: [refactor/ci/disk-maintenance-f226-proof-r1]
+permissions:
+  contents: read
+jobs:
+  disposable-controls:
+    if: ${{ github.repository == 'Maxteabag/clarp' && github.event_name == 'push' && github.ref == 'refs/heads/refactor/ci/disk-maintenance-f226-proof-r1' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Exact branch carrier
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Exactly fifteen synthetic controls under existing containment
+        shell: bash
+        env:
+          PROOF_RUNNER_ENVIRONMENT: ${{ runner.environment }}
+        run: |
+          set -euo pipefail
+          umask 077
+          echo '48d0beab07dc3c5129e5236a5cc907c3357545d65e39de636378717ec7f90c8f  SOURCE-CLOSURE.json' | sha256sum -c -
+          /usr/bin/timeout --signal=TERM --kill-after=30s 570s /usr/bin/bash .disk-maintenance-proof/run-proof.sh
+      - name: Retain evidence even when refused or failed
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          test -d proof-results || mkdir -m700 proof-results
+          /usr/bin/python3 -B - <<'PY'
+          from pathlib import Path
+          import hashlib,json,stat
+          rows=[];total=0
+          for root in (Path('proof-results'),Path('.disk-maintenance-proof/results')):
+              if not root.exists():continue
+              for p in sorted(root.rglob('*')):
+                  mode=p.lstat().st_mode
+                  assert not stat.S_ISLNK(mode)
+                  if stat.S_ISDIR(mode):continue
+                  assert stat.S_ISREG(mode)
+                  raw=p.read_bytes();total+=len(raw)
+                  assert len(rows)<1000 and total<=64*1024*1024
+                  rows.append(dict(path=str(p),bytes=len(raw),sha256=hashlib.sha256(raw).hexdigest()))
+          with Path('proof-results/artifact-index.json').open('x') as f:
+              json.dump(dict(files=rows,missing='UNKNOWN_NOT_PASS',scope='synthetic_control_only'),f,indent=2)
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: ${{ always() }}
+        with:
+          name: disk-maintenance-f226-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            proof-results/
+            .disk-maintenance-proof/results/
+          include-hidden-files: true
+          retention-days: 45
+          if-no-files-found: error
