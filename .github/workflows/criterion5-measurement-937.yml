@@ -26,39 +26,39 @@
       "steps": [
         {
           "uses": "actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
-          "timeout-minutes": 2,
+          "timeout-minutes": 1,
           "with": {
             "persist-credentials": false
           }
         },
         {
           "uses": "astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e",
-          "timeout-minutes": 2,
+          "timeout-minutes": 1,
           "with": {
             "enable-cache": false
           }
         },
         {
           "uses": "actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
-          "timeout-minutes": 2,
+          "timeout-minutes": 1,
           "with": {
             "node-version": 22
           }
         },
         {
           "name": "Stage exact two product pins and one shared dependency environment",
-          "timeout-minutes": 9,
+          "timeout-minutes": 5,
           "run": "bash tools/refactor/criterion5_pair_937/prepare.sh > measurement-setup.log 2>&1"
         },
         {
           "name": "One matched interleaved contained experiment",
-          "timeout-minutes": 77,
-          "run": "timeout --signal=TERM --kill-after=30s 76m bash scripts/ci_contained.sh .venv/bin/python tools/refactor/criterion5_pair_937/runner.py --workspace \"$PWD\""
+          "timeout-minutes": 89,
+          "run": "timeout --signal=TERM --kill-after=30s 88m30s bash scripts/ci_contained.sh .venv/bin/python tools/refactor/criterion5_pair_937/runner.py --workspace \"$PWD\""
         },
         {
           "uses": "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
           "if": "always()",
-          "timeout-minutes": 5,
+          "timeout-minutes": 2,
           "with": {
             "name": "criterion5-937-matched-evidence",
             "path": "measurement-results/\nmeasurement-setup.log\nmeasurement-source.json",

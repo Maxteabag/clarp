@@ -4,18 +4,18 @@
   "B": "1ca5a5a69cba322e311968f20298c1db36f31eac",
   "suite_pairs": 3,
   "startup_pairs": 5,
-  "workers": 2,
+  "workers": 4,
   "standing_failures": {
     "A": [],
     "B": []
   },
-  "suite_timeout_s": 360,
+  "suite_timeout_s": 480,
   "runtime_ready_timeout_s": 90,
   "host_ready_timeout_s": 60,
   "plateau_s": 60,
   "plateau_drift_fraction": 0.05,
   "seed_timeout_s": 120,
-  "runner_timeout_s": 4500,
+  "runner_timeout_s": 5280,
   "median_tolerance_fraction": 0.05,
   "poll_s": 0.1,
   "memory_workload_gets": [
