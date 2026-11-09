@@ -140,6 +140,8 @@ def autonomy_templates():
             {"key":"codex_min_remaining","label":"Codex floor: weekly window percent remaining","type":"integer","default":10,"min":0,"max":100},
             {"key":"mode","label":"Switching","type":"choice","default":"automatic","choices":[{"value":"notify","label":"Notify only"},{"value":"automatic","label":"Switch through Hotseat"}]},
             {"key":"hotseat_command","label":"Hotseat command","type":"string","default":"hotseat"},
+            {"key":"auto_repair_auth","label":"Repair saved Claude authentication","type":"boolean","default":False,
+             "description":"Optional exact-profile repair; repaired authentication is verified separately from usable quota and model limits."},
             # Backing off would leave an exhausted account in use: fixed unless configured.
             _max_interval_option(0)])
         ]]
