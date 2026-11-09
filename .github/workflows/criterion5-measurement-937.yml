@@ -1,7 +1,15 @@
 {
   "name": "Criterion5 matched937 (reviewed branch only)",
   "on": {
-    "workflow_dispatch": {}
+    "push": {
+      "branches": [
+        "ci/criterion5-937-*"
+      ],
+      "paths": [
+        ".github/workflows/criterion5-measurement-937.yml",
+        "tools/refactor/criterion5_pair_937/**"
+      ]
+    }
   },
   "permissions": {
     "contents": "read"
@@ -12,7 +20,7 @@
   },
   "jobs": {
     "matched": {
-      "if": "${{ startsWith(github.ref, 'refs/heads/ci/criterion5-937-') && github.repository == 'Maxteabag/clarp' }}",
+      "if": "${{ github.event_name == 'push' && startsWith(github.ref, 'refs/heads/ci/criterion5-937-') && github.repository == 'Maxteabag/clarp' }}",
       "runs-on": "ubuntu-24.04",
       "timeout-minutes": 100,
       "steps": [
@@ -55,7 +63,8 @@
             "name": "criterion5-937-matched-evidence",
             "path": "measurement-results/\nmeasurement-setup.log\nmeasurement-source.json",
             "if-no-files-found": "error",
-            "retention-days": 30
+            "retention-days": 30,
+            "include-hidden-files": true
           }
         }
       ]

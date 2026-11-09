@@ -1,6 +1,6 @@
 # Criterion5 /937: lead method decision rf1c82b9c1d49
 
-SOURCE ONLY / UNEXECUTED. No dispatch/push/execution grant. This replaces the
+SOURCE ONLY / UNEXECUTED. No publication/push/execution grant. This replaces the
 previous criterion5 native-worker/teardown/execnet certification method. The
 criterion remains suite, startup and memory no worse. Historical source and raw
 failures stay retained; none of the old channel/getter/nine-actor certification,
@@ -77,13 +77,24 @@ are finite refusal boundaries, not an admission or promise that all native work
 will fit. An incomplete/invalid campaign retains partials/UNKNOWN; no retry/cap
 extension/corpus shrink. No VM/provider query or native source execution occurred.
 
-Workflow is dispatch-only on ci/criterion5-937-<driverSHA12> branch (prepare
-checks this exact commit-derived immutable name), no push/PR trigger, no
+Workflow fires only on the ONE captain-authorized push of
+ci/criterion5-937-<driverSHA12> (prepare checks the exact commit-derived name),
+with only its workflow/driver paths selected. No default-branch registration or
+trial dispatch/main merge is needed. No PR/manual trigger, no
 workflow_call, matrix/reusable workflow/deploy, secrets context or write permission.
 The proposed change touches no desktop/publish-trigger paths and no other workflow
-is changed/fired by this preparation. Before push/dispatch: B exact workflow +
+is changed/fired by this preparation. Before the single execution push: B exact workflow +
 runner review (pins, contexts, no secrets, no other workflow fired), then captain
-handoff and ONE execution request. LOWEST after933, disk-maintenance controller
+handoff and ONE execution request authorizing that exact immutable push. LOWEST after933, disk-maintenance controller
 proof and ready landings; never preempt/delay/FUND override. Heavy once restored
 or this temporary Actions route, per lead. No Actions use is inferred from the
 older program-gate exception. Herald931 HOLD stays unchanged.
+
+Corrected review boundaries (05b0 findings): only primary suite pytest elapsed,
+Host/runtime startup and RSS determine overall status; wall/per-outcome spreads
+remain diagnostics. Cleanup does not signal a reaped numeric group, checks owned
+child state before timeout signals and attempts all known children/logs
+independently. Unknown survivors remain separate hygiene. Uploader explicitly
+includes the synthetic hidden payloads indexed by SHA256.json; only generated
+measurement results + setup/source metadata, never external HOME/secrets, are
+retained. Exact B source re-review required; no push/job has occurred.

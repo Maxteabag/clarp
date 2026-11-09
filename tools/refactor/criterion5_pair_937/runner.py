@@ -30,24 +30,53 @@ def digest(path):
 
 
 def terminate(proc):
-    """Bounded ordinary owned-group cleanup; hygiene is separate from timing."""
+    """Ordinary cleanup only while the child PID reservation is still owned."""
+    if proc.poll() is not None:
+        return {'exit': proc.returncode, 'signal_sent': False,
+                'survivors': 'unobserved after reap; separate hygiene only'}
+    sent = []
     try:
         os.killpg(proc.pid, signal.SIGTERM)
+        sent.append('TERM')
     except ProcessLookupError:
         pass
     try:
         proc.wait(timeout=2)
     except subprocess.TimeoutExpired:
-        try:
-            os.killpg(proc.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
+        if proc.poll() is None:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+                sent.append('KILL')
+            except ProcessLookupError:
+                pass
         proc.wait(timeout=3)
-    try:
-        os.killpg(proc.pid, 0)
-    except ProcessLookupError:
-        return {'group_survivors_observed': False}
-    return {'group_survivors_observed': True, 'finding': 'separate hygiene finding; no native teardown certificate'}
+    return {'exit': proc.returncode, 'signals': sent,
+            'survivors': 'not certified; separate hygiene only'}
+
+
+def cleanup(children, streams, primary=None):
+    findings, errors = [], []
+    for proc in reversed(children):
+        try:
+            findings.append(terminate(proc))
+        except BaseException as error:
+            errors.append(error)
+            findings.append({'cleanup_fault': type(error).__name__ + ': ' + str(error)})
+    for stream in streams:
+        try:
+            stream.close()
+        except BaseException as error:
+            errors.append(error)
+            findings.append({'log_close_fault': type(error).__name__ + ': ' + str(error)})
+    if primary is not None:
+        if errors:
+            if primary.__cause__ is not None:
+                errors.insert(0, primary.__cause__)
+            primary.__cause__ = BaseExceptionGroup('ordinary cleanup failures', errors)
+        raise primary
+    if any(not isinstance(error, Exception) for error in errors):
+        raise BaseExceptionGroup('ordinary cleanup control', errors)
+    return findings
 
 
 def run(command, *, cwd, env, log, timeout, deadline):
@@ -179,10 +208,9 @@ def ready_process(source, role, env, python, out, plan, deadline, port, root):
         return proc, stream, {'valid': valid, 'startup_s': time.monotonic() - started,
                                'pid': proc.pid, 'error': error, 'health': health,
                                'process_start_mono': started, 'health_observed_mono': time.monotonic()}
-    except BaseException:
-        terminate(proc)
-        stream.close()
-        raise
+    except BaseException as primary:
+        cleanup([proc], [stream], primary)
+        raise  # cleanup propagates primary after all known cleanup attempts
 
 
 def memory(pid):
@@ -212,6 +240,7 @@ def native(source, arm, cycle, out, python, plan, seed, deadline):
         port = sock.getsockname()[1]
     env = state_environment(active, source, port)
     children, streams, result = [], [], {'arm': arm, 'cycle': cycle, 'startup': {}, 'samples': []}
+    primary = None
     try:
         for role in ('runtime', 'server'):
             proc, stream, observation = ready_process(source, role, env, python, attempt, plan,
@@ -244,10 +273,10 @@ def native(source, arm, cycle, out, python, plan, seed, deadline):
                 result['memory'][role]['PSS'] = statistics.median(pss)
     except (OSError, ValueError, statistics.StatisticsError) as exc:
         result['invalid_reason'] = str(exc)
+    except BaseException as error:
+        primary = error
     finally:
-        result['hygiene'] = [terminate(p) for p in reversed(children)]
-        for stream in streams:
-            stream.close()
+        result['hygiene'] = cleanup(children, streams, primary)
         write(attempt / 'observations.json', result)
     return result
 
@@ -302,11 +331,17 @@ def main():
     except (OSError, ValueError, TimeoutError, subprocess.SubprocessError) as exc:
         write(out / 'invalid-campaign.json', {'reason': str(exc), 'no_retry': True})
     finally:
-        result = {'suite_runs': runs, 'native_runs': startups, 'targets': {},
+        result = {'suite_runs': runs, 'native_runs': startups, 'targets': {}, 'diagnostics': {},
                   'hotspot_coverage': 'INFORMATIONAL_NOT_COLLECTED', 'final_main_rerun_outstanding': True}
         for metric in ('pytest_s', 'wall_s', 'pytest_ms_per_outcome'):
             samples = {arm: [r[metric] for r in runs if r['arm'] == arm and r['valid']] for arm in arms}
-            result['targets']['suite_' + metric] = compare(samples['A'], samples['B'], plan['suite_pairs'], plan['median_tolerance_fraction'])
+            comparison = compare(samples['A'], samples['B'], plan['suite_pairs'], plan['median_tolerance_fraction'])
+            if metric == 'pytest_s':
+                result['targets']['suite_pytest_s'] = comparison
+            else:
+                comparison.pop('verdict', None)
+                result['diagnostics']['suite_' + metric] = comparison
+
         for role in ('Host', 'runtime'):
             samples = {arm: [r['startup'][role]['startup_s'] for r in startups if r['arm'] == arm
                              and r.get('startup', {}).get(role, {}).get('valid')] for arm in arms}
@@ -314,6 +349,12 @@ def main():
             samples = {arm: [r['memory'][role]['RSS'] for r in startups if r['arm'] == arm
                              and r.get('memory', {}).get(role, {}).get('valid')] for arm in arms}
             result['targets'][role + '_RSS'] = compare(samples['A'], samples['B'], plan['startup_pairs'], plan['median_tolerance_fraction'])
+            pss = {arm: [r['memory'][role]['PSS'] for r in startups if r['arm'] == arm
+                         and r.get('memory', {}).get(role, {}).get('valid')
+                         and 'PSS' in r['memory'][role]] for arm in arms}
+            diagnostic = compare(pss['A'], pss['B'], plan['startup_pairs'], plan['median_tolerance_fraction'])
+            diagnostic.pop('verdict', None)
+            result['diagnostics'][role + '_PSS'] = diagnostic
         write(out / 'report.json', result)
         hashes = {p.relative_to(out).as_posix(): digest(p) for p in out.rglob('*') if p.is_file()}
         write(out / 'SHA256.json', hashes)
