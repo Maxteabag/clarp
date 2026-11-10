@@ -27,7 +27,7 @@ from typing import Any, Callable, Iterator, Optional
 from .. import agents as agents_db
 from .. import turn_lifecycle
 from .. import events
-from ..live_pacing import LivePacer
+from ..stream_pacing import LivePacer
 from ..log import log, log_exception
 from ..proc_util import attach_stderr_drain
 from ..process_registry import TurnHandle
