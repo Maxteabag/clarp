@@ -1630,3 +1630,117 @@ def test_owner_lease_reentrant_acquire_preserves_block_without_self_wait(tmp_pat
                 cache.release_owner_lease(lease, binding)
         finally:
             assert cache.reset_for_tests()
+
+
+@pytest.mark.parametrize("preflight", ["selected", "replaced", "error", "close_failure"])
+def test_owner_lease_covers_real_connection_close_on_every_worker_exit(tmp_path, monkeypatch, preflight):
+    import sqlite3
+    import threading
+    import time
+    from lib import db
+
+    cache = transcript_import_cache
+    assert cache.reset_for_tests()
+    path = tmp_path / "close.jsonl"
+    path.write_text("{}\n")
+    marker_entered, marker_release = threading.Event(), threading.Event()
+    close_entered, close_release = threading.Event(), threading.Event()
+    actual, failures, calls = [], [], []
+    close_error = sqlite3.OperationalError("selected real connection close failed")
+    lease = None
+    hook = threading.excepthook
+
+    def capture(args):
+        if args.thread.name == "transcript-import":
+            failures.append(args.exc_value)
+        else:
+            hook(args)
+
+    monkeypatch.setattr(threading, "excepthook", capture)
+
+    class OwnedConnection:
+        def __init__(self, connection):
+            self.connection = connection
+
+        def __getattr__(self, name):
+            return getattr(self.connection, name)
+
+        def close(self):
+            close_entered.set()
+            assert close_release.wait(3), "test did not release real terminal close"
+            if preflight == "close_failure":
+                raise close_error
+            return self.connection.close()
+
+    original = _lease_native_import(path, "lease-owner", "old-native",
+                                    lambda: calls.append("import") or {})
+
+    class OpeningMarker:
+        @property
+        def _clarp_transcript_completion_v1(self):
+            if threading.current_thread().name == "transcript-import" and not actual:
+                connection = db.conn()  # actual owned SQLite connection, not a close receipt
+                actual.append(connection)
+                db._LOCAL.conn = OwnedConnection(connection)
+                marker_entered.set()
+                assert marker_release.wait(3)
+                if preflight == "error":
+                    raise ValueError("selected preflight failure after opening real DB")
+            return True
+
+        def __getattr__(self, name):
+            return getattr(original, name)
+
+        def __call__(self):
+            return original()
+
+    importer = OpeningMarker()
+    binding = _lease_binding(path, "old-native")
+    try:
+        assert cache.schedule_import(path, importer, owner="lease-owner", urgent=True)
+        assert marker_entered.wait(2)
+        with pytest.raises(cache.OwnerLeasePending) as pending:
+            cache.acquire_owner_lease("lease-owner", binding, time.monotonic(), operation_id="close-1")
+        lease = pending.value.lease
+        if preflight == "replaced":
+            assert cache.schedule_import(path, importer, owner="lease-owner", urgent=True)
+        marker_release.set()
+        assert close_entered.wait(2), "owner exit did not reach actual connection close"
+        assert actual[0].execute("SELECT 1").fetchone()[0] == 1
+        with pytest.raises(cache.OwnerLeasePending):
+            cache.wait_owner_lease(lease, time.monotonic())
+        close_release.set()
+        assert cache.wait_for_background(3)
+        if preflight == "close_failure":
+            assert failures == [close_error]
+            assert actual[0].execute("SELECT 1").fetchone()[0] == 1
+            with pytest.raises(cache.OwnerLeaseBusy, match="cleanup"):
+                cache.wait_owner_lease(lease, time.monotonic())
+            with pytest.raises(cache.OwnerLeaseBusy, match="cleanup"):
+                cache.release_owner_lease(lease, binding)
+        else:
+            assert not failures
+            with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+                actual[0].execute("SELECT 1")
+            assert cache.wait_owner_lease(lease, time.monotonic()) is lease
+            assert calls == ([] if preflight in ("error", "replaced") else ["import"])
+            cache.release_owner_lease(lease, binding)
+            lease = None
+    finally:
+        marker_release.set()
+        close_release.set()
+        try:
+            assert cache.wait_for_background(3)
+        finally:
+            try:
+                # Independent real close before clearing ONLY this test's
+                # fail-closed poison for teardown; no positive drain oracle
+                # above is produced by this fixture cleanup.
+                for connection in actual:
+                    connection.close()
+                if lease is not None:
+                    with cache._guard:
+                        cache._owner_admissions.states["lease-owner"].cleanup_uncertain = False
+                    cache.release_owner_lease(lease, binding)
+            finally:
+                assert cache.reset_for_tests()
