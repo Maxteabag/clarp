@@ -297,8 +297,9 @@ def _prune_detail(c, statement: str, params: tuple) -> int:
 def _drop_whole_hours(c, current_hour: int, budget_bytes: int) -> int:
     """Delete the oldest whole hours until the live data fits the budget.
 
-    Only hours before the current one: the caller has just rolled those up,
-    and a whole hour that is gone is never aggregated again (RM-N8c).
+    Only hours before the current one: the caller has just rolled those up.
+    A late row can bring such an hour back into the detail; the rollup it
+    already has is then kept (_retained_keys), not recomputed from that row.
     """
     removed = 0
     while live_bytes(c) > budget_bytes:
@@ -337,6 +338,25 @@ def _cut_current_hour(c, keep_bytes: int) -> int:
     return removed
 
 
+def _retained_keys(c, metrics: list) -> set[tuple]:
+    """The rollup rows that must stay as they are: those that already count
+    more rows than the detail now holds for the same hour and kind.
+
+    Detail rows are never changed, so a kind's count in an hour only falls
+    when detail was deleted: the hour was pruned (by age or by the budget)
+    and a late row has arrived for it, or a prune was interrupted. Replacing
+    the rollup then would overwrite the hour's full count with the count of
+    what is left (100 becomes 1).
+    """
+    if not metrics:
+        return set()
+    counted = {tuple(row[:5]): row[5] for row in c.execute(
+        """SELECT bucket_ms,source,event,path,status,samples
+             FROM hourly_metrics WHERE bucket_ms >= ?""",
+        (min(row[0] for row in metrics),))}
+    return {tuple(row[:5]) for row in metrics if counted.get(tuple(row[:5]), 0) > row[5]}
+
+
 def rollup_and_prune(*, now_ms: int | None = None, checkpoint: bool = True,
                       budget_bytes: int = DETAIL_BUDGET_BYTES) -> dict[str, int]:
     """Roll every retained hour up, then expire detail and old rollups, then
@@ -351,6 +371,15 @@ def rollup_and_prune(*, now_ms: int | None = None, checkpoint: bool = True,
     The budget (``budget_bytes`` of live data, see live_bytes) drops whole
     hours, oldest first, all of them rolled up above. If the current hour
     alone is still over it, its oldest rows go too (_cut_current_hour).
+
+    A rollup row is replaced only by one made from at least as many detail
+    rows (_retained_keys). So a row that arrives late for an hour whose detail
+    is already gone (a deferred emit that commits after the hour turned, or a
+    supplied older timestamp) leaves that hour's rollup as it was. This is a
+    declared loss, not exact accounting: such a late row is not added to a
+    rollup row of its own kind, and only a kind the hour did not have yet
+    gets a row. If late rows of a kind are at least as many as the hour
+    counted, they replace it.
 
     It is best-effort reclamation at each pass, not a hard ceiling: what
     arrives between two passes can overshoot it, the cut of the current hour
@@ -371,6 +400,9 @@ def rollup_and_prune(*, now_ms: int | None = None, checkpoint: bool = True,
                      COALESCE(status,0)""",
         (hour, current_hour, hour),
     ).fetchall()
+    # Both tables follow one decision per hour and kind, so they stay in step.
+    retained = _retained_keys(c, metrics)
+    metrics = [row for row in metrics if tuple(row[:5]) not in retained]
     _upsert_in_batches(c,
         """INSERT INTO hourly_metrics (
                bucket_ms,source,event,path,status,samples,
@@ -389,6 +421,7 @@ def rollup_and_prune(*, now_ms: int | None = None, checkpoint: bool = True,
                      COALESCE(status,0),{_LATENCY_BUCKET}""",
         (hour, current_hour, hour),
     ).fetchall()
+    latency = [row for row in latency if tuple(row[:5]) not in retained]
     _upsert_in_batches(c,
         """INSERT INTO hourly_latency_buckets (
                bucket_ms,source,event,path,status,upper_ms,samples)

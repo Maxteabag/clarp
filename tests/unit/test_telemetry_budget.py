@@ -192,3 +192,104 @@ def test_an_emit_gets_the_lock_between_byte_bounded_statements(monkeypatch):
         other.close()
     assert counts["telemetry_budget_details"] == 12
     assert len(admitted) >= 3, admitted                  # four statements, a pause between each
+
+
+# --- a late row for an hour whose detail is gone (review D) -------------------------
+
+def _rollup_rows() -> list[tuple]:
+    return [tuple(row) for row in telemetry.conn().execute(
+        "SELECT bucket_ms / ?, source, event, path, status, samples, total_duration_ms, max_duration_ms "
+        "FROM hourly_metrics ORDER BY 1, 2, 3, 4, 5", (HOUR,))]
+
+
+def _latency_rows() -> list[tuple]:
+    return [tuple(row) for row in telemetry.conn().execute(
+        "SELECT bucket_ms / ?, source, event, path, status, upper_ms, samples "
+        "FROM hourly_latency_buckets ORDER BY 1, 2, 3, 4, 5, 6", (HOUR,))]
+
+
+def _late_emit(event: str, ts_ms: int, duration_ms: float) -> None:
+    """A real emit carrying an older timestamp, as a deferred row does when
+    its transaction ends after the hour has turned."""
+    import datetime
+    from lib import diagnostics_settings, eventlog
+    diagnostics_settings.update({"enabled": True, "categories": list(diagnostics_settings.CATEGORIES)})
+    eventlog.emit("server", event, duration_ms=duration_ms,
+                  now=datetime.datetime.fromtimestamp(ts_ms / 1000, datetime.timezone.utc))
+
+
+def test_a_late_row_does_not_overwrite_the_rollup_of_a_budget_pruned_hour(tmp_path, monkeypatch):
+    from lib import eventlog
+    monkeypatch.setattr(eventlog, "LOG_DIR", tmp_path)
+    _fill(39)
+    _fill(40)
+    telemetry.rollup_and_prune(now_ms=NOW, budget_bytes=telemetry.live_bytes() * 2 // 3)
+    assert _hours() == {40: ROWS}, "the fixture must budget-prune hour 39 whole"
+    metrics, latency = _rollup_rows(), _latency_rows()
+    assert metrics == [(39, "server", "noisy", "", 0, ROWS, 10.0 * ROWS, 10.0)]
+    assert latency == [(39, "server", "noisy", "", 0, 10, ROWS)]
+
+    # Under a new event identity: the same kind as the hour had, in another
+    # latency bucket, committed after the hour was rolled up and pruned.
+    _late_emit("noisy", 39 * HOUR + 59 * 60 * 1000, duration_ms=300)
+    assert _hours() == {39: 1, 40: ROWS}
+
+    for _ in range(2):                                   # the late row is still there the second time
+        counts = telemetry.rollup_and_prune(now_ms=NOW, budget_bytes=telemetry.live_bytes() * 100)
+        assert counts["telemetry_budget_details"] == 0
+        assert _rollup_rows() == metrics, "100 must not become 1, nor 101 twice"
+        assert _latency_rows() == latency, "and its latency buckets stay in step with it"
+    assert _hours() == {39: 1, 40: ROWS}                 # declared: kept as detail, not added to the rollup
+
+
+def test_a_late_row_of_a_kind_the_pruned_hour_did_not_have_gets_its_own_row_once(tmp_path, monkeypatch):
+    from lib import eventlog
+    monkeypatch.setattr(eventlog, "LOG_DIR", tmp_path)
+    _fill(39)
+    _fill(40)
+    telemetry.rollup_and_prune(now_ms=NOW, budget_bytes=telemetry.live_bytes() * 2 // 3)
+    _late_emit("other", 39 * HOUR + 5, duration_ms=300)
+    for _ in range(2):
+        telemetry.rollup_and_prune(now_ms=NOW, budget_bytes=telemetry.live_bytes() * 100)
+        assert _rollup_rows() == [(39, "server", "noisy", "", 0, ROWS, 10.0 * ROWS, 10.0),
+                                  (39, "server", "other", "", 0, 1, 300.0, 300.0)]
+        assert _latency_rows() == [(39, "server", "noisy", "", 0, 10, ROWS),
+                                   (39, "server", "other", "", 0, 500, 1)]
+
+
+def test_a_late_row_for_an_hour_that_still_has_its_detail_is_counted(tmp_path, monkeypatch):
+    """Unchanged from before: with the detail still there the hour is recomputed."""
+    from lib import eventlog
+    monkeypatch.setattr(eventlog, "LOG_DIR", tmp_path)
+    _fill(39)
+    budget = telemetry.live_bytes() * 100
+    telemetry.rollup_and_prune(now_ms=NOW, budget_bytes=budget)
+    _late_emit("noisy", 39 * HOUR + 59 * 60 * 1000, duration_ms=300)
+    for _ in range(2):
+        telemetry.rollup_and_prune(now_ms=NOW, budget_bytes=budget)
+        assert _rollup_rows() == [(39, "server", "noisy", "", 0, ROWS + 1, 10.0 * ROWS + 300, 300.0)]
+        assert _latency_rows() == [(39, "server", "noisy", "", 0, 10, ROWS),
+                                   (39, "server", "noisy", "", 0, 500, 1)]
+
+
+def test_an_interrupted_prune_does_not_shrink_the_hours_rollup():
+    _fill(39)
+    budget = telemetry.live_bytes() * 100
+    telemetry.rollup_and_prune(now_ms=NOW, budget_bytes=budget)
+    # A prune that stopped after its first batches: part of the hour is left.
+    telemetry.conn().execute(
+        "DELETE FROM diagnostic_events WHERE event_id IN "
+        "(SELECT event_id FROM diagnostic_events ORDER BY event_id LIMIT 40)")
+    for _ in range(2):
+        telemetry.rollup_and_prune(now_ms=NOW, budget_bytes=budget)
+        assert _rollup() == {39: ROWS}
+
+
+def test_declared_limit_late_rows_that_outnumber_the_pruned_count_replace_it():
+    """Not exact accounting: without the detail there is nothing to add them to."""
+    _fill(39, rows=2)
+    telemetry.rollup_and_prune(now_ms=NOW, budget_bytes=1)
+    assert _hours() == {} and _rollup() == {39: 2}
+    _fill(39, rows=3)
+    telemetry.rollup_and_prune(now_ms=NOW, budget_bytes=telemetry.live_bytes() * 100)
+    assert _rollup() == {39: 3}
