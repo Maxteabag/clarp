@@ -1,5 +1,7 @@
 # Reviewer A's probe on cd1119d4 (WIP 1349e0c5), kept unchanged as the round-6 regression.
 """A mirror write predating a timed-out activation cannot settle its uncertainty."""
+
+from tests.codex_request import result_reply
 import pytest
 
 from lib import agent_goals, agents, codex_app_server as cas
@@ -19,6 +21,7 @@ def test_old_paused_write_finishing_after_a_resume_timeout_keeps_uncertainty(tmp
         goal=agent_goals.from_codex({'objective': 'synthetic', 'status': 'paused'}))
     requested = []
 
+    @result_reply
     def lost_reply(method, params, timeout=30):
         assert method == 'thread/goal/set' and params['status'] == 'active'
         requested.append(True)
@@ -58,6 +61,7 @@ def test_a_later_notification_never_resolves_an_unanswered_activation(tmp_path, 
     other = _codex_agent(tmp_path, 'lost-answer', 'lost-thread')
     client._loaded_threads.add('lost-thread')
 
+    @result_reply
     def lost_reply(method, params, timeout=30):
         raise TimeoutError('no answer')
 

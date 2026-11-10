@@ -1,5 +1,7 @@
 # Reviewer A's probe (WIP 5812031b, extends 61b3f873 with late_continuation), unchanged.
 """A stopped native goal must stay fenced when its resume-time pause fails."""
+
+from tests.codex_request import result_reply
 import threading
 import pytest
 from lib import agent_goals, codex_app_server as cas
@@ -16,6 +18,7 @@ def test_an_unanswered_resume_pause_does_not_admit_the_user_turn(tmp_path, monke
     cas._stop_pause_put('stopped-thread')
     sent = []
     interrupted = threading.Event()
+    @result_reply
     def reply(method, params, timeout=30):
         sent.append(method)
         if method == 'thread/resume':

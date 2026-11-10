@@ -1,5 +1,7 @@
 # Reviewer A's probe (WIP 61b3f873, supersedes f0d6105b), unchanged.
 """Coarse goal-call admission shares the retirement fence for every action."""
+
+from tests.codex_request import result_reply
 import threading
 
 from lib import agents, codex_app_server as cas
@@ -10,7 +12,7 @@ from lib import agent_goals
 def test_a_goal_call_picked_before_retirement_cannot_enter_after_its_mark(tmp_path, monkeypatch):
     client, agent = _loaded_goal(tmp_path, monkeypatch, agent_goals.PAUSED)
     monkeypatch.setattr(cas, '_auth_fingerprint', lambda: b'old')
-    client.request = lambda *_a, **_k: {'goal': {'objective': 'synthetic', 'status': 'paused'}}
+    client.request = result_reply(lambda *_a, **_k: {'goal': {'objective': 'synthetic', 'status': 'paused'}})
     looked_up = threading.Event()
     begin = threading.Event()
     request_or_done = threading.Event()
@@ -26,6 +28,7 @@ def test_a_goal_call_picked_before_retirement_cannot_enter_after_its_mark(tmp_pa
 
     monkeypatch.setattr(client, 'goal', after_pool_lookup)
 
+    @result_reply
     def provider_reply(method, params, timeout=30):
         assert method == 'thread/goal/get'
         outstanding.set()

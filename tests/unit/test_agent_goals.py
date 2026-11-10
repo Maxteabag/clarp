@@ -1,6 +1,8 @@
 """Goals: the table, the Codex mirror, adopted continuation turns, routing."""
 from __future__ import annotations
 
+from tests.codex_request import result_reply
+
 import threading
 
 import pytest
@@ -192,6 +194,7 @@ def test_stop_pauses_an_active_goal_before_interrupting(tmp_path):
     client = _client(_Stream())
     sent = []
 
+    @result_reply
     def fake_request(method, params, timeout=30):
         sent.append((method, params))
         if method == "thread/goal/set":

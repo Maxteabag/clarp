@@ -7,6 +7,8 @@ Q2: after the recycle that goal may still be active in codex, and a resume
 restarts an active goal by itself. Stop's semantics hold: the goal is paused
 right after the resume, a continuation that starts anyway is interrupted at
 turn/started and never taken for the user's send, and the send then runs."""
+
+from tests.codex_request import result_reply
 import threading
 import time
 
@@ -61,6 +63,7 @@ def test_a_resume_after_an_unapplied_stop_pause_keeps_the_goal_paused(tmp_path, 
     cas._stop_pause_put('stopped-thread')         # the stuck process never answered Stop's pause
     sent, interrupted = [], threading.Event()
 
+    @result_reply
     def reply(method, params, timeout=30):
         sent.append((method, params.get('status') or params.get('turnId') or ''))
         if method == 'thread/resume':
@@ -99,6 +102,7 @@ def test_an_unanswered_stop_pause_leaves_a_durable_marker(tmp_path, monkeypatch)
     agent_goals.upsert(stopped, session='stopped', backend='codex',
                        goal=agent_goals.from_codex({'objective': 'synthetic', 'status': 'active'}))
 
+    @result_reply
     def no_answer(method, params, timeout=30):
         raise TimeoutError('the stuck process never answered')
 

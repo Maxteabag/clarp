@@ -1,5 +1,7 @@
 # Reviewer A's probes on 66f67140 (WIP 2b5712de), kept unchanged as the round-4 regression.
 """Goal activation publication and follow-up sends retain their retirement fences."""
+
+from tests.codex_request import result_reply
 import sqlite3
 
 import pytest
@@ -23,6 +25,7 @@ def test_successful_activation_is_protected_until_its_active_state_is_known(tmp_
         goal=agent_goals.from_codex({'objective': 'synthetic', 'status': 'paused'}))
     accepted = []
 
+    @result_reply
     def reply(method, params, timeout=30):
         assert method == 'thread/goal/set'
         assert params['status'] == 'active'

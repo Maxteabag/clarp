@@ -6,6 +6,8 @@ itself (an active goal on a thread loaded there, or a goal being activated).
 F3: a kill without process-exit evidence keeps the stopped agent's thread
 held, so its queued send keeps waiting.
 The first and the F3 scenario follow reviewer A's probes (WIP 34cad05d)."""
+
+from tests.codex_request import result_reply
 import subprocess
 
 import pytest
@@ -69,6 +71,7 @@ def test_a_goal_being_activated_keeps_the_process_and_none_starts_on_a_retiring_
     pool._loaded_threads.add('activating-thread')
     seen = []
 
+    @result_reply
     def request(method, params, timeout=30):
         if method == 'thread/goal/set':
             pool.recycle_if_quiet()          # a recycle while the activation is in flight

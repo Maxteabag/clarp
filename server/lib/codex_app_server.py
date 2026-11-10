@@ -195,7 +195,7 @@ class _Client:
         self._write_lock = threading.Lock()
         self._lock = threading.Lock()
         self._next_id = 1
-        self._pending: dict[int, tuple[threading.Event, dict]] = {}
+        self._pending: dict[int, tuple[threading.Event, dict, Callable[[dict], None] | None]] = {}
         self.active: _ActiveTurn | None = None
         self._actives: dict[str, _ActiveTurn] = {}
         self.thread_id = ""
@@ -224,7 +224,8 @@ class _Client:
             self.proc.stdin.write(line)
             self.proc.stdin.flush()
 
-    def request(self, method: str, params: dict, timeout: float = 30) -> dict:
+    def request(self, method: str, params: dict, timeout: float = 30, *,
+                on_result: Callable[[dict], None] | None = None) -> dict:
         with self._lock:
             if getattr(self, "reader_dead", False):
                 raise RuntimeError("codex app-server reader ended")
@@ -232,7 +233,7 @@ class _Client:
             self._next_id += 1
             done = threading.Event()
             box: dict = {}
-            self._pending[rid] = (done, box)
+            self._pending[rid] = (done, box, on_result)
         self._send({"method": method, "id": rid, "params": params})
         if not done.wait(timeout):
             with self._lock:
@@ -276,9 +277,15 @@ class _Client:
             with self._lock:
                 pending = self._pending.pop(message["id"], None)
             if pending:
-                done, box = pending
+                done, box, on_result = pending
                 box.update(message)
-                done.set()
+                try:
+                    if on_result is not None and "error" not in message:
+                        on_result(message.get("result") or {})
+                except Exception as exc:  # noqa: BLE001 - keep the shared reader alive
+                    log_exception("codexGoalMirrorFail", exc, detail=self.agent_id)
+                finally:
+                    done.set()
             return
         method = str(message.get("method") or "")
         params = message.get("params") or {}
@@ -303,7 +310,7 @@ class _Client:
         with self._lock:
             pending = list(self._pending.values())
             self._pending.clear()
-        for done, box in pending:
+        for done, box, _on_result in pending:
             box["error"] = {"message": message}
             done.set()
         actives = list(getattr(self, "_actives", {}).values())
@@ -681,10 +688,12 @@ class _Client:
             _move_put(thread_id, record)
             self._goal_answer_begin(thread_id)
             try:
-                result = self.request("thread/goal/set", {"threadId": thread_id, "status": "paused"},
-                                      timeout=10)
-                goal = result.get("goal") if isinstance(result, dict) else None
-                self._mirror_goal(thread_id, goal if isinstance(goal, dict) else None)
+                def mirror(result):
+                    goal = result.get("goal") if isinstance(result, dict) else None
+                    self._mirror_goal(thread_id, goal if isinstance(goal, dict) else None)
+
+                self.request("thread/goal/set", {"threadId": thread_id, "status": "paused"},
+                             timeout=10, on_result=mirror)
             except Exception as exc:  # noqa: BLE001 - left 'pausing': recovery decides
                 log_exception("codexGoalMovePauseFail", exc, detail=thread_id[:8])
                 return
@@ -865,32 +874,35 @@ class _Client:
             self._goal_answer_begin(thread_id)
         try:
             try:
-                result = self._goal_request(agent, action, thread_id, objective)
+                self._goal_request(agent, action, thread_id, objective)
             except Exception:
                 if activating:
                     # It may have reached codex: possibly active from now on.
                     self._mark_goal_unknown(thread_id, "unanswered")
                 raise
-            goal = result.get("goal") if isinstance(result, dict) else None
-            self._mirror_goal(thread_id, goal if isinstance(goal, dict) else None)
         finally:
             self._goal_answer_end(thread_id)
         return agent_goals.public(agent_goals.get(agent_id))
 
     def _goal_request(self, agent: dict, action: str, thread_id: str, objective: str) -> dict:
+        def mirror(result):
+            goal = result.get("goal") if isinstance(result, dict) else None
+            self._mirror_goal(thread_id, goal if isinstance(goal, dict) else None)
+
         if action == "get":
-            result = self.request("thread/goal/get", {"threadId": thread_id})
+            result = self.request("thread/goal/get", {"threadId": thread_id}, on_result=mirror)
         else:
             self._ensure_loaded(agent, thread_id)
             if action == "clear":
-                self.request("thread/goal/clear", {"threadId": thread_id})
+                self.request("thread/goal/clear", {"threadId": thread_id},
+                             on_result=lambda _result: self._mirror_goal(thread_id, None))
                 result = {"goal": None}
             else:
                 params: dict = {"threadId": thread_id, "status": {
                     "start": "active", "resume": "active", "pause": "paused"}[action]}
                 if action == "start":
                     params["objective"] = objective.strip()
-                result = self.request("thread/goal/set", params)
+                result = self.request("thread/goal/set", params, on_result=mirror)
         return result
 
     def _suppressed(self, method: str, params: dict) -> bool:
@@ -929,10 +941,12 @@ class _Client:
         try:
             self._goal_answer_begin(thread_id)
             try:
-                answer = self.request("thread/goal/set", {"threadId": thread_id, "status": "paused"},
-                                      timeout=10)
-                goal = answer.get("goal") if isinstance(answer, dict) else None
-                self._mirror_goal(thread_id, goal if isinstance(goal, dict) else None)
+                def mirror(result):
+                    goal = result.get("goal") if isinstance(result, dict) else None
+                    self._mirror_goal(thread_id, goal if isinstance(goal, dict) else None)
+
+                self.request("thread/goal/set", {"threadId": thread_id, "status": "paused"},
+                             timeout=10, on_result=mirror)
                 _stop_pause_forget(thread_id)
                 log("codexStoppedGoalPausedOnResume", f"thread={thread_id[:8]} retry=True")
             except Exception as exc:  # noqa: BLE001 - the fence stays; the next start tries again
@@ -961,10 +975,12 @@ class _Client:
             result = resume()
             self._goal_answer_begin(thread_id)
             try:
-                answer = self.request("thread/goal/set", {"threadId": thread_id, "status": "paused"},
-                                      timeout=10)
-                goal = answer.get("goal") if isinstance(answer, dict) else None
-                self._mirror_goal(thread_id, goal if isinstance(goal, dict) else None)
+                def mirror(result):
+                    goal = result.get("goal") if isinstance(result, dict) else None
+                    self._mirror_goal(thread_id, goal if isinstance(goal, dict) else None)
+
+                self.request("thread/goal/set", {"threadId": thread_id, "status": "paused"},
+                             timeout=10, on_result=mirror)
                 _stop_pause_forget(thread_id)
                 log("codexStoppedGoalPausedOnResume", f"thread={thread_id[:8]}")
             except Exception as exc:
@@ -1128,18 +1144,22 @@ class _Client:
             row = agent_goals.get(active.agent_id)
             if not row or row.get("status") != agent_goals.ACTIVE or not active.thread_id:
                 return
+            def mirror(result):
+                goal = result.get("goal") if isinstance(result, dict) else None
+                self._mirror_goal(active.thread_id, goal if isinstance(goal, dict) else None)
+
             self._goal_answer_begin(active.thread_id)
             try:
                 try:
-                    result = self.request("thread/goal/set", {
-                        "threadId": active.thread_id, "status": "paused"}, timeout=10)
+                    self.request("thread/goal/set", {
+                        "threadId": active.thread_id, "status": "paused"}, timeout=10,
+                        on_result=mirror)
                 except Exception:
                     # A stuck process may never apply it: the next resume of
                     # this thread pauses the goal first (Stop means stop).
                     _stop_pause_put(active.thread_id)
                     raise
-                goal = result.get("goal") if isinstance(result, dict) else None
-                self._mirror_goal(active.thread_id, goal if isinstance(goal, dict) else None)
+                _stop_pause_forget(active.thread_id)   # the pause landed
             finally:
                 self._goal_answer_end(active.thread_id)
         except Exception as exc:  # noqa: BLE001 - the interrupt itself must still go out

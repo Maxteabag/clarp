@@ -4,6 +4,8 @@ the handoff); by then the agent can be running its next turn, which a stale
 handle must leave alone."""
 from __future__ import annotations
 
+from tests.codex_request import result_reply
+
 import threading
 from unittest.mock import Mock
 
@@ -17,7 +19,7 @@ def _client_with_turn(agent_id):
     client._lock = threading.Lock()
     client.proc = Mock()
     requests = []
-    client.request = lambda method, params, timeout=30: requests.append((method, params)) or {}
+    client.request = result_reply(lambda method, params, timeout=30: requests.append((method, params)) or {})
     return client, requests
 
 
