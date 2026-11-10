@@ -72,6 +72,23 @@ jobs:
           cp "$file" /tmp/history-fold-candidate.rs
           trap 'cp /tmp/history-fold-candidate.rs "$file"' EXIT
           git show "$baseline:desktop-rs/$file" > "$file"
+          # The baseline predates the hide_activity fields (Hidden tool
+          # activity, 4f163940): declare the field and set it false in the
+          # two live_present literals, or the control fails to compile
+          # (E0063) instead of failing its ordering assertion. False is the
+          # baseline's own behaviour, so what is on trial does not change.
+          python3 - <<'PYCTRL'
+          from pathlib import Path
+          path = Path('core/src/history_fold.rs')
+          source = path.read_text()
+          field = '    pub busy: bool,\n'
+          assert source.count(field) == 1
+          source = source.replace(field, field + '    pub hide_activity: bool,\n')
+          literal = 'host_now_ms: 0 }'
+          assert source.count(literal) == 2
+          source = source.replace(literal, 'host_now_ms: 0, hide_activity: false }')
+          path.write_text(source)
+          PYCTRL
           set +e
           cargo test --locked -p clarp-core --test history_fold retained_final_stays_between_prompts_sent_during_and_after_its_reply -- --exact > /tmp/reply-order-baseline.log 2>&1
           rc=$?
