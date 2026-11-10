@@ -97,6 +97,111 @@ def test_snapshot_fixed_runtime_json_bytes(fleet):
     assert actual == GOLDEN.read_bytes()
 
 
+def test_snapshot_model_reads_are_bounded_and_reused_across_a_large_fleet(
+        fleet, tmp_path, monkeypatch):
+    """Read actual model files through the snapshot, with no mocked model result."""
+    import builtins
+    import os
+
+    from lib import claude_transcript, session_models
+
+    ctx, status = fleet
+    backends.configure_runtime_client(Runtime(status))
+    monkeypatch.setenv("HOME", str(tmp_path))
+    projects = tmp_path / ".claude" / "projects" / "-fixture"
+    projects.mkdir(parents=True)
+    caches = (session_models._read_model, session_models._transcript,
+              session_models._indexed_model)
+    for cache in caches:
+        cache.cache_clear()
+    paths, expected_models = {}, {}
+    for i in range(513):
+        aid, session, bsid = f"model-agent-{i}", f"model-session-{i}", f"model-native-{i}"
+        db.conn().execute("""INSERT INTO agents
+            (agent_id,persona,voice_id,cwd,session,backend,created_at)
+            VALUES (?,?,?,?,?,'claude',?)""",
+            (aid, f"Model fixture {i}", "V", str(tmp_path), session, NOW - 100000 - i))
+        agents.start_runtime(aid, session)
+        agents.bind_backend_session(aid, bsid)
+        agents.record_state(aid, "done")
+        model = f"model-{i}"
+        path = projects / f"{bsid}.jsonl"
+        # Only one file crosses the small read window; the fixture is <150 KiB,
+        # rather than hundreds of megabytes of duplicate padding.
+        prefix = (json.dumps({"type": "user", "message": {"content": "x" * 70000}})
+                  + "\n") if i == 0 else ""
+        path.write_text(prefix + json.dumps({"type": "assistant", "message": {"model": model}})
+                        + "\n")
+        os.utime(path, ns=(0, 0))  # settled files; preserve the context-cache racy rule
+        paths[str(path)] = aid
+        expected_models[aid] = model
+
+    real_open = builtins.open
+    opened, read_bytes = [], []
+
+    class MeasuredFile:
+        def __init__(self, stream, path):
+            self.stream, self.path = stream, path
+
+        def __enter__(self):
+            self.stream.__enter__()
+            return self
+
+        def __exit__(self, *args):
+            return self.stream.__exit__(*args)
+
+        def __getattr__(self, name):
+            return getattr(self.stream, name)
+
+        def read(self, *args):
+            data = self.stream.read(*args)
+            read_bytes.append((self.path, len(data)))
+            return data
+
+    def measured_open(path, mode="r", *args, **kwargs):
+        stream = real_open(path, mode, *args, **kwargs)
+        if mode == "rb" and str(path) in paths:
+            opened.append(str(path))
+            return MeasuredFile(stream, str(path))
+        return stream
+
+    # session_models uses binary open/read; context usage has its own Path.open
+    # reader. These counters deliberately attribute model reads only.
+    monkeypatch.setattr(builtins, "open", measured_open)
+    try:
+        cold = snapshot.build_agent_snapshot(ctx)
+        actual_models = {a["agent_id"]: a["model"] for a in cold["agents"]
+                         if a["agent_id"] in expected_models}
+        assert actual_models == expected_models
+        assert len(cold["agents"]) == 563  # retain the original mixed/archived fleet too
+        assert len(opened) == 513
+        small_bytes = sum(pathlib.Path(p).stat().st_size for p in paths
+                          if paths[p] != "model-agent-0")
+        assert sum(n for _, n in read_bytes) <= 64 * 1024 + small_bytes
+
+        opened.clear()
+        read_bytes.clear()
+        warm = snapshot.build_agent_snapshot(ctx)
+        assert json.dumps(warm).encode() == json.dumps(cold).encode()
+        assert opened == [] and read_bytes == []
+
+        changed_path = next(p for p, aid in paths.items() if aid == "model-agent-0")
+        with real_open(changed_path, "a") as stream:
+            stream.write(json.dumps({"type": "assistant",
+                                     "message": {"model": "changed-in-session"}}) + "\n")
+        changed = snapshot.build_agent_snapshot(ctx)
+        expected = json.loads(json.dumps(cold))
+        next(a for a in expected["agents"] if a["agent_id"] == "model-agent-0")["model"] = (
+            "changed-in-session")
+        assert json.dumps(changed).encode() == json.dumps(expected).encode()
+        assert opened == [changed_path]
+        assert 0 < sum(n for _, n in read_bytes) <= 64 * 1024
+    finally:
+        for cache in caches:
+            cache.cache_clear()
+        claude_transcript.reset_transcript_index()
+
+
 @pytest.mark.parametrize("offline", [False, True], ids=["healthy", "timeout"])
 def test_snapshot_one_bounded_status_attempt_per_build(fleet, offline):
     ctx, status = fleet
