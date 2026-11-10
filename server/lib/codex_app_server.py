@@ -1025,6 +1025,7 @@ class _Client:
                 result = self._resume_stopped_safely(backend_session_id, lambda: self.request(
                     "thread/resume", {
                         "threadId": backend_session_id, "cwd": str(cwd),
+                        "excludeTurns": True,
                         "approvalPolicy": "never", "sandbox": "danger-full-access",
                         "developerInstructions": developer_instructions,
                         **({"model": model} if model else {}),
