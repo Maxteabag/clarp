@@ -70,3 +70,36 @@ def test_native_user_item_projection_requires_the_same_owned_id_and_data():
     # copied into a genuine user-message event is not a hidden context item.
     assert not context.is_context_item({"type": "user_message", "message": item["content"][0]["text"]},
                                        "new-thread")
+
+
+@pytest.mark.parametrize("metadata", ["missing", "foreign", "after_turn"])
+def test_parser_requires_positive_native_metadata_and_pre_turn_context_position(tmp_path, metadata):
+    item = _item()
+    path = tmp_path / "source.jsonl"
+    rows = []
+    if metadata != "missing":
+        rows.append({"type": "session_meta", "payload": {"id": "foreign" if metadata == "foreign" else "new-thread"}})
+    if metadata == "after_turn":
+        rows.append({"type": "event_msg", "payload": {"type": "task_started", "turn_id": "real-user-turn"}})
+    rows.append({"type": "response_item", "payload": item})
+    path.write_text("".join(json.dumps(row) + "\n" for row in rows))
+    assert any(turn["text"] == item["content"][0]["text"] for turn in codex_transcript.parse_turns(path))
+
+
+def test_real_turn_boundary_tail_without_metadata_matches_full_visible_history(tmp_path):
+    from lib import transcript_incremental
+    item = _item()
+    prefix = [{"type": "session_meta", "payload": {"id": "new-thread"}},
+              {"type": "response_item", "payload": item}]
+    tail = [{"type": "event_msg", "payload": {"type": "task_started", "turn_id": "real-turn"}},
+            {"type": "event_msg", "payload": {"type": "user_message", "message": "Actual user request"}},
+            {"type": "event_msg", "payload": {"type": "agent_message", "message": "Actual completion"}}]
+    prefix_bytes = "".join(json.dumps(row) + "\n" for row in prefix).encode()
+    tail_bytes = "".join(json.dumps(row) + "\n" for row in tail).encode()
+    path = tmp_path / "source.jsonl"
+    path.write_bytes(prefix_bytes + tail_bytes)
+    full = codex_transcript.parse_turns(path)
+    actual_tail = transcript_incremental.parse_range("codex", path, len(prefix_bytes), path.stat().st_size)
+    assert [(row["role"], row["text"]) for row in full] == [
+        ("user", "Actual user request"), ("assistant", "Actual completion")]
+    assert actual_tail == full
