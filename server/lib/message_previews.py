@@ -310,22 +310,30 @@ def _agent_preview(agent_id: str, max_len: int, routine: tuple[str, ...]) -> dic
     return entry
 
 
-def _dashboard_revisions() -> tuple[dict[str, dict[str, int]], dict[str, dict[str, int]], list[str]]:
+_LIVE_AGENTS = "SELECT agent_id FROM agents WHERE deleted_at IS NULL"
+# The same, among the agent ids of one JSON array.
+_LIVE_AMONG = ("SELECT a.agent_id FROM agents a JOIN json_each(?) j ON j.value = a.agent_id"
+               " WHERE a.deleted_at IS NULL")
+
+
+def _revision_maps(agents_sql: str, params: tuple = ()) -> tuple[dict[str, dict[str, int]], dict[str, dict[str, int]]]:
+    """Highest revision and highest updated_at per agent and conversation,
+    for the agents ``agents_sql`` selects (it appears twice in the statement)."""
     revisions: dict[str, dict[str, int]] = {}
     # updated_at rides along: a transcript import that rewrites a row in place
     # (same revision, new text) must refresh the cached preview as well.
     stamps: dict[str, dict[str, int]] = {}
-    for row in conn().execute("""
+    for row in conn().execute(f"""
         SELECT agent_id, backend_session_id, MAX(revision) AS revision,
                MAX(updated_at) AS updated_at
           FROM messages
-         WHERE agent_id IN (SELECT agent_id FROM agents WHERE deleted_at IS NULL)
+         WHERE agent_id IN ({agents_sql})
          GROUP BY agent_id, backend_session_id
         UNION ALL
         SELECT agent_id, backend_session_id, revision, 0 AS updated_at
           FROM conversation_heads
-         WHERE agent_id IN (SELECT agent_id FROM agents WHERE deleted_at IS NULL)
-    """):
+         WHERE agent_id IN ({agents_sql})
+    """, (*params, *params)):
         aid = row['agent_id']
         bsid = row['backend_session_id']
         rev = int(row['revision'] or 0)
@@ -336,8 +344,28 @@ def _dashboard_revisions() -> tuple[dict[str, dict[str, int]], dict[str, dict[st
         agent_stamps = stamps.setdefault(aid, {})
         if upd > agent_stamps.get(bsid, 0) or bsid not in agent_stamps:
             agent_stamps[bsid] = upd
-    live = [row['agent_id'] for row in conn().execute("SELECT agent_id FROM agents WHERE deleted_at IS NULL")]
+    return revisions, stamps
+
+
+def _dashboard_revisions() -> tuple[dict[str, dict[str, int]], dict[str, dict[str, int]], list[str]]:
+    revisions, stamps = _revision_maps(_LIVE_AGENTS)
+    live = [row['agent_id'] for row in conn().execute(_LIVE_AGENTS)]
     return revisions, stamps, live
+
+
+def _preview_key(agent_id: str, revisions: dict, stamps: dict) -> tuple:
+    """What an agent's cached preview is valid for: every conversation of the
+    agent with its highest revision and highest updated_at. Any write that
+    changes what the preview shows moves one of them."""
+    return tuple(sorted((str(session or ''), rev, stamps.get(agent_id, {}).get(session, 0))
+                        for session, rev in revisions.get(agent_id, {}).items()))
+
+
+def _current_keys(agent_ids: list[str]) -> dict[str, tuple]:
+    """The keys those agents have now, in one grouped statement."""
+    wanted = json.dumps(agent_ids)
+    revisions, stamps = _revision_maps(_LIVE_AMONG, (wanted,))
+    return {agent_id: _preview_key(agent_id, revisions, stamps) for agent_id in agent_ids}
 
 
 def _cache_stamp():
@@ -390,9 +418,25 @@ def dashboard_messages(max_len: int = 80, *, agent_ids=None) -> dict[str, dict[s
     previews are still good for the next caller that wants them.
 
     A caller's transaction may see uncommitted rows: never read or populate
-    shared caches there. Otherwise validate one database stamp around the whole
-    batch, so an import racing any fill cannot publish that mixed-generation
-    map or preview. Stamp queries do not grow with the roster.
+    shared caches there. Otherwise one database stamp is sampled before and
+    after the whole batch. Stamp queries do not grow with the roster.
+
+    Unchanged stamp: nothing was committed while the batch ran, so the
+    revision map and every preview computed in it are one generation and are
+    all published.
+
+    Changed stamp: something was committed meanwhile, by any connection. The
+    revision map is not published (it is keyed by the stamp). A preview is
+    still published if its own agent's key is the same after the batch as it
+    was before: that agent's rows did not change while its three statements
+    ran, so the preview is the one the key stands for. An agent whose key
+    moved is left out and computed again next time, so a preview older than
+    the rows it describes is never stored. The keys are read again for the
+    computed agents only, in one grouped statement. Before this, any commit
+    at all discarded the whole batch; on a Host that is always being written
+    a cold cache (after a restart: three statements for every agent) then
+    never filled, and each agent list took seconds until a batch happened to
+    run undisturbed.
 
     Shared caching requires callers to exhaust prior implicit read cursors.
     The snapshot and warm-up caller tests pin this existing boundary; an old
@@ -414,8 +458,7 @@ def dashboard_messages(max_len: int = 80, *, agent_ids=None) -> dict[str, dict[s
     for agent_id in live:
         if agent_ids is not None and agent_id not in agent_ids:
             continue
-        key = tuple(sorted((str(session or ''), rev, stamps.get(agent_id, {}).get(session, 0))
-                           for session, rev in revisions.get(agent_id, {}).items()))
+        key = _preview_key(agent_id, revisions, stamps)
         hit, cached = ((False, None) if stamp is None or max_len != 80 else
                        _cache_read(_PREVIEW_CACHE, agent_id, key, failed))
         entry = _preview_copy(cached) if hit else _agent_preview(agent_id, max_len, routine)
@@ -425,7 +468,8 @@ def dashboard_messages(max_len: int = 80, *, agent_ids=None) -> dict[str, dict[s
             entry['revisions'] = dict(revisions[agent_id])
         result[agent_id] = entry
     if stamp is not None and not database.in_transaction:
-        if stamp == _cache_stamp():
+        after = _cache_stamp()
+        if stamp == after:
             if not map_hit:
                 _cache_write(_REVISION_CACHE, "all", stamp, projection, failed)
             for agent_id, key, entry in pending:
@@ -435,7 +479,23 @@ def dashboard_messages(max_len: int = 80, *, agent_ids=None) -> dict[str, dict[s
                     _PREVIEW_CACHE.retain(result)
                 except Exception as exc:  # noqa: BLE001 - bounded keys are never projected as a roster
                     cache_log.log("dashboardCachePruneFail", f"cache={_PREVIEW_CACHE.name} error={type(exc).__name__}")
+        elif after is not None and pending:
+            _publish_unchanged(pending, failed)
     return result
+
+
+def _publish_unchanged(pending: list, failed: set[str]) -> None:
+    """Store the computed previews of the agents whose key did not move
+    during the batch (see dashboard_messages). Never prunes: this batch's
+    roster may already be out of date."""
+    try:
+        current = _current_keys([agent_id for agent_id, _key, _entry in pending])
+    except Exception as exc:  # noqa: BLE001 - the projection is already made; only the cache fill is lost
+        cache_log.log("dashboardCacheCertifyFail", f"error={type(exc).__name__}")
+        return
+    for agent_id, key, entry in pending:
+        if current.get(agent_id) == key:
+            _cache_write(_PREVIEW_CACHE, agent_id, key, entry, failed)
 
 
 def last_message_activity(*, agent_id: str) -> int:
