@@ -92,12 +92,14 @@ def _request_advance(run_id: str) -> None:
 
 
 def process_assistant_text(agent_id: str, text: str, *, origin: str,
-                           live: bool = False) -> tuple[bool, str]:
+                           live: bool = False,
+                           originating_run_id: str | None = None) -> tuple[bool, str]:
     """Capture dreaming control markers and return display decision.
 
     Live streamed text is suppressed/cleaned but does not advance the ledger;
     durable transcript import owns stage completion so partial output cannot
-    accidentally trigger the next sub-turn.
+    accidentally trigger the next sub-turn. A no-op acknowledgement additionally
+    requires dispatch-owned run provenance; body/imported run IDs are not proof.
     """
     raw = str(text or "")
     stage = _STAGE_OUTPUT_RE.search(raw)
@@ -131,8 +133,8 @@ def process_assistant_text(agent_id: str, text: str, *, origin: str,
     skip, stripped = origins.ack_for_origin(
         strip_dreaming_ack(raw), raw, token=DREAMING_OK, origin=origin, own="dreaming")
     if skip:
-        if not live and origin == "dreaming":
-            mark_active_noop(agent_id)
+        if not live and origin == "dreaming" and originating_run_id:
+            mark_active_noop(agent_id, run_id=originating_run_id)
         return True, ""
     return False, stripped
 
@@ -392,6 +394,15 @@ def dispatch_isolated_dream(agent: dict, prompt: str) -> bool:
     trace_id = _trace.new_trace_id()
     model, effort = _resolve_dream_llm(agent, backend)
     run_id = _run_id_from_prompt(prompt)
+    # Only the original generated header is acknowledgement provenance. The
+    # ordinary context/worktree handling below remains unchanged; quoted IDs
+    # in the body, or IDs in assistant output, cannot retarget this callback.
+    header = re.fullmatch(
+        rf"{re.escape(DREAM_HIDDEN_PREFIX)} run_id=(dream_[A-Za-z0-9_]+) "
+        r"round_id=dround_[A-Za-z0-9_]+ stage=[A-Z_]+ hidden=true\]\]",
+        str(prompt or "").partition("\n")[0],
+    )
+    originating_run_id = header.group(1) if header else None
     run = get_run(run_id) if run_id else None
     dose = str((run or {}).get("context_dose") or dream_seeds.DOSE_FULL)
     text = _with_isolated_context_snapshot(agent, prompt, dose)
@@ -403,7 +414,8 @@ def dispatch_isolated_dream(agent: dict, prompt: str) -> bool:
             log("dreamingIsolatedNoOutput",
                 f"agent={agent_id} session={session} trace={trace_id}")
             return
-        process_assistant_text(agent_id, assistant_text, live=False, origin="dreaming")
+        process_assistant_text(agent_id, assistant_text, live=False, origin="dreaming",
+                               originating_run_id=originating_run_id)
 
     def on_error(message: str) -> None:
         log("dreamingIsolatedError",

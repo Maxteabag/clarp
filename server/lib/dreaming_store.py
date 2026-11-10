@@ -577,20 +577,20 @@ def _harvest_abandoned_runs() -> None:
         _harvest_abandoned(run_id)
 
 
-def mark_active_noop(agent_id: str) -> None:
-    run = active_run_for_agent(agent_id)
-    if not run:
-        log("dreamingNoop", f"agent={agent_id}")
+def mark_active_noop(agent_id: str, *, run_id: str | None = None) -> None:
+    """End only the dispatch-bound run, if it still belongs to this agent and is active."""
+    if not isinstance(run_id, str) or not run_id:
         return
     now = db.now_ms()
-    db.conn().execute(
+    changed = db.conn().execute(
         """UPDATE dream_runs
               SET status = 'noop', stage = 'noop', finished_at = ?,
                   updated_at = ?
-            WHERE run_id = ?""",
-        (now, now, run["run_id"]),
-    )
-    log("dreamingNoop", f"agent={agent_id} run={run['run_id']}")
+            WHERE run_id = ? AND agent_id = ? AND status = 'active'""",
+        (now, now, run_id, agent_id),
+    ).rowcount
+    if changed:
+        log("dreamingNoop", f"agent={agent_id} run={run_id}")
 
 
 def _record_thread_evidence(thread_id: str, response: str, *,
