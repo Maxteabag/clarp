@@ -15,7 +15,7 @@ from . import (background_jobs, agent_goals, agents as agents_db, avatar_setting
                compaction, db,
                config, message_store, model_avatars, team_store,
                turn_queue, scheduler, janitors, quiet_agents)
-from . import reconcile
+from . import reconcile, turn_lifecycle
 from .clock import now_ms
 from .session_models import agent_model
 from . import personas as persona_store
@@ -197,13 +197,15 @@ def build_agent_snapshot(ctx, *, include_archived: bool = True) -> dict[str, Any
     """Reconcile liveness and project the dashboard from batched database reads.
 
     With ``include_archived=False`` the archived agents are left out of
-    ``agents`` and are not built at all: no reconcile, no transcript read and
-    no per-agent query is spent on them, which on a long-lived Host is most
-    of the work (1,019 of 1,375 agents on 10 Nov 2026). The rows that remain
-    are exactly the rows the full snapshot has for those agents, counts of
-    archived children included, and ``archived_count`` says how many were
-    left out; SharedSnapshot.archived_page pages them. The full snapshot, the
-    default, is unchanged: clients that do not ask keep getting every agent.
+    ``agents`` and their rows are not built: no transcript read, no message
+    preview and no per-agent query is spent on them, which on a long-lived
+    Host is most of the work (1,019 of 1,375 agents on 10 Nov 2026). Only an
+    archived agent that still looks active is reconciled (_reconcile_unlisted).
+    The rows that remain are exactly the rows the full snapshot has for those
+    agents, counts of archived children included, and ``archived_count`` says
+    how many were left out; SharedSnapshot.archived_page pages them. The full
+    snapshot, the default, is unchanged: clients that do not ask keep getting
+    every agent.
     """
     snapshot, agent_rows = _project(ctx, None if include_archived else _not_archived)
     if not include_archived:
@@ -275,6 +277,45 @@ def _decode_cursor(cursor: str) -> tuple[tuple[int, str], str]:
     return (archived_at, agent_id), token
 
 
+def _reconcile_unlisted(agent_rows: list[dict[str, Any]], selected: list[dict[str, Any]],
+                        states: dict[str, dict[str, Any]], runtimes: dict[str, dict[str, Any]]) -> None:
+    """Reconcile the archived agents this build leaves out that still look active.
+
+    Building a row is what reconciles an agent (a stuck busy state, a ghost
+    session, a leaked slot). Once clients stop asking for archived agents no
+    build would do that for them any more, and archiving does not stop a
+    turn: an agent archived mid-turn whose turn then died would stay busy
+    until someone restored it or opened the archive. So an archived agent
+    whose last state is a busy one, that has a live handle, or that the
+    runtime holds queued work for, is reconciled here without building its
+    row. On a Host at rest that is no agent at all. What is still left to the
+    archive listing or a restore is an idle archived agent whose bound session
+    has lost its transcript.
+    """
+    listed = {a["agent_id"] for a in selected}
+    queued: set[str] = set()
+    if backends._RUNTIME_CLIENT is not None:
+        try:
+            queued = set(backends.runtime_status().get("queued") or {})
+        except Exception:  # noqa: BLE001 - logged once per window by backends; nothing is reconciled blind
+            return
+    for a in agent_rows:
+        agent_id = a["agent_id"]
+        if agent_id in listed or not a.get("archived_at"):
+            continue
+        backend = a.get("backend") or AgentBackend.CLAUDE
+        state = states.get(agent_id, {})
+        try:
+            if not (state.get("kind") in turn_lifecycle.BUSY or agent_id in queued
+                    or backends.active_handles(backend, agent_id)):
+                continue
+            reconcile.reconcile_agent(
+                agent_id, backend, observed_state=state,
+                bound_session=runtimes.get(agent_id, {}).get('backend_session_id') or '')
+        except Exception as e:  # noqa: BLE001
+            log_exception("snapshotReconcileFail", e, detail=agent_id)
+
+
 def _project(ctx, select) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """The snapshot for the agents ``select`` picks from all agent rows (None:
     every agent), and all agent rows. Whatever one agent's row says about
@@ -331,6 +372,8 @@ def _project(ctx, select) -> tuple[dict[str, Any], list[dict[str, Any]]]:
             reconcile.forget_observations(a["agent_id"] for a in agent_rows)
             log("snapshotReconcileSkipped",
                 f"count={len(agent_rows)} error_type={type(exc).__name__}")
+    if select is not None and reconcile_available:
+        _reconcile_unlisted(agent_rows, selected, states, runtimes)
     for a in selected:
         agent_id = a["agent_id"]
         backend = a.get("backend") or AgentBackend.CLAUDE
