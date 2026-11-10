@@ -1152,10 +1152,17 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, dia
                       imports_since_audit=cp.imports_since_audit + 1, updated_at=db.now_ms())
     raw_inputs = None
     checkpoint_status = {}
+    source_invalidated = False
 
     def publish(database, captured):
-        nonlocal raw_inputs
-        if identity(path) != before:
+        nonlocal raw_inputs, source_invalidated
+        try:
+            current = identity(path)
+        except OSError:
+            source_invalidated = True
+            raise
+        if current != before:
+            source_invalidated = True
             return
         write_checkpoint(database, next_cp)
         raw_inputs = message_writes._prepare_import_prelude(
@@ -1169,15 +1176,32 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, dia
             checkpoint_status=checkpoint_status)
     except message_writes._TailInvalidated:
         return refuse("carry_inputs_changed")
-    _tail_log("tail_applied", backend=backend, size=size)
-    if not _checkpoint_refused(checkpoint_status):
+    try:
+        source_invalidated = source_invalidated or identity(path) != before
+    except OSError:
+        source_invalidated = True
+    if not _checkpoint_refused(checkpoint_status) and not source_invalidated:
         _cache_committed_tail(key, revision, next_cp, raw_inputs, current_hash,
                               reason_token=reason_token)
     else:
         _TAIL_STATES.note_refusal(key, revision, reason_token, _checkpoint_reason(checkpoint_status))
-    return {"rows": next_cp.turn_count, "parse_s": parsed - started,
-            "store_s": time.perf_counter() - parsed, "shadow": "not_sampled_tail",
-            "apply_mode": "tail", "parsed_bytes": before.size - cp.boundary_offset}
+    # Include replacement during process-frontier publication, not just the
+    # transaction callback. A refusal must not become a fresh completion.
+    try:
+        source_invalidated = source_invalidated or identity(path) != before
+    except OSError:
+        source_invalidated = True
+    result = {"rows": next_cp.turn_count, "parse_s": parsed - started,
+              "store_s": time.perf_counter() - parsed, "shadow": "not_sampled_tail",
+              "apply_mode": "tail", "parsed_bytes": before.size - cp.boundary_offset}
+    if source_invalidated:
+        token = _TAIL_STATES.consume(key, revision)
+        _TAIL_STATES.note_refusal(key, revision, token, "publication_file_moved")
+        _tail_log("deferred_tail_source_changed", backend=backend, size=size)
+        result.update(apply_mode="deferred", _clarp_transcript_completion_v1="deferred")
+    else:
+        _tail_log("tail_applied", backend=backend, size=size)
+    return result
 
 
 def _store_full_with_tail_checkpoint(backend, path, agent_id, backend_session_id,
