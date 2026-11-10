@@ -234,14 +234,14 @@ def _owner_admission(owner, path, importer):
         binding = ticket[2]
         valid = binding is None or _binding_matches(owner, binding, path, importer)
         if valid and binding is not None and binding.source_file is None:
+            materialized = OwnerImportBinding(binding.database_path, binding.backend,
+                                               binding.backend_session_id, str(path))
             with _guard:
                 state = ticket[1]
                 if state.binding == binding:
-                    state.binding = OwnerImportBinding(binding.database_path, binding.backend,
-                                                       binding.backend_session_id, str(path))
+                    state.binding = materialized
                 else:
-                    valid = state.binding == OwnerImportBinding(
-                        binding.database_path, binding.backend, binding.backend_session_id, str(path))
+                    valid = state.binding == materialized
         yield valid
     finally:
         with _guard:
@@ -355,7 +355,9 @@ def run_final_owner_import(lease, path, importer, *, after=None):
                 raise OwnerLeaseBusy("cache reset in progress")
             lease.final_started = True
             epoch = _epoch
-        result = _import_admitted(path, importer, lease.owner, epoch)
+        final_context = (lease.binding.database_path, lease.binding.source_file,
+                         lease.binding.backend, lease.owner, lease.binding.backend_session_id)
+        result = _import_admitted(path, importer, lease.owner, epoch, final_context=final_context)
         complete = isinstance(result, _CompletedImport)
         if complete and after is not None:
             after()
@@ -385,13 +387,14 @@ def release_owner_lease(lease, new_binding):
         if new_binding != lease.binding and not lease.final_completed:
             raise OwnerLeaseBusy("cutover requires completed final old import")
         # Retain scalar dirty work only. Old closures never run under new UUIDs.
-        requests = [entry[0] for entry in (*_pending.values(), *_deferred.values())
-                    if entry[0][2] == lease.owner]
+        owned = [(key, entry[0]) for key, entry in (*_pending.items(), *_deferred.items())
+                 if entry[0][2] == lease.owner]
+        requests = [request for _, request in owned]
         ranks = [r[5] for r in requests]
         if state.first_wait_rank is not None:
             ranks.append(state.first_wait_rank)
         dirty = OwnerDirtySnapshot(state.dirty or bool(requests),
-                                   tuple(str(r[0]) for r in requests),
+                                   tuple(key.partition("\0")[2] for key, _ in owned),
                                    state.urgent or any(r[4] for r in requests),
                                    state.startup_exempt or any(r[6] for r in requests),
                                    min(ranks, default=None))
@@ -519,7 +522,8 @@ def _signature(path: pathlib.Path) -> tuple[int, ...]:
 
 
 def _import_admitted(path: pathlib.Path, importer: Callable[[], object], owner: str,
-                     epoch: int) -> bool | _DeferredImport | _CompletedImport:
+                     epoch: int, *, final_context: tuple | None = None
+                     ) -> bool | _DeferredImport | _CompletedImport:
     """The import itself, for a caller already admitted under ``epoch``: the
     worker's popped item, or a direct call that passed import_if_changed's
     admission. Bookkeeping written by a call admitted before a test reset is
@@ -532,10 +536,12 @@ def _import_admitted(path: pathlib.Path, importer: Callable[[], object], owner: 
         before = _signature(path)
         with _completion_fence(importer):
             token = _completion_probe(importer)  # outside the cache guard
+            if final_context is not None and (token is None or token[0] != final_context):
+                return _DeferredImport("final_binding")
             if token is not None and not token[2]:
                 return _DeferredImport()
             with _guard:
-                if _imported.get(key) == before and _completion_matches(key, token, epoch):
+                if final_context is None and _imported.get(key) == before and _completion_matches(key, token, epoch):
                     if _epoch == epoch:
                         _validated_at.put(key, epoch, observed_at)
                         _record_completion_token(key, token, epoch)
@@ -548,7 +554,10 @@ def _import_admitted(path: pathlib.Path, importer: Callable[[], object], owner: 
             value = db.retry_locked(importer)
         else:
             from .transcript_incremental import _call_in_cache_epoch
-            value = db.retry_locked(lambda: _call_in_cache_epoch(importer, epoch))
+            operation = lambda: _call_in_cache_epoch(importer, epoch)
+            # The lease's explicit final operation is never supplied by an old
+            # cache stamp or automatically replayed after a BUSY exception.
+            value = operation() if final_context is not None else db.retry_locked(operation)
         result = _completion_result(value, token)
         with _completion_fence(importer):
             current = _completion_probe(importer)
