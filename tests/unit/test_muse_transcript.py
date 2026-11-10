@@ -144,3 +144,40 @@ def test_list_sessions_filters_by_workspace_and_previews_the_first_prompt(tmp_pa
     assert muse_transcript.list_sessions("/somewhere/else", limit=10) == []
     every = muse_transcript.list_sessions("", limit=1, all_projects=True)
     assert [r["id"] for r in every] == [TOOL_CALL_ID]
+
+
+def test_muse_timestamps_sort_in_microsecond_order_in_text_storage(tmp_path):
+    import sqlite3
+
+    # Same-second exact and fractional rows are compared as TEXT by /log.
+    samples = [
+        (1791288006999999, "preceding-fraction", "2026-10-06T12:00:06.999999Z"),
+        (1791288007000000, "exact", "2026-10-06T12:00:07.000000Z"),
+        (1791288007000001, "one-microsecond", "2026-10-06T12:00:07.000001Z"),
+        (1791288007123456, "fractional", "2026-10-06T12:00:07.123456Z"),
+        (1791288008000000, "following-exact", "2026-10-06T12:00:08.000000Z"),
+    ]
+    rows = [{"recorded_at": micros, "payload_type": "runtime.session",
+             "payload": {"kind": "run", "event": {
+                 "kind": "started", "prompt": label}}}
+            for micros, label, _ in samples]
+    turns = muse_transcript.parse_turns(_write(tmp_path / "synthetic.jsonl", rows))
+    with sqlite3.connect(":memory:") as conn:
+        conn.execute("CREATE TABLE parsed (stamp TEXT, label TEXT)")
+        conn.executemany("INSERT INTO parsed VALUES (?, ?)",
+                         [(turns[i]["timestamp"], turns[i]["text"]) for i in (3, 0, 4, 2, 1)])
+        assert [label for label, in conn.execute("SELECT label FROM parsed ORDER BY stamp ASC")] == [
+            "preceding-fraction", "exact", "one-microsecond", "fractional", "following-exact"]
+        assert [label for label, in conn.execute("SELECT label FROM parsed ORDER BY stamp DESC")] == [
+            "following-exact", "fractional", "one-microsecond", "exact", "preceding-fraction"]
+    assert [turn["timestamp"] for turn in turns] == [stamp for _, _, stamp in samples]
+
+
+@pytest.mark.parametrize("micros, expected", [
+    (1791288007123456, "2026-10-06T12:00:07.123456Z"),
+    (1791288007000001, "2026-10-06T12:00:07.000001Z"),
+    ("invalid", ""),
+    (None, ""),
+])
+def test_muse_timestamp_existing_fraction_and_suffix_are_preserved(micros, expected):
+    assert muse_transcript._iso(micros) == expected
