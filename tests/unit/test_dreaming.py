@@ -1541,3 +1541,132 @@ def test_an_older_snapshot_cannot_replace_a_new_generation_wake(monkeypatch,dela
         if old_thread:old_thread.join(5)
         for thread in workers:thread.join(5)
         scheduler.stop()
+
+
+# Backlog72: a replayed acknowledgement never targets the currently active run.
+def _ack_run_for(agent_id, local_date):
+    return dreaming.create_dream_run(
+        agents_db.get_by_agent_id(agent_id), local_date=local_date,
+        timezone_name="UTC", timezone_source="synthetic", seed_strategy="control")
+
+
+@pytest.mark.parametrize("already_imported", [False, True], ids=["first-seen", "unchanged-replay"])
+@pytest.mark.parametrize("marker_has_run_id", [False, True], ids=["bare-ack", "body-run-id"])
+def test_historical_full_import_ack_never_noops_a_newer_run(monkeypatch, tmp_path,
+                                                          already_imported, marker_has_run_id):
+    from lib import db
+    aid = _agent("ack-history")
+    clock = [db.now_ms()]
+    monkeypatch.setattr(db, "now_ms", lambda: clock[0])
+    old_run = _ack_run_for(aid, "2026-06-24")
+    old_prompt = dreaming.next_round_for_run(old_run)["prompt"]
+    ack = "DREAMING_OK" + (f" run_id={old_run['run_id']}" if marker_has_run_id else "")
+    turns = [{"role": "user", "text": old_prompt, "timestamp": "1"},
+             {"role": "assistant", "text": ack, "timestamp": "2"}]
+    def import_old():
+        message_store.store_transcript_turns(
+            agent_id=aid, backend_session_id="ack-history-transcript",
+            source_file=str(tmp_path / "ack-history.jsonl"), turns=turns)
+    if already_imported:
+        import_old()
+    # The original run is terminal before the newer one starts, independently
+    # of whether an earlier full import had already observed its marker.
+    dreaming.abandon_run(old_run["run_id"], harvest=False)
+    clock[0] += 1
+    newer = _ack_run_for(aid, "2026-06-25")
+    assert newer["started_at"] > old_run["started_at"]
+    before = dreaming.get_run(newer["run_id"])
+    assert before["status"] == "active"
+
+    import_old()  # Real full import: the locked pass sees the historical ACK.
+
+    assert dreaming.get_run(newer["run_id"]) == before
+    assert dreaming.active_run_for_agent(aid)["run_id"] == newer["run_id"]
+    visible = message_store.list_messages(agent_id=aid, backend_session_id="ack-history-transcript")
+    assert [row["text"] for row in visible] == [
+        "Automated dreaming run", "Dreaming check: no action needed."]
+
+
+@pytest.mark.parametrize("case", ["active", "late", "duplicate", "foreign-agent", "missing-id", "unknown-id"])
+def test_isolated_ack_is_bound_to_its_dispatch_run(monkeypatch, tmp_path, case):
+    from lib import db
+    aid = _agent("ack-callback")
+    clock = [db.now_ms()]
+    monkeypatch.setattr(db, "now_ms", lambda: clock[0])
+    run = _ack_run_for(aid, "2026-06-24")
+    agent = agents_db.get_by_agent_id(aid)
+    prompt = dreaming.next_round_for_run(run)["prompt"]
+    other = None
+    if case == "foreign-agent":
+        other_aid = _agent("ack-other")
+        other = _ack_run_for(other_aid, "2026-06-24")
+        agent = agents_db.get_by_agent_id(other_aid)
+    elif case == "missing-id":
+        prompt = dreaming.DREAMING_PROMPT
+    elif case == "unknown-id":
+        prompt = prompt.replace(run["run_id"], "dream_unknown_ack72")
+    callbacks = []
+    def fake_spawn(_backend, **kwargs):
+        callbacks.append(kwargs)
+        return object()
+    patch_shared(monkeypatch, dreaming, "_dream_scratch_cwd", lambda *_: tmp_path)
+    monkeypatch.setattr(dreaming.backends, "spawn_turn", fake_spawn)
+    assert dreaming.dispatch_isolated_dream(agent, prompt) is True
+    assert len(callbacks) == 1
+    result = callbacks[0]["on_result"]
+    if case == "duplicate":
+        result({"_assistant_text": "DREAMING_OK"})
+        assert dreaming.get_run(run["run_id"])["status"] == "noop"
+    elif case == "late":
+        dreaming.abandon_run(run["run_id"], harvest=False)
+    if case in ("late", "duplicate"):
+        clock[0] += 1
+        other = _ack_run_for(aid, "2026-06-25")
+    before = dreaming.get_run(run["run_id"])
+    other_before = dreaming.get_run(other["run_id"]) if other else None
+    clock[0] += 1
+
+    result({"_assistant_text": "DREAMING_OK"})
+
+    if case == "active":
+        after = dreaming.get_run(run["run_id"])
+        assert after["status"] == after["stage"] == "noop"
+        assert after["finished_at"] == clock[0]
+        # No active run remains; a duplicate cannot rewrite a terminal receipt.
+        clock[0] += 1
+        result({"_assistant_text": "DREAMING_OK"})
+        assert dreaming.get_run(run["run_id"]) == after
+    else:
+        assert dreaming.get_run(run["run_id"]) == before
+    if other:
+        assert dreaming.get_run(other["run_id"]) == other_before
+        assert other_before["status"] == "active"
+
+
+@pytest.mark.parametrize("exit_reason", ["deadline", "disabled"])
+def test_import_only_unbound_ack_keeps_ledger_until_existing_run_exit(monkeypatch, tmp_path, exit_reason):
+    from lib import db
+    aid = _agent("ack-import-only")
+    clock = [db.now_ms()]
+    monkeypatch.setattr(db, "now_ms", lambda: clock[0])
+    run = _ack_run_for(aid, "2026-06-24")
+    prompt = dreaming.next_round_for_run(run)["prompt"]
+    before = dreaming.get_run(run["run_id"])
+    message_store.store_transcript_turns(
+        agent_id=aid, backend_session_id="ack-only-transcript",
+        source_file=str(tmp_path / "ack-only.jsonl"), turns=[
+            {"role": "user", "text": prompt, "timestamp": "1"},
+            {"role": "assistant", "text": f"DREAMING_OK run_id={run['run_id']}", "timestamp": "2"}])
+    # The marker body is not dispatch provenance. Import display is preserved,
+    # but neither a current-active fallback nor a guessed run id may close it.
+    assert dreaming.get_run(run["run_id"]) == before
+    if exit_reason == "deadline":
+        clock[0] = run["started_at"] + dreaming.DREAM_RUN_DEADLINE_SEC * 1000 + 1
+    else:
+        agents_db.update_agent(aid, dreaming_enabled=False)
+    scheduler = dreaming.DreamingScheduler(send_dream=lambda *_: pytest.fail("expired/disabled run dispatched"))
+    assert scheduler._advance_run(dreaming.get_run(run["run_id"])) == 0
+    ended = dreaming.get_run(run["run_id"])
+    assert ended["status"] == "abandoned" and ended["finished_at"] == clock[0]
+    assert ended["last_error"] == (dreaming._DEADLINE_REASON if exit_reason == "deadline"
+                                  else "dreaming disabled while in flight")
