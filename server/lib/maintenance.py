@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import datetime
+import errno
+import fcntl
+import os
 import pathlib
 import shutil
 import threading
@@ -19,6 +22,7 @@ HOUR_MS = 60 * 60 * 1000
 STATE_LOG_DELETE_BATCH = 500
 STATE_LOG_BATCH_PAUSE_S = 0.05
 DAY_MS = 24 * HOUR_MS
+MIB = 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -31,6 +35,20 @@ class Policy:
     # The daily event-log mirror (lib.eventlog) is diagnostic; SQLite holds the
     # live record. Nothing else ever deleted these files.
     event_log_max_age_ms: int = 14 * DAY_MS
+    # Size bounds on the diagnostics, on top of the age bounds: on 10 Nov 2026
+    # they held 34 GB, all of it younger than its age limit. The telemetry
+    # database's budget is telemetry.DETAIL_BUDGET_BYTES and one event's is
+    # eventlog.MAX_DETAIL_BYTES.
+    # The event-log directory: the oldest days go first. Today's file is never
+    # deleted; when it alone is over the bound its newest part is kept.
+    event_log_max_bytes: int = 2048 * MIB
+    event_log_today_keep_bytes: int = 512 * MIB
+    # hook.log (hooks and the client log append to it; nothing else trims it).
+    hook_log_max_bytes: int = 100 * MIB
+    hook_log_keep_bytes: int = 20 * MIB
+    # The size bounds are also checked between the hourly passes, so a flood
+    # overshoots them by minutes of writes, not by an hour of them.
+    size_check_interval_sec: float = 5 * 60
     # Must outlive the longest window lib.turn_usage reports on (7 days).
     turn_usage_max_age_ms: int = 30 * DAY_MS
     background_job_events_max_age_ms: int = 30 * DAY_MS
@@ -253,29 +271,166 @@ def prune_hls_artifacts(audio_dir: pathlib.Path, *, now_ms: int | None = None,
     return removed
 
 
+_COPY_CHUNK = MIB
+
+
+def _copy_within(fd: int, src: int, dst: int, length: int) -> int:
+    """Copy ``length`` bytes of one file from ``src`` down to ``dst``; the end
+    of what was written."""
+    while length > 0:
+        chunk = os.pread(fd, min(_COPY_CHUNK, length), src)
+        if not chunk:
+            break
+        view = memoryview(chunk)
+        while view:
+            written = os.pwrite(fd, view, dst)
+            dst += written
+            view = view[written:]
+        src += len(chunk)
+        length -= len(chunk)
+    return dst
+
+
+def _line_start(fd: int, offset: int, size: int) -> int:
+    """The first line start at or after ``offset``; ``size`` when there is none."""
+    at = max(0, offset - 1)
+    while at < size:
+        chunk = os.pread(fd, min(65536, size - at), at)
+        if not chunk:
+            break
+        newline = chunk.find(b"\n")
+        if newline >= 0:
+            return at + newline + 1
+        at += len(chunk)
+    return size
+
+
+def keep_tail(path: pathlib.Path, keep_bytes: int) -> int:
+    """Cut a log file down, in place, to its newest ``keep_bytes`` (at most
+    half of it), starting at a line; the number of bytes removed.
+
+    Safe against the processes that append to it. Every writer opens the file
+    in append mode for each write, so it only ever adds after the end measured
+    here. The kept part is first copied over the head of the same file under
+    no lock: it is at most half the file, so it never reaches what appenders
+    write. Only the short finish (copy what was appended meanwhile, truncate)
+    holds the flock the event-log writers take, so an emit waits for that and
+    not for the copy. A writer that takes no lock (hook.log) can lose a line it
+    appends during the finish.
+
+    In place, never a new file moved over the old one: a writer waiting for
+    the lock already has this file open and would write into the discarded
+    one. After a crash midway the newest part is still intact at the end of
+    the file and the next pass repeats the cut. On a disk too full even for
+    the copy (a copy-on-write filesystem writes new blocks), the file is
+    emptied instead: freeing the space is what matters then.
+    """
+    fd = os.open(path, os.O_RDWR)   # not O_APPEND: pwrite would ignore its offset
+    try:
+        size = os.fstat(fd).st_size
+        start = _line_start(fd, size - min(max(0, keep_bytes), size // 2), size)
+        if size == 0 or start == 0:
+            return 0
+        try:
+            end = _copy_within(fd, start, 0, size - start)
+        except OSError as e:
+            if e.errno != errno.ENOSPC:
+                raise
+            end = start = size       # keep nothing of what was measured
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        try:
+            grown = os.fstat(fd).st_size
+            if grown < size:
+                return 0    # something else cut the file meanwhile: leave it
+            if start == size:
+                os.ftruncate(fd, 0)
+                return grown
+            end = _copy_within(fd, size, end, grown - size)
+            os.ftruncate(fd, end)
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        return grown - end
+    finally:
+        os.close(fd)
+
+
 def prune_event_logs(log_dir: pathlib.Path, *, max_age_ms: int,
-                     today: datetime.date | None = None) -> int:
-    """Delete daily ``YYYY-MM-DD.jsonl`` event logs older than ``max_age_ms``.
+                     today: datetime.date | None = None,
+                     max_total_bytes: int | None = None,
+                     today_keep_bytes: int | None = None) -> int:
+    """Delete daily ``YYYY-MM-DD.jsonl`` event logs older than ``max_age_ms``,
+    then the oldest remaining days while together they exceed
+    ``max_total_bytes``; the number of files deleted.
 
     Age comes from the date in the file name, so a touched or copied file
     cannot dodge retention, and any other file in the directory is left alone.
+
+    Today's file is never deleted. If it alone is over ``max_total_bytes`` it
+    is cut down to its newest ``today_keep_bytes`` (keep_tail) and one
+    ``eventLogCut`` record says so.
     """
     today = today or datetime.datetime.now(datetime.timezone.utc).date()
     cutoff = today - datetime.timedelta(milliseconds=max_age_ms)
     removed = 0
+    kept: list[tuple[datetime.date, pathlib.Path]] = []
     for path in pathlib.Path(log_dir).glob("*.jsonl"):
         try:
             day = datetime.date.fromisoformat(path.stem)
         except ValueError:
             continue
         if day >= cutoff:
+            kept.append((day, path))
             continue
         try:
             path.unlink()
             removed += 1
         except OSError as e:
             log_exception("eventLogPruneFail", e, detail=path.name)
+    if max_total_bytes is None:
+        return removed
+    sizes: dict[pathlib.Path, int] = {}
+    for _, path in kept:
+        try:
+            sizes[path] = path.stat().st_size
+        except OSError:
+            continue    # gone meanwhile
+    for day, path in sorted(kept):
+        if sum(sizes.values()) <= max_total_bytes:
+            break
+        if path not in sizes:
+            continue
+        try:
+            if day < today:
+                path.unlink()
+                removed += 1
+                del sizes[path]
+                continue
+            keep = max_total_bytes // 4 if today_keep_bytes is None else today_keep_bytes
+            cut = keep_tail(path, min(keep, max_total_bytes))
+            if cut:
+                sizes[path] -= cut
+                log("eventLogCut", f"file={path.name} removed_bytes={cut} "
+                    f"kept_bytes={sizes[path]} max_bytes={max_total_bytes}")
+        except OSError as e:
+            log_exception("eventLogPruneFail", e, detail=path.name)
     return removed
+
+
+def prune_hook_log(path: pathlib.Path, *, max_bytes: int, keep_bytes: int) -> int:
+    """Keep hook.log bounded: over ``max_bytes`` it is cut down to its newest
+    ``keep_bytes`` (keep_tail) and a line in it says so; the bytes removed."""
+    try:
+        if path.stat().st_size <= max_bytes:
+            return 0
+    except OSError:
+        return 0    # no hook log yet
+    cut = keep_tail(path, keep_bytes)
+    if cut:
+        with path.open("a") as f:
+            f.write(f"{time.strftime('%H:%M:%S')} maintenance {os.getpid()} "
+                    f"hookLogCut removed_bytes={cut} max_bytes={max_bytes}\n")
+        log("hookLogCut", f"removed_bytes={cut} max_bytes={max_bytes}")
+    return cut
 
 
 def _checkpoint_database() -> None:
@@ -297,12 +452,16 @@ def _log_checkpoint_result(mode: str, result) -> None:
 
 
 class MaintenanceWorker:
-    """Run conservative retention cleanup at startup and then hourly."""
+    """Run conservative retention cleanup at startup and then hourly, and
+    check the diagnostics' size bounds every few minutes in between."""
 
     def __init__(self, *, audio_dir: pathlib.Path, policy: Policy = Policy(),
                  interval_sec: float = 60 * 60,
-                 startup_delay_sec: float | None = None, stream=None):
+                 startup_delay_sec: float | None = None, stream=None,
+                 hook_log: pathlib.Path | None = None):
         self.audio_dir = pathlib.Path(audio_dir)
+        # None: this worker does not bound a hook log (tests, embedded use).
+        self.hook_log = pathlib.Path(hook_log) if hook_log is not None else None
         self.stream = stream
         self.policy = policy
         self.interval_sec = interval_sec
@@ -336,10 +495,12 @@ class MaintenanceWorker:
                 self.audio_dir, max_age_ms=self.policy.hls_artifact_max_age_ms,
             ))}
             counts.update(prune_database(policy=self.policy, phases=phases))
-            from . import eventlog
-            counts["event_logs"] = phases.run("event_logs", lambda: prune_event_logs(
-                eventlog.LOG_DIR, max_age_ms=self.policy.event_log_max_age_ms,
-            ))
+            counts["event_logs"] = phases.run("event_logs", self._prune_event_logs)
+            if self.hook_log is not None:
+                try:
+                    counts["hook_log_bytes"] = phases.run("hook_log", self._prune_hook_log)
+                except Exception as e:  # noqa: BLE001
+                    log_exception("hookLogPruneFail", e)
             try:
                 counts["helpers_archived"] = phases.run("helpers_archived", lambda: archive_done_helpers(
                     policy=self.policy, stream=self.stream))
@@ -350,6 +511,7 @@ class MaintenanceWorker:
                 counts.update(phases.run("telemetry", lambda: telemetry.rollup_and_prune(checkpoint=checkpoint)))
             except Exception as e:  # noqa: BLE001
                 log_exception("telemetryMaintenanceFail", e)
+            self._report_current_hour_cut(counts)
             if any(counts.values()):
                 log("maintenancePruned", str(counts))
             # Keep trying to truncate hourly so a quiet pass can cap the WAL.
@@ -366,6 +528,71 @@ class MaintenanceWorker:
                 log("maintenancePhases", phases.line())
             except Exception:  # noqa: BLE001 - diagnostics are best effort
                 pass
+
+    def _prune_event_logs(self) -> int:
+        from . import eventlog
+        return prune_event_logs(
+            eventlog.LOG_DIR, max_age_ms=self.policy.event_log_max_age_ms,
+            max_total_bytes=self.policy.event_log_max_bytes,
+            today_keep_bytes=self.policy.event_log_today_keep_bytes)
+
+    def _prune_hook_log(self) -> int:
+        return prune_hook_log(
+            self.hook_log, max_bytes=self.policy.hook_log_max_bytes,
+            keep_bytes=self.policy.hook_log_keep_bytes)
+
+    @staticmethod
+    def _report_current_hour_cut(counts: dict[str, int]) -> None:
+        # The one budget cut that costs accuracy: say so on its own line.
+        cut = counts.get("telemetry_current_hour_cut")
+        if cut:
+            log("telemetryCurrentHourCut",
+                f"rows={cut} the current hour alone was over the telemetry budget; "
+                "its hourly rollup will count only the rows that are left")
+
+    def check_sizes(self) -> dict[str, int]:
+        """The size bounds alone, between the hourly passes. With nothing over
+        its bound this is a few file sizes and three pragmas."""
+        counts: dict[str, int] = {}
+        try:
+            counts["event_logs"] = self._prune_event_logs()
+        except Exception as e:  # noqa: BLE001
+            log_exception("eventLogPruneFail", e)
+        if self.hook_log is not None:
+            try:
+                counts["hook_log_bytes"] = self._prune_hook_log()
+            except Exception as e:  # noqa: BLE001
+                log_exception("hookLogPruneFail", e)
+        try:
+            from . import telemetry
+            if telemetry.over_budget():
+                # The whole pass, so every hour the budget deletes is rolled
+                # up first. No exclusive checkpoint outside the hourly pass.
+                counts.update(telemetry.rollup_and_prune(checkpoint=False))
+        except Exception as e:  # noqa: BLE001
+            log_exception("telemetryMaintenanceFail", e)
+        self._report_current_hour_cut(counts)
+        if any(counts.values()):
+            log("maintenancePruned", str(counts))
+        return counts
+
+    def _wait_for_next_pass(self) -> bool:
+        """Wait out the interval to the next full pass, checking the size
+        bounds on the way. True when the worker was stopped."""
+        step = self.policy.size_check_interval_sec
+        deadline = time.monotonic() + self.interval_sec
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return self._stop.is_set()
+            if step <= 0 or remaining <= step:
+                return self._stop.wait(remaining)
+            if self._stop.wait(step):
+                return True
+            try:
+                self.check_sizes()
+            except Exception as e:  # noqa: BLE001
+                log_exception("maintenanceFail", e)
 
     def _loop(self) -> None:
         # Retention and the telemetry rollup are ordinary short writes, so they
@@ -384,5 +611,5 @@ class MaintenanceWorker:
                 self.run_once()
             except Exception as e:  # noqa: BLE001
                 log_exception("maintenanceFail", e)
-            if self._stop.wait(self.interval_sec):
+            if self._wait_for_next_pass():
                 break

@@ -18,8 +18,13 @@ from .timing import SQLITE_BUSY_TIMEOUT_MS, SQLITE_CONNECT_TIMEOUT_SEC
 
 TELEMETRY_PATH = pathlib.Path(os.environ.get(
     "CLARP_TELEMETRY_DB", str(xdg.data_dir() / "telemetry.sqlite")))
-DETAIL_RETENTION_MS = 24 * 60 * 60 * 1000
+HOUR_MS = 60 * 60 * 1000
+DETAIL_RETENTION_MS = 24 * HOUR_MS
 ROLLUP_RETENTION_MS = 30 * DETAIL_RETENTION_MS
+# The size bound on top of the age bounds: when the live data (pages in use,
+# see live_bytes) is over this, the oldest detail goes first, however young.
+# Age alone let one noisy code path write 16 GB inside the 24 hours.
+DETAIL_BUDGET_BYTES = 1024 ** 3
 _LOCAL = threading.local()
 _SCHEMA_LOCK = threading.Lock()
 # The files the schema has been made in (TEL-N1): a connection to one file never
@@ -222,16 +227,84 @@ def _upsert_in_batches(c, statement: str, rows: list) -> None:
             raise
 
 
-def rollup_and_prune(*, now_ms: int | None = None,
-                      checkpoint: bool = True) -> dict[str, int]:
-    """Roll every retained hour up, then expire detail and old rollups.
+def live_bytes(c: sqlite3.Connection | None = None) -> int:
+    """Bytes of telemetry.sqlite that hold data: its pages in use.
+
+    Not the file size: SQLite keeps the pages a delete frees and fills them
+    again before it grows the file, so the file stops growing once the live
+    data holds a budget, but it never shrinks by itself.
+    """
+    c = c if c is not None else conn()
+    page_size = c.execute("PRAGMA page_size").fetchone()[0]
+    pages = c.execute("PRAGMA page_count").fetchone()[0]
+    free = c.execute("PRAGMA freelist_count").fetchone()[0]
+    return (pages - free) * page_size
+
+
+def over_budget(budget_bytes: int = DETAIL_BUDGET_BYTES) -> bool:
+    """Three pragmas, no scan: cheap enough to ask every few minutes."""
+    return live_bytes() > budget_bytes
+
+
+def _drop_whole_hours(c, current_hour: int, budget_bytes: int) -> int:
+    """Delete the oldest whole hours until the live data fits the budget.
+
+    Only hours before the current one: the caller has just rolled those up,
+    and a whole hour that is gone is never aggregated again (RM-N8c).
+    """
+    removed = 0
+    while live_bytes(c) > budget_bytes:
+        oldest = c.execute("SELECT MIN(ts) FROM diagnostic_events").fetchone()[0]
+        if oldest is None or oldest >= current_hour:
+            break
+        removed += batched_delete.prune(
+            c, "DELETE FROM diagnostic_events WHERE ts < ?",
+            (oldest - oldest % HOUR_MS + HOUR_MS,), indexed=True)
+    return removed
+
+
+def _cut_current_hour(c, keep_bytes: int) -> int:
+    """The current hour alone is over the budget: delete its oldest rows
+    until ``keep_bytes`` are left.
+
+    This is the one case that deletes part of an hour. That hour's rollup,
+    made after the hour ends, then counts only the rows that survived; the
+    number deleted is returned so the caller can log it. A disk that fills
+    costs more than one hour's exact counts.
+    """
+    removed = 0
+    for _ in range(8):
+        live = live_bytes(c)
+        if live <= keep_bytes:
+            break
+        first, last = c.execute(
+            "SELECT MIN(event_id), MAX(event_id) FROM diagnostic_events").fetchone()
+        if first is None:
+            break
+        # Rows differ in size: delete the share that would fit if they did
+        # not, oldest first, then measure again.
+        through = first + int((last - first + 1) * (1 - keep_bytes / live))
+        removed += batched_delete.prune(
+            c, "DELETE FROM diagnostic_events WHERE event_id <= ?",
+            (through,), indexed=True)
+    return removed
+
+
+def rollup_and_prune(*, now_ms: int | None = None, checkpoint: bool = True,
+                      budget_bytes: int = DETAIL_BUDGET_BYTES) -> dict[str, int]:
+    """Roll every retained hour up, then expire detail and old rollups, then
+    hold the size budget.
 
     The aggregation is a plain read, which in WAL mode blocks no writer; only
     its results are written, in short transactions, and the deletes run in
     bounded batches (RM-N8b). An emit waits at most one batch, never the scan.
+
+    The budget (``budget_bytes`` of live data, see live_bytes) drops whole
+    hours, oldest first, all of them rolled up above. If the current hour
+    alone is still over it, its oldest rows go too (_cut_current_hour).
     """
     now = int(now_ms if now_ms is not None else time.time() * 1000)
-    hour = 60 * 60 * 1000
+    hour = HOUR_MS
     current_hour = now - (now % hour)
     c = conn()
     metrics = c.execute(
@@ -281,10 +354,17 @@ def rollup_and_prune(*, now_ms: int | None = None,
     batched_delete.prune(
         c, "DELETE FROM hourly_latency_buckets WHERE bucket_ms < ?",
         (now - ROLLUP_RETENTION_MS,))
+    budget_details = _drop_whole_hours(c, current_hour, budget_bytes)
+    current_hour_cut = 0
+    if live_bytes(c) > budget_bytes:
+        # Down to half, so the cut is not repeated at every check.
+        current_hour_cut = _cut_current_hour(c, budget_bytes // 2)
     # Exclusive and can block concurrent event writers for its duration;
     # the boot sweep runs with checkpoint=False for the same reason
     # MaintenanceWorker defers state.sqlite's own truncate (see
     # maintenance.py), so it doesn't collide with startup write volume.
     if checkpoint:
         c.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-    return {"telemetry_details": details, "telemetry_rollups": rollups}
+    return {"telemetry_details": details, "telemetry_rollups": rollups,
+            "telemetry_budget_details": budget_details,
+            "telemetry_current_hour_cut": current_hour_cut}

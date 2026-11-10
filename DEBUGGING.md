@@ -25,6 +25,20 @@ The JSONL files under `~/.cache/clarp/logs/YYYY-MM-DD.jsonl` mirror the same
 rows for DuckDB analysis with `./scripts/query.sh`; SQLite is the live source
 of truth.
 
+Diagnostics are bounded by size as well as by age, so one noisy code path
+cannot fill the disk:
+
+| what | bound | where it is set |
+|---|---|---|
+| one event's `detail` | 32 KiB serialised; longer strings keep their head and tail, and `detail._truncated` holds the original size | `eventlog.MAX_DETAIL_BYTES` |
+| `telemetry.sqlite` detail | 1 GiB of live data; the oldest whole hours go first (their rollups stay) | `telemetry.DETAIL_BUDGET_BYTES` |
+| `~/.cache/clarp/logs/` | 2 GiB in total; the oldest days go first, and today's file is cut to its newest 512 MiB (`eventLogCut`) | `maintenance.Policy` |
+| `~/.cache/clarp/hook.log` | over 100 MiB it is cut to its newest 20 MiB (`hookLogCut`) | `maintenance.Policy` |
+
+The maintenance worker checks these at Host start, hourly, and every five
+minutes in between. `telemetry.sqlite` reuses the pages a delete frees, so
+the file stops growing at its budget but does not shrink by itself.
+
 ## Sources
 
 | source              | who writes it                                        |

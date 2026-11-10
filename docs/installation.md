@@ -316,7 +316,9 @@ Detailed diagnostics are disabled by default. Enable them per Computer under
 **Settings → Developer Diagnostics** in the iOS app and select only the needed
 categories. Operational state remains in `state.sqlite`; opt-in diagnostic
 events are written to the isolated `telemetry.sqlite` store. Detail expires
-after 24 hours and compact hourly summaries expire after 30 days.
+after 24 hours and compact hourly summaries expire after 30 days. Detail is
+also held to 1 GiB, the event-log mirror to 2 GiB and `hook.log` to 100 MiB;
+see `DEBUGGING.md`.
 
 Advanced diagnostic families are independently opt-in: interaction
 waterfalls, transcript-import phases, database repetition detection, network
