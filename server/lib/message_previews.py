@@ -355,8 +355,15 @@ def _dashboard_revisions() -> tuple[dict[str, dict[str, int]], dict[str, dict[st
 
 def _preview_key(agent_id: str, revisions: dict, stamps: dict) -> tuple:
     """What an agent's cached preview is valid for: every conversation of the
-    agent with its highest revision and highest updated_at. Any write that
-    changes what the preview shows moves one of them."""
+    agent with its highest revision (of its messages or of its conversation
+    head, whichever is higher) and its messages' highest updated_at.
+
+    Every writer in this code base that changes what a preview shows moves
+    one of them: a new or edited row raises the revision or updated_at, and a
+    delete raises the conversation head's revision in the same transaction
+    (audited for #253 over 9,872 commits of real writes, no exception). That
+    is a property of those writers, not of the table: raw SQL that changes a
+    row without doing either moves nothing here and is not noticed."""
     return tuple(sorted((str(session or ''), rev, stamps.get(agent_id, {}).get(session, 0))
                         for session, rev in revisions.get(agent_id, {}).items()))
 
