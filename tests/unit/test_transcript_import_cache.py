@@ -1485,9 +1485,10 @@ def test_owner_lease_drains_real_import_and_observers_before_cutover(tmp_path, e
                 assert cache.reset_for_tests()
 
 
-@pytest.mark.parametrize("outcome", ["completed", "deferred", "error"])
+@pytest.mark.parametrize("outcome", ["completed", "warm", "deferred", "error", "busy"])
 def test_owner_lease_final_import_is_once_and_rebind_rejects_old_callbacks(tmp_path, outcome):
     import time
+    import sqlite3
 
     cache = transcript_import_cache
     assert cache.reset_for_tests()
@@ -1497,6 +1498,10 @@ def test_owner_lease_final_import_is_once_and_rebind_rejects_old_callbacks(tmp_p
     new.write_text("{}\n")
     calls, after = [], []
     binding = _lease_binding(old, "old-native")
+    if outcome == "warm":
+        warm = _lease_native_import(old, "lease-owner", "old-native", lambda: calls.append("warm") or {})
+        assert cache.import_if_changed(old, warm, owner="lease-owner")
+        assert calls == ["warm"]
     lease = cache.acquire_owner_lease("lease-owner", binding, time.monotonic() + 1,
                                       operation_id="final-1")
 
@@ -1504,21 +1509,25 @@ def test_owner_lease_final_import_is_once_and_rebind_rejects_old_callbacks(tmp_p
         calls.append("final")
         if outcome == "error":
             raise ValueError("real selected callback failure")
+        if outcome == "busy":
+            raise sqlite3.OperationalError("database is locked")
         return {"_clarp_transcript_completion_v1": "deferred"} if outcome == "deferred" else {}
 
     importer = _lease_native_import(old, "lease-owner", "old-native", final)
     try:
-        if outcome == "error":
-            with pytest.raises(ValueError, match="real selected callback failure"):
+        if outcome in ("error", "busy"):
+            expected = ValueError if outcome == "error" else sqlite3.OperationalError
+            with pytest.raises(expected):
                 cache.run_final_owner_import(lease, old, importer, after=lambda: after.append(1))
         else:
             receipt = cache.run_final_owner_import(lease, old, importer,
                                                     after=lambda: after.append(1))
-            assert receipt.completed is (outcome == "completed")
+            assert receipt.completed is (outcome in ("completed", "warm"))
         with pytest.raises(cache.OwnerLeaseBusy):
             cache.run_final_owner_import(lease, old, importer)
-        assert calls == ["final"] and after == ([1] if outcome == "completed" else [])
-        if outcome != "completed":
+        prefix = ["warm"] if outcome == "warm" else []
+        assert calls == prefix + ["final"] and after == ([1] if outcome in ("completed", "warm") else [])
+        if outcome not in ("completed", "warm"):
             with pytest.raises(cache.OwnerLeaseBusy):
                 cache.release_owner_lease(lease, _lease_binding(new, "new-native"))
             cache.release_owner_lease(lease, binding)
@@ -1532,7 +1541,7 @@ def test_owner_lease_final_import_is_once_and_rebind_rejects_old_callbacks(tmp_p
             fresh = _lease_native_import(new, "lease-owner", "new-native",
                                          lambda: calls.append("new") or {})
             assert cache.import_if_changed(new, fresh, owner="lease-owner")
-            assert calls == ["final", "new"]
+            assert calls == prefix + ["final", "new"]
         lease = None
     finally:
         try:
@@ -1553,19 +1562,32 @@ def test_owner_lease_parks_only_existing_capacity_and_retains_refused_dirty_summ
     binding = _lease_binding(path, "old-native")
     lease = cache.acquire_owner_lease("lease-owner", binding, time.monotonic(), operation_id="slots-1")
     calls = []
+    formatting = []
+    release_phase = False
+
+    class ReentrantPath(type(path)):
+        def __str__(self):
+            if release_phase:
+                # If release formats queued objects while holding _guard,
+                # this real reentry deadlocks. It is not a mocked receipt.
+                formatting.append(cache.is_active(path, owner="lease-owner"))
+            return super().__str__()
+
     try:
         # These paths deliberately do not exist. Held-owner admission must not
         # stat, call descriptors or execute any of these old closures.
         for i in range(cache._BACKGROUND_LIMIT):
-            assert cache.schedule_import(tmp_path / f"absent-{i}",
+            assert cache.schedule_import(ReentrantPath(tmp_path / f"absent-{i}"),
                                          lambda: calls.append("old"), owner="lease-owner")
         assert not cache.schedule_import(tmp_path / "capacity-refused", lambda: calls.append("overflow"),
                                          owner="lease-owner", urgent=True, startup_exempt=True)
         other = tmp_path / "other.jsonl"
         other.write_text("{}\n")
         assert cache.import_if_changed(other, lambda: calls.append("other"), owner="unrelated")
+        release_phase = True
         dirty = cache.release_owner_lease(lease, binding)
         lease = None
+        assert formatting == []
         assert dirty.dirty and dirty.urgent and dirty.startup_exempt
         assert len(dirty.paths) == cache._BACKGROUND_LIMIT
         assert dirty.first_wait_rank is not None
