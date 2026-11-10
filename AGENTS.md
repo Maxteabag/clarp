@@ -4,21 +4,20 @@ This repository is the Clarp server, PWA, and Tauri desktop shell.
 The iOS app is a separate private repo (`clarp-ios`). Do not document
 or duplicate iOS build/signing steps here.
 
-## Refactor program (from 3 Nov 2026)
+## Refactor program (ended 10 Nov 2026)
 
-A refactor program of the server is running. Its brief is `REFACTOR.md`; this
-section applies until that file is removed.
+The server refactor program that began on 3 Nov 2026 was retired on 10 Nov 2026
+by the owner's decision. No file is claimed and there is no lead to ask: the
+rules below are the only ones. `REFACTOR.md` stays in the tree as the program's
+record, and its final hand-off is
+`laptopstudio:/var/tmp/clarp-refactor-program/FINAL-HANDOFF.md`.
 
-- **Do not deploy, update or restart the Clarp Host yourself** (`make deploy`,
-  `install.sh`, `make deploy-static`, `clarp-admin update`, restarting the
-  `clarp*` units). Keep pushing to main as described below; the program's release
-  owner ships main in the 12:00 and 18:00 windows (Europe/Oslo). If a change must
-  go live sooner, ask the release owner (session in `REFACTOR.md` section 6).
-  Peter can still deploy himself.
-- **Do not edit files listed under "Claims" in `REFACTOR.md`.** Ask the lead
-  (`hobbles-18b0`).
-- Agents in the program follow `REFACTOR.md`, which overrides "Push to main" for
-  them: they commit on their own branch and the merge captain lands it.
+## Deploying
+
+Do not deploy, update or restart the Clarp Host yourself (`make deploy`,
+`install.sh`, `make deploy-static`, `clarp-admin update`, restarting the
+`clarp*` units). Push to main as described below and ask whoever gave you the
+task to have it shipped. Peter can still deploy himself.
 
 ## Agent instruction files
 
