@@ -1,8 +1,17 @@
 name: Tests
 
+# A pull request runs the critical gate (tests/critical.txt); a dispatch, the nightly
+# schedule and a calling workflow (Docker) run the full suite.
 on:
+  pull_request:
   workflow_dispatch:
+  schedule:
+    - cron: "23 2 * * *"
   workflow_call:
+    inputs:
+      suite:
+        type: string
+        default: full
 
 permissions:
   contents: read
@@ -11,6 +20,8 @@ jobs:
   tests:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      SUITE: ${{ (github.event_name == 'pull_request' && inputs.suite != 'full') && 'critical' || 'full' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -36,7 +47,11 @@ jobs:
       # Everything the tests need is installed above, with the network. The tests themselves run with
       # no network (loopback only), no credentials, no privilege, an empty HOME and only their own
       # processes (scripts/ci_contained.sh, which self-checks that before the command starts).
+      - name: Critical gate
+        if: env.SUITE == 'critical'
+        run: bash scripts/ci_contained.sh .venv/bin/python -m pytest -n0 $(sed -e 's/#.*//' tests/critical.txt) --junitxml=test-results/python.xml
       - name: Python unit, integration and contract tests
+        if: env.SUITE == 'full'
         # Per-test phase timings stream into test-results/timing/ (flushed per line), so the
         # always() upload below keeps them even when the job is cancelled at its time limit.
         run: bash scripts/ci_contained.sh .venv/bin/python -m pytest -n 2 --junitxml=test-results/python.xml --clarp-timing-dir=test-results/timing
