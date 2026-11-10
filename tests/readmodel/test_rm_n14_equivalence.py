@@ -1209,47 +1209,150 @@ def test_full_bootstrap_certifies_only_the_actual_consumed_prefix(tmp_path, back
 
 @pytest.mark.parametrize("backend", harness.BACKENDS)
 @pytest.mark.parametrize("same_size", [False, True])
-def test_staged_rollout_replacement_after_real_checkpoint_reparses_all_products(tmp_path, backend, same_size):
-    """Same pathname/native conversation is not the checkpoint's file identity."""
+@pytest.mark.parametrize("phase", ["before_dispatch", "before_tail_checkpoint", "after_tail_checkpoint",
+                                  "after_process_frontier"])
+def test_staged_rollout_replacement_after_real_checkpoint_reparses_all_products(
+        tmp_path, backend, same_size, phase, monkeypatch):
+    """Exercise the real outer cache, warm checkpoint and completion transport."""
     import os
-    from lib import transcript_incremental as inc
+    import threading
+    from lib import transcript_incremental as inc, transcript_import_cache as cache, message_writes
 
+    assert cache.reset_for_tests()
+    # Keep an automatic deferred retry in a real owner window until assertions
+    # finish. Direct requests still exercise their normal production admission.
+    monkeypatch.setattr(cache, "_BACKGROUND_MIN_INTERVAL", 3600.0)
     reference, candidate = _clones(tmp_path, backend)
     transcript = tmp_path / "synthetic.jsonl"
     initial = b"".join(harness.append_bytes(backend, i) for i in range(20))
     transcript.write_bytes(initial)
+    reports, completions, workers = [], [], []
+    first_done = threading.Event()
+    db.reset_for_tests(candidate)
+
+    def importing():
+        workers.append(threading.current_thread())
+        result = harness.run_lane(candidate, transcript, backend, "candidate", tick=len(reports),
+                                  initialize=not reports, close=False)
+        reports.append(result)
+        return result
+
+    producer = inc._completion_import(importing, backend=backend, path=transcript,
+                                      agent_id=corpus.AGENT, backend_session_id=corpus.SESSION,
+                                      after_complete=lambda result: completions.append(result["apply_mode"]))
+    key = (str(candidate), corpus.AGENT, corpus.SESSION, str(transcript))
+    cache_key = f"{corpus.AGENT}\0{transcript}"
     try:
         harness.isolated_lane(reference, transcript, backend, "reference", tick=0)
-        first = harness.run_lane(candidate, transcript, backend, "candidate", tick=0, close=False)
-        assert first["apply_mode"] == "full"
+        assert cache.schedule_import(transcript, producer, owner=corpus.AGENT,
+                                     urgent=True, after=first_done.set)
+        assert first_done.wait(3), "actual native initial import/after did not complete"
+        assert workers and workers[0] is not threading.current_thread()
+        workers[0].join(3)
+        assert not workers[0].is_alive()
+        assert len(reports) == 1 and reports[0]["apply_mode"] == "full" and completions == ["full"]
         harness.assert_product_equal(reference, candidate)
         harness.assert_checkpoint_parse_equal(candidate, transcript, backend)
         old = inc.load_checkpoint(db.conn(), corpus.AGENT, corpus.SESSION, str(transcript))
-        assert old is not None
-        key = (str(candidate), corpus.AGENT, corpus.SESSION, str(transcript))
         retained = inc._TAIL_STATES.peek(key)
-        assert retained is not None and retained[1] is not None, "real native frontier prerequisite failed"
+        assert old is not None and retained is not None and retained[1] is not None
+        prior_signature = cache._imported[cache_key]
+        prior_validation = cache._validated_at.get(cache_key, cache._epoch)
+        if phase != "before_dispatch":
+            with transcript.open("ab") as output:
+                output.write(harness.append_bytes(backend, 20))
+            # The historical products of the admitted old-inode tail remain
+            # valid while pending; compare to an independent real full import.
+            harness.isolated_lane(reference, transcript, backend, "reference", tick=1)
+        parsed_extent = transcript.read_bytes()
         stat = transcript.stat()
-        rewritten = initial.replace(b"synthetic request 0", b"synthetic request X", 1)
-        assert rewritten != initial and len(rewritten) == len(initial)
-        staged = tmp_path / "canonical.staged.jsonl"
-        staged.write_bytes(rewritten if same_size else rewritten + harness.append_bytes(backend, 20))
-        os.utime(staged, ns=(stat.st_atime_ns, stat.st_mtime_ns))
-        os.replace(staged, transcript)
-        assert transcript.stat().st_ino != old.inode
-        if same_size:
-            assert transcript.stat().st_size == old.size and transcript.stat().st_mtime_ns == old.mtime_ns
-        harness.isolated_lane(reference, transcript, backend, "reference", tick=1)
-        actual = harness.run_lane(candidate, transcript, backend, "candidate", tick=1,
-                                  initialize=False, close=False)
-        assert actual["apply_mode"] == "full"
-        assert {"event": "transcriptTailDecision", "code": "full_inode", "count": 1} in actual["tail_events"]
-        assert actual.get("_clarp_transcript_completion_v1") != "deferred"
+        replacements = []
+
+        def replace_source():
+            rewritten = parsed_extent.replace(b"synthetic request 0", b"synthetic request X", 1)
+            assert rewritten != parsed_extent and len(rewritten) == len(parsed_extent)
+            staged = tmp_path / "canonical.staged.jsonl"
+            staged.write_bytes(rewritten if same_size else rewritten + harness.append_bytes(backend, 21))
+            os.utime(staged, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+            os.replace(staged, transcript)
+            replacements.append(transcript.stat().st_ino)
+            assert replacements[-1] != stat.st_ino
+            if same_size:
+                assert transcript.stat().st_size == stat.st_size
+                assert transcript.stat().st_mtime_ns == stat.st_mtime_ns
+
+        reached = []
+        real_tail_store, real_checkpoint = message_writes.store_transcript_tail, inc.write_checkpoint
+        real_cache = inc._cache_committed_tail
+
+        def tail_store(*args, **kwargs):
+            publish = kwargs["on_stored"]
+            def replace_before_publication(database, captured):
+                reached.append("before")
+                replace_source()
+                return publish(database, captured)
+            kwargs["on_stored"] = replace_before_publication
+            return real_tail_store(*args, **kwargs)
+
+        def checkpoint(*args, **kwargs):
+            result = real_checkpoint(*args, **kwargs)
+            reached.append("after")
+            replace_source()
+            return result
+
+        def publish_frontier(*args, **kwargs):
+            result = real_cache(*args, **kwargs)
+            retained = inc._TAIL_STATES.peek(key)
+            assert retained is not None and retained[1] is not None
+            reached.append("frontier")
+            replace_source()
+            return result
+
+        if phase == "before_dispatch":
+            replace_source()
+            harness.isolated_lane(reference, transcript, backend, "reference", tick=1)
+        with monkeypatch.context() as selected:
+            if phase == "before_tail_checkpoint":
+                selected.setattr(message_writes, "store_transcript_tail", tail_store)
+            elif phase == "after_tail_checkpoint":
+                selected.setattr(inc, "write_checkpoint", checkpoint)
+            elif phase == "after_process_frontier":
+                selected.setattr(inc, "_cache_committed_tail", publish_frontier)
+            imported = cache.import_if_changed(transcript, producer, owner=corpus.AGENT)
+        assert len(reports) == 2, "outer unchanged-signature shortcut hid a new file incarnation"
+        assert len(replacements) == 1
+        if phase == "before_dispatch":
+            assert imported and reports[-1]["apply_mode"] == "full" and completions == ["full", "full"]
+            assert {"event": "transcriptTailDecision", "code": "full_inode", "count": 1} in reports[-1]["tail_events"]
+        else:
+            assert reached == [{"before_tail_checkpoint": "before", "after_tail_checkpoint": "after",
+                                "after_process_frontier": "frontier"}[phase]]
+            assert not imported and reports[-1]["apply_mode"] == "deferred"
+            assert reports[-1]["_clarp_transcript_completion_v1"] == "deferred"
+            assert completions == ["full"], "known replaced tail invoked its success observer"
+            assert cache._imported[cache_key] == prior_signature
+            assert cache._validated_at.get(cache_key, cache._epoch) == prior_validation
+            retained = inc._TAIL_STATES.peek(key)
+            assert retained is None or retained[1] is None, "old-inode process carry survived"
         harness.assert_product_equal(reference, candidate)
+        if phase != "before_dispatch":
+            harness.isolated_lane(reference, transcript, backend, "reference", tick=2)
+            assert cache.import_if_changed(transcript, producer, owner=corpus.AGENT)
+            assert len(reports) == 3 and reports[-1]["apply_mode"] == "full"
+            assert completions == ["full", "full"]
+            harness.assert_product_equal(reference, candidate)
         current = inc.load_checkpoint(db.conn(), corpus.AGENT, corpus.SESSION, str(transcript))
-        assert current is not None and current.inode == transcript.stat().st_ino
-        assert current.inode != old.inode
         retained = inc._TAIL_STATES.peek(key)
+        assert current is not None and current.inode == transcript.stat().st_ino != old.inode
         assert retained is not None and retained[1].checkpoint.inode == current.inode
     finally:
-        db.close_local()
+        try:
+            assert cache.reset_for_tests()
+        finally:
+            try:
+                for worker in workers:
+                    if worker is not threading.current_thread():
+                        worker.join(3)
+                        assert not worker.is_alive()
+            finally:
+                db.close_local()
