@@ -44,6 +44,7 @@ import threading
 import time
 import types
 from dataclasses import dataclass, replace
+from contextvars import ContextVar
 from typing import Any, Callable
 
 SUPPORTED_BACKENDS = ("claude", "codex", "agy")
@@ -633,6 +634,155 @@ class ShadowBudget:
 
 BUDGET = ShadowBudget()
 
+_IMPORT_CACHE_EPOCH = ContextVar("transcript_import_cache_epoch", default=None)
+_IMPORT_LOG_METADATA = ContextVar("transcript_import_log_metadata", default=(None, None))
+
+
+def _call_in_cache_epoch(importer, epoch):
+    """Carry admission lifetime only, never a positive DB/file certificate."""
+    token = _IMPORT_CACHE_EPOCH.set(epoch)
+    try:
+        return importer()
+    finally:
+        _IMPORT_CACHE_EPOCH.reset(token)
+
+
+def _materialized_history(agent_id, session_id):
+    """Existing committed history permits negative admission, never freshness."""
+    from . import db
+    return db.conn().execute(
+        "SELECT 1 FROM messages WHERE agent_id=? AND backend_session_id=? AND seq>=0 LIMIT 1",
+        (agent_id, session_id)).fetchone() is not None
+
+
+class _FullImportGate:
+    """Bounded negative admission for materialized contexts, not freshness.
+
+    Active reservations are never evicted. Polls do not extend cooldowns;
+    old inactive epochs/expired windows are discarded on admission. No IO,
+    caller callbacks, sleeps or timers run under this lock.
+    """
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._slots = {}
+        self._weight = 0
+
+    def reserve(self, key, epoch):
+        charge = 512 + sys.getsizeof(key) + sum(sys.getsizeof(item) for item in key)
+        with self._lock:
+            now = time.monotonic()
+            for old_key, (_, active, until, weight, old_epoch) in list(self._slots.items()):
+                if not active and (old_epoch != epoch or until <= now):
+                    del self._slots[old_key]
+                    self._weight -= weight
+            previous = self._slots.get(key)
+            if previous is not None:
+                return None, "running" if previous[1] else "cooldown"
+            if len(self._slots) >= 256 or self._weight + charge > 2 * 1024 * 1024:
+                return None, "capacity"
+            ticket = object()
+            self._slots[key] = (ticket, True, 0.0, charge, epoch)
+            self._weight += charge
+            return ticket, ""
+
+    def finish(self, key, ticket, refused):
+        with self._lock:
+            current = self._slots.get(key)
+            if current is None or current[0] is not ticket:
+                return
+            if refused:
+                self._slots[key] = (ticket, False, time.monotonic() + 5.0, current[3], current[4])
+            else:
+                del self._slots[key]
+                self._weight -= current[3]
+
+
+_FULL_IMPORT_GATE = _FullImportGate()
+
+
+class _FullImportAttempt:
+    def __init__(self, enabled, backend, path, agent_id, session_id, before):
+        from . import db
+        epoch = _IMPORT_CACHE_EPOCH.get()
+        self.key = None
+        self.ticket = None
+        self.reason = ""
+        self.full_started = False
+        self.retained = False
+        self.metadata = (backend, before.size if before else None)
+        if enabled and epoch is not None and before is not None:
+            # Namespace/epoch isolates negative admission, not DB authority.
+            # Same-source aliases cannot create duplicate eligible full work.
+            self.key = (str(db.DB_PATH), epoch, backend, agent_id, session_id, str(path.resolve()),
+                        before.device, before.inode)
+            self.ticket, self.reason = _FULL_IMPORT_GATE.reserve(self.key, epoch)
+
+    def __enter__(self):
+        self.log_token = _IMPORT_LOG_METADATA.set(self.metadata)
+        return self
+
+    def __exit__(self, exc_type, _exc, _traceback):
+        try:
+            if self.ticket is not None:
+                _FULL_IMPORT_GATE.finish(self.key, self.ticket,
+                                         exc_type is None and self.full_started and not self.retained)
+        finally:
+            _IMPORT_LOG_METADATA.reset(self.log_token)
+
+
+def _completion_state(result) -> str:
+    """Private native result, interpreted only by an opted-in import adapter."""
+    if not isinstance(result, dict) or "_clarp_transcript_completion_v1" not in result:
+        return "completed-changed"  # existing strict importer / legacy test callers
+    state = result["_clarp_transcript_completion_v1"]
+    return state if state in ("completed-changed", "completed-unchanged", "deferred") else "deferred"
+
+
+class _CompletionImport:
+    """Completion transport; NOT an audit or native file/DB certificate.
+
+    The default remains strict legacy admission. The later audit implementation
+    must supply its real epoch/generation probe AND publication fence before
+    enabling warm hash reuse. This groundwork does not enable that optimization.
+    A native authority's fence must be reentrant and shared by all its debt /
+    generation mutations; importer IO is always outside that fence.
+    """
+    _clarp_transcript_completion_v1 = True
+
+    def __init__(self, callback, context, *, eligibility=None, fence=None, after_complete=None):
+        self._callback = callback
+        self._context = context
+        self._eligibility = eligibility
+        self._fence = fence
+        self._after_complete = after_complete
+
+    def _clarp_transcript_eligibility(self):
+        if self._eligibility is None:
+            return self._context, None, True  # legacy, not an audit generation
+        return self._eligibility()
+
+    def _clarp_transcript_fence(self):
+        from contextlib import nullcontext
+        return self._fence() if self._fence is not None else nullcontext()
+
+    def __call__(self):
+        context, generation, eligible = self._clarp_transcript_eligibility()
+        value = self._callback() if eligible else None
+        state = _completion_state(value) if eligible else "deferred"
+        return {"_clarp_transcript_completion_v1": (context, generation, state),
+                "_native_result": value}
+
+    def _clarp_transcript_completed(self, envelope):
+        if self._after_complete is not None:
+            self._after_complete(envelope["_native_result"])
+
+
+def _completion_import(callback, *, backend, path, agent_id, backend_session_id,
+                       after_complete=None):
+    from . import db
+    context = (str(db.DB_PATH), str(path), backend, agent_id, backend_session_id)
+    return _CompletionImport(callback, context, after_complete=after_complete)
+
 
 # ---- the import ------------------------------------------------------------
 
@@ -728,11 +878,28 @@ def _tail_file_hashes(path, previous_size, current_size):
     return previous, digest.hexdigest()
 
 
-def _tail_log(code, *, retention=False):
+def _size_bucket(size):
+    if size is None:
+        return "unknown"
+    for limit, label in ((1, "lt1m"), (16, "lt16m"), (64, "lt64m"),
+                         (256, "lt256m"), (1024, "lt1024m")):
+        if size < limit * 1024 * 1024:
+            return label
+    return "ge1024m"
+
+
+def _tail_log(code, *, retention=False, backend=None, size=None):
     """Fixed codes and unit counts; no session, path, text or message IDs."""
     from .log import log
-    log("transcriptTailRetention" if retention else "transcriptTailDecision",
-        f"code={code} count=1")
+    detail = f"code={code} count=1"
+    if not retention:
+        observed_backend, observed_size = _IMPORT_LOG_METADATA.get()
+        if backend is None:
+            backend = observed_backend
+            size = size if size is not None else observed_size
+        detail += f" backend={backend if backend in SUPPORTED_BACKENDS else 'other'}"
+        detail += f" size={_size_bucket(size)}"
+    log("transcriptTailRetention" if retention else "transcriptTailDecision", detail)
 
 
 def _refuse_tail(code):
@@ -910,6 +1077,7 @@ def _store_full_with_tail_checkpoint(backend, path, agent_id, backend_session_id
 def import_transcript(*, backend: str, path: pathlib.Path, agent_id: str,
                       backend_session_id: str,
                       parse: Callable[[pathlib.Path], list[dict]] | None = None,
+                      _defer_full: bool = False,
                       ) -> dict[str, Any]:
     """Parse and store one transcript in full (authoritative), plus the
     shadow when the budget admits it. Returns the import's timings."""
@@ -939,37 +1107,61 @@ def import_transcript(*, backend: str, path: pathlib.Path, agent_id: str,
         if tail_enabled:
             try:
                 before = identity(path)
-                tail = _try_tail(backend, path, agent_id, backend_session_id, conf, started)
             except OSError as exc:
                 from .log import log_exception
                 log_exception("transcriptTailFileSkip", exc)
-                _tail_log("full_file_io")
-            except Exception:
-                _tail_log("tail_failed")
-                raise
+                _tail_log("full_file_io", backend=backend)
+        gate_native = False
+        if _defer_full and tail_enabled:
+            method = implementation.parse_transcript
+            gate_native = (isinstance(method, types.MethodType)
+                           and method.__func__ is type(implementation).parse_transcript)
+        with _FullImportAttempt(gate_native, backend, path,
+                                agent_id, backend_session_id, before) as admission:
+            if admission.reason:
+                _tail_log("deferred_full_" + admission.reason, backend=backend,
+                          size=before.size if before else None)
+                return {"rows": 0, "parse_s": 0.0, "store_s": 0.0,
+                        "apply_mode": "deferred", "shadow": skip,
+                        "_clarp_transcript_completion_v1": "deferred"}
+            if tail_enabled and before is not None:
+                try:
+                    tail = _try_tail(backend, path, agent_id, backend_session_id, conf, started)
+                except OSError as exc:
+                    from .log import log_exception
+                    log_exception("transcriptTailFileSkip", exc)
+                    _tail_log("full_file_io", backend=backend, size=before.size)
+                except Exception:
+                    _tail_log("tail_failed", backend=backend, size=before.size)
+                    raise
+                else:
+                    if tail is not None:
+                        return tail
+            if not tail_enabled:
+                if not native_parse:
+                    _tail_log("full_custom_parser", backend=backend)
+                elif implementation is None or backend not in SUPPORTED_BACKENDS:
+                    _tail_log("full_backend_unsupported", backend=backend)
+                else:
+                    _tail_log("full_backend_tail_disabled", backend=backend)
+            admission.full_started = True
+            turns = parse(path)
+            parsed = time.perf_counter()
+            if tail_enabled:
+                _store_full_with_tail_checkpoint(backend, path, agent_id, backend_session_id,
+                                                 turns, before, conf)
+                retained = _TAIL_STATES.peek(_tail_key(path, agent_id, backend_session_id))
+                admission.retained = (retained is not None
+                                      and retained[0] == parser_version(backend)
+                                      and retained[1] is not None)
             else:
-                if tail is not None:
-                    return tail
-        if not tail_enabled:
-            if not native_parse:
-                _tail_log("full_custom_parser")
-            elif implementation is None or backend not in SUPPORTED_BACKENDS:
-                _tail_log("full_backend_unsupported")
-            else:
-                _tail_log("full_backend_tail_disabled")
-        turns = parse(path)
-        parsed = time.perf_counter()
-        if tail_enabled:
-            _store_full_with_tail_checkpoint(backend, path, agent_id, backend_session_id,
-                                             turns, before, conf)
-        else:
-            message_store.store_transcript_turns(
-                agent_id=agent_id, backend_session_id=backend_session_id,
-                source_file=str(path), turns=turns)
-        return {"rows": len(turns), "parse_s": parsed - started,
-                "store_s": time.perf_counter() - parsed, "shadow": skip,
-                "apply_mode": "full", "parsed_bytes": before.size if before else None}
-    _tail_log("full_shadow_admitted")
+                message_store.store_transcript_turns(
+                    agent_id=agent_id, backend_session_id=backend_session_id,
+                    source_file=str(path), turns=turns)
+            return {"rows": len(turns), "parse_s": parsed - started,
+                    "store_s": time.perf_counter() - parsed, "shadow": skip,
+                    "apply_mode": "full", "parsed_bytes": before.size if before else None}
+    _tail_log("full_shadow_admitted", backend=backend)
     shadow = _Shadow(backend, path, agent_id, backend_session_id, conf)
     try:
         try:
