@@ -81,6 +81,12 @@ def _forget_busy(agent_id: str) -> None:
                 del _BUSY_OBSERVATIONS[key]
 
 
+def forget_observations(agent_ids) -> None:
+    """An unknown-runtime roster read breaks absence evidence for these agents."""
+    for agent_id in agent_ids:
+        _forget_busy(agent_id)
+
+
 def _observe_busy(agent_id: str, identity: tuple | None,
                   token: tuple[int, str]) -> bool:
     """Consume one matured observation; eviction/refusal can only delay it."""
