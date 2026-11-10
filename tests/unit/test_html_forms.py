@@ -178,3 +178,16 @@ def test_a_deleted_agents_forms_neither_retry_nor_block_the_others(tmp_path):
     live = html_forms.submit(f['artifact_id'], {'submission_id': 'b' * 32, 'version': '1',
                                                 'answers': {'budget': 7}})
     assert [row['submission_id'] for row in html_forms.pending()] == [live['submission_id']]
+
+
+def test_a_delivered_submission_keeps_its_first_delivery_time(tmp_path, monkeypatch):
+    f=form(tmp_path)
+    body={'submission_id':'b'*32,'version':'1','answers':{'budget':1}}
+    html_forms.submit(f['artifact_id'],body)
+    monkeypatch.setattr(db,'now_ms',lambda: 1000)
+    html_forms.mark_delivered(body['submission_id'])
+    monkeypatch.setattr(db,'now_ms',lambda: 2000)
+    html_forms.mark_delivered(body['submission_id'])
+    row=db.conn().execute('SELECT status,delivered_at FROM form_submissions').fetchone()
+    assert tuple(row)==('delivered',1000)
+    assert html_forms.FORM_SUBMISSION.decide('pending','deliver')=='delivered'

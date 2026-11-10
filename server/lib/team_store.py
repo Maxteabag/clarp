@@ -7,8 +7,10 @@ import secrets
 from contextlib import contextmanager
 from typing import Any
 
+from . import lifecycle as lk
 from . import origins
 from .db import conn, now_ms
+from .lifecycle import Edge, Lifecycle, WaitForever
 from .protocol import AgentState
 from .voice_markup import clean_for_display
 
@@ -24,6 +26,19 @@ _HEARTBEAT_WAKE_STATE_KINDS = {
     AgentState.INTERRUPTED,
     AgentState.BACKGROUND,
 }
+
+# A teammate's copy of a team message (docs/architecture/lifecycles.md). This
+# module is the only writer of team_inbox.status; the fanout inserts the row as
+# unread. The primary key is (team_message_id, agent_id), so the kit's single
+# key column is SQLite's rowid.
+TEAM_INBOX = Lifecycle(
+    name="team_inbox", owner="lib/team_store.py",
+    table="team_inbox", key="rowid", state_column="status",
+    entered_columns={"injected": "injected_at"},
+    initial="unread", final=frozenset({"injected"}),
+    edges=(Edge("inject", frozenset({"unread"}), "injected"),),
+    waits={"unread": WaitForever("the member's next prompt injects it")},
+)
 
 _TEAM_BLOCK_RE = re.compile(
     r"<team\b[^>]*>(.*?)</team>", re.IGNORECASE | re.DOTALL
@@ -619,13 +634,10 @@ def pending_digest(agent_id: str, *, limit: int = 5) -> tuple[str, list[str]]:
 def mark_injected(agent_id: str, team_message_ids: list[str] | tuple[str, ...]) -> None:
     if not team_message_ids:
         return
-    ts = now_ms()
-    conn().executemany(
-        """UPDATE team_inbox
-              SET status = 'injected', injected_at = ?
-            WHERE agent_id = ? AND team_message_id = ? AND status = 'unread'""",
-        [(ts, agent_id, msg_id) for msg_id in team_message_ids],
-    )
+    ts, con = now_ms(), conn()
+    for msg_id in team_message_ids:
+        lk.compare_and_set_where(con, TEAM_INBOX, "inject", where="agent_id = ? AND team_message_id = ?",
+                                 params=(agent_id, msg_id), now=ts)
 
 
 def latest_activity_for_agent(agent_id: str) -> int:
