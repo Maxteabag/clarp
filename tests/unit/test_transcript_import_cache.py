@@ -342,7 +342,7 @@ def test_running_deferred_import_keeps_capacity_for_its_retry(tmp_path, monkeypa
 
 
 @pytest.mark.parametrize("reenter", ["lookup", "replace"])
-def test_worker_marker_descriptor_runs_before_locked_request_consumption(tmp_path, reenter):
+def test_worker_marker_descriptor_runs_before_locked_request_consumption(tmp_path, reenter, monkeypatch):
     import threading
 
     cache = transcript_import_cache
@@ -350,6 +350,39 @@ def test_worker_marker_descriptor_runs_before_locked_request_consumption(tmp_pat
     path = tmp_path / "marker-descriptor.jsonl"
     path.write_text("{}\n")
     observations, calls, after = [], [], []
+    real_guard = cache._guard
+
+    class OwnershipGuard:
+        """Delegate the real lock; observe this thread, not global contention.
+
+        The cache's Condition keeps that same underlying real lock. This
+        worker path uses _guard sections; no lock or cache receipt is supplied.
+        """
+        def __init__(self):
+            self.local = threading.local()
+
+        def acquire(self, *args, **kwargs):
+            acquired = real_guard.acquire(*args, **kwargs)
+            if acquired:
+                self.local.held = True
+            return acquired
+
+        def release(self):
+            self.local.held = False
+            real_guard.release()
+
+        def held_here(self):
+            return getattr(self.local, "held", False)
+
+        def __enter__(self):
+            self.acquire()
+            return self
+
+        def __exit__(self, *_):
+            self.release()
+
+    guard = OwnershipGuard()
+    monkeypatch.setattr(cache, "_guard", guard)
 
     class GenericImporter:
         replaced = False
@@ -357,11 +390,10 @@ def test_worker_marker_descriptor_runs_before_locked_request_consumption(tmp_pat
         @property
         def _clarp_transcript_completion_v1(self):
             if threading.current_thread().name == "transcript-import":
-                unlocked = cache._guard.acquire(blocking=False)
-                if unlocked:
-                    cache._guard.release()
+                unlocked = not guard.held_here()
                 # A broken baseline must report the held lock, not deadlock
-                # irreapably by entering is_active under that same lock.
+                # irreapably by entering is_active under that same lock. Other
+                # threads may hold it normally: real is_active waits for them.
                 active = cache.is_active(path, owner="marker") if unlocked else None
                 observations.append((unlocked, active))
                 if unlocked and reenter == "replace" and not self.replaced:
