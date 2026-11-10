@@ -1470,7 +1470,7 @@ def test_owner_lease_final_import_is_once_and_rebind_rejects_old_callbacks(tmp_p
         calls.append("final")
         if outcome == "error":
             raise ValueError("real selected callback failure")
-        return {"_clarp_transcript_deferred_v1": True} if outcome == "deferred" else {}
+        return {"_clarp_transcript_completion_v1": "deferred"} if outcome == "deferred" else {}
 
     importer = _lease_native_import(old, "lease-owner", "old-native", final)
     try:
