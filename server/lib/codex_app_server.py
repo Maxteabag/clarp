@@ -551,17 +551,10 @@ class _Client:
             # Marks set after this point are newer than what this write saw.
             started_at = getattr(self, "goal_mark_seq", 0)
         try:
-            agent = agents_db.get_by_backend_session(thread_id)
-            if not agent:
+            mirrored = agent_goals.mirror_codex(thread_id, goal)
+            if mirrored is None:
                 return
-            if goal:
-                row = agent_goals.upsert(
-                    agent["agent_id"], session=agent["session"],
-                    backend=str(agent.get("backend") or "codex"),
-                    goal=agent_goals.from_codex(goal))
-            else:
-                agent_goals.clear(agent["agent_id"])
-                row = None
+            agent, row = mirrored
             recorded = True
             with self._goal_state_lock:
                 mark = self._goal_marks().get(thread_id)
