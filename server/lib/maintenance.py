@@ -6,7 +6,9 @@ import errno
 import fcntl
 import os
 import pathlib
+import re
 import shutil
+import stat
 import threading
 import time
 from dataclasses import dataclass
@@ -304,9 +306,154 @@ def _line_start(fd: int, offset: int, size: int) -> int:
     return size
 
 
-def keep_tail(path: pathlib.Path, keep_bytes: int) -> int:
+class UnsafeLogPath(OSError):
+    """A path this worker refuses to delete from or cut: not provably one of
+    Clarp's own diagnostics files. An OSError, so it is logged like any other
+    failure to prune and never passes for nothing to do."""
+
+
+# What the files this worker may cut start with. A file under the right name
+# that does not is somebody else's (a wrong CLAUDE_PWA_LOG_DIR or
+# CLARP_CACHE_DIR) and is left alone.
+# An event-log line as lib.eventlog writes it: {"ts":"<ISO>Z","source":"...
+_EVENT_LOG_START = re.compile(rb'\{"ts":"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z","source":"')
+# A hook.log line (HookLogger, the hook report, /clog): HH:MM:SS <writer> ...
+# Searched in the first 64 KiB, because a cut can start on a continuation line.
+_HOOK_LOG_LINE = re.compile(rb"^\d\d:\d\d:\d\d \S", re.M)
+_SNIFF_BYTES = 65536
+
+
+def _open_log_dir(root: pathlib.Path) -> int:
+    """A descriptor of the directory destructive work is confined to.
+
+    Refused: a path that is not absolute (an empty setting is the working
+    directory), a symlink, anything that is not a directory, and a directory
+    this user does not own. Every later step names its file relative to this
+    descriptor, so swapping the path afterwards redirects nothing.
+    """
+    root = pathlib.Path(root)
+    if not root.is_absolute():
+        raise UnsafeLogPath(errno.EINVAL, "not an absolute directory", str(root))
+    try:
+        fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    except OSError as e:
+        if e.errno in (errno.ELOOP, errno.ENOTDIR):
+            raise UnsafeLogPath(e.errno, "a symlink or not a directory", str(root)) from None
+        raise
+    try:
+        if os.fstat(fd).st_uid != os.geteuid():
+            raise UnsafeLogPath(errno.EPERM, "directory not owned by this user", str(root))
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd
+
+
+def _require_own_file(st: os.stat_result, name: str) -> None:
+    """Only a regular file of this user's, under this one name."""
+    if not stat.S_ISREG(st.st_mode):
+        raise UnsafeLogPath(errno.EINVAL, "not a regular file", name)
+    if st.st_uid != os.geteuid():
+        raise UnsafeLogPath(errno.EPERM, "not owned by this user", name)
+    if st.st_nlink != 1:
+        raise UnsafeLogPath(errno.EMLINK, "has another hard link", name)
+
+
+def _own_file(dir_fd: int, name: str) -> os.stat_result | None:
+    """The entry itself (a symlink is not followed), or None when it cannot
+    be looked at."""
+    try:
+        st = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
+    except OSError:
+        return None
+    _require_own_file(st, name)
+    return st
+
+
+def _open_own_file(dir_fd: int, name: str, flags: int) -> int:
+    """Open ``name`` in the directory without following a symlink, and check
+    the file that was actually opened: no gap between check and use."""
+    try:
+        fd = os.open(name, flags | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=dir_fd)
+    except OSError as e:
+        if e.errno == errno.ELOOP:
+            raise UnsafeLogPath(e.errno, "a symlink", name) from None
+        raise
+    try:
+        _require_own_file(os.fstat(fd), name)
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd
+
+
+def _require_start(fd: int, name: str, looks_like: re.Pattern | None) -> None:
+    if looks_like is None:
+        return
+    head = os.pread(fd, _SNIFF_BYTES, 0)
+    found = looks_like.search(head) if looks_like.flags & re.M else looks_like.match(head)
+    if found is None:
+        raise UnsafeLogPath(errno.EINVAL, "does not look like a Clarp log", name)
+
+
+def _is_event_log(dir_fd: int, name: str) -> bool:
+    fd = _open_own_file(dir_fd, name, os.O_RDONLY)
+    try:
+        return _EVENT_LOG_START.match(os.pread(fd, 128, 0)) is not None
+    finally:
+        os.close(fd)
+
+
+def _keep_tail(fd: int, keep_bytes: int) -> int:
+    """keep_tail on an open, validated descriptor."""
+    size = os.fstat(fd).st_size
+    start = _line_start(fd, size - min(max(0, keep_bytes), size // 2), size)
+    if size == 0 or start == 0:
+        return 0
+    try:
+        end = _copy_within(fd, start, 0, size - start)
+    except OSError as e:
+        if e.errno != errno.ENOSPC:
+            raise
+        end = start = size       # keep nothing of what was measured
+    fcntl.flock(fd, fcntl.LOCK_EX)
+    try:
+        grown = os.fstat(fd).st_size
+        if grown < size:
+            return 0    # something else cut the file meanwhile: leave it
+        if start == size:
+            os.ftruncate(fd, 0)
+            return grown
+        end = _copy_within(fd, size, end, grown - size)
+        os.ftruncate(fd, end)
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+    return grown - end
+
+
+def _keep_tail_in(dir_fd: int, name: str, keep_bytes: int,
+                  looks_like: re.Pattern | None) -> int:
+    fd = _open_own_file(dir_fd, name, os.O_RDWR)   # not O_APPEND: pwrite would ignore its offset
+    try:
+        _require_start(fd, name, looks_like)
+        return _keep_tail(fd, keep_bytes)
+    finally:
+        os.close(fd)
+
+
+def keep_tail(path: pathlib.Path, keep_bytes: int, *,
+              looks_like: re.Pattern | None = None) -> int:
     """Cut a log file down, in place, to its newest ``keep_bytes`` (at most
-    half of it), starting at a line; the number of bytes removed.
+    half of it), starting at a line; the number of bytes removed. This is
+    intentional data loss, not lossless rotation: the older part is gone.
+
+    Confined to the file it is meant for. The directory must be an absolute
+    path, no symlink and this user's (_open_log_dir); the file is opened in
+    it without following a symlink and must be a regular file of this user's
+    with no other hard link, checked on the open descriptor, which is what
+    every later step works on. With ``looks_like`` its content must also
+    start like the log it is taken for. Anything else raises UnsafeLogPath
+    and nothing is written.
 
     Safe against the processes that append to it. Every writer opens the file
     in append mode for each write, so it only ever adds after the end measured
@@ -324,33 +471,12 @@ def keep_tail(path: pathlib.Path, keep_bytes: int) -> int:
     the copy (a copy-on-write filesystem writes new blocks), the file is
     emptied instead: freeing the space is what matters then.
     """
-    fd = os.open(path, os.O_RDWR)   # not O_APPEND: pwrite would ignore its offset
+    path = pathlib.Path(path)
+    dir_fd = _open_log_dir(path.parent)
     try:
-        size = os.fstat(fd).st_size
-        start = _line_start(fd, size - min(max(0, keep_bytes), size // 2), size)
-        if size == 0 or start == 0:
-            return 0
-        try:
-            end = _copy_within(fd, start, 0, size - start)
-        except OSError as e:
-            if e.errno != errno.ENOSPC:
-                raise
-            end = start = size       # keep nothing of what was measured
-        fcntl.flock(fd, fcntl.LOCK_EX)
-        try:
-            grown = os.fstat(fd).st_size
-            if grown < size:
-                return 0    # something else cut the file meanwhile: leave it
-            if start == size:
-                os.ftruncate(fd, 0)
-                return grown
-            end = _copy_within(fd, size, end, grown - size)
-            os.ftruncate(fd, end)
-        finally:
-            fcntl.flock(fd, fcntl.LOCK_UN)
-        return grown - end
+        return _keep_tail_in(dir_fd, path.name, keep_bytes, looks_like)
     finally:
-        os.close(fd)
+        os.close(dir_fd)
 
 
 def prune_event_logs(log_dir: pathlib.Path, *, max_age_ms: int,
@@ -359,77 +485,120 @@ def prune_event_logs(log_dir: pathlib.Path, *, max_age_ms: int,
                      today_keep_bytes: int | None = None) -> int:
     """Delete daily ``YYYY-MM-DD.jsonl`` event logs older than ``max_age_ms``,
     then the oldest remaining days while together they exceed
-    ``max_total_bytes``; the number of files deleted.
+    ``max_total_bytes``; the number of files deleted. Both are intentional
+    data loss.
 
     Age comes from the date in the file name, so a touched or copied file
     cannot dodge retention, and any other file in the directory is left alone.
 
-    Today's file is never deleted. If it alone is over ``max_total_bytes`` it
-    is cut down to its newest ``today_keep_bytes`` (keep_tail) and one
-    ``eventLogCut`` record says so.
+    A file dated today or later is never deleted. If the logs are still over
+    ``max_total_bytes`` it is cut down to its newest ``today_keep_bytes``
+    (keep_tail) and one ``eventLogCut`` record says so.
+
+    Confined to Clarp's own logs. The directory must pass _open_log_dir and
+    everything is done relative to that descriptor. An entry is touched only
+    if it is itself a regular file of this user's with no other hard link (a
+    symlink is never followed, and not removed either). The size budget
+    additionally counts, deletes and cuts only files that start with an
+    event-log record. Whatever is refused or cannot be inspected is logged
+    as ``eventLogPruneFail``.
     """
     today = today or datetime.datetime.now(datetime.timezone.utc).date()
-    cutoff = today - datetime.timedelta(milliseconds=max_age_ms)
+    try:
+        dir_fd = _open_log_dir(log_dir)
+    except FileNotFoundError:
+        return 0        # no event log yet
+    except OSError as e:
+        log_exception("eventLogPruneFail", e, detail=str(log_dir))
+        return 0
+    try:
+        return _prune_event_logs(
+            dir_fd, cutoff=today - datetime.timedelta(milliseconds=max_age_ms), today=today,
+            max_total_bytes=max_total_bytes, today_keep_bytes=today_keep_bytes)
+    finally:
+        os.close(dir_fd)
+
+
+def _prune_event_logs(dir_fd: int, *, cutoff: datetime.date, today: datetime.date,
+                      max_total_bytes: int | None, today_keep_bytes: int | None) -> int:
     removed = 0
-    kept: list[tuple[datetime.date, pathlib.Path]] = []
-    for path in pathlib.Path(log_dir).glob("*.jsonl"):
+    kept: list[tuple[datetime.date, str]] = []
+    sizes: dict[str, int] = {}
+    for name in sorted(os.listdir(dir_fd)):
+        if not name.endswith(".jsonl"):
+            continue
         try:
-            day = datetime.date.fromisoformat(path.stem)
+            day = datetime.date.fromisoformat(name[:-len(".jsonl")])
         except ValueError:
             continue
-        if day >= cutoff:
-            kept.append((day, path))
-            continue
         try:
-            path.unlink()
-            removed += 1
+            st = _own_file(dir_fd, name)
+            if st is None:
+                continue    # gone meanwhile
+            if day < cutoff:
+                os.unlink(name, dir_fd=dir_fd)
+                removed += 1
+                continue
+            if max_total_bytes is None or not st.st_size:
+                continue
+            if not _is_event_log(dir_fd, name):
+                raise UnsafeLogPath(errno.EINVAL, "does not start with an event-log record", name)
+            kept.append((day, name))
+            sizes[name] = st.st_size
         except OSError as e:
-            log_exception("eventLogPruneFail", e, detail=path.name)
+            log_exception("eventLogPruneFail", e, detail=name)
     if max_total_bytes is None:
         return removed
-    sizes: dict[pathlib.Path, int] = {}
-    for _, path in kept:
-        try:
-            sizes[path] = path.stat().st_size
-        except OSError:
-            continue    # gone meanwhile
-    for day, path in sorted(kept):
+    for day, name in kept:
         if sum(sizes.values()) <= max_total_bytes:
             break
-        if path not in sizes:
-            continue
         try:
             if day < today:
-                path.unlink()
+                os.unlink(name, dir_fd=dir_fd)
                 removed += 1
-                del sizes[path]
+                del sizes[name]
                 continue
             keep = max_total_bytes // 4 if today_keep_bytes is None else today_keep_bytes
-            cut = keep_tail(path, min(keep, max_total_bytes))
+            cut = _keep_tail_in(dir_fd, name, min(keep, max_total_bytes), _EVENT_LOG_START)
             if cut:
-                sizes[path] -= cut
-                log("eventLogCut", f"file={path.name} removed_bytes={cut} "
-                    f"kept_bytes={sizes[path]} max_bytes={max_total_bytes}")
+                sizes[name] -= cut
+                log("eventLogCut", f"file={name} removed_bytes={cut} "
+                    f"kept_bytes={sizes[name]} max_bytes={max_total_bytes}")
         except OSError as e:
-            log_exception("eventLogPruneFail", e, detail=path.name)
+            log_exception("eventLogPruneFail", e, detail=name)
     return removed
 
 
 def prune_hook_log(path: pathlib.Path, *, max_bytes: int, keep_bytes: int) -> int:
     """Keep hook.log bounded: over ``max_bytes`` it is cut down to its newest
-    ``keep_bytes`` (keep_tail) and a line in it says so; the bytes removed."""
+    ``keep_bytes`` (keep_tail) and a line in it says so; the bytes removed.
+    The cut is intentional data loss.
+
+    Confined like the event logs: an absolute, unlinked directory of this
+    user's, and in it a regular file of this user's that reads like a hook
+    log. Anything else raises UnsafeLogPath; the caller logs it.
+    """
+    path = pathlib.Path(path)
     try:
-        if path.stat().st_size <= max_bytes:
-            return 0
-    except OSError:
-        return 0    # no hook log yet
-    cut = keep_tail(path, keep_bytes)
-    if cut:
-        with path.open("a") as f:
-            f.write(f"{time.strftime('%H:%M:%S')} maintenance {os.getpid()} "
-                    f"hookLogCut removed_bytes={cut} max_bytes={max_bytes}\n")
-        log("hookLogCut", f"removed_bytes={cut} max_bytes={max_bytes}")
-    return cut
+        dir_fd = _open_log_dir(path.parent)
+    except FileNotFoundError:
+        return 0    # no cache directory yet
+    try:
+        st = _own_file(dir_fd, path.name)
+        if st is None or st.st_size <= max_bytes:
+            return 0    # no hook log yet, or within its bound
+        cut = _keep_tail_in(dir_fd, path.name, keep_bytes, _HOOK_LOG_LINE)
+        if cut:
+            fd = _open_own_file(dir_fd, path.name, os.O_WRONLY | os.O_APPEND)
+            try:
+                os.write(fd, (f"{time.strftime('%H:%M:%S')} maintenance {os.getpid()} "
+                              f"hookLogCut removed_bytes={cut} max_bytes={max_bytes}\n").encode())
+            finally:
+                os.close(fd)
+            log("hookLogCut", f"removed_bytes={cut} max_bytes={max_bytes}")
+        return cut
+    finally:
+        os.close(dir_fd)
 
 
 def _checkpoint_database() -> None:
