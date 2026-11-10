@@ -59,10 +59,13 @@ LOG_DIR = pathlib.Path(os.environ.get(
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 
-# The size bound on one event. A record's serialised ``detail`` never exceeds
-# this, in either sink: one code path logging megabyte tracebacks filled 34 GB
-# in a day while every age-based retention held. Longer string values keep
-# their head and tail (see _bound_detail).
+# The size bound on one event's ``detail``: serialised, it never exceeds this
+# in either sink, whichever way the record is made (see _bounded). One code
+# path logging megabyte tracebacks filled 34 GB in a day while every age-based
+# retention held. Longer string values keep their head and tail (see
+# _bound_detail). The bound is on the detail only: the promoted fields
+# (session, path and so on) are not capped, and emit_exception still formats
+# the whole traceback before it gets here.
 MAX_DETAIL_BYTES = 32 * 1024
 # String lengths tried, longest first, until the shortened detail fits.
 _STRING_LIMITS = (24576, 16384, 8192, 4096, 2048, 1024, 512, 256)
@@ -173,6 +176,28 @@ def _bound_detail(detail: object) -> object:
     return {"_truncated": note, "_preview": _shorten(encoded, room // 2 - 64)}
 
 
+def _bounded(record: dict, size: int | None = None) -> dict:
+    """``record`` with its detail within MAX_DETAIL_BYTES. Every record passes
+    here once, when it is made: before it reaches a sink and before it is
+    queued, so a deferred record waits in the queue already bounded and both
+    sinks later get the same one. ``size`` is the record's serialised length
+    when the caller already has it. Never raises.
+    """
+    try:
+        if size is None:
+            size = len(json.dumps(record, separators=(",", ":")))
+        # Only a record over the cap can carry a detail over it, so an
+        # ordinary event pays nothing more than the length it already had.
+        if size > MAX_DETAIL_BYTES and "detail" in record:
+            record["detail"] = _bound_detail(record["detail"])
+    except Exception as error:  # noqa: BLE001 - logging must not break the caller
+        print(f"eventlog detail bound failed: {type(error).__name__}", file=sys.stderr)
+        record["detail"] = {"_truncated": {
+            "original_bytes": size, "limit_bytes": MAX_DETAIL_BYTES,
+            "error": type(error).__name__}}
+    return record
+
+
 # Ordinary emits queue only their SQLite row; JSONL stays synchronous. The
 # sqliteWriteWait record queues both sinks (and stderr) until its particular
 # explicit/open state transaction ends (RM-N8b addition B).
@@ -256,8 +281,10 @@ def defer_sqlite_write_wait(connection, stderr_line: str, detail: str) -> bool:
     now = _dt.datetime.now(_dt.timezone.utc)
     record = None
     if diagnostics_settings.allows_event(source="server", event="sqliteWriteWait"):
-        record = {"ts": _iso(now), "source": "server", "event": "sqliteWriteWait",
-                  "level": "info", "detail": {"msg": detail}}
+        # Bounded here, not at the flush: the queue never holds the oversized
+        # detail, and nothing is written until the transaction ends.
+        record = _bounded({"ts": _iso(now), "source": "server", "event": "sqliteWriteWait",
+                           "level": "info", "detail": {"msg": detail}})
     item = _DeferredRecord(record, now, jsonl=True, stderr_line=stderr_line,
                            connection=weakref.ref(connection))
     with _DEFERRED_LOCK:
@@ -357,10 +384,10 @@ def _report_dropped(now: _dt.datetime, *, dropped: bool = False, force: bool = F
         last = _DROPPED["last_report"]
         if not force and last is not None and tick - last < 60:
             return
-        record = {
+        record = _bounded({
             "ts": _iso(now), "source": "server", "event": "eventlogDropped", "level": "warn",
             "detail": {"pid": pid, "dropped": pending, "total_dropped": _DROPPED["total"]},
-        }
+        })
         try:
             _write_jsonl(record, now)
         except OSError as error:
@@ -444,16 +471,7 @@ def emit(source: str, event: str, *,
         except Exception as error:
             print(f"eventlog serialization failed: {error}", file=sys.stderr)
             return
-    # Only a record over the cap can carry a detail over it, so an ordinary
-    # event pays nothing for the bound. Both sinks get the bounded record.
-    if size > MAX_DETAIL_BYTES and "detail" in record:
-        try:
-            record["detail"] = _bound_detail(record["detail"])
-        except Exception as error:  # noqa: BLE001 - logging must not break the caller
-            print(f"eventlog detail bound failed: {type(error).__name__}", file=sys.stderr)
-            record["detail"] = {"_truncated": {
-                "original_bytes": size, "limit_bytes": MAX_DETAIL_BYTES,
-                "error": type(error).__name__}}
+    record = _bounded(record, size)
     _write_sqlite(record, now_dt)
     _append_jsonl(record, now_dt)
 
