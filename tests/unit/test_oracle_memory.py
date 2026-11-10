@@ -197,3 +197,36 @@ def test_a_corrupt_stored_time_leaves_the_row_undated_instead_of_failing_startup
     corrupt_row, good_row = _payload(store, now_ms=NOW)["recent_conversation"]
     assert corrupt_row["text"] == "Corrupt time." and "at" not in corrupt_row and "age" not in corrupt_row
     assert good_row["age"] == "1 minute ago"
+
+
+def test_a_corrupt_stored_time_still_starts_when_every_log_sink_fails(monkeypatch):
+    import copy
+    import os
+    from lib import eventlog
+    from lib import log as logging
+    attempts = []
+
+    class BrokenStream:
+        def write(self, data):
+            attempts.append("stderr")
+            raise OSError("stderr gone")
+
+        def flush(self):
+            raise OSError("stderr gone")
+
+    def broken(*args, **kwargs):
+        attempts.append("sink")
+        raise OSError("sink gone")
+    monkeypatch.setattr(logging, "_FAULT_LOG_THROTTLE", {})
+    monkeypatch.setattr(logging.sys, "stderr", BrokenStream())
+    monkeypatch.setattr(eventlog, "emit", broken)
+    monkeypatch.setattr(os, "write", broken)
+    store = memory.open_thread("phone", "main", connection_id="one")
+    fragments = [{"role": "user", "text": "Corrupt time.", "at": 10**20, "revision": 1},
+                 {"role": "assistant", "text": "Good time.", "at": NOW - 60_000}]
+    store.save({"revision": 1, "fragments": copy.deepcopy(fragments)})
+    corrupt_row, good_row = _payload(store, now_ms=NOW)["recent_conversation"]
+    assert attempts, "the fault report must actually reach the failing sinks"
+    assert corrupt_row == {"role": "user", "text": "Corrupt time.", "revision": 1}
+    assert good_row["text"] == "Good time." and good_row["age"] == "1 minute ago"
+    assert store.load()["fragments"] == fragments
