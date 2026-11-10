@@ -6,6 +6,7 @@ the agent is muted. Audio playback is separate.
 """
 from __future__ import annotations
 
+from contextlib import nullcontext
 import hashlib
 import re
 import time
@@ -13,6 +14,7 @@ from typing import Any, Callable
 
 from . import agents as agents_db, artifacts, db, origins, quiet_agents, settings_store
 from .log import log
+from . import lifecycle
 from .policies import notifications as notification_policy
 from .policies.notifications import (
     AgentCapabilities, CompletedTurn, Notify, NotificationSettings)
@@ -326,7 +328,42 @@ def _row_payload(row) -> dict[str, Any]:
     }
 
 
+def _nonpublishing(payload: dict[str, Any]) -> dict[str, Any]:
+    """Suppress this callback without changing the already published original."""
+    return {**payload, "notify": False, "push": False, "badge": False,
+            "unread": False, "preview": "", "reason": "duplicate-completion"}
+
+
 def _persist(payload: dict[str, Any]) -> dict[str, Any]:
+    # Settlement and all policy reads happen before this short writer boundary.
+    # Distinct DONE observations can select the same imported assistant message,
+    # including when one observation lacks a recognized execution identity.
+    database = db.conn()
+    joined = database.in_transaction
+    with nullcontext() if joined else lifecycle.transaction(database):
+        if joined:
+            # A caller may own a deferred transaction. Acquire its writer before
+            # reading winners, without changing rows or ending caller work.
+            # A failed snapshot upgrade propagates; the body is never retried.
+            database.execute("UPDATE user_notifications SET notify=notify WHERE 0")
+        original = database.execute(
+            "SELECT * FROM user_notifications WHERE agent_id=? AND done_ts=?",
+            (payload["agent_id"], payload["done_ts"])).fetchone()
+        if original is not None and original["notify"]:
+            return _nonpublishing(_row_payload(original))
+        if payload["notify"] and payload["source_message_id"]:
+            admitted = database.execute(
+                """SELECT 1 FROM user_notifications
+                     WHERE agent_id=? AND source_message_id=? AND notify=1 LIMIT 1""",
+                (payload["agent_id"], payload["source_message_id"])).fetchone()
+            if admitted is not None:
+                # Keep the distinct observation's suppressed audit row; never
+                # reset the winner's ID, visibility or read state.
+                payload = _nonpublishing(payload)
+        return _upsert(payload)
+
+
+def _upsert(payload: dict[str, Any]) -> dict[str, Any]:
     database = db.conn()
     database.execute(
         """INSERT INTO user_notifications (
