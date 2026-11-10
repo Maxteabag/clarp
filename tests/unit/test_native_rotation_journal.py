@@ -30,7 +30,13 @@ def test_reservation_is_expected_binding_idempotent_and_survives_fresh_read(tmp_
         assert raw is not None and '"operation-a"' in raw[0]
     finally:
         other.close()
-    agents.bind_backend_session(agent, "replacement")
+    with pytest.raises(journal.RotationConflict):
+        agents.bind_backend_session(agent, "replacement")
+    assert agents.live_backend_session(agent) == "old"
+    # An older/external writer can still bypass the new canonical boundary.
+    # Its mutation must invalidate the existing operation, never retarget it.
+    agents.conn().execute("UPDATE runtimes SET backend_session_id='replacement' WHERE runtime_id=?",
+                          (first["runtime_id"],))
     with pytest.raises(journal.RotationConflict):
         journal.advance(agent, "operation-a", "reserved", "quiescing")
     assert journal.get(agent) == first and journal.blocked(agent)
@@ -92,8 +98,8 @@ def test_malformed_or_replaced_runtime_cannot_be_treated_as_no_rotation(tmp_path
     # Native-ID equality is insufficient after an owning runtime replacement.
     original_runtime = agents.current_runtime_id(agent)
     agents.conn().execute("UPDATE runtimes SET ended_at=1 WHERE runtime_id=?", (original_runtime,))
-    agents.start_runtime(agent, "rotation-owner")
-    agents.bind_backend_session(agent, "old")
+    agents.conn().execute("INSERT INTO runtimes(agent_id,session,backend_session_id,started_at) "
+                          "VALUES (?,?,'old',?)", (agent, "rotation-owner", db.now_ms()))
     with pytest.raises(journal.RotationConflict):
         journal.advance(agent, "operation-a", "reserved", "quiescing")
     settings_store.set_text(journal.key(agent), "not-json")
@@ -109,3 +115,70 @@ def test_operation_id_is_bounded_ascii_and_cannot_open_an_alias_intent(tmp_path,
     with pytest.raises(journal.RotationConflict):
         journal.reserve(agent, "old", operation_id)
     assert journal.get(agent) is None
+
+
+@pytest.mark.parametrize("mutation", ["bind", "runtime", "delete"])
+@pytest.mark.parametrize("joined", [False, True])
+def test_reserved_owner_refuses_canonical_mutation_before_any_durable_effect(tmp_path, mutation, joined):
+    agent = _agent(tmp_path)
+    reserved = journal.reserve(agent, "old", "operation-a")
+    con = db.conn()
+    runtimes = [dict(row) for row in con.execute("SELECT * FROM runtimes WHERE agent_id=?", (agent,))]
+    owner = agents.get_by_agent_id(agent)
+    if joined:
+        con.execute("BEGIN IMMEDIATE")
+        settings_store.set_text("caller-unit", "keep")
+    with pytest.raises(journal.RotationConflict):
+        if mutation == "bind":
+            agents.bind_backend_session(agent, "foreign")
+        elif mutation == "runtime":
+            agents.start_runtime(agent, "replacement")
+        else:
+            agents.soft_delete(agent)
+    assert con.in_transaction is joined
+    if joined:
+        con.execute("COMMIT")
+        assert settings_store.get("caller-unit") == "keep"
+    assert agents.get_by_agent_id(agent) == owner
+    assert [dict(row) for row in con.execute("SELECT * FROM runtimes WHERE agent_id=?", (agent,))] == runtimes
+    assert journal.get(agent) == reserved
+
+
+def test_old_native_resource_remains_reserved_after_binding_cutover(tmp_path):
+    agent = _agent(tmp_path)
+    journal.reserve(agent, "old", "operation-a")
+    for before, after in (("reserved", "quiescing"), ("quiescing", "quiescent"),
+                          ("quiescent", "create_pending"), ("create_pending", "created"),
+                          ("created", "final_imported"), ("final_imported", "chats_carried"),
+                          ("chats_carried", "plans_carried")):
+        journal.advance(agent, "operation-a", before, after,
+                        **({"new_thread_id": "new"} if after == "created" else {}))
+    journal.bind(agent, "operation-a")
+    other = agents.create_agent(persona="Other", voice_id="v", cwd=str(tmp_path),
+                                 session="other", backend="codex")
+    # No live row owns old anymore, so the ordinary live-UUID unique index
+    # cannot provide this protection. Refuse before implicit runtime creation.
+    assert agents.get_by_backend_session("old") is None
+    with pytest.raises(journal.RotationConflict):
+        agents.bind_backend_session(other, "old")
+    assert agents.current_runtime_id(other) is None
+    # An unrelated native identity continues using the normal route.
+    agents.bind_backend_session(other, "unrelated")
+    assert agents.live_backend_session(other) == "unrelated"
+
+
+def test_new_native_collision_keeps_the_create_intent_and_old_reservation(tmp_path):
+    agent = _agent(tmp_path)
+    other = agents.create_agent(persona="Other", voice_id="v", cwd=str(tmp_path),
+                                 session="other", backend="codex")
+    agents.bind_backend_session(other, "foreign")
+    journal.reserve(agent, "old", "operation-a")
+    for before, after in (("reserved", "quiescing"), ("quiescing", "quiescent"),
+                          ("quiescent", "create_pending")):
+        journal.advance(agent, "operation-a", before, after)
+    intent = journal.get(agent)
+    with pytest.raises(journal.RotationConflict):
+        journal.advance(agent, "operation-a", "create_pending", "created", new_thread_id="foreign")
+    assert journal.get(agent) == intent
+    assert agents.live_backend_session(agent) == "old"
+    assert agents.live_backend_session(other) == "foreign"
