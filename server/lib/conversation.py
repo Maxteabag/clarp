@@ -95,10 +95,14 @@ def load_conversation(*, session: str, after_revision: int = 0,
     latest = backends.find_session_jsonl(backend, backend_session_id)
 
     if latest is not None:
-        def import_latest() -> None:
-            imported = transcript_incremental.import_transcript(
+        def import_latest():
+            materialized = (background_import and has_stored_history and not after_revision and not before_message_id
+                            and transcript_incremental._materialized_history(agent_id, backend_session_id))
+            return transcript_incremental.import_transcript(
                 backend=backend, path=latest, agent_id=agent_id,
-                backend_session_id=backend_session_id)
+                backend_session_id=backend_session_id, _defer_full=materialized)
+
+        def import_completed(imported):
             eventlog.emit(
                 "transcript", "import",
                 session=session, agent_id=agent_id,
@@ -113,6 +117,10 @@ def load_conversation(*, session: str, after_revision: int = 0,
                 },
             )
 
+        importer = transcript_incremental._completion_import(
+            import_latest, backend=backend, path=latest, agent_id=agent_id,
+            backend_session_id=backend_session_id, after_complete=import_completed)
+
         # Preserve first-open history for adopted/restored agents. Once the
         # canonical store has rows, refreshes serve that snapshot immediately.
         # Cold imports still use the same time-budgeted, yielding write batches.
@@ -122,13 +130,13 @@ def load_conversation(*, session: str, after_revision: int = 0,
         if (background_import and has_stored_history and not after_revision
                 and not before_message_id and agents_db.is_busy(agent_id)):
             transcript_import_cache.import_for_snapshot(
-                latest, import_latest, owner=agent_id,
+                latest, importer, owner=agent_id,
                 timeout=ACTIVE_SNAPSHOT_IMPORT_TIMEOUT_SECONDS)
         else:
             importing = (transcript_import_cache.schedule_import
                          if background_import and has_stored_history
                          else transcript_import_cache.import_if_changed)
-            importing(latest, import_latest, owner=agent_id,
+            importing(latest, importer, owner=agent_id,
                       **({"startup_exempt": True} if background_import and has_stored_history else {}))
 
     # SQLite is the app-facing source of truth. Backend transcript files are

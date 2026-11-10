@@ -235,7 +235,11 @@ def run_lane(database: pathlib.Path, transcript: pathlib.Path, backend: str,
             def capture_log(event, detail=""):
                 if event in ("transcriptTailDecision", "transcriptTailRetention", "transcriptTailFenceRead"):
                     import re
-                    assert re.fullmatch(r"code=[a-z0-9_]+ count=[1-9][0-9]*", detail)
+                    shape = r"code=[a-z0-9_]+ count=[1-9][0-9]*"
+                    if event == "transcriptTailDecision":
+                        shape += (r" backend=(?:claude|codex|agy|other)"
+                                  r" size=(?:unknown|lt1m|lt16m|lt64m|lt256m|lt1024m|ge1024m)")
+                    assert re.fullmatch(shape, detail)
                     fields = dict(item.split("=", 1) for item in detail.split())
                     metrics["tail_events"].append({"event": event, "code": fields["code"],
                                                    "count": int(fields["count"])})

@@ -14,6 +14,439 @@ def _bump_mtime(path: pathlib.Path) -> None:
     os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000))
 
 
+class _TranscriptCompletionInput:
+    """Audit INPUT double; the real cache owns all freshness/publication.
+
+    This explicit private callable protocol is production-facing groundwork,
+    not a positive native file/DB certificate supplied by the fixture.
+    """
+    _clarp_transcript_completion_v1 = True
+
+    def __init__(self, path, owner, *, outcome="completed-changed"):
+        self.context = (str(path), owner, "claude", "synthetic-session", "synthetic-db-epoch")
+        self.generation = 1
+        self.eligible = True
+        self.outcome = outcome
+        self.calls = 0
+        self.before_return = None
+
+    def _clarp_transcript_eligibility(self):
+        return self.context, self.generation, self.eligible
+
+    def __call__(self):
+        self.calls += 1
+        result = {"_clarp_transcript_completion_v1":
+                  (self.context, self.generation, self.outcome)}
+        if self.before_return is not None:
+            self.before_return()
+        return result
+
+
+@pytest.mark.parametrize("entry", ["direct", "schedule", "snapshot"])
+def test_due_transcript_authority_precedes_each_cached_signature_shortcut(tmp_path, entry):
+    cache = transcript_import_cache
+    cache.reset_for_tests()
+    path = tmp_path / "audit-due.jsonl"
+    path.write_text("{}\n")
+    importer = _TranscriptCompletionInput(path, "audit-owner")
+    key = f"audit-owner\0{path}"
+    try:
+        assert cache.import_if_changed(path, importer, owner="audit-owner")
+        found, previous_validation = cache._validated_at.get(key, cache._epoch)
+        assert found and previous_validation is not None
+        importer.generation += 1
+        importer.eligible = False
+        if entry == "schedule":
+            assert cache.schedule_import(path, importer, owner="audit-owner"), (
+                "an unchanged signature discarded the due source's pending work")
+        elif entry == "snapshot":
+            assert not cache.import_for_snapshot(path, importer, owner="audit-owner", timeout=.02), (
+                "an old signature certified a new audit-due generation")
+        else:
+            assert not cache.import_if_changed(path, importer, owner="audit-owner")
+        assert cache._validated_at.get(key, cache._epoch) == (True, previous_validation), (
+            "a deferred source acquired a new successful validation timestamp")
+    finally:
+        assert cache.reset_for_tests()
+
+
+@pytest.mark.parametrize("outcome", ["deferred", "completed-unchanged"])
+def test_worker_completion_state_controls_after_and_freshness(tmp_path, outcome, monkeypatch):
+    cache = transcript_import_cache
+    cache.reset_for_tests()
+    monkeypatch.setattr(cache, "_BACKGROUND_MIN_INTERVAL", 0.0)
+    path = tmp_path / "completion.jsonl"
+    path.write_text("{}\n")
+    importer = _TranscriptCompletionInput(path, "audit-owner", outcome=outcome)
+    after = []
+    key = f"audit-owner\0{path}"
+    try:
+        assert cache.schedule_import(path, importer, owner="audit-owner",
+                                     after=lambda: after.append("completed"))
+        assert cache.wait_for_background(2), "the worker must not wait for denied audit IO"
+        assert after == ([] if outcome == "deferred" else ["completed"])
+        if outcome == "deferred":
+            assert key not in cache._imported
+            assert not cache._validated_at.get(key, cache._epoch)[0]
+            completed = cache._last_started.get("audit-owner")
+            assert completed is None or completed[0] is None
+        else:
+            assert cache._validated_at.get(key, cache._epoch)[0]
+    finally:
+        assert cache.reset_for_tests()
+
+
+@pytest.mark.parametrize("entry", ["direct", "snapshot"])
+def test_new_audit_generation_before_publication_cannot_satisfy_freshness(tmp_path, entry):
+    import threading
+
+    cache = transcript_import_cache
+    cache.reset_for_tests()
+    path = tmp_path / "generation-race.jsonl"
+    path.write_text("{}\n")
+    importer = _TranscriptCompletionInput(path, "audit-owner")
+    key = f"audit-owner\0{path}"
+    try:
+        assert cache.import_if_changed(path, importer, owner="audit-owner")
+        previous_signature = cache._imported[key]
+        previous_validation = cache._validated_at.get(key, cache._epoch)
+        path.write_text("{}\n{}\n")
+        changed = threading.Event()
+        selected_workers = []
+        previous_generation = importer.generation
+
+        def audit_became_due():
+            importer.generation += 1
+            importer.eligible = False
+            selected_workers.append(threading.current_thread())
+            changed.set()
+
+        importer.before_return = audit_became_due
+        if entry == "direct":
+            result = cache.import_if_changed(path, importer, owner="audit-owner")
+        else:
+            result = cache.import_for_snapshot(path, importer, owner="audit-owner", timeout=.02)
+        assert changed.wait(2), "the selected callback never reached the generation change"
+        assert importer.generation == previous_generation + 1 and not importer.eligible
+        if entry == "snapshot":
+            worker = selected_workers[0]
+            assert worker is not threading.current_thread()
+            worker.join(2)
+            assert not worker.is_alive(), "selected worker did not finish publication/cleanup"
+        assert not result, "an old admission published completion after its audit generation changed"
+        assert cache._imported[key] == previous_signature
+        assert cache._validated_at.get(key, cache._epoch) == previous_validation
+    finally:
+        assert cache.reset_for_tests()
+
+
+@pytest.mark.parametrize("value", [None, 0, False,
+    {"_clarp_transcript_completion_v1": "deferred"}])
+def test_unopted_callback_results_keep_legacy_completion(tmp_path, value, monkeypatch):
+    cache = transcript_import_cache
+    cache.reset_for_tests()
+    monkeypatch.setattr(cache, "_BACKGROUND_MIN_INTERVAL", 0.0)
+    path = tmp_path / "legacy.jsonl"
+    path.write_text("{}\n")
+    after = []
+    try:
+        assert cache.schedule_import(path, lambda: value, owner="legacy",
+                                     after=lambda: after.append("completed"))
+        assert cache.wait_for_background(2)
+        assert after == ["completed"]
+        assert cache._validated_at.get(f"legacy\0{path}", cache._epoch)[0]
+    finally:
+        assert cache.reset_for_tests()
+
+
+@pytest.mark.parametrize("entry", ["direct", "worker"])
+def test_accepted_completion_is_not_retroactively_deferred_by_its_observer(tmp_path, entry):
+    cache = transcript_import_cache
+    assert cache.reset_for_tests()
+    path = tmp_path / "observer-generation.jsonl"
+    path.write_text("{}\n")
+    importer = _TranscriptCompletionInput(path, "observer")
+    events, after = [], []
+
+    def completed(value):
+        events.append(value)
+        importer.generation += 1
+        importer.eligible = False
+
+    importer._clarp_transcript_completed = completed
+    try:
+        if entry == "direct":
+            result = cache.import_if_changed(path, importer, owner="observer")
+        else:
+            assert cache.schedule_import(path, importer, owner="observer",
+                                         after=lambda: after.append("accepted"))
+            assert cache.wait_for_background(2)
+            result = after == ["accepted"]
+        assert len(events) == 1 and not importer.eligible
+        assert result, "a success already observed was retroactively returned as deferred"
+        assert not cache._validated_at.get(f"observer\0{path}", cache._epoch)[0], (
+            "the old acceptance refreshed a newly ineligible generation")
+    finally:
+        assert cache.reset_for_tests()
+
+
+@pytest.mark.parametrize("observer", ["completion", "after"])
+def test_completion_observers_release_authority_and_cache_locks(tmp_path, observer):
+    import threading
+
+    cache = transcript_import_cache
+    assert cache.reset_for_tests()
+    path = tmp_path / "observer-locks.jsonl"
+    path.write_text("{}\n")
+    importer = _TranscriptCompletionInput(path, "observer")
+    authority = threading.RLock()
+    importer._clarp_transcript_fence = lambda: authority
+    entered, acquired, stop = threading.Event(), threading.Event(), threading.Event()
+    threads, observed, after = [], [], []
+
+    def observe(*_):
+        def contender():
+            if stop.is_set() or not authority.acquire(timeout=1):
+                return
+            try:
+                if stop.is_set() or not cache._guard.acquire(timeout=1):
+                    return
+                try:
+                    if not stop.is_set():
+                        acquired.set()
+                finally:
+                    cache._guard.release()
+            finally:
+                authority.release()
+
+        thread = threading.Thread(target=contender)
+        threads.append(thread)
+        thread.start()
+        entered.set()
+        observed.append(acquired.wait(2))
+
+    if observer == "completion":
+        importer._clarp_transcript_completed = observe
+
+    def on_after():
+        if observer == "after":
+            observe()
+        after.append("accepted")
+
+    try:
+        assert cache.schedule_import(path, importer, owner="observer", after=on_after)
+        assert entered.wait(3), "the actual observer was not invoked"
+        assert cache.wait_for_background(4)
+        for thread in threads:
+            thread.join(2)
+            assert not thread.is_alive()
+        assert observed == [True], "observer IO retained authority or cache lock"
+        assert after == ["accepted"]
+    finally:
+        stop.set()
+        try:
+            assert cache.reset_for_tests()
+        finally:
+            errors = []
+            for thread in threads:
+                try:
+                    # A failing start can leave an honestly unstarted object.
+                    if thread.ident is not None:
+                        thread.join(3)
+                    assert not thread.is_alive(), "unknown/live observer contender"
+                except Exception as exc:
+                    errors.append(exc)
+            if errors:
+                raise ExceptionGroup("observer contender cleanup failed", errors)
+
+
+def test_failed_completion_observer_does_not_publish_cache_success(tmp_path):
+    cache = transcript_import_cache
+    assert cache.reset_for_tests()
+    path = tmp_path / "observer-failure.jsonl"
+    path.write_text("{}\n")
+    importer = _TranscriptCompletionInput(path, "observer")
+
+    def failed(_):
+        raise OSError("owned observer failure")
+
+    importer._clarp_transcript_completed = failed
+    try:
+        with pytest.raises(OSError, match="owned observer failure"):
+            cache.import_if_changed(path, importer, owner="observer")
+        assert f"observer\0{path}" not in cache._imported
+        assert not cache._validated_at.get(f"observer\0{path}", cache._epoch)[0]
+    finally:
+        assert cache.reset_for_tests()
+
+
+def test_running_deferred_import_keeps_capacity_for_its_retry(tmp_path, monkeypatch):
+    import threading
+
+    cache = transcript_import_cache
+    assert cache.reset_for_tests()
+    monkeypatch.setattr(cache, "_BACKGROUND_MIN_INTERVAL", 0.0)
+    path = tmp_path / "retry-capacity.jsonl"
+    path.write_text("{}\n")
+    importer = _TranscriptCompletionInput(path, "reserved", outcome="deferred")
+    entered, release = threading.Event(), threading.Event()
+    waiting_entered, waiting_release = threading.Event(), threading.Event()
+    after = []
+
+    def hold_import():
+        entered.set()
+        if not release.wait(5):
+            raise AssertionError("test did not release the admitted import")
+
+    def waiting():
+        waiting_entered.set()
+        if not waiting_release.wait(5):
+            raise AssertionError("test did not release the waiting import")
+
+    def completed():
+        after.append("completed")
+
+    importer.before_return = hold_import
+    try:
+        assert cache.schedule_import(path, importer, owner="reserved", after=completed)
+        assert entered.wait(2)
+        admitted = [cache.schedule_import(path, waiting, owner=f"waiting-{i}")
+                    for i in range(64)]
+        assert sum(admitted) == 63, "running retry reservation allowed a 65th owned intent"
+        release.set()
+        assert waiting_entered.wait(2)
+        key = f"reserved\0{path}"
+        with cache._guard:
+            pending, deferred = cache._pending.get(key), cache._deferred.get(key)
+            assert pending is not None or deferred is not None, "completion lost its admitted retry"
+            retained = pending[0] if pending is not None else deferred[0]
+            retained_epoch = pending[1] if pending is not None else deferred[2]
+            assert retained_epoch == cache._epoch
+            assert retained[:3] == (path, importer, "reserved") and retained[3] is completed
+            rank = retained[5]
+            assert len(set(cache._pending) | set(cache._deferred)) <= 64
+        assert after == []
+        importer.outcome = "completed-unchanged"
+        importer.before_return = None
+        assert cache.schedule_import(path, importer, owner="reserved", urgent=True)
+        with cache._guard:
+            latest = cache._pending.get(key) or cache._deferred.get(key)
+            assert latest is not None and latest[0][3] is completed and latest[0][5] == rank
+        waiting_release.set()
+        assert cache.wait_for_background(4)
+        assert after == ["completed"], "the reserved dirty intent did not complete once"
+    finally:
+        release.set()
+        waiting_release.set()
+        assert cache.reset_for_tests()
+
+
+@pytest.mark.parametrize("reenter", ["lookup", "replace"])
+def test_worker_marker_descriptor_runs_before_locked_request_consumption(tmp_path, reenter, monkeypatch):
+    import threading
+
+    cache = transcript_import_cache
+    assert cache.reset_for_tests()
+    path = tmp_path / "marker-descriptor.jsonl"
+    path.write_text("{}\n")
+    observations, calls, after = [], [], []
+    real_guard = cache._guard
+
+    class OwnershipGuard:
+        """Delegate the real lock; observe this thread, not global contention.
+
+        The cache's Condition keeps that same underlying real lock. This
+        worker path uses _guard sections; no lock or cache receipt is supplied.
+        """
+        def __init__(self):
+            self.local = threading.local()
+
+        def acquire(self, *args, **kwargs):
+            acquired = real_guard.acquire(*args, **kwargs)
+            if acquired:
+                self.local.held = True
+            return acquired
+
+        def release(self):
+            self.local.held = False
+            real_guard.release()
+
+        def held_here(self):
+            return getattr(self.local, "held", False)
+
+        def __enter__(self):
+            self.acquire()
+            return self
+
+        def __exit__(self, *_):
+            self.release()
+
+    guard = OwnershipGuard()
+    monkeypatch.setattr(cache, "_guard", guard)
+
+    class GenericImporter:
+        replaced = False
+
+        @property
+        def _clarp_transcript_completion_v1(self):
+            if threading.current_thread().name == "transcript-import":
+                unlocked = not guard.held_here()
+                # A broken baseline must report the held lock, not deadlock
+                # irreapably by entering is_active under that same lock. Other
+                # threads may hold it normally: real is_active waits for them.
+                active = cache.is_active(path, owner="marker") if unlocked else None
+                observations.append((unlocked, active))
+                if unlocked and reenter == "replace" and not self.replaced:
+                    self.replaced = True
+                    assert cache.schedule_import(
+                        path, lambda: calls.append("replacement"), owner="marker",
+                        after=lambda: after.append("replacement"))
+            return False  # a generic callable, not an opted-in completion
+
+        def __call__(self):
+            calls.append("original")
+
+    try:
+        assert cache.schedule_import(path, GenericImporter(), owner="marker",
+                                     after=lambda: after.append("original"))
+        assert cache.wait_for_background(3)
+        assert observations and all(unlocked and active for unlocked, active in observations), (
+            "worker evaluated user marker under its guard or after losing active ownership")
+        expected = ["replacement" if reenter == "replace" else "original"]
+        assert calls == expected and after == expected
+    finally:
+        assert cache.reset_for_tests()
+
+
+@pytest.mark.parametrize("urgent,startup_exempt,expected", [
+    (True, False, 1.0), (False, False, 300.0), (False, True, 300.0)])
+def test_completion_retry_respects_urgent_owner_window_bypass(
+        tmp_path, monkeypatch, urgent, startup_exempt, expected):
+    from types import SimpleNamespace
+
+    cache = transcript_import_cache
+    assert cache.reset_for_tests()
+    path = tmp_path / "urgent-retry.jsonl"
+    path.write_text("{}\n")
+    importer = _TranscriptCompletionInput(path, "urgent")
+    importer.eligible = False
+    key = f"urgent\0{path}"
+    # Only the cache's monotonic lookup changes; native thread/SQLite clocks do not.
+    monkeypatch.setattr(cache, "time", SimpleNamespace(monotonic=lambda: 1000.0))
+    with cache._guard:
+        cache._last_started["urgent"] = (1000.0, 50.0)
+        cache._completion_retry_at.put(key, cache._epoch, (1001.0, 1))
+    try:
+        assert cache.schedule_import(path, importer, owner="urgent", urgent=urgent,
+                                     startup_exempt=startup_exempt)
+        with cache._guard:
+            request, timer, _ = cache._deferred[key]
+            assert request[4] is urgent
+            assert timer.interval == expected, "urgent retry inherited the normal owner wait"
+    finally:
+        assert cache.reset_for_tests()
+
+
 def test_pseudo_path_signature_tracks_the_database(tmp_path):
     transcript_import_cache.reset_for_tests()
     db = tmp_path / "opencode.db"
