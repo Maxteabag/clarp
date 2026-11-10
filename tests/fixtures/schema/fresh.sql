@@ -1,4 +1,4 @@
--- user_version 121
+-- user_version 122
 
 -- index idx_agent_portraits_agent_created on agent_portraits
 CREATE INDEX idx_agent_portraits_agent_created ON agent_portraits(agent_id, created_at) WHERE deleted_at IS NULL;
@@ -137,6 +137,9 @@ CREATE INDEX idx_janitor_attachments_agent ON janitor_attachments(agent_id, reti
 
 -- index idx_janitor_runs_agent on janitor_runs
 CREATE INDEX idx_janitor_runs_agent ON janitor_runs(agent_id, created_at DESC);
+
+-- index idx_janitor_runs_newest on janitor_runs
+CREATE INDEX idx_janitor_runs_newest ON janitor_runs(agent_id, generation, status, finished_at);
 
 -- index idx_janitor_runs_one_active on janitor_runs
 CREATE UNIQUE INDEX idx_janitor_runs_one_active ON janitor_runs(agent_id) WHERE status IN ('queued', 'running');

@@ -97,11 +97,16 @@ def test_the_matrix_shows_the_known_paths(monkeypatch):
     assert "_migrate_to_v89" in fresh["calls"]          # the v84+ region runs on a fresh database
     assert "_migrate_to_v62" not in fresh["calls"]      # the else branch does not
     assert "_migrate_to_v121" not in fresh["calls"]     # 0 < version < 121
-    assert from_119["calls"] == ["_migrate_to_v121"] and from_119["final"] == db_schema._SCHEMA_VERSION
+    assert "_migrate_to_v122" in fresh["calls"]         # an additive index: a no-op after _create_schema
+    assert from_119["calls"] == ["_migrate_to_v121", "_migrate_to_v122"]
+    assert from_119["final"] == db_schema._SCHEMA_VERSION
+    assert run_from(121, monkeypatch)["calls"] == ["_migrate_to_v122"]
 
 
 def test_every_supported_start_reaches_the_final_stamp(monkeypatch):
     for start in range(db_schema._MIN_UPGRADABLE_VERSION, db_schema._SCHEMA_VERSION):
         result = run_from(start, monkeypatch)
         assert result["error"] is None and result["final"] == db_schema._SCHEMA_VERSION, (start, result)
-        assert "_migrate_to_v121" in result["calls"], start      # every upgrade, early ones included
+        if start < 121:
+            assert "_migrate_to_v121" in result["calls"], start  # every upgrade from before it, early ones included
+        assert "_migrate_to_v122" in result["calls"], start
