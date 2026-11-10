@@ -25,24 +25,36 @@ def _transcript(backend: str, session: str, epoch: int):
 def _read_model(path: str, stamp: int, size: int) -> str:
     del stamp
     with open(path, "rb") as stream:
-        stream.seek(max(0, size - 1024 * 1024))
-        lines = stream.read().splitlines()
-    for line in reversed(lines):
-        try:
-            event = json.loads(line)
-        except (ValueError, UnicodeDecodeError):
-            continue
-        if not isinstance(event, dict):
-            continue
-        payload = event.get("payload") or {}
-        message = event.get("message") or {}
-        if not isinstance(payload, dict) or not isinstance(message, dict):
-            continue
-        model = (payload.get("model") if event.get("type") == "turn_context"
-                 else message.get("model") if event.get("type") == "assistant" else "")
-        if isinstance(model, str) and model and model != "<synthetic>":
-            return model
-    return ""
+        floor = max(0, size - 1024 * 1024)
+        window = 64 * 1024
+        while True:
+            start = max(floor, size - window)
+            stream.seek(start)
+            # Keep read-to-EOF behavior if the file grew after the caller's
+            # stat. Only the starting offset is bounded by that size.
+            lines = stream.read().splitlines()
+            if start > floor and lines:
+                # A trial window can begin inside a record. At the final
+                # legacy floor, retain its original cropped-line semantics.
+                lines = lines[1:]
+            for line in reversed(lines):
+                try:
+                    event = json.loads(line)
+                except (ValueError, UnicodeDecodeError):
+                    continue
+                if not isinstance(event, dict):
+                    continue
+                payload = event.get("payload") or {}
+                message = event.get("message") or {}
+                if not isinstance(payload, dict) or not isinstance(message, dict):
+                    continue
+                model = (payload.get("model") if event.get("type") == "turn_context"
+                         else message.get("model") if event.get("type") == "assistant" else "")
+                if isinstance(model, str) and model and model != "<synthetic>":
+                    return model
+            if start == floor:
+                return ""
+            window = min(window * 4, 1024 * 1024)
 
 
 def indexed_model(home, session: str) -> str:
