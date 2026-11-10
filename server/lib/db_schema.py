@@ -15,7 +15,7 @@ from __future__ import annotations
 
 # Versions 81 and 82 also exist on installed Hosts with additive indexing
 # migrations. History must run when upgrading those Hosts, not only main's v80.
-_SCHEMA_VERSION = 121  # PROVISIONAL (stale provider tasks over main 119; 120 is feat/agent-ring-device-optout's): renumber at the landing if taken
+_SCHEMA_VERSION = 122  # PROVISIONAL (janitor_runs newest-run index, the next number above main 121; 120 is feat/agent-ring-device-optout's): renumber at the landing if taken
 
 
 # The schema below is the complete current shape. It is applied in one step to
@@ -1295,6 +1295,8 @@ CREATE TABLE IF NOT EXISTS janitor_runs (
 );
 CREATE INDEX IF NOT EXISTS idx_janitor_runs_agent
     ON janitor_runs(agent_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_janitor_runs_newest
+    ON janitor_runs(agent_id, generation, status, finished_at);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_janitor_runs_one_active
     ON janitor_runs(agent_id) WHERE status IN ('queued', 'running');
 CREATE TABLE IF NOT EXISTS janitor_effects (
