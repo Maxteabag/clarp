@@ -26,17 +26,16 @@ THREAD = "c59fbeda-de2d-4989-a7a8-4683580325e9"
 
 
 @pytest.fixture(autouse=True)
-def _local_dispatch_runtime(monkeypatch):
+def _local_dispatch_runtime(monkeypatch, codex_pool_lifecycle):
     monkeypatch.setattr(_td, "_RUNTIME_CLIENT", None)
     _td.reset_for_tests()
     yield
     _td.reset_for_tests()
-    codex_app_server.recycle_clients()
 
 
 @pytest.fixture
-def broken(tmp_path, monkeypatch):
-    home = _install_fake_codex(tmp_path, monkeypatch)
+def broken(tmp_path, monkeypatch, codex_pool_lifecycle):
+    home = _install_fake_codex(tmp_path, monkeypatch, codex_pool_lifecycle)
     (home / "sessions").mkdir()
     (home / "sessions" / f"rollout-{THREAD}.jsonl").write_text("")
     agent_id = agents_db.create_agent(
