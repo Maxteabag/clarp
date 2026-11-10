@@ -1176,6 +1176,12 @@ def test_full_bootstrap_certifies_only_the_actual_consumed_prefix(tmp_path, back
     if change.startswith("publication_"):
         assert yielded and probe_seen, "actual fresh-probe/writer replacement phase was not reached"
     assert consumed and changed and actual["apply_mode"] == "full"
+    if change.startswith("publication_"):
+        # The unrelated commit is an input intervention, not an importer
+        # product: give the independent full reference that same external row.
+        with sqlite3.connect(reference) as other:
+            other.execute("INSERT INTO sse_events(ts,type,session,agent_id,payload) VALUES (?,?,?,?,?)",
+                          (harness.BASE_MS, "synthetic-unrelated", "other-native", "other-agent", "{}"))
     harness.assert_product_equal(reference, candidate)
     db.reset_for_tests(candidate)
     checkpoint = inc.load_checkpoint(db.conn(), corpus.AGENT, corpus.SESSION, str(transcript))
