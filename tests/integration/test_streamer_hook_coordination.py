@@ -56,7 +56,8 @@ def env(tmp_path, monkeypatch):
     yield tmp_path
 
 
-def test_streamer_advances_cursor_so_hook_sees_no_new_text(env):
+@pytest.mark.parametrize("bind_write", ["before_watch", "after_watch"])
+def test_streamer_advances_cursor_so_hook_sees_no_new_text(env, monkeypatch, bind_write):
     """Streamer consumes a text block → cursor_positions.position is at
     end-of-file. A fresh TranscriptCursor (which is what the Stop hook
     uses) sees no new text on advance()."""
@@ -81,18 +82,14 @@ def test_streamer_advances_cursor_so_hook_sees_no_new_text(env):
         "role": "user", "content": "synthetic prompt"}}) + "\n")
 
     streamer = TranscriptStreamer(reconcile_interval_sec=0.05)
+    from tests.streamer_bind_race import force_bind_write
+    written, event_tick = force_bind_write(
+        monkeypatch, streamer, agent_id, tx, _assistant_text("the only text"), bind_write)
     streamer.start()
     try:
-        # As in test_transcript_streamer: the pick-up wait is asserted, and both
-        # waits poll their condition with a deadline that outlasts a loaded
-        # machine's scheduling (G1 flake with 2 s and 3 s).
-        assert _wait_for(lambda: streamer.pool.has(agent_id), timeout=15.0), \
-            "the streamer never picked the agent up"
-
-        # Now write a text block. Streamer should consume it + enqueue it +
-        # advance cursor_positions.position.
-        with tx.open("a") as f:
-            f.write(json.dumps(_assistant_text("the only text")) + "\n")
+        assert written.wait(5), "the boundary write completed without another file write"
+        if bind_write == "after_watch":
+            assert event_tick.wait(5), "the real inotify event also ticks the shared cursor"
 
         _wait_for(lambda: bool([r for r in tts_queue.recent()
                                   if r["agent_id"] == agent_id]),

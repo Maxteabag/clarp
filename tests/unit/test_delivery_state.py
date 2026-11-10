@@ -519,10 +519,10 @@ def test_mixed_version_old_runtime_result_stays_unknown():
     assert (old.delivery, new.delivery["state"], junk.delivery) == (None, "handed_over", None)
 
 
-def test_the_delivery_contract_is_advertised_as_78():
+def test_the_delivery_contract_is_advertised_as_81():
     from lib import server_identity
     info = server_identity.get_server_info()
-    assert info["contract"]["features"]["send_delivery_state"] == 78
+    assert info["contract"]["features"]["send_delivery_state"] == 81
     assert "send_delivery_state" in info["capabilities"]["features"]
 
 
