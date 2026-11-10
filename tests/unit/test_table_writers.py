@@ -184,7 +184,6 @@ STATUS_WRITERS: dict[tuple[str, str], set[str]] = {
     ("background_jobs", "status"): {"lib/background_jobs.py"},
     ("clips", "producer_status"): {"lib/clip_records.py"},
     ("clips", "status"): {"lib/clip_records.py"},
-    ("decision_deliveries", "status"): {"lib/artifacts.py"},
     ("decisions", "status"): {"lib/leader_memory.py"},
     ("dream_rounds", "status"): {"lib/dreaming.py"},
     ("dream_runs", "status"): {"lib/dreaming.py"},
@@ -194,7 +193,6 @@ STATUS_WRITERS: dict[tuple[str, str], set[str]] = {
     ("janitor_continuity", "status"): {"lib/janitor_store.py"},
     ("janitor_runs", "status"): {"lib/janitor_store.py"},
     ("messages", "phase"): {"lib/message_live.py", "lib/message_writes.py"},
-    ("oracle_admissions", "status"): {"lib/oracle_memory.py"},
     ("orchestrator_pending_utterances", "status"): {"lib/orchestrator.py"},
     ("provider_limit_episodes", "status"): {"lib/backend_usage.py"},
     ("state_log", "kind"): {"lib/turn_lifecycle.py"},
@@ -203,7 +201,6 @@ STATUS_WRITERS: dict[tuple[str, str], set[str]] = {
     ("tool_explanation_jobs", "status"): {"lib/tool_explanation_queue.py"},
     ("tool_explanation_mappings", "status"): {"lib/tool_explanation_mappings.py"},
     ("tts_queue", "status"): {"lib/tts_queue_records.py"},
-    ("user_value_facts", "status"): {"lib/leader_memory.py"},
 }
 
 

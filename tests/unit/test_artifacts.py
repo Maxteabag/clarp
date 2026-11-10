@@ -857,3 +857,24 @@ def test_pins_survive_reopen_and_are_independent_of_inbox_archiving(tmp_path, mo
     unpinned, changed = artifacts.pin(newer["artifact_id"], pinned=False)
     assert changed and unpinned["updated_at"] == newer["updated_at"]
     assert [row["artifact_id"] for row in artifacts.list_pinned()] == [older["artifact_id"]]
+
+
+def test_only_a_pending_delivery_is_delivered_or_cancelled(tmp_path, monkeypatch):
+    agent_id = _agent(tmp_path)
+    status = lambda ident: db.conn().execute(
+        "SELECT status, delivered_at FROM decision_deliveries WHERE decision_id=?", (ident,)).fetchone()
+    ids = []
+    for title in ("First", "Second"):
+        created = artifacts.create_decision(session="mike", title=title, question="Go?",
+                                            yes_label="Yes", no_label="No")
+        ids.append(created["decision"]["decision_id"])
+        artifacts.resolve(ids[-1], choice="accepted", expected_revision=1)
+    monkeypatch.setattr(db, "now_ms", lambda: 5_000_000_000_000)
+    artifacts.mark_delivered(ids[0])
+    artifacts.cancel_for_agent(agent_id)
+    monkeypatch.setattr(db, "now_ms", lambda: 6_000_000_000_000)
+    artifacts.mark_delivered(ids[0])
+    artifacts.mark_delivered(ids[1])
+    assert tuple(status(ids[0])) == ("delivered", 5_000_000_000_000)
+    assert tuple(status(ids[1])) == ("cancelled", None)
+    assert artifacts.DECISION_DELIVERY.decide("pending", "deliver") == "delivered"

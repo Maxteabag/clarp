@@ -176,3 +176,15 @@ def test_leader_context_includes_standing_orders_and_helper(tmp_path, monkeypatc
     assert "--from lena" in context
     assert "scripts/leader_decision.py search" in context
     assert "Evidence first" in context
+
+
+def test_promoting_a_promoted_fact_writes_nothing(tmp_path, monkeypatch):
+    from lib import db
+    fact_id = leader_memory.upsert_user_value_fact(statement="Prefer short answers.", category="style")
+    monkeypatch.setattr(db, "now_ms", lambda: 1000)
+    leader_memory.promote_user_value_fact(fact_id)
+    monkeypatch.setattr(db, "now_ms", lambda: 2000)
+    leader_memory.promote_user_value_fact(fact_id)
+    row = db.conn().execute("SELECT status, updated_at FROM user_value_facts WHERE fact_id=?", (fact_id,)).fetchone()
+    assert tuple(row) == ("promoted", 1000)
+    assert leader_memory.latest_promotion_activity() == 1000

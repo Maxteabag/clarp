@@ -13,6 +13,8 @@ from urllib.parse import urlsplit
 from typing import Any
 
 from . import agents, db, media_store
+from . import lifecycle as lk
+from .lifecycle import Edge, Lifecycle, WaitForever
 from .revisioned_cache import RevisionedCache
 from .voice_markup import strip_hidden_blocks
 
@@ -921,6 +923,25 @@ def _answer(row, *, choice: Any, answer: Any) -> tuple[str, dict]:
     return "answered", {"text": text.strip()}
 
 
+# A resolved decision's delivery to the asking agent
+# (docs/architecture/lifecycles.md). This module is the only writer of
+# decision_deliveries.status; _queue_delivery() inserts the row as pending.
+# Only a pending delivery moves: a cancelled one is never marked delivered, and
+# a delivered one is not cancelled when its agent is deleted.
+DECISION_DELIVERY = Lifecycle(
+    name="decision_delivery", owner="lib/artifacts.py",
+    table="decision_deliveries", key="decision_id", state_column="status",
+    entered_columns={"delivered": "delivered_at"},
+    initial="pending", final=frozenset({"delivered", "cancelled"}),
+    edges=(
+        Edge("deliver", frozenset({"pending"}), "delivered"),
+        Edge("cancel", frozenset({"pending"}), "cancelled"),
+    ),
+    waits={"pending": WaitForever("dispatch delivers it to the asking agent, or the agent's"
+                                  " deletion cancels it")},
+)
+
+
 def _queue_delivery(con, row, *, choice: str, answer: dict | None, now: int) -> None:
     artifact = con.execute("SELECT session,reference_id,payload_json FROM artifacts WHERE artifact_id=?",
                            (row["artifact_id"],)).fetchone()
@@ -1247,9 +1268,8 @@ def format_delivery_prompt(delivery: dict) -> str:
 
 
 def mark_delivered(decision_id: str) -> None:
-    db.conn().execute(
-        "UPDATE decision_deliveries SET status='delivered',delivered_at=? WHERE decision_id=?",
-        (db.now_ms(), decision_id))
+    lk.compare_and_set_where(db.conn(), DECISION_DELIVERY, "deliver", where="decision_id=?",
+                             params=(decision_id,), now=db.now_ms())
 
 
 def delivery_pending(decision_id: str) -> bool:
@@ -1263,9 +1283,8 @@ def cancel_for_agent(agent_id: str) -> None:
     now = db.now_ms(); con = db.conn()
     agent = con.execute("SELECT session FROM agents WHERE agent_id=?", (agent_id,)).fetchone()
     if agent:
-        con.execute(
-            "UPDATE decision_deliveries SET status='cancelled' WHERE session=? AND status='pending'",
-            (agent["session"],))
+        lk.compare_and_set_where(con, DECISION_DELIVERY, "cancel", where="session=?",
+                                 params=(agent["session"],), now=now)
     ids = [row["artifact_id"] for row in con.execute(
         "SELECT artifact_id FROM artifacts WHERE agent_id=? AND type IN ('decision','question') AND status='active'",
         (agent_id,)).fetchall()]
@@ -1276,9 +1295,10 @@ def cancel_for_agent(agent_id: str) -> None:
         con.executemany(
             "UPDATE artifacts SET status='cancelled',updated_at=MAX(?,updated_at+1),completed_at=? WHERE artifact_id=?",
             [(now, now, artifact_id) for artifact_id in ids])
-        con.executemany(
-            "UPDATE decision_deliveries SET status='cancelled' WHERE decision_id IN (SELECT decision_id FROM artifact_decisions WHERE artifact_id=?)",
-            [(artifact_id,) for artifact_id in ids])
+        for artifact_id in ids:
+            lk.compare_and_set_where(
+                con, DECISION_DELIVERY, "cancel", now=now, params=(artifact_id,),
+                where="decision_id IN (SELECT decision_id FROM artifact_decisions WHERE artifact_id=?)")
     con.execute(
         """UPDATE artifacts SET status='cancelled',updated_at=MAX(?,updated_at+1),completed_at=?
              WHERE agent_id=? AND status='active'""",
