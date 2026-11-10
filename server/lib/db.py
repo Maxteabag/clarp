@@ -704,6 +704,23 @@ def retry_locked(
     raise RuntimeError("retry_locked exhausted without returning")
 
 
+def close_local_strict() -> None:
+    """Close this thread's owned connection with a truthful terminal outcome.
+
+    A failure (including a control exception) leaves the exact pointer intact;
+    callers must retain their admission fence instead of claiming quiescence.
+    The ordinary request-end close_local contract remains non-raising.
+    """
+    connection = getattr(_LOCAL, "conn", None)
+    if connection is None:
+        return
+    connection.close()
+    if getattr(_LOCAL, "conn", None) is connection:
+        _LOCAL.conn = None
+    elif getattr(_LOCAL, "conn", None) is not None:
+        raise RuntimeError("thread connection changed during strict close")
+
+
 def close_local() -> None:
     """Close and drop this thread's connection. Call at request end so a
     short-lived request thread releases its FDs instead of leaking them."""

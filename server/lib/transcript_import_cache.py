@@ -1096,30 +1096,90 @@ def _finish_background_import(key, request, epoch, result, started, completed):
     return True
 
 
+@contextmanager
+def _worker_owner_scope(ticket):
+    """Count selection, arbitrary observers and actual terminal DB closure."""
+    from . import db
+    primary = None
+    try:
+        yield
+    except BaseException as exc:
+        primary = exc
+        raise
+    finally:
+        try:
+            db.close_local_strict()
+        except BaseException as cleanup:
+            with _guard:
+                ticket[1].cleanup_uncertain = True
+            if primary is not None and not isinstance(primary, Exception):
+                raise primary from cleanup
+            raise cleanup from primary
+        finally:
+            with _guard:
+                _owner_admissions.end(ticket)
+
+
+def _select_owner_request(key, request, item_epoch, ticket):
+    """Preflight outside _guard, then consume only the exact waiting token."""
+    global _running
+    from .log import log, log_exception
+    size, error = request[7], None
+    reserves_retry = False
+    try:
+        if ticket[2] is not None and not _binding_matches(
+                request[2], ticket[2], request[0], request[1]):
+            raise OwnerLeaseBusy("stale worker binding")
+        reserves_retry = getattr(request[1], "_clarp_transcript_completion_v1", None) is True
+        if (_host_started_at is not None and not request[4] and not request[6]
+                and time.monotonic() < _host_started_at + _STARTUP_GRACE_SECONDS):
+            size = source_size(request[0])
+    except Exception as exc:
+        error = exc
+    failed = False
+    with _guard:
+        current = _pending.get(key)
+        if current is None or current[0] is not request or current[1] != item_epoch:
+            return None
+        if _resetting or item_epoch != _epoch:
+            del _pending[key]
+            return None
+        if error is not None:
+            del _pending[key]
+        else:
+            request = (*request[:7], size)
+            wait = _request_deadline(key, request) - time.monotonic()
+            if wait > 0:
+                failed = not _defer_locked(key, request, item_epoch, wait)
+                del _pending[key]
+            else:
+                del _pending[key]
+                _running = (key, item_epoch, reserves_retry)
+                return request, reserves_retry
+    if error is not None:
+        log_exception('backgroundTranscriptImportFail', error, detail=request[2])
+    if failed:
+        log('transcriptImportThreadStartFail', f'owner={request[2]}')
+    return None
+
+
 def _drain_background():
     global _worker, _running
     from . import db
     from .log import log, log_exception
+    cleanup_failed = False
     try:
         while True:
-            failed = []
-            selected = None
             with _guard:
                 now = time.monotonic()
-                # Due timer threads may get CPU in any order. Promote all due
-                # keys here so an older path cannot lose its place merely
-                # because its timer callback ran after a hotter path's.
                 for key, (request, timer, item_epoch) in list(_deferred.items()):
                     if _request_deadline(key, request) <= now:
                         timer.cancel()
                         del _deferred[key]
                         _pending[key] = (request, item_epoch)
                 waiting = sorted(_pending.items(), key=lambda item: item[1][0][5])
+            selected = False
             for key, (request, item_epoch) in waiting:
-                # Retain the waiting slot/rank while stat and user marker
-                # descriptors run outside _guard. Either may reenter/replace.
-                # Revalidate the exact request token and epoch before consuming
-                # it: a replacement/reset during stat must keep its own intent.
                 capacity_refused = False
                 with _guard:
                     try:
@@ -1131,97 +1191,52 @@ def _drain_background():
                         if current is not None and current[0] is request:
                             del _pending[key]
                 if capacity_refused:
-                    log("transcriptImportQueueFull", f"owner={request[2]}")
+                    print(f"transcriptImportQueueFull owner={request[2]}",
+                          file=sys.stderr, flush=True)
                 if ticket is None:
                     continue
-                size = request[7]
-                selection_error = None
-                reserves_retry = False
                 try:
-                    if ticket[2] is not None and not _binding_matches(
-                            request[2], ticket[2], request[0], request[1]):
-                        raise OwnerLeaseBusy("stale worker binding")
-                    reserves_retry = (
-                        getattr(request[1], "_clarp_transcript_completion_v1", None) is True)
-                    if (_host_started_at is not None and not request[4] and not request[6]
-                            and time.monotonic() < _host_started_at + _STARTUP_GRACE_SECONDS):
-                        size = source_size(request[0])
-                except Exception as exc:
-                    selection_error = exc
-                except BaseException:
-                    with _guard:
-                        _owner_admissions.end(ticket)
-                    raise
-                with _guard:
-                    current = _pending.get(key)
-                    if current is None or current[0] is not request or current[1] != item_epoch:
-                        _owner_admissions.end(ticket)
-                        continue
-                    if _resetting or item_epoch != _epoch:
-                        del _pending[key]
-                        _owner_admissions.end(ticket)
-                        continue
-                    if selection_error is not None:
-                        del _pending[key]
-                        _owner_admissions.end(ticket)
-                    else:
-                        now = time.monotonic()
-                        request = (*request[:7], size)
-                        wait = _request_deadline(key, request) - now
-                        if wait > 0:
-                            if not _defer_locked(key, request, item_epoch, wait):
-                                failed.append(request[2])
-                            del _pending[key]
-                            _owner_admissions.end(ticket)
+                    with _worker_owner_scope(ticket):
+                        choice = _select_owner_request(key, request, item_epoch, ticket)
+                        if choice is None:
                             continue
-                        del _pending[key]
-                        _running = (key, item_epoch, reserves_retry)
-                        selected = (key, request, item_epoch, ticket)
-                if selection_error is not None:
-                    log_exception('backgroundTranscriptImportFail', selection_error, detail=request[2])
-                if selected is not None:
-                    break
-            for failed_owner in failed:
-                log('transcriptImportThreadStartFail', f'owner={failed_owner}')
-            if selected is None:
-                # Never sleep or hold the worker behind an ineligible owner.
-                # Close before clearing: reset must outlive every real thread.
-                db.close_local()
-                with _guard:
-                    if not any(not _owner_admissions.held(entry[0][2])
-                               for entry in _pending.values()):
-                        _worker = None
-                        return
-                continue
-            key, (path, importer, owner, after, urgent, rank, startup_exempt, size), item_epoch, ticket = selected
-            started = time.monotonic()
-            try:
-                try:
-                    imported = _import_admitted(path, importer, owner, item_epoch)
-                    completed = time.monotonic()
-                    if not _finish_background_import(
-                            key, (path, importer, owner, after, urgent, rank, startup_exempt, size),
-                            item_epoch, imported, started, completed):
-                        _retry_completion(
-                            key, (path, importer, owner, after, urgent, rank, startup_exempt, size),
-                            item_epoch)
-                except Exception as exc:
-                    log_exception('backgroundTranscriptImportFail', exc, detail=owner)
-            finally:
-                try:
-                    db.close_local()
+                        request, reserves_retry = choice
+                        selected = True
+                        path, importer, owner, after, urgent, rank, startup_exempt, size = request
+                        started = time.monotonic()
+                        try:
+                            imported = _import_admitted(path, importer, owner, item_epoch)
+                            completed = time.monotonic()
+                            if not _finish_background_import(
+                                    key, request, item_epoch, imported, started, completed):
+                                _retry_completion(key, request, item_epoch)
+                        except Exception as exc:
+                            log_exception('backgroundTranscriptImportFail', exc, detail=owner)
+                        finally:
+                            with _guard:
+                                _running = None
+                                _cond.notify_all()
                 except BaseException:
-                    with _guard:
-                        ticket[1].cleanup_uncertain = True
+                    cleanup_failed = ticket[1].cleanup_uncertain
                     raise
-                finally:
-                    with _guard:
-                        _running = None
-                        _owner_admissions.end(ticket)
-                        _cond.notify_all()
+                break
+            if selected:
+                continue
+            # No owned connection remains here: every preflight scope closed
+            # strictly before ending its owner ticket. Keep ordinary idle/thread
+            # housekeeping for existing reset/thread-lifetime callers.
+            db.close_local()
+            with _guard:
+                if not any(not _owner_admissions.held(entry[0][2])
+                           for entry in _pending.values()):
+                    _worker = None
+                    return
     finally:
         try:
-            db.close_local()
+            # Never retry a failed strict close through the swallowing legacy
+            # helper, which would drop the uncertain pointer.
+            if not cleanup_failed:
+                db.close_local()
         finally:
             with _guard:
                 if _worker is threading.current_thread():
