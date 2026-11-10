@@ -330,3 +330,13 @@ def test_serve_logs_v2_sessions_and_journals_when_enabled(monkeypatch):
     assert 'journal=journal-1' in logged[0][1] and 'seconds=' in logged[1][1] and 'out_audible=0' in logged[1][1]
     kinds=[k for k,_ in journals[0].records]
     assert kinds[0]=='session.open' and 'session.start' in kinds and kinds[-2:]==['session.summary','session.close']
+
+
+def test_tinkered_transcript_fragments_record_their_wall_clock_time(monkeypatch):
+    monkeypatch.setattr(oracle_live,'wall_ms',lambda:1_792_152_000_000)
+    c=oracle_live.Conversation(SimpleNamespace(send=lambda _e:None),lambda _e:None,SimpleNamespace(results=lambda:[]),'unused',lambda:100)
+    try:
+        c.receive({'type':'session.input_transcript.delta','delta':'Hallo.','start_ms':0,'end_ms':300})
+        assert c.fragments[-1]['at']==1_792_152_000_000
+    finally:
+        c.stop.set();c.pool.shutdown()

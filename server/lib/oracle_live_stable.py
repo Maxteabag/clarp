@@ -603,7 +603,7 @@ class Conversation:
                 else:
                     self.fragments.append({"role": role, "text": text, "provider_session": self.provider_session,
                                            "end_ms": event.get("end_ms", 0),
-                                           "revision": self.revision})
+                                           "revision": self.revision, "at": wall_ms()})
                 self.fragments = self.fragments[-30:]
                 self.checkpoint()
             self.downstream(event)
