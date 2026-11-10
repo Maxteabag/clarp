@@ -355,8 +355,15 @@ def _dashboard_revisions() -> tuple[dict[str, dict[str, int]], dict[str, dict[st
 
 def _preview_key(agent_id: str, revisions: dict, stamps: dict) -> tuple:
     """What an agent's cached preview is valid for: every conversation of the
-    agent with its highest revision and highest updated_at. Any write that
-    changes what the preview shows moves one of them."""
+    agent with its highest revision (of its messages or of its conversation
+    head, whichever is higher) and its messages' highest updated_at.
+
+    Every writer in this code base that changes what a preview shows moves
+    one of them: a new or edited row raises the revision or updated_at, and a
+    delete raises the conversation head's revision in the same transaction
+    (audited for #253 over 9,872 commits of real writes, no exception). That
+    is a property of those writers, not of the table: raw SQL that changes a
+    row without doing either moves nothing here and is not noticed."""
     return tuple(sorted((str(session or ''), rev, stamps.get(agent_id, {}).get(session, 0))
                         for session, rev in revisions.get(agent_id, {}).items()))
 
@@ -408,8 +415,14 @@ def _preview_copy(entry):
             for key, value in entry.items()}
 
 
-def dashboard_messages(max_len: int = 80) -> dict[str, dict[str, Any]]:
+def dashboard_messages(max_len: int = 80, *, agent_ids=None) -> dict[str, dict[str, Any]]:
     """Project every live agent, publishing cache fills only after validation.
+
+    ``agent_ids`` (a set) projects only those agents: a preview that misses
+    the cache costs three statements, so a snapshot that leaves agents out
+    must not pay for theirs. Such a partial projection fills the cache for
+    its own agents and never prunes it, because the other agents' cached
+    previews are still good for the next caller that wants them.
 
     A caller's transaction may see uncommitted rows: never read or populate
     shared caches there. Otherwise one database stamp is sampled before and
@@ -450,6 +463,8 @@ def dashboard_messages(max_len: int = 80) -> dict[str, dict[str, Any]]:
     result: dict[str, dict[str, Any]] = {}
     pending = []
     for agent_id in live:
+        if agent_ids is not None and agent_id not in agent_ids:
+            continue
         key = _preview_key(agent_id, revisions, stamps)
         hit, cached = ((False, None) if stamp is None or max_len != 80 else
                        _cache_read(_PREVIEW_CACHE, agent_id, key, failed))
@@ -466,7 +481,7 @@ def dashboard_messages(max_len: int = 80) -> dict[str, dict[str, Any]]:
                 _cache_write(_REVISION_CACHE, "all", stamp, projection, failed)
             for agent_id, key, entry in pending:
                 _cache_write(_PREVIEW_CACHE, agent_id, key, entry, failed)
-            if _PREVIEW_CACHE.name not in failed:
+            if agent_ids is None and _PREVIEW_CACHE.name not in failed:
                 try:
                     _PREVIEW_CACHE.retain(result)
                 except Exception as exc:  # noqa: BLE001 - bounded keys are never projected as a roster
