@@ -171,7 +171,16 @@ def observe_source_reads(path: pathlib.Path, metrics: dict):
     import builtins
     import io
     target = os.path.abspath(os.fspath(path))
+    stat = path.stat()
+    source_identity = (stat.st_dev, stat.st_ino)
     metrics["source_read_bytes"] = 0
+
+    def source_fd(fd):
+        try:
+            stat = os.fstat(fd)
+            return (stat.st_dev, stat.st_ino) == source_identity
+        except (OSError, TypeError):
+            return False
 
     def charge(value):
         if isinstance(value, str):
@@ -189,6 +198,8 @@ def observe_source_reads(path: pathlib.Path, metrics: dict):
 
         def __getattr__(self, name):
             value = getattr(self.native, name)
+            if name in ("buffer", "raw"):
+                return ObservedFile(value)
             if name in ("read", "read1", "readall", "readline", "readlines"):
                 def read(*args, **kwargs):
                     return charge(value(*args, **kwargs))
@@ -219,12 +230,23 @@ def observe_source_reads(path: pathlib.Path, metrics: dict):
             native = opening(file, *args, **kwargs)
             try:
                 matches = os.path.abspath(os.fspath(file)) == target
-            except TypeError:  # integer file descriptors are not pathname opens
-                matches = False
+            except TypeError:
+                matches = source_fd(file)
             return ObservedFile(native) if matches else native
         return opened
 
-    with patch.object(builtins, "open", observe(builtins.open)), patch.object(io, "open", observe(io.open)):
+    def observe_fd(reading):
+        def read(fd, *args, **kwargs):
+            matches = source_fd(fd)
+            value = reading(fd, *args, **kwargs)
+            return charge(value) if matches else value
+        return read
+
+    with ExitStack() as stack:
+        stack.enter_context(patch.object(builtins, "open", observe(builtins.open)))
+        stack.enter_context(patch.object(io, "open", observe(io.open)))
+        stack.enter_context(patch.object(os, "read", observe_fd(os.read)))
+        stack.enter_context(patch.object(os, "pread", observe_fd(os.pread)))
         yield
 
 
