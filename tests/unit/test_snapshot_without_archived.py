@@ -397,6 +397,43 @@ def test_a_lean_snapshot_leaves_the_other_agents_cached_previews_alone(fleet, mo
     assert json.dumps(again) == json.dumps(full)
 
 
+def test_a_lean_build_written_into_while_cold_stores_its_own_previews_and_prunes_nothing(fleet, monkeypatch):
+    """This branch's partial projection and #253's publication, together: a
+    write during a cold lean build must not cost the next one its previews,
+    and a partial projection must still never prune what it did not ask for."""
+    import sqlite3
+    _with_messages(fleet)
+    _cold_previews()
+    snapshot.build_archived_agents(None)                   # the archived agents' previews are cached
+    archived = _archived_ids(fleet)
+    held = {agent_id: message_previews._PREVIEW_CACHE.peek(agent_id) for agent_id in archived}
+    assert all(held.values())
+
+    original, fired = message_previews._agent_preview, []
+    def compute(agent_id, *args):
+        value = original(agent_id, *args)
+        if not fired:
+            fired.append(True)
+            foreign = sqlite3.connect(str(db.DB_PATH))
+            try:
+                foreign.execute("UPDATE agents SET custom_status='busy' WHERE agent_id=?", (fleet["solo"],))
+                foreign.commit()
+            finally:
+                foreign.close()
+        return value
+    monkeypatch.setattr(message_previews, "_agent_preview", compute)
+    snapshot.build_agent_snapshot(None, include_archived=False)     # cold for its three agents, written into
+    assert fired
+
+    computed = _previews_computed(monkeypatch)
+    lean = snapshot.build_agent_snapshot(None, include_archived=False)
+    assert computed == []                                  # its three previews were stored
+    assert all(row["last_message"] == "You: hello" for row in lean["agents"])
+    assert {agent_id: message_previews._PREVIEW_CACHE.peek(agent_id) for agent_id in archived} == held
+    snapshot.build_agent_snapshot(None)
+    assert computed == []                                  # and the full list still finds every preview
+
+
 # --- one build is shared by the requests that asked for the same thing ------------------------------
 
 def test_the_two_bodies_are_shared_separately(fleet):
