@@ -27,6 +27,7 @@ from .claude_reply_evidence import ClaudeReplyEvidence, is_synthetic_assistant_r
 import json
 import pathlib
 import sys
+import threading
 import time
 from typing import Callable, Iterable
 
@@ -64,6 +65,7 @@ class TranscriptWatcher:
                  persist_offset: bool = False,
                  on_change: Callable[[], None] | None = None,
                  pass_line_timestamp: bool = False):
+        self._tick_lock = threading.RLock()
         self.path = pathlib.Path(path)
         self._reply_evidence = ClaudeReplyEvidence()
         self.on_text = on_text
@@ -105,6 +107,10 @@ class TranscriptWatcher:
         Disk read starts at `byte_offset + len(_partial)`, so we don't
         double-read the partial chunk on the next tick.
         """
+        with self._tick_lock:
+            return self._tick_locked()
+
+    def _tick_locked(self) -> int:
         if self._save_pending:
             self._save_offset()
         try:
@@ -164,8 +170,9 @@ class TranscriptWatcher:
         return self._save_pending
 
     def retry_save(self) -> None:
-        if self._save_pending:
-            self._save_offset()
+        with self._tick_lock:
+            if self._save_pending:
+                self._save_offset()
 
     def _save_offset(self) -> None:
         if not (self.persist_offset and self.backend_session_id):

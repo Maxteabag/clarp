@@ -195,8 +195,8 @@ class _FakeStream:
         self.events.append(event)
 
 
-def test_streamer_broadcasts_transcript_updated_for_text_blocks(tmp_path,
-                                                                 monkeypatch):
+@pytest.mark.parametrize("bind_write", ["before_watch", "after_watch"])
+def test_streamer_broadcasts_transcript_updated_for_text_blocks(tmp_path, monkeypatch, bind_write):
     """Each text block that lands fires a TRANSCRIPT_UPDATED SSE event so
     the client can refetch /log and refresh the history pane live."""
     monkeypatch.setenv("HOME", str(tmp_path))
@@ -213,16 +213,15 @@ def test_streamer_broadcasts_transcript_updated_for_text_blocks(tmp_path,
 
     agent_id, tx = _build_agent_with_transcript(tmp_path,
                                                 backend_session_id="cs-sse")
+    _append(tx, _assistant_text("history must stay silent"))
+    from tests.streamer_bind_race import force_bind_write
+    written, event_tick = force_bind_write(
+        monkeypatch, streamer, agent_id, tx, _assistant_text("first block"), bind_write)
     streamer.start()
     try:
-        # Both waits poll the asserted condition and return as soon as it holds;
-        # the deadline only has to outlast a loaded machine's scheduling of the
-        # watcher and its 50 ms reconcile loop (G1 flake with 2 s). The first one
-        # is asserted: appending before the watch is armed would turn a slow
-        # start into a missing event further down.
-        assert _wait_for(lambda: streamer.pool.has(agent_id), timeout=15.0), \
-            "the streamer never picked the agent up"
-        _append(tx, _assistant_text("first block"))
+        assert written.wait(5), "the boundary write completed without another file write"
+        if bind_write == "after_watch":
+            assert event_tick.wait(5), "inotify also ticks the same watcher"
         _wait_for(lambda: any(e.get("type") == SSEType.TRANSCRIPT_UPDATED
                                 for e in fake_stream.events), timeout=15.0)
         evs = [e for e in fake_stream.events
@@ -233,11 +232,14 @@ def test_streamer_broadcasts_transcript_updated_for_text_blocks(tmp_path,
         assert e["session"]    # the session is included so the
                                      # client can match against currentSession
         assert e["backend_session_id"] == "cs-sse"
+        rows = db.conn().execute("SELECT text FROM tts_queue WHERE agent_id=?", (agent_id,)).fetchall()
+        assert len(rows) == 1 and "first block" in rows[0]["text"]
     finally:
         streamer.stop(timeout=2.0)
 
 
-def test_streamer_broadcasts_for_tool_use_lines_too(tmp_path, monkeypatch):
+@pytest.mark.parametrize("bind_write", ["before_watch", "after_watch"])
+def test_streamer_broadcasts_for_tool_use_lines_too(tmp_path, monkeypatch, bind_write):
     """Tool calls don't fire on_text (no audio for them) but they SHOULD
     fire on_change so the history pane updates live as Claude works."""
     monkeypatch.setenv("HOME", str(tmp_path))
@@ -252,19 +254,15 @@ def test_streamer_broadcasts_for_tool_use_lines_too(tmp_path, monkeypatch):
                                   stream=fake_stream)
     agent_id, tx = _build_agent_with_transcript(tmp_path,
                                                 backend_session_id="cs-tool")
+    _append(tx, _assistant_text("history must stay silent"))
+    from tests.streamer_bind_race import force_bind_write
+    written, event_tick = force_bind_write(
+        monkeypatch, streamer, agent_id, tx, {"type": "assistant", "message": {"content": [{"type": "tool_use", "name": "Bash"}]}}, bind_write)
     streamer.start()
     try:
-        # As in the text-block test above: the pick-up wait is asserted, and both
-        # waits poll their condition with a deadline that outlasts a loaded
-        # machine's scheduling (G1 flake with 2 s).
-        assert _wait_for(lambda: streamer.pool.has(agent_id), timeout=15.0), \
-            "the streamer never picked the agent up"
-        # Write ONLY a tool_use entry (no assistant text). The streamer
-        # must still broadcast — the history pane should update so the
-        # user sees the tool invocation appear.
-        _append(tx, {"type": "assistant",
-                     "message": {"content": [{"type": "tool_use",
-                                              "name": "Bash"}]}})
+        assert written.wait(5), "the boundary write completed without another file write"
+        if bind_write == "after_watch":
+            assert event_tick.wait(5), "inotify also ticks the same watcher"
         ok = _wait_for(
             lambda: any(e.get("type") == SSEType.TRANSCRIPT_UPDATED
                           for e in fake_stream.events),
@@ -273,6 +271,8 @@ def test_streamer_broadcasts_for_tool_use_lines_too(tmp_path, monkeypatch):
             "tool_use line should broadcast TRANSCRIPT_UPDATED even though "
             "it produces no TTS — the history pane needs to update"
         )
+        rows = [r for r in tts_queue.recent() if r["agent_id"] == agent_id]
+        assert rows == [], "neither tool calls nor pre-snapshot history are voiced"
     finally:
         streamer.stop(timeout=2.0)
 
@@ -671,3 +671,75 @@ def test_structural_synthetic_speech_is_skipped_without_losing_the_next_partial_
     assert len(texts()) == 1
     assert 'No response requested.' in texts()[0]
     assert watcher.byte_offset == tx.stat().st_size
+
+
+def test_bind_catchup_tick_failure_is_logged_and_keeps_the_watch(streamer_env, monkeypatch):
+    from lib import transcript_streamer as module
+    from lib.transcript_watcher import TranscriptWatcher
+
+    streamer, tmp_path = streamer_env
+    agent_id, _tx = _build_agent_with_transcript(tmp_path, backend_session_id='cs-failed-tick')
+    watched, errors = [], []
+    real_watch = streamer.dispatcher.watch
+    def watch(selected, path):
+        watched.append(selected)
+        return real_watch(selected, path)
+    def fail_tick(self):
+        raise RuntimeError('synthetic catchup failure')
+    monkeypatch.setattr(streamer.dispatcher, 'watch', watch)
+    monkeypatch.setattr(TranscriptWatcher, 'tick', fail_tick)
+    monkeypatch.setattr(module, 'log_exception', lambda event, exc, **kw: errors.append((event, str(exc))))
+    streamer.reconcile_once()
+    streamer.reconcile_once()
+    assert streamer.pool.has(agent_id)
+    assert watched == [agent_id], 'a failed catchup does not unwind the valid bind'
+    assert errors == [('transcriptStreamerCatchupFail', 'synthetic catchup failure')]
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="the indefinite inotify wait is Linux-specific")
+def test_quiet_bind_save_failure_wakes_the_cursor_retry(streamer_env, monkeypatch):
+    import sqlite3
+    import threading
+    from lib import db
+    from tests.streamer_bind_race import force_bind_write
+    streamer, tmp_path = streamer_env
+    agent_id, path = _build_agent_with_transcript(tmp_path, backend_session_id='quiet-catchup')
+    written, _ = force_bind_write(monkeypatch, streamer, agent_id, path, _assistant_text('new boundary text'), 'before_watch')
+    initial, quiet, retried = threading.Event(), threading.Event(), threading.Event()
+    first = [True]
+    real_conn = db.conn
+    real_wait = streamer.dispatcher._wait
+
+    def wait(fds, timeout):
+        if streamer.dispatcher._inotify is None and timeout is None:
+            initial.set()
+        elif streamer.dispatcher._inotify is not None and timeout is None:
+            quiet.set()  # dispatcher chose an indefinite wait with no pending save
+        return real_wait(fds, timeout)
+
+    class Connection:
+        def __init__(self, con): self.con = con
+        def __getattr__(self, name): return getattr(self.con, name)
+        def execute(self, sql, parameters=()):
+            if 'INSERT INTO cursor_positions' in ' '.join(sql.split()):
+                if first[0]:
+                    first[0] = False
+                    assert quiet.wait(5)
+                    raise sqlite3.OperationalError('synthetic transient cursor failure')
+            return self.con.execute(sql, parameters)
+
+    from lib.transcript_watcher import TranscriptWatcher
+    real_retry = TranscriptWatcher.retry_save
+    def completed_retry(watcher):
+        real_retry(watcher)
+        if not watcher.save_pending:
+            retried.set()
+    monkeypatch.setattr(TranscriptWatcher, 'retry_save', completed_retry)
+    monkeypatch.setattr(streamer.dispatcher, '_wait', wait)
+    monkeypatch.setattr(db, 'conn', lambda: Connection(real_conn()))
+    streamer.dispatcher.start()
+    assert initial.wait(5), 'dispatcher is already waiting before watch registration'
+    streamer.reconcile_once()
+    assert written.is_set()
+    assert retried.wait(2), 'a quiet bind tick must wake the dispatcher to retry its failed cursor save'
+    assert not streamer.pool.watcher_for(agent_id).save_pending

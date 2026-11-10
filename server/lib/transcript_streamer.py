@@ -171,6 +171,14 @@ class TranscriptStreamer:
             log_exception("transcriptStreamerWatchFail", e,
                           detail=str(path))
             return
+        # Catch bytes appended after the watcher's EOF snapshot but before
+        # inotify registration. tick serializes with the dispatcher's reads.
+        try:
+            watcher.tick()
+        except Exception as e:
+            log_exception("transcriptStreamerCatchupFail", e, detail=str(path))
+        if watcher.save_pending:
+            self.dispatcher._wake()  # a failed catchup save may be the only activity
         _emit("transcript_streamer", "bind",
               session=agent.get("session"),
               backend_session_id=backend_session_id,
