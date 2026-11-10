@@ -817,8 +817,139 @@ def _tail_weight(key, revision, state) -> int:
 
 
 from .revisioned_cache import RevisionedCache
-_TAIL_STATES = RevisionedCache("transcript-tail-state", max_entries=256,
-                              max_weight=32 * 1024 * 1024, weight=_tail_weight)
+
+
+@dataclass(frozen=True)
+class _TailReason:
+    code: str
+    token: int
+    weight: int = -1
+
+
+def _reason_weight(key, revision, value):
+    # Only keys/revisions and scalar codes, never checkpoint/row payloads.
+    return 512 + sys.getsizeof(key) + sys.getsizeof(revision) + sum(
+        sys.getsizeof(part) for part in key)
+
+
+_TAIL_REASONS = RevisionedCache("transcript-tail-reasons", max_entries=4096,
+                               max_weight=4 * 1024 * 1024, weight=_reason_weight)
+
+
+class _TailCache(RevisionedCache):
+    """Observe actual LRU transitions without changing their admission policy.
+
+    Lock order is frontier -> diagnostic history; diagnostics never take the
+    frontier lock in reverse. No logging/DB work occurs under either lock.
+    """
+    def __init__(self):
+        self._sequence = 0
+        self._resets = 0
+        self._last_charge = 0
+        self._diagnostic_loss = False
+        super().__init__("transcript-tail-state", max_entries=256,
+                         max_weight=32 * 1024 * 1024, weight=self._charge)
+
+    def _charge(self, key, revision, value):
+        self._last_charge = _tail_weight(key, revision, value)
+        return self._last_charge
+
+    def _store(self, key, revision, value):
+        # Hold only keys/revisions/charged sizes for the transition, not an
+        # extra reference to an evicted or overweight witness graph.
+        try:
+            before = {k: (entry[0], self._weights.get(k, 0), entry[1] is None)
+                      for k, entry in self._entries.items()}
+        except Exception:
+            before = {}
+            self._diagnostic_loss = True
+        super()._store(key, revision, value)
+        self._sequence += 1
+        for victim in before.keys() - self._entries.keys() - {key}:
+            old_revision, weight, was_empty = before[victim]
+            self._remember(victim, old_revision,
+                           _TailReason("evicted_empty" if was_empty else "evicted",
+                                       self._sequence, weight))
+        if key not in self._entries:
+            reason = "overweight" if self._last_charge > self.max_weight else "unknown"
+        else:
+            reason = "consumed" if value is None else "admitted"
+        self._remember(key, revision, _TailReason(reason, self._sequence, self._last_charge))
+
+    def _remember(self, key, revision, reason):
+        try:
+            _TAIL_REASONS.put(key, revision, reason)
+        except Exception:
+            # Diagnostics cannot refuse or certify the actual import/cache.
+            self._diagnostic_loss = True
+
+    def observe(self, key, revision):
+        with self._lock:
+            before = self._sequence
+        found, value = super().get(key, revision)  # exactly the existing get/LRU action
+        reason = None
+        if not found or value is None:
+            with self._lock:
+                resident = self._entries.get(key)
+                try:
+                    historical = _TAIL_REASONS.peek(key)
+                except Exception:
+                    historical = None
+                    self._diagnostic_loss = True
+                if self._sequence != before:
+                    reason = "unknown_concurrent"
+                elif self._diagnostic_loss:
+                    # Failed replacement can leave a formerly valid old token.
+                    # No history is authoritative until an explicit reset succeeds.
+                    reason = "unknown_metadata"
+                elif resident is not None and resident[0] != revision:
+                    reason = "revision"
+                elif historical is not None and historical[0] != revision:
+                    reason = "unknown_revision"
+                elif historical is not None:
+                    recorded = historical[1].code
+                    reason = recorded if recorded != "admitted" else "unknown_removal"
+                else:
+                    # No history is NOT proof this key never existed: history
+                    # is bounded and may have reset/overflowed independently.
+                    reason = "unknown_reset" if self._resets else "missing_unknown"
+        return found, value, reason
+
+    def consume(self, key, revision):
+        with self._lock:
+            self._store(key, revision, None)  # original pre-attempt invalidation
+            return self._sequence
+
+    def note_refusal(self, key, revision, token, code):
+        if token is None:
+            return
+        try:
+            with self._lock:
+                entry = self._entries.get(key)
+                recorded = _TAIL_REASONS.peek(key)
+                if (entry is not None and entry[0] == revision and entry[1] is None
+                        and recorded is not None and recorded[0] == revision
+                        and recorded[1].token == token):
+                    self._remember(key, revision, _TailReason(code, token))
+        except Exception:
+            self._diagnostic_loss = True
+
+    def reset(self):
+        with self._lock:
+            self._entries.clear()
+            self._weights.clear()
+            self._pins.clear()
+            self.weight = self.hits = self.misses = 0
+            self._sequence += 1
+            self._resets += 1
+            try:
+                _TAIL_REASONS.reset()
+                self._diagnostic_loss = False
+            except Exception:
+                self._diagnostic_loss = True
+
+
+_TAIL_STATES = _TailCache()
 
 
 def _tail_key(path, agent_id, backend_session_id):
@@ -888,10 +1019,12 @@ def _size_bucket(size):
     return "ge1024m"
 
 
-def _tail_log(code, *, retention=False, backend=None, size=None):
+def _tail_log(code, *, retention=False, reason=None, backend=None, size=None):
     """Fixed codes and unit counts; no session, path, text or message IDs."""
     from .log import log
     detail = f"code={code} count=1"
+    if reason is not None:
+        detail += f" reason={reason}"
     if not retention:
         observed_backend, observed_size = _IMPORT_LOG_METADATA.get()
         if backend is None:
@@ -902,8 +1035,8 @@ def _tail_log(code, *, retention=False, backend=None, size=None):
     log("transcriptTailRetention" if retention else "transcriptTailDecision", detail)
 
 
-def _refuse_tail(code):
-    _tail_log("full_" + code)
+def _refuse_tail(code, *, reason=None, backend=None, size=None):
+    _tail_log("full_" + code, reason=reason, backend=backend, size=size)
     return None
 
 
@@ -914,27 +1047,42 @@ def _checkpoint_refused(status):
     return bool(reasons)
 
 
-def _cache_committed_tail(key, revision, checkpoint, raw_inputs, file_hash):
+def _checkpoint_reason(status):
+    reasons = status.get("refused", ())
+    known = {"foreign_commit_yield", "connection_changed_yield",
+             "yield_without_release_sample", "data_version_read_failure"}
+    if len(reasons) == 1 and reasons[0] in known:
+        return "publication_" + reasons[0]
+    return "publication_refused_unknown"
+
+
+def _cache_committed_tail(key, revision, checkpoint, raw_inputs, file_hash, *, reason_token=None):
     from . import db
     if raw_inputs is None or file_hash is None:
+        _TAIL_STATES.note_refusal(key, revision, reason_token, "publication_not_written")
         _tail_log("checkpoint_not_written", retention=True)
         return
     try:
         current = identity(pathlib.Path(checkpoint.source_file))
     except OSError:
+        _TAIL_STATES.note_refusal(key, revision, reason_token, "publication_file_unavailable")
         _tail_log("file_unavailable_after_store", retention=True)
         return
     if current != Identity(checkpoint.device, checkpoint.inode, checkpoint.size, checkpoint.mtime_ns):
+        _TAIL_STATES.note_refusal(key, revision, reason_token, "publication_file_moved")
         _tail_log("file_moved_before_publication", retention=True)
         return
     if load_checkpoint(db.conn(), checkpoint.agent_id, checkpoint.backend_session_id,
                        checkpoint.source_file) != checkpoint:
+        _TAIL_STATES.note_refusal(key, revision, reason_token, "publication_superseded")
         _tail_log("checkpoint_superseded", retention=True)
         return
     if raw_inputs[4]:
+        _TAIL_STATES.note_refusal(key, revision, reason_token, "oracle_history")
         _tail_log("oracle_history", retention=True)
         return
     if any(row["origin"] not in ("user", "agent", None, "") for row in raw_inputs[1]):
+        _TAIL_STATES.note_refusal(key, revision, reason_token, "automation_provenance")
         _tail_log("automation_provenance", retention=True)
         return
     state = _TailState(checkpoint, raw_inputs, file_hash)
@@ -944,34 +1092,41 @@ def _cache_committed_tail(key, revision, checkpoint, raw_inputs, file_hash):
         _tail_log("frontier_not_retained", retention=True)
 
 
-def _try_tail(backend, path, agent_id, backend_session_id, conf, started):
+def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, diagnostic=None):
     from . import db, message_writes
     key = _tail_key(path, agent_id, backend_session_id)
     revision = parser_version(backend)
-    found, state = _TAIL_STATES.get(key, revision)
+    size = diagnostic.get("size") if diagnostic is not None else None
+
+    def refuse(code, *, reason=None):
+        return _refuse_tail(code, reason=reason, backend=backend, size=size)
+
+    found, state, reason = _TAIL_STATES.observe(key, revision)
     # Invalidate before any attempt, including a failure after a partial batch
     # or external effect. Only successful committed progress re-admits carry.
-    _TAIL_STATES.put(key, revision, None)
+    reason_token = _TAIL_STATES.consume(key, revision)
+    if diagnostic is not None:
+        diagnostic["token"] = reason_token
     if not found or state is None:
-        return _refuse_tail("no_frontier")
+        return refuse("no_frontier", reason=reason)
     cp = load_checkpoint(db.conn(), agent_id, backend_session_id, str(path))
     if cp != state.checkpoint:
-        return _refuse_tail("checkpoint_changed")
+        return refuse("checkpoint_changed")
     before = identity(path)
     if complete_size(path, before.size) != before.size:
-        return _refuse_tail("partial_record")
+        return refuse("partial_record")
     reason = decide(cp, backend, path, before, now_ms=db.now_ms(),
                     audit_every=int(conf["audit_every"]), audit_seconds=float(conf["audit_seconds"]),
                     max_tail_bytes=int(conf["max_tail_bytes"]))
     if reason:
-        return _refuse_tail(reason)
+        return refuse(reason)
     previous_hash, current_hash = _tail_file_hashes(path, cp.complete_size, before.size)
     if previous_hash != state.file_hash:
-        return _refuse_tail("prefix_content_changed")
+        return refuse("prefix_content_changed")
     turns = parse_range(backend, path, cp.boundary_offset, before.size)
     parsed = time.perf_counter()
     if identity(path) != before:
-        return _refuse_tail("file_moved_during_parse")
+        return refuse("file_moved_during_parse")
     next_cp = replace(cp, size=before.size, mtime_ns=before.mtime_ns,
                       complete_size=before.size, turn_count=cp.boundary_seq + len(turns),
                       tail_hash=range_hash(path, cp.boundary_offset, before.size),
@@ -994,17 +1149,20 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started):
             carry=cp.store_carry, expected_prelude=state.raw_inputs, on_stored=publish,
             checkpoint_status=checkpoint_status)
     except message_writes._TailInvalidated:
-        return _refuse_tail("carry_inputs_changed")
-    _tail_log("tail_applied")
+        return refuse("carry_inputs_changed")
+    _tail_log("tail_applied", backend=backend, size=size)
     if not _checkpoint_refused(checkpoint_status):
-        _cache_committed_tail(key, revision, next_cp, raw_inputs, current_hash)
+        _cache_committed_tail(key, revision, next_cp, raw_inputs, current_hash,
+                              reason_token=reason_token)
+    else:
+        _TAIL_STATES.note_refusal(key, revision, reason_token, _checkpoint_reason(checkpoint_status))
     return {"rows": next_cp.turn_count, "parse_s": parsed - started,
             "store_s": time.perf_counter() - parsed, "shadow": "not_sampled_tail",
             "apply_mode": "tail", "parsed_bytes": before.size - cp.boundary_offset}
 
 
 def _store_full_with_tail_checkpoint(backend, path, agent_id, backend_session_id,
-                                     turns, before, conf):
+                                     turns, before, conf, *, reason_token=None):
     from . import db, message_store, message_writes
     key = _tail_key(path, agent_id, backend_session_id)
     revision = parser_version(backend)
@@ -1064,14 +1222,24 @@ def _store_full_with_tail_checkpoint(backend, path, agent_id, backend_session_id
         agent_id=agent_id, backend_session_id=backend_session_id,
         source_file=str(path), turns=turns, checkpoint_status=checkpoint_status, **kwargs)
     if _checkpoint_refused(checkpoint_status):
+        _TAIL_STATES.note_refusal(key, revision, reason_token, _checkpoint_reason(checkpoint_status))
         return
     if refusal:
+        reason = {"effect_bearing_prefix": "bootstrap_effect",
+                  "file_moved_before_bootstrap": "bootstrap_file_moved",
+                  "empty_transcript": "bootstrap_empty",
+                  "assistant_prefix": "bootstrap_assistant_prefix",
+                  "partial_record": "bootstrap_partial_record",
+                  "bootstrap_file_io": "bootstrap_io"}.get(refusal, "bootstrap_refused")
+        _TAIL_STATES.note_refusal(key, revision, reason_token, reason)
         if not refusal_logged:
             _tail_log(refusal, retention=True)
     elif checkpoint is None:
+        _TAIL_STATES.note_refusal(key, revision, reason_token, "publication_not_written")
         _tail_log("checkpoint_not_written", retention=True)
     else:
-        _cache_committed_tail(key, revision, checkpoint, raw_inputs, current_hash)
+        _cache_committed_tail(key, revision, checkpoint, raw_inputs, current_hash,
+                              reason_token=reason_token)
 
 
 def import_transcript(*, backend: str, path: pathlib.Path, agent_id: str,
@@ -1104,9 +1272,11 @@ def import_transcript(*, backend: str, path: pathlib.Path, agent_id: str,
                         and implementation is not None
                         and implementation.supports_transcript_tail_apply)
         before = None
+        diagnostic = {}
         if tail_enabled:
             try:
                 before = identity(path)
+                diagnostic["size"] = before.size
             except OSError as exc:
                 from .log import log_exception
                 log_exception("transcriptTailFileSkip", exc)
@@ -1126,7 +1296,8 @@ def import_transcript(*, backend: str, path: pathlib.Path, agent_id: str,
                         "_clarp_transcript_completion_v1": "deferred"}
             if tail_enabled and before is not None:
                 try:
-                    tail = _try_tail(backend, path, agent_id, backend_session_id, conf, started)
+                    tail = _try_tail(backend, path, agent_id, backend_session_id, conf, started,
+                                     diagnostic=diagnostic)
                 except OSError as exc:
                     from .log import log_exception
                     log_exception("transcriptTailFileSkip", exc)
@@ -1149,7 +1320,8 @@ def import_transcript(*, backend: str, path: pathlib.Path, agent_id: str,
             parsed = time.perf_counter()
             if tail_enabled:
                 _store_full_with_tail_checkpoint(backend, path, agent_id, backend_session_id,
-                                                 turns, before, conf)
+                                                 turns, before, conf,
+                                                 reason_token=diagnostic.get("token"))
                 retained = _TAIL_STATES.peek(_tail_key(path, agent_id, backend_session_id))
                 admission.retained = (retained is not None
                                       and retained[0] == parser_version(backend)

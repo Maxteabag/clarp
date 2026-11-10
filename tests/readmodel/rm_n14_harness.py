@@ -237,12 +237,16 @@ def run_lane(database: pathlib.Path, transcript: pathlib.Path, backend: str,
                     import re
                     shape = r"code=[a-z0-9_]+ count=[1-9][0-9]*"
                     if event == "transcriptTailDecision":
-                        shape += (r" backend=(?:claude|codex|agy|other)"
+                        shape += (r"(?: reason=(?:evicted_empty|evicted|overweight|unknown|consumed|unknown_concurrent|revision|unknown_revision|unknown_removal|unknown_metadata|unknown_reset|missing_unknown|publication_foreign_commit_yield|publication_connection_changed_yield|publication_yield_without_release_sample|publication_data_version_read_failure|publication_refused_unknown|publication_not_written|publication_file_unavailable|publication_file_moved|publication_superseded|oracle_history|automation_provenance|bootstrap_effect|bootstrap_file_moved|bootstrap_empty|bootstrap_assistant_prefix|bootstrap_partial_record|bootstrap_io|bootstrap_refused))?"
+                                  r" backend=(?:claude|codex|agy|other)"
                                   r" size=(?:unknown|lt1m|lt16m|lt64m|lt256m|lt1024m|ge1024m)")
                     assert re.fullmatch(shape, detail)
                     fields = dict(item.split("=", 1) for item in detail.split())
                     metrics["tail_events"].append({"event": event, "code": fields["code"],
                                                    "count": int(fields["count"])})
+                    if "reason" in fields:
+                        assert event == "transcriptTailDecision" and fields["code"] == "full_no_frontier"
+                        metrics["tail_events"][-1]["reason"] = fields["reason"]
                 return original_log(event, detail)
 
             stack.enter_context(patch.object(host_log, "log", capture_log))
