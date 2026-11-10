@@ -701,12 +701,13 @@ def test_each_codex_thread_carries_its_own_agent_session(tmp_path, monkeypatch):
             threads[session] = sent[-1][1].get("threadId") or [
                 result.get("thread", {}).get("id") for method, _p, result in sent
                 if method == "thread/start"][-1]
-        for session, agent_id in agent_ids.items():
-            handle = _spawn_fake_turn(tmp_path, agent_id=agent_id, session=session,
-                                      text=session + " again",
-                                      backend_session_id=threads[session],
-                                      is_new_session=False)
-            assert handle.wait(timeout=8) == 0
+        for suffix in (" again", " once more"):
+            for session, agent_id in agent_ids.items():
+                handle = _spawn_fake_turn(tmp_path, agent_id=agent_id, session=session,
+                                          text=session + suffix,
+                                          backend_session_id=threads[session],
+                                          is_new_session=False)
+                assert handle.wait(timeout=8) == 0
     finally:
         codex_app_server.recycle_clients()
 
@@ -717,4 +718,85 @@ def test_each_codex_thread_carries_its_own_agent_session(tmp_path, monkeypatch):
     assert [(method, identity(params)) for method, params, _r in sent
             if method in ("thread/start", "thread/resume")] == [
         ("thread/start", "one"), ("thread/start", "two"),
+        ("thread/resume", "one"), ("thread/resume", "two"),
         ("thread/resume", "one"), ("thread/resume", "two")]
+    resumes = [(params, result) for method, params, result in sent
+               if method == "thread/resume"]
+    assert len(resumes) == 4
+    assert all(params.get("excludeTurns") is True for params, _result in resumes)
+    # This real fake-server transport returns only the thread ID: the reader,
+    # binding and next-turn/callback path need no hydrated history.
+    assert all("turns" not in result["thread"] for _params, result in resumes)
+    assert all("excludeTurns" not in params for method, params, _result in sent
+               if method == "thread/start")
+
+
+@pytest.mark.parametrize("failure", ["rejected", "timeout"])
+def test_per_turn_resume_failure_does_not_retry_without_history_exclusion(
+        tmp_path, monkeypatch, failure):
+    client = _reader_client([], agent_id="resume-owner")
+    client._loaded_threads = {"existing-thread"}
+    handle = _Handle()
+    requests, bindings, callbacks = [], [], []
+    primary = (RuntimeError("thread/resume: unsupported parameter excludeTurns")
+               if failure == "rejected" else TimeoutError("thread/resume reply unknown"))
+
+    def request(method, params, timeout=30):
+        requests.append((method, dict(params)))
+        raise primary
+
+    monkeypatch.setattr(client, "request", request)
+    with pytest.raises(type(primary)) as caught:
+        client.start(
+            text="New work", cwd=tmp_path, backend_session_id="existing-thread",
+            is_new_session=False, session="resume-owner", trace_id="resume-trace",
+            model="", effort="", voice=False, persona="Owner", handle=handle,
+            on_session_init=lambda thread: bindings.append(thread),
+            on_result=lambda value: callbacks.append(("result", value)),
+            on_error=lambda value: callbacks.append(("error", value)),
+            stream=None, enqueue=lambda **kwargs: 0, agent_id="resume-owner")
+    assert caught.value is primary
+    assert [method for method, _params in requests] == ["thread/resume"]
+    assert requests[0][1].get("excludeTurns") is True
+    assert bindings == callbacks == []
+    assert client.active is None and client._actives == {}
+    assert handle._done.is_set()
+    assert client._loaded_threads == {"existing-thread"}
+
+
+def test_ignored_resume_exclusion_does_not_feed_returned_history_to_the_turn(
+        tmp_path, monkeypatch):
+    client = _reader_client([], agent_id="resume-owner")
+    client._loaded_threads = {"existing-thread"}
+    handle = _Handle()
+    requests, bindings = [], []
+
+    def request(method, params, timeout=30):
+        requests.append((method, dict(params)))
+        if method == "thread/resume":
+            # A receiver may ignore an unknown field and return its legacy
+            # response. Correctness stays unchanged; no IO saving is inferred.
+            return {"thread": {"id": "existing-thread", "turns": [
+                {"id": "old-turn", "items": [{"text": "Old work must not replay"}]}]}}
+        assert method == "turn/start"
+        return {"turn": {"id": "new-turn"}}
+
+    monkeypatch.setattr(client, "request", request)
+    result_callback, error_callback = lambda value: None, lambda value: None
+    client.start(
+        text="Only this new work", cwd=tmp_path, backend_session_id="existing-thread",
+        is_new_session=False, session="resume-owner", trace_id="resume-trace",
+        model="", effort="", voice=False, persona="Owner", handle=handle,
+        on_session_init=lambda thread: bindings.append(thread),
+        on_result=result_callback, on_error=error_callback,
+        stream=None, enqueue=lambda **kwargs: 0, agent_id="resume-owner")
+    assert [method for method, _params in requests] == ["thread/resume", "turn/start"]
+    assert requests[0][1].get("excludeTurns") is True
+    assert requests[1][1]["input"] == [{"type": "text", "text": "Only this new work"}]
+    assert requests[1][1]["threadId"] == "existing-thread"
+    assert bindings == ["existing-thread"]
+    active = client._actives["resume-owner"]
+    assert active.thread_id == "existing-thread" and active.turn_id == "new-turn"
+    assert active.trace_id == "resume-trace" and active.session == "resume-owner"
+    assert active.on_result is result_callback and active.on_error is error_callback
+    assert active.handle is handle and not handle._done.is_set()
