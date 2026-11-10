@@ -10,7 +10,7 @@ import uuid
 from .persistence.schema_parts.oracle_memory import SCHEMA
 
 from . import db
-from .log import log
+from .log import log_fault
 from . import lifecycle as lk
 from .lifecycle import Edge, Lifecycle, WaitForever
 
@@ -61,7 +61,7 @@ def _dated(row, key, ms, now_ms):
     try:
         return {**row, key: iso_time(ms), "age": age_phrase(ms, now_ms)}
     except (OverflowError, OSError, ValueError) as exc:  # a corrupt stored time must not stop the call
-        log("oracleHistoryTimeUnreadable", f"{key}={ms}: {type(exc).__name__}: {exc}")
+        log_fault("oracleHistoryTimeUnreadable", exc)  # contained: a failing sink cannot raise here
         return {name: value for name, value in row.items() if name != key}
 
 
