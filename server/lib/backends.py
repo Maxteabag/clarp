@@ -49,6 +49,24 @@ _clock = time.monotonic
 _STATUS_GENERATION = 0
 
 
+def _remember(error: Exception) -> Exception:
+    """Keep the traceback a status failure has now, for _raise_remembered."""
+    error._status_origin = error.__traceback__
+    return error
+
+
+def _raise_remembered(error: BaseException) -> None:
+    """Raise a status failure that is remembered for a window or a build.
+
+    ``raise`` adds the frames it unwinds to the exception's own traceback, and
+    they stay there. One remembered object raised once per agent therefore
+    carried every earlier caller's frames: megabytes per logged traceback over
+    a large fleet, 34 GB of diagnostics in a day (10 Nov 2026). Every raise
+    starts again from the traceback the failure had when it was caught.
+    """
+    raise error.with_traceback(getattr(error, "_status_origin", None))
+
+
 @dataclass
 class _ScopedRuntimeStatus:
     client: Any
@@ -68,10 +86,10 @@ class _ScopedRuntimeStatus:
                 from .log import log_exception
                 log_exception("runtimeStatusUnavailable", exc,
                               detail="snapshot-fresh" if fresh else "snapshot-status")
-                self.samples[fresh] = (None, exc)
+                self.samples[fresh] = (None, _remember(exc))
         result, error = self.samples[fresh]
         if error is not None:
-            raise error
+            _raise_remembered(error)
         return result if result is not None else {}
 
 
@@ -130,12 +148,12 @@ def runtime_status(*, max_age: float | None = None) -> dict:
             try:
                 result, error = client.status(), None
             except Exception as exc:  # noqa: BLE001 - remembered for the window
-                result, error = None, exc
+                result, error = None, _remember(exc)
                 from .log import log_exception
                 log_exception("runtimeStatusUnavailable", exc, detail="shared-status")
             _STATUS_CACHE = (client, _clock(), result, error)
         if error is not None:
-            raise error
+            _raise_remembered(error)
         return result if isinstance(result, dict) else {}
 
 
