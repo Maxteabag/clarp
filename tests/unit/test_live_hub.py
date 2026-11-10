@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import copy
 
+from lib import live_core
+
 from lib.live_hub import LiveHub
 from lib.live_items import LiveView
 
@@ -204,6 +206,8 @@ def test_the_runtime_pushes_live_events_and_answers_snapshots_over_its_socket(tm
     import threading
     import time
 
+    from lib import live_hub, live_items, live_projection
+    from lib.backend import opencode
     from lib.audio_stream import AudioStream
     from lib.live_hub import LiveFanout, LiveRelay
     from lib.runtime_bridge import RuntimeClient
@@ -212,6 +216,10 @@ def test_the_runtime_pushes_live_events_and_answers_snapshots_over_its_socket(tm
     class _Dispatch:
         pass
 
+    assert live_hub.LiveHub is live_core.LiveHub
+    assert live_items.LiveView is live_projection.LiveView
+    for name in ("current", "ensure_turn", "report", "item_prefix", "nudge", "install"):
+        assert getattr(live_hub, name) is getattr(live_core, name)
     fanout = LiveFanout()
     hub = LiveHub(sink=fanout.publish)
     socket_path = tmp_path / "rt.sock"
@@ -225,17 +233,20 @@ def test_the_runtime_pushes_live_events_and_answers_snapshots_over_its_socket(tm
     relay = LiveRelay(socket_path, stream)
     relay.start()
     try:
+        live_hub.install(hub, fanout)
         deadline = time.monotonic() + 5
         while not fanout.subscribers() and time.monotonic() < deadline:
             time.sleep(0.02)
         hub.begin_turn(agent_id="a1", session="rachel", conv="conv-1", turn_id="tr-1")
-        hub.message_text("a1", "m1", "Hello")
+        assert fanout.subscribers()
+        opencode._live("a1", "message_text", "a1", "m1", "Hello", trace_id="tr-1")
         got = json.loads(phone.get(timeout=5))
         assert got["type"] == "live" and got["lseq"] == 1
         snapshot = RuntimeClient(socket_path).live_snapshot(session="rachel")
         assert snapshot["epoch"] == hub.epoch
         assert [item["text"] for item in snapshot["items"]] == ["Hello"]
     finally:
+        live_hub.install(None)
         relay.stop()
         runtime.shutdown()
         runtime.server_close()
@@ -247,7 +258,7 @@ def test_a_failed_turn_carries_the_reason_clients_show(monkeypatch):
     from lib import live_hub
     from lib.protocol import AgentState
     hub, clock, events = _hub()
-    monkeypatch.setattr(live_hub, "_HUB", hub)
+    monkeypatch.setattr(live_core, "_HUB", hub)
     hub.begin_turn(agent_id="a1", session="rachel", conv="conv-1", turn_id="tr-1")
     hub.item("a1", "cx:tr-1:compaction", "compaction", {"status": "running"})
     clock.advance(1)
@@ -304,14 +315,52 @@ def test_an_update_handoff_keeps_the_turn_and_says_it_waits_for_the_update(monke
     from lib import live_hub
     from lib.protocol import AgentState
     hub, clock, events = _hub()
-    monkeypatch.setattr(live_hub, "_HUB", hub)
+    monkeypatch.setattr(live_core, "_HUB", hub)
     hub.begin_turn(agent_id="a1", session="rachel", conv="conv-1", turn_id="tr-1")
     hub.account_recovery("a1", "Waiting for a claude account with available usage")
     clock.advance(1)
+    successor, _, successor_events = _hub()
+    captured = []
+    def capture_then_replace():
+        selected = live_core.current()
+        captured.append(selected)
+        monkeypatch.setattr(live_core, "_HUB", successor)
+        return selected
+    monkeypatch.setattr(live_hub, "current", capture_then_replace)
     live_hub.observe_transition("a1", "update_handoff", AgentState.IDLE, {
         "trace_id": "tr-1", "reason": "update_handoff",
         "message": "Waiting for the Clarp update"})
     snapshot = hub.snapshot(session="rachel")
     assert snapshot["turn"]["status"] == "running"
     assert snapshot["activity"]["headline"] == "Waiting for the Clarp update"
+    assert captured == [hub]
+    assert successor_events == []
     _same_state(_client(hub, events), snapshot)
+
+
+def test_a_missing_local_hub_forwards_the_transition_with_its_original_detail(monkeypatch):
+    """A split/hook process still uses the feature forwarder without a local hub."""
+    import threading
+    from types import SimpleNamespace
+    from lib import backends, live_hub
+
+    calls, workers = [], []
+    original_thread = threading.Thread
+    def worker(*args, **kwargs):
+        thread = original_thread(*args, **kwargs)
+        workers.append(thread)
+        return thread
+    def forward(*args):
+        calls.append(args)
+        raise RuntimeError("synthetic older runtime")
+    monkeypatch.setattr(live_core, "_HUB", None)
+    monkeypatch.setattr(backends, "_RUNTIME_CLIENT", SimpleNamespace(live_observe=forward))
+    monkeypatch.setattr(live_hub.threading, "Thread", worker)
+    live_hub.observe_transition("a1", "tool_started", "busy", {
+        "trace_id": "tr-1", "call_id": "c1", "_state_id": 17,
+        "input": {"command": "pwd"}, "status": None, "private": "not forwarded"})
+    assert len(workers) == 1
+    workers[0].join(timeout=5)
+    assert not workers[0].is_alive()
+    assert calls == [("a1", "tool_started", "busy", {
+        "trace_id": "tr-1", "call_id": "c1", "_state_id": 17, "input": {"command": "pwd"}})]

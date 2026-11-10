@@ -394,3 +394,8 @@ Additional explicit lead S1 signature (937): `janitor_store` is classified featu
 ## Wave 2: canonical pacing primitive (packet 4)
 
 `stream_pacing` is a new core primitive owning generic markdown prefix pacing, per-instance timer generations and trailing throttling. Feature `live_pacing` preserves exact object exports; provider/runtime core consumers use the canonical owner. The existing feature module retains its classification. Muse timer observers patch the canonical scheduler read by the moved classes. No timer, generation, cancellation or callback behavior changes.
+
+
+## Wave 2: live projection and registry primitives (packet 8)
+
+Core live_projection owns the unchanged reference reducer. Core live_core owns the unchanged hub/fanout projection implementation and sole process-local registry; legacy live_items/live_hub retain canonical exports. Feature live_hub keeps observation, relay, interrupted projection recovery and runtime forwarding; its observer makes one canonical registry read at the original first statement. Producers depend on canonical core attributes; their module aliases are distinct module objects. Generated dispatcher and lifecycle feature edges remain outstanding. No wire, registry policy, timer or state-transition behavior change.
