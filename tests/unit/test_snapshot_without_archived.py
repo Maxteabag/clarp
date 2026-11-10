@@ -9,7 +9,7 @@ import json
 import pytest
 
 from lib import agents as agents_db
-from lib import backends, db, reconcile, snapshot
+from lib import backends, db, message_previews, reconcile, snapshot
 
 FULL_KEYS = {"agents", "focus", "roster", "personas", "model_avatars", "available_mcp_servers",
              "tool_explanations"}
@@ -242,6 +242,71 @@ def test_a_page_of_archived_agents_costs_the_same_however_many_there_are(fleet):
     large = len(_statements(lambda: snapshot.build_archived_agents(None, limit=5)))
     # The five newest are now busy ones, each with its own statements; the other 43 cost nothing.
     assert large <= small + 5 * 4, (small, large)
+
+
+# --- message previews: three statements each when the cache cannot answer ------------------------
+
+def _with_messages(fleet) -> None:
+    db.conn().executemany(
+        """INSERT INTO messages (message_id,agent_id,backend_session_id,seq,role,text,revision,updated_at)
+           VALUES (?,?,?,1,'user','hello',1,1000)""",
+        [(f"m-{agent_id}", agent_id, f"s-{agent_id}") for agent_id in fleet.values()])
+
+
+def _previews_computed(monkeypatch) -> list[str]:
+    computed: list[str] = []
+    real = message_previews._agent_preview
+
+    def record(agent_id, *args):
+        computed.append(agent_id)
+        return real(agent_id, *args)
+
+    monkeypatch.setattr(message_previews, "_agent_preview", record)
+    return computed
+
+
+def _cold_previews() -> None:
+    message_previews._PREVIEW_CACHE.reset()
+    message_previews._REVISION_CACHE.reset()
+
+
+def test_a_cold_preview_cache_costs_the_lean_snapshot_nothing_for_archived_agents(fleet, monkeypatch):
+    """On the Host a snapshot that could not use the preview cache ran 4,181 statements,
+    2,750 of them one agent's message head at a time, archived agents included."""
+    _with_messages(fleet)
+    computed = _previews_computed(monkeypatch)
+    archived = set(_archived_ids(fleet))
+
+    _cold_previews()
+    lean = snapshot.build_agent_snapshot(None, include_archived=False)
+    assert set(computed) == set(fleet.values()) - archived and len(computed) == 3
+    assert all(row["last_message"] == "You: hello" for row in lean["agents"])
+
+    _cold_previews()
+    computed.clear()
+    page = snapshot.build_archived_agents(None, limit=3)
+    assert sorted(computed) == sorted(_archived_ids(fleet)[:3])   # the page's three, nothing else
+    assert all(row["last_message"] == "You: hello" for row in page["agents"])
+
+    _cold_previews()
+    computed.clear()
+    snapshot.build_agent_snapshot(None)
+    assert set(computed) == set(fleet.values())            # the default: every agent, as before
+
+
+def test_a_lean_snapshot_leaves_the_other_agents_cached_previews_alone(fleet, monkeypatch):
+    _with_messages(fleet)
+    _cold_previews()
+    full = snapshot.build_agent_snapshot(None)             # fills the cache for every agent
+    computed = _previews_computed(monkeypatch)
+
+    snapshot.build_agent_snapshot(None, include_archived=False)
+    snapshot.build_archived_agents(None, limit=2)
+    assert computed == []                                  # both read the cache
+
+    again = snapshot.build_agent_snapshot(None)
+    assert computed == [], "a partial projection must not evict what it did not ask for"
+    assert json.dumps(again) == json.dumps(full)
 
 
 # --- one build is shared by the requests that asked for the same thing ------------------------------

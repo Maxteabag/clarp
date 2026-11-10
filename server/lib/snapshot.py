@@ -211,7 +211,9 @@ def _project(ctx, select) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     states = agents_db.dashboard_states()
     live_activities = _live_activities()
     runtimes = agents_db.dashboard_runtimes()
-    messages = message_store.dashboard_messages()
+    # Every agent's preview here, as always, when every agent is wanted;
+    # otherwise only the selected agents', once the selection is known.
+    messages = message_store.dashboard_messages() if select is None else None
     schedules: dict[str, list] = {}
     for schedule in scheduler.list_schedules():
         schedules.setdefault(schedule['agent_id'], []).append(schedule)
@@ -234,6 +236,8 @@ def _project(ctx, select) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         call_profiles = None  # uncertainty must refuse explicitly, never silently start Normal
     agent_rows = agents_db.list_agents()
     selected = agent_rows if select is None else select(agent_rows)
+    if messages is None:
+        messages = message_store.dashboard_messages(agent_ids={a["agent_id"] for a in selected})
     tree = helper_tree(agent_rows, states, visible_labels)
     child_count = tree.child_count
     running_children = tree.running_children
