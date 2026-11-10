@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import sqlite3
 import stat
+import sys
 
 from .. import xdg
 
@@ -91,3 +92,12 @@ def check_existing(path: Path | None = None) -> None:
         check_connection(connection, path, identity)
     finally:
         connection.close()
+
+
+def require_startup() -> None:
+    """Fail a directly executed service before dependent imports or listeners."""
+    try:
+        check_existing()
+    except SchemaNotReady as exc:
+        print(str(exc), file=sys.stderr)
+        raise SystemExit(1) from None

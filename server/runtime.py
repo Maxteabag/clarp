@@ -9,6 +9,10 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
+if __name__ == "__main__":
+    from lib.persistence.schema_readiness import require_startup
+    require_startup()
+
 from lib.context import ServerContext  # noqa: E402
 from lib.log import log, log_exception  # noqa: E402
 from lib.paths import RuntimePaths  # noqa: E402

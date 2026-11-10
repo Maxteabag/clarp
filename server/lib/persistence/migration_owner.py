@@ -132,6 +132,9 @@ def run(path: Path | None = None) -> None:
 
 
 def main() -> int:
+    if len(sys.argv) != 1:
+        print("migration_owner_invalid_arguments", file=sys.stderr)
+        return 2
     try:
         run()
     except readiness.SchemaNotReady as exc:

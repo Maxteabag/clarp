@@ -11,6 +11,12 @@ Endpoints (see Handler.do_GET / do_POST for the dispatch tables):
 """
 from __future__ import annotations
 
+# Imports as a library remain inert. A directly executed Host must pass the
+# pure compatibility gate before importing application context/recovery code.
+if __name__ == "__main__":
+    from lib.persistence.schema_readiness import require_startup
+    require_startup()
+
 import time
 _HOST_PROCESS_STARTED_AT = time.monotonic()
 from lib import transcript_import_cache as _transcript_import_cache
