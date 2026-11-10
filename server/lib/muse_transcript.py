@@ -60,7 +60,7 @@ def _iso(recorded_at: Any) -> str:
     except (TypeError, ValueError):
         return ""
     return _dt.datetime.fromtimestamp(micros / 1_000_000, tz=_dt.timezone.utc) \
-        .isoformat().replace("+00:00", "Z")
+        .isoformat(timespec="microseconds").replace("+00:00", "Z")
 
 
 def _rows(path) -> Iterator[dict]:
