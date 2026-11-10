@@ -15,7 +15,7 @@ from __future__ import annotations
 
 # Versions 81 and 82 also exist on installed Hosts with additive indexing
 # migrations. History must run when upgrading those Hosts, not only main's v80.
-_SCHEMA_VERSION = 122  # PROVISIONAL (janitor_runs newest-run index, the next number above main 121; 120 is feat/agent-ring-device-optout's): renumber at the landing if taken
+_SCHEMA_VERSION = 122  # the janitor_runs newest-run index. 120 is a hole: no step has that number (see db_migrations._migrate)
 
 
 # The schema below is the complete current shape. It is applied in one step to
