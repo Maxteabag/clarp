@@ -103,3 +103,36 @@ def test_real_turn_boundary_tail_without_metadata_matches_full_visible_history(t
     assert [(row["role"], row["text"]) for row in full] == [
         ("user", "Actual user request"), ("assistant", "Actual completion")]
     assert actual_tail == full
+
+
+def test_late_conflicting_metadata_restores_the_earlier_context_candidate(tmp_path):
+    item = _item()
+    path = tmp_path / "conflicted.jsonl"
+    rows = [{"type": "session_meta", "payload": {"id": "new-thread"}},
+            {"type": "response_item", "payload": item},
+            {"type": "session_meta", "payload": {"id": "foreign-thread"}}]
+    path.write_text("".join(json.dumps(row) + "\n" for row in rows))
+    assert [row["text"] for row in codex_transcript.parse_turns(path)] == [item["content"][0]["text"]]
+
+
+def test_a_genuine_user_event_closes_bootstrap_even_without_a_start_record(tmp_path):
+    item = _item()
+    path = tmp_path / "missing-start.jsonl"
+    rows = [{"type": "session_meta", "payload": {"id": "new-thread"}},
+            {"type": "event_msg", "payload": {"type": "user_message", "message": "Real input"}},
+            {"type": "response_item", "payload": item}]
+    path.write_text("".join(json.dumps(row) + "\n" for row in rows))
+    assert [row["text"] for row in codex_transcript.parse_turns(path)] == [
+        "Real input", item["content"][0]["text"]]
+
+
+def test_a_real_user_copy_of_context_text_is_not_lost_to_dual_format_deduplication(tmp_path):
+    item = _item()
+    path = tmp_path / "user-copy.jsonl"
+    ordinary = {**item, "id": "real-provider-user-id"}
+    rows = [{"type": "session_meta", "payload": {"id": "new-thread"}},
+            {"type": "response_item", "payload": item},
+            {"type": "event_msg", "payload": {"type": "task_started", "turn_id": "real-turn"}},
+            {"type": "response_item", "payload": ordinary}]
+    path.write_text("".join(json.dumps(row) + "\n" for row in rows))
+    assert [row["text"] for row in codex_transcript.parse_turns(path)] == [ordinary["content"][0]["text"]]
