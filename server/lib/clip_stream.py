@@ -36,7 +36,7 @@ import time
 from dataclasses import dataclass, field
 
 from .http_utils import send_plain_http_error
-from .log import log_exception
+from .log import log_exception, log_fault
 
 
 CHUNK_WAIT_SEC = 30.0
@@ -431,7 +431,8 @@ def _is_producer_complete(clip_id: int) -> bool:
             "SELECT producer_status FROM clips WHERE clip_id = ?",
             (int(clip_id),),
         ).fetchone()
-    except Exception:
+    except Exception as exc:
+        log_fault("clipProducerLookupFailed", exc)
         return False
     if not row:
         return False
@@ -446,7 +447,8 @@ def _path_for_clip(clip_id: int, audio_dir: pathlib.Path) -> pathlib.Path | None
             "SELECT path FROM clips WHERE clip_id = ?",
             (clip_id,),
         ).fetchone()
-    except Exception:
+    except Exception as exc:
+        log_fault("clipPathLookupFailed", exc)
         return None
     if not row or not row["path"]:
         return None

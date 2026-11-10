@@ -14,6 +14,8 @@ import json
 from typing import Any, Iterable
 from urllib.parse import urlencode
 
+from .log import log_fault
+
 WS_URL = "wss://api.cartesia.ai/stt/websocket"
 API_VERSION = "2026-08-14"
 
@@ -114,8 +116,8 @@ def transcribe_pcm(sock: Any, *, pcm: bytes,
     finally:
         try:
             sock.close()
-        except Exception:  # noqa: BLE001 - a close failure must not mask a result
-            pass
+        except Exception as exc:  # noqa: BLE001 - a close failure must not mask a result
+            log_fault("cartesiaSTTSocketCloseFailed", exc)
     return "".join(parts).strip()
 
 
