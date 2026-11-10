@@ -38,7 +38,7 @@ class RuntimeEventStream:
     @staticmethod
     def _record(event: dict) -> None:
         agents_db.record_sse_event({**dict(event), _RUNTIME_MARKER: True})
-        from . import live_hub
+        from . import live_core as live_hub
         live_hub.nudge()
 
     def broadcast_ephemeral(self, event: dict) -> None:
