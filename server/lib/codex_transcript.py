@@ -506,12 +506,13 @@ def parse_turns(path: pathlib.Path) -> list[dict]:
             try:
                 ev = json.loads(line)
             except json.JSONDecodeError as e:
-                metadata_conflict = True
+                # Preserve the legacy skip policy. A corrupt prefix cannot
+                # authorize a later seed, but it does not revoke an already
+                # attributable history-only item earlier in the file.
                 rotation_prefix = False
                 log_exception("codexTranscriptLineSkip", e, detail=str(path))
                 continue
             if not isinstance(ev, dict):
-                metadata_conflict = True
                 rotation_prefix = False
                 continue
             ts = str(ev.get("timestamp") or "")
@@ -534,8 +535,8 @@ def parse_turns(path: pathlib.Path) -> list[dict]:
             if (rotation_prefix and native_thread_id and not metadata_conflict and
                     native_rotation_context.is_context_item(candidate, native_thread_id)):
                 if not context_prefix:
-                    # Delay the drop until EOF: a later conflicting header or
-                    # corrupt record cannot retroactively certify this prefix.
+                    # Delay the drop until EOF: a later parsed conflicting
+                    # header revokes this stream's native identity authority.
                     _append_visible_message(
                         context_prefix, role="user",
                         text=native_rotation_context.item_text(candidate), timestamp=ts)
