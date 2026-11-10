@@ -311,3 +311,225 @@ def test_live_content_type_follows_row_suffix(audio_dir):
 def test_producer_complete_helper_tolerates_missing_row():
     assert cs._is_producer_complete(12345) is False
     assert cs._path_for_clip(12345, Path("/x")) is None
+
+
+# 937: metadata lookup faults remain nonfatal without diagnostic payloads.
+_CLIP_FAULT_SECRET = 'SYNTHETIC_CLIP_LOOKUP_SECRET_937'
+
+
+class ClipLookupFault(RuntimeError):
+    def __str__(self):
+        raise AssertionError('lookup fault message must not be formatted')
+
+    def __repr__(self):
+        raise AssertionError('lookup fault repr must not be formatted')
+
+
+@pytest.fixture
+def clip_faults(monkeypatch):
+    from types import SimpleNamespace
+    from lib import eventlog, log as logger
+    stderr, records, raw, locks, checks, clock = io.StringIO(), [], [], [], [], [100.0]
+    def record(*args, **kwargs):
+        available = []
+        def inspect():
+            for lock in locks:
+                acquired = lock.acquire(blocking=False)
+                available.append(acquired)
+                if acquired:
+                    lock.release()
+        worker = threading.Thread(target=inspect)
+        worker.start()
+        worker.join(timeout=2)
+        checks.append((not worker.is_alive(), tuple(available)))
+        records.append((args, kwargs))
+    monkeypatch.setattr(logger.sys, 'stderr', stderr)
+    monkeypatch.setattr(logger, 'time', SimpleNamespace(monotonic=lambda: clock[0], strftime=logger.time.strftime))
+    monkeypatch.setattr(eventlog, 'emit', record)
+    monkeypatch.setattr(logger.os, 'write', lambda fd, data: raw.append((fd, data)) or len(data))
+    logger._FAULT_LOG_THROTTLE.clear()
+    logger._FAULT_LOG_COUNTS.clear()
+    yield SimpleNamespace(stderr=stderr, records=records, raw=raw, locks=locks,
+                          checks=checks, clock=clock, logger=logger)
+    logger._FAULT_LOG_THROTTLE.clear()
+    logger._FAULT_LOG_COUNTS.clear()
+
+
+def _lookup_db(monkeypatch, *, row=None, fail_at=None):
+    from types import SimpleNamespace
+    calls = []
+    def fetchone():
+        if fail_at == 'fetch':
+            raise ClipLookupFault(_CLIP_FAULT_SECRET)
+        return row
+    def execute(sql, params):
+        calls.append((sql, params))
+        if fail_at == 'execute':
+            raise ClipLookupFault(_CLIP_FAULT_SECRET)
+        return SimpleNamespace(fetchone=fetchone)
+    def connect():
+        if fail_at == 'connect':
+            raise ClipLookupFault(_CLIP_FAULT_SECRET)
+        return SimpleNamespace(execute=execute)
+    monkeypatch.setattr(db, 'conn', connect)
+    return calls
+
+
+@pytest.mark.parametrize('producer', [False, True])
+@pytest.mark.parametrize('failure', ['connect', 'execute', 'fetch'])
+def test_lookup_fault_retains_sentinel_and_safe_evidence(clip_faults, monkeypatch, audio_dir, producer, failure):
+    f = clip_faults
+    queries = _lookup_db(monkeypatch, fail_at=failure)
+    result = cs._is_producer_complete(123) if producer else cs._path_for_clip(123, audio_dir)
+    assert result is (False if producer else None)
+    assert len(queries) == (0 if failure == 'connect' else 1)
+    code = 'clipProducerLookupFailed' if producer else 'clipPathLookupFailed'
+    assert len(f.records) == 1 and f.records[0][0] == ('server', code)
+    assert f.records[0][1]['detail'] == {'error_type': 'ClipLookupFault', 'suppressed': 0}
+    assert _CLIP_FAULT_SECRET not in f.stderr.getvalue() + repr(f.records) + repr(f.raw)
+
+
+@pytest.mark.parametrize('mode', ['missing', 'chunked', 'range'])
+def test_path_fault_route_and_sink_observe_released_broker_and_condition(clip_faults, monkeypatch, audio_dir, mode):
+    from types import SimpleNamespace
+    f = clip_faults
+    broker, clip_id, queries = cs.ClipStreamBroker(), 123, []
+    stream = None
+    if mode != 'missing':
+        broker.open(clip_id)
+        broker.append(clip_id, b'DATA')
+        if mode == 'chunked':
+            broker.finish(clip_id)
+        stream = broker.get(clip_id)
+    f.locks.extend([broker._lock] + ([stream.cond] if stream else []))
+    def execute(sql, params):
+        queries.append((sql, params))
+        # For live variants fail ONLY the header lookup: this observes the
+        # condition state after the Range snapshot, not just the first query.
+        if mode == 'missing' or len(queries) == 2:
+            raise ClipLookupFault(_CLIP_FAULT_SECRET)
+        return SimpleNamespace(fetchone=lambda: None)
+    monkeypatch.setattr(db, 'conn', lambda: SimpleNamespace(execute=execute))
+    handler = FakeHandler('bytes=0-1' if mode == 'range' else None)
+    try:
+        cs.serve_clip_stream(handler, broker, clip_id, audio_dir)
+        if mode == 'missing':
+            assert handler.status == 404 and handler.wfile.getvalue() == b'no such clip'
+        elif mode == 'chunked':
+            assert handler.status == 200 and handler.sent_headers['Transfer-Encoding'] == 'chunked'
+            assert _dechunk(handler.wfile.getvalue()) == [b'DATA']
+        else:
+            assert handler.status == 206 and handler.sent_headers['Content-Range'] == 'bytes 0-1/*'
+            assert handler.wfile.getvalue() == b'DA'
+        if stream:
+            assert handler.sent_headers['Content-Type'] == 'audio/mpeg'
+        assert len(queries) == (1 if mode == 'missing' else 2)
+        assert len(f.records) == 1
+        assert f.records[0][0] == ('server', 'clipPathLookupFailed')
+        assert f.checks == [(True, (True,) if mode == 'missing' else (True, True))]
+        assert _CLIP_FAULT_SECRET not in f.stderr.getvalue() + repr(f.records)
+    finally:
+        if stream:
+            broker.finish(clip_id)
+
+
+def test_producer_fault_selects_live_range_instead_of_static_file(clip_faults, monkeypatch, audio_dir):
+    from types import SimpleNamespace
+    f = clip_faults
+    path = audio_dir / 'existing.mp3'
+    path.write_bytes(b'FILE')
+    broker, queries = cs.ClipStreamBroker(), []
+    broker.open(123)
+    broker.append(123, b'LIVE')
+    stream = broker.get(123)
+    f.locks.extend([broker._lock, stream.cond])
+    def execute(sql, params):
+        queries.append((sql, params))
+        if 'producer_status' in sql:
+            raise ClipLookupFault(_CLIP_FAULT_SECRET)
+        return SimpleNamespace(fetchone=lambda: {'path': str(path)})
+    monkeypatch.setattr(db, 'conn', lambda: SimpleNamespace(execute=execute))
+    handler = FakeHandler('bytes=0-1')
+    try:
+        cs.serve_clip_stream(handler, broker, 123, audio_dir)
+        assert handler.status == 206 and handler.wfile.getvalue() == b'LI'
+        assert handler.sent_headers['Content-Range'] == 'bytes 0-1/*'
+        assert len(queries) == 3 and len(f.records) == 1
+        assert f.records[0][0] == ('server', 'clipProducerLookupFailed')
+        assert f.checks == [(True, (True, True))]
+    finally:
+        broker.finish(123)
+
+
+def test_producer_int_conversion_is_still_inside_catch_before_query(clip_faults, monkeypatch):
+    queries = _lookup_db(monkeypatch)
+    assert cs._is_producer_complete('not-an-integer') is False
+    assert queries == [] and len(clip_faults.records) == 1
+    assert clip_faults.records[0][0] == ('server', 'clipProducerLookupFailed')
+    assert clip_faults.records[0][1]['detail']['error_type'] == 'ValueError'
+
+
+def test_producer_row_keys_failure_remains_outside_catch(clip_faults, monkeypatch):
+    class MalformedRow(dict):
+        def keys(self):
+            raise ValueError('post-query keys failure')
+    queries = _lookup_db(monkeypatch, row=MalformedRow(producer_status='complete'))
+    with pytest.raises(ValueError, match='post-query keys failure'):
+        cs._is_producer_complete(123)
+    assert len(queries) == 1 and clip_faults.records == []
+
+
+@pytest.mark.parametrize('failure', ['row', 'str', 'resolve'])
+def test_path_processing_failures_remain_outside_query_catch(clip_faults, monkeypatch, audio_dir, failure):
+    class MalformedRow(dict):
+        def __getitem__(self, key):
+            raise ValueError('post-query path failure')
+    class MalformedText:
+        def __str__(self):
+            raise ValueError('post-query path failure')
+    row = (MalformedRow(path='x') if failure == 'row' else
+           {'path': MalformedText()} if failure == 'str' else {'path': '/audio/clip.mp3'})
+    queries = _lookup_db(monkeypatch, row=row)
+    with monkeypatch.context() as patch:
+        if failure == 'resolve':
+            def fail(*args, **kwargs):
+                raise ValueError('post-query path failure')
+            patch.setattr(Path, 'resolve', fail)
+        with pytest.raises(ValueError, match='post-query path failure'):
+            cs._path_for_clip(123, audio_dir)
+    assert len(queries) == 1 and clip_faults.records == []
+
+
+@pytest.mark.parametrize('producer', [False, True])
+def test_lookup_fault_throttle_does_not_cache_result_or_skip_queries(clip_faults, monkeypatch, audio_dir, producer):
+    f = clip_faults
+    queries = _lookup_db(monkeypatch, fail_at='execute')
+    def run():
+        return cs._is_producer_complete(123) if producer else cs._path_for_clip(123, audio_dir)
+    for _ in range(3):
+        assert run() is (False if producer else None)
+    assert len(queries) == 3 and len(f.records) == 1
+    f.clock[0] += 60
+    assert run() is (False if producer else None)
+    assert len(queries) == 4 and len(f.records) == 2
+    assert f.records[-1][1]['detail']['suppressed'] == 2
+
+
+@pytest.mark.parametrize('producer', [False, True])
+def test_lookup_fault_all_sinks_fail_without_changing_fallback(clip_faults, monkeypatch, audio_dir, producer):
+    from lib import eventlog
+    f = clip_faults
+    queries = _lookup_db(monkeypatch, fail_at='execute')
+    class BrokenStream:
+        def write(self, data):
+            raise OSError(_CLIP_FAULT_SECRET)
+        def flush(self):
+            raise OSError(_CLIP_FAULT_SECRET)
+    def fail(*args, **kwargs):
+        raise OSError(_CLIP_FAULT_SECRET)
+    monkeypatch.setattr(f.logger.sys, 'stderr', BrokenStream())
+    monkeypatch.setattr(eventlog, 'emit', fail)
+    monkeypatch.setattr(f.logger.os, 'write', fail)
+    result = cs._is_producer_complete(123) if producer else cs._path_for_clip(123, audio_dir)
+    assert result is (False if producer else None)
+    assert len(queries) == 1 and f.logger._FAULT_LOG_COUNTS['dropped'] == 1
