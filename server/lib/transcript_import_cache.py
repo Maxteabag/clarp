@@ -14,7 +14,7 @@ import threading
 import time
 from collections.abc import Callable
 from contextlib import contextmanager, nullcontext
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from .revisioned_cache import RevisionedCache
 
@@ -83,6 +83,339 @@ class _CompletedImport:
     epoch: int
     value: object = None
     after_claimed: bool = False
+
+
+@dataclass(frozen=True)
+class OwnerImportBinding:
+    """Native admission namespace, never a DB or transcript certificate."""
+    database_path: str
+    backend: str
+    backend_session_id: str
+    source_file: str | None
+
+    def __post_init__(self):
+        for value in (self.database_path, self.backend, self.backend_session_id):
+            if type(value) is not str or not value or len(value.encode("utf-8")) > 4096:
+                raise ValueError("invalid owner import binding")
+        if self.backend != "codex":
+            raise ValueError("owner rotation lease requires Codex")
+        if self.source_file is not None and (type(self.source_file) is not str
+                or not self.source_file or len(self.source_file.encode("utf-8")) > 4096):
+            raise ValueError("invalid owner source binding")
+
+
+class OwnerLeaseBusy(RuntimeError):
+    """A conflicting operation or an unsafe lease transition was refused."""
+
+
+class OwnerLeasePending(TimeoutError):
+    def __init__(self, lease):
+        super().__init__("owner imports still draining; lease remains held")
+        self.lease = lease
+
+
+@dataclass(frozen=True)
+class OwnerDirtySnapshot:
+    dirty: bool
+    paths: tuple[str, ...]
+    urgent: bool
+    startup_exempt: bool
+    first_wait_rank: float | None
+
+
+@dataclass(frozen=True)
+class FinalOwnerImportReceipt:
+    completed: bool
+    changed: bool
+
+
+@dataclass(eq=False)
+class OwnerImportLease:
+    """Opaque process-local token. The controller owns durable boot fencing."""
+    owner: str
+    operation_id: str
+    binding: OwnerImportBinding
+    generation: int
+    final_started: bool = False
+    final_completed: bool = False
+    closed: bool = False
+    released_binding: OwnerImportBinding | None = None
+    dirty: OwnerDirtySnapshot | None = None
+
+
+@dataclass
+class _OwnerAdmissionState:
+    generation: int = 0
+    binding: OwnerImportBinding | None = None
+    lease: OwnerImportLease | None = None
+    active: int = 0
+    cleanup_uncertain: bool = False
+    dirty: bool = False
+    urgent: bool = False
+    startup_exempt: bool = False
+    first_wait_rank: float | None = None
+    threads: dict = field(default_factory=dict)
+
+
+class _OwnerAdmissions:
+    """Bounded protocol state, protected exclusively by the existing _guard.
+
+    Active leases and stale-callback binding fences are never LRU/TTL evicted.
+    Idle owners without a binding are removed. Capacity refuses admission;
+    neither test reset nor an elapsed deadline releases a real lease.
+    """
+    def __init__(self):
+        self.states = {}
+        self.limit = 2048
+
+    def state(self, owner):
+        state = self.states.get(owner)
+        if state is None:
+            if len(self.states) >= self.limit:
+                raise OwnerLeaseBusy("owner admission capacity exhausted")
+            state = self.states[owner] = _OwnerAdmissionState()
+        return state
+
+    def begin(self, owner):
+        state = self.state(owner)
+        if state.lease is not None and not state.lease.closed:
+            return None
+        return self.enter(owner, state)
+
+    def enter(self, owner, state):
+        ident = threading.get_ident()
+        state.active += 1
+        state.threads[ident] = state.threads.get(ident, 0) + 1
+        return owner, state, state.binding, ident
+
+    def end(self, ticket):
+        owner, state, _, ident = ticket
+        state.active -= 1
+        state.threads[ident] -= 1
+        if not state.threads[ident]:
+            del state.threads[ident]
+        if (not state.active and state.binding is None and state.lease is None
+                and not state.cleanup_uncertain):
+            self.states.pop(owner, None)
+        _cond.notify_all()
+
+    def held(self, owner):
+        state = self.states.get(owner)
+        return state is not None and state.lease is not None and not state.lease.closed
+
+
+_owner_admissions = _OwnerAdmissions()
+
+
+def _binding_matches(owner, binding, path, importer):
+    # Descriptors/probes are arbitrary caller code: always outside _guard.
+    token = _completion_probe(importer)
+    if token is None or len(token[0]) != 5:
+        return False
+    namespace, source, backend, agent, native = token[0]
+    return (namespace == binding.database_path and backend == binding.backend
+            and agent == owner and native == binding.backend_session_id
+            and source == str(path)
+            and (binding.source_file is None or source == binding.source_file))
+
+
+@contextmanager
+def _owner_admission(owner, path, importer):
+    with _guard:
+        try:
+            ticket = _owner_admissions.begin(owner)
+        except OwnerLeaseBusy:
+            ticket = None
+    if ticket is None:
+        yield False
+        return
+    try:
+        binding = ticket[2]
+        valid = binding is None or _binding_matches(owner, binding, path, importer)
+        if valid and binding is not None and binding.source_file is None:
+            with _guard:
+                state = ticket[1]
+                if state.binding == binding:
+                    state.binding = OwnerImportBinding(binding.database_path, binding.backend,
+                                                       binding.backend_session_id, str(path))
+                else:
+                    valid = state.binding == OwnerImportBinding(
+                        binding.database_path, binding.backend, binding.backend_session_id, str(path))
+        yield valid
+    finally:
+        with _guard:
+            _owner_admissions.end(ticket)
+
+
+def _lease_state(lease):
+    state = _owner_admissions.states.get(lease.owner) if type(lease) is OwnerImportLease else None
+    if state is None or state.lease is not lease:
+        raise OwnerLeaseBusy("unknown or retired owner lease")
+    return state
+
+
+def _owner_deadline_value(deadline):
+    if type(deadline) not in (int, float) or not math.isfinite(deadline):
+        raise ValueError("invalid owner lease monotonic deadline")
+    return deadline
+
+
+def acquire_owner_lease(agent, expected_binding, deadline, *, operation_id):
+    """Block first, then drain; timeout preserves the same operation/token."""
+    _owner_deadline_value(deadline)
+    if (type(agent) is not str or not agent or len(agent.encode("utf-8")) > 4096
+            or type(expected_binding) is not OwnerImportBinding or expected_binding.source_file is None
+            or type(operation_id) is not str or not 1 <= len(operation_id) <= 128
+            or not operation_id.isascii() or any(ord(c) < 33 or ord(c) > 126 for c in operation_id)):
+        raise ValueError("invalid owner lease identity")
+    with _guard:
+        if _resetting:
+            raise OwnerLeaseBusy("cache reset in progress")
+        state = _owner_admissions.state(agent)
+        old = state.lease
+        if old is not None and old.operation_id == operation_id:
+            if old.binding != expected_binding:
+                raise OwnerLeaseBusy("operation binding changed")
+            lease = old
+        else:
+            if old is not None and not old.closed:
+                raise OwnerLeaseBusy("another owner lease is held")
+            if state.binding is not None and state.binding != expected_binding:
+                raise OwnerLeaseBusy("stale owner binding")
+            lease = OwnerImportLease(agent, operation_id, expected_binding, state.generation)
+            state.lease = lease
+            # Park timers in the existing waiting slots, never in a second queue.
+            for key, (request, timer, epoch) in list(_deferred.items()):
+                if request[2] == agent:
+                    timer.cancel()
+                    del _deferred[key]
+                    _pending[key] = (request, epoch)
+            _cond.notify_all()
+    return wait_owner_lease(lease, deadline)
+
+
+def wait_owner_lease(lease, deadline):
+    _owner_deadline_value(deadline)
+    with _cond:
+        state = _lease_state(lease)
+        while state.active:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or threading.get_ident() in state.threads:
+                raise OwnerLeasePending(lease)
+            _cond.wait(remaining)
+            state = _lease_state(lease)
+        if state.cleanup_uncertain:
+            raise OwnerLeaseBusy("owner connection cleanup is uncertain")
+        return lease
+
+
+def _park_owner_import(path, importer, owner, after=None, urgent=False, startup_exempt=False):
+    """No stat/probe/observer on a blocked owner; retain bounded dirty intent."""
+    key = f"{owner}\0{path}"
+    with _guard:
+        if _resetting or not _owner_admissions.held(owner):
+            return False
+        state = _owner_admissions.states[owner]
+        state.dirty = True
+        state.urgent |= urgent
+        state.startup_exempt |= startup_exempt
+        if state.first_wait_rank is None:
+            state.first_wait_rank = time.monotonic()
+        queued = _pending.get(key) or _deferred.get(key)
+        waiting = set(_pending) | set(_deferred)
+        if _running is not None and _running[2]:
+            waiting.add(_running[0])
+        if key not in waiting and len(waiting) >= _BACKGROUND_LIMIT:
+            return False
+        old = queued[0] if queued else None
+        request = (path, importer, owner, after if after is not None else old[3] if old else None,
+                   urgent or bool(old and old[4]), old[5] if old else time.monotonic(),
+                   startup_exempt or bool(old and old[6]), old[7] if old else 0)
+        if key in _deferred:
+            _, timer, _ = _deferred.pop(key)
+            timer.cancel()
+        _pending[key] = (request, _epoch)
+        return True
+
+
+def run_final_owner_import(lease, path, importer, *, after=None):
+    """One explicit old import, counted through observers; never auto-replayed."""
+    # Validate the token/actual binding before reserving its one final attempt.
+    with _guard:
+        state = _lease_state(lease)
+        if lease.closed or state.active or state.cleanup_uncertain or lease.final_started:
+            raise OwnerLeaseBusy("owner lease not drained or final import already attempted")
+        ticket = _owner_admissions.enter(lease.owner, state)
+    try:
+        if not _binding_matches(lease.owner, lease.binding, path, importer):
+            raise OwnerLeaseBusy("final importer does not match old binding")
+        with _guard:
+            if _resetting:
+                raise OwnerLeaseBusy("cache reset in progress")
+            lease.final_started = True
+            epoch = _epoch
+        result = _import_admitted(path, importer, lease.owner, epoch)
+        complete = isinstance(result, _CompletedImport)
+        if complete and after is not None:
+            after()
+        with _guard:
+            lease.final_completed = complete
+        return FinalOwnerImportReceipt(complete, result.changed if complete else False)
+    finally:
+        with _guard:
+            _owner_admissions.end(ticket)
+
+
+def release_owner_lease(lease, new_binding):
+    """Controller cutover/verified rollback only; fence old callbacks first."""
+    if type(new_binding) is not OwnerImportBinding:
+        raise ValueError("invalid released binding")
+    with _guard:
+        state = _lease_state(lease)
+        if lease.closed:
+            if lease.released_binding != new_binding:
+                raise OwnerLeaseBusy("released binding changed")
+            return lease.dirty
+        if state.active or state.cleanup_uncertain:
+            raise OwnerLeaseBusy("owner lease still draining or cleanup uncertain")
+        if (new_binding.database_path != lease.binding.database_path
+                or new_binding.backend != lease.binding.backend):
+            raise OwnerLeaseBusy("owner namespace cannot change")
+        if new_binding != lease.binding and not lease.final_completed:
+            raise OwnerLeaseBusy("cutover requires completed final old import")
+        # Retain scalar dirty work only. Old closures never run under new UUIDs.
+        requests = [entry[0] for entry in (*_pending.values(), *_deferred.values())
+                    if entry[0][2] == lease.owner]
+        ranks = [r[5] for r in requests]
+        if state.first_wait_rank is not None:
+            ranks.append(state.first_wait_rank)
+        dirty = OwnerDirtySnapshot(state.dirty or bool(requests),
+                                   tuple(str(r[0]) for r in requests),
+                                   state.urgent or any(r[4] for r in requests),
+                                   state.startup_exempt or any(r[6] for r in requests),
+                                   min(ranks, default=None))
+        prefix = lease.owner + "\0"
+        keys = {k for k in (*_imported, *_pending, *_deferred) if k.startswith(prefix)}
+        for key in keys:
+            _imported.pop(key, None)
+            _validated_at.pop(key)
+            _last_import_duration.pop(key)
+            _snapshot_wait_until.pop(key)
+            _completion_retry_at.pop(key)
+            _completion_tokens.pop(key)
+            _pending.pop(key, None)
+            deferred = _deferred.pop(key, None)
+            if deferred is not None:
+                deferred[1].cancel()
+        _last_started.pop(lease.owner, None)
+        state.generation += 1
+        state.binding = new_binding
+        lease.released_binding, lease.dirty, lease.closed = new_binding, dirty, True
+        _cond.notify_all()
+        # Existing unrelated pending work may have lost its sole worker.
+        if _pending:
+            _ensure_worker()
+        return dirty
 
 
 def _completion_fence(importer):
@@ -246,11 +579,15 @@ def _import_admitted(path: pathlib.Path, importer: Callable[[], object], owner: 
                     _validated_at.put(key, epoch, observed_at)
                     _record_completion_token(key, token, epoch)
                     _completion_retry_at.pop(key)
+                    state = _owner_admissions.states.get(owner)
+                    if state is not None and not _owner_admissions.held(owner):
+                        state.dirty = state.urgent = state.startup_exempt = False
+                        state.first_wait_rank = None
                     _cond.notify_all()
         return result if accepted is None else accepted
 
 
-def import_if_changed(path: pathlib.Path, importer: Callable[[], object],
+def _import_if_changed_unleased(path: pathlib.Path, importer: Callable[[], object],
                       *, owner: str = "") -> bool:
     """Run importer once per owner for the current file version.
 
@@ -346,8 +683,11 @@ def reset_for_tests(deadline_s: float = 5.0) -> bool:
                 _cond.wait(remaining)
             quiet = (all(not thread.is_alive() for thread in drain.threads)
                      and (_worker is None or not _worker.is_alive())
-                     and _running is None and _direct_active == 0)
+                     and _running is None and _direct_active == 0
+                     and not any(v.active or (v.lease is not None and not v.lease.closed)
+                                 for v in _owner_admissions.states.values()))
             if quiet:
+                _owner_admissions.states.clear()
                 _path_locks.clear()
                 _imported.clear()
                 _validated_at.reset()
@@ -515,7 +855,7 @@ def _rearm_owner_locked(key: str, now: float) -> list[str]:
     return failures
 
 
-def schedule_import(path: pathlib.Path, importer: Callable[[], object], *, owner: str = '',
+def _schedule_import_unleased(path: pathlib.Path, importer: Callable[[], object], *, owner: str = '',
                     after: Callable[[], None] | None = None, urgent: bool = False,
                     startup_exempt: bool = False) -> bool:
     """Coalesce normal work by agent; urgent RM-N12 requests bypass at drain.
@@ -580,7 +920,7 @@ def schedule_import(path: pathlib.Path, importer: Callable[[], object], *, owner
     return True
 
 
-def import_for_snapshot(path: pathlib.Path, importer: Callable[[], object], *,
+def _import_for_snapshot_unleased(path: pathlib.Path, importer: Callable[[], object], *,
                         owner: str, timeout: float) -> bool:
     """Give this owner's observed source version a bounded chance to land.
 
@@ -628,7 +968,7 @@ def import_for_snapshot(path: pathlib.Path, importer: Callable[[], object], *,
                 token = _completion_probe(importer)
                 _cond.acquire()
                 locked = True
-                if epoch != _epoch or _resetting:
+                if epoch != _epoch or _resetting or _owner_admissions.held(owner):
                     break
                 _, validated_at = _validated_at.get(key, epoch)
                 if (_completion_matches(key, token, epoch)
@@ -666,7 +1006,7 @@ def _schedule_deferred(key: str, epoch: int, token: threading.Timer) -> None:
         del _deferred[key]
         # This key already owns a waiting slot and a reserved cooldown entry.
         _pending[key] = (request, epoch)
-        if not _ensure_worker():
+        if not _owner_admissions.held(request[2]) and not _ensure_worker():
             del _pending[key]
             failed_owner = request[2]
     if failed_owner is not None:
@@ -699,7 +1039,7 @@ def _retry_completion(key, request, epoch):
         attempts = min(7, (previous[1] if previous else 0) + 1)
         wait = min(60.0, 2.0 ** (attempts - 1))
         _completion_retry_at.put(key, epoch, (time.monotonic() + wait, attempts))
-        if key in _pending:
+        if key in _pending or _owner_admissions.held(request[2]):
             _pending[key] = (request, epoch)
         elif not _defer_locked(key, request, epoch,
                                max(0.0, _request_deadline(key, request) - time.monotonic())):
@@ -770,10 +1110,27 @@ def _drain_background():
                 # descriptors run outside _guard. Either may reenter/replace.
                 # Revalidate the exact request token and epoch before consuming
                 # it: a replacement/reset during stat must keep its own intent.
+                capacity_refused = False
+                with _guard:
+                    try:
+                        ticket = _owner_admissions.begin(request[2])
+                    except OwnerLeaseBusy:
+                        ticket = None
+                        capacity_refused = True
+                        current = _pending.get(key)
+                        if current is not None and current[0] is request:
+                            del _pending[key]
+                if capacity_refused:
+                    log("transcriptImportQueueFull", f"owner={request[2]}")
+                if ticket is None:
+                    continue
                 size = request[7]
                 selection_error = None
                 reserves_retry = False
                 try:
+                    if ticket[2] is not None and not _binding_matches(
+                            request[2], ticket[2], request[0], request[1]):
+                        raise OwnerLeaseBusy("stale worker binding")
                     reserves_retry = (
                         getattr(request[1], "_clarp_transcript_completion_v1", None) is True)
                     if (_host_started_at is not None and not request[4] and not request[6]
@@ -781,15 +1138,22 @@ def _drain_background():
                         size = source_size(request[0])
                 except Exception as exc:
                     selection_error = exc
+                except BaseException:
+                    with _guard:
+                        _owner_admissions.end(ticket)
+                    raise
                 with _guard:
                     current = _pending.get(key)
                     if current is None or current[0] is not request or current[1] != item_epoch:
+                        _owner_admissions.end(ticket)
                         continue
                     if _resetting or item_epoch != _epoch:
                         del _pending[key]
+                        _owner_admissions.end(ticket)
                         continue
                     if selection_error is not None:
                         del _pending[key]
+                        _owner_admissions.end(ticket)
                     else:
                         now = time.monotonic()
                         request = (*request[:7], size)
@@ -798,10 +1162,11 @@ def _drain_background():
                             if not _defer_locked(key, request, item_epoch, wait):
                                 failed.append(request[2])
                             del _pending[key]
+                            _owner_admissions.end(ticket)
                             continue
                         del _pending[key]
                         _running = (key, item_epoch, reserves_retry)
-                        selected = (key, request, item_epoch)
+                        selected = (key, request, item_epoch, ticket)
                 if selection_error is not None:
                     log_exception('backgroundTranscriptImportFail', selection_error, detail=request[2])
                 if selected is not None:
@@ -813,11 +1178,12 @@ def _drain_background():
                 # Close before clearing: reset must outlive every real thread.
                 db.close_local()
                 with _guard:
-                    if not _pending:
+                    if not any(not _owner_admissions.held(entry[0][2])
+                               for entry in _pending.values()):
                         _worker = None
                         return
                 continue
-            key, (path, importer, owner, after, urgent, rank, startup_exempt, size), item_epoch = selected
+            key, (path, importer, owner, after, urgent, rank, startup_exempt, size), item_epoch, ticket = selected
             started = time.monotonic()
             try:
                 try:
@@ -832,10 +1198,17 @@ def _drain_background():
                 except Exception as exc:
                     log_exception('backgroundTranscriptImportFail', exc, detail=owner)
             finally:
-                with _guard:
-                    _running = None
-                    _cond.notify_all()
-                db.close_local()
+                try:
+                    db.close_local()
+                except BaseException:
+                    with _guard:
+                        ticket[1].cleanup_uncertain = True
+                    raise
+                finally:
+                    with _guard:
+                        _running = None
+                        _owner_admissions.end(ticket)
+                        _cond.notify_all()
     finally:
         db.close_local()
 
@@ -847,3 +1220,27 @@ def wait_for_background(timeout: float = 5) -> bool:
         worker.join(timeout)
         return not worker.is_alive()
     return True
+
+
+def import_if_changed(path, importer, *, owner=""):
+    with _owner_admission(owner, path, importer) as admitted:
+        if not admitted:
+            _park_owner_import(path, importer, owner, startup_exempt=True)
+            return False
+        return _import_if_changed_unleased(path, importer, owner=owner)
+
+
+def schedule_import(path, importer, *, owner="", after=None, urgent=False, startup_exempt=False):
+    with _owner_admission(owner, path, importer) as admitted:
+        if not admitted:
+            return _park_owner_import(path, importer, owner, after, urgent, startup_exempt)
+        return _schedule_import_unleased(path, importer, owner=owner, after=after,
+                                         urgent=urgent, startup_exempt=startup_exempt)
+
+
+def import_for_snapshot(path, importer, *, owner, timeout):
+    with _owner_admission(owner, path, importer) as admitted:
+        if not admitted:
+            _park_owner_import(path, importer, owner, startup_exempt=True)
+            return False
+        return _import_for_snapshot_unleased(path, importer, owner=owner, timeout=timeout)
