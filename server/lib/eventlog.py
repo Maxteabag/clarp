@@ -182,6 +182,12 @@ def _bounded(record: dict, size: int | None = None) -> dict:
     queued, so a deferred record waits in the queue already bounded and both
     sinks later get the same one. ``size`` is the record's serialised length
     when the caller already has it. Never raises.
+
+    If the bounding itself fails, the record still goes out with a finite
+    detail that names the failure. That detail is in place before anything is
+    reported, and the report (log_fault: contained, throttled) cannot stop it.
+    ``record_original_bytes`` there is the whole record's size, or null when
+    even that was not measured: the detail alone was never measured.
     """
     try:
         if size is None:
@@ -191,10 +197,10 @@ def _bounded(record: dict, size: int | None = None) -> dict:
         if size > MAX_DETAIL_BYTES and "detail" in record:
             record["detail"] = _bound_detail(record["detail"])
     except Exception as error:  # noqa: BLE001 - logging must not break the caller
-        print(f"eventlog detail bound failed: {type(error).__name__}", file=sys.stderr)
         record["detail"] = {"_truncated": {
-            "original_bytes": size, "limit_bytes": MAX_DETAIL_BYTES,
+            "record_original_bytes": size, "limit_bytes": MAX_DETAIL_BYTES,
             "error": type(error).__name__}}
+        log_fault("eventlogDetailBoundFailed", error, structured=False)
     return record
 
 
