@@ -1,0 +1,470 @@
+"""Step0 additive contract, not a conversion of S02 or any S42 owner.
+
+Authoring audit: legacy SQL tests already own transactions/CAS/Outbox. These
+cases own NEW declaration and orchestration risks (missing/frozen vocabulary,
+attempt confusion, falsey outcomes and diagnostic error precedence). The tiny
+memory owner is a protocol witness with a real lock/guard/write boundary; its
+fencing is NOT proof that a production owner has been converted correctly.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from threading import Lock
+
+import pytest
+
+from lib import lifecycle as lk
+from tests.lifecycle_cases import registered_cases
+
+
+def policy(**updates):
+    data = dict(family="work", owner="tests.memory_owner", states={"ready", "busy", "done"},
+                events={"start", "finish", "renew"}, initial="ready", final={"done"},
+                edges=(lk.Edge("start", frozenset({"ready"}), "busy"),
+                       lk.Edge("finish", frozenset({"busy"}), "done"),
+                       lk.Edge("renew", frozenset({"busy"}), "busy")),
+                waits={"ready": lk.NamedWait(name="admit", exits=(lk.WaitExit("event", "start"),)),
+                       "busy": lk.NamedWait(name="result", exits=(lk.WaitExit("event", "finish"),))},
+                refusal_codes={"illegal", "generation", "token", "closed"})
+    data.update(updates)
+    return lk.Rules(**data)
+
+
+def test_independent_policy_pairs_and_structural_registration():
+    rules = policy()
+    assert [(exit.kind, exit.name) for exit in rules.waits["busy"].exits] == [("event", "finish")]
+    expected = {(state, event): None for state in (None, "ready", "busy", "done")
+                for event in ("start", "finish", "renew")}
+    expected.update({("ready", "start"): "busy", ("busy", "finish"): "done",
+                     ("busy", "renew"): "busy"})
+    for (state, event), target in registered_cases(rules, expected):
+        if target is None:
+            with pytest.raises(lk.IllegalTransition):
+                rules.decide(state, event)
+        else:
+            assert rules.decide(state, event) == target
+    with pytest.raises(AssertionError, match="missing"):
+        registered_cases(rules, {key: value for key, value in expected.items() if key != ("ready", "start")})
+    with pytest.raises(AssertionError, match="extra"):
+        registered_cases(rules, expected | {("new", "start"): "busy"})
+    with pytest.raises(lk.IllegalTransition):
+        rules.decide("ready", "unknown")
+
+
+@pytest.mark.parametrize("change", [
+    {"states": {"ready", "done"}}, {"events": {"start", "finish"}},
+    {"initial": "missing"}, {"final": {"missing"}}, {"final": set()},
+    {"waits": {}}, {"waits": {"ready": "eventually"}},
+    {"edges": (lk.Edge("start", frozenset({"ready"}), "busy"),
+                lk.Edge("start", frozenset({"ready"}), "done"))},
+    {"edges": (lk.Edge("finish", frozenset({"done"}), "ready"),)},
+])
+def test_invalid_new_declarations_refuse(change):
+    with pytest.raises(lk.LifecycleError):
+        policy(**change)
+
+
+@pytest.mark.parametrize("exit", ["unbounded", "timer"])
+def test_unknown_wait_exit_kind_refuses(exit):
+    with pytest.raises(lk.LifecycleError):
+        policy(waits={"ready": lk.NamedWait(name="bad", exits=(lk.WaitExit(exit, "start"),))})
+
+
+def test_wait_exit_requires_real_event_and_existing_deadline_source():
+    for exit in (lk.WaitExit("event", "typo"), lk.WaitExit("deadline", "owner_timeout")):
+        with pytest.raises(lk.LifecycleError):
+            policy(waits={"ready": lk.NamedWait(name="admit", exits=(exit,)),
+                          "busy": lk.NamedWait(name="result", exits=(lk.WaitExit("event", "finish"),))})
+
+
+def test_new_declaration_copies_small_metadata_without_copying_payload():
+    states = {"ready", "busy", "done"}
+    waits = {"ready": lk.NamedWait(name="admit", exits=(lk.WaitExit("event", "start"),)),
+             "busy": lk.NamedWait(name="result", exits=(lk.WaitExit("event", "finish"),))}
+    rules = policy(states=states, waits=waits)
+    states.clear(); waits.clear()
+    assert rules.decide("ready", "start") == "busy"
+    assert rules.states == frozenset({"ready", "busy", "done"})
+    with pytest.raises(TypeError):
+        rules.waits["ready"] = rules.waits["busy"]
+    payload = {"borrowed": []}
+    event = lk.OwnedEvent("start", "work1", (1, object()), payload)
+    assert event.payload is payload
+
+
+def sink_for(rules, events, *, report=None):
+    return lk.RefusalSink(family=rules.family, events=rules.events, states=rules.states,
+                          refusal_codes=rules.refusal_codes,
+                          report=report or (lambda notice: events.append(("notice", notice.reason))),
+                          recent_limit=2)
+
+
+@dataclass(frozen=True)
+class Fence:
+    generation: int
+    token: object
+
+
+class MemoryOwner:
+    """Minimal owning authority; mutation is performed inside its real lock."""
+    def __init__(self):
+        self.lock = Lock()
+        self.state = "ready"
+        self.generation = 1
+        self.token = object()
+        self.trace = []
+        self.writes = 0
+
+    def attempt(self, *, failure=None, completion="normal", nested=None):
+        owner = self
+        class Port(lk.OwnerWritePort):
+            def write(self, rules, event, reject):
+                with owner.lock:
+                    owner.trace.append("enter")
+                    try:
+                        if nested:
+                            nested()
+                        if failure:
+                            raise failure
+                        if event.expected.generation != owner.generation:
+                            return reject("generation", owner.state, lk.SafeIds(entity_id=event.entity_id))
+                        if event.expected.token is not owner.token:
+                            return reject("token", owner.state, lk.SafeIds(entity_id=event.entity_id))
+                        try:
+                            target = rules.decide(owner.state, event.name)
+                        except lk.IllegalTransition as primary:
+                            reject("illegal", owner.state, lk.SafeIds(), primary=primary)
+                            raise
+                        owner.state = target
+                        owner.writes += 1
+                        owner.trace.append("settled")
+                        return lk.Applied(event.payload)
+                    finally:
+                        owner.trace.append("release")
+            def after_boundary(self, report):
+                assert not owner.lock.locked()
+                if completion == "omit":
+                    return
+                report()
+                if completion == "twice":
+                    report()
+        return Port()
+
+    def event(self, name="start", payload=None):
+        return lk.OwnedEvent(name, "work1", Fence(self.generation, self.token), payload)
+
+
+@pytest.mark.parametrize("value", [None, False, 0])
+def test_settle_then_act_preserves_falsey_applied_value(value):
+    owner, rules = MemoryOwner(), policy()
+    event = owner.event(payload=value)
+    result = lk.apply_owned(rules, event, owner.attempt(), sink_for(rules, owner.trace))
+    assert isinstance(result, lk.Applied) and result.value is value
+    # External continuation consumes a settled result only after release.
+    assert not owner.lock.locked()
+    owner.trace.append(("effect", owner.state))
+    assert owner.trace == ["enter", "settled", "release", ("effect", "busy")]
+    assert owner.writes == 1
+
+
+@pytest.mark.parametrize("replace", ["generation", "token", "aba"])
+def test_at_write_owner_fence_refuses_without_success(replace):
+    owner, rules = MemoryOwner(), policy()
+    event = owner.event()
+    if replace in {"generation", "aba"}:
+        owner.generation += 1
+    if replace == "token":
+        owner.token = object()
+    if replace == "aba":
+        owner.state = "busy"
+        owner.state = "ready"
+    sink = sink_for(rules, owner.trace)
+    result = lk.apply_owned(rules, event, owner.attempt(), sink)
+    reason = "token" if replace == "token" else "generation"
+    assert isinstance(result, lk.Refused) and result.code == reason
+    assert owner.writes == 0 and owner.state == "ready"
+    assert owner.trace == ["enter", "release", ("notice", reason)]
+    assert sum(sink.counts.values()) == 1
+
+
+def test_exceptional_illegal_pair_counts_and_emits_after_release():
+    owner, rules = MemoryOwner(), policy()
+    report_attempts = []
+    def report(notice):
+        report_attempts.append(owner.lock.locked())
+        assert not owner.lock.locked()
+        owner.trace.append(("notice", notice.reason))
+    sink = sink_for(rules, owner.trace, report=report)
+    with pytest.raises(lk.IllegalTransition):
+        lk.apply_owned(rules, owner.event("finish"), owner.attempt(), sink)
+    assert owner.writes == 0
+    assert owner.trace == ["enter", "release", ("notice", "illegal")]
+    assert report_attempts == [False]
+    assert sum(sink.counts.values()) == 1
+
+
+def test_storage_failure_is_same_exception_without_invented_refusal():
+    owner, rules = MemoryOwner(), policy()
+    error = OSError("test storage failure")
+    sink = sink_for(rules, owner.trace)
+    with pytest.raises(OSError) as caught:
+        lk.apply_owned(rules, owner.event(), owner.attempt(failure=error), sink)
+    assert caught.value is error and owner.writes == 0
+    assert owner.trace == ["enter", "release"] and not sink.counts
+
+
+def test_reporter_failure_keeps_primary_and_explicit_secondary_cause():
+    owner, rules = MemoryOwner(), policy()
+    reporter_error = RuntimeError("diagnostic test failure")
+    def report(notice):
+        assert not owner.lock.locked()
+        raise reporter_error
+    with pytest.raises(lk.IllegalTransition) as caught:
+        lk.apply_owned(rules, owner.event("finish"), owner.attempt(), sink_for(rules, [], report=report))
+    assert caught.value.__cause__ is reporter_error
+    assert owner.writes == 0 and owner.trace == ["enter", "release"]
+
+
+@pytest.mark.parametrize("completion", ["omit", "twice"])
+def test_bad_completion_never_succeeds_or_reemits(completion):
+    owner, rules = MemoryOwner(), policy()
+    owner.generation += 1
+    stale = lk.OwnedEvent("start", "work1", Fence(1, owner.token), None)
+    with pytest.raises(lk.LifecycleError):
+        lk.apply_owned(rules, stale, owner.attempt(completion=completion), sink_for(rules, owner.trace))
+    assert owner.writes == 0
+    assert owner.trace.count(("notice", "generation")) <= 1
+
+
+def test_reusing_same_facade_never_runs_a_second_write():
+    owner, rules = MemoryOwner(), policy()
+    port = owner.attempt()
+    sink = sink_for(rules, [])
+    lk.apply_owned(rules, owner.event(), port, sink)
+    with pytest.raises(lk.LifecycleError):
+        lk.apply_owned(rules, owner.event("finish"), port, sink)
+    assert owner.writes == 1 and owner.state == "busy"
+
+
+def test_diagnostics_inventory_is_immutable_bounded_and_has_no_caller_family():
+    rules = policy()
+    events, states, codes = set(rules.events), set(rules.states), set(rules.refusal_codes)
+    sink = lk.RefusalSink(family="work", events=events, states=states, refusal_codes=codes,
+                          report=lambda notice: None, recent_limit=2)
+    events.clear(); states.clear(); codes.clear()
+    for i in range(10):
+        sink.capture(f"unknown{i}", f"unknown{i}", "illegal", lk.SafeIds(entity_id="x" * 200))
+    assert sum(sink.counts.values()) == 10 and len(sink.counts) == 1
+    assert len(sink.recent) == 2 and len(sink.recent[0].ids.entity_id) <= 128
+    with pytest.raises(TypeError):
+        sink.capture("start", "ready", "illegal", lk.SafeIds(), family="other")
+    with pytest.raises(lk.LifecycleError):
+        sink.capture("start", "ready", "unbounded-new-reason", lk.SafeIds())
+    assert sum(sink.counts.values()) == 10
+
+
+def test_correction_noop_is_distinct_from_ordinary_self_loop():
+    rules = policy(states={"ready", "busy", "done", "corrected"}, final={"done", "corrected"},
+                   events={"start", "finish", "renew", "correct"},
+                   edges=policy().edges + (lk.Edge("correct", frozenset({"done"}), "corrected", correction=True),))
+    assert rules.decide("done", "correct") == "corrected"
+    assert rules.decide("corrected", "correct") == "corrected"
+    assert rules.already_corrected("corrected", "correct")
+    assert not rules.already_corrected("busy", "renew")
+
+
+def test_cyclic_resource_does_not_invent_a_final_or_escape_waits():
+    options = dict(states={"ready", "busy"}, events={"start", "release"}, final=set(), cyclic=True,
+                   edges=(lk.Edge("start", frozenset({"ready"}), "busy"),
+                          lk.Edge("release", frozenset({"busy"}), "ready")),
+                   waits={"ready": lk.NamedWait(name="admit", exits=(lk.WaitExit("event", "start"),)),
+                          "busy": lk.NamedWait(name="owner_release", exits=(lk.WaitExit("event", "release"),))})
+    rules = policy(**options)
+    assert rules.decide("busy", "release") == "ready"
+    with pytest.raises(lk.LifecycleError):
+        policy(**(options | {"waits": {}}))
+
+
+def test_independent_oracle_detects_valid_graph_mutants():
+    original = policy()
+    # All three graphs validate: structural walking alone cannot catch these.
+    mutants = [policy(edges=original.edges[:2]),
+               policy(edges=original.edges + (lk.Edge("finish", frozenset({"ready"}), "done"),)),
+               policy(edges=original.edges[:2] + (lk.Edge("renew", frozenset({"busy"}), "done"),))]
+    for rules, state, event, expected in [(mutants[0], "busy", "renew", "busy"),
+                                          (mutants[1], "ready", "finish", None),
+                                          (mutants[2], "busy", "renew", "busy")]:
+        with pytest.raises((AssertionError, lk.IllegalTransition)):
+            if expected is None:
+                # Independent owner contract forbids finishing before start.
+                try:
+                    rules.decide(state, event)
+                except lk.IllegalTransition:
+                    continue
+                raise AssertionError("finish was admitted before start")
+            assert rules.decide(state, event) == expected
+    wrong_exit = policy(waits={"ready": original.waits["ready"],
+                               "busy": lk.NamedWait(name="result", exits=(lk.WaitExit("event", "renew"),))})
+    assert wrong_exit.waits["busy"].exits != (lk.WaitExit("event", "finish"),)
+
+
+def test_interleaved_attempts_keep_their_own_notice_and_release_boundary():
+    a, b = MemoryOwner(), MemoryOwner()
+    ra, rb = policy(family="A"), policy(family="B")
+    notices = []
+    def report_a(notice):
+        assert not a.lock.locked()
+        notices.append((notice.family, notice.reason))
+    def report_b(notice):
+        assert a.lock.locked() and not b.lock.locked()
+        notices.append((notice.family, notice.reason))
+    sa, sb = sink_for(ra, [], report=report_a), sink_for(rb, [], report=report_b)
+    class PortA(lk.OwnerWritePort):
+        def write(self, rules, event, reject):
+            with a.lock:
+                result = reject("generation", a.state, lk.SafeIds())
+                b.generation += 1
+                stale_b = lk.OwnedEvent("start", "b", Fence(1, b.token), None)
+                assert isinstance(lk.apply_owned(rb, stale_b, b.attempt(), sb), lk.Refused)
+                return result
+    assert isinstance(lk.apply_owned(ra, a.event(), PortA(), sa), lk.Refused)
+    assert notices == [("B", "generation"), ("A", "generation")]
+    assert sum(sa.counts.values()) == sum(sb.counts.values()) == 1
+    assert a.writes == b.writes == 0
+
+
+@pytest.mark.parametrize("fault", ["capture", "emit", "same_primary"])
+def test_diagnostic_fault_retains_exact_primary_and_original_traceback(fault):
+    owner, rules = MemoryOwner(), policy()
+    primary = {}
+    secondary = RuntimeError("diagnostic fault")
+    class RecordingPolicy:
+        def decide(self, state, event):
+            try:
+                return rules.decide(state, event)
+            except lk.IllegalTransition as error:
+                primary["error"], primary["traceback"] = error, error.__traceback__
+                raise
+    class Sink(lk.RefusalSink):
+        def capture(self, *args, **kwargs):
+            if fault == "capture":
+                raise secondary
+            return super().capture(*args, **kwargs)
+    def report(notice):
+        raise primary["error"] if fault == "same_primary" else secondary
+    sink = Sink(family=rules.family, states=rules.states, events=rules.events,
+                refusal_codes=rules.refusal_codes, report=report)
+    with pytest.raises(lk.IllegalTransition) as caught:
+        lk.apply_owned(RecordingPolicy(), owner.event("finish"), owner.attempt(), sink)
+    assert caught.value is primary["error"]
+    tracebacks = []
+    current = caught.value.__traceback__
+    while current:
+        tracebacks.append(current)
+        current = current.tb_next
+    assert primary["traceback"] in tracebacks
+    if fault != "same_primary":
+        assert caught.value.__cause__ is secondary
+    else:
+        assert caught.value.__cause__ is not caught.value
+    assert owner.writes == 0 and not owner.lock.locked()
+
+
+def test_no_primary_reporter_error_propagates_without_repeating_write_or_report():
+    owner, rules = MemoryOwner(), policy()
+    event = owner.event()
+    owner.generation += 1
+    failure = RuntimeError("reporter fault")
+    attempts = []
+    def report(notice):
+        attempts.append(notice)
+        raise failure
+    with pytest.raises(RuntimeError) as caught:
+        lk.apply_owned(rules, event, owner.attempt(), sink_for(rules, [], report=report))
+    assert caught.value is failure and len(attempts) == 1 and owner.writes == 0
+
+
+def test_diagnostic_reset_is_owner_local_and_does_not_change_authority():
+    a, b = MemoryOwner(), MemoryOwner()
+    rules = policy()
+    sa, sb = sink_for(rules, []), sink_for(rules, [])
+    for owner, sink in ((a, sa), (b, sb)):
+        with pytest.raises(lk.IllegalTransition):
+            lk.apply_owned(rules, owner.event("finish"), owner.attempt(), sink)
+    with a.lock:
+        sa.reset()
+    assert not sa.counts and not sa.recent and sum(sb.counts.values()) == 1
+    assert isinstance(lk.apply_owned(rules, a.event(), a.attempt(), sa), lk.Applied)
+    assert a.state == "busy" and b.state == "ready"
+
+
+@pytest.mark.parametrize("with_primary", [False, True])
+@pytest.mark.parametrize("outer_path", ["reject_again", "return_after_failure"])
+def test_failed_capture_is_not_retried_or_converted_to_success(with_primary, outer_path):
+    owner, rules = MemoryOwner(), policy()
+    capture_attempts, emissions = [], []
+    failure = RuntimeError("partial capture failure")
+    domain = lk.IllegalTransition("work", "ready", "finish") if with_primary else None
+    expected = domain if domain is not None else failure
+    class PartialSink(lk.RefusalSink):
+        def capture(self, *args, **kwargs):
+            capture_attempts.append("capture")
+            notice = super().capture(*args, **kwargs)
+            if len(capture_attempts) == 1:
+                raise failure  # Mutation happened; retry would double count.
+            return notice
+    class Port(lk.OwnerWritePort):
+        def write(self, policy, event, reject):
+            with owner.lock:
+                try:
+                    reject("illegal", "ready", lk.SafeIds(), primary=domain)
+                except BaseException as caught:
+                    assert caught is expected
+                if outer_path == "reject_again":
+                    # An existing outer rejection path may run after handling
+                    # the first fault; it does not gain another capture attempt.
+                    return reject("closed", "ready", lk.SafeIds())
+                return lk.Refused("illegal", "ready")
+    sink = PartialSink(family="work", events=rules.events, states=rules.states,
+                       refusal_codes=rules.refusal_codes, report=emissions.append)
+    with pytest.raises(type(expected)) as caught:
+        lk.apply_owned(rules, owner.event("finish"), Port(), sink)
+    assert caught.value is expected
+    if with_primary:
+        assert caught.value.__cause__ is failure
+    assert capture_attempts == ["capture"] and sum(sink.counts.values()) == 1
+    assert len(sink.recent) == 1 and not emissions and owner.writes == 0
+
+
+def test_repeated_successful_reject_captures_and_emits_once():
+    rules = policy()
+    emissions = []
+    sink = sink_for(rules, [], report=emissions.append)
+    class Port(lk.OwnerWritePort):
+        def write(self, policy, event, reject):
+            first = reject("closed", "ready", lk.SafeIds())
+            assert reject("closed", "ready", lk.SafeIds()) is first
+            return first
+    result = lk.apply_owned(rules, lk.OwnedEvent("start", "one", None, None), Port(), sink)
+    assert isinstance(result, lk.Refused) and result.code == "closed"
+    assert sum(sink.counts.values()) == 1 and len(sink.recent) == len(emissions) == 1
+
+
+def test_cyclic_transient_cannot_hide_absent_continuation():
+    with pytest.raises(lk.LifecycleError, match="transient.*continuation"):
+        lk.Rules(family="empty", owner="tests.empty", states={"ready"}, events=set(),
+                 initial="ready", final=set(), edges=(), transient={"ready"},
+                 waits={}, cyclic=True, refusal_codes={"illegal"})
+
+
+def test_immediate_transient_continuation_in_finite_and_cyclic_policies():
+    rules = policy(transient={"ready"}, waits={"busy": policy().waits["busy"]})
+    assert rules.decide("ready", "start") == "busy"
+    cyclic = lk.Rules(family="resource", owner="tests.resource", states={"ready", "busy"},
+                      events={"start", "release"}, initial="ready", final=set(), cyclic=True,
+                      edges=(lk.Edge("start", frozenset({"ready"}), "busy"),
+                             lk.Edge("release", frozenset({"busy"}), "ready")),
+                      transient={"ready"}, waits={"busy": lk.NamedWait(name="release", exits=(lk.WaitExit("event", "release"),))},
+                      refusal_codes={"illegal"})
+    assert cyclic.decide("ready", "start") == "busy"
+    assert cyclic.decide("busy", "release") == "ready"
