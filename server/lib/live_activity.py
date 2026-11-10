@@ -147,16 +147,17 @@ def badge_attention() -> dict[str, Any]:
     for item in janitors:
         items.append(str(item.get("agent_id") or ""))
     cursor = ""
-    for _page in range(50):
-        page = attention_index.page(limit=200, cursor=cursor)
-        for artifact in page["artifacts"]:
-            if artifact.get("attention_bucket") == "blocking" and not artifact.get("archived_at") \
-                    and str(artifact.get("artifact_id")) not in janitor_ids \
-                    and artifact.get("type") != "workflow_run":
-                items.append(str(artifact.get("agent_id") or ""))
-        cursor = page.get("next_cursor") or ""
-        if not cursor:
-            break
+    with attention_index.page_sequence() as read_page:
+        for _page in range(50):
+            page = read_page(limit=200, cursor=cursor)
+            for artifact in page["artifacts"]:
+                if artifact.get("attention_bucket") == "blocking" and not artifact.get("archived_at") \
+                        and str(artifact.get("artifact_id")) not in janitor_ids \
+                        and artifact.get("type") != "workflow_run":
+                    items.append(str(artifact.get("agent_id") or ""))
+            cursor = page.get("next_cursor") or ""
+            if not cursor:
+                break
     return {"count": len(items), "agent_ids": {agent for agent in items if agent}, "items": items}
 
 
