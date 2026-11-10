@@ -1362,3 +1362,147 @@ def test_a_window_timer_that_fails_to_start_is_not_left_armed(tmp_path, monkeypa
     assert len(made) == 1 and made[0] not in cache._threads
     monkeypatch.setattr(cache, "threading", _threading)
     assert cache.reset_for_tests()
+
+
+def _lease_native_import(path, owner, native_id, callback):
+    from lib import db, transcript_incremental
+    return transcript_incremental._CompletionImport(
+        callback, (str(db.DB_PATH), str(path), "codex", owner, native_id))
+
+
+def _lease_binding(path, native_id):
+    from lib import db
+    return transcript_import_cache.OwnerImportBinding(
+        str(db.DB_PATH), "codex", native_id, str(path))
+
+
+@pytest.mark.parametrize("entry", ["direct", "worker", "after"])
+def test_owner_lease_drains_real_import_and_observers_before_cutover(tmp_path, entry):
+    import threading
+    import time
+
+    cache = transcript_import_cache
+    assert cache.reset_for_tests()
+    path = tmp_path / "old.jsonl"
+    path.write_text("{}\n")
+    entered, finish = threading.Event(), threading.Event()
+    calls, errors = [], []
+    lease = None
+    direct = None
+
+    def hold():
+        entered.set()
+        assert finish.wait(3), "test did not release the selected old operation"
+
+    def import_old():
+        calls.append("old")
+        if entry != "after":
+            hold()
+        return {}
+
+    importer = _lease_native_import(path, "lease-owner", "old-native", import_old)
+    try:
+        if entry == "direct":
+            def run():
+                try:
+                    cache.import_if_changed(path, importer, owner="lease-owner")
+                except BaseException as exc:
+                    errors.append(exc)
+            direct = threading.Thread(target=run)
+            direct.start()
+        else:
+            assert cache.schedule_import(path, importer, owner="lease-owner",
+                                         after=hold if entry == "after" else None,
+                                         urgent=True)
+        assert entered.wait(2), "actual importer/after observer did not start"
+        with pytest.raises(cache.OwnerLeasePending) as pending:
+            cache.acquire_owner_lease("lease-owner", _lease_binding(path, "old-native"),
+                                      time.monotonic(), operation_id="drain-1")
+        lease = pending.value.lease
+        assert not cache.import_for_snapshot(path, importer, owner="lease-owner", timeout=.01)
+        assert not cache.import_if_changed(path, importer, owner="lease-owner")
+        with pytest.raises(cache.OwnerLeaseBusy):
+            cache.acquire_owner_lease("lease-owner", _lease_binding(path, "old-native"),
+                                      time.monotonic(), operation_id="other-operation")
+        finish.set()
+        if direct is not None:
+            direct.join(2)
+            assert not direct.is_alive()
+        assert cache.wait_for_background(2)
+        assert not errors and calls == ["old"]
+        assert cache.wait_owner_lease(lease, time.monotonic() + 1) is lease
+        assert cache.acquire_owner_lease("lease-owner", _lease_binding(path, "old-native"),
+                                        time.monotonic(), operation_id="drain-1") is lease
+        cache.release_owner_lease(lease, _lease_binding(path, "old-native"))
+        lease = None
+    finally:
+        finish.set()
+        try:
+            if direct is not None:
+                direct.join(3)
+                assert not direct.is_alive()
+        finally:
+            try:
+                assert cache.wait_for_background(3)
+                if lease is not None:
+                    cache.wait_owner_lease(lease, time.monotonic() + 1)
+                    cache.release_owner_lease(lease, _lease_binding(path, "old-native"))
+            finally:
+                assert cache.reset_for_tests()
+
+
+@pytest.mark.parametrize("outcome", ["completed", "deferred", "error"])
+def test_owner_lease_final_import_is_once_and_rebind_rejects_old_callbacks(tmp_path, outcome):
+    import time
+
+    cache = transcript_import_cache
+    assert cache.reset_for_tests()
+    old = tmp_path / "old.jsonl"
+    new = tmp_path / "new.jsonl"
+    old.write_text("{}\n")
+    new.write_text("{}\n")
+    calls, after = [], []
+    binding = _lease_binding(old, "old-native")
+    lease = cache.acquire_owner_lease("lease-owner", binding, time.monotonic() + 1,
+                                      operation_id="final-1")
+
+    def final():
+        calls.append("final")
+        if outcome == "error":
+            raise ValueError("real selected callback failure")
+        return {"_clarp_transcript_deferred_v1": True} if outcome == "deferred" else {}
+
+    importer = _lease_native_import(old, "lease-owner", "old-native", final)
+    try:
+        if outcome == "error":
+            with pytest.raises(ValueError, match="real selected callback failure"):
+                cache.run_final_owner_import(lease, old, importer, after=lambda: after.append(1))
+        else:
+            receipt = cache.run_final_owner_import(lease, old, importer,
+                                                    after=lambda: after.append(1))
+            assert receipt.completed is (outcome == "completed")
+        with pytest.raises(cache.OwnerLeaseBusy):
+            cache.run_final_owner_import(lease, old, importer)
+        assert calls == ["final"] and after == ([1] if outcome == "completed" else [])
+        if outcome != "completed":
+            with pytest.raises(cache.OwnerLeaseBusy):
+                cache.release_owner_lease(lease, _lease_binding(new, "new-native"))
+            cache.release_owner_lease(lease, binding)
+        else:
+            assert cache.schedule_import(old, importer, owner="lease-owner", urgent=True)
+            dirty = cache.release_owner_lease(lease, _lease_binding(new, "new-native"))
+            assert dirty.dirty and dirty.urgent
+            assert not cache.import_if_changed(old, importer, owner="lease-owner")
+            assert not cache.import_if_changed(old, lambda: calls.append("generic-old"),
+                                                owner="lease-owner")
+            fresh = _lease_native_import(new, "lease-owner", "new-native",
+                                         lambda: calls.append("new") or {})
+            assert cache.import_if_changed(new, fresh, owner="lease-owner")
+            assert calls == ["final", "new"]
+        lease = None
+    finally:
+        try:
+            if lease is not None:
+                cache.release_owner_lease(lease, binding)
+        finally:
+            assert cache.reset_for_tests()
