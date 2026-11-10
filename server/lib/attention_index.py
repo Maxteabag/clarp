@@ -3,6 +3,8 @@ No inferred completion or age-based retention. Cursors restart on source changes
 Decisions and Janitor failures retain their dedicated authority endpoints.
 """
 import base64,hashlib,json,time
+import threading
+from contextlib import contextmanager
 from . import db,artifacts,countdown_attention,quiet_agents
 # workflow_run is deliberately absent: a CI result is not something the owner
 # can act on from Updates. An agent blocked by a failed run raises a question.
@@ -56,54 +58,95 @@ def _page(*,limit,cursor,representation,budget):
     now_ms=int(time.time()*1000)
     c=db.conn();c.execute('SAVEPOINT attention_read')
     try:
-        marks=','.join('?' for _ in TYPES)
-        columns=[r[1] for r in c.execute('PRAGMA table_info(artifacts)') if r[1]!='payload_json']
-        # A quiet agent's (a Janitor's) artifacts stay in its chat; its failure
-        # alerts reach Updates through janitor_attention, not this index.
-        rows=c.execute(f'''SELECT {','.join('a.'+k for k in columns)},g.persona AS agent_name,
+        selected,revision=_selection(c,now_ms)
+        return _render_page(c,selected,revision,limit,cursor,representation,budget)
+    finally:c.execute('RELEASE SAVEPOINT attention_read')
+
+@contextmanager
+def page_sequence():
+    """One synchronous badge computation: one read view and one selection.
+
+    Each requested page still loads and serializes its own full rows with a
+    fresh summary budget. No state is shared with another computation.
+    """
+    c=db.conn();c.execute('SAVEPOINT attention_sequence')
+    reader=None
+    try:
+        selected,revision=_selection(c,int(time.time()*1000))
+        reader=_SequencePage(c,selected,revision)
+        yield reader
+    finally:
+        if reader is not None:reader.close()
+        c.execute('RELEASE SAVEPOINT attention_sequence')
+
+class _SequencePage:
+    def __init__(self,c,selected,revision):
+        self._c,self._selected,self._revision=c,selected,revision
+        self._thread=threading.get_ident()
+
+    def __call__(self,*,limit=100,cursor='',representation=''):
+        if self._c is None or threading.get_ident()!=self._thread:
+            raise RuntimeError('attention page sequence is closed or belongs to another thread')
+        if representation not in artifacts.REPRESENTATIONS:raise ValueError('unsupported artifact representation')
+        limit=max(1,min(int(limit),200))
+        if len(cursor)>2048:raise ValueError('invalid attention cursor')
+        with artifacts.summary_request() as budget:
+            return _render_page(self._c,self._selected,self._revision,limit,cursor,representation,budget)
+
+    def close(self):
+        self._c=self._selected=self._revision=None
+
+def _selection(c,now_ms):
+    marks=','.join('?' for _ in TYPES)
+    columns=[r[1] for r in c.execute('PRAGMA table_info(artifacts)') if r[1]!='payload_json']
+    # A quiet agent's (a Janitor's) artifacts stay in its chat; its failure
+    # alerts reach Updates through janitor_attention, not this index.
+    rows=c.execute(f'''SELECT {','.join('a.'+k for k in columns)},g.persona AS agent_name,
             {_OBJECT} AS pj_object,{_LITE}
             FROM artifacts a JOIN agents g ON a.agent_id=g.agent_id WHERE a.deleted_at IS NULL
             AND {quiet_agents.loud_sql('g')}
             AND a.type IN ({marks}) ORDER BY a.created_at,a.artifact_id''',tuple(sorted(TYPES))).fetchall()
-        # Select canonical workflow attempt from source updates before eligibility.
-        # Distinct attempts never resolve each other; historical records stay intact.
-        canonical={}
-        for r in rows:
-            key=('artifact',r['artifact_id'])
-            if r['type']=='workflow_run':
-                try:
-                    p=json.loads(_payload(c,r['artifact_id']) or '{}')
-                    if p.get('provider') and p.get('repository') and p.get('run_id'):
-                        key=('workflow',p['provider'],p['repository'],str(p['run_id']),str(p.get('run_attempt',1)))
-                except (ValueError,TypeError,AttributeError):pass
-            old=canonical.get(key)
-            if old is None or (r['updated_at'],r['artifact_id'])>(old['updated_at'],old['artifact_id']):canonical[key]=r
-        selected=[(r,_lite_bucket(c,r,now_ms)) for r in canonical.values()];selected=[(r,b) for r,b in selected if b]
-        ranks={'blocking':0,'review':1,'working':2}
-        selected.sort(key=lambda rb:(ranks[rb[1]],rb[0]['created_at'],rb[0]['artifact_id']))
-        # Content, archive and source outcome changes invalidate pagination.
-        # Every payload write bumps updated_at (artifacts._apply_update), so the
-        # row's other columns and its bucket stand for its content.
-        revision=hashlib.sha256(json.dumps(
-            [{**{k:r[k] for k in columns},'agent_name':r['agent_name'],'bucket':b} for r,b in selected],
-            sort_keys=True,default=str).encode()).hexdigest()
-        offset=0
-        if cursor:
+    # Select canonical workflow attempt from source updates before eligibility.
+    # Distinct attempts never resolve each other; historical records stay intact.
+    canonical={}
+    for r in rows:
+        key=('artifact',r['artifact_id'])
+        if r['type']=='workflow_run':
             try:
-                raw=json.loads(base64.urlsafe_b64decode(cursor.encode()))
-                if set(raw)!={'revision','offset'} or type(raw['offset']) is not int or raw['offset']<0:raise ValueError()
-            except Exception as e:raise ValueError('invalid attention cursor') from e
-            if raw['revision']!=revision:raise StaleCursor('attention snapshot changed; restart pagination')
-            offset=raw['offset']
-        window=selected[offset:offset+limit]
-        full=_full_rows(c,[r['artifact_id'] for r,_ in window])
-        result=[]
-        for r,b in window:
-            public=artifacts.response_representation(artifacts._public(full[r['artifact_id']]),representation,budget=budget);public['attention_bucket']=b;result.append(public)
-        end=offset+len(result)
-        next_cursor=base64.urlsafe_b64encode(json.dumps({'revision':revision,'offset':end}).encode()).decode() if end<len(selected) else None
-        return {'artifacts':result,'next_cursor':next_cursor,'snapshot_revision':revision,'total':len(selected),'index_version':1}
-    finally:c.execute('RELEASE SAVEPOINT attention_read')
+                p=json.loads(_payload(c,r['artifact_id']) or '{}')
+                if p.get('provider') and p.get('repository') and p.get('run_id'):
+                    key=('workflow',p['provider'],p['repository'],str(p['run_id']),str(p.get('run_attempt',1)))
+            except (ValueError,TypeError,AttributeError):pass
+        old=canonical.get(key)
+        if old is None or (r['updated_at'],r['artifact_id'])>(old['updated_at'],old['artifact_id']):canonical[key]=r
+    selected=[(r,_lite_bucket(c,r,now_ms)) for r in canonical.values()];selected=[(r,b) for r,b in selected if b]
+    ranks={'blocking':0,'review':1,'working':2}
+    selected.sort(key=lambda rb:(ranks[rb[1]],rb[0]['created_at'],rb[0]['artifact_id']))
+    # Content, archive and source outcome changes invalidate pagination.
+    # Every payload write bumps updated_at (artifacts._apply_update), so the
+    # row's other columns and its bucket stand for its content.
+    revision=hashlib.sha256(json.dumps(
+        [{**{k:r[k] for k in columns},'agent_name':r['agent_name'],'bucket':b} for r,b in selected],
+        sort_keys=True,default=str).encode()).hexdigest()
+    return selected,revision
+
+def _render_page(c,selected,revision,limit,cursor,representation,budget):
+    offset=0
+    if cursor:
+        try:
+            raw=json.loads(base64.urlsafe_b64decode(cursor.encode()))
+            if set(raw)!={'revision','offset'} or type(raw['offset']) is not int or raw['offset']<0:raise ValueError()
+        except Exception as e:raise ValueError('invalid attention cursor') from e
+        if raw['revision']!=revision:raise StaleCursor('attention snapshot changed; restart pagination')
+        offset=raw['offset']
+    window=selected[offset:offset+limit]
+    full=_full_rows(c,[r['artifact_id'] for r,_ in window])
+    result=[]
+    for r,b in window:
+        public=artifacts.response_representation(artifacts._public(full[r['artifact_id']]),representation,budget=budget);public['attention_bucket']=b;result.append(public)
+    end=offset+len(result)
+    next_cursor=base64.urlsafe_b64encode(json.dumps({'revision':revision,'offset':end}).encode()).decode() if end<len(selected) else None
+    return {'artifacts':result,'next_cursor':next_cursor,'snapshot_revision':revision,'total':len(selected),'index_version':1}
 
 def _lite_bucket(c, row, now_ms):
     """bucket() from the extracted fields; a countdown's projection, or a
