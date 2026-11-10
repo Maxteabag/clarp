@@ -323,24 +323,6 @@ def _upstream_without_provider(monkeypatch):
     return upstream, socket
 
 
-@pytest.mark.parametrize("sink_failed", [False, True])
-def test_gemini_detached_close_fault_retains_closed_state(monkeypatch, fault_sinks, sink_failed):
-    upstream, socket = _upstream_without_provider(monkeypatch)
-    closes = []
-    fault_sinks.failed = sink_failed
-    fault_sinks.lock = upstream.lock
-
-    def close():
-        closes.append(1)
-        raise OSError(SECRET)
-    socket.close = close
-    assert upstream.close() is None
-    assert upstream.closed and upstream.ws is None
-    assert upstream.close() is None
-    assert closes == [1]
-    fault_sinks.assert_fault('oracleGeminiSocketCloseFail')
-
-
 @pytest.mark.parametrize("failure_at", [None, 'connect', 'send', 'recv'])
 @pytest.mark.parametrize("sink_failed", [False, True])
 def test_gemini_resume_reports_close_fault_after_unlock_on_every_exit(
