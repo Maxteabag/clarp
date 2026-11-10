@@ -223,6 +223,104 @@ def test_snapshot_one_bounded_status_attempt_per_build(fleet, offline):
     assert runtime.timeouts == [2.0, 2.0]
 
 
+def test_snapshot_unavailable_runtime_skips_reconcile_and_preserves_payload(fleet, monkeypatch):
+    """An outage costs one status report and one summary, not one traceback per agent."""
+    import copy
+    from lib import eventlog, reconcile
+
+    ctx, status = fleet
+    # Independently frozen healthy bytes supply every field. Only these known
+    # runtime-derived fields differ when the same status read fails: no live
+    # activity, and no synthetic spawning/terminal handles for the two done rows.
+    expected = json.loads(GOLDEN.read_bytes())
+    expected_rows = {row["agent_id"]: row for row in expected["agents"]}
+    expected_rows["fixture-01"]["live_activity"] = None
+    for aid in ("fixture-04", "fixture-09"):
+        expected_rows[aid].update(busy=False, latest_state="done", turn_started_at=0)
+    # A bound missing transcript must stay bound while ownership is unknown.
+    agents.start_runtime("fixture-15", "session-15")
+    agents.bind_backend_session("fixture-15", "missing-native-session")
+    expected_rows["fixture-15"].update(
+        backend_session_id="missing-native-session", conversation_id="missing-native-session")
+    db.conn().execute("""INSERT INTO background_jobs
+        (job_id,agent_id,session,title,status,started_at,updated_at)
+        VALUES ('outage-job','fixture-03','session-03','Synthetic work','running',?,?)""",
+        (NOW, NOW))
+    expected_rows["fixture-03"]["background_jobs"]["count"] = 1
+    expected_rows["fixture-03"]["status_text"] = "Synthetic work"
+
+    # Scale real stored rows without scaling fixture files or inventing another
+    # projection oracle. These idle agents are copies of one frozen idle row;
+    # their shared persona also exercises roster deduplication and ordering.
+    extras = []
+    for i in range(300):
+        aid, session = f"outage-{i:03d}", f"outage-session-{i:03d}"
+        created = NOW - 100000 - i
+        db.conn().execute("""INSERT INTO agents
+            (agent_id,persona,voice_id,cwd,session,backend,created_at)
+            VALUES (?, 'Fixture 25','V','/fixture',?,'codex',?)""", (aid, session, created))
+        agents.record_state(aid, "idle")
+        row = copy.deepcopy(expected_rows["fixture-25"])
+        row.update(agent_id=aid, session=session, last_activity=created)
+        row["activity"].update(agent_id=aid, session=session)
+        extras.insert(0, row)
+    expected["agents"] = extras + expected["agents"]
+    expected["roster"] = ["Fixture", "Fixture 25"] + [
+        name for name in expected["roster"] if name not in {"Fixture", "Fixture 25"}]
+    stored = {table: [tuple(row) for row in db.conn().execute(f"SELECT * FROM {table}")]
+              for table in ("agents", "state_log", "runtimes", "turns", "queued_turns")}
+
+    class UnavailableRuntime(Runtime):
+        def status_within(self, total_s):
+            self.timeouts.append(total_s)
+            raise RuntimeUnavailable("synthetic unavailable runtime")
+
+    runtime = UnavailableRuntime(status)
+    backends.configure_runtime_client(runtime)
+    reconciled, exception_events, summary_events = [], [], []
+    original_reconcile = reconcile.reconcile_agent
+    original_exception, original_emit = eventlog.emit_exception, eventlog.emit
+
+    def observed_reconcile(aid, *args, **kwargs):
+        reconciled.append(aid)
+        return original_reconcile(aid, *args, **kwargs)
+
+    def observed_exception(source, event, exc, **kwargs):
+        exception_events.append(event)
+        return original_exception(source, event, exc, **kwargs)
+
+    def observed_emit(source, event, **kwargs):
+        if event == "snapshotReconcileSkipped":
+            summary_events.append(kwargs.get("detail"))
+        return original_emit(source, event, **kwargs)
+
+    monkeypatch.setattr(reconcile, "reconcile_agent", observed_reconcile)
+    monkeypatch.setattr(eventlog, "emit_exception", observed_exception)
+    monkeypatch.setattr(eventlog, "emit", observed_emit)
+    actual = snapshot.build_agent_snapshot(ctx)
+    assert actual == expected  # whole unavailable payload, before work-count RED
+    assert len(actual["agents"]) == 350
+    assert runtime.timeouts == [2.0]
+    assert {table: [tuple(row) for row in db.conn().execute(f"SELECT * FROM {table}")]
+            for table in stored} == stored
+    assert reconciled == []
+    assert exception_events == ["runtimeStatusUnavailable"]
+    assert summary_events == [{"msg": "count=350 error_type=RuntimeUnavailable"}]
+
+    # Failure is build-local. The next build must actually reconcile again,
+    # including the missing binding once a fresh clear ownership read succeeds.
+    reconciled.clear()
+    exception_events.clear()
+    summary_events.clear()
+    recovered = Runtime(status)
+    backends.configure_runtime_client(recovered)
+    snapshot.build_agent_snapshot(ctx)
+    assert len(reconciled) == 350
+    assert recovered.timeouts == [2.0, 2.0]
+    assert agents.live_backend_session("fixture-15") == ""
+    assert exception_events == [] and summary_events == []
+
+
 @pytest.mark.parametrize("build_fails", [False, True])
 def test_non_snapshot_status_keeps_ttl_and_default_timeout(fleet, monkeypatch, build_fails):
     ctx, status = fleet
