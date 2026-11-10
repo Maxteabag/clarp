@@ -180,21 +180,17 @@ def _migrate(con: sqlite3.Connection) -> None:
         if version < 117:
             _migrate_to_v117(con)
 
-        # 118, confirmed by the ledger (Nadia) as the next number above main 117; steer_receipts and the LF family
-        # move up behind it. If main's schema changes before this merges, stop and renumber; never skip a number.
+        # 118: device_tokens.principal (the agent-ring device opt-out, which first reserved 120).
         if version < 118:
             _migrate_to_v118(con)
-        # 119 (listen-first state_log index) is PROVISIONAL: the next free number above main 118, decided by
-        # Nadia's ledger order at the landing (an earlier notice placed steer_receipts at 119 and the LF family
-        # at 120); renumber in this source before CI, never skip a number.
+        # Numbers from here on. 120 is a hole and stays one: no step has it (the change that once
+        # reserved it landed as 118). A step added later as ``if version < 120`` would never run on
+        # a database that is already past 120, so a new step always takes the next number above
+        # _SCHEMA_VERSION, whatever is free below it.
         if version < 119:
             _migrate_to_v119(con)
-        # 121 is PROVISIONAL: 120 is taken by feat/agent-ring-device-optout (unmerged). If main's
-        # schema moves before this lands, renumber above every source; never reuse a taken number.
         if 0 < version < 121:  # Data only: a new database has nothing to end.
             _migrate_to_v121(con)
-        # 122 is PROVISIONAL: the next free number above main 121 (120 is feat/agent-ring-device-optout's,
-        # unmerged). If main's schema moves before this lands, renumber above every source; never skip a number.
         if version < 122:
             _migrate_to_v122(con)
 
@@ -939,15 +935,27 @@ def _migrate_to_v122(con: sqlite3.Connection) -> None:
 
     janitor_attention._episode asks, on every runner tick and for each janitor, for the newest
     valid completed run and the newest terminal run. With only idx_janitor_runs_agent (agent_id,
-    created_at) each of those read every run of the agent and sorted them: 58,687 rows and about
-    345 MB per query on a Host with 115,807 runs (10 Nov 2026). With this index the same statements
-    walk newest-first within the generation and status and stop at the first match.
+    created_at) each of those read every run of the agent and sorted them. On the Host where
+    this was found (10 Nov 2026) janitor_runs held 115,819 runs in 109 MB (configuration_json
+    572 bytes on average), 58,687 of them completed runs of one janitor, and the janitor runner
+    thread read about 1.4 GB per minute. On a lab table of that shape one call for that janitor
+    read 135 MB without the index and 0.04 MB with it.
+
+    With the index the same statements walk newest-first within the generation and status. The
+    two a healthy janitor runs on each tick stop at the first match. Two cases have no bound and
+    still grow with the runs. A janitor with completed runs but no valid success walks every
+    completed run of its generation: no sort, and no other status or generation, but the whole
+    walk (64 MB instead of 133 MB in that lab). And when the newest run failed, the search for
+    the newest run that did not fail walks every failed index entry of the generation, and the
+    failure count every terminal entry after that run, or all of them when there is none; a row
+    is read only where the status alone does not decide.
 
     The row id is the last, implicit key of the index, so ``ORDER BY finished_at DESC, rowid DESC``
-    is its own order read backwards. An additive index: older code ignores it, so rolling back
-    needs no down-migration. It is built inside _migrate's one write transaction, once: about
-    0.1 s for 120,000 runs with the table in the page cache, longer when the table must be read
-    from disk first."""
+    is its own order read backwards; ``finished_at DESC`` in the index would need a sort for the
+    row id. An additive index: older code ignores it, so rolling back needs no down-migration.
+    It is built inside _migrate's one write transaction, once, and reads the whole table for
+    it: about 109 MB on that Host. On the lab table that took 0.08 s with the table in the page
+    cache and 0.2 s read from a fast SSD."""
     con.execute("CREATE INDEX IF NOT EXISTS idx_janitor_runs_newest"
                 " ON janitor_runs(agent_id, generation, status, finished_at)")
 
