@@ -817,3 +817,82 @@ def test_no_frontier_reason_reports_only_proven_cache_history(tmp_path, backend,
                              "count": 1, "reason": "unknown_reset"}]
         harness.run_lane(reference, transcript, backend, "reference", tick=2)
         harness.assert_product_equal(reference, candidate)
+
+
+@pytest.mark.parametrize("append_kind", ["conflict", "duplicate", "outer", "payload", "hidden_outer",
+                                          "corrupt", "nonobject", "blank", "malformed_body"])
+def test_rotation_context_tail_metadata_refusal_preserves_full_stored_products(tmp_path, append_kind):
+    from lib import native_rotation_context as context
+    from lib import transcript_incremental as inc
+    from lib.native_rotation_seed import Seed
+
+    backend = "codex"
+    reference, candidate = _clones(tmp_path, backend)
+    transcript = tmp_path / "rotation.jsonl"
+    native = "a981c3a8-87c9-47c1-a3f5-5319cd708fc8"
+    old_native = "6b051c7a-c88e-4bc4-9dce-2496a145cce1"
+    source = tmp_path / "synthetic-seed-data.json"
+    source.write_text('{"summary":"bounded synthetic context"}')
+    stat = source.stat()
+    # Producer-format fixture only: not a controller/native seed-certification
+    # receipt. Actual importer CP/frontier and product guards below are real.
+    seed = Seed("handover", old_native, source.read_text(), stat.st_size,
+                (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns))
+    item = context.build_item(seed, agent_id=corpus.AGENT, new_thread_id=native,
+                              operation_id="tail-products-1")
+    seed_text = item["content"][0]["text"]
+    encode = lambda value: json.dumps(value, separators=(",", ":")).encode() + b"\n"
+    transcript.write_bytes(encode({"type": "session_meta", "payload": {"id": native}})
+                           + encode({"type": "response_item", "payload": item})
+                           + b"".join(harness.append_bytes(backend, i) for i in range(20)))
+    initial = backends.parse_turns(backend, transcript)
+    assert sum(row["role"] == "user" for row in initial) == 20
+    assert all(row.get("text") != seed_text for row in initial)
+    try:
+        full = harness.isolated_lane(reference, transcript, backend, "reference", tick=0)
+        first = harness.run_lane(candidate, transcript, backend, "candidate", tick=0, close=False)
+        assert "failure_code" not in full and "failure_code" not in first
+        assert first["apply_mode"] == "full"
+        harness.assert_product_equal(reference, candidate)
+        harness.assert_checkpoint_parse_equal(candidate, transcript, backend)
+        key = (str(candidate), corpus.AGENT, corpus.SESSION, str(transcript))
+        retained = inc._TAIL_STATES.peek(key)
+        assert retained is not None and retained[1] is not None, (
+            "native import did not retain the real frontier required by this tail control")
+        with sqlite3.connect(candidate) as connection:
+            assert connection.execute("SELECT count(*) FROM transcript_import_checkpoints").fetchone()[0] == 1
+            assert connection.execute("SELECT count(*) FROM messages WHERE text=?", (seed_text,)).fetchone()[0] == 0
+        records = {
+            "conflict": encode({"type": "session_meta", "payload": {"id": old_native}}),
+            "duplicate": encode({"type": "session_meta", "payload": {"id": native}}),
+            "outer": encode({"type": "session_meta", "payload": {"id": None}}),
+            "payload": encode({"type": "event_msg", "payload": {"type": "session_meta", "id": old_native}}),
+            "hidden_outer": encode({"type": "session_meta", "payload": {"type": "token_count", "id": old_native}}),
+            "corrupt": b"{not-json}\n",
+            "nonobject": b"[]\n",
+            "blank": b"\n",
+            "malformed_body": encode({"type": "response_item", "payload": {
+                "type": "message", "role": "user", "id": item["id"],
+                "content": [{"type": "input_text", "text": "<clarp-native-rotation-context>malformed</clarp-native-rotation-context>"}]}}),
+        }
+        with transcript.open("ab") as output:
+            output.write(records[append_kind])  # complete newline, not partial-record refusal
+            output.write(harness.append_bytes(backend, 20))
+        full = harness.isolated_lane(reference, transcript, backend, "reference", tick=1)
+        report = harness.run_lane(candidate, transcript, backend, "candidate", tick=1,
+                                  initialize=False, close=False)
+        assert "failure_code" not in full and "failure_code" not in report
+        harness.assert_product_equal(reference, candidate)
+        metadata = append_kind in ("conflict", "duplicate", "outer", "payload", "hidden_outer")
+        assert report["apply_mode"] == ("full" if metadata else "tail")
+        if metadata:
+            assert {"event": "transcriptTailDecision", "code": "full_codex_session_meta_before_boundary",
+                    "count": 1} in report["tail_events"]
+        with sqlite3.connect(candidate) as connection:
+            seed_rows = connection.execute("SELECT count(*) FROM messages WHERE text=?", (seed_text,)).fetchone()[0]
+            assert seed_rows == (1 if append_kind in ("conflict", "outer", "hidden_outer") else 0)
+            if append_kind == "malformed_body":
+                text = "<clarp-native-rotation-context>malformed</clarp-native-rotation-context>"
+                assert connection.execute("SELECT count(*) FROM messages WHERE text=?", (text,)).fetchone()[0] == 1
+    finally:
+        db.close_local()
