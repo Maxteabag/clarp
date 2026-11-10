@@ -1550,25 +1550,30 @@ def _ack_run_for(agent_id, local_date):
         timezone_name="UTC", timezone_source="synthetic", seed_strategy="control")
 
 
-@pytest.mark.parametrize("already_imported", [False, True], ids=["first-seen", "unchanged-replay"])
-@pytest.mark.parametrize("marker_has_run_id", [False, True], ids=["bare-ack", "body-run-id"])
+@pytest.mark.parametrize("history_case", ["first-seen", "changed-row", "unchanged-replay"])
+@pytest.mark.parametrize("marker_binding", ["bare-ack", "old-run-id", "claimed-newer-id"])
 def test_historical_full_import_ack_never_noops_a_newer_run(monkeypatch, tmp_path,
-                                                          already_imported, marker_has_run_id):
+                                                          history_case, marker_binding):
     from lib import db
     aid = _agent("ack-history")
     clock = [db.now_ms()]
     monkeypatch.setattr(db, "now_ms", lambda: clock[0])
     old_run = _ack_run_for(aid, "2026-06-24")
     old_prompt = dreaming.next_round_for_run(old_run)["prompt"]
-    ack = "DREAMING_OK" + (f" run_id={old_run['run_id']}" if marker_has_run_id else "")
+    ack = "DREAMING_OK" + (f" run_id={old_run['run_id']}" if marker_binding != "bare-ack" else "")
     turns = [{"role": "user", "text": old_prompt, "timestamp": "1"},
              {"role": "assistant", "text": ack, "timestamp": "2"}]
     def import_old():
         message_store.store_transcript_turns(
             agent_id=aid, backend_session_id="ack-history-transcript",
             source_file=str(tmp_path / "ack-history.jsonl"), turns=turns)
-    if already_imported:
+    if history_case != "first-seen":
+        if history_case == "changed-row":
+            turns[1]["text"] = "Earlier historical assistant output"
         import_old()
+        prior = message_store.list_messages(agent_id=aid, backend_session_id="ack-history-transcript")
+        assert prior[-1]["text"] == ("Earlier historical assistant output" if history_case == "changed-row"
+                                      else "Dreaming check: no action needed.")
     # The original run is terminal before the newer one starts, independently
     # of whether an earlier full import had already observed its marker.
     dreaming.abandon_run(old_run["run_id"], harvest=False)
@@ -1578,6 +1583,8 @@ def test_historical_full_import_ack_never_noops_a_newer_run(monkeypatch, tmp_pat
     before = dreaming.get_run(newer["run_id"])
     assert before["status"] == "active"
 
+    turns[1]["text"] = (f"DREAMING_OK run_id={newer['run_id']}"
+                         if marker_binding == "claimed-newer-id" else ack)
     import_old()  # Real full import: the locked pass sees the historical ACK.
 
     assert dreaming.get_run(newer["run_id"]) == before
@@ -1587,7 +1594,8 @@ def test_historical_full_import_ack_never_noops_a_newer_run(monkeypatch, tmp_pat
         "Automated dreaming run", "Dreaming check: no action needed."]
 
 
-@pytest.mark.parametrize("case", ["active", "late", "duplicate", "foreign-agent", "missing-id", "unknown-id"])
+@pytest.mark.parametrize("case", ["active", "late", "duplicate", "foreign-agent", "missing-id", "unknown-id",
+                                 "quoted-id", "ambiguous-header", "body-conflict", "late-claims-new"])
 def test_isolated_ack_is_bound_to_its_dispatch_run(monkeypatch, tmp_path, case):
     from lib import db
     aid = _agent("ack-callback")
@@ -1605,6 +1613,12 @@ def test_isolated_ack_is_bound_to_its_dispatch_run(monkeypatch, tmp_path, case):
         prompt = dreaming.DREAMING_PROMPT
     elif case == "unknown-id":
         prompt = prompt.replace(run["run_id"], "dream_unknown_ack72")
+    elif case == "quoted-id":
+        prompt = "Quoted old dream context follows:\n" + prompt
+    elif case == "ambiguous-header":
+        prompt = prompt.replace("hidden=true]]", "hidden=true run_id=dream_ambiguous_ack72]]", 1)
+    elif case == "body-conflict":
+        prompt += "\nQuoted historical context: run_id=dream_other_ack72"
     callbacks = []
     def fake_spawn(_backend, **kwargs):
         callbacks.append(kwargs)
@@ -1617,18 +1631,21 @@ def test_isolated_ack_is_bound_to_its_dispatch_run(monkeypatch, tmp_path, case):
     if case == "duplicate":
         result({"_assistant_text": "DREAMING_OK"})
         assert dreaming.get_run(run["run_id"])["status"] == "noop"
-    elif case == "late":
+    elif case in ("late", "late-claims-new"):
         dreaming.abandon_run(run["run_id"], harvest=False)
-    if case in ("late", "duplicate"):
+    if case in ("late", "duplicate", "late-claims-new"):
         clock[0] += 1
         other = _ack_run_for(aid, "2026-06-25")
     before = dreaming.get_run(run["run_id"])
     other_before = dreaming.get_run(other["run_id"]) if other else None
     clock[0] += 1
 
-    result({"_assistant_text": "DREAMING_OK"})
+    response = (f"DREAMING_OK run_id={other['run_id']}" if case == "late-claims-new"
+                else "DREAMING_OK run_id=dream_other_ack72" if case == "body-conflict"
+                else "DREAMING_OK")
+    result({"_assistant_text": response})
 
-    if case == "active":
+    if case in ("active", "body-conflict"):
         after = dreaming.get_run(run["run_id"])
         assert after["status"] == after["stage"] == "noop"
         assert after["finished_at"] == clock[0]
@@ -1641,6 +1658,52 @@ def test_isolated_ack_is_bound_to_its_dispatch_run(monkeypatch, tmp_path, case):
     if other:
         assert dreaming.get_run(other["run_id"]) == other_before
         assert other_before["status"] == "active"
+
+
+def test_bound_ack_loses_to_an_independent_terminal_writer(monkeypatch, tmp_path, capsys):
+    import sqlite3
+    from lib import db
+    aid = _agent("ack-write-race")
+    run = _ack_run_for(aid, "2026-06-24")
+    callbacks = []
+    patch_shared(monkeypatch, dreaming, "_dream_scratch_cwd", lambda *_: tmp_path)
+    def fake_spawn(_backend, **kwargs):
+        callbacks.append(kwargs)
+        return object()
+    monkeypatch.setattr(dreaming.backends, "spawn_turn", fake_spawn)
+    assert dreaming.dispatch_isolated_dream(
+        agents_db.get_by_agent_id(aid), dreaming.next_round_for_run(run)["prompt"])
+    original_conn = db.conn
+    primary = original_conn()
+    observer = sqlite3.connect(primary.execute("PRAGMA database_list").fetchone()["file"],
+                               isolation_level=None)
+    observer.row_factory = sqlite3.Row
+    terminal = []
+    class BeforeNoopWrite:
+        def __getattr__(self, name):
+            return getattr(primary, name)
+        def execute(self, sql, parameters=()):
+            if sql.lstrip().upper().startswith("UPDATE DREAM_RUNS") and "'noop'" in sql and not terminal:
+                assert not primary.in_transaction
+                # A real separate SQLite writer commits the terminal state
+                # immediately before the original target UPDATE is forwarded.
+                stamp = db.now_ms() + 1
+                observer.execute("UPDATE dream_runs SET status='abandoned', stage='abandoned', "
+                                 "finished_at=?, updated_at=?, last_error='independent terminal' WHERE run_id=?",
+                                 (stamp, stamp, run["run_id"]))
+                terminal.append(dict(observer.execute(
+                    "SELECT * FROM dream_runs WHERE run_id=?", (run["run_id"],)).fetchone()))
+            return primary.execute(sql, parameters)
+    capsys.readouterr()
+    try:
+        with monkeypatch.context() as scoped:
+            scoped.setattr(db, "conn", lambda: BeforeNoopWrite())
+            callbacks[0]["on_result"]({"_assistant_text": "DREAMING_OK"})
+        assert len(terminal) == 1, "the actual noop write was not reached"
+        assert dreaming.get_run(run["run_id"]) == terminal[0]
+        assert "dreamingNoop" not in capsys.readouterr().err
+    finally:
+        observer.close()
 
 
 @pytest.mark.parametrize("exit_reason", ["deadline", "disabled"])
