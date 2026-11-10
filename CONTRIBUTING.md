@@ -83,7 +83,7 @@ So a model release means a release here:
 Write the commit message for the person reading `git log` in a year: what
 changed and why, in plain sentences. Keep pull request descriptions short and
 concrete. Run `make test-critical` and the tests for what you changed before
-pushing; the full suite runs on GitHub.
+pushing; the full suite only runs when someone starts it by hand on GitHub.
 
 Contributions are accepted under the [CLA](CLA.md); the project is licensed
 under [PolyForm Shield 1.0.0](LICENSE.md).
