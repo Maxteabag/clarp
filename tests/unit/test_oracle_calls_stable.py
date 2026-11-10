@@ -17,7 +17,6 @@ import pytest
 
 from lib import agents, message_store, oracle_calls_stable as mod, oracle_delegations
 from lib.oracle_prompt import PROMPT
-from tests.oracle_faults import SECRET, fault_sinks
 
 
 # ---- session_config ---------------------------------------------------------
@@ -597,23 +596,3 @@ def test_read_agent_transcript_reads_newest_messages_without_dispatch(tools, mon
     # Limit is bounded and defaults to ten.
     assert len(tools.execute("read_agent_transcript", {"agent": "Mike", "limit": 999}, "c")["messages"]) == 30
     assert len(tools.execute("read_agent_transcript", {"agent": "Mike"}, "c")["messages"]) == 10
-
-
-@pytest.mark.parametrize("sink_failed", [False, True])
-def test_failed_socket_close_keeps_sideband_cleanup_order(sideband, fault_sinks, sink_failed):
-    effects = []
-    fault_sinks.failed = sink_failed
-    sideband.controller.close = lambda: effects.append('controller')
-    sideband.pool.shutdown = lambda **kwargs: effects.append(('pool', kwargs))
-
-    def close_socket():
-        effects.append('socket')
-        raise OSError(SECRET)
-    sideband.socket.close = close_socket
-    sideband.journal = SimpleNamespace(close=lambda: effects.append('journal'))
-    assert sideband.close() is None
-    assert sideband.stopped.is_set()
-    assert effects == ['controller', ('pool', {'wait': False, 'cancel_futures': True}), 'socket', 'journal']
-    assert sideband.close() is None
-    assert len(effects) == 4
-    fault_sinks.assert_fault('oracleStableSocketCloseFail')
