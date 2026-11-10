@@ -126,6 +126,48 @@ def test_every_kind_of_change_to_the_agent_moves_its_key(monkeypatch, change):
     assert _stored(other) == _fresh(other)                 # the agent beside it did not: stored
 
 
+def test_a_key_that_moves_only_through_the_conversation_head_keeps_the_agent_out(monkeypatch):
+    """How every real delete moves the key: the row goes and the conversation's
+    head revision is raised in the same transaction. Here the deleted row is
+    the one the preview shows, while a newer tool row (never shown) still holds
+    the highest revision and updated_at of the messages. Nothing in `messages`
+    tells; only the head does. A certificate that left the head out would
+    store the preview of a row that no longer exists."""
+    aid, other = seed(2)
+    db.conn().executemany(
+        """INSERT INTO messages (message_id,agent_id,backend_session_id,seq,role,text,tool_name,revision,updated_at)
+           VALUES (?,?,?,?,?,?,?,?,?)""",
+        [(f"{aid}-shown", aid, aid, 2, "user", "shown now", "", 2, 1500),
+         (f"{aid}-tool", aid, aid, 3, "assistant", "", "Bash", 3, 2000)])
+    assert previews.dashboard_messages()[aid]['head']['preview'] == 'You: shown now'
+    previews._PREVIEW_CACHE.reset()
+    previews._REVISION_CACHE.reset()
+    highest = db.conn().execute(
+        "SELECT MAX(revision), MAX(updated_at) FROM messages WHERE agent_id=?", (aid,)).fetchone()
+
+    def delete_as_the_writers_do():
+        foreign = sqlite3.connect(str(db.DB_PATH))
+        try:
+            foreign.execute("BEGIN")
+            foreign.execute("DELETE FROM messages WHERE message_id=?", (f"{aid}-shown",))
+            foreign.execute("""INSERT INTO conversation_heads (agent_id,backend_session_id,revision) VALUES (?,?,4)
+                               ON CONFLICT(agent_id,backend_session_id) DO UPDATE SET revision=excluded.revision""",
+                            (aid, aid))
+            foreign.commit()
+        finally:
+            foreign.close()
+
+    fired = _once_during_fill(monkeypatch, delete_as_the_writers_do, after=aid)
+    stale = previews.dashboard_messages()
+    assert fired and stale[aid]['head']['preview'] == 'You: shown now'      # what this batch saw
+    assert tuple(db.conn().execute(
+        "SELECT MAX(revision), MAX(updated_at) FROM messages WHERE agent_id=?", (aid,)).fetchone()) == tuple(highest), \
+        "the fixture must leave the messages' own maxima where they were"
+    assert previews._PREVIEW_CACHE.peek(aid) is None       # the head moved: not stored
+    assert _stored(other) == _fresh(other)
+    assert previews.dashboard_messages()[aid]['head']['preview'] == 'You: synthetic'
+
+
 # --- a write to something else ----------------------------------------------------------
 
 @pytest.mark.parametrize('when', ['before-its-preview', 'after-its-preview'])
@@ -283,16 +325,17 @@ def test_a_slow_batch_and_a_fast_one_leave_only_true_previews(monkeypatch):
 
 def test_concurrent_batches_under_writes_never_store_a_wrong_preview():
     ids = seed(24)
-    stop, errors = threading.Event(), []
+    stop, errors, turn = threading.Event(), [], threading.Event()   # `turn` is never set: wait() only yields
 
     def writer():
         connection = sqlite3.connect(str(db.DB_PATH), timeout=5)
         try:
-            for n in range(120):
+            for n in range(48):                            # every agent twice
                 agent_id = ids[n % len(ids)]
                 connection.execute("UPDATE messages SET text=?,revision=revision+1,updated_at=updated_at+1 WHERE agent_id=?",
                                    (f'text {n}', agent_id))
                 connection.commit()
+                turn.wait(0.002)                           # let the builders run into the next write
         except Exception as exc:  # noqa: BLE001 - reported by the assertion below
             errors.append(exc)
         finally:
@@ -303,6 +346,7 @@ def test_concurrent_batches_under_writes_never_store_a_wrong_preview():
         try:
             while not stop.is_set():
                 previews.dashboard_messages()
+                turn.wait(0)                               # give up the interpreter: two tight loops starve the writer
         except Exception as exc:  # noqa: BLE001
             errors.append(exc)
         finally:
