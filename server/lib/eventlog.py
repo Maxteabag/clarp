@@ -59,6 +59,19 @@ LOG_DIR = pathlib.Path(os.environ.get(
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 
+# The size bound on one event's ``detail``: serialised, it never exceeds this
+# in either sink, whichever way the record is made (see _bounded). One code
+# path logging megabyte tracebacks filled 34 GB in a day while every age-based
+# retention held. Longer string values keep their head and tail (see
+# _bound_detail). The bound is on the detail only: the promoted fields
+# (session, path and so on) are not capped, and emit_exception still formats
+# the whole traceback before it gets here.
+MAX_DETAIL_BYTES = 32 * 1024
+# String lengths tried, longest first, until the shortened detail fits.
+_STRING_LIMITS = (24576, 16384, 8192, 4096, 2048, 1024, 512, 256)
+# Kept free for the "_truncated" entry that says the detail was shortened.
+_TRUNCATION_NOTE_BYTES = 256
+
 # In-process serialisation. The flock handles cross-process; this avoids
 # interleaving when many threads in the same server emit at once.
 _LOCK = threading.Lock()
@@ -119,6 +132,83 @@ def _sanitize_detail(value: object, key: str = "") -> object:
     if isinstance(value, list):
         return [_sanitize_detail(item) for item in value]
     return value
+
+
+def _shorten(text: str, limit: int) -> str:
+    """``text`` cut to about ``limit`` characters: a third from its head and
+    the rest from its tail, where a traceback names the failure."""
+    head = limit // 3
+    tail = limit - head
+    return f"{text[:head]}\n...[{len(text) - limit} chars omitted]...\n{text[-tail:]}"
+
+
+def _shorten_strings(value: object, limit: int) -> object:
+    if isinstance(value, str):
+        # The slack keeps a string from growing by more than it loses.
+        return _shorten(value, limit) if len(value) > limit + 64 else value
+    if isinstance(value, dict):
+        return {name: _shorten_strings(item, limit) for name, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_shorten_strings(item, limit) for item in value]
+    return value
+
+
+def _bound_detail(detail: object) -> object:
+    """``detail`` as it is when it serialises within MAX_DETAIL_BYTES, else a
+    shortened copy that does, carrying ``_truncated`` with the original size.
+
+    Long string values are shortened first, every one to the same length, so
+    the keys a reader looks for survive. A detail that is too large for other
+    reasons (thousands of small values) becomes a head-and-tail preview of its
+    own JSON text.
+    """
+    encoded = json.dumps(detail, separators=(",", ":"))
+    if len(encoded) <= MAX_DETAIL_BYTES:
+        return detail
+    note = {"original_bytes": len(encoded), "limit_bytes": MAX_DETAIL_BYTES}
+    room = MAX_DETAIL_BYTES - _TRUNCATION_NOTE_BYTES
+    if isinstance(detail, dict):
+        for limit in _STRING_LIMITS:
+            shortened = _shorten_strings(detail, limit)
+            if len(json.dumps(shortened, separators=(",", ":"))) <= room:
+                return {**shortened, "_truncated": note}
+    # Quotes and backslashes double when JSON text is stored as a string.
+    return {"_truncated": note, "_preview": _shorten(encoded, room // 2 - 64)}
+
+
+def _bounded(record: dict, size: int | None = None, *, report: bool = True) -> dict:
+    """``record`` with its detail within MAX_DETAIL_BYTES. Every record passes
+    here once, when it is made: before it reaches a sink and before it is
+    queued, so a deferred record waits in the queue already bounded and both
+    sinks later get the same one. ``size`` is the record's serialised length
+    when the caller already has it. Never raises.
+
+    If the bounding itself fails, the record still goes out with a finite
+    detail that names the failure. That detail is in place before anything is
+    reported, and the report (log_fault: contained, throttled) cannot stop it.
+    ``record_original_bytes`` there is the whole record's size, or null when
+    even that was not measured: the detail alone was never measured.
+
+    ``report=False`` makes this free of side effects: no report is printed.
+    It is for a record made while its transaction is still open
+    (defer_sqlite_write_wait), where no sink may be touched. The fallback
+    detail, with the error's class, is then the diagnostic: it is queued with
+    the record and reaches both sinks once the transaction has ended.
+    """
+    try:
+        if size is None:
+            size = len(json.dumps(record, separators=(",", ":")))
+        # Only a record over the cap can carry a detail over it, so an
+        # ordinary event pays nothing more than the length it already had.
+        if size > MAX_DETAIL_BYTES and "detail" in record:
+            record["detail"] = _bound_detail(record["detail"])
+    except Exception as error:  # noqa: BLE001 - logging must not break the caller
+        record["detail"] = {"_truncated": {
+            "record_original_bytes": size, "limit_bytes": MAX_DETAIL_BYTES,
+            "error": type(error).__name__}}
+        if report:
+            log_fault("eventlogDetailBoundFailed", error, structured=False)
+    return record
 
 
 # Ordinary emits queue only their SQLite row; JSONL stays synchronous. The
@@ -204,8 +294,12 @@ def defer_sqlite_write_wait(connection, stderr_line: str, detail: str) -> bool:
     now = _dt.datetime.now(_dt.timezone.utc)
     record = None
     if diagnostics_settings.allows_event(source="server", event="sqliteWriteWait"):
-        record = {"ts": _iso(now), "source": "server", "event": "sqliteWriteWait",
-                  "level": "info", "detail": {"msg": detail}}
+        # Bounded here, not at the flush: the queue never holds the oversized
+        # detail, and nothing is written until the transaction ends. That
+        # includes a report of a failed bounding (stderr is a sink too): the
+        # record's own fallback detail carries the failure instead.
+        record = _bounded({"ts": _iso(now), "source": "server", "event": "sqliteWriteWait",
+                           "level": "info", "detail": {"msg": detail}}, report=False)
     item = _DeferredRecord(record, now, jsonl=True, stderr_line=stderr_line,
                            connection=weakref.ref(connection))
     with _DEFERRED_LOCK:
@@ -305,10 +399,10 @@ def _report_dropped(now: _dt.datetime, *, dropped: bool = False, force: bool = F
         last = _DROPPED["last_report"]
         if not force and last is not None and tick - last < 60:
             return
-        record = {
+        record = _bounded({
             "ts": _iso(now), "source": "server", "event": "eventlogDropped", "level": "warn",
             "detail": {"pid": pid, "dropped": pending, "total_dropped": _DROPPED["total"]},
-        }
+        })
         try:
             _write_jsonl(record, now)
         except OSError as error:
@@ -383,15 +477,16 @@ def emit(source: str, event: str, *,
     if detail:
         record["detail"] = _sanitize_detail(detail)
     try:
-        json.dumps(record, separators=(",", ":"))
+        size = len(json.dumps(record, separators=(",", ":")))
     except (TypeError, ValueError):
         # Detail wasn't serialisable — coerce to repr and retry.
         try:
             record["detail"] = {"_repr": repr(detail)}
-            json.dumps(record, separators=(",", ":"))
+            size = len(json.dumps(record, separators=(",", ":")))
         except Exception as error:
             print(f"eventlog serialization failed: {error}", file=sys.stderr)
             return
+    record = _bounded(record, size)
     _write_sqlite(record, now_dt)
     _append_jsonl(record, now_dt)
 
