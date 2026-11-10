@@ -96,6 +96,19 @@ fn a_chat_opened_cold_folds_its_settled_turn_from_log() {
 }
 
 #[test]
+fn hidden_activity_leaves_finished_turns_unfolded_for_presentation_to_hide() {
+    let rows = real_rows(false);
+
+    let folded = present(&rows, None, &Options { hide_activity: true, ..options(&[]) });
+
+    assert!(folded.folds.is_empty());
+    assert!(folded.hidden_rows.is_empty());
+    assert!(folded.stripped_calls.is_empty());
+    assert!(folded.details_wanted.is_empty());
+    assert!(folded.unexplained.is_empty());
+}
+
+#[test]
 fn an_open_fold_shows_one_row_per_tool() {
     let rows = real_rows(false);
     let folded = present(&rows, None, &options(&[&format!("live:fold:{T1}")]));

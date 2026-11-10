@@ -332,7 +332,10 @@ impl Engine {
         let tools_visible = config.settings.boolean("conversation/toolsVisible", false);
         let presentation = clarp_core::presentation::Settings {
             show_when_ready: config.settings.boolean("conversation/showWhenReady", false),
-            activity_mode: config.settings.integer("conversation/activityDisplayMode", i64::from(tools_visible)).clamp(0, 2) as i32,
+            activity_mode: config
+                .settings
+                .integer("conversation/activityDisplayMode", i64::from(tools_visible))
+                .clamp(0, i64::from(clarp_core::presentation::HIDDEN)) as i32,
             ..clarp_core::presentation::Settings::default()
         };
         // lifecycle
@@ -575,12 +578,13 @@ impl Engine {
         let selected = self.selected.clone();
         self.changes.push(Change::Conversation(selected));
     }
-    /// 0 grouped, 1 always visible, 2 group old (C++ `activityDisplayMode`).
+    /// 0 grouped, 1 always visible, 2 group old, 3 hidden
+    /// (C++ `activityDisplayMode`, extended with hidden).
     pub fn activity_mode(&self) -> i32 {
         self.presentation.activity_mode
     }
     pub fn set_activity_mode(&mut self, mode: i32) {
-        let mode = mode.clamp(0, 2);
+        let mode = mode.clamp(0, clarp_core::presentation::HIDDEN);
         if self.presentation.activity_mode != mode {
             self.presentation.activity_mode = mode;
             self.settings.set("conversation/activityDisplayMode", i64::from(mode));
@@ -661,7 +665,10 @@ impl Engine {
             self.changes.push(Change::Conversation(selected));
         }
         let tools_visible = self.settings.boolean("conversation/toolsVisible", false);
-        let mode = self.settings.integer("conversation/activityDisplayMode", i64::from(tools_visible)).clamp(0, 2) as i32;
+        let mode = self
+            .settings
+            .integer("conversation/activityDisplayMode", i64::from(tools_visible))
+            .clamp(0, i64::from(clarp_core::presentation::HIDDEN)) as i32;
         if self.presentation.activity_mode != mode {
             self.set_activity_mode(mode);
         }
