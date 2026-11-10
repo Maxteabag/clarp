@@ -819,7 +819,7 @@ def test_fake_pool_close_joins_running_backstop_and_terminal_callback(
             timers[0].run()
         with pytest.raises(QuiescenceError, match="body after"):
             timers[0].function()
-        with pytest.raises(QuiescenceError, match="actor construction"):
+        with pytest.raises(QuiescenceError, match="body after"):
             client._callback(terminal, None)
         after = {path.name: path.read_bytes() for path in later.glob("*") if path.is_file()}
         assert after == before and callbacks == ["terminal"]
@@ -834,6 +834,8 @@ def test_preconstructed_pool_actors_refuse_start_and_body_after_undo():
     from tests.codex_pool_lifecycle import QuiescenceError
     owner, namespace, mp, gate = _private_pool_owner()
     calls = []
+    client = namespace._Client.__new__(namespace._Client)
+    deferred_dispatch = client._callback
     with owner.producing():
         timer = namespace.threading.Timer(60, lambda: calls.append("timer"))
         thread = namespace.threading.Thread(target=lambda: calls.append("thread"))
@@ -846,6 +848,8 @@ def test_preconstructed_pool_actors_refuse_start_and_body_after_undo():
             actor.start()
         with pytest.raises(QuiescenceError, match="body after"):
             actor.run()
+    with pytest.raises(QuiescenceError, match="body after"):
+        deferred_dispatch(lambda _v: calls.append("late callback"), None)
     assert calls == []
     gate.check(namespace)
 
@@ -914,15 +918,23 @@ def test_pool_cleanup_deadline_blocks_reset_next_setup_and_exact_undo(tmp_path, 
     from tests import conftest
     from tests import codex_pool_lifecycle as lifecycle
     from lib import db, eventlog, revisioned_cache
-    owner, namespace, mp, gate = _private_pool_owner(timeout=0.05)
+    owner, namespace, mp, gate = _private_pool_owner(timeout=0.2)
     paths = {"DB": "old-test-db", "LOG": "old-test-log"}
     mp.setitem(paths, "DB", "owned-test-db")
     mp.setitem(paths, "LOG", "owned-test-log")
-    entered, release = threading.Event(), threading.Event()
+    release, retiring = threading.Event(), threading.Event()
+    entered = [threading.Event() for _ in range(4)]
     with owner.producing():
-        actor = namespace.threading.Thread(target=lambda: (entered.set(), release.wait(5)))
-    actor.start()
-    assert entered.wait(5)
+        actors = [namespace.threading.Thread(
+            target=lambda event=event: (event.set(), release.wait(5))) for event in entered]
+    for actor in actors:
+        actor.start()
+    assert all(event.wait(5) for event in entered)
+    client = namespace._Client.__new__(namespace._Client)
+    client.proc = _FakeProc()
+    # A blocking stop is part of the ONE budget, not an unbounded preliminary
+    # shutdown followed by a separate join allowance per actor.
+    client.retire = lambda: (retiring.set(), release.wait(5), client.proc.terminate())
     # Drive the actual DB fixture generator only through its setup, against
     # this test's existing paths. Its teardown must independently fence reset.
     db_fixture = conftest._isolated_db.__wrapped__(None, tmp_path, monkeypatch)
@@ -933,6 +945,7 @@ def test_pool_cleanup_deadline_blocks_reset_next_setup_and_exact_undo(tmp_path, 
         with pytest.raises(lifecycle.QuiescenceError, match="deadline"):
             owner.close()
         assert time.monotonic() - started < 1.0
+        assert retiring.is_set()
         assert owner.state == "FAILED" and owner in gate.owners
         stacks = (list(mp._setattr), list(mp._setitem))
         with pytest.raises(lifecycle.QuiescenceError, match="undo"):
@@ -954,14 +967,18 @@ def test_pool_cleanup_deadline_blocks_reset_next_setup_and_exact_undo(tmp_path, 
                 assert resets == []
             finally:
                 release.set()
-                actor.join(5)
-        assert not actor.is_alive()
+                for actor in owner.actors:
+                    if actor.ident is not None:
+                        actor.join(5)
+        assert all(not actor.is_alive() for actor in owner.actors)
         assert owner.state == "FAILED" and owner in gate.owners
         with pytest.raises(lifecycle.QuiescenceError):
             mp.undo()  # completion is not an implicit failed-owner release
     finally:
         release.set()
-        actor.join(5)
+        for actor in owner.actors:
+            if actor.ident is not None:
+                actor.join(5)
 
 
 def test_healthy_pool_undo_delegates_once_and_preserves_native_errors():

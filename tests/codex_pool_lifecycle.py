@@ -40,7 +40,7 @@ def _stopped(client):
     proc = getattr(client, "proc", None)
     if proc is None or type(proc.poll()) is not int:
         return False
-    return all(not actor.is_alive() for actor in
+    return all(actor.is_alive() is False for actor in
                (getattr(client, "reader", None), getattr(client, "stderr_reader", None))
                if actor is not None)
 
@@ -80,8 +80,17 @@ class PoolOwner:
                 return client
 
             def __init__(self, *args, **kwargs):
-                with owner.producing():
-                    super().__init__(*args, **kwargs)
+                # Also cover explicit object.__new__(Client) followed by init.
+                if owner.clients.get(id(self)) is not self:
+                    owner.register(self)
+                initialize = super().__init__
+                owner.run(self, lambda: initialize(*args, **kwargs))
+
+            def _callback(self, callback, value):
+                # A retained bound dispatch may be invoked after CAS's module
+                # proxy was undone. Its own original owner still gates entry.
+                dispatch = super()._callback
+                return owner.run(self, lambda: dispatch(callback, value))
 
         self.client_class = Client
         monkeypatch.setattr(cas, "_Client", Client)
@@ -190,7 +199,14 @@ class PoolOwner:
         # Stop can block too. It belongs to the same deadline as every join.
         def retire(client):
             try:
-                client.retire()
+                try:
+                    client.retire()
+                finally:
+                    # An initializer may have published proc but not yet its
+                    # locks/pending maps. Even a failed retire must attempt
+                    # process stop, within this same tracked worker/deadline.
+                    if client.proc.poll() is None:
+                        client._stop_process()
             except BaseException as exc:
                 with self.lock:
                     self.errors.append(f"owned retire failed: {type(exc).__name__}")
