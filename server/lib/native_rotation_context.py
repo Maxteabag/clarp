@@ -67,7 +67,7 @@ def build_item(seed: Seed, *, agent_id: str, new_thread_id: str, operation_id: s
             "content": [{"type": "input_text", "text": text}]}
 
 
-def _item_text(item):
+def item_text(item):
     if not isinstance(item, dict):
         return None
     kind = item.get("type")
@@ -105,7 +105,7 @@ def is_context_item(item, native_thread_id):
     operation_id = item_id[len(_ID_PREFIX):]
     if not _operation(operation_id):
         return False
-    text = _item_text(item)
+    text = item_text(item)
     if text is None or not text.startswith(_OPEN) or not text.endswith(_CLOSE):
         return False
     try:

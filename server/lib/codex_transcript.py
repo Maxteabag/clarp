@@ -497,6 +497,7 @@ def parse_turns(path: pathlib.Path) -> list[dict]:
     native_thread_id = ""
     metadata_conflict = False
     rotation_prefix = True
+    context_prefix: list[dict] = []
     with path.open(encoding="utf-8") as f:
         for line in f:
             line = line.strip()
@@ -505,9 +506,13 @@ def parse_turns(path: pathlib.Path) -> list[dict]:
             try:
                 ev = json.loads(line)
             except json.JSONDecodeError as e:
+                metadata_conflict = True
+                rotation_prefix = False
                 log_exception("codexTranscriptLineSkip", e, detail=str(path))
                 continue
             if not isinstance(ev, dict):
+                metadata_conflict = True
+                rotation_prefix = False
                 continue
             ts = str(ev.get("timestamp") or "")
             payload = ev.get("payload")
@@ -524,14 +529,30 @@ def parse_turns(path: pathlib.Path) -> list[dict]:
                     native_thread_id = supplied
             if inner in ("task_started", "turn_started"):
                 rotation_prefix = False
-            if rotation_prefix and native_thread_id and not metadata_conflict:
-                # History-only injection precedes the first actual user turn.
-                # Tail ranges begin at task_started; missing session metadata
-                # is never replaced by a filename/prefix or inferred UUID.
-                item = payload.get("item") or ev.get("item")
-                candidate = item if isinstance(item, dict) else payload
-                if native_rotation_context.is_context_item(candidate, native_thread_id):
+            item = payload.get("item") or ev.get("item")
+            candidate = item if isinstance(item, dict) else payload
+            if (rotation_prefix and native_thread_id and not metadata_conflict and
+                    native_rotation_context.is_context_item(candidate, native_thread_id)):
+                if not context_prefix:
+                    # Delay the drop until EOF: a later conflicting header or
+                    # corrupt record cannot retroactively certify this prefix.
+                    _append_visible_message(
+                        context_prefix, role="user",
+                        text=native_rotation_context.item_text(candidate), timestamp=ts)
                     continue
+                metadata_conflict = True  # ambiguous repeated seed, not a new authority
+            if rotation_prefix:
+                bootstrap = (inner == "message" and
+                             (payload.get("role") in ("system", "developer") or
+                              (payload.get("role") == "user" and
+                               _is_injected_user_context(_response_message_text(payload)))))
+                metadata = (ev.get("type") in ("session_meta", "turn_context") or
+                            inner in ("thread_settings_applied", "token_count"))
+                if not bootstrap and not metadata:
+                    # Also close on real input/output with a missing start
+                    # event, or on an unknown pre-seed record. The native seed
+                    # producer owns a fresh thread before any real turn.
+                    rotation_prefix = False
 
             if inner == "message":
                 role = str(payload.get("role") or "")
@@ -660,6 +681,18 @@ def parse_turns(path: pathlib.Path) -> list[dict]:
             elif inner in ("function_call_output", "custom_tool_call_output"):
                 _attach_output(turns, payload.get("call_id") or "",
                                payload.get("output") or payload.get("stdout") or "")
+    if metadata_conflict and context_prefix:
+        # The one withheld bootstrap user row predates all visible turns.
+        # Preserve the ordinary dual-format dedup rule at the splice point.
+        if turns and turns[0].get("role") == "user":
+            prefix_text = context_prefix[-1]["text"]
+            first_text = turns[0].get("text") or ""
+            if (prefix_text == first_text or
+                    strip_hidden_blocks(prefix_text).strip() == strip_hidden_blocks(first_text).strip()):
+                first = turns.pop(0)
+                _append_visible_message(context_prefix, role="user", text=first_text,
+                                        timestamp=first.get("timestamp") or "", kind=first.get("kind"))
+        turns = context_prefix + turns
     _drop_superseded_legacy_items(turns, structured_items)
     _coalesce_exploration_cells(turns)
     for turn in turns:
