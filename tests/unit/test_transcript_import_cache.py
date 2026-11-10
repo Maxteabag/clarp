@@ -1376,7 +1376,7 @@ def _lease_binding(path, native_id):
         str(db.DB_PATH), "codex", native_id, str(path))
 
 
-@pytest.mark.parametrize("entry", ["direct", "worker", "after"])
+@pytest.mark.parametrize("entry", ["direct", "worker", "after", "descriptor", "path_wait"])
 def test_owner_lease_drains_real_import_and_observers_before_cutover(tmp_path, entry):
     import threading
     import time
@@ -1396,13 +1396,42 @@ def test_owner_lease_drains_real_import_and_observers_before_cutover(tmp_path, e
 
     def import_old():
         calls.append("old")
-        if entry != "after":
+        if entry in ("direct", "worker"):
             hold()
         return {}
 
     importer = _lease_native_import(path, "lease-owner", "old-native", import_old)
+    held_lock = None
+    if entry == "descriptor":
+        original = importer
+        class SelectedDescriptor:
+            @property
+            def _clarp_transcript_completion_v1(self):
+                if threading.current_thread().name == "transcript-import":
+                    hold()
+                return True
+
+            def __getattr__(self, name):
+                return getattr(original, name)
+
+            def __call__(self):
+                return original()
+        importer = SelectedDescriptor()
+    if entry == "path_wait":
+        held_lock = threading.Lock()
+        held_lock.acquire()
+        path_wait_lock = held_lock
+        class RealPathWait:
+            def __enter__(self):
+                entered.set()
+                path_wait_lock.acquire()
+
+            def __exit__(self, *args):
+                path_wait_lock.release()
+        with cache._guard:
+            cache._path_locks[f"lease-owner\0{path}"] = RealPathWait()
     try:
-        if entry == "direct":
+        if entry in ("direct", "path_wait"):
             def run():
                 try:
                     cache.import_if_changed(path, importer, owner="lease-owner")
@@ -1425,6 +1454,9 @@ def test_owner_lease_drains_real_import_and_observers_before_cutover(tmp_path, e
             cache.acquire_owner_lease("lease-owner", _lease_binding(path, "old-native"),
                                       time.monotonic(), operation_id="other-operation")
         finish.set()
+        if held_lock is not None:
+            held_lock.release()
+            held_lock = None
         if direct is not None:
             direct.join(2)
             assert not direct.is_alive()
@@ -1437,6 +1469,8 @@ def test_owner_lease_drains_real_import_and_observers_before_cutover(tmp_path, e
         lease = None
     finally:
         finish.set()
+        if held_lock is not None:
+            held_lock.release()
         try:
             if direct is not None:
                 direct.join(3)
@@ -1503,6 +1537,74 @@ def test_owner_lease_final_import_is_once_and_rebind_rejects_old_callbacks(tmp_p
     finally:
         try:
             if lease is not None:
+                cache.release_owner_lease(lease, binding)
+        finally:
+            assert cache.reset_for_tests()
+
+
+
+def test_owner_lease_parks_only_existing_capacity_and_retains_refused_dirty_summary(tmp_path):
+    import time
+
+    cache = transcript_import_cache
+    assert cache.reset_for_tests()
+    path = tmp_path / "old.jsonl"
+    path.write_text("{}\n")
+    binding = _lease_binding(path, "old-native")
+    lease = cache.acquire_owner_lease("lease-owner", binding, time.monotonic(), operation_id="slots-1")
+    calls = []
+    try:
+        # These paths deliberately do not exist. Held-owner admission must not
+        # stat, call descriptors or execute any of these old closures.
+        for i in range(cache._BACKGROUND_LIMIT):
+            assert cache.schedule_import(tmp_path / f"absent-{i}",
+                                         lambda: calls.append("old"), owner="lease-owner")
+        assert not cache.schedule_import(tmp_path / "capacity-refused", lambda: calls.append("overflow"),
+                                         owner="lease-owner", urgent=True, startup_exempt=True)
+        other = tmp_path / "other.jsonl"
+        other.write_text("{}\n")
+        assert cache.import_if_changed(other, lambda: calls.append("other"), owner="unrelated")
+        dirty = cache.release_owner_lease(lease, binding)
+        lease = None
+        assert dirty.dirty and dirty.urgent and dirty.startup_exempt
+        assert len(dirty.paths) == cache._BACKGROUND_LIMIT
+        assert dirty.first_wait_rank is not None
+        assert not cache.is_active(path, owner="lease-owner")
+        assert calls == ["other"]
+    finally:
+        try:
+            if lease is not None:
+                cache.release_owner_lease(lease, binding)
+        finally:
+            assert cache.reset_for_tests()
+
+
+def test_owner_lease_reentrant_acquire_preserves_block_without_self_wait(tmp_path):
+    import time
+
+    cache = transcript_import_cache
+    assert cache.reset_for_tests()
+    path = tmp_path / "old.jsonl"
+    path.write_text("{}\n")
+    binding = _lease_binding(path, "old-native")
+    tokens = []
+
+    def import_old():
+        with pytest.raises(cache.OwnerLeasePending) as pending:
+            cache.acquire_owner_lease("lease-owner", binding, time.monotonic() + 30,
+                                      operation_id="self-1")
+        tokens.append(pending.value.lease)
+        return {}
+
+    try:
+        assert cache.import_if_changed(path, _lease_native_import(path, "lease-owner", "old-native", import_old),
+                                        owner="lease-owner")
+        assert len(tokens) == 1
+        assert cache.wait_owner_lease(tokens[0], time.monotonic()) is tokens[0]
+        cache.release_owner_lease(tokens.pop(), binding)
+    finally:
+        try:
+            for lease in tokens:
                 cache.release_owner_lease(lease, binding)
         finally:
             assert cache.reset_for_tests()
