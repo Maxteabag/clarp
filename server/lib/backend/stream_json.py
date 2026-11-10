@@ -355,7 +355,7 @@ class StreamJsonBackend(Backend):
         pacer.offer(text, final=force)
 
     def _live_item_id(self, st: Any) -> str:
-        from ..live_hub import item_prefix
+        from ..live_core import item_prefix
         target = st._live_target
         key = target.get("item_key") or ""
         if key:
@@ -364,7 +364,7 @@ class StreamJsonBackend(Backend):
 
     def _live_message_item(self, st: Any, text: str, *, phase: str | None) -> None:
         """The text as a live message item (docs/live-items.md), unpaced."""
-        from .. import live_hub
+        from .. import live_core as live_hub
         hub = live_hub.current()
         target = st._live_target
         if hub is None or not target.get("agent_id"):
@@ -383,7 +383,7 @@ class StreamJsonBackend(Backend):
         target = getattr(st, "_live_target", None)
         if not target or not target.get("agent_id"):
             return
-        from .. import live_hub
+        from .. import live_core as live_hub
         live_hub.report("done", target["agent_id"], self._live_item_id(st),
                         turn_id=target.get("trace_id") or None)
         st._live_msg_n = getattr(st, "_live_msg_n", 0) + 1

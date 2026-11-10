@@ -164,3 +164,175 @@ def test_only_the_biasing_models_take_the_socket_route():
     from lib import stt_providers
     assert "ink-2" in stt_providers._CARTESIA_SOCKET_MODELS
     assert "ink-whisper" not in stt_providers._CARTESIA_SOCKET_MODELS
+
+
+# 937: cleanup diagnostics must never replace the prior transcript/exception.
+_CLOSE_SECRET = 'SYNTHETIC_CLOSE_SECRET_937'
+
+
+class MediaCloseFault(RuntimeError):
+    def __str__(self):
+        raise AssertionError('close fault message must not be formatted')
+
+    def __repr__(self):
+        raise AssertionError('close fault repr must not be formatted')
+
+
+class ClosingSocket(FakeSocket):
+    def __init__(self, script, *, close_fails=True, receive_error=None):
+        import threading
+        super().__init__(script)
+        self.lock, self.readlock = threading.RLock(), threading.RLock()
+        self.close_fails, self.receive_error = close_fails, receive_error
+        self.close_calls, self.recv_calls = 0, 0
+        self.primary_at_close = None
+
+    def recv(self):
+        with self.readlock:
+            self.recv_calls += 1
+            if self.receive_error is not None:
+                raise self.receive_error
+            return super().recv()
+
+    def close(self):
+        import sys
+        with self.lock:
+            self.close_calls += 1
+            self.primary_at_close = sys.exception()
+            self.closed = True
+            if self.close_fails:
+                raise MediaCloseFault(_CLOSE_SECRET)
+
+
+@pytest.fixture
+def close_faults(monkeypatch):
+    import io
+    import threading
+    from types import SimpleNamespace
+    from lib import eventlog, log as logger
+    stderr, records, raw, locks, checks, clock = io.StringIO(), [], [], [], [], [100.0]
+    def record(*args, **kwargs):
+        acquired = []
+        def inspect():
+            for lock in locks:
+                ok = lock.acquire(blocking=False)
+                acquired.append(ok)
+                if ok:
+                    lock.release()
+        worker = threading.Thread(target=inspect)
+        worker.start()
+        worker.join(timeout=2)
+        checks.append((not worker.is_alive(), tuple(acquired)))
+        records.append((args, kwargs))
+    monkeypatch.setattr(logger.sys, 'stderr', stderr)
+    monkeypatch.setattr(logger, 'time', SimpleNamespace(monotonic=lambda: clock[0], strftime=logger.time.strftime))
+    monkeypatch.setattr(eventlog, 'emit', record)
+    monkeypatch.setattr(logger.os, 'write', lambda fd, data: raw.append((fd, data)) or len(data))
+    logger._FAULT_LOG_THROTTLE.clear()
+    logger._FAULT_LOG_COUNTS.clear()
+    yield SimpleNamespace(stderr=stderr, records=records, raw=raw, locks=locks,
+                          checks=checks, clock=clock, logger=logger)
+    logger._FAULT_LOG_THROTTLE.clear()
+    logger._FAULT_LOG_COUNTS.clear()
+
+
+@pytest.mark.parametrize('text', ['retained transcript', ''])
+def test_failed_close_preserves_text_once_and_reports_after_locks_release(close_faults, text):
+    f = close_faults
+    script = ([{'type': 'transcript', 'is_final': True, 'text': text}] if text else [])
+    sock = ClosingSocket(script + [{'type': 'done'}])
+    f.locks.extend([sock.lock, sock.readlock])
+    assert ws.transcribe_pcm(sock, pcm=b'\x00\x01' * 5) == text
+    assert sock.close_calls == 1 and sock.recv_calls == len(script) + 1
+    assert sock.text == ['finalize', 'close'] and b''.join(sock.binary) == b'\x00\x01' * 5
+    assert len(f.records) == 1 and f.checks == [(True, (True, True))]
+    assert f.records[0][0] == ('server', 'cartesiaSTTSocketCloseFailed')
+    assert f.records[0][1]['detail']['error_type'] == 'MediaCloseFault'
+    assert _CLOSE_SECRET not in f.stderr.getvalue() + repr(f.records) + repr(f.raw)
+
+
+@pytest.mark.parametrize('protocol_error', [False, True])
+def test_failed_close_preserves_primary_exception_identity_and_origin(close_faults, protocol_error):
+    f = close_faults
+    primary = RuntimeError('existing receive failure')
+    sock = ClosingSocket([{'type': 'error', 'message': 'existing protocol failure'}],
+                         receive_error=None if protocol_error else primary)
+    f.locks.extend([sock.lock, sock.readlock])
+    expected = ws.CartesiaSTTStreamError if protocol_error else RuntimeError
+    with pytest.raises(expected) as raised:
+        ws.transcribe_pcm(sock, pcm=b'\x00\x00')
+    assert raised.value is sock.primary_at_close
+    if protocol_error:
+        assert str(raised.value) == 'existing protocol failure'
+    else:
+        assert raised.value is primary and str(raised.value) == 'existing receive failure'
+    tb = raised.value.__traceback__
+    while tb.tb_next is not None:
+        tb = tb.tb_next
+    assert tb.tb_frame.f_code.co_name == ('transcribe_pcm' if protocol_error else 'recv')
+    assert sock.close_calls == 1 and sock.recv_calls == 1
+    assert f.checks == [(True, (True, True))]
+    assert _CLOSE_SECRET not in f.stderr.getvalue() + repr(f.records)
+
+
+def test_successful_close_has_no_new_fault(close_faults):
+    sock = ClosingSocket([{'type': 'done'}], close_fails=False)
+    assert ws.transcribe_pcm(sock, pcm=b'\x00\x00') == ''
+    assert sock.close_calls == 1 and close_faults.records == []
+    assert close_faults.stderr.getvalue() == ''
+
+
+@pytest.mark.parametrize('stage', ['binary', 'finalize', 'close'])
+def test_send_failure_before_receive_try_still_does_not_attempt_close(close_faults, stage):
+    primary = RuntimeError('existing send failure')
+    class SendFailure(ClosingSocket):
+        def send_binary(self, payload):
+            if stage == 'binary':
+                raise primary
+            super().send_binary(payload)
+        def send(self, payload):
+            if payload == stage:
+                raise primary
+            super().send(payload)
+    sock = SendFailure([])
+    with pytest.raises(RuntimeError) as raised:
+        ws.transcribe_pcm(sock, pcm=b'\x00\x00')
+    assert raised.value is primary and sock.close_calls == sock.recv_calls == 0
+    assert close_faults.records == []
+
+
+def test_close_fault_throttle_does_not_skip_closes(close_faults):
+    f = close_faults
+    sockets = [ClosingSocket([{'type': 'done'}]) for _ in range(4)]
+    for sock in sockets[:3]:
+        assert ws.transcribe_pcm(sock, pcm=b'\x00\x00') == ''
+    assert [s.close_calls for s in sockets[:3]] == [1, 1, 1] and len(f.records) == 1
+    f.clock[0] += 60
+    assert ws.transcribe_pcm(sockets[3], pcm=b'\x00\x00') == ''
+    assert sockets[3].close_calls == 1 and len(f.records) == 2
+    assert f.records[-1][1]['detail']['suppressed'] == 2
+
+
+@pytest.mark.parametrize('primary_fails', [False, True])
+def test_all_diagnostic_sinks_failing_preserves_return_or_primary(close_faults, monkeypatch, primary_fails):
+    from lib import eventlog
+    f = close_faults
+    class BrokenStream:
+        def write(self, data):
+            raise OSError(_CLOSE_SECRET)
+        def flush(self):
+            raise OSError(_CLOSE_SECRET)
+    def fail(*args, **kwargs):
+        raise OSError(_CLOSE_SECRET)
+    monkeypatch.setattr(f.logger.sys, 'stderr', BrokenStream())
+    monkeypatch.setattr(eventlog, 'emit', fail)
+    monkeypatch.setattr(f.logger.os, 'write', fail)
+    primary = RuntimeError('preserved receive failure') if primary_fails else None
+    sock = ClosingSocket([{'type': 'done'}], receive_error=primary)
+    if primary_fails:
+        with pytest.raises(RuntimeError) as raised:
+            ws.transcribe_pcm(sock, pcm=b'\x00\x00')
+        assert raised.value is primary is sock.primary_at_close
+    else:
+        assert ws.transcribe_pcm(sock, pcm=b'\x00\x00') == ''
+    assert sock.close_calls == 1 and f.logger._FAULT_LOG_COUNTS['dropped'] == 1

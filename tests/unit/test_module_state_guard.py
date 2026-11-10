@@ -74,12 +74,12 @@ ALLOWED: dict[tuple[str, str], str] = {
     # The one manager-probe slot and start-rate bucket of this Host process: a
     # rate limit by design; it only withholds work and never proves anything.
     ("lib/runtime_attestation.py", "_GATE"): THROTTLE,
-    ("lib/live_hub.py", "_HUB"): CLIENT,
+    ("lib/live_core.py", "_HUB"): CLIENT,
     ("lib/server_identity.py", "_live_probe"): CLIENT,
     ("lib/static_assets.py", "_hashes"): CACHE,
     ("lib/transcript_import_cache.py", "_last_started"): THROTTLE,
     ("lib/transcript_import_cache.py", "_deferred"): THROTTLE,
-    ("lib/live_hub.py", "_FANOUT"): CLIENT,
+    ("lib/live_core.py", "_FANOUT"): CLIENT,
     ("lib/backends.py", "_STATUS_CACHE"): CACHE,
     # Invalidation generation of that window: an F4 O1 never stores a status
     # fetched before a reconfigure / invalidate.
