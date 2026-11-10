@@ -4,7 +4,6 @@ from __future__ import annotations
 import base64
 import json
 import re
-import secrets
 import threading
 import time
 from dataclasses import dataclass
@@ -91,8 +90,10 @@ class SharedSnapshot:
     The full snapshot and the one without archived agents are different
     bodies; each is shared among the requests that asked for it. The listing
     of archived agents is a third projection, shared the same way and also by
-    the pages of one walk (archived_page). One lock lets a single build of
-    any of them run at a time.
+    every page that continues a walk (archived_page). One lock lets a single
+    build of any of them run at a time, so a request for any of the three
+    waits while another one's build runs: a snapshot behind a listing of
+    every archived agent included.
     """
 
     def __init__(self) -> None:
@@ -103,6 +104,7 @@ class SharedSnapshot:
     def body(self, ctx, *, include_archived: bool = True) -> bytes:
         arrived = time.monotonic()
         with self._lock:
+            self._release_expired_listing(arrived)
             last = self._last.get(include_archived)
             if last is not None and last[0] >= arrived and last[1] is ctx:
                 return last[2]
@@ -114,39 +116,46 @@ class SharedSnapshot:
             self._last[include_archived] = (started, ctx, body)
             return body
 
-    def archived_page(self, ctx, *, limit: int = None, position=None, token: str = "") -> dict[str, Any]:
+    def archived_page(self, ctx, *, limit: int = None, position=None) -> dict[str, Any]:
         """One page of the archived agents, cut from a shared listing.
 
-        The listing is every archived agent's row, built once. A request
-        without a cursor shares a listing whose build started after the
-        request arrived, like ``body``. A request that carries a cursor
-        continues its own walk: it is answered from the listing that issued
-        the cursor for as long as that is held (ARCHIVED_LISTING_TTL_S), with
-        no build at all, so the pages of one walk are one consistent listing
-        and cost one build, not one each. When that listing is gone the walk
-        goes on in a new one from the agent the cursor names.
+        The listing is every archived agent's row, built once and held for
+        ARCHIVED_LISTING_TTL_S. A request without a position (the first page)
+        asks for a current listing: it shares one whose build started after
+        the request arrived, like ``body``, and otherwise builds one, which
+        replaces the held one. A request with a position (any later page) is
+        cut from whichever listing is held, with no build at all, whoever's
+        first page built it: a position is a place in the order, not a place
+        in one listing, so it means the same in every listing. Builds are
+        therefore one per first page, however many clients page at once.
+        Only when no listing is held (it expired, or the Host restarted) does
+        a later page build one.
         """
         limit = _page_limit(ARCHIVED_PAGE_DEFAULT if limit is None else limit)
         arrived = time.monotonic()
         with self._lock:
+            self._release_expired_listing(arrived)
             listing = self._archived
-            reusable = listing is not None and listing.ctx is ctx and (
-                listing.started >= arrived
-                or (bool(token) and token == listing.token
-                    and arrived - listing.started <= ARCHIVED_LISTING_TTL_S))
-            if not reusable:
+            if listing is None or listing.ctx is not ctx or (position is None and listing.started < arrived):
                 started = time.monotonic()
                 rows, order = build_archived_listing(ctx)
-                listing = _ArchivedListing(started, ctx, secrets.token_hex(8), rows, order)
-                self._archived = listing
-        return _cut_page(listing.rows, listing.order, listing.token, limit, position)
+                listing = self._archived = _ArchivedListing(started, ctx, rows, order)
+            return _cut_page(listing.rows, listing.order, limit, position)
+
+    def _release_expired_listing(self, now: float) -> None:
+        """Drop a listing held longer than ARCHIVED_LISTING_TTL_S, and its
+        rows with it. Called with the lock held by every snapshot and listing
+        request, so the memory goes at the first request after the expiry;
+        nothing runs on a timer, and a Host no client asks keeps it."""
+        held = self._archived
+        if held is not None and now - held.started > ARCHIVED_LISTING_TTL_S:
+            self._archived = None
 
 
 @dataclass(frozen=True)
 class _ArchivedListing:
     started: float                     # time.monotonic() when its build began
     ctx: Any
-    token: str                         # names this listing in the cursors it issues
     rows: list[dict[str, Any]]         # every archived agent's row, most recently archived first
     order: list[tuple[int, str]]       # (archived_at, agent_id) of each row
 
@@ -157,9 +166,11 @@ SHARED = SharedSnapshot()
 # One page of GET /agents/archived.
 ARCHIVED_PAGE_DEFAULT = 50
 ARCHIVED_PAGE_MAX = 200
-# How long the pages of one walk are answered from the listing that began it.
+# How long a listing is held for the pages that follow a first page.
 ARCHIVED_LISTING_TTL_S = 300.0
-_LIMIT_TEXT = re.compile(r"[0-9]{1,3}")     # ASCII digits only: no sign, space, underscore or other script
+# A whole number as it is written: ASCII digits, no leading zero, sign, space,
+# underscore or other script.
+_LIMIT_TEXT = re.compile(r"[1-9][0-9]{0,2}")
 
 
 def _not_archived(agent_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -180,16 +191,15 @@ def _page_limit(limit: int) -> int:
     return limit
 
 
-def parse_archived_query(limit: str, cursor: str) -> tuple[int, tuple[int, str] | None, str]:
-    """The query of GET /agents/archived as (limit, position, token), or
-    ValueError: ``limit`` is 1 to ARCHIVED_PAGE_MAX in plain digits, and
-    ``cursor`` is one this Host issued. Empty means the default page from the
-    start. Nothing is read from the database here."""
+def parse_archived_query(limit: str, cursor: str) -> tuple[int, tuple[int, str] | None]:
+    """The query of GET /agents/archived as (limit, position), or ValueError:
+    ``limit`` is 1 to ARCHIVED_PAGE_MAX written in plain digits without a
+    leading zero, and ``cursor`` is one this Host issued. Empty means the
+    default page from the start. Nothing is read from the database here."""
     if limit and not _LIMIT_TEXT.fullmatch(limit):
         raise ValueError("invalid archived agents limit")
     size = _page_limit(int(limit) if limit else ARCHIVED_PAGE_DEFAULT)
-    position, token = _decode_cursor(cursor) if cursor else (None, "")
-    return size, position, token
+    return size, (_decode_cursor(cursor) if cursor else None)
 
 
 @backends.runtime_status_scope(timeout=2.0)
@@ -236,17 +246,17 @@ def build_archived_listing(ctx) -> tuple[list[dict[str, Any]], list[tuple[int, s
 
 def build_archived_agents(ctx, *, limit: int = ARCHIVED_PAGE_DEFAULT, cursor: str = "") -> dict[str, Any]:
     """One page of the archived agents from a listing built for this call.
-    The route goes through SharedSnapshot.archived_page, which builds the
-    listing once for all the pages of a walk; this is the same page without
-    the sharing, for callers that want exactly one. Raises ValueError for a
+    The route goes through SharedSnapshot.archived_page, which holds one
+    listing for the pages that follow; this is the same page without the
+    sharing, for callers that want exactly one. Raises ValueError for a
     limit outside 1 to ARCHIVED_PAGE_MAX or a cursor this Host did not issue."""
     limit = _page_limit(limit)
-    position, _token = _decode_cursor(cursor) if cursor else (None, "")
+    position = _decode_cursor(cursor) if cursor else None
     rows, order = build_archived_listing(ctx)
-    return _cut_page(rows, order, "", limit, position)
+    return _cut_page(rows, order, limit, position)
 
 
-def _cut_page(rows: list[dict[str, Any]], order: list[tuple[int, str]], token: str,
+def _cut_page(rows: list[dict[str, Any]], order: list[tuple[int, str]],
               limit: int, position: tuple[int, str] | None) -> dict[str, Any]:
     """The ``limit`` rows after ``position`` (the last agent of the previous
     page; None: from the start). The position is a place in the order, not an
@@ -255,30 +265,32 @@ def _cut_page(rows: list[dict[str, Any]], order: list[tuple[int, str]], token: s
     end = start + limit
     return {
         "agents": rows[start:end],
-        "next_cursor": _encode_cursor(order[end - 1], token) if end < len(rows) else None,
+        "next_cursor": _encode_cursor(order[end - 1]) if end < len(rows) else None,
         "total": len(rows),
     }
 
 
-def _encode_cursor(position: tuple[int, str], token: str) -> str:
-    return base64.urlsafe_b64encode(json.dumps([*position, token]).encode()).decode()
+def _encode_cursor(position: tuple[int, str]) -> str:
+    return base64.urlsafe_b64encode(json.dumps(list(position)).encode()).decode()
 
 
-def _decode_cursor(cursor: str) -> tuple[tuple[int, str], str]:
+def _decode_cursor(cursor: str) -> tuple[int, str]:
+    """The position a cursor names: (archived_at, agent_id) of the last agent
+    of the page that issued it. Nothing in it names a listing."""
     if len(cursor) > 512:
         raise ValueError("invalid archived agents cursor")
     try:
-        archived_at, agent_id, token = json.loads(base64.urlsafe_b64decode(cursor.encode()))
+        archived_at, agent_id = json.loads(base64.urlsafe_b64decode(cursor.encode()))
     except Exception as exc:  # noqa: BLE001 - any malformed cursor is the caller's error
         raise ValueError("invalid archived agents cursor") from exc
-    if (isinstance(archived_at, bool) or not isinstance(archived_at, int)
-            or not isinstance(agent_id, str) or not isinstance(token, str)):
+    if isinstance(archived_at, bool) or not isinstance(archived_at, int) or not isinstance(agent_id, str):
         raise ValueError("invalid archived agents cursor")
-    return (archived_at, agent_id), token
+    return archived_at, agent_id
 
 
 def _reconcile_unlisted(agent_rows: list[dict[str, Any]], selected: list[dict[str, Any]],
-                        states: dict[str, dict[str, Any]], runtimes: dict[str, dict[str, Any]]) -> None:
+                        states: dict[str, dict[str, Any]], runtimes: dict[str, dict[str, Any]],
+                        runtime_status: dict[str, Any] | None) -> None:
     """Reconcile the archived agents this build leaves out that still look active.
 
     Building a row is what reconciles an agent (a stuck busy state, a ghost
@@ -286,19 +298,26 @@ def _reconcile_unlisted(agent_rows: list[dict[str, Any]], selected: list[dict[st
     build would do that for them any more, and archiving does not stop a
     turn: an agent archived mid-turn whose turn then died would stay busy
     until someone restored it or opened the archive. So an archived agent
-    whose last state is a busy one, that has a live handle, or that the
-    runtime holds queued work for, is reconciled here without building its
-    row. On a Host at rest that is no agent at all. What is still left to the
-    archive listing or a restore is an idle archived agent whose bound session
-    has lost its transcript.
+    whose last state is a busy one, that has a live handle, or that the turn
+    dispatcher still holds something for, is reconciled here without building
+    its row. On a Host at rest that is no agent at all. What is still left to
+    the archive listing or a restore is an idle archived agent whose bound
+    session has lost its transcript.
+
+    ``runtime_status`` is the external runtime's status this build read, or
+    None when this process dispatches its own turns. The caller does not call
+    this when that status could not be read: nothing is reconciled blind.
     """
     listed = {a["agent_id"] for a in selected}
-    queued: set[str] = set()
-    if backends._RUNTIME_CLIENT is not None:
-        try:
-            queued = set(backends.runtime_status().get("queued") or {})
-        except Exception:  # noqa: BLE001 - logged once per window by backends; nothing is reconciled blind
-            return
+    if runtime_status is None:
+        # A slot in flight in this process. A live turn also has a handle; a
+        # leaked slot has only this.
+        from . import turn_dispatch
+        held = turn_dispatch.agents_in_flight()
+    else:
+        # The runtime's slots already count as handles (backends.active_handles);
+        # work queued behind no owner shows nowhere else.
+        held = set(runtime_status.get("queued") or {})
     for a in agent_rows:
         agent_id = a["agent_id"]
         if agent_id in listed or not a.get("archived_at"):
@@ -306,7 +325,7 @@ def _reconcile_unlisted(agent_rows: list[dict[str, Any]], selected: list[dict[st
         backend = a.get("backend") or AgentBackend.CLAUDE
         state = states.get(agent_id, {})
         try:
-            if not (state.get("kind") in turn_lifecycle.BUSY or agent_id in queued
+            if not (state.get("kind") in turn_lifecycle.BUSY or agent_id in held
                     or backends.active_handles(backend, agent_id)):
                 continue
             reconcile.reconcile_agent(
@@ -364,16 +383,17 @@ def _project(ctx, select) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     helper_sessions = tree.helper_sessions
     helper_activity = tree.helper_activity
     reconcile_available = True
+    runtime_status = None                 # the external runtime's, when there is one
     if backends._RUNTIME_CLIENT is not None:
         try:
-            backends.runtime_status()
+            runtime_status = backends.runtime_status()
         except Exception as exc:  # noqa: BLE001 - scoped status already logs once
             reconcile_available = False
             reconcile.forget_observations(a["agent_id"] for a in agent_rows)
             log("snapshotReconcileSkipped",
                 f"count={len(agent_rows)} error_type={type(exc).__name__}")
     if select is not None and reconcile_available:
-        _reconcile_unlisted(agent_rows, selected, states, runtimes)
+        _reconcile_unlisted(agent_rows, selected, states, runtimes, runtime_status)
     for a in selected:
         agent_id = a["agent_id"]
         backend = a.get("backend") or AgentBackend.CLAUDE

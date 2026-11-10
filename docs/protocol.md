@@ -133,10 +133,12 @@ Rules:
   transcript read, no message preview, no per-agent statement. It also does
   not check it for a stuck state on the way out, with one exception:
   archiving does not stop a turn, so an archived agent that still looks
-  active (its last state is a busy one, it has a live process, or the runtime
-  holds queued work for it) is checked and repaired as before. An archived
-  agent that is idle but whose bound session has lost its transcript is
-  repaired when the archive is listed or the agent is restored.
+  active is checked and repaired as before: its last state is a busy one, it
+  has a live process, the turn dispatcher still holds its slot (a slot left
+  behind by a turn that died is freed this way), or, on a Host whose turns
+  run in a separate runtime process, that runtime holds queued work for it.
+  An archived agent that is idle but whose bound session has lost its
+  transcript is repaired when the archive is listed or the agent is restored.
 - `head_revision` and `conversation_id` are the same values `/log` reports.
   If a client already holds a cached chat for this agent, it is current iff
   the cached `conversation_id` matches and the cached revision equals
@@ -198,8 +200,9 @@ Rules:
 #### Archived agents: `GET /agents/archived`
 
 The agents `include_archived=0` leaves out, a page at a time, for an archive
-screen. `limit` is a whole number from 1 to 200 in plain digits (default 50);
-`cursor` is the `next_cursor` of the previous page.
+screen. `limit` is a whole number from 1 to 200 written in plain digits
+without a leading zero (default 50); `cursor` is the `next_cursor` of the
+previous page.
 
 ```json
 {
@@ -210,18 +213,45 @@ screen. `limit` is a whole number from 1 to 200 in plain digits (default 50);
 ```
 
 Rows are in the order most recently archived first. A request without a
-cursor starts a walk: the Host builds every archived agent's row once, and
-the pages that follow with its cursors are cut from that same listing for up
-to five minutes, so a walk is one consistent listing and costs the Host one
-build, not one per page. Start again without a cursor for a current listing.
-A walk that outlives its listing, or a Host restart, continues in a new
-listing from the agent the cursor names (a position in the order, not an
-offset), so nothing repeats and nothing is skipped.
+cursor asks for a current listing: the Host builds every archived agent's
+row and holds that listing for five minutes. A request with a cursor is cut
+from the listing the Host holds at that moment, without building anything,
+whichever client's first page built it. So the Host builds once per first
+page, not once per page, however many clients page at the same time.
 
-A `limit` that is not 1 to 200 in plain digits, or a cursor the Host did not
-issue, is `400 {"error": "invalid archived agents query"}`; an empty value
-counts as absent. A Host without the feature answers 404; read the archived
-rows from the full snapshot there.
+A cursor names a place in the order (the last agent of the page before), not
+an offset and not a listing. A walk therefore goes on from the same place
+when the held listing has been replaced by another client's first page, when
+it has expired (the Host builds a new one for that page) and after a Host
+restart. What a walk returns:
+
+- A later page shows the listing the Host holds when the page is asked, and
+  that listing can be up to five minutes old. Its rows are as they were when
+  it was built: an agent restored since then is still returned, with the
+  `archived_at` it had; an agent archived since then is not in it; an agent
+  restored and archived again is still at its old place with its old
+  `archived_at`. Only a first page, any client's, or the five minutes bring
+  a current listing.
+- No agent is returned twice.
+- An agent that is archived for the whole walk is not missed.
+- `total` is the number of agents in the listing that answered the page, so
+  it can differ from one page to the next.
+
+Start again without a cursor for a current listing.
+
+What a first page costs the Host: it builds every archived agent's row,
+which is the work `include_archived=0` saves a connect, and the Host builds
+one snapshot or listing at a time, so every snapshot request, with or
+without `include_archived=0`, waits while that build runs. Ask for a first
+page when the user opens the archive, not on connect and not on a timer.
+
+A `limit` that is not 1 to 200 written that way (`0`, `201`, `007`, `+5`,
+`5.0`), or a cursor the Host did not issue, is
+`400 {"error": "invalid archived agents query"}`; an empty value counts as
+absent. A cursor is good for the Host build that issued it: after a Host
+update it can be refused, so on a 400 start again without a cursor. A Host
+without the feature answers 404; read the archived rows from the full
+snapshot there.
 
 ### 2. Load a chat: `GET /log`
 

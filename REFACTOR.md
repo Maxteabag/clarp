@@ -1,5 +1,14 @@
 # Clarp server refactor program — the brief
 
+> **Closed on 10 Nov 2026.** The program was retired on that date by the
+> owner's decision; its lead and its lanes are archived. This file is kept as
+> a record and nothing in it is an instruction any more. The "Claims" table
+> below is historical: no file is claimed, and there is no lead to ask before
+> editing one. Final hand-off:
+> `FINAL-HANDOFF.md` in
+> `laptopstudio:~/clarp-refactor-program-records/`, with the decision log,
+> registers and reviews beside it.
+
 Read this whole file before you start. It is the single source of truth for every
 agent in the program. The lead is **Hobbles** (Clarp session `hobbles-18b0`); the
 owner is **Peter**. Ask the lead, never Peter directly. Only the lead edits this
@@ -227,6 +236,9 @@ Reviewers never edit sources, never run jobs against the live Host and never
 grant more than the exact commit they reviewed.
 
 ### Claims
+
+Historical since 10 Nov 2026 (see the notice at the top): no claim below is in
+force.
 
 Files a slice has claimed. Agents outside the program must not edit them; ask
 the lead (`hobbles-18b0`). A claim is short-lived and ends when its slice
