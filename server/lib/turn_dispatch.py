@@ -97,7 +97,7 @@ def _announce_delivery(trace_id: str) -> None:
     inside ``mark_attempted`` and failover-attempt spawns emit none (/log
     heals them). It runs under a short busy budget restored on success and on
     exception (N4 B): a busy database drops the hint instead of delaying
-    anything. Not emitted until the Host advertises send_delivery_state."""
+    anything. Emitted only while the Host advertises send_delivery_state."""
     from . import server_identity
     stream = _DELIVERY_STREAM
     if stream is None or not server_identity.feature_advertised(server_identity.SEND_DELIVERY_STATE):

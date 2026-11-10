@@ -4758,6 +4758,8 @@ def _fake_spawn(monkeypatch):
 
 
 def test_delivery_fields_stay_off_until_the_feature_is_advertised(running_server, monkeypatch):
+    from lib import server_identity
+    monkeypatch.setattr(server_identity, "feature_advertised", lambda name: False)
     base, _ctx, _srv = running_server
     _fake_spawn(monkeypatch)
     status, raw = _post_status(base + "/send", {"text": "hi", "session": "rachel",

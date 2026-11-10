@@ -519,23 +519,23 @@ def test_mixed_version_old_runtime_result_stays_unknown():
     assert (old.delivery, new.delivery["state"], junk.delivery) == (None, "handed_over", None)
 
 
-def test_the_feature_is_implemented_but_not_advertised_until_allocated():
+def test_the_delivery_contract_is_advertised_as_78():
     from lib import server_identity
-    assert server_identity.SEND_DELIVERY_STATE not in server_identity.FEATURES
-    assert server_identity.SEND_DELIVERY_STATE not in server_identity.FEATURE_CONTRACTS
-    assert server_identity.feature_advertised(server_identity.SEND_DELIVERY_STATE) is False
+    info = server_identity.get_server_info()
+    assert info["contract"]["features"]["send_delivery_state"] == 78
+    assert "send_delivery_state" in info["capabilities"]["features"]
 
 
-def test_no_hint_is_emitted_while_the_feature_is_not_advertised(tmp_path):
+def test_no_hint_is_emitted_while_the_feature_is_not_advertised(tmp_path, monkeypatch):
+    from lib import server_identity
+    monkeypatch.setattr(server_identity, "feature_advertised", lambda name: False)
     service, _agent = _service(tmp_path)
     _send(service, "u-h", "th")
     assert not any(getattr(e, "type", None) == "delivery-updated"
                    or "delivery-updated" in str(e) for e in service.ctx.stream.events)
 
 
-def test_hints_follow_committed_transitions_when_advertised(tmp_path, monkeypatch):
-    from lib import server_identity
-    monkeypatch.setattr(server_identity, "feature_advertised", lambda name: True)
+def test_hints_follow_committed_transitions_when_advertised(tmp_path):
     service, _agent = _service(tmp_path)
     _send(service, "u-h2", "th2")
     hints = [e for e in service.ctx.stream.events if "delivery-updated" in str(e)]
