@@ -5,6 +5,7 @@ does not ask gets what it always got."""
 from __future__ import annotations
 
 import json
+import types
 
 import pytest
 
@@ -161,6 +162,72 @@ def test_archiving_and_restoring_between_pages_neither_repeats_nor_hides_an_agen
     assert seen == _archived_ids(fleet)                    # every agent of the first walk, once, in order
     assert fleet["solo"] not in seen                       # archived after the walk began: on the next walk
     assert snapshot.build_archived_agents(None, limit=1)["agents"][0]["agent_id"] == fleet["solo"]
+
+
+def test_a_later_page_shows_the_held_listing_not_the_archive_as_it_is_now(fleet, monkeypatch):
+    """Third review round of PR 254. The route's pages after the first are cut from the listing
+    the Host holds, with no build, so they are as old as that listing: an agent restored between
+    two pages is still returned, and one restored and archived again is still at its old place.
+    A first page, anyone's, or the five minutes bring a current listing."""
+    clock = [1000.0]
+    monkeypatch.setattr(snapshot, "time", types.SimpleNamespace(monotonic=lambda: clock[0]))
+    builds: list[int] = []
+    build = snapshot.build_archived_listing
+    monkeypatch.setattr(snapshot, "build_archived_listing", lambda ctx: builds.append(1) or build(ctx))
+    shared = snapshot.SharedSnapshot()
+
+    def page(cursor: str) -> dict:
+        limit, position = snapshot.parse_archived_query("3", cursor)
+        return shared.archived_page(None, limit=limit, position=position)
+
+    def rest(cursor: str | None) -> list[dict]:
+        rows: list[dict] = []
+        while cursor is not None:
+            answer = page(cursor)
+            rows += answer["agents"]
+            cursor = answer["next_cursor"]
+        return rows
+
+    first = page("")
+    assert [row["agent_id"] for row in first["agents"]] == _archived_ids(fleet)[:3]
+    # Between the pages: one agent of the second page is restored, one of the third is restored
+    # and archived again just now, and an agent that was in use is archived.
+    con = db.conn()
+    con.execute("UPDATE agents SET archived_at=NULL WHERE agent_id=?", (fleet["old3"],))
+    con.execute("UPDATE agents SET archived_at=9500 WHERE agent_id=?", (fleet["old1"],))
+    con.execute("UPDATE agents SET archived_at=9000 WHERE agent_id=?", (fleet["solo"],))
+    clock[0] += 60                                                      # a minute later
+
+    second = page(first["next_cursor"])
+    later = second["agents"] + rest(second["next_cursor"])
+    assert builds == [1] and second["total"] == 8                       # no build: the listing of the first page
+    assert [row["agent_id"] for row in later] == _archived_ids(fleet)[3:]   # the restored one too
+    stale = _by_id(later)
+    assert stale[fleet["old3"]]["archived_at"] == 1003                  # as it was when the listing was built
+    assert stale[fleet["old1"]]["archived_at"] == 1001                  # at its old place, with its old time
+    assert fleet["solo"] not in stale
+    seen = [row["agent_id"] for row in first["agents"] + later]
+    assert len(seen) == len(set(seen))                                  # nothing twice
+
+    # A first page is the archive as it is now.
+    clock[0] += 1
+    again = page("")
+    current = again["agents"] + rest(again["next_cursor"])
+    assert builds == [1, 1] and again["total"] == 8                     # one restored, one newly archived
+    assert [row["agent_id"] for row in current] == [
+        fleet["old1"], fleet["solo"], fleet["retired"],
+        *(fleet[f"old{n}"] for n in (6, 5, 4, 2, 0))]
+    assert _by_id(current)[fleet["old1"]]["archived_at"] == 9500 and fleet["old3"] not in _by_id(current)
+
+    # So are the five minutes: until then a restored agent is still returned, after them a
+    # later page is cut from a new listing, from the same place.
+    con.execute("UPDATE agents SET archived_at=NULL WHERE agent_id=?", (fleet["old4"],))
+    clock[0] += snapshot.ARCHIVED_LISTING_TTL_S - 1
+    assert fleet["old4"] in _by_id(rest(again["next_cursor"])) and builds == [1, 1]
+    clock[0] += 2
+    expired = rest(again["next_cursor"])
+    assert builds == [1, 1, 1]
+    assert [row["agent_id"] for row in expired] == [fleet[f"old{n}"] for n in (6, 5, 2, 0)]
 
 
 def test_agents_archived_in_the_same_millisecond_page_in_a_fixed_order():
