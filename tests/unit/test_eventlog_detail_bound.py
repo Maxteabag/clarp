@@ -117,3 +117,63 @@ def test_a_failure_while_bounding_never_reaches_the_caller(tmp_path, monkeypatch
     assert jsonl["_truncated"]["error"] == "RecursionError"
     assert jsonl["_truncated"]["original_bytes"] > 100_000
     assert "eventlog detail bound failed" in capsys.readouterr().err
+
+
+def test_a_detail_exactly_at_the_cap_is_unchanged_and_one_byte_more_is_shortened(tmp_path):
+    at_cap = {"m": "x" * (CAP - len('{"m":""}'))}
+    assert len(json.dumps(at_cap, separators=(",", ":"))) == CAP
+    eventlog.emit("server", "atCap", detail=at_cap)
+    jsonl, sqlite_row = _sinks(tmp_path)
+    assert jsonl == sqlite_row == at_cap
+
+
+def test_one_byte_over_the_cap_is_shortened(tmp_path):
+    over = {"m": "x" * (CAP - len('{"m":""}') + 1)}
+    eventlog.emit("server", "overCap", detail=over)
+    jsonl, _ = _sinks(tmp_path)
+    assert jsonl["_truncated"]["original_bytes"] == CAP + 1
+
+
+def test_a_deferred_wait_record_is_bounded_before_it_is_queued(tmp_path, capsys):
+    """sqliteWriteWait is made outside emit() and queued for both sinks until
+    its transaction ends: it passes the same bound, when it is made."""
+    from lib import db, log, telemetry
+
+    def written() -> tuple[list[dict], list]:
+        lines = [json.loads(line) for path in tmp_path.glob("*.jsonl")
+                 for line in path.read_text().splitlines()]
+        rows = telemetry.conn().execute(
+            "SELECT event, detail FROM diagnostic_events ORDER BY event_id").fetchall()
+        return lines, rows
+
+    oversized = "waited " + "w" * 200_000 + " for the writer"
+    connection = db.conn()
+    telemetry.conn()
+    capsys.readouterr()
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        log.sqlite_write_wait(oversized, connection)
+        log.sqlite_write_wait("waited 6.2s", connection)
+        # Nothing reaches any sink while the transaction is open ...
+        eventlog.flush_deferred()
+        assert written() == ([], [])
+        assert "sqliteWriteWait" not in capsys.readouterr().err
+        # ... and what waits in the queue is bounded already.
+        queued = [item.record for batch in eventlog._DEFERRED.values() for item in batch]
+        assert [len(json.dumps(record["detail"], separators=(",", ":"))) <= CAP for record in queued] == [True, True]
+        assert queued[1]["detail"] == {"msg": "waited 6.2s"}
+        connection.execute("COMMIT")
+    finally:
+        db.close_local()
+
+    lines, rows = written()
+    assert [line["event"] for line in lines] == ["sqliteWriteWait", "sqliteWriteWait"]
+    assert [row["event"] for row in rows] == ["sqliteWriteWait", "sqliteWriteWait"]
+    for line, row in zip(lines, rows):
+        assert len(row["detail"]) <= CAP
+        assert line["detail"] == json.loads(row["detail"]), "both sinks get the same bounded record"
+    bounded, small = lines[0]["detail"], lines[1]["detail"]
+    assert bounded["msg"].startswith("waited www") and bounded["msg"].endswith("w for the writer")
+    assert bounded["_truncated"] == {
+        "original_bytes": len(json.dumps({"msg": oversized}, separators=(",", ":"))), "limit_bytes": CAP}
+    assert small == {"msg": "waited 6.2s"}               # under the cap: exactly as before
