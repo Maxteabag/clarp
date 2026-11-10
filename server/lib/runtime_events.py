@@ -6,7 +6,7 @@ import time
 
 from . import agents as agents_db
 from . import events
-from .live_pacing import TrailingThrottle
+from .stream_pacing import TrailingThrottle
 from .log import log_exception
 from .protocol import SSEType
 
