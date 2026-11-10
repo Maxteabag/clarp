@@ -762,17 +762,21 @@ def _drain_background():
                         _pending[key] = (request, item_epoch)
                 waiting = sorted(_pending.items(), key=lambda item: item[1][0][5])
             for key, (request, item_epoch) in waiting:
-                # Retain the waiting slot/rank while stat runs outside _guard.
+                # Retain the waiting slot/rank while stat and user marker
+                # descriptors run outside _guard. Either may reenter/replace.
                 # Revalidate the exact request token and epoch before consuming
                 # it: a replacement/reset during stat must keep its own intent.
                 size = request[7]
-                stat_error = None
-                if (_host_started_at is not None and not request[4] and not request[6]
-                        and time.monotonic() < _host_started_at + _STARTUP_GRACE_SECONDS):
-                    try:
+                selection_error = None
+                reserves_retry = False
+                try:
+                    reserves_retry = (
+                        getattr(request[1], "_clarp_transcript_completion_v1", None) is True)
+                    if (_host_started_at is not None and not request[4] and not request[6]
+                            and time.monotonic() < _host_started_at + _STARTUP_GRACE_SECONDS):
                         size = source_size(request[0])
-                    except OSError as exc:
-                        stat_error = exc
+                except Exception as exc:
+                    selection_error = exc
                 with _guard:
                     current = _pending.get(key)
                     if current is None or current[0] is not request or current[1] != item_epoch:
@@ -780,7 +784,7 @@ def _drain_background():
                     if _resetting or item_epoch != _epoch:
                         del _pending[key]
                         continue
-                    if stat_error is not None:
+                    if selection_error is not None:
                         del _pending[key]
                     else:
                         now = time.monotonic()
@@ -792,11 +796,10 @@ def _drain_background():
                             del _pending[key]
                             continue
                         del _pending[key]
-                        _running = (key, item_epoch,
-                                    getattr(request[1], "_clarp_transcript_completion_v1", None) is True)
+                        _running = (key, item_epoch, reserves_retry)
                         selected = (key, request, item_epoch)
-                if stat_error is not None:
-                    log_exception('backgroundTranscriptImportFail', stat_error, detail=request[2])
+                if selection_error is not None:
+                    log_exception('backgroundTranscriptImportFail', selection_error, detail=request[2])
                 if selected is not None:
                     break
             for failed_owner in failed:
