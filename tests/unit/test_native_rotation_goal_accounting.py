@@ -16,10 +16,10 @@ def _raw(thread, **changes):
             "createdAt": 300, "updatedAt": 300, **changes}
 
 
-def _bound(tmp_path):
+def _bound(tmp_path, *, budget=1000):
     agent = _agent(tmp_path)
     old = agents.live_backend_session(agent)
-    transfer = accounting.plan_transfer(agent, old, _raw(old, status="active", tokenBudget=1000,
+    transfer = accounting.plan_transfer(agent, old, _raw(old, status="active", tokenBudget=budget,
                                                         tokensUsed=400, timeUsedSeconds=25,
                                                         createdAt=100, updatedAt=200))
     journal.reserve(agent, old, "rotation-a")
@@ -29,7 +29,8 @@ def _bound(tmp_path):
                           ("chats_carried", "plans_carried")):
         journal.advance(agent, "rotation-a", before, after,
                         **({"new_thread_id": "new-thread"} if after == "created" else {}))
-    journal.bind(agent, "rotation-a", goal_transfer=transfer, new_goal=_raw("new-thread"),
+    journal.bind(agent, "rotation-a", goal_transfer=transfer,
+                 new_goal=None if transfer["defer_native_goal"] else _raw("new-thread"),
                  incarnation="transport-unique-a")
     client = _client()
     client.rotation_incarnation = "transport-unique-a"
@@ -54,7 +55,12 @@ def test_real_native_mirror_projects_once_and_old_callbacks_cannot_reset_it(tmp_
     # A same-second clear+new goal cannot borrow the old epoch's allowance.
     client._notification("thread/goal/cleared", {"threadId": "new-thread"})
     assert agent_goals.get(agent) is None and carried.get(agent)["state"] == "retired"
+    # Only a correlated explicit new-goal response retires the old budget;
+    # an old raw update after clear cannot resurrect its offset or goal.
     client._notification("thread/goal/updated", {"threadId": "new-thread", "goal": update})
+    assert agent_goals.get(agent) is None
+    agent_goals.mirror_codex("new-thread", update, incarnation="transport-unique-a",
+                            user_action="start")
     assert agent_goals.get(agent)["tokens_used"] == 30
 
 
@@ -100,3 +106,19 @@ def test_joined_goal_and_offset_failure_roll_back_only_the_mirror_unit(tmp_path,
     con.execute("COMMIT")
     assert settings_store.get("caller-owned") == "keep"
     assert agent_goals.get(agent) == original_row and carried.get(agent) == original_offset
+
+
+@pytest.mark.parametrize("budget", [0, 300, 400])
+def test_exhausted_goal_is_carried_nonrunning_without_a_native_allowance(tmp_path, budget):
+    agent, _, client = _bound(tmp_path, budget=budget)
+    row = agent_goals.get(agent)
+    assert (row["token_budget"], row["tokens_used"], row["status"]) == (budget, 400, "budget_limited")
+    assert carried.get(agent)["offset"]["defer_native_goal"] is True
+    client._mirror_goal("new-thread", None)
+    assert agent_goals.get(agent) == row
+    with pytest.raises(accounting.AccountingUnavailable):
+        carried.require_activation(agent, "new-thread", "transport-unique-a")
+    # Explicit clear has its own correlated owner authority; an empty native
+    # goal snapshot on its own did not erase the exhausted logical goal.
+    agent_goals.mirror_codex("new-thread", None, incarnation="transport-unique-a", user_action="clear")
+    assert agent_goals.get(agent) is None and carried.get(agent)["state"] == "retired"
