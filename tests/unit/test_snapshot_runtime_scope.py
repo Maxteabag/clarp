@@ -405,3 +405,85 @@ def test_snapshot_admission_after_first_fresh_sample_keeps_second_binding(fleet,
     assert agents.live_backend_session(first) == ""
     assert agents.live_backend_session(second) == f"ghost-{second}"
     assert runtime.timeouts == [2.0, 2.0]
+
+
+@pytest.mark.parametrize("fresh", [False, True], ids=["ordinary", "fresh"])
+@pytest.mark.parametrize("error_name", ["RuntimeUnavailable", "RuntimeProtocolError"])
+def test_scoped_status_failure_replays_have_bounded_tracebacks(monkeypatch, fresh, error_name):
+    """A remembered transport failure must not grow on each fleet lookup."""
+    import traceback
+    from lib import log as logging, runtime_bridge
+
+    error_type = getattr(runtime_bridge, error_name)
+    message = "synthetic runtime failure"
+    calls, logged, errors, lengths, depths, graph_sizes = [], [], [], [], [], []
+    original_log = logging.log_exception
+
+    def depth(exc):
+        size, tb = 0, exc.__traceback__
+        while tb is not None:
+            size += 1
+            tb = tb.tb_next
+        return size
+
+    def observe_log(event, exc, detail=""):
+        logged.append((event, exc, detail, depth(exc)))
+        return original_log(event, exc, detail)
+
+    class FailedStatus:
+        unavailable = True
+
+        def status_within(self, total_s):
+            calls.append(total_s)
+            if self.unavailable:
+                try:
+                    raise TimeoutError("synthetic socket timeout")
+                except TimeoutError as cause:
+                    raise error_type(message) from cause
+            return {"active": {"recovered": "trace"}}
+
+    client = FailedStatus()
+    monkeypatch.setattr(logging, "log_exception", observe_log)
+    backends.configure_runtime_client(client)
+    try:
+        with backends.runtime_status_scope(timeout=2.0):
+            for _ in range(301):
+                # One fixed call site: line-number differences cannot look
+                # like replay growth, and live references prevent id reuse.
+                try:
+                    backends.runtime_status(max_age=0 if fresh else None)
+                except Exception as exc:
+                    errors.append(exc)
+                    lengths.append(len("".join(traceback.format_exception(exc))))
+                    depths.append(depth(exc))
+                    seen, pending = set(), [exc]
+                    while pending:
+                        node = pending.pop()
+                        if id(node) in seen:
+                            continue
+                        seen.add(id(node))
+                        pending.extend(x for x in (node.__cause__, node.__context__) if x is not None)
+                    graph_sizes.append(len(seen))
+            assert len(errors) == 301
+            assert all(type(exc) is error_type and str(exc) == message for exc in errors)
+            assert calls == [2.0]
+            assert len(logged) == 1
+            assert logged[0][0] == "runtimeStatusUnavailable"
+            assert logged[0][2] == ("snapshot-fresh" if fresh else "snapshot-status")
+            assert isinstance(logged[0][1].__cause__, TimeoutError)
+            assert len(set(lengths)) == 1
+            assert len(set(depths)) == 1
+            assert graph_sizes == [1] * 301
+            assert len({id(exc) for exc in errors}) == 301
+            assert depth(logged[0][1]) == logged[0][3]  # original diagnostic is not mutated
+
+            # Ordinary and destructive-repair samples remain independent.
+            client.unavailable = False
+            assert backends.runtime_status(max_age=None if fresh else 0) == {
+                "active": {"recovered": "trace"}}
+            assert calls == [2.0, 2.0] and len(logged) == 1
+        with backends.runtime_status_scope(timeout=2.0):
+            assert backends.runtime_status() == {"active": {"recovered": "trace"}}
+        assert calls == [2.0, 2.0, 2.0]
+    finally:
+        backends.configure_runtime_client(None)
