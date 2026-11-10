@@ -28,8 +28,9 @@ class OwnerGate:
             # Even an unregistered/foreign client must not cross a sink reset.
             for pool in (cas._CLIENTS, cas._DRAINING, cas._RETIRING):
                 for client in list(pool.values()):
-                    if not _stopped(client):
-                        raise QuiescenceError("unowned Codex pool client not quiescent")
+                    # poll()/reader exit alone cannot prove an unowned
+                    # client's unretained callback/timer queue is empty.
+                    raise QuiescenceError("unowned Codex pool client lacks quiescence provenance")
 
 
 GATE = OwnerGate()
@@ -248,6 +249,9 @@ class _OwnedThread(threading.Thread):
     def __init__(self, owner, *args, **kwargs):
         self.owner = owner
         super().__init__(*args, **kwargs)
+        target = self._target
+        if target is not None:
+            self._target = lambda *a, **kw: owner.run(self, lambda: target(*a, **kw))
         owner.retain(self)
 
     def start(self):
@@ -261,6 +265,8 @@ class _OwnedTimer(threading.Timer):
     def __init__(self, owner, *args, **kwargs):
         self.owner = owner
         super().__init__(*args, **kwargs)
+        function = self.function
+        self.function = lambda *a, **kw: owner.run(self, lambda: function(*a, **kw))
         owner.retain(self)
 
     def start(self):
