@@ -186,3 +186,47 @@ def test_lab_promise_from_an_old_call_is_replayed_with_its_real_age():
     replayed = next(row for row in payload["recent_conversation"] if row["text"] == promise)
     assert replayed["age"] == "14 days ago"
     assert _epoch_ms(replayed["at"]) == NOW - 14 * DAY and _epoch_ms(payload["now"]) == NOW
+
+
+@pytest.mark.parametrize("corrupt", [10**20, -10**20, 2**63])
+def test_a_corrupt_stored_time_leaves_the_row_undated_instead_of_failing_startup(corrupt):
+    store = memory.open_thread("phone", "main", connection_id="one")
+    store.save({"revision": 1, "fragments": [
+        {"role": "user", "text": "Corrupt time.", "at": corrupt},
+        {"role": "assistant", "text": "Good time.", "at": NOW - 60_000}]})
+    corrupt_row, good_row = _payload(store, now_ms=NOW)["recent_conversation"]
+    assert corrupt_row["text"] == "Corrupt time." and "at" not in corrupt_row and "age" not in corrupt_row
+    assert good_row["age"] == "1 minute ago"
+
+
+def test_a_corrupt_stored_time_still_starts_when_every_log_sink_fails(monkeypatch):
+    import copy
+    import os
+    from lib import eventlog
+    from lib import log as logging
+    attempts = []
+
+    class BrokenStream:
+        def write(self, data):
+            attempts.append("stderr")
+            raise OSError("stderr gone")
+
+        def flush(self):
+            raise OSError("stderr gone")
+
+    def broken(*args, **kwargs):
+        attempts.append("sink")
+        raise OSError("sink gone")
+    monkeypatch.setattr(logging, "_FAULT_LOG_THROTTLE", {})
+    monkeypatch.setattr(logging.sys, "stderr", BrokenStream())
+    monkeypatch.setattr(eventlog, "emit", broken)
+    monkeypatch.setattr(os, "write", broken)
+    store = memory.open_thread("phone", "main", connection_id="one")
+    fragments = [{"role": "user", "text": "Corrupt time.", "at": 10**20, "revision": 1},
+                 {"role": "assistant", "text": "Good time.", "at": NOW - 60_000}]
+    store.save({"revision": 1, "fragments": copy.deepcopy(fragments)})
+    corrupt_row, good_row = _payload(store, now_ms=NOW)["recent_conversation"]
+    assert attempts, "the fault report must actually reach the failing sinks"
+    assert corrupt_row == {"role": "user", "text": "Corrupt time.", "revision": 1}
+    assert good_row["text"] == "Good time." and good_row["age"] == "1 minute ago"
+    assert store.load()["fragments"] == fragments
