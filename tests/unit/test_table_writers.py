@@ -190,7 +190,6 @@ STATUS_WRITERS: dict[tuple[str, str], set[str]] = {
     ("dream_runs", "status"): {"lib/dreaming.py"},
     ("dream_threads", "evidence_status"): {"lib/dreaming.py"},
     ("dream_threads", "status"): {"lib/dreaming.py"},
-    ("goal_delegations", "status"): {"lib/goal_ledger.py"},
     ("goal_subgoals", "status"): {"lib/goal_ledger.py"},
     ("janitor_continuity", "status"): {"lib/janitor_store.py"},
     ("janitor_runs", "status"): {"lib/janitor_store.py"},
