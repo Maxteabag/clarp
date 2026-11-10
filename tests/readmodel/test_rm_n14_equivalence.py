@@ -817,3 +817,324 @@ def test_no_frontier_reason_reports_only_proven_cache_history(tmp_path, backend,
                              "count": 1, "reason": "unknown_reset"}]
         harness.run_lane(reference, transcript, backend, "reference", tick=2)
         harness.assert_product_equal(reference, candidate)
+
+
+@pytest.mark.parametrize("backend", harness.BACKENDS)
+@pytest.mark.parametrize("intervention", ["unrelated", "prefix_before_probe", "prefix_before_writer", "checkpoint_failure", "writer_rollback_failure",
+                                           "primary_keyboard_interrupt", "primary_system_exit",
+                                           "cleanup_keyboard_interrupt", "cleanup_system_exit",
+                                           "caught_caller_control", "diagnostic_control"])
+def test_full_bootstrap_recertifies_after_unrelated_foreign_yield(tmp_path, backend, intervention, monkeypatch):
+    """Fresh carry can publish only if the read-only probe and final writer agree."""
+    from lib import log as host_log
+    from lib import message_store, message_writes
+    from lib import transcript_incremental as inc
+
+    reference, candidate = _clones(tmp_path, backend)
+    transcript = tmp_path / "synthetic.jsonl"
+    transcript.write_bytes(b"".join(harness.append_bytes(backend, i) for i in range(20)))
+    observations = []
+    real_yield = message_writes._ImportWriter.yield_writer
+    real_prepare = message_writes._prepare_import_prelude
+    real_execute = message_writes._ImportWriter.execute
+    real_checkpoint = inc.write_checkpoint
+    real_log_exception = host_log.log_exception
+    diagnostic_control = KeyboardInterrupt("synthetic local diagnostic control")
+    caller_control = KeyboardInterrupt("synthetic already handled caller control")
+    primary_error = sqlite3.DatabaseError("synthetic current-writer proof read failure")
+    cleanup_error = sqlite3.OperationalError("database is locked")
+    rollback_control = intervention in ("writer_rollback_failure", "primary_keyboard_interrupt",
+                                        "primary_system_exit", "cleanup_keyboard_interrupt", "cleanup_system_exit",
+                                        "caught_caller_control", "diagnostic_control")
+    if intervention == "primary_keyboard_interrupt":
+        primary_error = KeyboardInterrupt("synthetic primary control")
+    elif intervention == "primary_system_exit":
+        primary_error = SystemExit(73)
+    elif intervention == "cleanup_keyboard_interrupt":
+        cleanup_error = KeyboardInterrupt("synthetic cleanup control")
+    elif intervention == "cleanup_system_exit":
+        cleanup_error = SystemExit(74)
+    expected_control = (diagnostic_control if intervention == "diagnostic_control"
+                        else primary_error if not isinstance(primary_error, Exception)
+                        else cleanup_error if not isinstance(cleanup_error, Exception) else None)
+    native_holder, proxy_holder = [], []
+    cleanup_attempts = operation_calls = 0
+
+    class FailingWriterRollback:
+        def __init__(self, native):
+            self.native = native
+            self.primary_raised = False
+
+        def __getattr__(self, name):
+            return getattr(self.native, name)
+
+        def execute(self, sql, parameters=()):
+            nonlocal cleanup_attempts
+            statement = str(sql).strip().upper()
+            if final_writer and self.native.in_transaction:
+                if statement.startswith("SELECT TRACE_ID, STARTED_AT") and not self.primary_raised:
+                    self.primary_raised = True
+                    raise primary_error
+                if statement == "ROLLBACK":
+                    cleanup_attempts += 1
+                    assert self.native.in_transaction
+                    raise cleanup_error  # leave the REAL writer transaction active
+            return self.native.execute(sql, parameters)
+
+    def provided_connection():
+        native = db.conn()
+        if not native_holder:
+            native_holder.append(native)
+            proxy_holder.append(FailingWriterRollback(native))
+        assert native_holder[0] is native
+        return proxy_holder[0]
+
+    def edit_prefix(path):
+        with sqlite3.connect(path) as other:
+            cursor = other.execute("UPDATE messages SET text=text || ' foreign' WHERE agent_id=? "
+                                   "AND backend_session_id=? AND seq=0", (corpus.AGENT, corpus.SESSION))
+            assert cursor.rowcount == 1
+
+    for database, lane in ((reference, "reference"), (candidate, "candidate")):
+        injected = probe_seen = prefix_changed = final_writer = False
+        checkpoint_attempts = 0
+
+        def unrelated_commit(writer):
+            nonlocal injected
+            real_yield(writer)
+            if injected:
+                return
+            assert not writer.in_transaction
+            before = real_prepare(writer._database, corpus.AGENT, corpus.SESSION, [], raw_only=True)
+            version = writer._database.execute("PRAGMA data_version").fetchone()[0]
+            with sqlite3.connect(database) as other:
+                other.execute("INSERT INTO sse_events(ts,type,session,agent_id,payload) VALUES (?,?,?,?,?)",
+                              (harness.BASE_MS, "synthetic-unrelated", "other-native", "other-agent", "{}"))
+            after = real_prepare(writer._database, corpus.AGENT, corpus.SESSION, [], raw_only=True)
+            assert writer._database.execute("PRAGMA data_version").fetchone()[0] != version
+            assert before == after
+            observations.append(lane)
+            injected = True
+
+        def prepare(writer, *args, **kwargs):
+            nonlocal probe_seen, prefix_changed
+            if lane == "candidate" and kwargs.get("guard_carry"):
+                probe_seen = True
+                if intervention == "prefix_before_probe":
+                    assert not writer.in_transaction
+                    edit_prefix(database)
+                    prefix_changed = True
+            return real_prepare(writer, *args, **kwargs)
+
+        def execute(writer, *args, **kwargs):
+            nonlocal prefix_changed, final_writer
+            if (lane == "candidate" and rollback_control and probe_seen
+                    and writer.locked and writer.began_at is None):
+                final_writer = True
+            if (lane == "candidate" and intervention == "prefix_before_writer" and probe_seen
+                    and writer.locked and writer.began_at is None and not prefix_changed):
+                assert not writer.in_transaction  # real commit BEFORE target BEGIN, never after lock
+                edit_prefix(database)
+                prefix_changed = True
+            return real_execute(writer, *args, **kwargs)
+
+        def checkpoint(*args, **kwargs):
+            nonlocal checkpoint_attempts
+            checkpoint_attempts += 1
+            result = real_checkpoint(*args, **kwargs)
+            if intervention == "checkpoint_failure":
+                raise sqlite3.OperationalError("synthetic checkpoint failure after actual write")
+            return result
+
+        def diagnostic(event, exc, *args, **kwargs):
+            if intervention == "diagnostic_control" and event == "transcriptCheckpointRecertifySkip":
+                raise diagnostic_control
+            return real_log_exception(event, exc, *args, **kwargs)
+
+        with monkeypatch.context() as selected:
+            selected.setattr(message_writes._ImportWriter, "yield_writer", unrelated_commit)
+            selected.setattr(message_writes, "_prepare_import_prelude", prepare)
+            selected.setattr(message_writes._ImportWriter, "execute", execute)
+            selected.setattr(inc, "write_checkpoint", checkpoint)
+            if lane == "candidate" and rollback_control:
+                selected.setattr(message_store, "conn", provided_connection)
+                selected.setattr(host_log, "log_exception", diagnostic)
+
+                def operation():
+                    nonlocal operation_calls
+                    operation_calls += 1
+                    return harness.run_lane(database, transcript, backend, lane, tick=0,
+                                            faults={"single_row_batches": True}, close=False)
+
+                try:
+                    expected_type = (BaseException if intervention == "caught_caller_control"
+                                     else type(expected_control) if expected_control is not None else RuntimeError)
+                    with pytest.raises(expected_type) as failure:
+                        if intervention == "caught_caller_control":
+                            try:
+                                raise caller_control
+                            except KeyboardInterrupt as already_handled:
+                                assert already_handled is caller_control
+                                db.retry_locked(operation, retries=2, sleep_sec=0)
+                        else:
+                            db.retry_locked(operation, retries=2, sleep_sec=0)
+                    if expected_control is diagnostic_control:
+                        assert failure.value is diagnostic_control
+                        assert failure.value.__cause__ is cleanup_error
+                    elif expected_control is primary_error:
+                        assert failure.value is primary_error
+                        assert failure.value.__cause__ is cleanup_error
+                    elif expected_control is cleanup_error:
+                        assert failure.value is cleanup_error
+                        assert failure.value.__cause__ is primary_error
+                    else:
+                        assert isinstance(failure.value, RuntimeError)
+                        assert failure.value is not caller_control
+                        assert str(failure.value) == "checkpoint recertification cleanup uncertain"
+                        assert failure.value.primary_error is primary_error
+                        assert failure.value.cleanup_error is cleanup_error
+                        assert failure.value.__cause__ is cleanup_error
+                    assert operation_calls == cleanup_attempts == 1
+                    assert native_holder[0].in_transaction
+                    assert checkpoint_attempts == 0
+                finally:
+                    try:
+                        if native_holder:
+                            native_holder[0].rollback()  # independent real terminal cleanup, never proxy
+                            assert not native_holder[0].in_transaction
+                    finally:
+                        db.close_local()
+            else:
+                report = harness.run_lane(database, transcript, backend, lane, tick=0,
+                                          faults={"single_row_batches": True})
+        assert injected
+        if lane == "candidate" and not rollback_control:
+            assert report["apply_mode"] == "full"
+    assert observations == ["reference", "candidate"]
+    if intervention.startswith("prefix_"):
+        assert probe_seen and prefix_changed, "new read-only/writer boundary was not exercised"
+        edit_prefix(reference)  # independent reference preserves the same legitimate foreign edit
+    harness.assert_product_equal(reference, candidate)
+    db.reset_for_tests(candidate)
+    cp = inc.load_checkpoint(db.conn(), corpus.AGENT, corpus.SESSION, str(transcript))
+    if intervention != "unrelated":
+        assert cp is None, "failed recertification published a stale or rolled-back checkpoint"
+        if intervention == "checkpoint_failure":
+            assert probe_seen and checkpoint_attempts == 1, "checkpoint failure was retried or never reached"
+        elif rollback_control:
+            assert probe_seen and final_writer and operation_calls == 1
+        return
+    assert cp is not None, "unrelated foreign commit stranded a completed full-import frontier"
+    assert cp.complete_size == transcript.stat().st_size
+    with transcript.open("ab") as output:
+        output.write(harness.append_bytes(backend, 20))
+    harness.run_lane(reference, transcript, backend, "reference", tick=1)
+    next_tick = harness.run_lane(candidate, transcript, backend, "candidate", tick=1)
+    assert next_tick["apply_mode"] == "tail"
+    harness.assert_product_equal(reference, candidate)
+
+
+@pytest.mark.parametrize("backend", harness.BACKENDS)
+@pytest.mark.parametrize("change", ["append", "prefix_rewrite", "same_mtime_rewrite",
+                                     "midread_same_mtime_rewrite", "rotation", "partial_append"])
+def test_full_bootstrap_certifies_only_the_actual_consumed_prefix(tmp_path, backend, change, monkeypatch):
+    """Growth certifies consumed bytes; earlier-byte edits and replacement do not."""
+    import os
+    import pathlib
+    from lib import transcript_incremental as inc
+
+    reference, candidate = _clones(tmp_path, backend)
+    transcript = tmp_path / "synthetic.jsonl"
+    initial = b"".join(harness.append_bytes(backend, i) for i in range(20))
+    delta = harness.append_bytes(backend, 20)
+    transcript.write_bytes(initial)
+    harness.run_lane(reference, transcript, backend, "reference", tick=0)
+    real_parse = backends.parse_turns
+    consumed = []
+    changed = False
+
+    def mutate():
+        nonlocal changed
+        stat = transcript.stat()
+        changed = True
+        if change in ("append", "partial_append"):
+            with transcript.open("ab") as output:
+                output.write(delta if change == "append" else delta[:-40])
+        elif change == "rotation":
+            transcript.rename(tmp_path / "old-synthetic.jsonl")
+            transcript.write_bytes(initial + delta)
+        else:
+            rewritten = initial.replace(b"synthetic request 0", b"synthetic request X", 1)
+            assert len(rewritten) == len(initial) and rewritten != initial
+            transcript.write_bytes(rewritten)
+            if change in ("same_mtime_rewrite", "midread_same_mtime_rewrite"):
+                os.utime(transcript, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+        if change != "rotation":
+            assert transcript.stat().st_ino == stat.st_ino
+
+    class AfterUserLine:
+        def __init__(self, native):
+            self.native = native
+
+        def __getattr__(self, name):
+            return getattr(self.native, name)
+
+        def __enter__(self):
+            self.native.__enter__()
+            return self
+
+        def __exit__(self, *args):
+            return self.native.__exit__(*args)
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            line = next(self.native)
+            if not changed and "synthetic request 0" in line:
+                mutate()  # actual original user line has already been consumed
+            return line
+
+    def intercept_open(original):
+        def opened(path, *args, **kwargs):
+            native = original(path, *args, **kwargs)
+            return AfterUserLine(native) if os.fspath(path) == str(transcript) else native
+        return opened
+
+    def mutate_after_real_parse(selected_backend, path):
+        if not consumed and os.fspath(path) == str(transcript):
+            if change == "midread_same_mtime_rewrite":
+                with monkeypatch.context() as reading:
+                    reading.setattr(pathlib.Path, "open", intercept_open(pathlib.Path.open))
+                    reading.setattr(inc._RangePath, "open", intercept_open(inc._RangePath.open))
+                    turns = real_parse(selected_backend, path)
+                assert changed, "native reader did not pass its real user line"
+            else:
+                turns = real_parse(selected_backend, path)
+                mutate()
+            consumed.append(len(turns))
+            return turns
+        return real_parse(selected_backend, path)
+
+    with monkeypatch.context() as selected:
+        selected.setattr(backends, "parse_turns", mutate_after_real_parse)
+        actual = harness.run_lane(candidate, transcript, backend, "candidate", tick=0)
+    assert consumed and changed and actual["apply_mode"] == "full"
+    harness.assert_product_equal(reference, candidate)
+    db.reset_for_tests(candidate)
+    checkpoint = inc.load_checkpoint(db.conn(), corpus.AGENT, corpus.SESSION, str(transcript))
+    if change in ("append", "partial_append"):
+        assert transcript.stat().st_size > len(initial)
+        assert checkpoint is not None, "pure growth discarded the actual parsed-prefix frontier"
+        assert checkpoint.complete_size == len(initial)
+        assert checkpoint.turn_count == consumed[0]
+    else:
+        assert checkpoint is None, "an earlier-byte rewrite or replacement was falsely certified"
+        assert actual.get("_clarp_transcript_completion_v1") == "deferred", "known invalid bytes became fresh"
+    if change == "partial_append":
+        with transcript.open("ab") as output:
+            output.write(delta[-40:])
+    harness.run_lane(reference, transcript, backend, "reference", tick=1)
+    following = harness.run_lane(candidate, transcript, backend, "candidate", tick=1)
+    assert following["apply_mode"] == ("tail" if change in ("append", "partial_append") else "full")
+    harness.assert_product_equal(reference, candidate)
