@@ -125,6 +125,31 @@ def clear(agent_id: str) -> bool:
     return cursor.rowcount > 0
 
 
+
+def mirror_codex(thread_id: str, goal: dict[str, Any] | None):
+    """Resolve the native owner and mirror under the same SQLite writer.
+
+    A callback that resolved an old binding before rotation cannot overwrite
+    the new owner's goal after cutover. Joined callers retain their transaction;
+    SQLite snapshot/write conflicts propagate rather than writing stale data.
+    """
+    from contextlib import nullcontext
+    from . import agents, settings_store
+
+    database = _db().conn()
+    with nullcontext() if database.in_transaction else settings_store.transaction():
+        agent = agents.get_by_backend_session(thread_id)
+        if not agent:
+            return None
+        if goal:
+            row = upsert(agent["agent_id"], session=agent["session"],
+                         backend=str(agent.get("backend") or "codex"), goal=from_codex(goal))
+        else:
+            clear(agent["agent_id"])
+            row = None
+        return agent, row
+
+
 def public(row: dict[str, Any] | None) -> dict[str, Any] | None:
     """What ``/agents/snapshot`` and ``/agent-goal`` return for an agent."""
     if not row:
