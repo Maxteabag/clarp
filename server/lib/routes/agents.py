@@ -385,6 +385,26 @@ class AgentRoutes:
         )
 
     def _handle_snapshot(self):
-        """Unified per-agent read model for the dashboard."""
+        """Unified per-agent read model for the dashboard.
+
+        ``include_archived=0`` leaves the archived agents out and does not
+        build them; GET /agents/archived pages those. Without it, or with any
+        other value, the answer is every agent, as it has always been."""
         from lib import snapshot
-        self._send(200, snapshot.SHARED.body(self.ctx), "application/json")
+        include_archived = self._query().get("include_archived", [""])[0] != "0"
+        self._send(200, snapshot.SHARED.body(self.ctx, include_archived=include_archived),
+                   "application/json")
+
+    def _handle_archived_agents(self):
+        """One page of the archived agents, as snapshot rows."""
+        from lib import snapshot
+        query = self._query()
+        try:
+            limit, position, token = snapshot.parse_archived_query(
+                query.get("limit", [""])[0], query.get("cursor", [""])[0])
+        except ValueError:
+            # Only the query: a fault while building is the Host's, and is
+            # answered and logged as the snapshot route's are.
+            return self._json_error(400, "invalid archived agents query")
+        self._json_ok(snapshot.SHARED.archived_page(
+            self.ctx, limit=limit, position=position, token=token))

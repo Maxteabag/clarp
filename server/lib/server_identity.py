@@ -41,7 +41,7 @@ CAPABILITIES_VERSION = 1
 # adds a row to docs/compatibility.md; tests/unit/test_client_contract.py
 # fails when the table and these constants disagree. Clients identify
 # themselves with the X-Clarp-Client header ("ios/2620 contract=1").
-HOST_CONTRACT = 81  # AUTH934 catalog 80 plus delivery-state advertisement 81.
+HOST_CONTRACT = 82  # 81 plus the snapshot without archived agents (snapshot_without_archived).
 MIN_IOS_CONTRACT = 1
 # F4 delivery state: read paths and committed-transition hints share the
 # advertised feature gate; an unavailable runtime still leaves delivery unknown.
@@ -141,6 +141,8 @@ FEATURES: tuple[str, ...] = (
     "voice_humanness",
     "log_turn_summary",
     "server_home_terminal",
+    # GET /agents/snapshot?include_archived=0 and GET /agents/archived.
+    "snapshot_without_archived",
 )
 
 
@@ -392,6 +394,7 @@ FEATURE_CONTRACTS["agent_call_live"] = 76  # PROVISIONAL: was 75 on the Sandra l
 FEATURE_CONTRACTS["accounts_hotseat"] = 78  # read-only Hotseat status; lead931 landing
 FEATURE_CONTRACTS["decision_on_behalf"] = 79  # PROVISIONAL: booked at the ready landing, else next free
 FEATURE_CONTRACTS[SEND_DELIVERY_STATE] = 81
+FEATURE_CONTRACTS["snapshot_without_archived"] = 82
 
 
 def feature_advertised(name: str) -> bool:

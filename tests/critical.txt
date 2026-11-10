@@ -32,6 +32,18 @@ tests/integration/test_route_registry.py
 tests/integration/test_server_di.py::test_build_server_starts_the_worker_registry_in_order
 tests/integration/test_server_di.py::test_server_info_is_stable
 tests/integration/test_server_di.py::test_get_snapshot_returns_seeded_data
+# The agent list: a client that does not ask must keep getting every agent (app builds in
+# people's hands read their archive from it), and never another request's variant.
+tests/unit/test_snapshot_without_archived.py
+tests/unit/test_snapshot_sharing.py
+tests/integration/test_server_di.py::test_snapshot_leaves_archived_agents_out_only_when_asked
+tests/integration/test_server_di.py::test_archived_agents_refuses_a_bad_query
+tests/integration/test_server_di.py::test_a_host_fault_on_archived_agents_is_not_answered_as_a_bad_query
+tests/integration/test_server_di.py::test_archived_agents_lists_a_row_whose_archive_time_is_not_a_number
+# The message preview cache behind the agent list: a preview older than its rows must never be
+# stored, and a cold cache must fill on a database that is being written.
+tests/unit/test_dashboard_cache_guards.py
+tests/unit/test_dashboard_cache_callers.py
 tests/integration/test_server_di.py::test_status_reports_external_runtime_health
 tests/integration/test_server_di.py::test_post_agents_opens_runtime_row
 
