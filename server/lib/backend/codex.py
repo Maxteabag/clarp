@@ -161,6 +161,8 @@ class CodexBackend(StreamJsonBackend):
     supports_fork = CatalogueDefault('supports_fork')
     supports_steer = CatalogueDefault('supports_steer')
     supports_transcript_tail_apply = True
+    # Eligibility only: source incarnation and consumed-prefix hash still decide.
+    supports_frozen_transcript_prefix = True
     supports_usage = CatalogueDefault('supports_usage')
     login_kind = CatalogueDefault('login_kind')
     efforts = CatalogueDefault('efforts')

@@ -1240,8 +1240,16 @@ def _store_full_with_tail_checkpoint(backend, path, agent_id, backend_session_id
                         captured = {}
 
                         def publish(database, carry):
-                            nonlocal checkpoint, raw_inputs
-                            if not carry or identity(path) != observed:
+                            nonlocal checkpoint, raw_inputs, source_invalidated
+                            if not carry:
+                                return
+                            try:
+                                current = identity(path)
+                            except OSError:
+                                source_invalidated = parsed_evidence is not None
+                                raise
+                            if current != observed:
+                                source_invalidated = parsed_evidence is not None
                                 return
                             now = db.now_ms()
                             # size/mtime describe the observed file; complete_size
@@ -1287,6 +1295,17 @@ def _store_full_with_tail_checkpoint(backend, path, agent_id, backend_session_id
     message_store.store_transcript_turns(
         agent_id=agent_id, backend_session_id=backend_session_id,
         source_file=str(path), turns=turns, checkpoint_status=checkpoint_status, **kwargs)
+    if parsed_evidence is not None:
+        # A staged rename can land after the callback's check and before its
+        # transaction commits. Never turn those old-incarnation products into a
+        # fresh completion; the next admission must parse the new source fully.
+        try:
+            after_store = identity(path)
+            if ((after_store.device, after_store.inode) != (before.device, before.inode)
+                    or after_store.size < before.size or after_store.mtime_ns < before.mtime_ns):
+                source_invalidated = True
+        except OSError:
+            source_invalidated = True
     if _checkpoint_refused(checkpoint_status):
         _TAIL_STATES.note_refusal(key, revision, reason_token, _checkpoint_reason(checkpoint_status))
         return source_invalidated
@@ -1320,10 +1339,13 @@ def import_transcript(*, backend: str, path: pathlib.Path, agent_id: str,
     started = time.perf_counter()
     path = pathlib.Path(path)
     implementation = backends.get(backend)
-    native_parse = parse is None or (
-        isinstance(parse, types.MethodType) and implementation is not None
-        and parse.__self__ is implementation
-        and parse.__func__ is type(implementation).parse_transcript)
+    method = implementation.parse_transcript if implementation is not None else None
+    native_binding = (isinstance(method, types.MethodType)
+                      and method.__self__ is implementation
+                      and method.__func__ is type(implementation).parse_transcript)
+    native_parse = native_binding and (parse is None or (
+        isinstance(parse, types.MethodType) and parse.__self__ is implementation
+        and parse.__func__ is type(implementation).parse_transcript))
     parse = parse or (lambda p: backends.parse_turns(backend, p))
     skip = "unsupported_backend"
     if backend in SUPPORTED_BACKENDS:
@@ -1384,9 +1406,11 @@ def import_transcript(*, backend: str, path: pathlib.Path, agent_id: str,
                     _tail_log("full_backend_tail_disabled", backend=backend)
             admission.full_started = True
             parse_path = path
-            if tail_enabled and before is not None and backend in ("claude", "codex"):
+            if (tail_enabled and before is not None
+                    and getattr(implementation, "supports_frozen_transcript_prefix", False)):
                 parse_path = _RangePath(path, start=0, end=before.size)
-                parse_path._full_read = {"hash": hashlib.sha256(), "bytes": 0, "opens": 0, "file": None}
+                parse_path._full_read = {"hash": hashlib.blake2b(digest_size=16),
+                                         "bytes": 0, "opens": 0, "file": None}
             turns = parse(parse_path)
             parsed_evidence = None
             if parse_path is not path:
