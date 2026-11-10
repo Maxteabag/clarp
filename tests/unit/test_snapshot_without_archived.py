@@ -266,6 +266,49 @@ def test_idle_archived_agents_cost_the_lean_snapshot_no_statement_of_their_own(f
     assert len(lean()["agents"]) == 3 and lean()["archived_count"] == 48
 
 
+def test_an_archived_agent_that_looks_active_is_reconciled_but_not_built(fleet, monkeypatch):
+    """Archiving does not stop a turn. If it dies afterwards and no client asks for
+    archived agents any more, only this keeps the agent from staying busy for ever."""
+    stuck = _agent("stuck", archived_at=3000, state="thinking")
+    handled = _agent("handled", archived_at=3001)
+    with monkeypatch.context() as m:
+        m.setattr(backends, "active_handles", lambda backend, agent_id: ["h"] if agent_id == handled else [])
+        reconciled: list[str] = []
+        m.setattr(reconcile, "reconcile_agent", lambda agent_id, *a, **kw: reconciled.append(agent_id) or {})
+        lean = snapshot.build_agent_snapshot(None, include_archived=False)
+    listed = {row["agent_id"] for row in lean["agents"]}
+    assert stuck not in listed and handled not in listed and lean["archived_count"] == 10
+    assert sorted(reconciled) == sorted([*listed, stuck, handled])     # the idle archived eight: not touched
+
+    # It costs the lean build a bounded amount per such agent, never a row.
+    lean_build = lambda: snapshot.build_agent_snapshot(None, include_archived=False)
+    before = len(_statements(lean_build))
+    _more_archived(40, state="thinking", prefix="busy")
+    after = len(_statements(lean_build))
+    assert 0 < after - before <= 3 * 40, (before, after)
+    assert len(lean_build()["agents"]) == 3
+
+
+def test_with_the_runtime_unreachable_nothing_is_reconciled_blind(fleet, monkeypatch):
+    _agent("stuck", archived_at=3000, state="thinking")
+
+    class Down:
+        def status(self):
+            raise OSError("runtime down")
+
+        def status_within(self, total_s):
+            raise OSError("runtime down")
+
+    reconciled: list[str] = []
+    monkeypatch.setattr(reconcile, "reconcile_agent", lambda agent_id, *a, **kw: reconciled.append(agent_id) or {})
+    backends.configure_runtime_client(Down())
+    try:
+        snapshot.build_agent_snapshot(None, include_archived=False)
+    finally:
+        backends.configure_runtime_client(None)
+    assert reconciled == []
+
+
 def test_each_build_reconciles_the_agents_it_builds(fleet, monkeypatch):
     reconciled: list[str] = []
     real = reconcile.reconcile_agent
