@@ -64,7 +64,8 @@ def _validate(record, agent_id):
     if offset["logical_budget"] is not None:
         accounting._integer(offset["logical_budget"])
     if offset["defer_native_goal"]:
-        if (offset["native_budget"] != 0 or offset["native_created_at"] is not None or
+        if (type(offset["native_budget"]) is not int or offset["native_budget"] != 0 or
+                offset["native_created_at"] is not None or
                 offset["logical_budget"] is None or offset["tokens_base"] < offset["logical_budget"] or
                 offset["last_native_tokens"] != 0 or offset["last_native_seconds"] != 0):
             raise accounting.AccountingUnavailable("invalid exhausted-goal deferral")

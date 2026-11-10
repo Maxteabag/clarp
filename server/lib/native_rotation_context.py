@@ -43,10 +43,14 @@ def _render(envelope):
 
 
 def build_item(seed: Seed, *, agent_id: str, new_thread_id: str, operation_id: str):
+    witness = seed.witness
     if (not _identity(agent_id) or not _identity(new_thread_id) or not _operation(operation_id) or
             new_thread_id == seed.thread_id or not _identity(seed.thread_id) or
             seed.kind not in {"handover", "compaction"} or type(seed.cutoff) is not int or
-            not 0 < seed.cutoff < (1 << 63) or seed.witness is None or seed.witness[2] != seed.cutoff):
+            not 0 < seed.cutoff < (1 << 63) or not isinstance(witness, tuple) or
+            len(witness) != 5 or
+            any(type(value) is not int or not 0 <= value < (1 << 63) for value in witness) or
+            witness[2] != seed.cutoff):
         raise SeedUnavailable("context has no certified source or destination")
     if len(seed.text.encode("utf-8")) > _MAX_BYTES:
         raise SeedUnavailable("context exceeds bound")
