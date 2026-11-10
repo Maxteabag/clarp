@@ -8,7 +8,6 @@ Other backends do not carry a goal yet: ``backends.goal`` refuses them.
 from __future__ import annotations
 
 from typing import Any
-from contextlib import contextmanager
 
 from .protocol import SSEType
 
@@ -135,10 +134,10 @@ def mirror_codex(thread_id: str, goal: dict[str, Any] | None, *, incarnation: st
     the new owner's goal after cutover. Joined callers retain their transaction;
     SQLite snapshot/write conflicts propagate rather than writing stale data.
     """
-    from . import agents, native_rotation_goals
+    from . import agents, native_rotation_goals, native_rotation_journal
 
     protected = None
-    with _mirror_writer():
+    with native_rotation_journal.writer():
         agent = agents.get_by_backend_session(thread_id)
         if not agent:
             return None
@@ -159,31 +158,6 @@ def mirror_codex(thread_id: str, goal: dict[str, Any] | None, *, incarnation: st
     if protected is not None:
         raise protected
     return agent, row
-
-
-@contextmanager
-def _mirror_writer():
-    """One atomic mirror unit, preserving any enclosing caller transaction."""
-    from . import settings_store
-
-    database = _db().conn()
-    if not database.in_transaction:
-        with settings_store.transaction():
-            yield
-        return
-    database.execute("SAVEPOINT codex_goal_mirror")
-    try:
-        yield
-        database.execute("RELEASE codex_goal_mirror")
-    except BaseException:
-        try:
-            database.execute("ROLLBACK TO codex_goal_mirror")
-            database.execute("RELEASE codex_goal_mirror")
-        except Exception:
-            # The reader reports the primary error and retains unknown state.
-            # Never replace it or roll back another owner's transaction.
-            pass
-        raise
 
 
 def public(row: dict[str, Any] | None) -> dict[str, Any] | None:
