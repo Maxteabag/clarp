@@ -8,6 +8,7 @@ Other backends do not carry a goal yet: ``backends.goal`` refuses them.
 from __future__ import annotations
 
 from typing import Any
+from contextlib import contextmanager
 
 from .protocol import SSEType
 
@@ -126,28 +127,62 @@ def clear(agent_id: str) -> bool:
 
 
 
-def mirror_codex(thread_id: str, goal: dict[str, Any] | None):
+def mirror_codex(thread_id: str, goal: dict[str, Any] | None, *, incarnation: str | None = None):
     """Resolve the native owner and mirror under the same SQLite writer.
 
     A callback that resolved an old binding before rotation cannot overwrite
     the new owner's goal after cutover. Joined callers retain their transaction;
     SQLite snapshot/write conflicts propagate rather than writing stale data.
     """
-    from contextlib import nullcontext
-    from . import agents, settings_store
+    from . import agents, native_rotation_goals
 
-    database = _db().conn()
-    with nullcontext() if database.in_transaction else settings_store.transaction():
+    protected = None
+    with _mirror_writer():
         agent = agents.get_by_backend_session(thread_id)
         if not agent:
             return None
-        if goal:
+        logical, offset, protected = native_rotation_goals.observation(
+            agent["agent_id"], thread_id, goal, incarnation)
+        if protected is not None:
+            current = get(agent["agent_id"])
+            row = (upsert(agent["agent_id"], session=agent["session"], backend="codex",
+                          goal={**current, "status": BLOCKED}) if current else None)
+        elif logical:
             row = upsert(agent["agent_id"], session=agent["session"],
-                         backend=str(agent.get("backend") or "codex"), goal=from_codex(goal))
+                         backend=str(agent.get("backend") or "codex"), goal=from_codex(logical))
         else:
             clear(agent["agent_id"])
             row = None
-        return agent, row
+        if offset is not None:
+            native_rotation_goals.store(offset)
+    if protected is not None:
+        raise protected
+    return agent, row
+
+
+@contextmanager
+def _mirror_writer():
+    """One atomic mirror unit, preserving any enclosing caller transaction."""
+    from . import settings_store
+
+    database = _db().conn()
+    if not database.in_transaction:
+        with settings_store.transaction():
+            yield
+        return
+    database.execute("SAVEPOINT codex_goal_mirror")
+    try:
+        yield
+        database.execute("RELEASE codex_goal_mirror")
+    except BaseException:
+        try:
+            database.execute("ROLLBACK TO codex_goal_mirror")
+            database.execute("RELEASE codex_goal_mirror")
+        except Exception:
+            # The reader reports the primary error and retains unknown state.
+            # Never replace it or roll back another owner's transaction.
+            pass
+        raise
 
 
 def public(row: dict[str, Any] | None) -> dict[str, Any] | None:

@@ -22,7 +22,7 @@ def _integer(value):
 
 
 def _seconds(value):
-    if type(value) not in (int, float) or not math.isfinite(value) or not 0 <= value <= _MAX:
+    if type(value) not in (int, float) or not 0 <= value <= _MAX or not math.isfinite(value):
         raise AccountingUnavailable("invalid native elapsed time")
     return value
 
@@ -38,7 +38,7 @@ def _goal(thread, raw):
         raise AccountingUnavailable("native thread mismatch")
     if not isinstance(raw.get("objective"), str) or not raw["objective"].strip():
         raise AccountingUnavailable("missing native objective")
-    if raw.get("status") not in _STATUSES:
+    if not isinstance(raw.get("status"), str) or raw["status"] not in _STATUSES:
         raise AccountingUnavailable("unknown native status")
     _integer(raw.get("createdAt"))
     _integer(raw.get("updatedAt"))
