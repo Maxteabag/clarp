@@ -226,6 +226,21 @@ _LATENCY_BUCKET = """CASE
                     WHEN duration_ms<=10000 THEN 10000 ELSE 60000 END"""
 
 
+_UPSERT_METRICS = """INSERT INTO hourly_metrics (
+       bucket_ms,source,event,path,status,samples,
+       total_duration_ms,max_duration_ms)
+   VALUES (?,?,?,?,?,?,?,?)
+   ON CONFLICT(bucket_ms,source,event,path,status) DO UPDATE SET
+       samples=excluded.samples,
+       total_duration_ms=excluded.total_duration_ms,
+       max_duration_ms=excluded.max_duration_ms"""
+_UPSERT_LATENCY = """INSERT INTO hourly_latency_buckets (
+       bucket_ms,source,event,path,status,upper_ms,samples)
+   VALUES (?,?,?,?,?,?,?)
+   ON CONFLICT(bucket_ms,source,event,path,status,upper_ms) DO UPDATE SET
+       samples=excluded.samples"""
+
+
 def _upsert_in_batches(c, statement: str, rows: list) -> None:
     """Write ``rows`` with ``statement``, ``UPSERT_BATCH`` per transaction."""
     for index in range(0, len(rows), UPSERT_BATCH):
@@ -361,6 +376,47 @@ def _retained_keys(c, metrics: list) -> set[tuple]:
     return {tuple(row[:5]) for row in metrics if counted.get(tuple(row[:5]), 0) > row[5]}
 
 
+def _stale_histograms(c, metrics: list, latency: list) -> set[tuple]:
+    """The kinds about to be replaced whose stored histogram has a bucket the
+    new detail does not fill.
+
+    An upsert only writes the buckets it has, so such a bucket would stay
+    beside the new ones: two samples at 10 ms replaced by three at 300 ms left
+    a metric of three over a histogram of five. It happens only when a kind is
+    replaced by other rows than it was made from (late rows for a pruned hour,
+    see _retained_keys); detail that only grows never empties a bucket.
+    """
+    if not metrics:
+        return set()
+    replaced = {tuple(row[:5]) for row in metrics}
+    filled = {tuple(row[:6]) for row in latency}
+    return {tuple(row[:5]) for row in c.execute(
+        """SELECT bucket_ms,source,event,path,status,upper_ms
+             FROM hourly_latency_buckets WHERE bucket_ms >= ?""",
+        (min(row[0] for row in metrics),))
+        if tuple(row[:5]) in replaced and tuple(row) not in filled}
+
+
+def _replace_kinds(c, kinds: set[tuple], metrics: list, latency: list) -> None:
+    """Replace each of ``kinds`` whole: its metric row and its entire
+    histogram, in one transaction per kind, so both always describe the same
+    rows. Only its own buckets are deleted."""
+    for index, kind in enumerate(sorted(kinds)):
+        if index and UPSERT_PAUSE_S:
+            time.sleep(UPSERT_PAUSE_S)
+        c.execute("BEGIN IMMEDIATE")
+        try:
+            c.executemany(_UPSERT_METRICS, [tuple(row) for row in metrics if tuple(row[:5]) == kind])
+            c.execute(
+                """DELETE FROM hourly_latency_buckets
+                    WHERE bucket_ms=? AND source=? AND event=? AND path=? AND status=?""", kind)
+            c.executemany(_UPSERT_LATENCY, [tuple(row) for row in latency if tuple(row[:5]) == kind])
+            c.execute("COMMIT")
+        except BaseException:
+            c.execute("ROLLBACK")
+            raise
+
+
 def rollup_and_prune(*, now_ms: int | None = None, checkpoint: bool = True,
                       budget_bytes: int = DETAIL_BUDGET_BYTES) -> dict[str, int]:
     """Roll every retained hour up, then expire detail and old rollups, then
@@ -383,7 +439,8 @@ def rollup_and_prune(*, now_ms: int | None = None, checkpoint: bool = True,
     declared loss, not exact accounting: such a late row is not added to a
     rollup row of its own kind, and only a kind the hour did not have yet
     gets a row. If late rows of a kind are at least as many as the hour
-    counted, they replace it.
+    counted, they replace it: its metric row and its whole histogram
+    together (_replace_kinds), so the two describe the same rows.
 
     It is best-effort reclamation at each pass, not a hard ceiling: what
     arrives between two passes can overshoot it, the cut of the current hour
@@ -404,18 +461,6 @@ def rollup_and_prune(*, now_ms: int | None = None, checkpoint: bool = True,
                      COALESCE(status,0)""",
         (hour, current_hour, hour),
     ).fetchall()
-    # Both tables follow one decision per hour and kind, so they stay in step.
-    retained = _retained_keys(c, metrics)
-    metrics = [row for row in metrics if tuple(row[:5]) not in retained]
-    _upsert_in_batches(c,
-        """INSERT INTO hourly_metrics (
-               bucket_ms,source,event,path,status,samples,
-               total_duration_ms,max_duration_ms)
-           VALUES (?,?,?,?,?,?,?,?)
-           ON CONFLICT(bucket_ms,source,event,path,status) DO UPDATE SET
-               samples=excluded.samples,
-               total_duration_ms=excluded.total_duration_ms,
-               max_duration_ms=excluded.max_duration_ms""", metrics)
     latency = c.execute(
         f"""SELECT ts - (ts % ?),source,event,COALESCE(path,''),
                   COALESCE(status,0),{_LATENCY_BUCKET},count(*)
@@ -425,13 +470,16 @@ def rollup_and_prune(*, now_ms: int | None = None, checkpoint: bool = True,
                      COALESCE(status,0),{_LATENCY_BUCKET}""",
         (hour, current_hour, hour),
     ).fetchall()
+    # Both tables follow one decision per hour and kind, so they stay in step.
+    retained = _retained_keys(c, metrics)
+    metrics = [row for row in metrics if tuple(row[:5]) not in retained]
     latency = [row for row in latency if tuple(row[:5]) not in retained]
-    _upsert_in_batches(c,
-        """INSERT INTO hourly_latency_buckets (
-               bucket_ms,source,event,path,status,upper_ms,samples)
-           VALUES (?,?,?,?,?,?,?)
-           ON CONFLICT(bucket_ms,source,event,path,status,upper_ms) DO UPDATE SET
-               samples=excluded.samples""", latency)
+    # A kind whose histogram would keep a bucket of rows it no longer counts
+    # is replaced whole; every other kind is upserted as before.
+    stale = _stale_histograms(c, metrics, latency)
+    _replace_kinds(c, stale, metrics, latency)
+    _upsert_in_batches(c, _UPSERT_METRICS, [row for row in metrics if tuple(row[:5]) not in stale])
+    _upsert_in_batches(c, _UPSERT_LATENCY, [row for row in latency if tuple(row[:5]) not in stale])
     # Detail expires by whole hours (RM-N8c): a delete inside an hour left a
     # partial bucket that the next rollup re-aggregated, overwriting its full
     # count with the remainder. Rows now live 24 to 25 h.

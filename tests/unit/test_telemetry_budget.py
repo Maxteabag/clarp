@@ -285,11 +285,81 @@ def test_an_interrupted_prune_does_not_shrink_the_hours_rollup():
         assert _rollup() == {39: ROWS}
 
 
-def test_declared_limit_late_rows_that_outnumber_the_pruned_count_replace_it():
-    """Not exact accounting: without the detail there is nothing to add them to."""
-    _fill(39, rows=2)
+def _insert_kind(hour: int, event: str, rows: int, duration_ms: float | None, *, offset: int = 0) -> None:
+    telemetry.conn().executemany(
+        """INSERT INTO diagnostic_events
+           (ts,ts_iso,source,event,level,duration_ms,detail) VALUES (?,?,?,?,?,?,?)""",
+        [(hour * HOUR + offset + n, "t", "server", event, "error", duration_ms, DETAIL) for n in range(rows)])
+
+
+def _prune_all_detail() -> None:
     telemetry.rollup_and_prune(now_ms=NOW, budget_bytes=1)
-    assert _hours() == {} and _rollup() == {39: 2}
-    _fill(39, rows=3)
-    telemetry.rollup_and_prune(now_ms=NOW, budget_bytes=telemetry.live_bytes() * 100)
-    assert _rollup() == {39: 3}
+    assert _hours() == {}
+
+
+def _histogram_total(event: str) -> int:
+    return telemetry.conn().execute(
+        "SELECT COALESCE(sum(samples), 0) FROM hourly_latency_buckets WHERE event = ?", (event,)).fetchone()[0]
+
+
+def _metric_samples(event: str) -> int:
+    return telemetry.conn().execute(
+        "SELECT samples FROM hourly_metrics WHERE event = ?", (event,)).fetchone()[0]
+
+
+@pytest.mark.parametrize("late_rows", [3, 2], ids=["more-late-rows", "as-many-late-rows"])
+def test_declared_limit_a_replaced_kind_replaces_its_whole_histogram(late_rows):
+    """Not exact accounting: without the detail there is nothing to add late
+    rows to, so a late population at least as large replaces the kind. Then
+    both tables must describe that same population: two samples at 10 ms
+    replaced by three at 300 ms left a metric of three over a histogram of five."""
+    _insert_kind(39, "noisy", 2, 10)                      # replaced below
+    _insert_kind(39, "kept", 5, 50)                       # one late row: retained
+    _insert_kind(39, "quiet", 4, 2500)                    # no late row at all
+    _prune_all_detail()
+    untouched = [row for row in _rollup_rows() + _latency_rows() if row[2] != "noisy"]
+    assert _latency_rows()[1] == (39, "server", "noisy", "", 0, 10, 2)
+
+    _insert_kind(39, "noisy", late_rows, 300, offset=1000)
+    _insert_kind(39, "kept", 1, 7000, offset=1000)
+
+    for _ in range(2):                                    # and it stays that way
+        telemetry.rollup_and_prune(now_ms=NOW, budget_bytes=telemetry.live_bytes() * 100)
+        assert [row for row in _rollup_rows() if row[2] == "noisy"] == [
+            (39, "server", "noisy", "", 0, late_rows, 300.0 * late_rows, 300.0)]
+        assert [row for row in _latency_rows() if row[2] == "noisy"] == [
+            (39, "server", "noisy", "", 0, 500, late_rows)], "the 10 ms bucket is gone with the rows it counted"
+        assert _histogram_total("noisy") == _metric_samples("noisy") == late_rows
+        # A retained kind and an unrelated kind keep their rows and buckets.
+        assert [row for row in _rollup_rows() + _latency_rows() if row[2] != "noisy"] == untouched
+        assert _histogram_total("kept") == _metric_samples("kept") == 5
+
+
+def test_a_kind_replaced_by_rows_without_a_duration_has_no_histogram_left():
+    _insert_kind(39, "noisy", 2, 10)
+    _insert_kind(39, "quiet", 4, 2500)
+    _prune_all_detail()
+    _insert_kind(39, "noisy", 3, None, offset=1000)
+    for _ in range(2):
+        telemetry.rollup_and_prune(now_ms=NOW, budget_bytes=telemetry.live_bytes() * 100)
+        assert [row for row in _rollup_rows() if row[2] == "noisy"] == [
+            (39, "server", "noisy", "", 0, 3, 0.0, 0.0)]
+        assert _histogram_total("noisy") == 0             # three rows, none of them measured
+        assert _latency_rows() == [(39, "server", "quiet", "", 0, 2500, 4)]
+
+
+def test_growing_detail_is_still_upserted_in_batches_not_replaced(monkeypatch):
+    """Unchanged ordinary behaviour: detail that only grows empties no bucket,
+    so no kind takes the replace path."""
+    replaced: list[set] = []
+    replace = telemetry._replace_kinds
+    monkeypatch.setattr(telemetry, "_replace_kinds",
+                        lambda c, kinds, metrics, latency: replaced.append(set(kinds)) or replace(c, kinds, metrics, latency))
+    budget = None
+    for round_ in range(3):
+        _insert_kind(39, "noisy", 5, 10, offset=round_ * 100)
+        _insert_kind(39, "noisy", 2, 300, offset=round_ * 100 + 50)
+        budget = budget or telemetry.live_bytes() * 100
+        telemetry.rollup_and_prune(now_ms=NOW, budget_bytes=budget)
+        assert _histogram_total("noisy") == _metric_samples("noisy") == 7 * (round_ + 1)
+    assert replaced == [set(), set(), set()]
