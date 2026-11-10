@@ -360,11 +360,12 @@ def _require_own_file(st: os.stat_result, name: str) -> None:
 
 
 def _own_file(dir_fd: int, name: str) -> os.stat_result | None:
-    """The entry itself (a symlink is not followed), or None when it cannot
-    be looked at."""
+    """The entry itself (a symlink is not followed), or None when it is gone.
+    Absence is the only thing that passes silently: any other failure to
+    look is the caller's to log."""
     try:
         st = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
-    except OSError:
+    except FileNotFoundError:
         return None
     _require_own_file(st, name)
     return st
@@ -501,7 +502,8 @@ def prune_event_logs(log_dir: pathlib.Path, *, max_age_ms: int,
     symlink is never followed, and not removed either). The size budget
     additionally counts, deletes and cuts only files that start with an
     event-log record. Whatever is refused or cannot be inspected is logged
-    as ``eventLogPruneFail``.
+    as ``eventLogPruneFail``; only a file that is already gone is skipped
+    silently.
     """
     today = today or datetime.datetime.now(datetime.timezone.utc).date()
     try:
@@ -576,7 +578,8 @@ def prune_hook_log(path: pathlib.Path, *, max_bytes: int, keep_bytes: int) -> in
 
     Confined like the event logs: an absolute, unlinked directory of this
     user's, and in it a regular file of this user's that reads like a hook
-    log. Anything else raises UnsafeLogPath; the caller logs it.
+    log. Anything else raises UnsafeLogPath, as does any failure to inspect
+    the file other than its absence; the caller logs it.
     """
     path = pathlib.Path(path)
     try:

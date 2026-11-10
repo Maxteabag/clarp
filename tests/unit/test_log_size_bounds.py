@@ -406,6 +406,60 @@ def test_a_hook_log_that_does_not_read_like_one_is_left_alone(tmp_path):
     assert path.read_bytes() == before
 
 
+# --- failures to inspect are logged, not skipped (review A2, F2) ------------------
+
+def _failing_stat(monkeypatch, name: str, error: OSError) -> None:
+    stat = os.stat
+
+    def fail(path, *args, **kwargs):
+        if path == name and "dir_fd" in kwargs:
+            raise error
+        return stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(maintenance.os, "stat", fail)
+
+
+def test_a_dated_log_that_cannot_be_inspected_is_logged_not_skipped(tmp_path, monkeypatch, failures):
+    for day in ("2026-10-01", "2026-10-02"):
+        _numbered(tmp_path / f"{day}.jsonl", 10)
+    _failing_stat(monkeypatch, "2026-10-01.jsonl", PermissionError(errno.EACCES, "Permission denied"))
+
+    assert maintenance.prune_event_logs(tmp_path, max_age_ms=DAYS14, today=TODAY) == 1
+
+    assert failures == [("eventLogPruneFail", "PermissionError", "2026-10-01.jsonl")]
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["2026-10-01.jsonl"]   # the other one still went
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root can read any directory")
+def test_a_log_directory_that_cannot_be_read_is_logged(tmp_path, failures):
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    _numbered(logs / "2026-10-01.jsonl", 10)
+    logs.chmod(0)
+    try:
+        assert maintenance.prune_event_logs(logs, max_age_ms=DAYS14, today=TODAY) == 0
+    finally:
+        logs.chmod(0o700)
+    assert failures == [("eventLogPruneFail", "PermissionError", str(logs))]
+    assert (logs / "2026-10-01.jsonl").exists()
+
+
+def test_a_hook_log_that_cannot_be_inspected_reaches_the_workers_log(tmp_path, monkeypatch, failures):
+    hook_log = tmp_path / "hook.log"
+    _hook_lines(hook_log, 2000)
+    _failing_stat(monkeypatch, "hook.log", OSError(errno.EIO, "Input/output error"))
+
+    with pytest.raises(OSError) as raised:
+        maintenance.prune_hook_log(hook_log, max_bytes=20_000, keep_bytes=4000)
+    assert raised.value.errno == errno.EIO
+
+    worker = maintenance.MaintenanceWorker(audio_dir=tmp_path, hook_log=hook_log)
+    assert "hook_log_bytes" not in worker.check_sizes()
+    assert ("hookLogPruneFail", "OSError", "") in failures
+    assert "hook_log_bytes" not in worker.run_once(checkpoint=False)
+    assert failures.count(("hookLogPruneFail", "OSError", "")) == 2
+
+
 # --- hook.log ------------------------------------------------------------------
 
 def test_hook_log_under_its_bound_is_untouched(tmp_path):
