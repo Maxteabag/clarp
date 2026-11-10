@@ -5,8 +5,13 @@ the lead agent with its current tool and start time. Updates are throttled
 to Apple's budget, except when something needs the owner."""
 from __future__ import annotations
 
+import json
+import sqlite3
+
+import pytest
+
 from lib import agents as agents_db
-from lib import live_activity
+from lib import db, live_activity
 
 
 class FakeClock:
@@ -118,7 +123,19 @@ def test_direct_apns_sends_live_activity_pushes_to_the_liveactivity_topic():
     assert client.headers["apns-push-type"] == "liveactivity"
 
 
-def test_needs_you_matches_the_updates_badge(monkeypatch):
+def _badge_pages(agent_id, session, count):
+    """Small real catalogue; one off-page body is larger than the rest."""
+    rows = [(f"badge-extra-{i:04d}", agent_id, session, f"Failure {i}",
+             json.dumps({"content": "x" * (80000 if i == count - 1 else 256)}),
+             2_000_000_000_000 + i, 2_000_000_000_000 + i) for i in range(count)]
+    db.conn().executemany("""INSERT INTO artifacts
+        (artifact_id,agent_id,session,type,title,status,payload_json,created_at,updated_at)
+        VALUES (?,?,?,'document',?,'failed',?,?,?)""", rows)
+    return [row[0] for row in rows]
+
+
+@pytest.mark.parametrize("extra", [0, 410], ids=["one-page", "three-pages"])
+def test_needs_you_matches_the_updates_badge(monkeypatch, extra):
     from lib import artifacts, janitor_attention
 
     rachel, mike = _agents()
@@ -136,10 +153,22 @@ def test_needs_you_matches_the_updates_badge(monkeypatch):
                      payload={"content": "x"})   # review, not response
     monkeypatch.setattr(janitor_attention, "pending",
                         lambda include_archived=False: [{"artifact_id": "j1", "agent_id": "janitor-1"}])
-    attention = live_activity.badge_attention()
-    assert attention["count"] == 3
+    _badge_pages(rachel, "rachel", extra)
+    scans = []
+    def count_global_selection(sql):
+        normalized = " ".join(sql.lower().split())
+        if "as pj_object" in normalized and "from artifacts a join agents g" in normalized:
+            scans.append(sql)
+    db.conn().set_trace_callback(count_global_selection)
+    try:
+        attention = live_activity.badge_attention()
+    finally:
+        db.conn().set_trace_callback(None)
+    assert attention["count"] == 3 + extra
     assert attention["agent_ids"] == {mike, rachel, "janitor-1"}
-    assert sorted(attention["items"]) == sorted([mike, rachel, "janitor-1"])
+    assert attention["items"] == [mike, "janitor-1"] + [rachel] * (1 + extra)
+    assert not db.conn().in_transaction
+    assert len(scans) == 1  # full literal badge oracle precedes the intended RED
 
     clock, sent = FakeClock(), []
     pusher = live_activity.LiveActivityPusher(
@@ -153,8 +182,81 @@ def test_needs_you_matches_the_updates_badge(monkeypatch):
     # Mike, Rachel (idle, her failure filed) and Nina once each, plus the
     # Janitor item, which names no agent on the chip.
     assert state["needs_you"] == 4
-    assert state["decisions"] == 3
+    assert state["decisions"] == 3 + extra
     assert {row["persona"] for row in state["agents"]} == {"Mike", "Rachel", "Nina"}
+
+
+def test_badge_pages_share_one_read_view_while_a_foreign_writer_commits(monkeypatch):
+    from lib import attention_index
+
+    rachel, _ = _agents()
+    ids = _badge_pages(rachel, "rachel", 410)
+    target = ids[-1]
+    original_full_rows = attention_index._full_rows
+    committed, observed = [], []
+
+    def full_rows(connection, page_ids):
+        rows = original_full_rows(connection, page_ids)
+        if target in rows:
+            observed.append((rows[target]["status"], rows[target]["payload_json"]))
+        if not committed:
+            assert target not in page_ids  # the changed row belongs to page three
+            writer = sqlite3.connect(str(db.DB_PATH), timeout=1, isolation_level=None)
+            try:
+                changed = writer.execute("""UPDATE artifacts SET status='cancelled',
+                    payload_json='{}',updated_at=updated_at+1 WHERE artifact_id=?""", (target,))
+                assert changed.rowcount == 1
+                assert writer.execute("SELECT status FROM artifacts WHERE artifact_id=?",
+                                      (target,)).fetchone() == ("cancelled",)
+                committed.append(target)  # actually committed before the next page
+            finally:
+                writer.close()
+        return rows
+
+    monkeypatch.setattr(attention_index, "_full_rows", full_rows)
+    first = live_activity.badge_attention()
+    assert committed == [target]
+    assert first == {"count": 410, "items": [rachel] * 410, "agent_ids": {rachel}}
+    assert observed == [("failed", json.dumps({"content": "x" * 80000}))]
+    assert not db.conn().in_transaction
+    later = live_activity.badge_attention()
+    assert later == {"count": 409, "items": [rachel] * 409, "agent_ids": {rachel}}
+    assert not db.conn().in_transaction
+
+
+@pytest.mark.parametrize("payload", ["null", "1", "true", '["content"]', '"content"',
+                                    '{"chart":{"kind":[]}}'])
+def test_badge_serializer_failure_preserves_prior_value_and_ends_read(payload, monkeypatch):
+    from lib import artifacts
+
+    rachel, _ = _agents()
+    row = artifacts.create(session="rachel", type="document", title="Failure", status="failed")
+    prior = live_activity.badge_attention()
+    assert prior == {"count": 1, "items": [rachel], "agent_ids": {rachel}}
+    db.conn().execute("UPDATE artifacts SET payload_json=?,updated_at=updated_at+1 WHERE artifact_id=?",
+                      (payload, row["artifact_id"]))
+    serialized = []
+    released = []
+    original_public = artifacts._public
+    original_release = artifacts.SummaryBudget.release
+    def public(raw):
+        serialized.append(raw["payload_json"])
+        return original_public(raw)
+    def release(budget):
+        released.append(budget)
+        return original_release(budget)
+    monkeypatch.setattr(artifacts, "_public", public)
+    monkeypatch.setattr(artifacts.SummaryBudget, "release", release)
+    clock = FakeClock()
+    pusher = live_activity.LiveActivityPusher(lambda *_: None, clock=clock,
+                                             attention=live_activity.badge_attention)
+    pusher.set_attention(prior)
+    assert pusher._read_attention() == prior  # actual serializer raises into old fallback
+    assert serialized == [payload]
+    assert len(released) == 1 and not released[0]._scopes
+    assert not db.conn().in_transaction
+    db.conn().execute("UPDATE artifacts SET payload_json='{}' WHERE artifact_id=?", (row["artifact_id"],))
+    assert live_activity.badge_attention() == prior  # failed sequence cannot poison its successor
 
 
 def test_attention_changes_push_and_raise_priority():
