@@ -1,0 +1,152 @@
+name: Release owner ONE synthetic boundary table
+on:
+  push:
+    branches: [ci/release-owner-boundary-r10-r8-table004]
+permissions:
+  contents: read
+jobs:
+  owner-boundary:
+    if: github.repository == 'Maxteabag/clarp' && github.event_name == 'push' && github.ref == 'refs/heads/ci/release-owner-boundary-r10-r8-table004'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Original whole-job clock
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os,time,pathlib
+          pathlib.Path(os.environ['RUNNER_TEMP'],'owner-boundary-start').write_text(str(time.monotonic()))
+          PY
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Verify source and run ONLY the synthetic owner table
+        id: table
+        shell: bash
+        timeout-minutes: 9
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib,json,os,pathlib,re,subprocess,sys,time,traceback
+          root=pathlib.Path.cwd()
+          start=float(pathlib.Path(os.environ['RUNNER_TEMP'],'owner-boundary-start').read_text())
+          out=root/'owner-boundary-evidence'
+          out.mkdir(mode=0o700)
+          receipt_deadline=start+540
+          result={'state':'UNKNOWN','retry':0,'whole_seconds':600,'child_seconds':245,'source_verified':False,'termination_known':False}
+          def left(deadline):
+              remaining=deadline-time.monotonic()
+              if remaining<=0:raise RuntimeError('original_deadline_exhausted')
+              return remaining
+          def git(*args):
+              return subprocess.check_output(['git',*args],timeout=min(10,left(start+120))).decode().strip()
+          expected={
+              'install_exact_and_measure-r10-SOURCE-ONLY.py':'61e981cd1b67194c5018cf2ca7146d99b37c84f07447672b921f57cdb127cfc9',
+              'test_release_owner_boundary.py':'35cefb1d2e78bc70700900c81b46955bdcce088c3a6d6bf919721d0e2b0b39e9',
+              'scripts/ci_contained.sh':'07f228044e915297a84a52201e68e40a34809928fcf0ecb8d300b692ee5d067f',
+              'scripts/ci_containment_selfcheck.py':'91a5b503b559eb6e7f1ceaf495199496c65851627e361cffdf47dc4be60546fb'}
+          def source_inventory():
+              records=[]
+              for name,sha in expected.items():
+                  p=root/name
+                  if p.is_symlink() or not p.is_file():raise RuntimeError('source_kind:'+name)
+                  data=p.read_bytes()
+                  if hashlib.sha256(data).hexdigest()!=sha:raise RuntimeError('source_hash:'+name)
+                  records.append({'path':name,'bytes':len(data),'sha256':sha})
+              for stem in ('test_release_owner_boundary','install_exact_and_measure-r10-SOURCE-ONLY'):
+                  if list((root/'__pycache__').glob(stem+'.*.pyc')) or (root/(stem+'.pyc')).exists():
+                      raise RuntimeError('competing_bytecode:'+stem)
+              return records
+          try:
+              if sys.version_info<(3,11):raise RuntimeError('requires_stdlib_tomllib')
+              base='f0af856fcba28c4c01883012625cd153951a476c'
+              if git('rev-parse','HEAD')!=os.environ['GITHUB_SHA']:raise RuntimeError('head_not_trigger')
+              if git('rev-parse','HEAD^')!=base:raise RuntimeError('not_exact_direct_parent')
+              changed=git('diff','--name-only',base,'HEAD').splitlines()
+              wanted=['.github/workflows/release-owner-boundary-table.yml','install_exact_and_measure-r10-SOURCE-ONLY.py','test_release_owner_boundary.py']
+              if sorted(changed)!=wanted:raise RuntimeError('outside_three_change')
+              records=source_inventory()
+              result.update(base=base,head=os.environ['GITHUB_SHA'],source_verified=True,python=sys.version,executable=sys.executable,sources=records)
+              # Standard library only: no dependency resolution, pip, uv sync or downloads.
+              with (out/'setup.stdout').open('wb') as so,(out/'setup.stderr').open('wb') as se:
+                  setup=subprocess.run([sys.executable,'-m','venv','--without-pip','.venv'],stdout=so,stderr=se,check=False,timeout=left(start+120))
+                  result['setup_raw_exit']=setup.returncode
+              result['setup_closed_elapsed']=time.monotonic()-start
+              if setup.returncode!=0:raise subprocess.CalledProcessError(setup.returncode,setup.args)
+              left(start+120)  # acceptance AFTER native return AND both raw closes
+              if left(receipt_deadline)<245:raise RuntimeError('no_full_child_and_receipt_reserve')
+              argv=['timeout','--signal=TERM','--kill-after=10s','225s','bash','scripts/ci_contained.sh',str(root/'.venv/bin/python'),'-u','-B','-m','unittest','-v','test_release_owner_boundary.ReleaseOwnerBoundary.test_single_owner_boundary_table']
+              child_start=time.monotonic()
+              child_deadline=min(child_start+245,receipt_deadline)
+              with (out/'table.stdout').open('wb') as so,(out/'table.stderr').open('wb') as se:
+                  child=subprocess.Popen(argv,stdout=so,stderr=se)
+                  # 225 TERM + 10 KILL + 10 join within the unchanged 245 child cap.
+                  rc=child.wait(timeout=left(child_deadline))
+                  result.update(termination_known=True,raw_exit=rc)
+              result['child_elapsed']=time.monotonic()-child_start
+              (out/'table.exit').write_text(str(rc)+'\n')
+              if rc!=0:raise RuntimeError('not_ordinary_table_success')
+              left(child_deadline)  # closed-raw/actual-return acceptance, never timeout intent alone
+              stderr=(out/'table.stderr').read_text(errors='replace')
+              if not re.search(r'(?m)^Ran 1 test in ',stderr) or not re.search(r'(?m)^OK\s*\Z',stderr):raise RuntimeError('not_exact_one_unittest_success')
+              if source_inventory()!=records:raise RuntimeError('post_source_changed')
+              left(receipt_deadline)
+              result['state']='TABLE_SUCCESS_PENDING_JOB_AND_REVIEW'
+          except BaseException as error:
+              result.update(error_type=type(error).__name__,error=str(error))
+              # TimeoutExpired leaves termination UNKNOWN. No numeric exit, stable
+              # final-custody or assertion proof is inferred from partial logs.
+              (out/'controller-error.txt').write_text(traceback.format_exc())
+          finally:
+              result['elapsed']=time.monotonic()-start
+              (out/'result.json').write_text(json.dumps(result,sort_keys=True,indent=2)+'\n')
+              inventory=[]
+              for name in ('setup.stdout','setup.stderr','table.stdout','table.stderr','table.exit','result.json','controller-error.txt'):
+                  p=out/name
+                  if p.is_file():
+                      data=p.read_bytes();inventory.append({'path':name,'bytes':len(data),'sha256':hashlib.sha256(data).hexdigest()})
+              (out/'inventory.json').write_text(json.dumps({'diagnostic_only':not result['termination_known'],'members':inventory},sort_keys=True,indent=2)+'\n')
+          # Publication includes the result and full raw inventory writes above.
+          publication_end=time.monotonic()
+          print(json.dumps({'receipt_publication_elapsed':publication_end-start,'receipt_bound_seconds':540,'receipt_within_bound':publication_end<receipt_deadline,'raw_exit':result.get('raw_exit'),'state':result['state'] if publication_end<receipt_deadline else 'RECEIPT_PUBLICATION_LATE_UNKNOWN'},sort_keys=True),flush=True)
+          # Keep original native rc/errors in retained receipts; lateness cannot
+          # overwrite them or pass via the remaining whole-job upload reserve.
+          if time.monotonic()>=receipt_deadline:raise SystemExit('receipt_publication_late_UNKNOWN')
+          if result['state']!='TABLE_SUCCESS_PENDING_JOB_AND_REVIEW':raise SystemExit(1)
+          PY
+      - name: Retain ONLY fixed raw evidence
+        id: upload
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: owner-boundary-one-table
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            owner-boundary-evidence/setup.stdout
+            owner-boundary-evidence/setup.stderr
+            owner-boundary-evidence/table.stdout
+            owner-boundary-evidence/table.stderr
+            owner-boundary-evidence/table.exit
+            owner-boundary-evidence/result.json
+            owner-boundary-evidence/inventory.json
+            owner-boundary-evidence/controller-error.txt
+      - name: Final original-clock and step agreement
+        if: always()
+        shell: bash
+        env:
+          TABLE_OUTCOME: ${{ steps.table.outcome }}
+          UPLOAD_OUTCOME: ${{ steps.upload.outcome }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json,os,pathlib,time
+          start=float(pathlib.Path(os.environ['RUNNER_TEMP'],'owner-boundary-start').read_text())
+          r=json.loads(pathlib.Path('owner-boundary-evidence/result.json').read_text())
+          assert time.monotonic()-start<600,'original_whole_deadline'
+          assert os.environ['TABLE_OUTCOME']=='success' and os.environ['UPLOAD_OUTCOME']=='success','step_failure'
+          assert r['state']=='TABLE_SUCCESS_PENDING_JOB_AND_REVIEW' and r['termination_known'] and r['raw_exit']==0,'not_table_success'
+          PY
