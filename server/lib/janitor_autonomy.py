@@ -145,6 +145,29 @@ def validate_decision(value):
     if value['action']=='wake' and not value.get('message','').strip():raise ValueError('Wake needs message')
     return value
 
+def _hotseat_quota_fingerprint(c=None):
+    """Lightweight candidate SET + all configuration fingerprints; no full views."""
+    ids=sorted(janitor_store.janitor_agent_ids(c,template_id=janitor_hotseat.ROLE,enabled_only=True))
+    frame=tuple((aid,janitor_store.admission_fingerprint(aid,c)) for aid in ids)
+    return frame if all(fingerprint is not None for _,fingerprint in frame) else None
+
+def _automatic_hotseat_quota_snapshot(provider):
+    """Resolve outside the writer, then require the complete capture to be stable."""
+    if provider not in janitor_hotseat.PROVIDERS:return None
+    try:
+        # resolve() builds full views/cadence. Like begin_run(), never do that
+        # under BEGIN IMMEDIATE: only cheap fingerprint checks belong there.
+        before=_hotseat_quota_fingerprint()
+        owner=janitor_builtins.resolve(janitor_hotseat.ROLE)
+        after=_hotseat_quota_fingerprint()
+        if before is None or before!=after or not owner or owner['options'].get('mode')!='automatic':return None
+        expected=(owner['revision'],owner['generation'],1,owner['backend'],owner['model'],owner['effort'],1)
+        return after if dict(after).get(owner['agent_id'])==expected else None
+    except Exception as exc:
+        # Uncertain ownership cannot silence the keeper; never log raw CLI/config data.
+        hotseat_status.diagnose('quotaThresholdOwnerUnavailable',f'provider={provider} error={type(exc).__name__}')
+        return None
+
 class AutonomyJanitors:
     def __init__(self,dispatch,notify,model_call=decision_model,usage_read=None,recover=None,hotseat_read=janitor_hotseat.read_accounts,hotseat_switch=janitor_hotseat.switch_account,label_judge=None):
         self.recover=recover;self.dispatch=dispatch;self.notify=notify;self.model_call=model_call;self.usage_read=usage_read;self.stop_event=threading.Event();self.thread=None
@@ -246,12 +269,22 @@ class AutonomyJanitors:
                 if not janitor_builtins.is_current(run['run_id']):return
                 rid=digest([provider_id,account,window['window_id'],stamp,owner['generation']])
                 payload={'notification_id':rid,'session':owner['session'],'agent_id':owner['agent_id'],'persona':owner['name'],'preview':f"{provider_id}{' '+window['label'] if window.get('label') else ''}: {100-used:g}% quota remaining",'push':True,'reason':'quota_threshold','recovery_mode':owner['options']['recovery_mode'],'owner_generation':owner['generation']}
-                inserted=janitor_store.insert_quota_receipt(rid,run['run_id'],json.dumps(payload),now)
+                ownership=_automatic_hotseat_quota_snapshot(provider_id)
+                with settings_store.transaction():
+                    c=db.conn()
+                    # Config/candidate drift is unknown ownership, not a retry or
+                    # a second full resolver/model/cadence call under the writer.
+                    suppressed=ownership is not None and ownership==_hotseat_quota_fingerprint(c)
+                    inserted=janitor_store.insert_quota_receipt(rid,run['run_id'],json.dumps(payload),now,c=c)
+                    if inserted and suppressed:
+                        # Audit stays, but a new pending delivery is never externally visible.
+                        janitor_store.set_quota_receipt_delivery(rid,json.dumps({'cancelled':'Automatic Hotseat owns provider notifications'}),c=c)
                 if inserted:
                     if used >= 100 and owner['options']['recovery_mode']!='notify':
                         payload['recovery']=self.request_recovery(provider_id,owner,run['run_id'],rid)
                         recovery_states.append(provider_id+': '+payload['recovery'].get('status','unknown'))
-                    janitor_store.set_quota_receipt_payload(rid,json.dumps(payload));notifications+=1
+                    janitor_store.set_quota_receipt_payload(rid,json.dumps(payload))
+                    if not suppressed:notifications+=1
         self.deliver_notifications(owner)
         summary=f'Checked provider quota; {notifications} threshold notifications'
         activity='worked' if notifications or recovery_states else 'idle'
