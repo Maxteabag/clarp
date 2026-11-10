@@ -66,10 +66,15 @@ exists nowhere else.
 
 ## A test run is green only when you read its result
 
-`make test` / `pytest` is the gate before pushing. When you run it in the
-background through a wrapper such as `pytest > log; echo "exit=$?" >> log`,
-the wrapper exits 0 whether or not the suite failed, so a harness "completed
-(exit code 0)" notification says nothing about the tests. Read the recorded
+The gate before pushing is `make test-critical` (serial, about a minute; the
+list is `tests/critical.txt`) plus the test files for the code you changed.
+Do not run the full suite (`make test`) locally: forty agents doing so overload
+the owner's laptops. The full suite runs on GitHub (dispatch, nightly, Docker).
+
+When you run a test command in the background through a wrapper such as
+`pytest > log; echo "exit=$?" >> log`, the wrapper exits 0 whether or not the
+suite failed, so a harness "completed (exit code 0)" notification says nothing
+about the tests. Read the recorded
 `exit=` line and grep the log for `^FAILED`, or run the suite in the
 foreground. Two commits were pushed and deployed from a false green this way.
 
