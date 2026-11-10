@@ -291,9 +291,13 @@ def _stamp_connection() -> sqlite3.Connection:
             raise
         return _STAMP_CONN
     identity = schema_readiness.file_identity(DB_PATH)
-    con = sqlite3.connect(DB_PATH.absolute().as_uri() + "?mode=ro", uri=True,
-                          timeout=SQLITE_CONNECT_TIMEOUT_SEC,
-                          isolation_level=None, check_same_thread=False, factory=_StampConnection)
+    try:
+        con = sqlite3.connect(DB_PATH.absolute().as_uri() + "?mode=ro", uri=True,
+                              timeout=SQLITE_CONNECT_TIMEOUT_SEC,
+                              isolation_level=None, check_same_thread=False, factory=_StampConnection)
+    except sqlite3.Error as exc:
+        raise schema_readiness.SchemaNotReady(
+            sqlite_code=getattr(exc, "sqlite_errorcode", None)) from exc
     try:
         schema_readiness.check_connection(con, DB_PATH, identity)
         con.execute(f"PRAGMA busy_timeout = {SQLITE_BUSY_TIMEOUT_MS}")
@@ -551,11 +555,15 @@ class _TrackedConnection(sqlite3.Connection):
 
 def _open_connection() -> sqlite3.Connection:
     identity = schema_readiness.file_identity(DB_PATH)
-    con = sqlite3.connect(DB_PATH.absolute().as_uri() + "?mode=rw", uri=True,
-                          timeout=SQLITE_CONNECT_TIMEOUT_SEC,
-                          isolation_level=None,
-                          check_same_thread=False,
-                          factory=_TrackedConnection)
+    try:
+        con = sqlite3.connect(DB_PATH.absolute().as_uri() + "?mode=rw", uri=True,
+                              timeout=SQLITE_CONNECT_TIMEOUT_SEC,
+                              isolation_level=None,
+                              check_same_thread=False,
+                              factory=_TrackedConnection)
+    except sqlite3.Error as exc:
+        raise schema_readiness.SchemaNotReady(
+            sqlite_code=getattr(exc, "sqlite_errorcode", None)) from exc
     try:
         schema_readiness.check_connection(con, DB_PATH, identity)
         con.row_factory = sqlite3.Row
