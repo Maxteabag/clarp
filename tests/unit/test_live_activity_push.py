@@ -230,7 +230,8 @@ def test_badge_serializer_failure_preserves_prior_value_and_ends_read(payload, m
     from lib import artifacts
 
     rachel, _ = _agents()
-    row = artifacts.create(session="rachel", type="document", title="Failure", status="failed")
+    row = artifacts.create(session="rachel", type="document", title="Failure", status="failed",
+                           payload={"content": "Synthetic failure detail"})
     prior = live_activity.badge_attention()
     assert prior == {"count": 1, "items": [rachel], "agent_ids": {rachel}}
     db.conn().execute("UPDATE artifacts SET payload_json=?,updated_at=updated_at+1 WHERE artifact_id=?",
