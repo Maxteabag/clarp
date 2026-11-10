@@ -41,17 +41,16 @@ CAPABILITIES_VERSION = 1
 # adds a row to docs/compatibility.md; tests/unit/test_client_contract.py
 # fails when the table and these constants disagree. Clients identify
 # themselves with the X-Clarp-Client header ("ios/2620 contract=1").
-HOST_CONTRACT = 80  # provisional AUTH934 catalog option; captain books next free value at READY
+HOST_CONTRACT = 81  # AUTH934 catalog 80 plus delivery-state advertisement 81.
 MIN_IOS_CONTRACT = 1
-# F4 delivery state (joint packet 9a96df74): implemented, NOT advertised. Its
-# introduction number is booked by Nadia at the ready landing; until then the
-# feature is absent from FEATURES/FEATURE_CONTRACTS and the Host emits none of
-# its fields (feature_advertised gates every read path).
+# F4 delivery state: read paths and committed-transition hints share the
+# advertised feature gate; an unavailable runtime still leaves delivery unknown.
 SEND_DELIVERY_STATE = "send_delivery_state"
 CLIENT_HEADER = "X-Clarp-Client"
 FEATURES: tuple[str, ...] = (
     "decision_on_behalf",
     "accounts_hotseat",
+    SEND_DELIVERY_STATE,
     "harness_model_providers",
     "agent_call_live",
     "artifact_summary_v1",
@@ -392,6 +391,7 @@ FEATURE_CONTRACTS["harness_model_providers"] = 75  # PROVISIONAL: booked at the 
 FEATURE_CONTRACTS["agent_call_live"] = 76  # PROVISIONAL: was 75 on the Sandra line; 75 is harness_model_providers on main
 FEATURE_CONTRACTS["accounts_hotseat"] = 78  # read-only Hotseat status; lead931 landing
 FEATURE_CONTRACTS["decision_on_behalf"] = 79  # PROVISIONAL: booked at the ready landing, else next free
+FEATURE_CONTRACTS[SEND_DELIVERY_STATE] = 81
 
 
 def feature_advertised(name: str) -> bool:

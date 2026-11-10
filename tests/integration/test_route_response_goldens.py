@@ -228,7 +228,9 @@ def test_response_golden(fake_ctx, backend_cli_guard):
 
     # Earlier tests in this worker leave entries in the process-wide registry.
     health.reset_for_tests()
-    ctx = fake_ctx.with_(auth_token=route_probe.ADMIN_TOKEN)
+    # Exercise the real advertised features with the deterministic in-process
+    # runtime, which owns delivery state without an external status probe.
+    ctx = fake_ctx.with_(auth_token=route_probe.ADMIN_TOKEN, runtime_client=None)
     issued = device_pairing.issue(device_name="route golden limited", scope="limited")
     limited_token = device_pairing.exchange(issued["code"])["token"]
     principals = {
