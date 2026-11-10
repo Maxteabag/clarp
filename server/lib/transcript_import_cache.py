@@ -69,11 +69,20 @@ class _DeferredImport:
     reason: str = "pending"
 
 
-@dataclass(frozen=True)
+@dataclass
 class _CompletedImport:
+    """Accepted historical completion; only _guard may claim its after observer.
+
+    Acceptance precedes arbitrary observers. A later authority generation may
+    prevent cache publication, but cannot retroactively revoke this completion.
+    Observer errors still propagate before successful cache bookkeeping.
+    """
     changed: bool
     token: tuple
+    key: str
+    epoch: int
     value: object = None
+    after_claimed: bool = False
 
 
 def _completion_fence(importer):
@@ -198,7 +207,7 @@ def _import_admitted(path: pathlib.Path, importer: Callable[[], object], owner: 
                         _record_completion_token(key, token, epoch)
                         _completion_retry_at.pop(key)
                         _cond.notify_all()
-                    return False if token is None else _CompletedImport(False, token)
+                    return False if token is None else _CompletedImport(False, token, key, epoch)
         # A busy writer must not cost the whole import; imports are idempotent.
         from . import db
         value = db.retry_locked(importer)
@@ -207,24 +216,34 @@ def _import_admitted(path: pathlib.Path, importer: Callable[[], object], owner: 
             current = _completion_probe(importer)
             if isinstance(result, _DeferredImport) or not _completion_current(token, current):
                 return result if isinstance(result, _DeferredImport) else _DeferredImport("superseded")
-            if token is not None:
-                with _guard:
-                    if _epoch != epoch or _resetting:
-                        return _DeferredImport("reset")
-                on_completed = getattr(importer, "_clarp_transcript_completed", None)
-                if on_completed is not None:
-                    on_completed(value)
-                if not _completion_current(token, _completion_probe(importer)):
-                    return _DeferredImport("superseded")
+            with _guard:
+                if token is not None and (_epoch != epoch or _resetting):
+                    return _DeferredImport("reset")
+                # The acceptance linearization point. No observer has run yet;
+                # the receipt remains historical even if its observer sees a
+                # subsequent generation. It grants no future shortcut itself.
+                accepted = (None if token is None else
+                            _CompletedImport(result, token, key, epoch, value))
+        if accepted is not None:
+            on_completed = getattr(importer, "_clarp_transcript_completed", None)
+            if on_completed is not None:
+                # Neither native authority nor cache guard spans arbitrary IO.
+                # Failure propagates with no successful cache publication.
+                on_completed(value)
+        with _completion_fence(importer):
+            current = _completion_probe(importer)
             with _guard:
                 # Keep the chosen version, not bytes appended during import.
-                if _epoch == epoch:
+                # An accepted old generation is still completed, but never
+                # supplies fresh validation for the new generation.
+                if (_epoch == epoch and not _resetting
+                        and _completion_current(token, current)):
                     _imported[key] = before
                     _validated_at.put(key, epoch, observed_at)
                     _record_completion_token(key, token, epoch)
                     _completion_retry_at.pop(key)
                     _cond.notify_all()
-        return result if token is None else _CompletedImport(result, token, value)
+        return result if accepted is None else accepted
 
 
 def import_if_changed(path: pathlib.Path, importer: Callable[[], object],
@@ -278,7 +297,9 @@ _resetting = False
 _reset_owner: object | None = None
 _drain: DrainRecord | None = None
 _direct_active = 0
-_running: tuple[str, int] | None = None
+# Third field reserves one waiting slot for an opted-in running request that
+# may return deferred. Generic callbacks retain their existing waiting capacity.
+_running: tuple[str, int, bool] | None = None
 # Every worker and window-timer Thread this module started, registered under
 # _guard in the same section that starts it. A thread never removes itself (it
 # cannot report having fully exited); dead entries are pruned when a thread is
@@ -420,7 +441,11 @@ def _completion_deadline(key: str) -> float:
 
 
 def _request_deadline(key: str, request: tuple, *, size: int | None = None) -> float:
-    deadline = max(_owner_deadline(key), _completion_deadline(key))
+    # Urgency bypasses the ordinary owner/startup window, never completion
+    # refusal pacing. Timers, coalescing, promotion and drain share this policy.
+    deadline = _completion_deadline(key)
+    if not request[4]:
+        deadline = max(deadline, _owner_deadline(key))
     if (_host_started_at is not None and not request[4] and not request[6]
             and (request[7] if size is None else size) >= _LARGE_SOURCE_BYTES):
         deadline = max(deadline, _host_started_at + _STARTUP_GRACE_SECONDS)
@@ -523,13 +548,14 @@ def schedule_import(path: pathlib.Path, importer: Callable[[], object], *, owner
         # it does not grant urgency or bypass the ordinary owner backoff.
         startup_exempt = startup_exempt or bool(queued and queued[0][6])
         request = (path, importer, owner, after, urgent, rank, startup_exempt, signature[1])
-        if (key not in _pending and key not in _deferred
-                and len(set(_pending) | set(_deferred)) >= _BACKGROUND_LIMIT):
+        waiting = set(_pending) | set(_deferred)
+        if _running is not None and _running[2]:
+            waiting.add(_running[0])
+        if key not in waiting and len(waiting) >= _BACKGROUND_LIMIT:
             full = True
         elif not _reserve_owner(key, now):
             full = True
-        elif key not in _pending and (wait := _request_deadline(key, request) - now) > 0 and (
-                not urgent or _completion_deadline(key) > now):
+        elif key not in _pending and (wait := _request_deadline(key, request) - now) > 0:
             start_failed = not _defer_locked(key, request, _epoch, wait)
         else:
             if key in _deferred:
@@ -671,7 +697,8 @@ def _retry_completion(key, request, epoch):
         _completion_retry_at.put(key, epoch, (time.monotonic() + wait, attempts))
         if key in _pending:
             _pending[key] = (request, epoch)
-        elif not _defer_locked(key, request, epoch, wait):
+        elif not _defer_locked(key, request, epoch,
+                               max(0.0, _request_deadline(key, request) - time.monotonic())):
             failed = True  # no freshness; the source remains refused/retryable
     if failed:
         log('transcriptImportThreadStartFail', f'owner={request[2]}')
@@ -682,35 +709,36 @@ def _finish_background_import(key, request, epoch, result, started, completed):
     importer, owner, after = request[1:4]
     if isinstance(result, _DeferredImport):
         return False
-    with _completion_fence(importer):
-        token = _completion_probe(importer)
-        if isinstance(result, _CompletedImport):
-            if not _completion_current(result.token, token):
+    accepted = isinstance(result, _CompletedImport)
+    if not accepted and getattr(importer, "_clarp_transcript_completion_v1", None) is True:
+        return False
+    with _guard:
+        if epoch != _epoch or _resetting:
+            return True  # reset owns old work; never requeue across epochs
+        if accepted:
+            if result.key != key or result.epoch != epoch:
                 return False
-            imported = result.changed
-        else:
-            if token is not None:
-                return False
-            imported = result
-        with _guard:
-            current = epoch == _epoch and not _resetting
-            if not current:
-                return True  # reset owns old work; never requeue across epochs
-            previous_deadline = _owner_deadline(key)
-            previous_cost = _last_started.get(_owner_key(key), (None, 0.0))[1]
-            cost = max(0.0, completed - started) if imported else previous_cost
-            _last_started[_owner_key(key)] = (completed, cost)
-            failed = (_rearm_owner_locked(key, completed)
-                      if _owner_deadline(key) < previous_deadline else [])
-            if imported:
-                _last_import_duration.put(key, epoch, max(0.0, completed - started))
-        for failed_owner in failed:
-            log('transcriptImportThreadStartFail', f'owner={failed_owner}')
-        if after is not None:
-            try:
-                after()
-            except Exception as exc:
-                log_exception('backgroundTranscriptAfterFail', exc, detail=owner)
+            if result.after_claimed:
+                return True
+            result.after_claimed = True
+        imported = result.changed if accepted else result
+        previous_deadline = _owner_deadline(key)
+        previous_cost = _last_started.get(_owner_key(key), (None, 0.0))[1]
+        cost = max(0.0, completed - started) if imported else previous_cost
+        _last_started[_owner_key(key)] = (completed, cost)
+        failed = (_rearm_owner_locked(key, completed)
+                  if _owner_deadline(key) < previous_deadline else [])
+        if imported:
+            _last_import_duration.put(key, epoch, max(0.0, completed - started))
+    for failed_owner in failed:
+        log('transcriptImportThreadStartFail', f'owner={failed_owner}')
+    if after is not None:
+        try:
+            # One accepted observer, outside both cache/native authority locks.
+            # Its binding/intent guards still decide which client work applies.
+            after()
+        except Exception as exc:
+            log_exception('backgroundTranscriptAfterFail', exc, detail=owner)
     return True
 
 
@@ -758,13 +786,14 @@ def _drain_background():
                         now = time.monotonic()
                         request = (*request[:7], size)
                         wait = _request_deadline(key, request) - now
-                        if wait > 0 and (not request[4] or _completion_deadline(key) > now):
+                        if wait > 0:
                             if not _defer_locked(key, request, item_epoch, wait):
                                 failed.append(request[2])
                             del _pending[key]
                             continue
                         del _pending[key]
-                        _running = (key, item_epoch)
+                        _running = (key, item_epoch,
+                                    getattr(request[1], "_clarp_transcript_completion_v1", None) is True)
                         selected = (key, request, item_epoch)
                 if stat_error is not None:
                     log_exception('backgroundTranscriptImportFail', stat_error, detail=request[2])
