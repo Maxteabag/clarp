@@ -69,7 +69,9 @@ exists nowhere else.
 The gate before pushing is `make test-critical` (serial, about a minute; the
 list is `tests/critical.txt`) plus the test files for the code you changed.
 Do not run the full suite (`make test`) locally: forty agents doing so overload
-the owner's laptops. The full suite runs on GitHub (dispatch, nightly, Docker).
+the owner's laptops. The full suite never runs automatically, on GitHub or anywhere:
+only the critical gate does. Start the full suite by hand on GitHub ("Run workflow"
+on Tests) when a change is broad enough to want it.
 
 When you run a test command in the background through a wrapper such as
 `pytest > log; echo "exit=$?" >> log`, the wrapper exits 0 whether or not the

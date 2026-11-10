@@ -7,8 +7,8 @@ changed; do not run the full suite locally. The critical list
 (`tests/critical.txt`) holds only what can brick the Host or lose data: state
 database schema and migrations, boot and route wiring, authentication and
 device scope, turn dispatch/queue/stop, update and installer, transcript
-import. Pull requests run it on GitHub; the full suite runs there on dispatch,
-nightly, and from the Docker workflow.
+import. GitHub runs it on pull requests and, through the Docker workflow, on every push to main. The full suite
+never runs automatically; start it by hand ("Run workflow" on Tests) when wanted.
 
 | Layer | Command | Where it runs | Time |
 |---|---|---|---|
