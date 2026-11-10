@@ -321,6 +321,8 @@ def _codex_reference(records, carry: dict) -> str:
     opened: set[str] = set()
     for record in records:
         payload = record.get("payload") if isinstance(record.get("payload"), dict) else {}
+        if record.get("type") == "session_meta" or payload.get("type") == "session_meta":
+            return "codex_session_meta_before_boundary"
         inner = payload.get("type") or record.get("type") or ""
         turn_id = _codex_turn_id(payload)
         if inner in ("task_started", "turn_context") or record.get("type") == "turn_context":
