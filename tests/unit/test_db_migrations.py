@@ -624,3 +624,57 @@ print(json.dumps(result))
     assert result == {"same_connection": True, "in_transaction": True}
     with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as observed:
         assert observed.execute("PRAGMA user_version").fetchone()[0] == 121
+
+
+def _explicit_owner_process(path):
+    environment = {**os.environ, "CLAUDE_PWA_DB": str(path),
+                   "PYTHONPATH": str(pathlib.Path(__file__).resolve().parents[2] / "server")}
+    return subprocess.run([sys.executable, "-m", "lib.persistence.migration_owner"],
+                          env=environment, capture_output=True, text=True, timeout=20)
+
+
+@pytest.mark.parametrize("shape", ["fresh", "legacy", "current"])
+def test_explicit_owner_preserves_historical_schema_results(tmp_path, shape):
+    path = tmp_path / "owner-parent" / "state.sqlite"
+    reference = _fresh(tmp_path / "reference.sqlite")
+    if shape != "fresh":
+        path.parent.mkdir()
+        prepared = _fresh(path)
+        if shape == "legacy":
+            _shape_as_v61(prepared)
+            _shape_as_v61(reference)
+            db._migrate(reference)
+        prepared.close()
+    expected = reference.execute(
+        "SELECT type, name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' "
+        "ORDER BY type, name").fetchall()
+    reference.close()
+    before = path.read_bytes() if shape == "current" else None
+    outcome = _explicit_owner_process(path)
+    assert outcome.returncode == 0, outcome.stderr
+    assert outcome.stdout == ""
+    with sqlite3.connect(path) as observed:
+        observed.row_factory = sqlite3.Row
+        assert observed.execute("PRAGMA user_version").fetchone()[0] == 121
+        assert observed.execute(
+            "SELECT type, name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' "
+            "ORDER BY type, name").fetchall() == expected
+        assert observed.execute("PRAGMA journal_mode").fetchone()[0] == (
+            "delete" if shape == "current" else "wal")
+    if before is not None:
+        assert path.read_bytes() == before, "current owner verification wrote the database"
+    assert (path.parent / "state.sqlite.migration-owner.lock").exists()
+
+
+def test_explicit_owner_refuses_participating_contention_without_creating_db(tmp_path):
+    import fcntl
+    path = tmp_path / "state.sqlite"
+    companion = tmp_path / "state.sqlite.migration-owner.lock"
+    with companion.open("xb") as held:
+        os.chmod(companion, 0o600)
+        fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        outcome = _explicit_owner_process(path)
+        assert outcome.returncode != 0
+        assert "migration_owner_busy" in outcome.stderr
+        assert not path.exists(), "a second owner created state before acquiring custody"
+        assert companion.stat().st_ino == os.fstat(held.fileno()).st_ino
