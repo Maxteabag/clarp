@@ -1,6 +1,8 @@
 """10 Nov 2026: every 15 seconds and for each janitor, janitor_attention._episode read and
-sorted every run of the agent (58,687 rows, about 345 MB per query) to find the newest one.
-idx_janitor_runs_newest lets the same statements stop at the first match."""
+sorted every run of the agent (58,687 completed runs for the largest, in a table of 115,819)
+to find the newest one. With idx_janitor_runs_newest the two statements a healthy janitor
+runs stop at the first match. Two cases keep growing with the runs and are tested as such:
+no valid success, and a newest run that failed."""
 from __future__ import annotations
 
 import json
@@ -12,8 +14,11 @@ from lib import agents, backends, db, db_migrations, db_schema, janitors, janito
 
 INDEX = "idx_janitor_runs_newest"
 INDEX_SQL = "CREATE INDEX idx_janitor_runs_newest ON janitor_runs(agent_id, generation, status, finished_at)"
-# The statements as they were before the index existed (main b3430b11..5ce2ce9d).
-OLD_NEWEST_VALID = """SELECT r.rowid AS sequence,r.*,d.result_json FROM janitor_runs r
+# A copy of the two statements, pasted here from janitor_attention as of main 5ce2ce9d, the
+# commit before the index. It proves nothing about that commit by itself; it is a tripwire.
+# The plans and timings behind the index were taken for exactly this text, so a change to
+# either statement fails here and has to be measured again.
+PINNED_NEWEST_VALID = """SELECT r.rowid AS sequence,r.*,d.result_json FROM janitor_runs r
         LEFT JOIN janitor_demand_results d ON d.run_id=r.run_id
         WHERE r.agent_id=? AND r.generation=? AND r.status='completed'
           AND ((r.outcome IN ('changed','same_task')
@@ -22,7 +27,7 @@ OLD_NEWEST_VALID = """SELECT r.rowid AS sequence,r.*,d.result_json FROM janitor_
             OR (r.outcome='completed' AND r.finished_at IS NOT NULL
                 AND (d.result_json IS NOT NULL OR ?='scheduled-prompt')))
         ORDER BY r.finished_at DESC,r.rowid DESC"""
-OLD_LATEST = """SELECT rowid AS sequence,* FROM janitor_runs
+PINNED_LATEST = """SELECT rowid AS sequence,* FROM janitor_runs
         WHERE agent_id=? AND generation=? AND status IN ('completed','failed','cancelled')
         ORDER BY finished_at DESC,rowid DESC LIMIT 1"""
 TEMPLATES = ("scheduled-prompt", "tool-explainer", "task-labels")
@@ -186,10 +191,17 @@ def test_the_index_is_ascending_because_the_row_id_must_run_the_same_way(janitor
     assert "TEMP B-TREE" not in _newest_valid_plan(janitor)
 
 
-def test_the_statements_are_the_ones_from_before_the_index(janitor):
-    """The fix is the index alone: an older runtime runs exactly these on the new database."""
+def test_the_statements_do_not_depend_on_the_index_and_match_the_measured_text(janitor):
+    """What a rollback needs is that no statement names the index: then code without it runs
+    the same SQL on a database that has it, and code with it on a database that lacks it. The
+    comparison with the pinned text is only the tripwire described at its definition."""
     _fill(janitor, 5)
+    for n in range(3):                                    # the failed branch too: all four statements
+        _add(janitor, f"fail-{n}", status="failed", outcome="failed", finished_at=5000 + n)
     statements = _statements(_config(janitor))
+    assert len(statements) == 4
+    for sql in statements:
+        assert INDEX not in sql and "INDEXED BY" not in sql.upper(), sql
 
     def filled(sql: str, values: tuple) -> str:
         for value in values:
@@ -197,8 +209,8 @@ def test_the_statements_are_the_ones_from_before_the_index(janitor):
         return " ".join(sql.split())
 
     identity = (janitor["agent_id"], 1)
-    assert " ".join(statements[0].split()) == filled(OLD_NEWEST_VALID, (*identity, "scheduled-prompt"))
-    assert " ".join(statements[1].split()) == filled(OLD_LATEST, identity)
+    assert " ".join(statements[0].split()) == filled(PINNED_NEWEST_VALID, (*identity, "scheduled-prompt"))
+    assert " ".join(statements[1].split()) == filled(PINNED_LATEST, identity)
 
 
 # --- it stops early ----------------------------------------------------------------
@@ -231,15 +243,43 @@ def test_with_no_valid_success_every_completed_run_is_still_walked(janitor):
     assert _steps(_config(janitor, 2, demand)) > large    # though it was more work still without it
 
 
-def test_a_janitor_that_only_fails_is_not_read_run_by_run(janitor):
-    for n in range(3000):
-        _add(janitor, f"fail-{n}", status="failed", outcome="failed", finished_at=1000 + n)
+def _failing(janitor, runs: int, *, generation: int) -> None:
+    for n in range(runs):
+        _add(janitor, f"g{generation}-fail-{n}", generation=generation, status="failed", outcome="failed",
+             finished_at=1000 + n)
+
+
+def test_when_the_newest_run_failed_all_four_statements_use_the_index(janitor):
+    _failing(janitor, 3000, generation=1)
     statements = _statements(_config(janitor))
     assert len(statements) == 4                           # the failed branch: newest not failed, and the count
     for sql in statements:
         assert INDEX in _plan(sql), _plan(sql)
     reference, latest, count = attention._episode(_config(janitor))
-    assert (reference.rsplit(":", 1)[-1], latest["run_id"], count) == ("initial", "fail-2999", 3000)
+    assert (reference.rsplit(":", 1)[-1], latest["run_id"], count) == ("initial", "g1-fail-2999", 3000)
+
+
+def test_when_the_newest_run_failed_the_work_still_grows_with_the_failed_runs(janitor):
+    """No bound is promised here either, and nothing stops at the first match. The search for
+    the newest run that did not fail passes every failed index entry of the generation, and
+    the count passes every terminal entry after that run, or all of them when there is none.
+    They are index entries, not rows, which is what the index buys in this branch."""
+    _failing(janitor, 300, generation=1)                  # never succeeded: no newest good run
+    _failing(janitor, 3000, generation=2)
+    small, large = _steps(_config(janitor, 1)), _steps(_config(janitor, 2))
+    assert large > 5 * small, (small, large)              # ten times the failed runs, most of ten times the work
+
+    # The same with a good run before the failures: the count starts there, the search does not.
+    _add(janitor, "g3-good", generation=3, finished_at=500)
+    _add(janitor, "g4-good", generation=4, finished_at=500)
+    _failing(janitor, 300, generation=3)
+    _failing(janitor, 3000, generation=4)
+    small, large = _steps(_config(janitor, 3)), _steps(_config(janitor, 4))
+    assert attention._episode(_config(janitor, 4))[2] == 3000
+    assert large > 5 * small, (small, large)
+
+    _drop_index()
+    assert _steps(_config(janitor, 4)) > large            # and more still without the index
 
 
 # --- the same answers --------------------------------------------------------------
@@ -272,8 +312,8 @@ def _answers(janitor) -> dict:
             out[generation, template] = (
                 reference, latest and (latest["run_id"], latest["sequence"]), count,
                 # Every candidate, in order: the caller takes the first that passes its own check.
-                [row["run_id"] for row in con.execute(OLD_NEWEST_VALID, (*identity, template))],
-                [row["run_id"] for row in con.execute(OLD_LATEST, identity)])
+                [row["run_id"] for row in con.execute(PINNED_NEWEST_VALID, (*identity, template))],
+                [row["run_id"] for row in con.execute(PINNED_LATEST, identity)])
     return out
 
 
@@ -336,12 +376,17 @@ def test_upgrading_a_database_that_has_runs_builds_the_index_once(janitor):
     assert con.execute("PRAGMA user_version").fetchone()[0] == db_schema._SCHEMA_VERSION
 
 
-def test_an_older_runtime_leaves_the_index_alone_and_keeps_working(janitor, monkeypatch):
-    """Rollback: code that knows only version 121 opens the upgraded database."""
+def test_code_that_stops_at_version_121_leaves_the_index_alone_and_keeps_working(janitor, monkeypatch):
+    """A SIMULATED older runtime, not a real one: this is today's code with its version constant
+    lowered to 121 and its v122 step removed, opening the upgraded database. It shows that
+    _migrate leaves a newer database alone and that the statements work beside an index the
+    code never asks for. Main's real code from before the index (5ce2ce9d) was run by hand
+    against a database made by this version, with the same result; no test can import it."""
     _mixed_history(janitor)
     expected = _answers(janitor)
     con = db.conn()
     monkeypatch.setattr(db_schema, "_SCHEMA_VERSION", 121)
+    monkeypatch.delattr(db_migrations, "_migrate_to_v122")
 
     db_migrations._migrate(con)                            # the database is newer: nothing to do
 
