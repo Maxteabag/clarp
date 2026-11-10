@@ -1,4 +1,7 @@
 """Offline traces of the actual sideband policy; never creates a provider call."""
+import pytest
+
+from tests.oracle_faults import SECRET, fault_sinks
 from lib.oracle_webrtc import ConversationController
 
 
@@ -81,17 +84,21 @@ def test_tool_wait_does_not_prevent_processing_speech():
     assert [r['type'] for r in sent] == ['conversation.item.create']
 
 
-def test_ack_failure_does_not_regenerate_audio():
+@pytest.mark.parametrize("sink_failed", [False, True])
+def test_ack_failure_does_not_regenerate_audio(fault_sinks, sink_failed):
     c, sent, ack = controller()
-    def failed(_): raise OSError('offline')
+    fault_sinks.failed = sink_failed
+    def failed(_): raise OSError(SECRET)
     c.acknowledge = failed
     result(c)
     c.event({'type': 'response.created', 'response': {'id': 'summary'}})
     c.event({'type': 'response.done', 'response': {'id': 'summary', 'status': 'completed'}})
     c.event({'type': 'output_audio_buffer.stopped', 'response_id': 'summary'})
-    c.flush()
+    for _ in range(10):
+        c.flush()
     assert len(sent) == 2
     assert c.acks == {'d1'}
+    fault_sinks.assert_fault('oracleWebrtcAckFail')
     c.acknowledge = ack.append
     c.flush()
     assert ack == ['d1']
