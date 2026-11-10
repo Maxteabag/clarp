@@ -101,6 +101,16 @@ reaches before it:
 - agy: a step numbered before the boundary (written out of order), or a
   background task ending while one started before the boundary still runs.
 
+A checkpoint is also refused (`effect_bearing_prefix`, counted as
+`bootstrap_effect`) while a turn before the boundary carries an effect that a
+full replay could repeat or change: a sub-agent cell or Agent/Task tool (its
+child transcripts are found outside the parent file), a `<team>` block
+(capture follows the agent's current teams), or a dream prompt or dream output
+(a replayed `DREAMING_OK` acts on whichever run is active now). Heartbeat and
+leader-tick prompts and acks need no replay once their row is stored (see
+`_prefix_effects`); a checkpoint over them is logged as
+`transcriptTailRetention code=checkpoint_closed_effects`.
+
 Residual risk: a same-length in-place edit that misses every sampled block
 before the boundary is not detected by the hashes; the periodic audit (a full
 import) repairs it, and in shadow mode the turn digest comparison reports it.
