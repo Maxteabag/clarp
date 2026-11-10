@@ -114,14 +114,29 @@ Rules:
   for a while most agents are archived helpers, and a client pays for them on
   every connect. A client that does not need them at connect asks for
   `GET /agents/snapshot?include_archived=0` (Hosts that advertise the feature
-  `snapshot_without_archived`): `agents` then holds only agents that are not
-  archived, the Host does not build the others at all, and the extra key
-  `archived_count` says how many were left out. Everything else is the same
-  as in the full snapshot, and each remaining row is the row the full
-  snapshot has, `child_count` of archived helpers included. An older Host
-  ignores the parameter and answers the full snapshot, so keep filtering on
+  `snapshot_without_archived`). Only the value `0` does this; `false`, `no`
+  or anything else is the full list. `agents` then holds only agents that are
+  not archived, and the extra key `archived_count` says how many were left
+  out. Everything else is the same as in the full snapshot, and each
+  remaining row is the row the full snapshot has. An older Host ignores the
+  parameter and answers the full snapshot, so keep filtering on
   `archived_at`. The archived agents are read with `GET /agents/archived`,
-  below.
+  below. A client that opts in must expect:
+  - `focus` can name an agent that is not in `agents`: archiving an agent
+    does not clear the focus.
+  - A row's `parent_agent_id` can name an agent that is not in `agents`: an
+    archived agent can still have helpers that are not archived.
+  - `child_count`, `running_children` and `background_jobs.sub_agents` count
+    archived helpers too, and `roster` still holds the names of archived
+    agents.
+  What the Host leaves out for an archived agent is building its row: no
+  transcript read, no message preview, no per-agent statement. It also does
+  not check it for a stuck state on the way out, with one exception:
+  archiving does not stop a turn, so an archived agent that still looks
+  active (its last state is a busy one, it has a live process, or the runtime
+  holds queued work for it) is checked and repaired as before. An archived
+  agent that is idle but whose bound session has lost its transcript is
+  repaired when the archive is listed or the agent is restored.
 - `head_revision` and `conversation_id` are the same values `/log` reports.
   If a client already holds a cached chat for this agent, it is current iff
   the cached `conversation_id` matches and the cached revision equals
@@ -183,8 +198,8 @@ Rules:
 #### Archived agents: `GET /agents/archived`
 
 The agents `include_archived=0` leaves out, a page at a time, for an archive
-screen. `limit` is 1 to 200 (default 50); `cursor` is the `next_cursor` of the
-previous page.
+screen. `limit` is a whole number from 1 to 200 in plain digits (default 50);
+`cursor` is the `next_cursor` of the previous page.
 
 ```json
 {
@@ -194,12 +209,19 @@ previous page.
 }
 ```
 
-Rows are in the order most recently archived first. The cursor names the
-last agent of the page, not an offset, so an agent archived or restored
-between two requests neither repeats nor hides another. A cursor the Host
-did not issue, or a `limit` that is not a number, is
-`400 {"error": "invalid archived agents query"}`. A Host without the feature
-answers 404; read the archived rows from the full snapshot there.
+Rows are in the order most recently archived first. A request without a
+cursor starts a walk: the Host builds every archived agent's row once, and
+the pages that follow with its cursors are cut from that same listing for up
+to five minutes, so a walk is one consistent listing and costs the Host one
+build, not one per page. Start again without a cursor for a current listing.
+A walk that outlives its listing, or a Host restart, continues in a new
+listing from the agent the cursor names (a position in the order, not an
+offset), so nothing repeats and nothing is skipped.
+
+A `limit` that is not 1 to 200 in plain digits, or a cursor the Host did not
+issue, is `400 {"error": "invalid archived agents query"}`; an empty value
+counts as absent. A Host without the feature answers 404; read the archived
+rows from the full snapshot there.
 
 ### 2. Load a chat: `GET /log`
 
