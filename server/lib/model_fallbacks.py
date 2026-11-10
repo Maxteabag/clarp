@@ -19,7 +19,25 @@ import os
 import re
 from contextlib import contextmanager
 
+from . import lifecycle as lk
+from .lifecycle import Edge, Lifecycle, WaitForever
 from .persistence.schema_parts.model_fallbacks import SCHEMA
+
+# One fallback invocation's receipt (docs/architecture/lifecycles.md). This
+# module is the only writer of model_fallback_attempts.status. claim() inserts
+# the row as running; the primary key is (agent_id, request_id, attempt), so the
+# kit's single key column is SQLite's rowid.
+_FINISHED = ("completed", "failed", "cancelled")
+FALLBACK_ATTEMPT = Lifecycle(
+    name="model_fallback_attempt", owner="lib/model_fallbacks.py",
+    table="model_fallback_attempts", key="rowid", state_column="status",
+    entered_columns={status: "finished_at" for status in _FINISHED},
+    initial="running", final=frozenset(_FINISHED),
+    edges=tuple(Edge(f"finish_{status}", frozenset({"running"}), status) for status in _FINISHED),
+    waits={"running": WaitForever(
+        "the invoking call finishes it; a row left by a dead process stays as the"
+        " receipt that refuses a second attempt")},
+)
 
 
 class Cancelled(RuntimeError):
@@ -175,18 +193,11 @@ def finish(agent_id, request_id, attempt, *, status, result=None):
     from . import db
 
     with _write() as c:
-        c.execute(
-            """UPDATE model_fallback_attempts SET status=?,result_json=?,finished_at=?
-            WHERE agent_id=? AND request_id=? AND attempt=? AND status='running'""",
-            (
-                status,
-                json.dumps(result) if result is not None else None,
-                db.now_ms(),
-                agent_id,
-                request_id,
-                attempt,
-            ),
-        )
+        lk.compare_and_set_where(
+            c, FALLBACK_ATTEMPT, f"finish_{status}",
+            where="agent_id=? AND request_id=? AND attempt=?",
+            params=(agent_id, request_id, attempt), now=db.now_ms(),
+            values={"result_json": json.dumps(result) if result is not None else None})
 
 
 def attempts(agent_id, request_id):

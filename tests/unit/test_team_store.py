@@ -324,3 +324,19 @@ def test_non_spoken_assistant_text_is_not_shared(tmp_path):
 
     assert inserted == 0
     assert team_store.pending_digest(rachel) == ("", [])
+
+
+def test_an_injected_update_is_not_injected_again(tmp_path, monkeypatch):
+    mike = agents_db.create_agent(persona="Mike", voice_id="V", cwd=str(tmp_path), session="mike")
+    rachel = agents_db.create_agent(persona="Rachel", voice_id="V", cwd=str(tmp_path), session="rachel")
+    team = team_store.create_team("Ops", color="moss", communication_enabled=True)
+    team_store.add_member(team["team_id"], mike)
+    team_store.add_member(team["team_id"], rachel)
+    team_store.capture_assistant_message(agent_id=mike, source_message_id="m", trace_id="t",
+                                         text="<team>Done.</team>")
+    _, ids = team_store.pending_digest(rachel)
+    monkeypatch.setattr(team_store, "now_ms", lambda: 1000)
+    team_store.mark_injected(rachel, ids)
+    monkeypatch.setattr(team_store, "now_ms", lambda: 2000)
+    team_store.mark_injected(rachel, ids + ["unknown"])
+    assert [tuple(r) for r in db.conn().execute("SELECT status, injected_at FROM team_inbox")] == [("injected", 1000)]
