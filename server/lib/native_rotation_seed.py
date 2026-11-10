@@ -158,7 +158,7 @@ def verified_handover_seed(path: Path, *, expected_thread: str, summary: str,
         if payload.get("type") == "token_count":
             continue
         if (payload.get("type") == "thread_goal_updated" and
-                payload.get("thread_id") == expected_thread and payload.get("turn_id") is None):
+                payload.get("threadId") == expected_thread and payload.get("turnId") is None):
             continue
         raise SeedUnavailable("new or uncertain work follows the handover")
     text = json.dumps({"handover": summary, "source_turn_id": turn_id,
