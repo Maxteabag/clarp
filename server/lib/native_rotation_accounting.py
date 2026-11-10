@@ -5,7 +5,6 @@ budget; the logical mirror retains cumulative usage and the original budget.
 """
 from __future__ import annotations
 
-import math
 
 _MAX = (1 << 63) - 1
 _STATUSES = frozenset({"active", "paused", "blocked", "usageLimited", "budgetLimited", "complete"})
@@ -22,9 +21,8 @@ def _integer(value):
 
 
 def _seconds(value):
-    if type(value) not in (int, float) or not 0 <= value <= _MAX or not math.isfinite(value):
-        raise AccountingUnavailable("invalid native elapsed time")
-    return value
+    # Pinned ThreadGoal.time_used_seconds is i64, not fractional wall time.
+    return _integer(value)
 
 
 def _identity(value):
@@ -60,7 +58,8 @@ def plan_transfer(agent_id, old_thread_id, rawgoal, *, prior=None):
     return {"version": 1, "agent_id": agent_id, "old_thread_id": old_thread_id,
             "objective": logical["objective"], "logical_budget": budget,
             "tokens_base": used, "time_base": logical["timeUsedSeconds"],
-            "logical_created_at": logical["createdAt"], "native_budget": remaining,
+            "logical_created_at": logical["createdAt"], "logical_updated_at": logical["updatedAt"],
+            "source_native_created_at": rawgoal["createdAt"], "native_budget": remaining,
             "restore_status": "budgetLimited" if remaining == 0 else logical["status"],
             "defer_native_goal": remaining == 0}
 

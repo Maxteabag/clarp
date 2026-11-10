@@ -560,7 +560,7 @@ class _Client:
                     }, agent_id=active.agent_id)
                 _backend().broadcast_transcript(active.stream, active.agent_id, active.session)
 
-    def _mirror_goal(self, thread_id: str, goal: dict | None) -> None:
+    def _mirror_goal(self, thread_id: str, goal: dict | None, *, user_action: str | None = None) -> None:
         """Keep Clarp's goal table and clients in step with the app-server."""
         if not thread_id:
             return
@@ -570,7 +570,7 @@ class _Client:
             started_at = getattr(self, "goal_mark_seq", 0)
         try:
             mirrored = agent_goals.mirror_codex(
-                thread_id, goal, incarnation=getattr(self, "rotation_incarnation", None))
+                thread_id, goal, incarnation=getattr(self, "rotation_incarnation", None), user_action=user_action)
             if mirrored is None:
                 return
             agent, row = mirrored
@@ -927,7 +927,10 @@ class _Client:
     def _goal_request(self, agent: dict, action: str, thread_id: str, objective: str) -> dict:
         def mirror(result):
             goal = result.get("goal") if isinstance(result, dict) else None
-            self._mirror_goal(thread_id, goal if isinstance(goal, dict) else None)
+            if action == "start":
+                self._mirror_goal(thread_id, goal if isinstance(goal, dict) else None, user_action="start")
+            else:
+                self._mirror_goal(thread_id, goal if isinstance(goal, dict) else None)
 
         if action == "get":
             result = self.request("thread/goal/get", {"threadId": thread_id}, on_result=mirror)
@@ -935,7 +938,7 @@ class _Client:
             self._ensure_loaded(agent, thread_id)
             if action == "clear":
                 self.request("thread/goal/clear", {"threadId": thread_id},
-                             on_result=lambda _result: self._mirror_goal(thread_id, None))
+                             on_result=lambda _result: self._mirror_goal(thread_id, None, user_action="clear"))
                 result = {"goal": None}
             else:
                 params: dict = {"threadId": thread_id, "status": {
