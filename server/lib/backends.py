@@ -21,7 +21,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from .protocol import AgentBackend
+from .backend_catalogue import AgentBackend, ids, normalize, is_valid, for_provider
 
 CLAUDE = AgentBackend.CLAUDE
 CODEX = AgentBackend.CODEX
@@ -212,23 +212,8 @@ from .backend.base import (  # noqa: E402
     BackendBrand, DEFAULT_BRAND, DEFAULT_SYMBOL, LOGIN_KINDS, EFFORT_UIS, EFFORT_SCOPES)
 
 
-def ids() -> tuple[str, ...]:
-    return tuple(b.id for b in _all())
 
 
-def catalogue_fields(backend: str | None) -> dict[str, Any]:
-    """Presentation + capability flags for one ``/agent-model-options`` row.
-
-    An unregistered id gets the neutral defaults so a catalogue row is
-    always complete; ``sort_index`` follows registry order.
-    """
-    row = get(backend)
-    if row is None:
-        neutral = type("UnregisteredBackend", (Backend,), {
-            "id": str(backend or ""), "label": str(backend or ""),
-            "required_binary": ""})()
-        return neutral.catalogue_fields(len(_all()))
-    return row.catalogue_fields(_all().index(row))
 
 
 def routing_adapters() -> tuple["Backend", ...]:
@@ -251,16 +236,6 @@ def get(backend: str | None):
     return by_id(backend) if is_valid(backend) else None
 
 
-def for_provider(provider: str) -> str:
-    """The backend id that executes a routing provider.
-
-    A registered backend id passes through; an API-key provider maps to the
-    CLI whose adapter fronts it (``openai`` runs through Codex).
-    """
-    for b in _all():
-        if provider in b.api_providers:
-            return b.id
-    return provider
 
 
 def valid_efforts(backend: str) -> tuple[str, ...]:
@@ -275,21 +250,8 @@ def is_valid_model(backend: str, model: str | None) -> bool:
     return by_id(backend).is_valid_model(model)
 
 
-def normalize(backend: str | None) -> str:
-    """Coerce an arbitrary string to a registered backend, else Claude.
-
-    Unknown / empty values fall back to Claude so a malformed agent row can
-    never strand a user with a backend that has no runner. Registered ids
-    (including ones a client has never seen) pass through.
-    """
-    b = (backend or "").strip().lower()
-    b = _ALIASES.get(b, b)
-    return b if b in _BY_ID else DEFAULT
 
 
-def is_valid(backend: str | None) -> bool:
-    b = (backend or "").strip().lower()
-    return _ALIASES.get(b, b) in _BY_ID
 
 
 def label(backend: str | None) -> str:
@@ -422,7 +384,7 @@ ResultCb = Callable[[dict], None]
 # from the adapter rows above on first use, so neither import order
 # (facade first or package first) sees a half-initialised module.
 from .backend.base import Backend, CompactionStrategy, Unsupported  # noqa: E402
-from .backend.registry import by_id  # noqa: E402
+from .backend.registry import by_id, catalogue_fields  # noqa: E402
 from .backend.registry import all as _all  # noqa: E402
 
 # Lookup tables derived from the classes. Built here, after the package

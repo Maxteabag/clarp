@@ -23,7 +23,8 @@ from ..text_util import truncate
 from ..process_registry import TurnHandle
 from ..turn_lifecycle import TurnEvent
 from ..voice_preamble import apply_voice_preamble
-from .base import BackendBrand
+from ..backend_catalogue import OPENCODE
+from .base import CatalogueDefault, BackendBrand
 from . import opencode_serve
 from .opencode_serve import OpenCodeTurnHandle, ServeClient, ServeError
 from .stream_json import StreamJsonBackend, iter_json_dicts, popen_turn, stop_after_drain_failure
@@ -203,32 +204,28 @@ class OpenCodeBackend(StreamJsonBackend):
     """One ``opencode serve`` per turn, followed live; ``opencode run`` as the
     fallback. No compaction or terminal yet."""
     # --- catalogue data ---------------------------------------------------
-    id = 'opencode'
-    label = 'OpenCode'
-    required_binary = 'opencode'
-    aliases = ('open-code', 'opencode-ai')
-    badge = 'BackendOpenCode'
-    detail = 'Runs on OpenCode.'
-    symbol = 'chevron.left.forwardslash.chevron.right'
-    brand = BackendBrand('#16352b', '#0b1c16', '#5ee4b5', '#1f8a65')
+    _catalogue_definition = OPENCODE
+    id = CatalogueDefault('id')
+    label = CatalogueDefault('label')
+    required_binary = CatalogueDefault('required_binary')
+    aliases = CatalogueDefault('aliases')
+    badge = CatalogueDefault('badge')
+    detail = CatalogueDefault('detail')
+    symbol = CatalogueDefault('symbol')
+    brand = CatalogueDefault('brand')
     # OpenCode's reasoning variants, least to most. Each model supports its
     # own subset (``opencode models --verbose``), so the catalogue lists
     # efforts per model; ``--variant`` / the prompt's ``variant`` take them.
-    efforts = ('none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max')
-    effort_scope = 'model'
-    runner = 'opencode'
-    config_model_field = 'opencode_model'
-    config_effort_field = 'opencode_effort'
-    model_providers = True
+    efforts = CatalogueDefault('efforts')
+    effort_scope = CatalogueDefault('effort_scope')
+    runner = CatalogueDefault('runner')
+    config_model_field = CatalogueDefault('config_model_field')
+    config_effort_field = CatalogueDefault('config_effort_field')
+    model_providers = CatalogueDefault('model_providers')
     # Shown only when ``opencode models`` cannot be read. OpenCode Zen's own
     # model first (no provider key needed), then models the common providers
     # listed on 2026-09-28.
-    fallback_models = (
-        ('opencode/big-pickle', 'Big Pickle'),
-        ('huggingface/deepseek-ai/DeepSeek-V4.1-Flash', 'DeepSeek V4.1 Flash (Hugging Face)'),
-        ('fireworks-ai/accounts/fireworks/models/kimi-k3', 'Kimi K3 (Fireworks)'),
-        ('huggingface/zai-org/GLM-5.3', 'GLM-5.3 (Hugging Face)'),
-    )
+    fallback_models = CatalogueDefault('fallback_models')
 
 
     transcript = opencode_transcript

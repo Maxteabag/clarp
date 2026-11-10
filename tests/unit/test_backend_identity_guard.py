@@ -40,7 +40,7 @@ EXEMPT = {"lib/backend/registry.py"}
 
 BASELINE: dict[tuple[str, str], int] = {
     ('lib/avatar_urls.py', 'dict_key'): 1,
-    ('lib/backend/agy.py', 'collection'): 1,
+    ('lib/backend_catalogue.py', 'collection'): 1,
     ('lib/backend/claude.py', 'collection'): 2,
     ('lib/backend_auth.py', 'dict_key'): 2,
     ('lib/backend_usage.py', 'collection'): 1,
@@ -68,7 +68,7 @@ BASELINE: dict[tuple[str, str], int] = {
     ('lib/policies/agent_spec.py', 'dict_key'): 1,
     ('lib/provider_background_jobs.py', 'by_id'): 1,
     ('lib/provider_background_jobs.py', 'sql'): 1,
-    ('lib/provider_capabilities.py', 'compare'): 15,
+    ('lib/provider_capabilities.py', 'compare'): 2,
     ('lib/provider_capabilities.py', 'dict_key'): 1,
     ('lib/roster.py', 'dict_key'): 2,
     ('lib/tool_explanations.py', 'collection'): 1,
