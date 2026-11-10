@@ -1,9 +1,13 @@
 """10 Nov 2026: one day's event log was 11.4 GB and hook.log 1.45 GB; nothing
-limited either by size. The maintenance worker now holds both under a bound."""
+limited either by size. The maintenance worker now holds both under a bound,
+and only ever cuts or deletes files that are provably Clarp's own logs."""
 from __future__ import annotations
 
 import datetime
+import errno
+import fcntl
 import json
+import os
 import threading
 
 import pytest
@@ -12,16 +16,45 @@ from lib import eventlog, maintenance
 from lib.hook_runtime import HookLogger
 
 TODAY = datetime.date(2026, 11, 10)
+NOON = datetime.datetime(2026, 11, 10, 12, tzinfo=datetime.timezone.utc)
+DAYS14 = 14 * maintenance.DAY_MS
 
 
 def _lines(path) -> list[dict]:
     return [json.loads(line) for line in path.read_text().splitlines()]
 
 
+def _ns(path) -> list[int]:
+    return [row["detail"]["n"] for row in _lines(path) if "n" in row.get("detail", {})]
+
+
+def _record(n: int) -> dict:
+    """One event as lib.eventlog writes it."""
+    return {"ts": "2026-11-10T12:00:00.000Z", "source": "test", "event": "numbered",
+            "level": "info", "detail": {"n": n, "pad": "p" * 40}}
+
+
 def _numbered(path, count: int, *, start: int = 0) -> None:
     with path.open("a") as f:
         for n in range(start, start + count):
-            f.write(json.dumps({"n": n, "pad": "p" * 80}) + "\n")
+            f.write(json.dumps(_record(n), separators=(",", ":")) + "\n")
+
+
+def _event_file(path, size: int) -> None:
+    """An event log of exactly ``size`` bytes."""
+    _numbered(path, 1)
+    with path.open("a") as f:
+        f.write("x" * (size - path.stat().st_size - 1) + "\n")
+    assert path.stat().st_size == size
+
+
+@pytest.fixture
+def failures(monkeypatch) -> list[tuple]:
+    """What the prune logged as failed: (event, exception class, detail)."""
+    logged: list[tuple] = []
+    monkeypatch.setattr(maintenance, "log_exception",
+                        lambda event, exc, detail="": logged.append((event, type(exc).__name__, detail)))
+    return logged
 
 
 @pytest.fixture
@@ -46,7 +79,7 @@ def test_keep_tail_keeps_the_newest_whole_lines_in_place(tmp_path):
     assert path.stat().st_ino == inode, "the same file, for a writer that has it open"
     assert removed == before - path.stat().st_size
     assert 4000 < path.stat().st_size <= 5000
-    numbers = [row["n"] for row in _lines(path)]       # every line parses: it starts at a line
+    numbers = _ns(path)                                # every line parses: it starts at a line
     assert numbers == list(range(numbers[0], 1000))
 
 
@@ -56,7 +89,7 @@ def test_keep_tail_never_keeps_more_than_half(tmp_path):
     before = path.stat().st_size
     maintenance.keep_tail(path, before)
     assert before // 2 - 200 < path.stat().st_size <= before // 2
-    assert _lines(path)[-1]["n"] == 999
+    assert _ns(path)[-1] == 999
 
 
 def test_keep_tail_handles_an_empty_file_and_one_endless_line(tmp_path):
@@ -83,7 +116,7 @@ def test_lines_appended_during_the_copy_are_kept(tmp_path, monkeypatch):
 
     monkeypatch.setattr(maintenance, "_copy_within", copy_then_append)
     maintenance.keep_tail(path, 5000)
-    numbers = [row["n"] for row in _lines(path)]
+    numbers = _ns(path)
     assert numbers == list(range(numbers[0], 1050))
     assert calls[1] > 0, "the finish copied what was appended meanwhile"
 
@@ -122,7 +155,7 @@ def test_no_event_is_lost_or_torn_while_a_writer_appends_under_flock(tmp_path):
 
     def write():
         for n in range(total):
-            eventlog._write_jsonl({"n": n, "pad": "p" * 80}, now)
+            eventlog._write_jsonl(_record(n), now)
 
     writer = threading.Thread(target=write)
     eventlog_dir, eventlog.LOG_DIR = eventlog.LOG_DIR, tmp_path
@@ -135,58 +168,242 @@ def test_no_event_is_lost_or_torn_while_a_writer_appends_under_flock(tmp_path):
     finally:
         eventlog.LOG_DIR = eventlog_dir
     assert len(cuts) > 3 and all(cuts)
-    numbers = [row["n"] for row in _lines(path)]
+    numbers = _ns(path)
     assert numbers == list(range(numbers[0], total))
 
 
 # --- the event-log directory ---------------------------------------------------
 
-def test_event_log_budget_deletes_the_oldest_days_first(tmp_path):
+def test_event_log_budget_deletes_the_oldest_days_first(tmp_path, failures):
     for day in ("2026-11-05", "2026-11-06", "2026-11-07", "2026-11-08", "2026-11-09", "2026-11-10"):
-        (tmp_path / f"{day}.jsonl").write_bytes(b"x" * 399 + b"\n")
+        _event_file(tmp_path / f"{day}.jsonl", 400)
     (tmp_path / "notes.jsonl").write_bytes(b"x" * 9000)       # not a daily log: not counted, not touched
 
     removed = maintenance.prune_event_logs(
-        tmp_path, max_age_ms=14 * maintenance.DAY_MS, today=TODAY, max_total_bytes=1000)
+        tmp_path, max_age_ms=DAYS14, today=TODAY, max_total_bytes=1000)
 
     assert removed == 4
     assert sorted(p.name for p in tmp_path.iterdir()) == [
         "2026-11-09.jsonl", "2026-11-10.jsonl", "notes.jsonl"]
+    assert failures == []
 
 
-def test_event_logs_within_the_budget_are_left_alone(tmp_path):
+def test_event_logs_within_the_budget_are_left_alone(tmp_path, failures):
     for day in ("2026-11-08", "2026-11-09", "2026-11-10"):
-        (tmp_path / f"{day}.jsonl").write_bytes(b"x" * 399 + b"\n")
+        _event_file(tmp_path / f"{day}.jsonl", 400)
     assert maintenance.prune_event_logs(
-        tmp_path, max_age_ms=14 * maintenance.DAY_MS, today=TODAY, max_total_bytes=1200) == 0
+        tmp_path, max_age_ms=DAYS14, today=TODAY, max_total_bytes=1200) == 0
     assert len(list(tmp_path.iterdir())) == 3
+    assert maintenance.prune_event_logs(tmp_path / "absent", max_age_ms=DAYS14, today=TODAY,
+                                        max_total_bytes=1) == 0
+    assert failures == [], "no event log yet is not a failure"
 
 
-def test_today_alone_over_the_budget_is_cut_down_and_says_so(event_log_dir):
+def test_today_alone_over_the_budget_is_cut_down_and_says_so(event_log_dir, failures):
     today = event_log_dir / "2026-11-10.jsonl"
     _numbered(event_log_dir / "2026-11-09.jsonl", 10)
     _numbered(today, 1000)
     size = today.stat().st_size
 
-    removed = maintenance.prune_event_logs(
-        event_log_dir, max_age_ms=14 * maintenance.DAY_MS, today=TODAY,
-        max_total_bytes=40_000, today_keep_bytes=10_000)
+    def prune() -> int:
+        return maintenance.prune_event_logs(
+            event_log_dir, max_age_ms=DAYS14, today=TODAY,
+            max_total_bytes=40_000, today_keep_bytes=10_000)
 
-    assert removed == 1                                   # yesterday went first
+    assert prune() == 1                                   # yesterday went first
     assert today.exists(), "today's file is never deleted"
-    rows = _lines(today)
-    numbers = [row["n"] for row in rows[:-1]]
+    raw = today.read_bytes().splitlines(keepends=True)
+    rows = [json.loads(line) for line in raw]
+    numbers = [row["detail"]["n"] for row in rows[:-1]]
     assert numbers == list(range(numbers[0], 1000))       # the newest events, whole
     record = rows[-1]                                     # one record that says so
     assert record["event"] == "eventLogCut"
-    assert f"removed_bytes={size - sum(len(json.dumps(r)) + 1 for r in rows[:-1])}" in record["detail"]["msg"]
+    assert f"removed_bytes={size - sum(len(line) for line in raw[:-1])}" in record["detail"]["msg"]
     assert "max_bytes=40000" in record["detail"]["msg"]
     assert today.stat().st_size <= 10_000 + 400
     # Holding the bound, the next pass changes nothing.
-    assert maintenance.prune_event_logs(
-        event_log_dir, max_age_ms=14 * maintenance.DAY_MS, today=TODAY,
-        max_total_bytes=40_000, today_keep_bytes=10_000) == 0
-    assert _lines(today) == rows
+    assert prune() == 0
+    assert today.read_bytes().splitlines(keepends=True) == raw
+    assert failures == []
+
+
+def test_what_the_event_log_writes_is_recognised_as_an_event_log(event_log_dir):
+    """The budget only touches files that start like an event log, so the
+    writer's own format must pass: emit, the drop report and the wait log."""
+    eventlog.emit("server", "real", detail={"msg": "hello"})
+    eventlog._report_dropped(NOON, dropped=True, force=True)
+    names = sorted(p.name for p in event_log_dir.glob("*.jsonl"))
+    dir_fd = maintenance._open_log_dir(event_log_dir)
+    try:
+        assert names and all(maintenance._is_event_log(dir_fd, name) for name in names)
+    finally:
+        os.close(dir_fd)
+    for line in (event_log_dir / names[0]).read_bytes().splitlines():
+        assert maintenance._EVENT_LOG_START.match(line), line[:60]
+
+
+# --- only Clarp's own logs (review A2, F1) --------------------------------------
+
+def _unrelated(path, size: int = 60_000) -> bytes:
+    """A file that is none of this worker's business, but would qualify by
+    size and even by content."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _numbered(path, size // 100)
+    return path.read_bytes()
+
+
+def test_a_symlinked_dated_log_is_refused_and_its_target_survives(tmp_path, failures):
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    target = tmp_path / "elsewhere" / "state.sqlite"
+    before = _unrelated(target)
+    (logs / "2026-11-10.jsonl").symlink_to(target)        # today's log, over the budget
+    (logs / "2026-10-01.jsonl").symlink_to(target)        # and one past its age
+
+    assert maintenance.prune_event_logs(logs, max_age_ms=DAYS14, today=TODAY,
+                                        max_total_bytes=1000, today_keep_bytes=100) == 0
+
+    assert target.read_bytes() == before
+    assert sorted(p.name for p in logs.iterdir()) == ["2026-10-01.jsonl", "2026-11-10.jsonl"]
+    assert failures == [("eventLogPruneFail", "UnsafeLogPath", "2026-10-01.jsonl"),
+                        ("eventLogPruneFail", "UnsafeLogPath", "2026-11-10.jsonl")]
+    with pytest.raises(maintenance.UnsafeLogPath):
+        maintenance.keep_tail(logs / "2026-11-10.jsonl", 100)
+    assert target.read_bytes() == before
+
+
+def test_a_symlinked_log_directory_is_refused_and_nothing_in_it_is_deleted(tmp_path, failures):
+    real = tmp_path / "real"
+    real.mkdir()
+    _numbered(real / "2026-10-01.jsonl", 10)              # past its age
+    _numbered(real / "2026-11-09.jsonl", 600)             # over the budget
+    _numbered(real / "2026-11-10.jsonl", 600)
+    before = {p.name: p.read_bytes() for p in real.iterdir()}
+    link = tmp_path / "logs"
+    link.symlink_to(real, target_is_directory=True)
+
+    assert maintenance.prune_event_logs(link, max_age_ms=DAYS14, today=TODAY,
+                                        max_total_bytes=1000, today_keep_bytes=100) == 0
+
+    assert {p.name: p.read_bytes() for p in real.iterdir()} == before
+    assert failures == [("eventLogPruneFail", "UnsafeLogPath", str(link))]
+
+
+@pytest.mark.parametrize("root", ["", ".", "logs"])
+def test_an_empty_or_relative_log_directory_is_refused(tmp_path, monkeypatch, failures, root):
+    """CLAUDE_PWA_LOG_DIR='' is the working directory: every dated .jsonl
+    there, whatever it is, would have been a candidate."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "logs").mkdir()
+    for directory in (tmp_path, tmp_path / "logs"):
+        _numbered(directory / "2026-10-01.jsonl", 10)
+        _numbered(directory / "2026-11-10.jsonl", 600)
+    before = {str(p): p.read_bytes() for p in tmp_path.rglob("*.jsonl")}
+
+    import pathlib
+    assert maintenance.prune_event_logs(pathlib.Path(root), max_age_ms=DAYS14, today=TODAY,
+                                        max_total_bytes=1000, today_keep_bytes=100) == 0
+
+    assert {str(p): p.read_bytes() for p in tmp_path.rglob("*.jsonl")} == before
+    assert failures == [("eventLogPruneFail", "UnsafeLogPath", str(pathlib.Path(root)))]
+
+
+def test_a_wrong_log_directory_keeps_files_that_are_not_event_logs(tmp_path, failures):
+    """An absolute but wrong root: dated .jsonl files of somebody else's."""
+    theirs = [tmp_path / "2026-11-09.jsonl", tmp_path / "2026-11-10.jsonl"]
+    for path in theirs:
+        path.write_text("".join(json.dumps({"row": n, "value": "v" * 60}) + "\n" for n in range(800)))
+    database = tmp_path / "state.sqlite"
+    database.write_bytes(b"SQLite format 3\x00" + b"\x00" * 50_000)
+    before = {p.name: p.read_bytes() for p in tmp_path.iterdir()}
+
+    assert maintenance.prune_event_logs(tmp_path, max_age_ms=DAYS14, today=TODAY,
+                                        max_total_bytes=1000, today_keep_bytes=100) == 0
+
+    assert {p.name: p.read_bytes() for p in tmp_path.iterdir()} == before
+    assert failures == [("eventLogPruneFail", "UnsafeLogPath", "2026-11-09.jsonl"),
+                        ("eventLogPruneFail", "UnsafeLogPath", "2026-11-10.jsonl")]
+
+
+def test_a_hard_linked_or_non_regular_entry_is_refused(tmp_path, failures):
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    other = tmp_path / "other-name"
+    before = _unrelated(other)
+    os.link(other, logs / "2026-11-10.jsonl")             # the same file under a second name
+    (logs / "2026-10-01.jsonl").mkdir()                   # a directory named like an old log
+
+    assert maintenance.prune_event_logs(logs, max_age_ms=DAYS14, today=TODAY,
+                                        max_total_bytes=1000, today_keep_bytes=100) == 0
+
+    assert other.read_bytes() == before and (logs / "2026-11-10.jsonl").read_bytes() == before
+    assert (logs / "2026-10-01.jsonl").is_dir()
+    assert failures == [("eventLogPruneFail", "UnsafeLogPath", "2026-10-01.jsonl"),
+                        ("eventLogPruneFail", "UnsafeLogPath", "2026-11-10.jsonl")]
+
+
+def test_a_directory_or_file_of_another_user_is_refused(tmp_path, monkeypatch, failures):
+    _numbered(tmp_path / "2026-10-01.jsonl", 10)
+    before = (tmp_path / "2026-10-01.jsonl").read_bytes()
+    someone_else = os.geteuid() + 1
+    with pytest.raises(maintenance.UnsafeLogPath):
+        monkeypatch.setattr(maintenance.os, "geteuid", lambda: someone_else)
+        maintenance._require_own_file(os.stat(tmp_path / "2026-10-01.jsonl"), "2026-10-01.jsonl")
+
+    assert maintenance.prune_event_logs(tmp_path, max_age_ms=DAYS14, today=TODAY) == 0
+
+    assert (tmp_path / "2026-10-01.jsonl").read_bytes() == before
+    assert failures == [("eventLogPruneFail", "UnsafeLogPath", str(tmp_path))]
+
+
+def _hook_lines(path, count: int) -> bytes:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a") as f:
+        for n in range(count):
+            f.write(f"12:00:00 stop     1 line {n}\n")
+    return path.read_bytes()
+
+
+def test_a_symlinked_hook_log_is_refused_and_its_target_survives(tmp_path, failures):
+    target = tmp_path / "elsewhere" / "state.sqlite"
+    before = _hook_lines(target, 2000)                    # over the bound, and it even reads like a hook log
+    hook_log = tmp_path / "cache" / "hook.log"
+    hook_log.parent.mkdir()
+    hook_log.symlink_to(target)
+
+    with pytest.raises(maintenance.UnsafeLogPath):
+        maintenance.prune_hook_log(hook_log, max_bytes=20_000, keep_bytes=4000)
+    assert target.read_bytes() == before
+
+    worker = maintenance.MaintenanceWorker(
+        audio_dir=tmp_path, hook_log=hook_log,
+        policy=maintenance.Policy(hook_log_max_bytes=20_000, hook_log_keep_bytes=4000))
+    assert "hook_log_bytes" not in worker.check_sizes()
+    assert target.read_bytes() == before
+    assert ("hookLogPruneFail", "UnsafeLogPath", "") in failures
+
+
+def test_a_hook_log_under_a_symlinked_or_relative_directory_is_refused(tmp_path, monkeypatch):
+    import pathlib
+    real = tmp_path / "real"
+    before = _hook_lines(real / "hook.log", 2000)
+    (tmp_path / "cache").symlink_to(real, target_is_directory=True)
+    monkeypatch.chdir(real)
+
+    for path in (tmp_path / "cache" / "hook.log", pathlib.Path("hook.log"), pathlib.Path("") / "hook.log"):
+        with pytest.raises(maintenance.UnsafeLogPath):
+            maintenance.prune_hook_log(path, max_bytes=20_000, keep_bytes=4000)
+    assert (real / "hook.log").read_bytes() == before
+
+
+def test_a_hook_log_that_does_not_read_like_one_is_left_alone(tmp_path):
+    """An absolute but wrong CLARP_CACHE_DIR with somebody else's hook.log."""
+    path = tmp_path / "hook.log"
+    path.write_text("commit-msg hook ran for abc123\n" * 2000)
+    before = path.read_bytes()
+    with pytest.raises(maintenance.UnsafeLogPath):
+        maintenance.prune_hook_log(path, max_bytes=20_000, keep_bytes=4000)
+    assert path.read_bytes() == before
 
 
 # --- hook.log ------------------------------------------------------------------
@@ -197,7 +414,9 @@ def test_hook_log_under_its_bound_is_untouched(tmp_path):
     before = path.read_text()
     assert maintenance.prune_hook_log(path, max_bytes=10_000, keep_bytes=1000) == 0
     assert path.read_text() == before
+    # Absence is the one thing that is silently nothing to do.
     assert maintenance.prune_hook_log(tmp_path / "absent.log", max_bytes=10, keep_bytes=1) == 0
+    assert maintenance.prune_hook_log(tmp_path / "no-such-dir" / "hook.log", max_bytes=10, keep_bytes=1) == 0
 
 
 def test_hook_log_over_its_bound_keeps_its_newest_lines(tmp_path):
