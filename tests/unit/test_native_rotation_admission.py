@@ -11,6 +11,11 @@ from lib.turn_dispatch_state import _SLOTS
 from tests.unit.test_agent_goals import _agent
 
 
+@pytest.fixture(autouse=True)
+def _owned_process_bookkeeping(monkeypatch):
+    monkeypatch.setattr(admission, "_owners", {})
+
+
 def test_running_admission_refuses_rotation_before_durable_or_native_effects(tmp_path):
     agent = _agent(tmp_path)
     old = agents.live_backend_session(agent)
