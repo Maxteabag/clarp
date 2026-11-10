@@ -38,6 +38,8 @@ from .turn_dispatch_state import (  # noqa: E402,F401  (split_apply: turn-dispat
     resume_account_recovery, unpersisted_held, provider_turns, UPDATE_HOLD_HEADLINE,
     refresh_hold_headlines, _ADMISSION, live_work, reset_for_tests, _terminal_live, _alive,
 )
+from . import native_rotation_admission as rotation_admission
+
 _RUNTIME_CLIENT: Any | None = None
 def configure_runtime_client(client: Any | None) -> None:
     global _RUNTIME_CLIENT
@@ -321,12 +323,12 @@ class TurnDispatchService(AdmissionMixin, LauncherMixin, HandoffMixin, ClaimMixi
             # slot back and is waiting to retry its head. Wait behind that
             # head instead of overtaking it, and start the head now.
             depth = _SLOTS.enqueue(agent_id, spec)
-            head = _SLOTS.pop_next(agent_id)
-            defer_on(_TURN_LOCK, lambda: (
-                log("turnQueued",
-                    f"agent={agent_id} depth={depth} trace={spec.trace_id or '∅'} "
-                    f"— behind a requeued head"),
-                head is not None and self._spawn_next(agent_id, head)))
+            head, selected = rotation_admission.select_next(agent_id)
+            if head is not None:
+                rotation_admission.defer_selected(agent_id, head, selected, lambda: (
+                    log("turnQueued",
+                        f"agent={agent_id} depth={depth} trace={spec.trace_id or '∅'} "
+                        f"— behind a requeued head"), self._spawn_next(agent_id, head)))
             return False, True
         _SLOTS.claim(agent_id, spec.trace_id)
         return False, False
@@ -724,11 +726,13 @@ def complete_stop(
 
 def finish_stop(ctx, agent_id: str, *, backend_registry=backends) -> None:
     """Release the barrier and run a normal send admitted during Stop."""
-    next_spec = _SLOTS.pop_next(agent_id, expected=_STOPPING_SENTINEL)
-    if next_spec is None:
-        return
-    TurnDispatchService(ctx, backend_registry=backend_registry)._resume_and_spawn(
-        agent_id, next_spec)
+    with _TURN_LOCK:
+        next_spec, selected = rotation_admission.select_next(agent_id, expected=_STOPPING_SENTINEL)
+        if next_spec is not None:
+            rotation_admission.defer_selected(
+                agent_id, next_spec, selected,
+                lambda: TurnDispatchService(ctx, backend_registry=backend_registry)._resume_and_spawn(
+                    agent_id, next_spec))
 
 
 def drain_after_terminal(ctx, agent_id: str) -> None:
@@ -744,7 +748,8 @@ def drain_after_terminal(ctx, agent_id: str) -> None:
             _CLAIMED_AT.pop(agent_id, None)
             _QUEUED.pop(agent_id, None)
             return
-        next_spec = _SLOTS.pop_next(agent_id)
-    if next_spec is None:
-        return
-    TurnDispatchService(ctx)._resume_and_spawn(agent_id, next_spec)
+        next_spec, selected = rotation_admission.select_next(agent_id, closed_owner=_TERMINAL_SENTINEL)
+        if next_spec is not None:
+            rotation_admission.defer_selected(
+                agent_id, next_spec, selected,
+                lambda: TurnDispatchService(ctx)._resume_and_spawn(agent_id, next_spec))

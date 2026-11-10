@@ -7,6 +7,7 @@ from dataclasses import replace
 from . import agents as agents_db
 from . import error_classify, eventlog
 from . import turn_queue
+from . import native_rotation_admission as rotation_admission
 from . import turn_lifecycle
 from . import events
 from .turn_lifecycle import TurnEvent
@@ -42,13 +43,13 @@ class HandoffMixin:
             if _SLOTS.get(agent_id) != trace_id:
                 return  # not the current turn — already drained / superseded
             account_failover(backend).discard(agent_id, trace_id)
-            next_spec = _SLOTS.pop_next(agent_id, expected=trace_id)
+            next_spec, selected = rotation_admission.select_next(agent_id, expected=trace_id)
             if next_spec is None:
                 return
             # The handover is decided; the spawn runs once no thread waits on
             # this lock (a terminal callback may hold it around this call).
-            defer_on(_TURN_LOCK, 
-                lambda: self._spawn_next(agent_id, next_spec))
+            rotation_admission.defer_selected(
+                agent_id, next_spec, selected, lambda: self._spawn_next(agent_id, next_spec))
 
     def _spawn_next(self, agent_id: str, next_spec: _TurnSpec) -> None:
         try:
@@ -114,9 +115,10 @@ class HandoffMixin:
         with _TURN_LOCK:
             if _SLOTS.get(agent_id) or not _SLOTS.queue_depth(agent_id):
                 return  # someone owns the slot; its finish drains the queue
-            head = _SLOTS.pop_next(agent_id)
-        if head is not None:
-            self._resume_and_spawn(agent_id, head)
+            head, selected = rotation_admission.select_next(agent_id)
+            if head is not None:
+                rotation_admission.defer_selected(
+                    agent_id, head, selected, lambda: self._resume_and_spawn(agent_id, head))
 
     def _hold_stopped_queue(self, agent_id: str, spec: _TurnSpec) -> None:
         """A Stop's pause holds ``spec``, which just took the slot over.
@@ -181,12 +183,14 @@ class HandoffMixin:
                 if kept and not _SLOTS.get(agent_id):
                     defer_on(_TURN_LOCK, lambda: self._retry_handoff(agent_id))
             _SLOTS.put_front(agent_id, kept)
-            next_spec = _SLOTS.pop_next(agent_id, expected=spec.trace_id)
+            next_spec, selected = rotation_admission.select_next(agent_id, expected=spec.trace_id)
             if next_spec is not None and next_spec.trace_id in stuck:
                 _SLOTS.release(agent_id, next_spec.trace_id)
                 _SLOTS.requeue_front(agent_id, next_spec)
+                rotation_admission.finish_selected(agent_id, selected)
             elif next_spec is not None:
-                defer_on(_TURN_LOCK, lambda: self._spawn_next(agent_id, next_spec))
+                rotation_admission.defer_selected(
+                    agent_id, next_spec, selected, lambda: self._spawn_next(agent_id, next_spec))
 
     def _resume_and_spawn_claimed(self, agent_id: str, next_spec: _TurnSpec,
                                   phase: dict) -> None:
