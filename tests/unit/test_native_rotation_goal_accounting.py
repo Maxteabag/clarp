@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import copy
 import json
+import threading
 
 import pytest
 
@@ -139,3 +140,78 @@ def test_malformed_exhausted_native_budget_is_not_valid_rotation_authority(tmp_p
     with pytest.raises(accounting.AccountingUnavailable):
         carried.get(agent)
     assert agent_goals.get(agent) == original_goal
+
+
+@pytest.mark.parametrize("loaded", [False, True])
+def test_lost_epoch_refuses_implicit_resume_even_when_thread_was_loaded(tmp_path, loaded):
+    agent, _, client = _bound(tmp_path)
+    client.rotation_incarnation = "different-transport"
+    if loaded:
+        client._loaded_threads.add("new-thread")
+    requests = []
+
+    def unexpected(method, params, **kwargs):
+        requests.append(method)
+        raise RuntimeError("native request should not have been issued")
+
+    client.request = unexpected
+    with pytest.raises(accounting.AccountingUnavailable):
+        client._ensure_loaded(agents.get_by_agent_id(agent), "new-thread")
+    assert requests == []
+
+
+@pytest.mark.parametrize("action", ["start", "resume"])
+def test_exhausted_carried_goal_cannot_be_activated_by_an_ordinary_goal_request(tmp_path, action):
+    agent, _, client = _bound(tmp_path, budget=0)
+    before = agent_goals.get(agent)
+    client._loaded_threads.add("new-thread")
+    requests = []
+
+    def unexpected(method, params, **kwargs):
+        requests.append(method)
+        raise RuntimeError("native activation should not have been issued")
+
+    client.request = unexpected
+    with pytest.raises(accounting.AccountingUnavailable):
+        client._goal_request(agents.get_by_agent_id(agent), action, "new-thread", "New objective")
+    assert requests == [] and agent_goals.get(agent) == before
+
+
+def test_explicit_clear_of_a_protected_epoch_never_resumes_the_native_goal_first(tmp_path):
+    from tests.codex_request import result_reply
+    agent, _, client = _bound(tmp_path)
+    client.rotation_incarnation = "different-transport"
+    requests = []
+
+    @result_reply
+    def request(method, params, **kwargs):
+        requests.append((method, params))
+        return {}
+
+    client.request = request
+    client._goal_request(agents.get_by_agent_id(agent), "clear", "new-thread", "")
+    assert requests == [("thread/goal/clear", {"threadId": "new-thread"})]
+    assert agent_goals.get(agent) is None and carried.get(agent)["state"] == "retired"
+
+
+def test_direct_turn_start_refuses_lost_epoch_after_releasing_the_pool_claim(tmp_path):
+    from lib.codex_app_server import AppTurnHandle
+    agent, _, client = _bound(tmp_path)
+    client.rotation_incarnation = "different-transport"
+    client._claims_lock = threading.RLock()
+    handle = AppTurnHandle(client, agent_id=agent)
+    claimed, requests = [], []
+
+    def unexpected(method, params, **kwargs):
+        requests.append(method)
+        raise RuntimeError("native request should not have been issued")
+
+    client.request = unexpected
+    with pytest.raises(accounting.AccountingUnavailable):
+        client.start(text="User request", cwd=tmp_path, backend_session_id="new-thread",
+                     is_new_session=False, session="theo", trace_id="new-user-trace", model="", effort="",
+                     voice=False, persona="Theo", handle=handle, on_session_init=None,
+                     on_result=None, on_error=None, stream=None, enqueue=None, agent_id=agent,
+                     on_claimed=lambda: claimed.append(True))
+    assert claimed == [True] and requests == []
+    assert handle._done.is_set() and client._actives == {} and client.active is None
