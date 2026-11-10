@@ -176,7 +176,7 @@ def _bound_detail(detail: object) -> object:
     return {"_truncated": note, "_preview": _shorten(encoded, room // 2 - 64)}
 
 
-def _bounded(record: dict, size: int | None = None) -> dict:
+def _bounded(record: dict, size: int | None = None, *, report: bool = True) -> dict:
     """``record`` with its detail within MAX_DETAIL_BYTES. Every record passes
     here once, when it is made: before it reaches a sink and before it is
     queued, so a deferred record waits in the queue already bounded and both
@@ -188,6 +188,12 @@ def _bounded(record: dict, size: int | None = None) -> dict:
     reported, and the report (log_fault: contained, throttled) cannot stop it.
     ``record_original_bytes`` there is the whole record's size, or null when
     even that was not measured: the detail alone was never measured.
+
+    ``report=False`` makes this free of side effects: no report is printed.
+    It is for a record made while its transaction is still open
+    (defer_sqlite_write_wait), where no sink may be touched. The fallback
+    detail, with the error's class, is then the diagnostic: it is queued with
+    the record and reaches both sinks once the transaction has ended.
     """
     try:
         if size is None:
@@ -200,7 +206,8 @@ def _bounded(record: dict, size: int | None = None) -> dict:
         record["detail"] = {"_truncated": {
             "record_original_bytes": size, "limit_bytes": MAX_DETAIL_BYTES,
             "error": type(error).__name__}}
-        log_fault("eventlogDetailBoundFailed", error, structured=False)
+        if report:
+            log_fault("eventlogDetailBoundFailed", error, structured=False)
     return record
 
 
@@ -288,9 +295,11 @@ def defer_sqlite_write_wait(connection, stderr_line: str, detail: str) -> bool:
     record = None
     if diagnostics_settings.allows_event(source="server", event="sqliteWriteWait"):
         # Bounded here, not at the flush: the queue never holds the oversized
-        # detail, and nothing is written until the transaction ends.
+        # detail, and nothing is written until the transaction ends. That
+        # includes a report of a failed bounding (stderr is a sink too): the
+        # record's own fallback detail carries the failure instead.
         record = _bounded({"ts": _iso(now), "source": "server", "event": "sqliteWriteWait",
-                           "level": "info", "detail": {"msg": detail}})
+                           "level": "info", "detail": {"msg": detail}}, report=False)
     item = _DeferredRecord(record, now, jsonl=True, stderr_line=stderr_line,
                            connection=weakref.ref(connection))
     with _DEFERRED_LOCK:
