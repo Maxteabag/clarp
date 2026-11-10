@@ -43,13 +43,18 @@ a backlog is trimmed then), hourly, and every five minutes in between.
 Whatever is written between two checks can overshoot a budget until the next
 one.
 
-The worker only touches files that are provably Clarp's own logs. The log
-directory and the cache directory must be absolute paths, no symlinks, and
-owned by the Host's user; a log must be a regular file of that user with no
-other hard link (a symlink is never followed), and for the size budgets it
-must also start like an event log or a hook log. Anything else is left alone
-and reported as `eventLogPruneFail` or `hookLogPruneFail`, as is a log that
-cannot be inspected.
+The worker only touches files that pass as Clarp's own logs. The log
+directory and the cache directory must be absolute paths, must not
+themselves be symlinks (only the last component is checked; a symlink
+earlier in the path is followed) and must be owned by the Host's user. A log
+must be a regular file of that user with no other hard link (a symlink is
+never followed), and it must start like an event log or a hook log before
+it is deleted, by age or by size, or cut. A cut writes through the same open
+file the checks were made on; a delete is by name in the opened directory
+after the checks. Anything else is left alone, as is a log that cannot be
+inspected. That is reported once per pass and directory as
+`eventLogPruneFail` (how many entries, and the first few) or
+`hookLogPruneFail`.
 
 A rollup is only as exact as the detail it was made from. When the budget
 removes an hour's detail, the hour keeps the rollup it had. A row that then

@@ -328,8 +328,11 @@ def _open_log_dir(root: pathlib.Path) -> int:
     """A descriptor of the directory destructive work is confined to.
 
     Refused: a path that is not absolute (an empty setting is the working
-    directory), a symlink, anything that is not a directory, and a directory
-    this user does not own. Every later step names its file relative to this
+    directory), a path whose last component is a symlink, anything that is
+    not a directory, and a directory this user does not own. Only the last
+    component is checked: a symlink earlier in the path is followed, as it is
+    for any path. What confines the work is that the directory actually
+    opened is held: every later step names its file relative to this
     descriptor, so swapping the path afterwards redirects nothing.
     """
     root = pathlib.Path(root)
@@ -450,7 +453,7 @@ def keep_tail(path: pathlib.Path, keep_bytes: int, *,
     intentional data loss, not lossless rotation: the older part is gone.
 
     Confined to the file it is meant for. The directory must be an absolute
-    path, no symlink and this user's (_open_log_dir); the file is opened in
+    path, not itself a symlink, and this user's (_open_log_dir); the file is opened in
     it without following a symlink and must be a regular file of this user's
     with no other hard link, checked on the open descriptor, which is what
     every later step works on. With ``looks_like`` its content must also
@@ -481,6 +484,23 @@ def keep_tail(path: pathlib.Path, keep_bytes: int, *,
         os.close(dir_fd)
 
 
+# How many refused entries one report names; the rest are only counted.
+_REPORTED_ENTRIES = 3
+
+
+def _report_refused(root: str, problems: list[tuple[str, OSError]]) -> None:
+    """One report per pass and directory for every entry that was refused or
+    could not be inspected: how many, and the first few with their reason.
+    Not one report with a traceback per entry: a directory full of files that
+    are not ours must not become a flood of its own."""
+    if not problems:
+        return
+    first = "; ".join(f"{name}: {type(error).__name__}: {error.strerror or error}"
+                      for name, error in problems[:_REPORTED_ENTRIES])
+    log_exception("eventLogPruneFail", problems[0][1],
+                  detail=f"dir={root} entries={len(problems)} first=[{first}]")
+
+
 def prune_event_logs(log_dir: pathlib.Path, *, max_age_ms: int,
                      today: datetime.date | None = None,
                      max_total_bytes: int | None = None,
@@ -498,13 +518,23 @@ def prune_event_logs(log_dir: pathlib.Path, *, max_age_ms: int,
     (keep_tail) and one ``eventLogCut`` record says so.
 
     Confined to Clarp's own logs. The directory must pass _open_log_dir and
-    everything is done relative to that descriptor. An entry is touched only
-    if it is itself a regular file of this user's with no other hard link (a
-    symlink is never followed, and not removed either). The size budget
-    additionally counts, deletes and cuts only files that start with an
-    event-log record. Whatever is refused or cannot be inspected is logged
-    as ``eventLogPruneFail``; only a file that is already gone is skipped
-    silently.
+    everything is done relative to that descriptor. A dated entry is deleted,
+    counted or cut, by age or by size alike, only if it is itself a regular
+    file of this user's with no other hard link (a symlink is never followed,
+    and not removed either) and starts with an event-log record. An empty
+    file has nothing to tell it by and is left alone. So a wrong directory's
+    files, whatever their names and dates, stay.
+
+    The two kinds of work are not equally bound to the file that was checked.
+    A cut writes through the same open descriptor the checks were made on. A
+    delete is by name in the held directory, after the checks: if the name is
+    replaced in between, the replacement is what is removed. It can never
+    reach outside that directory, and removing a symlink does not touch its
+    target.
+
+    Everything that is refused or cannot be inspected is reported once per
+    pass as ``eventLogPruneFail`` (_report_refused); only a file that is
+    already gone is skipped silently.
     """
     today = today or datetime.datetime.now(datetime.timezone.utc).date()
     try:
@@ -512,21 +542,22 @@ def prune_event_logs(log_dir: pathlib.Path, *, max_age_ms: int,
     except FileNotFoundError:
         return 0        # no event log yet
     except OSError as e:
-        log_exception("eventLogPruneFail", e, detail=str(log_dir))
+        log_exception("eventLogPruneFail", e, detail=f"dir={log_dir} refused")
         return 0
     try:
         return _prune_event_logs(
-            dir_fd, cutoff=today - datetime.timedelta(milliseconds=max_age_ms), today=today,
-            max_total_bytes=max_total_bytes, today_keep_bytes=today_keep_bytes)
+            dir_fd, str(log_dir), cutoff=today - datetime.timedelta(milliseconds=max_age_ms),
+            today=today, max_total_bytes=max_total_bytes, today_keep_bytes=today_keep_bytes)
     finally:
         os.close(dir_fd)
 
 
-def _prune_event_logs(dir_fd: int, *, cutoff: datetime.date, today: datetime.date,
+def _prune_event_logs(dir_fd: int, root: str, *, cutoff: datetime.date, today: datetime.date,
                       max_total_bytes: int | None, today_keep_bytes: int | None) -> int:
     removed = 0
     kept: list[tuple[datetime.date, str]] = []
     sizes: dict[str, int] = {}
+    problems: list[tuple[str, OSError]] = []
     for name in sorted(os.listdir(dir_fd)):
         if not name.endswith(".jsonl"):
             continue
@@ -534,24 +565,23 @@ def _prune_event_logs(dir_fd: int, *, cutoff: datetime.date, today: datetime.dat
             day = datetime.date.fromisoformat(name[:-len(".jsonl")])
         except ValueError:
             continue
+        if day >= cutoff and max_total_bytes is None:
+            continue    # nothing would be done to it: not inspected either
         try:
             st = _own_file(dir_fd, name)
-            if st is None:
-                continue    # gone meanwhile
+            if st is None or not st.st_size:
+                continue    # gone meanwhile, or empty
+            # Before any delete, by age as much as by size.
+            if not _is_event_log(dir_fd, name):
+                raise UnsafeLogPath(errno.EINVAL, "does not start with an event-log record", name)
             if day < cutoff:
                 os.unlink(name, dir_fd=dir_fd)
                 removed += 1
-                continue
-            if max_total_bytes is None or not st.st_size:
-                continue
-            if not _is_event_log(dir_fd, name):
-                raise UnsafeLogPath(errno.EINVAL, "does not start with an event-log record", name)
-            kept.append((day, name))
-            sizes[name] = st.st_size
+            else:
+                kept.append((day, name))
+                sizes[name] = st.st_size
         except OSError as e:
-            log_exception("eventLogPruneFail", e, detail=name)
-    if max_total_bytes is None:
-        return removed
+            problems.append((name, e))
     for day, name in kept:
         if sum(sizes.values()) <= max_total_bytes:
             break
@@ -568,7 +598,8 @@ def _prune_event_logs(dir_fd: int, *, cutoff: datetime.date, today: datetime.dat
                 log("eventLogCut", f"file={name} removed_bytes={cut} "
                     f"kept_bytes={sizes[name]} max_bytes={max_total_bytes}")
         except OSError as e:
-            log_exception("eventLogPruneFail", e, detail=name)
+            problems.append((name, e))
+    _report_refused(root, problems)
     return removed
 
 
@@ -577,8 +608,8 @@ def prune_hook_log(path: pathlib.Path, *, max_bytes: int, keep_bytes: int) -> in
     ``keep_bytes`` (keep_tail) and a line in it says so; the bytes removed.
     The cut is intentional data loss.
 
-    Confined like the event logs: an absolute, unlinked directory of this
-    user's, and in it a regular file of this user's that reads like a hook
+    Confined like the event logs: an absolute directory of this user's that
+    is not itself a symlink, and in it a regular file of this user's that reads like a hook
     log. Anything else raises UnsafeLogPath, as does any failure to inspect
     the file other than its absence; the caller logs it.
     """

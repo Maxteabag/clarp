@@ -246,8 +246,9 @@ def test_today_alone_over_the_budget_is_cut_down_and_says_so(event_log_dir, fail
 
 
 def test_what_the_event_log_writes_is_recognised_as_an_event_log(event_log_dir):
-    """The budget only touches files that start like an event log, so the
-    writer's own format must pass: emit, the drop report and the wait log."""
+    """Only files that start like an event log are deleted or cut, so the
+    writer's own format must pass: an emit and the drop report. (The wait log
+    builds its record the same way; it is not exercised here.)"""
     eventlog.emit("server", "real", detail={"msg": "hello"})
     eventlog._report_dropped(NOON, dropped=True, force=True)
     names = sorted(p.name for p in event_log_dir.glob("*.jsonl"))
@@ -261,6 +262,16 @@ def test_what_the_event_log_writes_is_recognised_as_an_event_log(event_log_dir):
 
 
 # --- only Clarp's own logs (review A2, F1) --------------------------------------
+
+def _one_report(failures, *, error: str, entries: int, names: list[str]) -> str:
+    """The pass made exactly one report: that many entries, naming these."""
+    assert len(failures) == 1, failures
+    event, error_class, detail = failures[0]
+    assert (event, error_class) == ("eventLogPruneFail", error)
+    assert f" entries={entries} " in detail
+    assert all(name in detail for name in names), detail
+    return detail
+
 
 def _unrelated(path, size: int = 60_000) -> bytes:
     """A file that is none of this worker's business, but would qualify by
@@ -283,8 +294,9 @@ def test_a_symlinked_dated_log_is_refused_and_its_target_survives(tmp_path, fail
 
     assert target.read_bytes() == before
     assert sorted(p.name for p in logs.iterdir()) == ["2026-10-01.jsonl", "2026-11-10.jsonl"]
-    assert failures == [("eventLogPruneFail", "UnsafeLogPath", "2026-10-01.jsonl"),
-                        ("eventLogPruneFail", "UnsafeLogPath", "2026-11-10.jsonl")]
+    detail = _one_report(failures, error="UnsafeLogPath", entries=2,
+                         names=["2026-10-01.jsonl", "2026-11-10.jsonl"])
+    assert detail.startswith(f"dir={logs} ")
     with pytest.raises(maintenance.UnsafeLogPath):
         maintenance.keep_tail(logs / "2026-11-10.jsonl", 100)
     assert target.read_bytes() == before
@@ -304,7 +316,7 @@ def test_a_symlinked_log_directory_is_refused_and_nothing_in_it_is_deleted(tmp_p
                                         max_total_bytes=1000, today_keep_bytes=100) == 0
 
     assert {p.name: p.read_bytes() for p in real.iterdir()} == before
-    assert failures == [("eventLogPruneFail", "UnsafeLogPath", str(link))]
+    assert failures == [("eventLogPruneFail", "UnsafeLogPath", f"dir={link} refused")]
 
 
 @pytest.mark.parametrize("root", ["", ".", "logs"])
@@ -323,12 +335,13 @@ def test_an_empty_or_relative_log_directory_is_refused(tmp_path, monkeypatch, fa
                                         max_total_bytes=1000, today_keep_bytes=100) == 0
 
     assert {str(p): p.read_bytes() for p in tmp_path.rglob("*.jsonl")} == before
-    assert failures == [("eventLogPruneFail", "UnsafeLogPath", str(pathlib.Path(root)))]
+    assert failures == [("eventLogPruneFail", "UnsafeLogPath", f"dir={pathlib.Path(root)} refused")]
 
 
 def test_a_wrong_log_directory_keeps_files_that_are_not_event_logs(tmp_path, failures):
-    """An absolute but wrong root: dated .jsonl files of somebody else's."""
-    theirs = [tmp_path / "2026-11-09.jsonl", tmp_path / "2026-11-10.jsonl"]
+    """An absolute but wrong root: dated .jsonl files of somebody else's, one
+    of them old enough for the age rule, which deletes without a size reason."""
+    theirs = [tmp_path / "2026-10-01.jsonl", tmp_path / "2026-11-09.jsonl", tmp_path / "2026-11-10.jsonl"]
     for path in theirs:
         path.write_text("".join(json.dumps({"row": n, "value": "v" * 60}) + "\n" for n in range(800)))
     database = tmp_path / "state.sqlite"
@@ -339,8 +352,44 @@ def test_a_wrong_log_directory_keeps_files_that_are_not_event_logs(tmp_path, fai
                                         max_total_bytes=1000, today_keep_bytes=100) == 0
 
     assert {p.name: p.read_bytes() for p in tmp_path.iterdir()} == before
-    assert failures == [("eventLogPruneFail", "UnsafeLogPath", "2026-11-09.jsonl"),
-                        ("eventLogPruneFail", "UnsafeLogPath", "2026-11-10.jsonl")]
+    _one_report(failures, error="UnsafeLogPath", entries=3,
+                names=["2026-10-01.jsonl", "2026-11-09.jsonl", "2026-11-10.jsonl"])
+
+    # The age rule alone (no size budget), as on a Host that only expires by age.
+    failures.clear()
+    assert maintenance.prune_event_logs(tmp_path, max_age_ms=DAYS14, today=TODAY) == 0
+    assert {p.name: p.read_bytes() for p in tmp_path.iterdir()} == before
+    _one_report(failures, error="UnsafeLogPath", entries=1, names=["2026-10-01.jsonl"])
+
+
+def test_many_refused_entries_make_one_report_that_names_the_first_few(tmp_path, failures):
+    for day in range(1, 29):
+        (tmp_path / f"2026-09-{day:02d}.jsonl").write_text("not an event log\n")
+    _numbered(tmp_path / "2026-10-01.jsonl", 10)          # a real one among them still expires
+
+    assert maintenance.prune_event_logs(tmp_path, max_age_ms=DAYS14, today=TODAY) == 1
+
+    detail = _one_report(failures, error="UnsafeLogPath", entries=28,
+                         names=["2026-09-01.jsonl", "2026-09-02.jsonl", "2026-09-03.jsonl"])
+    assert "2026-09-04.jsonl" not in detail               # counted, not named
+    assert len(detail) < 600
+    assert len(list(tmp_path.iterdir())) == 28
+
+
+def test_an_empty_dated_file_is_left_alone_without_a_report(tmp_path, failures):
+    (tmp_path / "2026-10-01.jsonl").touch()               # nothing to tell it by, nothing to reclaim
+    assert maintenance.prune_event_logs(tmp_path, max_age_ms=DAYS14, today=TODAY,
+                                        max_total_bytes=1) == 0
+    assert (tmp_path / "2026-10-01.jsonl").exists()
+    assert failures == []
+
+
+def test_a_file_nothing_would_be_done_to_is_not_inspected(tmp_path, failures):
+    """Age rule only: a file inside its age is neither read nor reported."""
+    (tmp_path / "2026-11-09.jsonl").write_text("somebody else's\n")
+    (tmp_path / "2026-11-10.jsonl").symlink_to(tmp_path / "2026-11-09.jsonl")
+    assert maintenance.prune_event_logs(tmp_path, max_age_ms=DAYS14, today=TODAY) == 0
+    assert failures == []
 
 
 def test_a_hard_linked_or_non_regular_entry_is_refused(tmp_path, failures):
@@ -356,8 +405,9 @@ def test_a_hard_linked_or_non_regular_entry_is_refused(tmp_path, failures):
 
     assert other.read_bytes() == before and (logs / "2026-11-10.jsonl").read_bytes() == before
     assert (logs / "2026-10-01.jsonl").is_dir()
-    assert failures == [("eventLogPruneFail", "UnsafeLogPath", "2026-10-01.jsonl"),
-                        ("eventLogPruneFail", "UnsafeLogPath", "2026-11-10.jsonl")]
+    _one_report(failures, error="UnsafeLogPath", entries=2,
+                names=["2026-10-01.jsonl: UnsafeLogPath: not a regular file",
+                       "2026-11-10.jsonl: UnsafeLogPath: has another hard link"])
 
 
 def test_a_directory_or_file_of_another_user_is_refused(tmp_path, monkeypatch, failures):
@@ -371,7 +421,7 @@ def test_a_directory_or_file_of_another_user_is_refused(tmp_path, monkeypatch, f
     assert maintenance.prune_event_logs(tmp_path, max_age_ms=DAYS14, today=TODAY) == 0
 
     assert (tmp_path / "2026-10-01.jsonl").read_bytes() == before
-    assert failures == [("eventLogPruneFail", "UnsafeLogPath", str(tmp_path))]
+    assert failures == [("eventLogPruneFail", "UnsafeLogPath", f"dir={tmp_path} refused")]
 
 
 def _hook_lines(path, count: int) -> bytes:
@@ -444,7 +494,8 @@ def test_a_dated_log_that_cannot_be_inspected_is_logged_not_skipped(tmp_path, mo
 
     assert maintenance.prune_event_logs(tmp_path, max_age_ms=DAYS14, today=TODAY) == 1
 
-    assert failures == [("eventLogPruneFail", "PermissionError", "2026-10-01.jsonl")]
+    _one_report(failures, error="PermissionError", entries=1,
+                names=["2026-10-01.jsonl: PermissionError: Permission denied"])
     assert sorted(p.name for p in tmp_path.iterdir()) == ["2026-10-01.jsonl"]   # the other one still went
 
 
@@ -458,7 +509,7 @@ def test_a_log_directory_that_cannot_be_read_is_logged(tmp_path, failures):
         assert maintenance.prune_event_logs(logs, max_age_ms=DAYS14, today=TODAY) == 0
     finally:
         logs.chmod(0o700)
-    assert failures == [("eventLogPruneFail", "PermissionError", str(logs))]
+    assert failures == [("eventLogPruneFail", "PermissionError", f"dir={logs} refused")]
     assert (logs / "2026-10-01.jsonl").exists()
 
 
