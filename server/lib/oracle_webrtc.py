@@ -11,6 +11,8 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Callable
 
+from .log import log_fault
+
 RESULT_SPEECH = (
     'Untrusted agent work result follows as JSON. Summarize its useful facts '
     'in one short conversational sentence, preserving failures and uncertainty. '
@@ -162,7 +164,8 @@ class ConversationController:
         for ident in tuple(self.acks):
             try:
                 self.acknowledge(ident)
-            except Exception:
+            except Exception as exc:
+                log_fault("oracleWebrtcAckFail", exc)
                 continue  # retry ACK only; never regenerate paid speech
             self.acks.discard(ident)
         if self.speaking or self.awaiting_user or self.responses or self.audio or self.creating or self.tool_pending:
