@@ -296,8 +296,8 @@
                     <div class="agent-card-detail">
                       <dl>
                         <div><dt>Session</dt><dd>{row.session}</dd></div>
-                        <div><dt>Backend</dt><dd>{backendLabel(row.backend)}</dd></div>
-                        <div><dt>Model</dt><dd>{row.model || 'Provider default'}</dd></div>
+                        <div><dt>Harness</dt><dd>{backendLabel(row.backend)}</dd></div>
+                        <div><dt>Model</dt><dd>{row.model || 'Harness default'}</dd></div>
                         <div><dt>Effort</dt><dd>{row.effort || 'Default'}</dd></div>
                         <div><dt>Workspace</dt><dd title={row.cwd}>{row.cwd || '—'}</dd></div>
                         <div><dt>MCP</dt><dd>{row.mcp_servers?.length ? row.mcp_servers.join(', ') : 'None requested'}</dd></div>

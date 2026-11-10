@@ -52,9 +52,11 @@ device credential from `POST /pairing/exchange`. A paired device may have
 `limited` scope, which allows conversation reads and the core `POST`s
 (`/send`, `/transcribe`, `/upload`, `/select`, `/focus`, `/clips/ack`, `/clog`,
 `/location`, `/calendar/response`, `/remote-action`). Administrative routes and
-Oracle require full scope. Host filesystem browsing (`/agent-file` and
-`/agent-files`) also requires full scope: a caller-selected root can contain
-configuration credentials, even though the operation is read-only.
+Oracle require full scope. Host filesystem browsing (`/agent-file`,
+`/agent-files`, `/dirs` and `/past-sessions` with any scope) also requires full
+scope: a caller-selected root can contain configuration credentials, even
+though the operation is read-only. So do an agent's interactive terminal
+(`/terminal/<session>`) and `PATCH /schedules/<id>`.
 
 Limited scope is an API permission boundary, not an agent sandbox. It still
 allows sending work to agents that run with the host user's permissions.
@@ -237,6 +239,33 @@ Rules:
   cached chat.
 - **`missing: true`** with an empty `turns` means the agent has no
   conversation yet. Render it as empty, not as an error.
+- **Delivery state (feature `send_delivery_state`, Host contract 78).**
+  A user row whose current `trace_id` has a launch
+  receipt carries `delivery: {state, rev, seq, for: {client_msg_id,
+  trace_id}}` with `state` one of `pending_launch` (saved, waiting for
+  handoff; a display hint, never permission to retry), `stopped` (withdrawn
+  by the user's Stop before handoff) or `handed_over` (handoff recorded,
+  outcome unconfirmed; not "started"). Absent means unknown, and the whole
+  block is omitted when the Host cannot observe the same F4-capable runtime
+  process before and after its read. Every response carries
+  `delivery_stop_generation` (the page's projection epoch) and
+  `delivery_scope {server_id, agent_id, runtime_release, runtime_instance}`.
+  Optional parameters, independent of `after_revision`:
+  `delivery_since=<seq>&delivery_stop_generation=<G>&delivery_runtime_release=<R>&delivery_runtime_instance=<I>`
+  returns `delivery_updates` `[{message_id, delivery}]`, `delivery_cursor`,
+  `delivery_more` and `delivery_cursor_expired`; a cursor is valid only with
+  the exact epoch and runtime scope it was taken under, so any runtime
+  restart resets it. Receipts changed by an older runtime stay unknown. `delivery_since=0` (or `delivery_bootstrap=1`)
+  starts a bootstrap pass that fixes `delivery_until` and the epoch on its
+  first page and must be continued with
+  `delivery_bootstrap=1&delivery_since=<cursor>&delivery_until=<B>&delivery_stop_generation=<G>`
+  until `delivery_more` is false. Expired means: reload the chat and
+  bootstrap again. A `/send` 200 carries no `delivery`: the client learns it
+  only from `GET /log`; every 503 body is unchanged. The fields are served
+  only when the Host can bind the answering runtime process to the runtime
+  unit's main process with one bounded manager read per `/log` response
+  (the runtime reports its pid, start time, boot, cgroup and invocation in an
+  internal `attestation` status field); otherwise they are omitted.
 - A growing assistant reply appears as one message whose `text` and `revision`
   change on successive deltas. Replace it in place.
 
@@ -349,8 +378,9 @@ Event types and payloads:
 | `agent-roster` | `kind` ∈ created, relaunched, forked, deleted, persona-created, persona-updated, persona-deleted, portrait-selected, backend-quota, contact-assigned, agent-renamed, janitor-changed, janitor-attention, stale-work (absent on the reconnect nudge); optional `session`, `persona`, `voice_id`, `backend`, `name` | Refetch the snapshot. `created`, `relaunched`, `forked` for a session you have cached means that session's conversation is new: discard the cache. |
 | `agent-focus` | `session`, `agent_id` | Server-wide focus moved (someone called `/select`, or hands-free routing picked an agent). Update `focused` flags. A client may follow focus or ignore it; the PWA follows, the native app follows only in hands-free mode. |
 | `queue-updated` | `agent_id`, `session`, `queue_depth`, `queue_paused`, `queue_started`, `queue_revision`, optional `client_msg_id` | The agent's pending-turn queue changed (a send while busy was queued, started, or the queue was paused by `/stop`). |
+| `delivery-updated` | `agent_id`, `session`, `message_id` | F4 (feature `send_delivery_state`, Host contract 78): a user send's delivery state may have changed. An invalidation hint only, carrying NO state: clients re-read `GET /log` (`delivery_since`) and merge from there, and never merge the hint itself into history or cursors. Replay emits only these three fields (plus `type`, `event_id`, `ts`): any older stored `delivery` field is dropped, and a stored event whose identity is missing or invalid is left out of replay entirely (stored history is not rewritten; replay continues past it). |
 | `user-notification` | `notification_id`, `agent_id`, `session`, `persona`, `done_ts`, `source_message_id`, `cause_message_id`, `origin`, `push`, `badge`, `unread`, `muted`, `preview`, `reason` | The server decided this completed turn deserves the user's attention. Badge and mark unread from this event only; never infer it from state changes. |
-| `audio` | `clip_id`, `url`, `name`, `session`, `agent_id`, `persona`, `trace_id`, `streamable`, `delivery`, `stream_url`, `playlist_url`, `complete_url`, `audio_format`, `preview`; a cross-agent clip adds `herald`; a cached phrase adds `voice_id`, `phrase_key`, `cached_phrase`; a replayed clip adds `voice_id`, `replay`; a message replay adds `ts` | A voice clip is ready. See §6. |
+| `audio` | `clip_id`, `url`, `name`, `session`, `agent_id`, `persona`, `trace_id`, `streamable`, `delivery`, `stream_url`, `playlist_url`, `complete_url`, `audio_format`, `preview`; a cross-agent clip adds `herald`; a cached phrase adds `voice_id`, `phrase_key`, `cached_phrase`; a replayed clip adds `voice_id`, `replay`; a message replay adds `ts`; a clip of a listen-first opening turn adds `call_id` and `opening` (ring id, token, epoch, kind and admission id; see agent-rings.md) | A voice clip is ready. See §6. |
 | `tts-error` | `session`, `agent_id`, `persona`, `message`, `error` | Synthesis failed; tell the user instead of playing silence. |
 | `server-version` | `version` | Server restarted on a new version; reload the client when it differs from the last one seen. |
 | `remote-action` | `action` ∈ record, record-toggle, stop-agent, controller-event; `ts`; a controller event adds `controller_event_id`, `button`, `controller_event`, `duration_ms`, `age_ms`, `queued` and optionally `controller_id` | A live shortcut/controller asked the client to act. These input events are never replayed after reconnect. |
@@ -361,7 +391,7 @@ Event types and payloads:
 | `location-request` | `session` | An agent asked for the user's location; show the one-tap share prompt for that session. Extension surface. |
 | `oracle-handoff` | `handoff_id`, `parent_handoff_id`, `host_id`, `principal`, `generation`, `revision`, `direction`, `mode`, `state`, `reason`, `oracle_call`, `agent`, `oracle`, `issued_at`, `server_now`, `ttl_ms`, `expires_at` | An Oracle call is being put through to an agent's hands-free session or back to Oracle. Apply the fence and phase rules in [oracle-handoff.md](oracle-handoff.md); act only for your own `principal`. Extension surface. |
 | `group-call` | `call_id`, `host_id`, `principal`, `state`, `reason`, `revision`, `started_at`, `ended_at`, `floor`, `participants`, `change`, `server_now` | A group call changed (started, a participant added, removed, held, resumed or given the floor, or the call ended). Apply only for your own `principal` and a `revision` newer than the one held; `GET /calls` is the snapshot. See [group-calls.md](group-calls.md). Extension surface. |
-| `agent-ring` | `ring_id`, `session`, `agent_id`, `persona`, `reason`, `opening_line`, `opening_audio_url`, `state`, `created_at`, `expires_at`, `ended_at`, `answered_by`, `call_id`, `server_now`, `conversation_mode` | An agent is calling the user (`state: ringing`), or the call was `answered`, `declined`, `missed` or `cancelled`. Show an incoming call while ringing; answer with `POST /calls/ring/answer`. `conversation_mode: agent_live_v1` is present only on an agent-live ring (feature `agent_ring_live`); answer it only with `conversation_mode: agent_live_v1`. A classic ring has no such field. `GET /calls/ring` is the snapshot. See [agent-rings.md](agent-rings.md). Extension surface. |
+| `agent-ring` | `ring_id`, `session`, `agent_id`, `persona`, `reason`, `opening_line`, `opening_audio_url`, `state`, `created_at`, `expires_at`, `ended_at`, `answered_by`, `call_id`, `server_now`, `conversation_mode` (agent-live rings only); a listen_first ring also `opening_mode` and `opening` (state and epoch) | An agent is calling the user (`state: ringing`), or the call was `answered`, `declined`, `missed` or `cancelled`. Show an incoming call while ringing; answer with `POST /calls/ring/answer`. `GET /calls/ring` is the snapshot. A listen_first ring lets the user speak first (feature `agent_ring_listen_first`). See [agent-rings.md](agent-rings.md). Extension surface. |
 | `controller-actions-updated` | `revision` | The controller custom actions or their gesture mappings changed. Refetch `GET /controller-actions` when `revision` is newer than the one held. Ephemeral. See [controller-actions.md](controller-actions.md). |
 | `calendar-request` | `request_id`, `session`, `title`, `start`, `end`, `time_zone`, `location`, `notes`, `url`, `all_day`, `calendar` | An agent asked the app to write an Apple Calendar event. Extension surface. |
 | `goal-updated` | `agent_id`, `session`, `goal` | The agent's standing objective changed; `goal` is the new goal or null. Extension surface. |
@@ -471,6 +501,34 @@ recording, e.g. `audio/webm`), headers `X-Hands-Free: 1` for dictation,
 to pick a model. Response includes `text`, `trace_id`, and `transcription_id`;
 pass both ids on the following `/send`.
 
+In a group call (feature `call_transcription_policy`), a clip captured for a
+participant also sends `X-Clarp-Call-Id: <call_id>` and
+`X-Transcription-Session: <that participant>`. The Host checks them before any
+transcription and refuses with no transcript: 400 `bad call id`, 404 `unknown
+call`, 403 `not your call` (another device or Host), 409 `call ended` (+
+`call_id`, `reason`), 409 `not a call participant` (+ `session`). A valid one
+answers with `stt`: `{language: {value, source}, engines: {value, source},
+effective_engine, attempts: [{engine, outcome, language, ms|reason}],
+language_adapted, requested_model}`, sources `agent | call_policy | device |
+global`; `attempts[].language` is the language the Host handed at that
+engine's boundary (`auto` = no constraint handed, not a detection; `null`, or
+no `language` on a skip = the boundary was unobserved, never a statement that
+the engine was or was not invoked). With a call policy configured, when no
+engine can take the call language the clip is refused, with no provider call:
+409 `{"ok": false, "error": "no compatible engine", "language", "engines",
+"attempts"}`. A stored call policy that can never work is refused the same
+way for every call clip: 409 `{"ok": false, "error": "call policy invalid",
+"call_policy_error", "language", "engines", "attempts": []}`. A configured
+language set skips ElevenLabs Scribe, which would drop it. Multilingual or
+unknown local engines never receive the code, so they are skipped when a call
+policy is configured. Without a call policy,
+in-call transcription is unchanged. The transcription settings take `call_languages` and
+`call_engines`, refuse a combination that can never work, and read back
+`call_policy_error`. A settings save writes only the keys it names (an
+omitted key is left as stored); an explicit `null` for `engine` or
+`turn_taking` is refused with 400. Without the header nothing changes. See
+[group-calls.md](group-calls.md).
+
 **Out:** an `audio` event announces a clip. Pick a source in this order:
 
 1. `playlist_url` (HLS) when present: assign it to an `<audio>` element.
@@ -510,7 +568,7 @@ apply the broadcast, not re-post `/select`, or two clients loop.
 - `DELETE /agents/<session>` — release the agent (soft delete).
 - `POST /agent-mute`, `/agent-archive`, `/agent-heartbeat`, `/agent-dreaming`,
   `/agent-voice` — per-agent toggles: `{"session", "<flag>": bool}`.
-- `GET /past-sessions?backend=&cwd=` — resumable backend conversations for
+- `GET /past-sessions?backend=&cwd=` (full scope) — resumable backend conversations for
   the start dialog.
 - `GET /agent-model-options` — the backend catalogue. `providers.<id>` is
   everything a chooser needs for one CLI: `label`, `detail`, `badge` (a
@@ -575,7 +633,9 @@ any subset. Payload shapes are documented in the handler docstrings in
 |---|---|---|
 | Device pairing | `POST /pairing/exchange`, `GET /paired-devices`, `POST /paired-devices/revoke`, `GET /devices`, `GET /server-info` | `device_pairing.py`, `server_identity.py` |
 | Push notifications | `POST /devices` (APNs token), `GET /notification-avatars/…`, `/attention` | `apns.py`, `user_notifications.py` |
-| Provider sign-in and usage | `/backend-auth`, `/backend-auth/login`, `/backend-auth/login-code`, `/backend-auth/logout`, `/backend-usage` | `backend_auth.py`, `backend_usage.py` |
+| Harness sign-in and usage | `/backend-auth` (`?harnesses=all` lists every harness), `/backend-auth/login`, `/backend-auth/login-code`, `/backend-auth/logout`, `/backend-usage` | `backend_auth.py`, `backend_usage.py` |
+| Hotseat account status (read-only snapshot, `accounts_hotseat`) | `/hotseat/status` | `hotseat_status.py` |
+| Model providers inside a harness (OpenCode, DeepSeek card) | `GET /harness-providers?harness=`, `GET /harness-providers/models?harness=&provider=`, `POST /harness-providers/login` (`key`, or `method` for OpenCode's own device/OAuth flow), `/harness-providers/login-code`, `/harness-providers/logout`; full-device scope; keys go to OpenCode's own `auth.json` and are never returned (see `docs/compatibility.md` row 75) | `harness_providers.py` |
 | Files and media | `POST /upload` (headers `X-Session`, `X-File-Name`, `X-Upload-ID`), `/media`, `/agent-files`, `/agent-file` | `upload_results.py`, `media_store.py`, `agent_files.py` |
 | Artifacts and decisions | `/artifacts`, `/artifacts/<id>`, `/decisions`, `/decisions/<id>/resolve`, `/task-plan` | `artifacts.py`, `task_plans.py` |
 | Portraits and personas | `/agent-portraits`, `/agent-portrait-generation`, `/personas`, `/personas/update`, `/personalities/settings`, `/avatar-settings` | `agent_portraits.py`, `portrait_generation.py`, `personas.py`, `model_avatars.py` |
@@ -648,6 +708,43 @@ Returns 404 for an unknown job, otherwise:
   declared `background` state it left behind settles to `idle`, and
   `agent-roster` with `kind: "stale-work"` asks for a refetch. Janitor
   labels keep their own validity window.
+
+### Delivery admission in `GET /status`
+
+`delivery_admission` is process-local health of the F4 delivery admission
+(reset when the Host restarts; never used to admit anything). It has fixed
+keys: `scope` ("process"), `reset_on` ("process_restart"), `gate`
+(`inflight_limit` 1, `rate_per_s` 2, `burst` 2, `probes_per_log_response` 1,
+`inflight_now`, `tokens_now`), `probes` (`started`, `reaped`, `bound`,
+`last_duration_ms`), `omitted` (one counter per fixed reason),
+`unexpected_by_type` (at most 16 exception type names plus `_other`), `budget`
+(`deadline_ms` 2000, `caps_ms` {`o1` 500, `b` 1000, `b_reap_reserve` 250,
+`o2` 500}, and `last_ms` / `max_ms` per phase `o1`, `b`, `snapshot`, `o2`,
+`total`: bounded health metadata, not a benchmark) and
+`reconcile` (`passes`, `laps`, `last_lap_ms`, `failures`,
+`consecutive_failures`, `last_failure_type`, `refused`, `findings` per fixed
+kind). The optional delivery part of one `GET /log` has ONE monotonic 2.0 s deadline
+from its start (after the core read): the first runtime observation (shared
+status of at most 1 s, else one RPC of at most 0.5 s), the manager read (at most
+1.0 s plus its 0.25 s kill / reap reserve, both inside the deadline), the read
+snapshot (its SQL is interrupted past the deadline) and the fresh second
+observation (one RPC of at most 0.5 s); each is clamped to what is left. When
+nothing is left before a step, or a step times out or fails, every delivery
+field is omitted and the step is counted (`deadline_exhausted`,
+`o1_unavailable`, `o2_unavailable`); nothing is retried and no partial field or
+cursor is returned. A first observation that misses the shared status first
+takes the request's manager-read permit (the same 1 in flight / 2 per second
+gate), so no status RPC starts while that gate is exhausted; its result refreshes
+the shared status only if that is free at that moment and holds nothing newer.
+While the shared status is busy (another status read in flight) the delivery
+fields are omitted (`status_contended`) rather than waiting or reading twice. A
+failed observation is logged at most once per step and exception type per 10 s
+(type name only); every one is counted. The `start_mismatch` reason counts any main start time the Host could not
+confirm equal: a different start, a process that is gone, or an unreadable
+`/proc` entry (fail-closed; it is not evidence of a different process). Reading
+it does no database, manager, runtime or file access. It is at
+most 8 KiB; past that it is `{"overflow": true, "serialized_bytes", "limit",
+"scope"}`.
 
 ### Runtime status in `GET /status`
 

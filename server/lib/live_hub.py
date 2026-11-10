@@ -728,7 +728,7 @@ def report(method: str, *args: Any, **kwargs: Any) -> Any:
 
 
 PREFIXES = {"claude": "cl", "codex": "cx", "opencode": "oc", "grok": "gk",
-            "agy": "ag", "deepseek": "ds"}
+            "agy": "ag", "deepseek": "ds", "muse": "mu"}
 
 
 def item_prefix(backend: str) -> str:
@@ -848,7 +848,8 @@ def _turn_error(detail: dict[str, Any]) -> dict[str, str] | None:
 
 # A provider turn that failed (its process died and was not retried): the
 # live turn ends `failed`, its running items `interrupted`.
-_FAILED_EVENTS = frozenset({"process_exited_failed", "turn_failed_unclassified", "unlaunched"})
+_FAILED_EVENTS = frozenset({"process_exited_failed", "turn_failed_unclassified", "unlaunched",
+                            "call_opening_unconfirmed"})
 
 
 def _settle_from_database(hub: LiveHub, agent_id: str, detail: dict[str, Any]) -> None:

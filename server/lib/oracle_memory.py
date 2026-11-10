@@ -7,50 +7,26 @@ import json
 import re
 import uuid
 
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS oracle_threads (
- thread_id TEXT PRIMARY KEY, owner_principal TEXT NOT NULL, contact TEXT NOT NULL,
- active_connection TEXT NOT NULL DEFAULT '', revision INTEGER NOT NULL DEFAULT 0,
- state_json TEXT NOT NULL DEFAULT '{}', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS oracle_threads_owner ON oracle_threads(owner_principal,contact,updated_at);
-CREATE TABLE IF NOT EXISTS oracle_context_notifications (
- thread_id TEXT NOT NULL REFERENCES oracle_threads(thread_id),
- owner_principal TEXT NOT NULL,
- source_kind TEXT NOT NULL,
- source_id TEXT NOT NULL,
- reference_ts INTEGER NOT NULL,
- stale INTEGER NOT NULL DEFAULT 0,
- sent_at INTEGER NOT NULL,
- PRIMARY KEY(thread_id,source_kind,source_id)
-);
-CREATE INDEX IF NOT EXISTS oracle_context_notifications_owner
- ON oracle_context_notifications(owner_principal,thread_id,sent_at);
-CREATE TABLE IF NOT EXISTS oracle_observations (
- sequence INTEGER PRIMARY KEY AUTOINCREMENT, thread_id TEXT NOT NULL REFERENCES oracle_threads(thread_id),
- source_key TEXT NOT NULL, event_json TEXT NOT NULL, created_at INTEGER NOT NULL,
- UNIQUE(thread_id,source_key)
-);
-CREATE TABLE IF NOT EXISTS oracle_thread_work (
- thread_id TEXT NOT NULL REFERENCES oracle_threads(thread_id), operation_id TEXT NOT NULL,
- created_at INTEGER NOT NULL, PRIMARY KEY(thread_id,operation_id)
-);
-CREATE TABLE IF NOT EXISTS oracle_admissions (
- thread_id TEXT NOT NULL REFERENCES oracle_threads(thread_id), revision INTEGER NOT NULL,
- action_index INTEGER NOT NULL, call_id TEXT NOT NULL, tool TEXT NOT NULL,
- arguments_json TEXT NOT NULL, result_json TEXT, status TEXT NOT NULL,
- created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
- PRIMARY KEY(thread_id,revision,action_index)
-);
-CREATE TABLE IF NOT EXISTS oracle_user_context (
- thread_id TEXT NOT NULL REFERENCES oracle_threads(thread_id), context_id TEXT NOT NULL,
- kind TEXT NOT NULL, text TEXT NOT NULL, mime_type TEXT, image BLOB,
- captured_at INTEGER, added_at INTEGER NOT NULL, removed_at INTEGER,
- content_hash TEXT NOT NULL, PRIMARY KEY(thread_id,context_id)
-);
-"""
+from .persistence.schema_parts.oracle_memory import SCHEMA
 
 from . import db
+from . import lifecycle as lk
+from .lifecycle import Edge, Lifecycle, WaitForever
+
+# One admitted voice action (docs/architecture/lifecycles.md). This module is
+# the only writer of oracle_admissions.status; admission() inserts the row as
+# planned. The first result stands: finishing a completed admission again
+# writes nothing. The primary key is (thread_id, revision, action_index), so
+# the kit's single key column is SQLite's rowid.
+ADMISSION = Lifecycle(
+    name="oracle_admission", owner="lib/oracle_memory.py",
+    table="oracle_admissions", key="rowid", state_column="status",
+    entered_column="updated_at",
+    initial="planned", final=frozenset({"completed"}),
+    edges=(Edge("finish", frozenset({"planned"}), "completed"),),
+    waits={"planned": WaitForever("the voice session that admitted the action finishes it;"
+                                  " reconcile() finishes one whose receipt was lost")},
+)
 
 
 def _json(value):
@@ -169,8 +145,10 @@ class ThreadStore:
 
     def finish_admission(self, revision, index, result):
         self._owned(active=True)
-        db.conn().execute("UPDATE oracle_admissions SET status='completed',result_json=?,updated_at=? WHERE thread_id=? AND revision=? AND action_index=?",
-                         (_json(result), db.now_ms(), self.thread_id, revision, index))
+        lk.compare_and_set_where(db.conn(), ADMISSION, "finish",
+                                 where="thread_id=? AND revision=? AND action_index=?",
+                                 params=(self.thread_id, revision, index), now=db.now_ms(),
+                                 values={"result_json": _json(result)})
         if result.get("operation_id"): self.link_work(result["operation_id"])
 
     def admissions(self, revision=None):

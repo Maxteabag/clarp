@@ -117,8 +117,19 @@ Do not substitute a multiple-choice preference for required explicit approval.
 
 ## Results and recovery
 
-- Never call resolve/dismiss endpoints or edit the decision database to answer
-  on the user's behalf. Creation does not authorize the requested action.
+- Never answer on the user's behalf without their explicit instruction for
+  that specific answer. One exception: a session the owner has configured
+  in `[agents] decision_on_behalf_sessions` (for example a front-desk
+  agent) may complete a card with
+  `clarp-agent-artifacts answer-on-behalf "$CLAUDE_PWA_SESSION" DECISION_ID EXPECTED_REVISION JSON_BODY`
+  after recording the user's exact words; for approvals, read the question
+  and options word for word and repeat the answer back for confirmation
+  first. The Host enforces the designation: it requires that session's own
+  verified turn identity, records `agent:<session>` as who resolved it, and
+  refuses every other session, including the asking agent. A designated
+  agent therefore needs a backend whose turns carry an identity. Never
+  call dismiss on the user's behalf, and never edit the decision database.
+  Creation does not authorize the requested action.
 - An accepted approval, rejected approval, selected option, and custom text are
   different outcomes. Respect the actual response and its scope.
 - Discard is silent: you are not told. Expiry grants neither approval nor an
@@ -142,9 +153,9 @@ Updates is only useful if every card in it still matters. You own your cards:
   `clarp-agent-artifacts withdraw "$CLAUDE_PWA_SESSION" DECISION_ID`.
   Withdrawal is silent and closes the card everywhere.
 - Never post a second card for the same question; withdraw the old one first.
-- When the user writes to you in chat, Clarp closes all your open requests as
-  `superseded`. Treat their message as the reply. If it did not answer
-  something you still need, ask again, as a new card if necessary.
+- A chat message from the user does not close your open requests. If it
+  plainly answers one, withdraw that card yourself; unrelated cards stay
+  open until answered, dismissed, withdrawn or expired.
 - Short-lived prompts ("approve within 3 minutes", "pick 67 in the app") get
   an `--expires-at` matching the window, so they disappear on their own.
 - Do not file CI results as attention. If a failing workflow blocks your work,

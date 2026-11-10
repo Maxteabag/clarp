@@ -473,3 +473,38 @@ def test_steered_followup_failure_tracks_original_turn(tmp_path):
     assert oracle_delegations.fail_for_trace("running-trace", "connection lost")
     assert oracle_delegations.get("steered")["status"] == "failed"
     assert oracle_delegations.get("steered")["error"] == "connection lost"
+
+
+def test_agent_live_asks_are_never_offered_to_another_call_and_oracles_own_results_always_are(tmp_path):
+    agent = _agent(tmp_path)
+    sandra = "Spørsmål fra Sandras Live-samtale med Peter (svar kort): hva er klart?"
+    rows = [("sandra-" + "a1" * 12, sandra),                         # Sandra's ask: held for its own call
+            ("sandra-" + "a1" * 12 + "x", sandra),                   # not Sandra's id shape: offered
+            ("sandra-" + "b2" * 12, "Investigate the failure"),      # Oracle's own text: offered
+            ("sandra-trip", "Book the trip"), ("oracle-own", "Investigate")]
+    for ident, text in rows:
+        oracle_delegations.begin(delegation_id=ident, trace_id="t-" + ident, client_msg_id=ident,
+                                 agent_id=agent["agent_id"], session="theo", request_text=text)
+        oracle_delegations.complete_for_trace(trace_id="t-" + ident, message_id="m-" + ident, text="Svar")
+    offered = {row["delegation_id"] for row in oracle_delegations.undelivered()}
+    assert offered == {ident for ident, _ in rows[1:]}
+
+
+def test_a_settled_delegation_refuses_every_later_event_but_the_failed_cancel(tmp_path):
+    agent = _agent(tmp_path)
+    for ident in ("done", "broken"):
+        oracle_delegations.begin(delegation_id=ident, trace_id=ident, client_msg_id=ident,
+                                 agent_id=agent["agent_id"], session="theo", request_text=ident)
+    assert oracle_delegations.complete_for_trace(trace_id="done", message_id="m", text="Answer")
+    assert oracle_delegations.fail("broken", "boom")["status"] == "failed"
+    assert not oracle_delegations.fail_for_trace("done", "late")
+    assert not oracle_delegations.mark_started_for_trace("done")
+    assert not oracle_delegations.complete_for_trace(trace_id="broken", message_id="m", text="Late")
+    assert oracle_delegations.mark_dispatched("done", backend_session_id="b", queued=False)["status"] == "completed"
+    assert oracle_delegations.get("done")["result_text"] == "Answer"
+    lifecycle = oracle_delegations.DELEGATION
+    assert lifecycle.decide("failed", "cancel_failed") == "cancelled"
+    for state in oracle_delegations.TERMINAL:
+        for event in ("dispatch_accepted", "dispatch_queued", "start", "complete", "fail", "cancel"):
+            with pytest.raises(Exception):
+                lifecycle.decide(state, event)

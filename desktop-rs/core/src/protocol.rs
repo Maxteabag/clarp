@@ -285,6 +285,12 @@ pub struct Message {
     pub activity_count: i32,
     pub pending: bool,
     pub delivery_failed: bool,
+    /// The Host's one-line reason for a failed send of this client, shown on
+    /// its bubble; local only (CLIENT-SEND-500).
+    pub delivery_error: String,
+    /// F4 (`send_delivery_state`): this user send's delivery state from its own
+    /// receipt (`pending_launch`, `stopped`, `handed_over`); empty = unknown.
+    pub send_state: String,
     pub activity: bool,
     pub automated: bool,
     pub tool_details_available: bool,
@@ -324,11 +330,23 @@ impl Message {
             automated: json::boolean(object, "automated") || json::boolean(object, "is_automated"),
             tool_details_available: json::boolean(object, "tool_details_available"),
             delivery_failed: json::boolean(object, "delivery_failed"),
+            send_state: send_state(object),
             tools: json::array(object, "tools"),
             display_cells: json::array(object, "display_cells"),
             ..Self::default()
         }
     }
+}
+
+/// A user row's F4 receipt state, only when the receipt names this row
+/// (`for.client_msg_id` is the id after `u-`). A Host that does not advertise
+/// `send_delivery_state` sends no object: unknown.
+fn send_state(object: &Object) -> String {
+    let Some(delivery) = object.get("delivery").and_then(Value::as_object) else { return String::new() };
+    let id = json::string(object, "id");
+    let own = delivery.get("for").and_then(Value::as_object)
+        .is_some_and(|f| id.strip_prefix("u-") == Some(json::string(f, "client_msg_id").as_str()));
+    if own { json::string(delivery, "state") } else { String::new() }
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]

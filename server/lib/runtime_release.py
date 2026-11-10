@@ -520,13 +520,31 @@ class RuntimeStatusView:
         }
 
 
+# GET /status asks the runtime with its own short deadline: a runtime busy
+# under database-lock contention then reads as unavailable (timeout) instead
+# of holding the request, so a new Host passes the installer's readiness
+# check (1 s probes) whatever the agents are doing.
+STATUS_RPC_TIMEOUT = 0.75
+
+
+def _bounded_status(client: Any) -> Callable[[], dict]:
+    import inspect
+    try:
+        takes_timeout = "timeout" in inspect.signature(client.status).parameters
+    except (TypeError, ValueError):
+        takes_timeout = False
+    if not takes_timeout:
+        return client.status            # a stand-in without a deadline
+    return lambda: client.status(timeout=STATUS_RPC_TIMEOUT)
+
+
 def status_view_for(client: Any) -> RuntimeStatusView:
     """The one view per runtime client, kept on the client itself, so its
     last known drain survives between requests (a replaced client starts a
     fresh view)."""
     view = getattr(client, "_clarp_status_view", None)
     if not isinstance(view, RuntimeStatusView):
-        view = RuntimeStatusView(client.status)
+        view = RuntimeStatusView(_bounded_status(client))
         try:
             setattr(client, "_clarp_status_view", view)
         except (AttributeError, TypeError):

@@ -1,7 +1,8 @@
 """Host-generation wiring, slice C2-S2a (design r4 §12-§14, C2-S2 packet and addendum 1).
 
 The token is bootstrapped at every process start before the state database is opened, and rotated
-only by the supported exclusive restore before its first destructive step. Nothing reads it yet.
+only by the supported exclusive restore before its first destructive step. Its one reader is the
+listen-first opening fence (server/lib/agent_rings.py); nothing else reads it.
 
 Rotation and the import check run real file operations on owned temporary roots. The runtime's call
 order is recorded through its real main(). The server's `__main__` block and the entrypoint heredoc
@@ -25,6 +26,7 @@ import pytest
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "server"))
+from tests.patching import logical_split_trees
 from lib import host_generation as hg  # noqa: E402
 
 OLD = "5d2f8a3e-1c4b-4e7a-8f60-3b9d7c2e4a10"
@@ -310,6 +312,19 @@ def test_structural_the_entrypoint_bootstraps_after_the_locks_and_before_the_dat
 
 # ---- ownership: the only callers --------------------------------------------------------------
 
+def _caller_origins(rel: str, text: str, name: str, recipes: pathlib.Path | None = None) -> set[str]:
+    """Where a file calls `name`: its own path, or for a call inside a
+    definition an S9 recipe moved into a split part, the old module
+    (logical_split_trees). A new caller in a part is a new decision."""
+    call = re.compile(rf"\b{name}\(")
+    if not call.search(text):
+        return set()
+    if not rel.endswith(".py"):
+        return {rel}
+    return {origin for origin, tree in logical_split_trees(rel, ast.parse(text), recipes)
+            if call.search(ast.unparse(tree))}
+
+
 def _callers(name: str) -> set[str]:
     found = set()
     for path in [*(REPO / "server").rglob("*.py"), *(REPO / "bin").rglob("*"),
@@ -319,13 +334,31 @@ def _callers(name: str) -> set[str]:
                 text = path.read_text()
             except UnicodeDecodeError:
                 continue
-            if re.search(rf"\b{name}\(", text):
-                found.add(str(path.relative_to(REPO)))
+            found |= _caller_origins(str(path.relative_to(REPO)), text, name)
     return found
 
 
-def test_only_process_starts_bootstrap_only_the_restore_rotates_and_nothing_reads_yet():
+def test_only_process_starts_bootstrap_only_the_restore_rotates_and_only_agent_rings_reads():
     assert _callers("ensure_instance_generation") == {
         "docker/entrypoint.sh", "server/server.py", "server/runtime.py"}
     assert _callers("rotate_instance_generation") == {"server/lib/data_root_locks.py"}
-    assert _callers("read_host_generation") == set()                 # no consumer in this slice
+    # The listen-first opening fence is the one consumer; any other reader is a new decision.
+    assert _callers("read_host_generation") == {"server/lib/agent_rings.py"}
+
+
+def test_a_caller_in_a_split_part_counts_as_its_old_module_only_inside_a_moved_definition(tmp_path):
+    # Review B (cut 1c): a whole-part mapping let a new, unlisted caller added
+    # to a split part pass as the old module's existing call.
+    (tmp_path / "s9.toml").write_text(
+        '[[split]]\nname = "x"\nmodule = "lib/old.py"\n'
+        '[[split.part]]\nmodule = "lib/old_part.py"\nnames = ["moved"]\n')
+    text = ("from .host_generation import read_host_generation\n\n"
+            "def moved():\n    return read_host_generation()\n\n"
+            "def unlisted():\n    return read_host_generation()\n")
+    assert _caller_origins("server/lib/old_part.py", text, "read_host_generation", tmp_path) == {
+        "server/lib/old.py", "server/lib/old_part.py"}
+    moved_only = text.split("\n\ndef unlisted")[0] + "\n"
+    assert _caller_origins("server/lib/old_part.py", moved_only, "read_host_generation", tmp_path) == {
+        "server/lib/old.py"}
+    assert _caller_origins("docker/entrypoint.sh", "x read_host_generation(", "read_host_generation",
+                           tmp_path) == {"docker/entrypoint.sh"}

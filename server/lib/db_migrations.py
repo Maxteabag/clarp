@@ -184,6 +184,15 @@ def _migrate(con: sqlite3.Connection) -> None:
         # move up behind it. If main's schema changes before this merges, stop and renumber; never skip a number.
         if version < 118:
             _migrate_to_v118(con)
+        # 119 (listen-first state_log index) is PROVISIONAL: the next free number above main 118, decided by
+        # Nadia's ledger order at the landing (an earlier notice placed steer_receipts at 119 and the LF family
+        # at 120); renumber in this source before CI, never skip a number.
+        if version < 119:
+            _migrate_to_v119(con)
+        # 121 is PROVISIONAL: 120 is taken by feat/agent-ring-device-optout (unmerged). If main's
+        # schema moves before this lands, renumber above every source; never reuse a taken number.
+        if 0 < version < 121:  # Data only: a new database has nothing to end.
+            _migrate_to_v121(con)
 
         con.execute(f"PRAGMA user_version = {db_schema._SCHEMA_VERSION}")
         con.execute("COMMIT")
@@ -900,6 +909,34 @@ def _migrate_to_v116(con: sqlite3.Connection) -> None:
     if "allow_paused" not in columns:
         con.execute("ALTER TABLE queued_turns"
                     " ADD COLUMN allow_paused INTEGER NOT NULL DEFAULT 0")
+
+
+def _migrate_to_v121(con: sqlite3.Connection) -> None:
+    """End provider tasks that lost their evidence long ago, once, at upgrade.
+
+    Before the observer learned to end them, a Claude background task with no
+    turn-exit link (launched before the fence, or by a process Clarp did not
+    start) stayed active forever. This applies the observer's rule to every
+    such row now rather than a few per visit. Data only: older code reads the
+    rows as ordinary terminal provider tasks, so a rollback needs nothing."""
+    from .provider_background_jobs import expire_lost_evidence
+    # The projection reads rows by name; the upgrade may run on a plain
+    # connection (a fresh hook process, or the state-upgrade rehearsal).
+    factory = con.row_factory
+    con.row_factory = sqlite3.Row
+    try:
+        expire_lost_evidence(con, limit=None)
+    finally:
+        con.row_factory = factory
+
+
+def _migrate_to_v119(con: sqlite3.Connection) -> None:
+    """The newest state row per agent in one seek, for the call-open end's write-time anchor
+    (turn_lifecycle's conditional transition). An additive index: older code ignores it, so
+    rolling back needs no down-migration. Version 119 is reserved behind steer_receipts' 118:
+    it must land after 118 (or be renumbered to 118 at merge), never ahead of it."""
+    con.execute("CREATE INDEX IF NOT EXISTS idx_state_log_agent_state"
+                " ON state_log(agent_id, state_id)")
 
 
 def _migrate_to_v117(con: sqlite3.Connection) -> None:

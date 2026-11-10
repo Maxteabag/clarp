@@ -14,6 +14,7 @@ import json
 import pathlib
 import socket
 import socketserver
+import sys
 import threading
 import time
 import uuid
@@ -101,13 +102,14 @@ class RuntimeClient:
     _CONNECT_BACKOFF_INITIAL = 0.02
     _CONNECT_BACKOFF_MAX = 0.25
 
-    def _connect(self) -> socket.socket:
-        deadline = time.monotonic() + self.timeout
+    def _connect(self, timeout: float | None = None) -> socket.socket:
+        timeout = self.timeout if timeout is None else timeout
+        deadline = time.monotonic() + timeout
         delay = self._CONNECT_BACKOFF_INITIAL
         while True:
             client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             try:
-                client.settimeout(self.timeout)
+                client.settimeout(timeout)
                 client.connect(str(self.socket_path))
                 return client
             except OSError as exc:
@@ -121,14 +123,32 @@ class RuntimeClient:
             time.sleep(delay)
             delay = min(delay * 2, self._CONNECT_BACKOFF_MAX)
 
-    def _request(self, method: str, params: dict[str, Any] | None = None) -> dict:
+    def _request(self, method: str, params: dict[str, Any] | None = None, *,
+                 timeout: float | None = None, total_s: float | None = None) -> dict:
+        """One RPC; ``timeout`` overrides the client's for this call only.
+
+        ``total_s`` (opt-in; None keeps the behaviour above exactly) bounds the
+        WHOLE call: connect, send and every read each get only the time left of
+        one monotonic deadline, so a slow or dripping answer cannot extend it."""
         request = encode_request(method, params)
+        deadline = None if total_s is None else time.monotonic() + max(0.0, float(total_s))
+
+        def left() -> float:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise socket.timeout("runtime call deadline passed")
+            return remaining
         try:
-            with self._connect() as client:
+            with self._connect(timeout if deadline is None
+                               else min(self.timeout if timeout is None else timeout, left())) as client:
+                if deadline is not None:
+                    client.settimeout(left())
                 client.sendall(request)
                 chunks: list[bytes] = []
                 total = 0
                 while True:
+                    if deadline is not None:
+                        client.settimeout(left())
                     chunk = client.recv(65536)
                     if not chunk:
                         break
@@ -165,6 +185,12 @@ class RuntimeClient:
             queued=bool(result.get("queued")),
             queue_depth=int(result.get("queue_depth") or 0),
             queue_revision=int(result.get("queue_revision") or 0),
+            # F4 S1 from a runtime that computes it; an older runtime sends
+            # none, which stays unknown (never a hint invented here).
+            delivery=(result.get("delivery")
+                      if isinstance(result.get("delivery"), dict) else None),
+            delivery_runtime=(result.get("delivery_runtime")
+                              if isinstance(result.get("delivery_runtime"), dict) else None),
         )
 
     def dispatch(self, **kwargs):
@@ -186,8 +212,19 @@ class RuntimeClient:
                 str(response.get("error") or "agent runtime recovery failed"))
         return int(response.get("result") or 0)
 
-    def status(self) -> dict[str, Any]:
-        response = self._request("status")
+    def status(self, *, timeout: float | None = None) -> dict[str, Any]:
+        """The runtime's status; ``timeout`` bounds this call alone (GET /status
+        must answer while the runtime is busy, see runtime_release)."""
+        return self._status(self._request("status", timeout=timeout))
+
+    def status_within(self, total_s: float) -> dict[str, Any]:
+        """``status`` bounded as a WHOLE by ``total_s`` (F4: a /log bracket's
+        observation under its own deadline). Every other caller keeps ``status``
+        and this client's default timeout."""
+        return self._status(self._request("status", total_s=total_s))
+
+    @staticmethod
+    def _status(response: dict) -> dict[str, Any]:
         if not response.get("ok"):
             raise RuntimeUnavailable(
                 str(response.get("error") or "agent runtime status unavailable"))
@@ -238,13 +275,11 @@ class RuntimeClient:
         return bool(response.get("ok") and response.get("result"))
 
     def begin_stop(self, agent_id: str, backend: str, *, strict: bool,
-                   hold: bool = True) -> StopLease:
-        response = self._request("begin_stop", {
-            "agent_id": agent_id,
-            "backend": backend,
-            "strict": strict,
-            "hold": hold,
-        })
+                   hold: bool = True, fence_user_receipts: bool = True) -> StopLease:
+        params = {"agent_id": agent_id, "backend": backend, "strict": strict, "hold": hold}
+        if not fence_user_receipts:
+            params["fence_user_receipts"] = False   # absent means the user's Stop
+        response = self._request("begin_stop", params)
         if not response.get("ok"):
             from .turn_dispatch import DispatchError
             raise DispatchError(
@@ -342,578 +377,3 @@ class RuntimeClient:
             return self.status().get("protocol_version") == PROTOCOL_VERSION
         except (RuntimeProtocolError, RuntimeUnavailable):
             return False
-
-
-class _RuntimeRequestHandler(socketserver.StreamRequestHandler):
-    def handle(self) -> None:
-        raw = self.rfile.readline(MAX_MESSAGE_BYTES + 1)
-        if not raw or len(raw) > MAX_MESSAGE_BYTES:
-            self._write({
-                "ok": False, "status": 400,
-                "error": "runtime request is empty or too large",
-            })
-            return
-        try:
-            request = decode_request(raw)
-            if request["method"] == "live_stream":
-                self._live_stream()
-                return
-            response = self.server.dispatch_request(  # type: ignore[attr-defined]
-                request["method"], request["params"])
-        except RuntimeProtocolError as exc:
-            response = {"ok": False, "status": 400, "error": str(exc)}
-        except Exception as exc:  # noqa: BLE001 - isolate malformed RPC calls
-            try:
-                from .log import log_exception
-                log_exception("runtimeRpcFail", exc)
-            except Exception:
-                pass
-            response = {"ok": False, "status": 500,
-                        "error": "runtime request failed"}
-        self._write(response)
-
-    def _write(self, value: dict[str, Any]) -> None:
-        self.wfile.write((json.dumps(
-            _json_value(value), separators=(",", ":")) + "\n").encode())
-
-    def _live_stream(self) -> None:
-        """Push live-item events to the HTTP process until it hangs up."""
-        import queue as _queue
-        fanout = getattr(self.server, "live_fanout", None)
-        if fanout is None:
-            self._write({"ok": False, "status": 404, "error": "no live items here"})
-            return
-        q = fanout.subscribe()
-        hub = getattr(self.server, "live_hub", None)
-        try:
-            # First line: this runtime serves live events (the HTTP process
-            # advertises `live_items` only after it).
-            self._write({"type": "hello", "epoch": getattr(hub, "epoch", "")})
-            self.wfile.flush()
-            idle = 0.0
-            while not getattr(q, "dropped", False) and not getattr(self.server, "live_closed", False):
-                try:
-                    event = q.get(timeout=1.0)
-                    idle = 0.0
-                except _queue.Empty:
-                    idle += 1.0
-                    if idle < 15.0:
-                        continue
-                    idle = 0.0
-                    event = {"type": "ping"}
-                self.wfile.write((json.dumps(event, separators=(",", ":")) + "\n").encode())
-                self.wfile.flush()
-        except (OSError, ValueError):
-            return
-        finally:
-            fanout.unsubscribe(q)
-
-
-class RuntimeRPCServer(socketserver.ThreadingMixIn,
-                       socketserver.UnixStreamServer):
-    """User-private runtime endpoint with injectable dispatch for tests."""
-
-    daemon_threads = True
-    allow_reuse_address = False
-    # socketserver's default listen backlog is 5.  The HTTP server asks for
-    # ``status`` once per agent per snapshot from dozens of threads, so a
-    # 120-agent fleet overran that queue constantly and clients got EAGAIN
-    # (see RuntimeClient._connect).  The kernel caps this at
-    # ``net.core.somaxconn`` (4096 on current Linux); 256 covers a full
-    # fleet-wide burst while the accept loop is starved for a moment.
-    request_queue_size = 256
-
-    def __init__(
-        self,
-        socket_path: pathlib.Path | str,
-        *,
-        dispatch_service,
-        status_provider=None,
-        release_id: str = "",
-        stop_lease_timeout: float = 30.0,
-        account_recovery_carry: pathlib.Path | str | None = None,
-    ):
-        self.socket_path = pathlib.Path(socket_path)
-        # Where the seal leaves account recovery's start for the next runtime
-        # (runtime_release.write_account_recovery_carry). Without it, parked
-        # account-recovery work keeps blocking the handoff, as it always did.
-        self.account_recovery_carry = (pathlib.Path(account_recovery_carry)
-                                       if account_recovery_carry else None)
-        self.dispatch_service = dispatch_service
-        self.status_provider = status_provider or self._default_status
-        self.release_id = str(release_id or "")
-        self.stop_lease_timeout = max(0.01, float(stop_lease_timeout))
-        self._stop_leases: dict[str, tuple[str, dict[str, Any]]] = {}
-        self._stop_lease_lock = threading.Lock()
-        self._admission_lock = threading.RLock()
-        self._draining = False
-        # The RuntimeReleaseMonitor, when this runtime watches for releases.
-        self.release_monitor = None
-        self.socket_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        try:
-            self.socket_path.parent.chmod(0o700)
-        except OSError:
-            pass
-        if self.socket_path.exists() or self.socket_path.is_symlink():
-            if not self.socket_path.is_socket():
-                raise RuntimeProtocolError(
-                    f"refusing to replace non-socket runtime path: {self.socket_path}")
-            if RuntimeClient(self.socket_path, timeout=0.5).ping():
-                raise RuntimeProtocolError(
-                    f"agent runtime is already running: {self.socket_path}")
-            # A socket that cannot answer the versioned status call is stale.
-            self.socket_path.unlink()
-        super().__init__(str(self.socket_path), _RuntimeRequestHandler)
-        self.socket_path.chmod(0o600)
-
-    @staticmethod
-    def _default_status() -> dict[str, Any]:
-        from . import turn_dispatch
-        return turn_dispatch.runtime_status()
-
-    def dispatch_request(self, method: str, params: dict[str, Any]) -> dict:
-        with self._admission_lock:
-            if self._draining and method in {
-                "dispatch", "dispatch_queued", "recover_queued", "steer",
-            }:
-                return {"ok": False, "status": 503,
-                        "error": "agent runtime is draining for an update"}
-            return self._dispatch_request(method, params)
-
-    def _dispatch_request(self, method: str, params: dict[str, Any]) -> dict:
-        if method in {"interrupt", "interrupt_any", "steer", "begin_stop", "release_agent"}:
-            from . import agents as agents_db
-            agent = agents_db.get_by_agent_id(str(params.get("agent_id") or ""))
-            if agent and not agents_db.interaction_capabilities(agent)["can_restart"]:
-                return {"ok": False, "status": 409,
-                        "error": "Janitors are managed from their maintenance configuration"}
-        if method == "recover_janitor_quota":
-            from .janitor_autonomy import runtime_recover
-            return {"ok":True,"result":runtime_recover(str(params.get("provider") or ""),str(params.get("owner_id") or ""),params.get("generation"),str(params.get("approval_id") or ""))}
-        if method == "cancel_janitor_run":
-            from . import turn_dispatch
-            try:
-                result = turn_dispatch.cancel_janitor_run(
-                    self.dispatch_service.ctx, str(params.get("run_id") or ""),
-                    backend_registry=self.dispatch_service.backends)
-            except turn_dispatch.DispatchError as exc:
-                return {"ok": False, "status": exc.status, "error": str(exc)}
-            return {"ok": True, "result": result}
-        if method == "status":
-            return {"ok": True, "result": {
-                "protocol_version": PROTOCOL_VERSION,
-                "capabilities": {"janitor_runs": True},
-                "draining": self._draining,
-                "release_id": self.release_id,
-                "drain": self._drain_status(),
-                **dict(self.status_provider()),
-            }}
-        if method == "recover_queued":
-            return {"ok": True,
-                    "result": int(self.dispatch_service.recover_queued())}
-        if method == "live_snapshot":
-            hub = getattr(self, "live_hub", None)
-            if hub is None:
-                return {"ok": False, "status": 404, "error": "no live items here"}
-            snapshot = hub.snapshot(
-                session=str(params.get("session") or ""),
-                agent_id=str(params.get("agent_id") or ""))
-            return {"ok": True, "result": snapshot or {"epoch": hub.epoch, "missing": True}}
-        if method == "live_observe":
-            hub = getattr(self, "live_hub", None)
-            if hub is None:
-                return {"ok": False, "status": 404, "error": "no live items here"}
-            from . import live_hub as _live_hub
-            detail = params.get("detail") if isinstance(params.get("detail"), dict) else {}
-            _live_hub._observe(hub, str(params.get("agent_id") or ""), str(params.get("event") or ""),
-                               str(params.get("to_state") or ""), detail)
-            return {"ok": True}
-        if method == "live_patch":
-            hub = getattr(self, "live_hub", None)
-            fields = params.get("fields")
-            if hub is None or not isinstance(fields, dict):
-                return {"ok": False, "status": 404, "error": "no live items here"}
-            hub.patch(str(params.get("agent_id") or ""), str(params.get("item_id") or ""), fields)
-            return {"ok": True}
-        if method == "explanation_command":
-            # Codex items are handled in this process; the explainer runs in
-            # the HTTP server (see tool_explanation_commands).
-            from . import tool_explanation_commands
-            return {"ok": True, "result": tool_explanation_commands.answer(
-                str(params.get("agent_id") or ""), str(params.get("label") or ""))}
-        if method in {"interrupt", "interrupt_any", "steer"}:
-            from . import backends
-            agent_id = str(params.get("agent_id") or "")
-            if not agent_id:
-                return {"ok": False, "status": 400,
-                        "error": "agent_id is required"}
-            if method == "interrupt":
-                result = backends.interrupt(
-                    str(params.get("backend") or ""), agent_id)
-            elif method == "interrupt_any":
-                result = backends.interrupt_any(agent_id)
-            else:
-                result = backends.steer_turn(
-                    str(params.get("backend") or ""), agent_id,
-                    str(params.get("text") or ""),
-                    client_msg_id=str(params.get("client_msg_id") or ""),
-                    synthesize_audio=bool(params.get("synthesize_audio")),
-                )
-            return {"ok": True, "result": result}
-        if method == "begin_stop":
-            from . import backends, turn_dispatch, turn_queue
-            agent_id = str(params.get("agent_id") or "")
-            backend = str(params.get("backend") or "")
-            if not agent_id:
-                return {"ok": False, "status": 400,
-                        "error": "agent_id is required"}
-            snapshot, dropped, queue_was_paused = turn_dispatch.begin_stop(agent_id)
-            try:
-                terminated = int(backends.interrupt(backend, agent_id) or 0)
-            except Exception as exc:
-                turn_dispatch.restore_stop_state(agent_id, snapshot)
-                turn_queue.set_paused(agent_id, queue_was_paused)
-                return {"ok": False, "status": 502, "error": str(exc)}
-            if (bool(params.get("strict")) and snapshot.get("trace_id")
-                    and terminated <= 0 and not snapshot.get("account_recovery_parked")):
-                turn_dispatch.restore_stop_state(agent_id, snapshot)
-                turn_queue.set_paused(agent_id, queue_was_paused)
-                return {"ok": False, "status": 502,
-                        "error": "backend did not confirm interruption"}
-            lease_id = ""
-            if bool(params.get("hold", True)):
-                lease_id = f"stop-{uuid.uuid4()}"
-                with self._stop_lease_lock:
-                    self._stop_leases[lease_id] = (agent_id, snapshot)
-                timer = threading.Timer(
-                    self.stop_lease_timeout,
-                    self._expire_stop_lease,
-                    args=(lease_id,),
-                )
-                timer.daemon = True
-                timer.start()
-            else:
-                turn_dispatch.complete_stop(
-                    self.dispatch_service.ctx, agent_id, snapshot, set(),
-                    backend_registry=self.dispatch_service.backends)
-            return {"ok": True, "result": {
-                "lease_id": lease_id,
-                "trace_id": str(snapshot.get("trace_id") or ""),
-                "terminated": terminated,
-                "dropped": dropped,
-            }}
-        if method == "finish_stop":
-            lease_id = str(params.get("lease_id") or "")
-            with self._stop_lease_lock:
-                lease = self._stop_leases.pop(lease_id, None)
-            if lease is None:
-                return {"ok": False, "status": 404,
-                        "error": "runtime stop lease not found"}
-            from . import turn_dispatch
-            agent_id, snapshot = lease
-            turn_dispatch.complete_stop(
-                self.dispatch_service.ctx, agent_id, snapshot,
-                {str(item) for item in (
-                    params.get("cancelled_trace_ids") or [])},
-                backend_registry=self.dispatch_service.backends)
-            return {"ok": True, "result": True}
-        if method == "release_leaked_slots":
-            agent_id = str(params.get("agent_id") or "")
-            if not agent_id:
-                return {"ok": False, "status": 400,
-                        "error": "agent_id is required"}
-            release_leaked = getattr(
-                self.dispatch_service, "release_leaked_slots", None)
-            if release_leaked is None:
-                return {"ok": False, "status": 501,
-                        "error": "this runtime cannot release leaked slots"}
-            return {"ok": True, "result": release_leaked(agent_id=agent_id)}
-        if method == "repair_slot":
-            agent_id = str(params.get("agent_id") or "")
-            if not agent_id:
-                return {"ok": False, "status": 400,
-                        "error": "agent_id is required"}
-            repair = getattr(self.dispatch_service, "repair_slot", None)
-            if repair is None:
-                return {"ok": False, "status": 501,
-                        "error": "this runtime cannot repair slots"}
-            try:
-                result = repair(agent_id, actor=str(params.get("actor") or ""),
-                                reason=str(params.get("reason") or ""),
-                                actor_verified=params.get("actor_verified") is True)
-            except ValueError as exc:
-                return {"ok": False, "status": 400, "error": str(exc)}
-            return {"ok": True, "result": result}
-        if method == "release_agent":
-            from . import agents as agents_db, backends, turn_dispatch
-            agent_id = str(params.get("agent_id") or "")
-            if not agent_id:
-                return {"ok": False, "status": 400,
-                        "error": "agent_id is required"}
-            turn_dispatch.clear_for_agent(agent_id)
-            terminated = int(backends.interrupt_any(agent_id) or 0)
-            agents_db.soft_delete(agent_id)
-            return {"ok": True, "result": terminated}
-        if method == "goal":
-            from . import agents as agents_db
-            from . import backends
-            agent_id = str(params.get("agent_id") or "")
-            agent = agents_db.get_by_agent_id(agent_id)
-            if not agent:
-                return {"ok": False, "status": 404, "error": "no such agent"}
-            try:
-                result = backends.goal(
-                    str(agent.get("backend") or ""), agent_id,
-                    str(params.get("action") or ""),
-                    objective=str(params.get("objective") or ""),
-                    stream=self.dispatch_service.ctx.stream)
-            except backends.GoalUnsupported as exc:
-                return {"ok": False, "status": 501, "error": str(exc)}
-            except ValueError as exc:
-                return {"ok": False, "status": 400, "error": str(exc)}
-            except Exception as exc:  # noqa: BLE001 - the app-server answer is the message
-                from .log import log_exception
-                log_exception("runtimeGoalFail", exc, detail=agent_id)
-                return {"ok": False, "status": 502, "error": str(exc)}
-            return {"ok": True, "result": result}
-        if method == "compact":
-            from . import compaction
-            session = str(params.get("session") or "").strip()
-            if not session:
-                return {"ok": False, "status": 400,
-                        "error": "session is required"}
-            return {"ok": True, "result": compaction.compact_session(session)}
-        if method == "dispatch_queued":
-            result = self.dispatch_service.dispatch_queued(
-                str(params.get("queue_id") or ""))
-            return {"ok": True, "result": dataclasses.asdict(result)}
-        if method == "dispatch":
-            from .turn_dispatch import DispatchCommand
-            try:
-                command = DispatchCommand.from_wire(params)
-            except ValueError as exc:
-                return {"ok": False, "status": 400, "error": str(exc)}
-            # This side owns turns: the command is admitted here, once.
-            submit = getattr(self.dispatch_service, "submit", None)
-            try:
-                result = (submit(command) if submit is not None
-                          else self.dispatch_service.dispatch(**command.as_kwargs()))
-            except Exception as exc:
-                from .turn_dispatch import DispatchError
-                if isinstance(exc, DispatchError):
-                    return {"ok": False, "status": exc.status,
-                            "error": str(exc)}
-                raise
-            return {"ok": True, "result": dataclasses.asdict(result)}
-        return {"ok": False, "status": 404,
-                "error": f"unknown runtime method: {method}"}
-
-    def begin_drain_if_idle(self) -> bool:
-        """Fence new work exactly when no runtime-owned work remains."""
-        with self._admission_lock:
-            if self._draining:
-                return True
-            with self._stop_lease_lock:
-                if self._stop_leases:
-                    return False
-            # A slot whose turn settled without releasing it would hold the
-            # handoff off forever; give those back before judging idleness.
-            release_leaked = getattr(
-                self.dispatch_service, "release_leaked_slots", None)
-            if release_leaked is not None:
-                release_leaked()
-            status = dict(self.status_provider())
-            if (status.get("active") or status.get("spawning")
-                    or status.get("terminals") or status.get("queued")
-                    or status.get("compactions")):
-                return False
-            self._draining = True
-            return True
-
-    # --- graceful release drain (driven by runtime_release) -----------------
-    #
-    # The soft fence lives in turn_dispatch (no turn starts; sends are admitted
-    # to the durable queue). ``seal_if_drained`` turns it into today's hard
-    # fence (``_draining``: dispatch RPCs answer 503) at the moment nothing the
-    # runtime owns is left, so the handoff and the new runtime's recovery are
-    # exactly as before.
-
-    def begin_admission_fence(self) -> None:
-        with self._admission_lock:
-            self.dispatch_service.begin_admission_fence()
-
-    def release_admission_fence(self) -> None:
-        """Lift the soft fence and start the held work, losing and repeating
-        nothing: every held spec is still queued exactly once."""
-        with self._admission_lock:
-            if self._draining:
-                raise RuntimeProtocolError("runtime is sealed for its handoff")
-            from . import turn_dispatch
-            turn_dispatch.log_held_order("revert")
-            self.dispatch_service.lower_admission_fence()
-        # Launches run outside the admission lock, like any queued handoff.
-        self.dispatch_service.start_held_work()
-
-    def handover_blockers(self) -> dict[str, list[str]]:
-        """Everything the runtime genuinely owns that a handoff would cut
-        short, by kind (empty when the runtime may hand over).
-
-        Held queued work is not a blocker once it is durable: the next
-        runtime recovers it. A slot whose turn settled without releasing it is
-        given back first (it would otherwise block for ever)."""
-        with self._stop_lease_lock:
-            leases = sorted(agent for agent, _ in self._stop_leases.values())
-        release_leaked = getattr(
-            self.dispatch_service, "release_leaked_slots", None)
-        if release_leaked is not None:
-            release_leaked()
-        status = dict(self.status_provider())
-        blockers = {
-            "stop_leases": leases,
-            "active": sorted(status.get("active") or ()),
-            "spawning": sorted(status.get("spawning") or ()),
-            "terminals": sorted(status.get("terminals") or ()),
-            "compactions": sorted(status.get("compactions") or ()),
-            "provider_turns": sorted(status.get("provider_turns") or ()),
-            "unpersisted": sorted(status.get("unpersisted") or ()),
-        }
-        for key, value in status.items():
-            if key.endswith("_account_recovery") and isinstance(value, dict):
-                waiting = sorted(value.get("waiting") or ())
-                if self.account_recovery_carry is None:
-                    if value.get("recovering") and not waiting:
-                        waiting = ["<recovering>"]
-                elif value.get("checking"):
-                    # A recovery pass (and maybe the selector) is running;
-                    # never cut it short. A recovery with nothing parked
-                    # otherwise carries over (resume_account_recovery).
-                    waiting = waiting or ["<checking>"]
-                blockers[key] = waiting
-        return {key: value for key, value in blockers.items() if value}
-
-    def only_account_recovery(self, blockers: dict[str, list[str]]) -> bool:
-        return self._only_account_recovery(blockers)
-
-    def seal_now(self) -> dict[str, list[str]]:
-        """The natural drain's one step at a zero-blocker moment: fence, check
-        and seal atomically (no RPC runs meanwhile), or lower the fence at
-        once and start whatever arrived. Returns the blockers; empty means
-        sealed. The fence never outlasts this call."""
-        with self._admission_lock:
-            if self._draining:
-                return {}
-            self.dispatch_service.begin_admission_fence()
-            blockers = self.seal_if_drained()
-            if blockers:
-                from . import turn_dispatch
-                turn_dispatch.log_held_order("seal_missed")
-                self.dispatch_service.lower_admission_fence()
-        if blockers:
-            # Launches run outside the admission lock, like any handoff.
-            self.dispatch_service.start_held_work()
-        return blockers
-
-    def _only_account_recovery(self, blockers: dict[str, list[str]]) -> bool:
-        """Whether every blocker is account-recovery parked work (whose slot
-        shows it active and spawning too), so a hand-over may clear them."""
-        parked: set[str] = set()
-        for key, value in blockers.items():
-            if key.endswith("_account_recovery"):
-                if any(item.startswith("<") for item in value):
-                    return False
-                parked.update(value)
-        if not parked:
-            return False
-        for key, value in blockers.items():
-            if key.endswith("_account_recovery"):
-                continue
-            if key not in ("active", "spawning") or not set(value) <= parked:
-                return False
-        return True
-
-    def seal_if_drained(self) -> dict[str, list[str]]:
-        """Behind the soft fence, raise the hard fence when nothing is owned.
-        Returns the blockers; empty means sealed (``draining``)."""
-        with self._admission_lock:
-            if self._draining:
-                return {}
-            if not self.dispatch_service.admission_fenced():
-                return {"fence": ["not raised"]}
-            self.dispatch_service.persist_held()
-            self.dispatch_service.refresh_hold_headlines()
-            blockers = self.handover_blockers()
-            transfer = getattr(self.dispatch_service, "transfer_recovery_parks", None)
-            refused: dict[str, str] = {}
-            if (blockers and transfer is not None
-                    and self.account_recovery_carry is not None
-                    and self._only_account_recovery(blockers)):
-                refused = dict(transfer().get("refused") or {})
-                blockers = self.handover_blockers()
-            if blockers:
-                if refused:
-                    blockers = {**blockers, "account_recovery_refused": sorted(
-                        f"{agent}:{reason}" for agent, reason in refused.items())}
-                return blockers
-            if self.account_recovery_carry is not None:
-                from . import turn_dispatch
-                from .runtime_release import write_account_recovery_carry
-                try:
-                    write_account_recovery_carry(
-                        self.account_recovery_carry,
-                        turn_dispatch.account_recovery_carry(
-                            handed_over=getattr(
-                                self.dispatch_service, "handed_over", None)))
-                except OSError as exc:
-                    from .log import log_exception
-                    log_exception("accountRecoveryCarryFail", exc)
-                    return {"account_recovery_carry": ["<write failed>"]}
-            self._draining = True
-            from . import turn_dispatch
-            turn_dispatch.log_held_order("seal")
-            # The held work now waits for the next runtime, which recovers it.
-            self.dispatch_service.clear_hold_headlines()
-            return {}
-
-    def cancel_handover(self) -> None:
-        """Undo a seal whose target vanished before shutdown (a rollback).
-        Work handed over from account recovery is held work again; lifting
-        the fence starts it first."""
-        with self._admission_lock:
-            self._draining = False
-            if self.account_recovery_carry is not None:
-                try:
-                    self.account_recovery_carry.unlink()
-                except FileNotFoundError:
-                    pass
-
-    def _drain_status(self) -> dict[str, Any]:
-        monitor = self.release_monitor
-        return monitor.status() if monitor is not None else {"phase": "idle"}
-
-    def _expire_stop_lease(self, lease_id: str) -> None:
-        with self._stop_lease_lock:
-            lease = self._stop_leases.pop(lease_id, None)
-        if lease is None:
-            return
-        from . import turn_dispatch
-        agent_id, snapshot = lease
-        try:
-            turn_dispatch.complete_stop(
-                self.dispatch_service.ctx, agent_id, snapshot, set(),
-                backend_registry=self.dispatch_service.backends)
-        except Exception as exc:  # noqa: BLE001 - never strand the expiry thread
-            try:
-                from .log import log_exception
-                log_exception("runtimeStopLeaseExpiryFail", exc, detail=agent_id)
-            except Exception:
-                pass
-
-    def server_close(self) -> None:
-        # Open live streams end with the server, so the HTTP side notices.
-        self.live_closed = True
-        super().server_close()
-        try:
-            if self.socket_path.is_socket():
-                self.socket_path.unlink()
-        except OSError:
-            pass

@@ -99,6 +99,9 @@ fn connects_loads_the_roster_and_opens_the_first_chat() {
     assert!(d.changes.contains(&Change::Connection) && d.changes.contains(&Change::Roster));
     d.until("rachel's transcript", |e| e.selected_session() == "rachel" && e.conversation("rachel").is_some_and(|c| c.rows().len() == 2));
     assert!(d.changes.contains(&Change::Selection));
+    // /select and /log are separate requests: the rows can arrive before the
+    // Host has recorded the selection.
+    d.until("the Host was told rachel is selected", |_| host.requests("POST", "/select").last().is_some_and(|r| r["body"]["session"] == "rachel"));
     assert_eq!(host.requests("POST", "/select").last().unwrap()["body"]["session"], "rachel");
     assert!(d.engine.error().is_empty());
 }

@@ -249,3 +249,96 @@ def test_agent_engine_chain_is_validated_and_kept_in_order(keys):
     assert status["agent_engines"] == {"mochi": "google:chirp_3,elevenlabs:scribe_v2"}
     with pytest.raises(ValueError):
         stt_providers.update_settings({"agent_engines": {"Mochi": "google:chirp_3,nope:x"}})
+
+
+# ---- L1: a save never reverts or validates against a stale omitted setting --------------------
+
+def _competing_save(monkeypatch, other):
+    """Run `other` (another settings save) after this save read its inputs and
+    before it opens its transaction: the race between two clients' saves."""
+    from contextlib import contextmanager
+    from lib import settings_store
+    real = settings_store.transaction
+
+    @contextmanager
+    def transaction():
+        monkeypatch.setattr(settings_store, "transaction", real)
+        other()
+        with real():
+            yield
+    monkeypatch.setattr(settings_store, "transaction", transaction)
+
+
+def _stored():
+    value = stt_providers.status()
+    return value["engine"], value["turn_taking"], value["call_languages"]
+
+
+def test_L1_a_policy_save_keeps_a_concurrent_engine_change(keys, monkeypatch):
+    stt_providers.update_settings({"engine": "google:chirp_3"})
+    _competing_save(monkeypatch, lambda: stt_providers.update_settings({"engine": "elevenlabs:scribe_v2"}))
+    stt_providers.update_settings({"call_languages": "no"})
+    assert _stored() == ("elevenlabs:scribe_v2", "native", "no")
+
+
+def test_L1_a_policy_save_keeps_a_concurrent_turn_taking_save(keys, monkeypatch):
+    stt_providers.update_settings({"engine": "deepgram:nova-3"})
+    _competing_save(monkeypatch, lambda: stt_providers.update_settings({"turn_taking": "provider"}))
+    stt_providers.update_settings({"call_languages": "no"})
+    assert _stored() == ("deepgram:nova-3", "provider", "no")
+
+
+def test_L1_a_turn_taking_save_keeps_a_concurrent_engine_change(keys, monkeypatch):
+    stt_providers.update_settings({"engine": "google:chirp_3"})
+    _competing_save(monkeypatch, lambda: stt_providers.update_settings({"engine": "elevenlabs:scribe_v2"}))
+    stt_providers.update_settings({"turn_taking": "native"})
+    assert _stored() == ("elevenlabs:scribe_v2", "native", "")
+
+
+def test_L1_a_policy_the_current_engine_cannot_take_is_refused_and_not_written(keys, monkeypatch):
+    stt_providers.update_settings({"engine": "google:chirp_3"})
+    _competing_save(monkeypatch, lambda: stt_providers.update_settings({"engine": "local"}))
+    with pytest.raises(ValueError) as err:
+        stt_providers.update_settings({"call_languages": "no"})          # fine for chirp, not small.en
+    assert "can never work" in str(err.value)
+    assert _stored() == ("local", "native", "")
+    assert stt_providers.status()["call_policy_error"] == ""
+
+
+def test_L1_an_engine_the_current_turn_taking_cannot_use_is_refused_and_not_written(keys, monkeypatch):
+    stt_providers.update_settings({"engine": "deepgram:nova-3"})
+    _competing_save(monkeypatch, lambda: stt_providers.update_settings({"turn_taking": "provider"}))
+    with pytest.raises(ValueError) as err:
+        stt_providers.update_settings({"engine": "elevenlabs:scribe_v2"})  # detects no turns
+    assert "provider-owned turn taking" in str(err.value)
+    assert _stored() == ("deepgram:nova-3", "provider", "")
+
+
+def test_L1_an_uncontended_save_is_unchanged(keys):
+    """Pin: green before and after L1."""
+    out = stt_providers.update_settings({"engine": "deepgram:nova-3", "turn_taking": "provider",
+                                         "call_languages": "no", "long_form_threshold_sec": 120})
+    assert (out["engine"], out["turn_taking"], out["call_languages"]) == ("deepgram:nova-3", "provider", "no")
+    assert out["long_form_threshold_sec"] == 120
+    out = stt_providers.update_settings({"call_engines": "google:chirp_3"})
+    assert (out["engine"], out["turn_taking"], out["call_languages"], out["call_engines"]) == (
+        "deepgram:nova-3", "provider", "no", "google:chirp_3")
+    with pytest.raises(ValueError):
+        stt_providers.update_settings({"turn_taking": "provider", "engine": "google:chirp_3"})
+    assert _stored() == ("deepgram:nova-3", "provider", "no")
+
+
+# ---- an explicit null is not an omission (as at 006e9e70 and a99cd589) ----------------------
+
+@pytest.mark.parametrize("key", ["engine", "turn_taking"])
+def test_an_explicit_null_engine_or_turn_taking_is_refused_and_nothing_is_written(keys, key):
+    stt_providers.update_settings({"engine": "deepgram:nova-3", "turn_taking": "provider"})
+    with pytest.raises(ValueError) as err:
+        stt_providers.update_settings({key: None, "call_languages": "no"})
+    assert str(err.value) == "engine and turn_taking must be strings"
+    assert _stored() == ("deepgram:nova-3", "provider", "")
+
+
+def test_omitting_engine_and_turn_taking_keeps_them():
+    stt_providers.update_settings({"engine": "google:chirp_3"})
+    assert stt_providers.update_settings({"call_languages": "no"})["engine"] == "google:chirp_3"

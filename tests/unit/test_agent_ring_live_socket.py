@@ -13,9 +13,11 @@ from __future__ import annotations
 import base64
 import json
 import queue
+import socket
 import struct
 import threading
 import time
+import weakref
 
 import pytest
 import websocket
@@ -175,8 +177,64 @@ def _wait(cond, timeout=15.0):
     raise AssertionError("condition not met")
 
 
+def _settles(cond, timeout=15.0):
+    """Wait (bounded) for what retire() finishes on other threads after the serve
+    thread ends: the upstream close runs on its own worker by design. Returns on
+    timeout too, so the assert after it reports the actual values."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            if cond():
+                return
+        except (IndexError, KeyError, StopIteration):
+            pass  # not there yet
+        time.sleep(0.01)
+
+
+_SERVED: list = []      # (thread, handler) of every serve a test starts through _serve
+
+
+@pytest.fixture(autouse=True)
+def _live_lifecycle(monkeypatch):
+    """No live session or agent-live thread outlives its test. Every LiveSocket the test creates is retired, a serve
+    still waiting for frames gets EOF, and every serve and agent-live-* thread started during the test is joined.
+    The yielded callable does that cleanup (the `call` fixture runs it before its reset); this teardown runs it
+    again and fails the test if any such thread survives."""
+    before = set(threading.enumerate())
+    made, served = weakref.WeakSet(), []    # every LiveSocket created in this test (a live one is held by its threads)
+    real_init = sock.LiveSocket.__init__
+
+    def tracked_init(self, *args, **kwargs):
+        real_init(self, *args, **kwargs)
+        made.add(self)
+    monkeypatch.setattr(sock.LiveSocket, "__init__", tracked_init)
+
+    def ours():
+        return [t for t in threading.enumerate() if t not in before and t.is_alive()
+                and (t.name.startswith("agent-live-") or any(t is s for s, _h in served))]
+
+    def end():
+        served.extend(_SERVED)
+        _SERVED.clear()
+        for session in list(made):
+            if not session.closed.is_set():
+                session.retire("test_teardown")
+        for thread, handler in served:
+            if thread.is_alive():
+                handler.connection.shutdown(socket.SHUT_RDWR)   # EOF for a serve still waiting on frames
+        deadline = time.monotonic() + 15.0
+        while ours() and time.monotonic() < deadline:          # a retire can start close/goodbye threads
+            for thread in ours():
+                thread.join(max(0.0, deadline - time.monotonic()))
+        return [t.name for t in ours()]
+
+    yield end
+    survivors = end()
+    assert not survivors, f"live session threads outlived the test: {survivors}"
+
+
 @pytest.fixture
-def call(sander, monkeypatch):
+def call(sander, monkeypatch, _live_lifecycle):
     """A Live-answered ring, a fake upstream and clean voice-ownership claims."""
     def reset():
         with oracle_realtime._ACTIVE_LOCK:
@@ -200,6 +258,8 @@ def call(sander, monkeypatch):
     monkeypatch.setattr(config, "load", lambda: Cfg())
     state = type("Call", (), {"grant": grant, "up": up, "connects": connects, "env": sander})()
     yield state
+    survivors = _live_lifecycle()
+    assert not survivors, f"live session threads outlived the test: {survivors}"   # before the registry reset
     reset()
 
 
@@ -212,6 +272,7 @@ def _join(grant, **change):
 def _serve(handler):
     thread = threading.Thread(target=sock.serve, args=(handler,), daemon=True)
     thread.start()
+    _SERVED.append((thread, handler))
     return thread
 
 
@@ -281,6 +342,7 @@ def test_a_live_call_joins_opens_once_talks_and_hangs_up(call):
     closed = h.wfile.frames()[-1]
     assert closed == {"type": "agent_live.closed", "call_id": g["call_id"], "call_epoch": 1,
                       "attempt_id": g["attempt_id"], "reason": "user_hangup"}
+    _settles(lambda: _ring_of(g)["_live_phase"] == "retired" and call.up.of("session.close") and call.up.closed)
     assert _ring_of(g)["_live_phase"] == "retired" and call.up.of("session.close") and call.up.closed
     assert oracle_realtime._ACTIVE_PRINCIPALS == {} and live._SESSIONS == {}
     assert g["owner_nonce"] not in bytes(h.wfile.data).decode(errors="replace")
@@ -475,6 +537,7 @@ def test_an_http_close_retires_authority_then_ends_the_socket(call):
     assert out["state"] == "retired"
     thread.join(15)
     assert not thread.is_alive() and h.wfile.frames()[-1]["type"] == "agent_live.closed"
+    _settles(lambda: h.wfile.frames()[-1]["reason"] == "user_hangup" and call.up.closed)
     assert h.wfile.frames()[-1]["reason"] == "user_hangup" and call.up.closed
 
 
@@ -491,6 +554,7 @@ def test_a_lost_phone_ends_the_call(call):
     h, thread = _admitted(call)
     h.rfile.close()
     thread.join(15)
+    _settles(lambda: _ring_of(call.grant)["_live_retired_reason"] == "transport_lost" and call.up.closed)
     assert _ring_of(call.grant)["_live_retired_reason"] == "transport_lost" and call.up.closed
 
 

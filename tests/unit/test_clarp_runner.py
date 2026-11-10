@@ -27,6 +27,7 @@ from lib import config                # noqa: E402
 from lib import agents as agents_db    # noqa: E402
 from lib.backend.registry import by_id  # noqa: E402
 from lib.protocol import SSEType       # noqa: E402
+from lib.claude_reply_evidence import REPLY_CODEC  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -500,6 +501,33 @@ def test_spawn_turn_drainer_is_daemon_so_python_can_exit(fake_clarp, tmp_path):
     assert handle.drain_thread.daemon is True
 
 
+def test_isolated_turn_delivers_only_the_last_results_assistant_text(fake_clarp, tmp_path):
+    """A resumed process may answer a background task before the requested turn."""
+    fake_clarp([
+        {"type": "system", "subtype": "init", "session_id": "multi-result"},
+        {"type": "assistant", "message": {"content": "Background answer"}},
+        {"type": "result", "subtype": "success", "result": "background"},
+        {"type": "stream_event", "event": {
+            "type": "content_block_delta", "delta": {"type": "text_delta", "text": "Final "}}},
+        {"type": "stream_event", "event": {
+            "type": "content_block_delta", "delta": {"type": "text_delta", "text": "answer"}}},
+        {"type": "result", "subtype": "success", "result": "requested"},
+    ])
+    results, errors = [], []
+    handle = CLAUDE.start_turn(
+        text="requested", cwd=tmp_path, isolated=True,
+        on_result=results.append, on_error=errors.append)
+    handle.wait(timeout=5)
+    handle.drain_thread.join(timeout=5)
+    assert not handle.drain_thread.is_alive()
+    assert errors == []
+    assert results == [{"type": "result", "subtype": "success",
+                        "result": "requested", "_assistant_text": "Final answer",
+                        "_clarp_reply_provider": REPLY_CODEC, "_clarp_reply_evidence": {
+                            "synthetic_seen": False, "genuine_text_seen": False,
+                            "genuine_tool_seen": False, "unknown_assistant_seen": True}}]
+
+
 def test_spawn_turn_callback_exception_is_isolated(fake_clarp, tmp_path):
     """A bad on_session_init must not crash the drainer thread or
     prevent subsequent events (result) from firing."""
@@ -875,3 +903,314 @@ def test_a_resumed_session_that_runs_queued_notifications_first_ends_its_turn_on
     assert results[0]["duration_ms"] == 9000
     assert results[0]["_assistant_text"] == "the real answer"
     assert errs == []
+
+
+@pytest.mark.parametrize('wrapped', [False, True])
+def test_synthetic_provider_message_never_reaches_live_items_rows_or_result(fake_clarp, tmp_path, wrapped):
+    from lib import live_hub, turn_lifecycle
+    from lib.turn_lifecycle import TurnEvent
+    agent_id = agents_db.create_agent(persona='Synthetic fixture', voice_id='V',
+                                      cwd=str(tmp_path), session='synthetic-fixture')
+    agents_db.start_runtime(agent_id, 'synthetic-fixture')
+    hub = live_hub.LiveHub(sink=lambda _event: None)
+    live_hub.install(hub)
+    synthetic = '<speak>This is SDK synthetic content.</speak>'
+    real = 'A genuine final answer.'
+
+    def streamed(message_id, model, text):
+        return [
+            {'type': 'stream_event', 'event': {'type': 'message_start',
+             'message': {'id': message_id, 'role': 'assistant', 'model': model}}},
+            {'type': 'stream_event', 'event': {'type': 'content_block_start', 'index': 0,
+             'content_block': {'type': 'text', 'text': text}}},
+            {'type': 'stream_event', 'event': {'type': 'content_block_stop', 'index': 0}},
+            {'type': 'stream_event', 'event': {'type': 'message_stop'}},
+        ]
+
+    records = [{'type': 'system', 'subtype': 'init', 'session_id': 'sid-synthetic'}]
+    if wrapped:
+        records += streamed('sdk-synthetic', '<synthetic>', synthetic)
+    else:
+        records += [{'type': 'assistant', 'message': {'id': 'sdk-synthetic',
+                     'role': 'assistant', 'model': '<synthetic>',
+                     'content': [{'type': 'text', 'text': synthetic}],
+                     'usage': {'input_tokens': 0}}}]
+    records += streamed('actual-answer', 'claude-genuine', real)
+    records += [{'type': 'result', 'subtype': 'success', 'result': real}]
+    fake_clarp(records)
+    results = []
+    try:
+        agents_db.open_turn(agent_id=agent_id, source='pwa', trace_id='trace-synthetic')
+        turn_lifecycle.transition(agent_id, TurnEvent.SPAWN_STARTED, {'trace_id': 'trace-synthetic'})
+        handle = CLAUDE.start_turn(text='synthetic fixture input', cwd=tmp_path,
+            backend_session_id='sid-synthetic', session='synthetic-fixture',
+            agent_id=agent_id, trace_id='trace-synthetic', on_result=results.append)
+        handle.wait(timeout=5)
+        handle.drain_thread.join(timeout=5)
+        rows = agents_db.conn().execute(
+            "SELECT text FROM messages WHERE agent_id=? AND role='assistant' ORDER BY timestamp,seq",
+            (agent_id,)).fetchall()
+        assert [r['text'] for r in rows] == [real]
+        items = hub.snapshot(session='synthetic-fixture')['items']
+        assert [item['id'] for item in items] == ['cl:actual-answer:0']
+        assert results[0]['_assistant_text'] == real
+        assert results[0]['_clarp_reply_evidence'] == {
+            'synthetic_seen': True, 'genuine_text_seen': True,
+            'genuine_tool_seen': False, 'unknown_assistant_seen': False}
+    finally:
+        live_hub.install(None)
+
+
+def test_structurally_genuine_exact_placeholder_phrase_keeps_its_live_row(fake_clarp, tmp_path):
+    agent_id = agents_db.create_agent(persona='Genuine fixture', voice_id='V',
+                                      cwd=str(tmp_path), session='genuine-fixture')
+    fake_clarp([
+        {'type': 'system', 'subtype': 'init', 'session_id': 'sid-genuine'},
+        {'type': 'assistant', 'message': {'id': 'actual-answer', 'role': 'assistant',
+            'model': 'claude-genuine', 'content': [{'type': 'text', 'text': 'No response requested.'}],
+            'usage': {'input_tokens': 0}}},
+        {'type': 'result', 'subtype': 'success', 'result': 'No response requested.'},
+    ])
+    agents_db.open_turn(agent_id=agent_id, source='pwa', trace_id='trace-genuine')
+    handle = CLAUDE.start_turn(text='synthetic positive control', cwd=tmp_path,
+        backend_session_id='sid-genuine', session='genuine-fixture',
+        agent_id=agent_id, trace_id='trace-genuine')
+    handle.wait(timeout=5)
+    handle.drain_thread.join(timeout=5)
+    rows = agents_db.conn().execute(
+        "SELECT text FROM messages WHERE agent_id=? AND role='assistant'", (agent_id,)).fetchall()
+    assert [r['text'] for r in rows] == ['No response requested.']
+
+
+@pytest.mark.parametrize('last_kind', ['synthetic', 'genuine', 'tool', 'unknown-alternate', 'late-old'])
+def test_result_display_uses_only_its_own_structural_reply_evidence(fake_clarp, tmp_path, last_kind):
+    """Real CLI drain -> result callback -> display extractor, including reset.
+
+    The first result is deliberately the opposite provenance. A late snapshot
+    must not manufacture a genuine answer for the second result.
+    """
+    from lib.turn_dispatch import _result_assistant_text
+
+    def assistant(mid, model, text):
+        return {'type': 'assistant', 'message': {'id': mid, 'role': 'assistant',
+                'model': model, 'content': [{'type': 'text', 'text': text}]}}
+
+    synthetic = 'No response requested.'
+    genuine = 'A real answer quoting No response requested.'
+    first_genuine = last_kind in {'synthetic', 'tool', 'unknown-alternate', 'late-old'}
+    first = assistant('prior', 'claude-real' if first_genuine else '<synthetic>',
+                      genuine if first_genuine else synthetic)
+    records = [{'type': 'system', 'subtype': 'init', 'session_id': 'sid-results'}, first,
+               {'type': 'result', 'subtype': 'success', 'result': first['message']['content'][0]['text']}]
+    if last_kind == 'genuine':
+        records += [assistant('new', 'claude-real', genuine)]
+        terminal = {'type': 'result', 'subtype': 'success', 'result': genuine}
+        expected, synthetic_seen, genuine_seen, tool_seen = genuine, False, True, False
+    else:
+        records += [assistant('new', '<synthetic>', synthetic)]
+        terminal = {'type': 'result', 'subtype': 'success', 'result': synthetic,
+                    'usage': {'input_tokens': 0}}
+        expected, synthetic_seen, genuine_seen, tool_seen = '', True, False, False
+        if last_kind == 'tool':
+            records += [{'type': 'assistant', 'message': {'id': 'tool-new', 'model': 'claude-real',
+                         'content': [{'type': 'tool_use', 'id': 'call', 'name': 'Read', 'input': {}}]}}]
+            tool_seen = True
+        elif last_kind == 'unknown-alternate':
+            terminal['last_agent_message'] = 'An unclassified result field must survive.'
+            expected = terminal['last_agent_message']
+        elif last_kind == 'late-old':
+            records += [first]  # same ID from the completed previous result
+    records += [terminal]
+    fake_clarp(records)
+    results, errors = [], []
+    handle = CLAUDE.start_turn(text='result scope fixture', cwd=tmp_path,
+        backend_session_id='sid-results', on_result=results.append, on_error=errors.append)
+    handle.wait(timeout=5)
+    handle.drain_thread.join(timeout=5)
+    assert errors == []
+    assert len(results) == 1  # process terminal ownership remains unchanged
+    result = results[0]
+    assert result['result'] == terminal['result']
+    assert result.get('usage') == terminal.get('usage')
+    assert _result_assistant_text(result) == expected
+    assert result['_clarp_reply_evidence'] == {
+        'synthetic_seen': synthetic_seen, 'genuine_text_seen': genuine_seen,
+        'genuine_tool_seen': tool_seen, 'unknown_assistant_seen': False}
+
+
+@pytest.mark.parametrize('annotation', [
+    {}, {'_assistant_text': None}, {'_assistant_text': ''},
+    {'_assistant_text': None, '_clarp_reply_evidence': {
+        'synthetic_seen': True, 'genuine_text_seen': False, 'genuine_tool_seen': False,
+        'unknown_assistant_seen': False}},
+    {'_assistant_text': None, '_clarp_reply_provider': 'codex', '_clarp_reply_evidence': {
+        'synthetic_seen': True, 'genuine_text_seen': False, 'genuine_tool_seen': False,
+        'unknown_assistant_seen': False}},
+    {'_assistant_text': None, '_clarp_reply_provider': REPLY_CODEC, '_clarp_reply_evidence': {
+        'synthetic_seen': 'yes', 'genuine_text_seen': False, 'genuine_tool_seen': False,
+        'unknown_assistant_seen': False}},
+])
+def test_untrusted_or_absent_reply_annotation_preserves_result_fallback(annotation):
+    from lib.turn_dispatch import _result_assistant_text
+    assert _result_assistant_text({'result': 'Legacy provider answer', **annotation}) == 'Legacy provider answer'
+
+
+def test_reply_evidence_snapshots_are_copies_and_overflow_cannot_certify_an_answer():
+    """Private attempt protocol: consumers may retain result facts after reset.
+
+    The bounded identity window may lose provenance, never turn it into a
+    positive answer fact. No lifecycle decision is asserted here.
+    """
+    from lib.claude_reply_evidence import ClaudeReplyEvidence
+    evidence = ClaudeReplyEvidence()
+    event = {'type': 'assistant', 'message': {'id': 'first', 'model': '<synthetic>',
+             'content': [{'type': 'text', 'text': 'SDK fixture'}]}}
+    assert evidence.suppress_event(event)
+    first = evidence.finish_result()
+    for i in range(300):
+        evidence.suppress_event({'type': 'assistant', 'message': {
+            'id': f'actual-{i}', 'model': 'claude-real',
+            'content': [{'type': 'text', 'text': 'real text'}]}})
+    second = evidence.finish_result()
+    assert first == {'synthetic_seen': True, 'genuine_text_seen': False,
+                     'genuine_tool_seen': False, 'unknown_assistant_seen': False}
+    assert second['unknown_assistant_seen'] is True
+    assert second['synthetic_seen'] is False
+    assert len(evidence._messages) <= 256  # accepted per-attempt resource ceiling
+    assert evidence.finish_result() is None
+
+
+@pytest.mark.parametrize('noise', ['fragmented', 'meta-parent', 'multiblock', 'whitespace'])
+@pytest.mark.parametrize('followed_by_genuine', [False, True])
+def test_suppressed_message_output_cannot_reappear_through_the_terminal_result(
+        fake_clarp, tmp_path, noise, followed_by_genuine):
+    """No full assistant snapshot: output association must follow actual blocks.
+
+    Meta provenance is deliberately not reclassified as synthetic/answered.
+    A second real result proves that suppression cannot terminate the process
+    or contaminate the next result's facts.
+    """
+    from lib.turn_dispatch import _result_assistant_text
+    phrase = 'No response requested.'
+    records = [{'type': 'system', 'subtype': 'init', 'session_id': 'sid-noise'}]
+    if noise != 'meta-parent':
+        records += [
+            {'type': 'stream_event', 'event': {'type': 'message_start', 'message': {
+                'id': 'noise', 'role': 'assistant', 'model': '<synthetic>'}}},
+            {'type': 'stream_event', 'event': {'type': 'content_block_start',
+                'index': 0, 'content_block': {'type': 'text', 'text': ''}}},
+            *[{'type': 'stream_event', 'event': {'type': 'content_block_delta',
+                'index': 0, 'delta': {'type': 'text_delta', 'text': text}}}
+              for text in ([' \tNo response ', 'requested.\n  '] if noise == 'whitespace'
+                           else ['No response ', 'requested.'])],
+            {'type': 'stream_event', 'event': {'type': 'content_block_stop', 'index': 0}},
+            {'type': 'stream_event', 'event': {'type': 'message_stop'}},
+        ]
+        if noise == 'multiblock':
+            # Split the two text pieces into distinct, ordered text blocks.
+            records[4:4] = [
+                {'type': 'stream_event', 'event': {'type': 'content_block_stop', 'index': 0}},
+                {'type': 'stream_event', 'event': {'type': 'content_block_start', 'index': 1,
+                    'content_block': {'type': 'text', 'text': ''}}},
+            ]
+            records[6]['event']['index'] = 1
+            records[7]['event']['index'] = 1
+    else:
+        records += [
+            {'type': 'user', 'isMeta': True, 'uuid': 'meta',
+             'message': {'content': 'Injected resume input'}},
+            {'type': 'assistant', 'parentUuid': 'meta', 'message': {'id': 'noise',
+             'content': [{'type': 'text', 'text': phrase}]}},
+        ]
+    records += [{'type': 'result', 'subtype': 'success', 'result': phrase,
+                 'usage': {'input_tokens': 0, 'output_tokens': 0}}]
+    if followed_by_genuine:
+        records += [
+            {'type': 'user', 'message': {'content': phrase}},
+            {'type': 'assistant', 'message': {'id': 'real', 'model': 'claude-real',
+                'content': [{'type': 'text', 'text': phrase}]}},
+            {'type': 'result', 'subtype': 'success', 'result': phrase,
+             'usage': {'input_tokens': 10, 'output_tokens': 3}},
+        ]
+    fake_clarp(records)
+    results, errors = [], []
+    handle = CLAUDE.start_turn(text='structural noise fixture', cwd=tmp_path,
+        backend_session_id='sid-noise', on_result=results.append, on_error=errors.append)
+    handle.wait(timeout=5)
+    handle.drain_thread.join(timeout=5)
+    assert errors == []
+    assert len(results) == 1
+    assert results[0]['result'] == phrase
+    assert results[0]['usage'] == records[-1]['usage']
+    assert _result_assistant_text(results[0]) == (phrase if followed_by_genuine else '')
+    facts = results[0]['_clarp_reply_evidence']
+    assert facts['genuine_text_seen'] is followed_by_genuine
+    assert facts['synthetic_seen'] is (noise != 'meta-parent' and not followed_by_genuine)
+    assert facts['unknown_assistant_seen'] is (noise == 'meta-parent' and not followed_by_genuine)
+
+
+@pytest.mark.parametrize('proof', [None, False, 1, 'true'])
+def test_meta_display_proof_must_be_present_and_exactly_boolean_true(proof):
+    from lib.turn_dispatch import _result_assistant_text
+    event = {'result': 'Uncertified fallback', '_assistant_text': None,
+             '_clarp_reply_provider': REPLY_CODEC, '_clarp_reply_evidence': {
+                 'synthetic_seen': False, 'genuine_text_seen': False,
+                 'genuine_tool_seen': False, 'unknown_assistant_seen': True}}
+    if proof is not None:
+        event['_clarp_suppressed_reply'] = proof
+    assert _result_assistant_text(event) == 'Uncertified fallback'
+
+
+@pytest.mark.parametrize('uncertain', ['unknown-same-text', 'cross-message', 'overflow', 'truncated'])
+def test_incomplete_or_competing_message_evidence_cannot_create_display_proof(
+        fake_clarp, tmp_path, uncertain):
+    from lib.turn_dispatch import _result_assistant_text
+    phrase = 'No response requested.'
+    def assistant(mid, text, **extra):
+        return {'type': 'assistant', **extra, 'message': {
+            'id': mid, 'model': '<synthetic>', 'content': [{'type': 'text', 'text': text}]}}
+    records = [{'type': 'system', 'subtype': 'init', 'session_id': 'sid-uncertain'}]
+    if uncertain == 'unknown-same-text':
+        records += [{'type': 'user', 'isMeta': True, 'uuid': 'meta',
+                     'message': {'content': 'Injected input'}},
+                    assistant('meta-reply', phrase, parentUuid='meta')]
+        unknown = assistant('unknown', phrase)
+        unknown['message'].pop('model')
+        records += [unknown]
+    elif uncertain == 'cross-message':
+        records += [assistant('one', 'No response '), assistant('two', 'requested.')]
+    elif uncertain == 'overflow':
+        records += [assistant(f'noise-{i}', 'An unrelated SDK message') for i in range(257)]
+        records += [assistant('last', phrase)]
+    else:
+        records += [
+            {'type': 'stream_event', 'event': {'type': 'message_start', 'message': {
+                'id': 'incomplete', 'model': '<synthetic>', 'role': 'assistant'}}},
+            {'type': 'stream_event', 'event': {'type': 'content_block_start', 'index': 0,
+                'content_block': {'type': 'text', 'text': phrase}}},
+        ]  # no block_stop/message_stop: this is a prefix, not a complete reply
+    records += [{'type': 'result', 'subtype': 'success', 'result': phrase}]
+    fake_clarp(records)
+    results = []
+    handle = CLAUDE.start_turn(text='uncertain output fixture', cwd=tmp_path,
+        backend_session_id='sid-uncertain', on_result=results.append)
+    handle.wait(timeout=5)
+    handle.drain_thread.join(timeout=5)
+    assert len(results) == 1
+    assert _result_assistant_text(results[0]) == phrase
+    assert results[0].get('_clarp_suppressed_reply') is not True
+    assert results[0]['result'] == phrase
+
+
+@pytest.mark.parametrize('marker', [None, 'claude', 'codex',
+    'clarp.claude.reply-evidence.v2', 'clarp.claude.reply-evidence.v1.extra',
+    ' clarp.claude.reply-evidence.v1'])
+def test_unrecognised_reply_codec_cannot_authorize_a_display_sentinel(marker):
+    from lib.turn_dispatch import _result_assistant_text
+    event = {'result': 'Legacy fallback', '_assistant_text': None,
+             '_clarp_suppressed_reply': True, '_clarp_reply_evidence': {
+                 'synthetic_seen': True, 'genuine_text_seen': False,
+                 'genuine_tool_seen': False, 'unknown_assistant_seen': False}}
+    if marker is not None:
+        event['_clarp_reply_provider'] = marker
+    assert _result_assistant_text(event) == 'Legacy fallback'

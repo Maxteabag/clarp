@@ -2,6 +2,7 @@ import pytest
 from pathlib import Path
 from types import SimpleNamespace
 
+from tests.patching import patch_shared
 from lib import agents as agents_db
 from lib import heartbeat, team_leader, team_store
 from lib import tts_queue, turn_queue
@@ -518,6 +519,478 @@ def test_connection_drop_is_silently_retried(tmp_path):
     assert agents_db.latest_state(agent_id)["kind"] == AgentState.DONE
 
 
+@pytest.mark.parametrize("steer_result", [None, False, "error"])
+def test_user_followup_queues_without_killing_a_nonsteerable_turn(tmp_path, monkeypatch, steer_result):
+    service, backend, agent_id = _make_service(tmp_path)
+    service.dispatch(text="first", requested_session="mike", trace_id="tA",
+                     client_msg_id="u-first", synthesize_audio=False)
+    first = backend.spawned[0][1]
+    if steer_result is not None:
+        def decline(*args, **kwargs):
+            if steer_result == "error":
+                raise RuntimeError("synthetic steer failure")
+            return False
+        backend.steer_turn = decline
+    cancelled = []
+    monkeypatch.setattr(tts_queue, "cancel", lambda *a, **kw: cancelled.append((a, kw)))
+    followup = service.dispatch(text="second", requested_session="mike", trace_id="tB",
+                                client_msg_id="u-second", synthesize_audio=False)
+    assert backend.interrupted == [] and cancelled == []
+    assert followup.queued and len(backend.spawned) == 1
+    assert _td._INFLIGHT[agent_id] == "tA"
+    assert turn_queue.get("u-second")["text"] == "second"
+    first["on_result"]({"duration_ms": 5})
+    assert [call["trace_id"] for _, call in backend.spawned] == ["tA", "tB"]
+    assert backend.spawned[1][1]["text"] == "second"
+
+
+
+@pytest.mark.parametrize("reply_count", [2, 3])
+@pytest.mark.parametrize("queued_origin", ["user", "agent"])
+@pytest.mark.parametrize("reverse_callbacks", [False, True])
+def test_queued_completion_keeps_its_own_notification_provenance(
+        tmp_path, monkeypatch, queued_origin, reverse_callbacks, reply_count):
+    """Both admissions precede DONE1; each completion owns its cause/reply.
+
+    The peer case exercises the pre-existing explicit queue path and retains
+    agent-chatter suppression, while ordinary user replies must each notify.
+    """
+    import json
+    from lib import apns, db, message_live, message_store, message_writes
+    from lib import prompt_admissions, turn_lifecycle, user_notifications
+    from lib.state_watcher import StateLogWatcher
+
+    clock = [1800000000000]
+    for module in (db, agents_db, message_live, message_writes, turn_lifecycle):
+        patch_shared(monkeypatch, module, "now_ms", lambda: clock[0])
+    monkeypatch.setattr(user_notifications, "SETTLE_TIMEOUT_S", 0)
+    pushed = []
+    monkeypatch.setattr(apns, "on_user_notification", pushed.append)
+    service, backend, agent_id = _make_service(tmp_path)
+    for index in range(1, reply_count + 1):
+        origin = "user" if index == 1 else queued_origin
+        admission = prompt_admissions.create(
+            authenticated_at_admission=True, origin=origin,
+            sender_agent_id="peer-sender" if origin == "agent" else "",
+            channel="chat", observed_at=clock[0],
+            client_admission_id=f"u-notify-{index}",
+            trace_id=f"notify-{index}", original_text="repeat question")
+        result = service.dispatch(
+            text="repeat question", requested_session="mike",
+            trace_id=admission.trace_id, client_msg_id=admission.client_admission_id,
+            origin=origin, sender_agent_id=admission.sender_agent_id,
+            prompt_admission=admission, queue_if_busy=origin == "agent",
+            synthesize_audio=False)
+    assert result.queued and len(backend.spawned) == 1
+    assert backend.interrupted == []
+    assert turn_queue.get("u-notify-2") is not None
+    users = db.conn().execute(
+        "SELECT message_id,trace_id,prompt_admission_id FROM messages "
+        "WHERE agent_id=? AND role='user' ORDER BY seq", (agent_id,)).fetchall()
+    assert {r["trace_id"]: r["message_id"] for r in users} == {
+        f"notify-{i}": f"u-notify-{i}" for i in range(1, (reply_count if queued_origin == "user" else 1) + 1)}
+    assert all(r["prompt_admission_id"] for r in users)
+    # Peer queue visibility is intentionally deferred until its actual launch.
+    # Its immutable admission/queue row already exists before DONE1.
+    assert db.conn().execute(
+        "SELECT COUNT(*) FROM prompt_admissions WHERE agent_id=?", (agent_id,)
+    ).fetchone()[0] == reply_count
+
+    sources = {}
+    for index in range(1, reply_count + 1):
+        clock[0] += 100
+        call = backend.spawned[index - 1][1]
+        row = message_store.upsert_live_assistant_message(
+            agent_id=agent_id, backend_session_id=call["backend_session_id"],
+            trace_id=f"notify-{index}", text=f"Answer {index}.")
+        assert row is not None
+        sources[f"notify-{index}"] = row["id"]
+        clock[0] += 10
+        call["on_result"]({"duration_ms": 10})
+    assert [c["trace_id"] for _, c in backend.spawned] == [
+        f"notify-{i}" for i in range(1, reply_count + 1)]
+    users = db.conn().execute(
+        "SELECT message_id,trace_id,prompt_admission_id FROM messages "
+        "WHERE agent_id=? AND role='user'", (agent_id,)).fetchall()
+    assert {r["trace_id"]: r["message_id"] for r in users} == {
+        f"notify-{i}": f"u-notify-{i}" for i in range(1, reply_count + 1)}
+    assert all(r["prompt_admission_id"] for r in users)
+    dones = db.conn().execute(
+        "SELECT ts,detail FROM state_log WHERE agent_id=? AND kind='done' "
+        "ORDER BY state_id", (agent_id,)).fetchall()
+    assert len(dones) == reply_count
+    stream = _Stream()
+    watcher = StateLogWatcher(stream)
+    for done in reversed(dones) if reverse_callbacks else dones:
+        watcher._classify_completed_turn(
+            agent_id=agent_id, session="mike", persona="Mike",
+            done_ts=done["ts"], detail=json.loads(done["detail"]))
+    notifications = db.conn().execute(
+        "SELECT * FROM user_notifications WHERE agent_id=? ORDER BY done_ts",
+        (agent_id,)).fetchall()
+    assert len(notifications) == reply_count
+    for index, notification in enumerate(notifications, start=1):
+        assert notification["trace_id"] == f"notify-{index}"
+        assert notification["cause_message_id"] == f"u-notify-{index}"
+        assert notification["source_message_id"] == sources[f"notify-{index}"]
+        eligible = int(index == 1 or queued_origin == "user")
+        assert tuple(notification[k] for k in ("notify", "push", "badge", "unread")) == (eligible,) * 4
+    expected = reply_count if queued_origin == "user" else 1
+    assert len(pushed) == expected
+    assert len([e for e in stream.events if e["type"] == "user-notification"]) == expected
+
+
+
+@pytest.mark.parametrize("input_origins,expected_cause,expected_flags", [
+    pytest.param(("user", "user"), 2, (1, 1, 1, 1), id="phone-user"),
+    pytest.param(("user", "agent"), 1, (1, 0, 1, 1), id="peer-after-user"),
+    pytest.param(("user", "watcher"), 2, (1, 1, 1, 1), id="watcher-after-user"),
+    pytest.param(("user", "oracle"), 2, (1, 1, 1, 1), id="oracle-after-user"),
+    pytest.param(("user", "automation"), 2, (1, 1, 1, 1), id="automation-after-user"),
+    pytest.param(("user", "watcher", "agent"), 2, (1, 1, 1, 1), id="watcher-then-peer"),
+    pytest.param(("user", "agent", "watcher"), 3, (1, 1, 1, 1), id="peer-then-watcher"),
+    pytest.param(("agent", "agent"), 1, (0, 0, 0, 0), id="pure-peer"),
+])
+def test_accepted_steer_notification_keeps_user_client_policy(
+        tmp_path, monkeypatch, input_origins, expected_cause, expected_flags):
+    """One native execution: phone USER supersedes desktop, a peer does not.
+
+    This characterizes the durable association before the queued provenance
+    repair: the steered admission retains a distinct request trace.
+    """
+    from lib import db, message_live, message_store, message_writes
+    from lib import prompt_admissions, turn_lifecycle, user_notifications
+
+    clock = [1800000000000]
+    for module in (db, agents_db, message_live, message_writes, turn_lifecycle):
+        patch_shared(monkeypatch, module, "now_ms", lambda: clock[0])
+    monkeypatch.setattr(user_notifications, "SETTLE_TIMEOUT_S", 0)
+    agent_id = agents_db.create_agent(
+        persona="Mike", voice_id="V", cwd=str(tmp_path), session="mike", backend="codex")
+    agents_db.start_runtime(agent_id, "mike")
+    backend = _SteerableBackends()
+    service = TurnDispatchService(
+        SimpleNamespace(default_session="mike", agents_path=tmp_path / "unused.json",
+                        stream=_Stream()), backend_registry=backend, home=tmp_path,
+        uuid_factory=lambda: "backend-session-1")
+    for index, input_origin in enumerate(input_origins, start=1):
+        client = "desktop" if index == 1 else ""
+        clock[0] += 10
+        admission = prompt_admissions.create(
+            authenticated_at_admission=True,
+            origin=input_origin,
+            sender_agent_id="peer-sender" if input_origin == "agent" else "",
+            channel="chat", observed_at=clock[0], client_admission_id=f"u-steer-{index}",
+            trace_id=f"steer-{index}", original_text=f"request {index}", client=client)
+        service.dispatch(text=admission.original_text, requested_session="mike",
+                         trace_id=admission.trace_id, client_msg_id=admission.client_admission_id,
+                         prompt_admission=admission, origin=admission.origin,
+                         sender_agent_id=admission.sender_agent_id, synthesize_audio=False)
+        if index == 1:
+            assert backend.spawned[0][1]["on_session_init"]("native-steer-session")
+    assert len(backend.spawned) == 1 and len(backend.steered) == len(input_origins) - 1
+    assert _td._INFLIGHT[agent_id] == "steer-1"
+    for index, input_origin in enumerate(input_origins, start=1):
+        if input_origin == "agent":
+            assert turn_queue.status(f"u-steer-{index}") == "started"
+    users = db.conn().execute(
+        "SELECT message_id,trace_id FROM messages WHERE agent_id=? AND role='user' "
+        "ORDER BY updated_at", (agent_id,)).fetchall()
+    assert [(r["message_id"], r["trace_id"]) for r in users] == [
+        (f"u-steer-{i}", f"steer-{i}") for i in range(1, len(input_origins) + 1)]
+    assert [(r["trace_id"], r["client"]) for r in db.conn().execute(
+        "SELECT trace_id,client FROM prompt_admissions WHERE agent_id=? ORDER BY observed_at",
+        (agent_id,))] == [(f"steer-{i}", "desktop" if i == 1 else "")
+                           for i in range(1, len(input_origins) + 1)]
+    call = backend.spawned[0][1]
+    clock[0] += 100
+    source = message_store.upsert_live_assistant_message(
+        agent_id=agent_id, backend_session_id="native-steer-session",
+        trace_id="steer-1", text="Combined answer.")
+    assert source is not None
+    clock[0] += 10
+    call["on_result"]({"duration_ms": 10})
+    done = agents_db.latest_state(agent_id)
+    assert done["kind"] == "done" and done["detail"]["trace_id"] == "steer-1"
+    notification = user_notifications.classify_completed_turn(
+        agent_id=agent_id, session="mike", persona="Mike", trace_id="steer-1",
+        backend_session_id="native-steer-session", done_ts=done["ts"])
+    assert notification["cause_message_id"] == f"u-steer-{expected_cause}"
+    assert notification["source_message_id"] == source["id"]
+    assert tuple(notification[k] for k in ("notify", "push", "badge", "unread")) == expected_flags
+    assert db.conn().execute(
+        "SELECT COUNT(*) FROM state_log WHERE agent_id=? AND kind='done'",
+        (agent_id,)).fetchone()[0] == 1
+
+
+
+@pytest.mark.parametrize("later_user", [False, True])
+def test_identified_user_cause_precedes_an_unowned_peer(tmp_path, monkeypatch, later_user):
+    """Native/imported peer rows need not have a separate queue owner."""
+    from lib import db, message_live, message_store, message_writes
+    from lib import prompt_admissions, turn_lifecycle, user_notifications
+
+    clock = [1800000000000]
+    for module in (db, agents_db, message_live, message_writes, turn_lifecycle):
+        patch_shared(monkeypatch, module, "now_ms", lambda: clock[0])
+    monkeypatch.setattr(user_notifications, "SETTLE_TIMEOUT_S", 0)
+    service, backend, aid = _make_service(tmp_path)
+    admission = prompt_admissions.create(
+        authenticated_at_admission=True, origin="user", sender_agent_id="", channel="chat",
+        observed_at=clock[0], client_admission_id="u-original-user", trace_id="active-user",
+        original_text="Original request", client="desktop")
+    service.dispatch(text=admission.original_text, requested_session="mike",
+                     trace_id=admission.trace_id, client_msg_id=admission.client_admission_id,
+                     prompt_admission=admission, synthesize_audio=False)
+    clock[0] += 10
+    message_store.record_user_message(
+        agent_id=aid, backend_session_id="backend-session-1", client_msg_id="u-imported-peer",
+        trace_id="imported-peer", text="Peer collaboration", origin="agent",
+        sender_agent_id="peer")
+    if later_user:
+        clock[0] += 10
+        phone = prompt_admissions.create(
+            authenticated_at_admission=True, origin="user", sender_agent_id="", channel="chat",
+            observed_at=clock[0], client_admission_id="u-later-user", trace_id="later-user",
+            original_text="Latest user correction", client="")
+        prompt_admissions.record(phone, agent_id=aid, session="mike")
+        message_store.record_user_message(
+            agent_id=aid, backend_session_id="backend-session-1", client_msg_id=phone.client_admission_id,
+            trace_id=phone.trace_id, prompt_admission_id=phone.admission_id,
+            text=phone.original_text, origin="user")
+    clock[0] += 10
+    source = message_store.upsert_live_assistant_message(
+        agent_id=aid, backend_session_id="backend-session-1", trace_id="active-user",
+        text="Answer to the user.")
+    assert source is not None
+    clock[0] += 10
+    backend.spawned[0][1]["on_result"]({"duration_ms": 10})
+    notification = user_notifications.classify_completed_turn(
+        agent_id=aid, session="mike", persona="Mike", trace_id="active-user",
+        backend_session_id="backend-session-1", done_ts=agents_db.latest_state(aid)["ts"])
+    assert notification["cause_message_id"] == ("u-later-user" if later_user else "u-original-user")
+    assert notification["source_message_id"] == source["id"]
+    assert tuple(notification[k] for k in ("notify", "push", "badge", "unread")) == (
+        True, later_user, True, True)
+
+
+
+def test_late_own_import_reclassifies_once_without_borrowing_the_queued_reply(tmp_path, monkeypatch):
+    from lib import apns, db, message_live, message_store, message_writes
+    from lib import turn_lifecycle, user_notifications
+    from lib.state_watcher import StateLogWatcher
+    from lib.transcript_streamer import TranscriptStreamer
+
+    clock = [1800000000000]
+    for module in (db, agents_db, message_live, message_writes, turn_lifecycle):
+        patch_shared(monkeypatch, module, "now_ms", lambda: clock[0])
+    monkeypatch.setattr(user_notifications, "SETTLE_TIMEOUT_S", 0)
+    pushed = []
+    monkeypatch.setattr(apns, "on_user_notification", pushed.append)
+    service, backend, aid = _make_service(tmp_path)
+    service.dispatch(text="late original A", requested_session="mike", trace_id="late-A",
+                     client_msg_id="u-late-A", synthesize_audio=False)
+    service.dispatch(text="queued B", requested_session="mike", trace_id="late-B",
+                     client_msg_id="u-late-B", synthesize_audio=False)
+    clock[0] += 100
+    backend.spawned[0][1]["on_result"]({"duration_ms": 10})
+    done_a = db.conn().execute(
+        "SELECT ts,detail FROM state_log WHERE agent_id=? AND kind='done' ORDER BY state_id",
+        (aid,)).fetchone()
+    clock[0] += 100
+    reply_b = message_store.upsert_live_assistant_message(
+        agent_id=aid, backend_session_id="backend-session-1", trace_id="late-B", text="Answer B.")
+    assert reply_b is not None
+    clock[0] += 10
+    backend.spawned[1][1]["on_result"]({"duration_ms": 10})
+    stream = _Stream()
+    watcher = StateLogWatcher(stream)
+    import json
+    watcher._classify_completed_turn(agent_id=aid, session="mike", persona="Mike",
+                                    done_ts=done_a["ts"], detail=json.loads(done_a["detail"]))
+    before = db.conn().execute(
+        "SELECT * FROM user_notifications WHERE agent_id=? AND done_ts=?",
+        (aid, done_a["ts"])).fetchone()
+    assert before["cause_message_id"] == "u-late-A"
+    assert before["source_message_id"] == "" and before["notify"] == 0
+    assert pushed == []
+
+    clock[0] += 100
+    message_store.store_transcript_turns(
+        agent_id=aid, backend_session_id="backend-session-1", source_file="late-import",
+        turns=[{"role": "user", "text": "late original A"},
+               {"role": "assistant", "text": "Delayed answer A."}])
+    source_a = db.conn().execute(
+        "SELECT message_id,trace_id FROM messages WHERE agent_id=? AND role='assistant' "
+        "AND text='Delayed answer A.'", (aid,)).fetchone()
+    assert source_a is not None and source_a["trace_id"] == "late-A"
+    streamer = TranscriptStreamer(stream=stream)
+    streamer._bound[aid] = "backend-session-1"
+    streamer._bind_generation[aid] = 1
+    try:
+        # Real import-delivery owner, twice: one flip and one outward push.
+        streamer._after_import(aid, "backend-session-1", 1, 1)
+        streamer._after_import(aid, "backend-session-1", 1, 1)
+    finally:
+        streamer.stop()
+    after = db.conn().execute(
+        "SELECT * FROM user_notifications WHERE agent_id=? AND done_ts=?",
+        (aid, done_a["ts"])).fetchone()
+    assert after["notification_id"] == before["notification_id"]
+    assert after["cause_message_id"] == "u-late-A"
+    assert after["source_message_id"] == source_a["message_id"]
+    assert tuple(after[k] for k in ("notify", "push", "badge", "unread")) == (1,) * 4
+    assert len(pushed) == 1 and pushed[0]["source_message_id"] == source_a["message_id"]
+    assert len([e for e in stream.events if e["type"] == "user-notification"]) == 1
+
+
+@pytest.mark.parametrize("supplied_backend", ["", "backend-session-1", "wrong-backend", "with-competitor"])
+def test_identified_notification_uses_its_own_backend_binding(tmp_path, monkeypatch, supplied_backend):
+    from lib import db, message_store, user_notifications
+    monkeypatch.setattr(user_notifications, "SETTLE_TIMEOUT_S", 0)
+    service, backend, aid = _make_service(tmp_path)
+    service.dispatch(text="own request", requested_session="mike", trace_id="own-binding",
+                     client_msg_id="u-own-binding", synthesize_audio=False)
+    source = message_store.upsert_live_assistant_message(
+        agent_id=aid, backend_session_id="backend-session-1", trace_id="own-binding",
+        text="Own answer.")
+    assert source is not None
+    backend.spawned[0][1]["on_result"]({"duration_ms": 10})
+    done_ts = agents_db.latest_state(aid)["ts"]
+    # A later foreign agent using the same textual trace/backend cannot bind us.
+    other = agents_db.create_agent(persona="Other", voice_id="V", cwd=str(tmp_path), session="other")
+    message_store.record_user_message(agent_id=other, backend_session_id="backend-session-1",
+                                      client_msg_id="u-foreign-binding", trace_id="own-binding",
+                                      text="Foreign request", origin="user")
+    db.conn().execute("UPDATE messages SET updated_at=? WHERE message_id='u-foreign-binding'", (done_ts,))
+    if supplied_backend == "with-competitor":
+        message_store.record_user_message(
+            agent_id=aid, backend_session_id="foreign-backend", client_msg_id="u-other-conversation",
+            trace_id="own-binding", text="Other conversation", origin="user")
+        db.conn().execute("UPDATE messages SET updated_at=? WHERE message_id='u-other-conversation'", (done_ts,))
+    notification = user_notifications.classify_completed_turn(
+        agent_id=aid, session="mike", persona="Mike", trace_id="own-binding",
+        backend_session_id=("backend-session-1" if supplied_backend == "with-competitor" else supplied_backend),
+        done_ts=done_ts)
+    valid = supplied_backend != "wrong-backend"
+    assert notification["notify"] is valid
+    assert notification["cause_message_id"] == ("u-own-binding" if valid else "")
+    assert notification["source_message_id"] == (source["id"] if valid else "")
+    assert db.conn().execute(
+        "SELECT COUNT(*) FROM user_notifications WHERE agent_id=?", (other,)).fetchone()[0] == 0
+
+
+
+@pytest.mark.parametrize("other_owner", ["queue", "queue-tombstone", "turn"])
+def test_notification_rejects_another_owner_with_only_one_durable_ledger(
+        tmp_path, monkeypatch, other_owner):
+    """Each ownership ledger protects a cause even without the other ledger.
+
+    A delayed queue handoff has no turn yet; an idle next send has no queue
+    receipt. Equal timestamps must not make either request the prior cause.
+    """
+    from lib import db, message_live, message_store, message_writes
+    from lib import prompt_admissions, turn_lifecycle, user_notifications
+
+    clock = [1800000000000]
+    for module in (db, agents_db, message_live, message_writes, turn_lifecycle):
+        patch_shared(monkeypatch, module, "now_ms", lambda: clock[0])
+    monkeypatch.setattr(user_notifications, "SETTLE_TIMEOUT_S", 0)
+    service, backend, aid = _make_service(tmp_path)
+    service.dispatch(text="original", requested_session="mike", trace_id="ledger-A",
+                     client_msg_id="u-ledger-A", synthesize_audio=False)
+    source = message_store.upsert_live_assistant_message(
+        agent_id=aid, backend_session_id="backend-session-1", trace_id="ledger-A",
+        text="Original answer.")
+    assert source is not None
+    if other_owner != "turn":
+        admission = prompt_admissions.create(
+            authenticated_at_admission=True, origin="user", sender_agent_id="", channel="chat",
+            observed_at=clock[0], client_admission_id="u-ledger-B", trace_id="ledger-B",
+            original_text="next request")
+        service.dispatch(text="next request", requested_session="mike", trace_id="ledger-B",
+                         client_msg_id="u-ledger-B", prompt_admission=admission, synthesize_audio=False)
+        # Model the real asynchronous handoff gap after A's DONE, before B's
+        # backend launch. No second turn is manufactured by the fixture.
+        monkeypatch.setattr(service, "_spawn_next", lambda *args: None)
+    backend.spawned[0][1]["on_result"]({"duration_ms": 10})
+    if other_owner != "turn":
+        # A real queue edit after A's terminal stamp makes B newest at the
+        # same millisecond. Revision ordering must not hide the queue guard.
+        assert turn_queue.update_text("u-ledger-B", "edited next request")
+        if other_owner == "queue-tombstone":
+            turn_queue.mark_started("u-ledger-B")
+            turn_queue.settle_receipt(aid, "ledger-B", "completed")
+            assert turn_queue.status("u-ledger-B") == "done"
+    if other_owner == "turn":
+        transcript = tmp_path / ".claude" / "projects" / "-ledger" / "backend-session-1.jsonl"
+        transcript.parent.mkdir(parents=True)
+        transcript.write_text("{}\n")
+        service.dispatch(text="next request", requested_session="mike", trace_id="ledger-B",
+                         client_msg_id="u-ledger-B", synthesize_audio=False)
+        assert not turn_queue.status("u-ledger-B")
+    owners = db.conn().execute(
+        "SELECT trace_id FROM turns WHERE agent_id=? ORDER BY turn_id", (aid,)).fetchall()
+    assert [r["trace_id"] for r in owners] == (
+        ["ledger-A", "ledger-B"] if other_owner == "turn" else ["ledger-A"])
+    done = db.conn().execute(
+        "SELECT ts FROM state_log WHERE agent_id=? AND kind='done' "
+        "AND json_extract(detail,'$.trace_id')='ledger-A'", (aid,)).fetchone()
+    notification = user_notifications.classify_completed_turn(
+        agent_id=aid, session="mike", persona="Mike", trace_id="ledger-A",
+        backend_session_id="backend-session-1", done_ts=done["ts"])
+    assert notification["cause_message_id"] == "u-ledger-A"
+    assert notification["source_message_id"] == source["id"]
+    assert tuple(notification[k] for k in ("notify", "push", "badge", "unread")) == (True,) * 4
+
+
+
+@pytest.mark.parametrize("completion_trace,supplied_backend,eligible", [
+    ("", "backend-session-1", True),
+    ("unrecognized-completion", "backend-session-1", True),
+    ("known-completion", "backend-session-1", True),
+    ("unrecognized-completion", "wrong-backend", False),
+])
+def test_unknown_completion_identity_retains_legacy_notification_selection(
+        tmp_path, monkeypatch, completion_trace, supplied_backend, eligible):
+    """Unknown identity cannot turn the legacy window into a foreign-owner veto."""
+    from lib import message_store, user_notifications
+    monkeypatch.setattr(user_notifications, "SETTLE_TIMEOUT_S", 0)
+    service, backend, aid = _make_service(tmp_path)
+    service.dispatch(text="Legacy-compatible request", requested_session="mike",
+                     trace_id="known-completion", client_msg_id="u-legacy-owner",
+                     synthesize_audio=False)
+    source = message_store.upsert_live_assistant_message(
+        agent_id=aid, backend_session_id="backend-session-1", trace_id="known-completion",
+        text="Legacy-compatible answer.")
+    assert source is not None
+    backend.spawned[0][1]["on_result"]({"duration_ms": 10})
+    notification = user_notifications.classify_completed_turn(
+        agent_id=aid, session="mike", persona="Mike", trace_id=completion_trace,
+        backend_session_id=supplied_backend, done_ts=agents_db.latest_state(aid)["ts"])
+    assert notification["cause_message_id"] == ("u-legacy-owner" if eligible else "")
+    assert notification["source_message_id"] == (source["id"] if eligible else "")
+    assert tuple(notification[k] for k in ("notify", "push", "badge", "unread")) == (eligible,) * 4
+
+
+def test_user_queue_handoff_survives_completion_during_persistence(tmp_path, monkeypatch):
+    service, backend, agent_id = _make_service(tmp_path)
+    service.dispatch(text="first", requested_session="mike", trace_id="tA")
+    enqueue = turn_queue.enqueue
+    def finish_during_enqueue(**kwargs):
+        result = enqueue(**kwargs)
+        if kwargs["trace_id"] == "tB":
+            backend.spawned[0][1]["on_result"]({"duration_ms": 5})
+        return result
+    monkeypatch.setattr(turn_queue, "enqueue", finish_during_enqueue)
+    result = service.dispatch(text="second", requested_session="mike", trace_id="tB",
+                              client_msg_id="u-second")
+    assert result.queued and backend.interrupted == []
+    assert [call["trace_id"] for _, call in backend.spawned] == ["tA", "tB"]
+    assert _td._INFLIGHT[agent_id] == "tB"
+    assert turn_queue.status("u-second") == "started"
+
+
 def test_busy_agent_send_preempts_inflight_turn(tmp_path):
     service, backends, agent_id = _make_service(tmp_path)
     service.dispatch(text="first", requested_session="mike", trace_id="tA",
@@ -525,8 +998,8 @@ def test_busy_agent_send_preempts_inflight_turn(tmp_path):
     assert len(backends.spawned) == 1      # first turn is running
     assert backends.interrupted == []      # nothing killed yet
 
-    # A backend without steering retains legacy preemption.
-    service.dispatch(text="second", requested_session="mike", trace_id="tB",
+    # Non-user automation retains its existing legacy preemption path.
+    service.dispatch(text="second", requested_session="mike", trace_id="tB", origin="automation",
                      synthesize_audio=False)
     assert len(backends.interrupted) == 1
     assert len(backends.spawned) == 2
@@ -542,6 +1015,228 @@ def test_busy_agent_send_preempts_inflight_turn(tmp_path):
     # The new turn completes normally → done.
     second_call["on_result"]({"duration_ms": 7})
     assert agents_db.latest_state(agent_id)["kind"] == AgentState.DONE
+
+
+class _DyingProcess:
+    """A turn process that keeps writing its session until it is let go."""
+
+    def __init__(self):
+        self.alive = True
+
+    def is_alive(self):
+        return self.alive
+
+
+class _SlowExitBackends(_Backends):
+    """SIGTERM is accepted but the old CLI has not exited yet."""
+
+    def __init__(self):
+        super().__init__()
+        self.process = _DyingProcess()
+
+    def interrupt(self, backend, agent_id):
+        self.interrupted.append((backend, agent_id))
+        return 1
+
+    def active_handles(self, backend, agent_id):
+        return [self.process] if self.spawned and self.process.alive else []
+
+
+def test_preemption_does_not_spawn_until_the_old_process_exits(tmp_path, monkeypatch):
+    """TP-01: two CLIs on one native session interleave and corrupt it."""
+    import time
+    patch_shared(monkeypatch, _td, "_PROCESS_EXIT_POLL_S", 0.01)
+    service, backends, agent_id = _make_service(tmp_path)
+    slow = _SlowExitBackends()
+    service.backends = slow
+    service.dispatch(text="first", requested_session="mike", trace_id="tA",
+                     synthesize_audio=False)
+    assert len(slow.spawned) == 1
+
+    service.dispatch(text="second", requested_session="mike", trace_id="tB", origin="automation",
+                     synthesize_audio=False)
+    assert slow.interrupted == [("claude", agent_id)], "the old turn is preempted"
+    assert len(slow.spawned) == 1, "a second CLI started while the first still runs"
+
+    slow.process.alive = False                  # the SIGTERMed CLI exits
+    deadline = time.monotonic() + 3
+    while len(slow.spawned) < 2 and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert [call["trace_id"] for _b, call in slow.spawned] == ["tA", "tB"]
+
+
+def _open_rows(agent_id):
+    return [(row["trace_id"], row["status"]) for row in agents_db.conn().execute(
+        "SELECT trace_id, status FROM queued_turns WHERE agent_id = ?", (agent_id,))]
+
+
+def test_a_send_waiting_for_a_preempted_process_survives_a_restart(tmp_path, monkeypatch):
+    """TP-01 review: a preempting send that waits for the old process is
+    acknowledged as queued, so it must not live only in memory."""
+    import time
+    patch_shared(monkeypatch, _td, "_PROCESS_EXIT_POLL_S", 0.01)
+    service, _backends, agent_id = _make_service(tmp_path)
+    slow = _SlowExitBackends()
+    service.backends = slow
+    service.dispatch(text="first", requested_session="mike", trace_id="tA",
+                     client_msg_id="m-first", synthesize_audio=False)
+    result = service.dispatch(text="second", requested_session="mike", trace_id="tB", origin="automation",
+                              client_msg_id="m-second", synthesize_audio=False)
+
+    assert result.queued is True
+    assert len(slow.spawned) == 1
+    assert ("tB", "parked") in _open_rows(agent_id), "only memory holds the queued send"
+
+    slow.process.alive = False
+    deadline = time.monotonic() + 3
+    while len(slow.spawned) < 2 and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert [call["trace_id"] for _b, call in slow.spawned] == ["tA", "tB"]
+    # The park row clears only after the launch returns (a failed launch keeps
+    # it), so it may still be there the moment the spawn is recorded.
+    while ("tB", "parked") in _open_rows(agent_id) and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert ("tB", "parked") not in _open_rows(agent_id), "a launched send keeps no park row"
+
+
+def _durable_order(agent_id):
+    return [row["trace_id"] for row in agents_db.conn().execute(
+        "SELECT trace_id FROM queued_turns WHERE agent_id = ? AND status IN ('queued', 'parked')"
+        " ORDER BY queue_seq", (agent_id,))]
+
+
+def test_a_follow_up_behind_a_preempted_process_is_durable_too(tmp_path, monkeypatch):
+    """TP-01 review round 2: every send acknowledged as waiting behind the old
+    process has a durable row, not only the one that preempted it."""
+    import time
+    patch_shared(monkeypatch, _td, "_PROCESS_EXIT_POLL_S", 0.01)
+    service, _backends, agent_id = _make_service(tmp_path)
+    slow = _SlowExitBackends()
+    service.backends = slow
+    service.dispatch(text="first", requested_session="mike", trace_id="tA",
+                     client_msg_id="m-first", synthesize_audio=False)
+    second = service.dispatch(text="second", requested_session="mike", trace_id="tB", origin="automation",
+                              client_msg_id="m-second", synthesize_audio=False)
+    third = service.dispatch(text="third", requested_session="mike", trace_id="tC",
+                             client_msg_id="m-third", synthesize_audio=False)
+
+    assert second.queued and third.queued and len(slow.spawned) == 1
+    assert _durable_order(agent_id) == ["tB", "tC"]
+
+    slow.process.alive = False
+    deadline = time.monotonic() + 3
+    while len(slow.spawned) < 2 and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert [call["trace_id"] for _b, call in slow.spawned] == ["tA", "tB"]
+    # tB's park row clears only after its launch returns (see above).
+    while _durable_order(agent_id) != ["tC"] and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert _durable_order(agent_id) == ["tC"]
+
+
+def test_the_preempting_send_keeps_its_place_ahead_of_queued_work(tmp_path, monkeypatch):
+    """TP-01 review round 2: the preempting send runs before work that was
+    already queued, in memory and in the durable order a restart recovers."""
+    patch_shared(monkeypatch, _td, "_PROCESS_EXIT_POLL_S", 0.01)
+    service, _backends, agent_id = _make_service(tmp_path)
+    slow = _SlowExitBackends()
+    service.backends = slow
+    service.dispatch(text="first", requested_session="mike", trace_id="tA",
+                     client_msg_id="m-first", synthesize_audio=False)
+    service.dispatch(text="queued", requested_session="mike", trace_id="tC",
+                     client_msg_id="m-queued", synthesize_audio=False, queue_if_busy=True)
+    service.dispatch(text="second", requested_session="mike", trace_id="tB", origin="automation",
+                     client_msg_id="m-second", synthesize_audio=False)
+
+    assert [spec.trace_id for spec in _td._SLOTS.queued.get(agent_id, [])] == ["tB", "tC"]
+    assert _durable_order(agent_id) == ["tB", "tC"]
+    slow.process.alive = False
+
+
+class _LeftoverProcessBackends(_SlowExitBackends):
+    """A turn process the Host already took for finished is still running."""
+
+    def active_handles(self, backend, agent_id):
+        return [self.process] if self.process.alive else []
+
+
+def test_a_send_behind_a_leftover_process_is_durable(tmp_path, monkeypatch):
+    """TP-01b: the free-slot-but-process-running branch acknowledges a waiting
+    send as queued, so it needs a durable row too."""
+    import time
+    patch_shared(monkeypatch, _td, "_PROCESS_EXIT_POLL_S", 0.01)
+    service, _backends, agent_id = _make_service(tmp_path)
+    leftover = _LeftoverProcessBackends()
+    service.backends = leftover
+    result = service.dispatch(text="first", requested_session="mike", trace_id="tA",
+                              client_msg_id="m-first", synthesize_audio=False)
+
+    assert result.queued is True and leftover.spawned == []
+    assert _durable_order(agent_id) == ["tA"]
+
+    leftover.process.alive = False
+    deadline = time.monotonic() + 3
+    while not leftover.spawned and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert [call["trace_id"] for _b, call in leftover.spawned] == ["tA"]
+    assert _durable_order(agent_id) == []
+
+
+def test_a_stop_finishing_after_the_send_parked_leaves_one_durable_row(tmp_path, monkeypatch):
+    """TP-01b review: the send parked behind a Stop barrier, then the Stop
+    finished before the send took the turn lock while the old CLI still runs.
+    That park row is the send's one durable row; no second row is left over."""
+    import time
+    patch_shared(monkeypatch, _td, "_PROCESS_EXIT_POLL_S", 0.01)
+    service, _backends, agent_id = _make_service(tmp_path)
+    leftover = _LeftoverProcessBackends()
+    service.backends = leftover
+    snapshot, _dropped, _was_paused = _td.begin_stop(agent_id)
+    real_park = _td._park
+    finished = []
+
+    def park_then_finish_stop(spec, **kwargs):
+        row = real_park(spec, **kwargs)
+        if kwargs.get("prefix", "stop-park") == "stop-park" and not finished:
+            _td.complete_stop(service.ctx, agent_id, snapshot, set(),
+                              backend_registry=leftover)
+            finished.append(True)
+        return row
+
+    patch_shared(monkeypatch, _td, "_park", park_then_finish_stop)
+    result = service.dispatch(text="waiting", requested_session="mike", trace_id="tW",
+                              client_msg_id="m-waiting", synthesize_audio=False)
+
+    assert result.queued and finished == [True] and leftover.spawned == []
+    assert _durable_order(agent_id) == ["tW"]
+    leftover.process.alive = False
+    deadline = time.monotonic() + 3
+    while not leftover.spawned and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert [call["trace_id"] for _b, call in leftover.spawned] == ["tW"]
+    assert _durable_order(agent_id) == []
+
+
+def test_a_send_that_cannot_wait_durably_is_refused(tmp_path, monkeypatch):
+    service, _backends, agent_id = _make_service(tmp_path)
+    slow = _SlowExitBackends()
+    service.backends = slow
+    service.dispatch(text="first", requested_session="mike", trace_id="tA",
+                     synthesize_audio=False)
+
+    def locked(**_kwargs):
+        raise RuntimeError("database is locked")
+
+    monkeypatch.setattr(_td.turn_queue, "park", locked)
+    monkeypatch.setattr(_td.turn_queue, "park_at_head", locked)
+    monkeypatch.setattr(_td.turn_queue, "enqueue", locked)
+    with pytest.raises(_td.DispatchError) as refused:
+        service.dispatch(text="second", requested_session="mike", trace_id="tB",
+                         synthesize_audio=False)
+    assert refused.value.status == 503
+    assert len(slow.spawned) == 1
+    assert _td._SLOTS.queue_depth(agent_id) == 0
+    slow.process.alive = False
 
 
 def test_explicit_queue_waits_for_current_turn_without_interrupting(tmp_path):
@@ -670,7 +1365,7 @@ def test_explicit_queue_does_not_steer_busy_codex_turn(tmp_path):
 def test_explicit_queue_behind_terminal_is_durable(tmp_path, monkeypatch):
     from lib import turn_dispatch as module, turn_queue
     service, backends, _agent_id = _make_service(tmp_path)
-    monkeypatch.setattr(module, "_terminal_live", lambda _agent_id: True)
+    patch_shared(monkeypatch, module, "_terminal_live", lambda _agent_id: True)
     result = service.dispatch(
         text="after terminal", requested_session="mike", trace_id="t-terminal",
         client_msg_id="u-terminal", queue_if_busy=True)
@@ -922,7 +1617,7 @@ def test_preempted_turn_failure_is_ignored(tmp_path):
     service, backends, agent_id = _make_service(tmp_path, retry_scheduler=_run_now)
     service.dispatch(text="first", requested_session="mike", trace_id="tA",
                      synthesize_audio=False)
-    service.dispatch(text="second", requested_session="mike", trace_id="tB",
+    service.dispatch(text="second", requested_session="mike", trace_id="tB", origin="automation",
                      synthesize_audio=False)
     assert len(backends.spawned) == 2
     _, first_call = backends.spawned[0]
@@ -1515,7 +2210,7 @@ def test_new_user_turn_parked_on_an_existing_session_keeps_native_user_boundary(
 
 def test_strict_runtime_cancellation_accepts_reaped_recovery_work(tmp_path, monkeypatch):
     from lib import backends as registry
-    from lib.runtime_bridge import RuntimeRPCServer
+    from lib.runtime_rpc_server import RuntimeRPCServer
     coordinator, recovery = _enable_account_failover(monkeypatch, available=False)
     service, backend, agent_id = _make_service(tmp_path)
     service.dispatch(text="delegated work", requested_session="mike", trace_id="oracle-work",
@@ -1763,14 +2458,16 @@ def test_retry_after_a_launch_that_died_on_a_locked_database_is_delivered_once(t
     _assert_retry_delivers_once(service, backends, agent_id)
 
 
-def test_retry_after_a_spawn_failure_is_delivered_once(tmp_path):
-    # The same guarantee when the backend itself fails to start (a clean 500).
+def test_unknown_native_spawn_failure_protects_same_id_without_reinvocation(tmp_path):
+    # A generic exception inside the registry carries no safe pre-invoke proof.
     class _SpawnDiesOnce(_CodexSteerable):
         def __init__(self):
             super().__init__()
             self.failures_left = 1
+            self.entries = 0
 
         def spawn_turn(self, backend, **kwargs):
+            self.entries += 1
             if self.failures_left:
                 self.failures_left -= 1
                 raise RuntimeError("codex app-server unreachable")
@@ -1778,13 +2475,39 @@ def test_retry_after_a_spawn_failure_is_delivered_once(tmp_path):
 
     backends = _SpawnDiesOnce()
     service, agent_id = _codex_service(tmp_path, backends)
-    with pytest.raises(DispatchError):
+    with pytest.raises(DispatchError) as first:
         service.dispatch(text="full control over the pipeline",
                          requested_session="cipher", trace_id="t-died",
                          client_msg_id="u-lost")
-    assert backends.spawned == []
+    assert first.value.status == 500
+    assert backends.entries == 1 and backends.spawned == [] and backends.steered == []
     assert _td._INFLIGHT.get(agent_id) is None
-    _assert_retry_delivers_once(service, backends, agent_id)
+    con = agents_db.conn()
+    users = [dict(row) for row in con.execute(
+        "SELECT * FROM messages WHERE role='user' AND agent_id=? ORDER BY message_id", (agent_id,))]
+    turns = [dict(row) for row in con.execute(
+        "SELECT * FROM turns WHERE agent_id=? ORDER BY turn_id", (agent_id,))]
+    assert len(users) == len(turns) == 1
+    assert users[0]["message_id"] == "u-lost" and users[0]["trace_id"] == "t-died"
+    assert turns[0]["trace_id"] == "t-died"
+    assert turns[0]["outcome"] is None and turns[0]["settled_at"] is None and turns[0]["ended_at"] is None
+    assert not con.execute(
+        """SELECT 1 FROM state_log WHERE agent_id=? AND json_extract(detail,'$.trace_id')='t-died'
+             AND json_extract(detail,'$.dispatch_not_started')=1""", (agent_id,)).fetchone()
+    for trace in ("t-retry", "t-again"):
+        with pytest.raises(DispatchError) as retry:
+            service.dispatch(text="full control over the pipeline", requested_session="cipher",
+                             trace_id=trace, client_msg_id="u-lost")
+        assert retry.value.status == 503
+        assert backends.entries == 1 and backends.spawned == [] and backends.steered == []
+        assert _td._INFLIGHT.get(agent_id) is None
+        assert [dict(row) for row in con.execute(
+            "SELECT * FROM messages WHERE role='user' AND agent_id=? ORDER BY message_id", (agent_id,))] == users
+        assert [dict(row) for row in con.execute(
+            "SELECT * FROM turns WHERE agent_id=? ORDER BY turn_id", (agent_id,))] == turns
+        assert not con.execute(
+            """SELECT 1 FROM state_log WHERE agent_id=? AND json_extract(detail,'$.dispatch_not_started')=1""",
+            (agent_id,)).fetchone()
 
 
 def test_phantom_inflight_slot_is_never_steered_into(tmp_path):
@@ -2013,7 +2736,7 @@ class _TransactionAwareStream(_Stream):
 def test_dispatch_never_takes_turn_lock_or_broadcasts_inside_its_write_transaction(tmp_path, monkeypatch):
     import sqlite3
     guard = _OrderedTurnLock(_td._TURN_LOCK)
-    monkeypatch.setattr(_td, "_TURN_LOCK", guard)
+    patch_shared(monkeypatch, _td, "_TURN_LOCK", guard)
     service, backends, agent_id = _make_service(tmp_path)
     stream = _TransactionAwareStream()
     service.ctx.stream = stream
@@ -2156,10 +2879,10 @@ def test_enqueue_paths_write_nothing_under_the_turn_lock(tmp_path, monkeypatch):
         _td._CLAIMED_AT.pop(agent_id, None)
         service.dispatch(text="q2", requested_session="mike", trace_id="t-3",
                          client_msg_id="q2", queue_if_busy=True)
-        monkeypatch.setattr(_td, "_terminal_live", lambda _agent: True)
+        patch_shared(monkeypatch, _td, "_terminal_live", lambda _agent: True)
         service.dispatch(text="q3", requested_session="mike", trace_id="t-4",
                          client_msg_id="q3", queue_if_busy=True)
-        monkeypatch.setattr(_td, "_terminal_live", lambda _agent: False)
+        patch_shared(monkeypatch, _td, "_terminal_live", lambda _agent: False)
         # Stop barrier: parks durably.
         _td.clear_for_agent(agent_id, preserve_queue=True)
         _td._INFLIGHT[agent_id] = _td._STOPPING_SENTINEL
@@ -2231,7 +2954,7 @@ def _wire_runtime(server):
 
 def test_rpc_round_trip_admits_the_command_once_on_the_owning_side(tmp_path, monkeypatch):
     from lib.prompt_admissions import PromptAdmission
-    from lib.runtime_bridge import RuntimeRPCServer
+    from lib.runtime_rpc_server import RuntimeRPCServer
     owner, backends, agent_id = _make_service(tmp_path)
     runtime = RuntimeRPCServer(tmp_path / "rt.sock", dispatch_service=owner)
     try:
@@ -2265,7 +2988,7 @@ def test_rpc_round_trip_admits_the_command_once_on_the_owning_side(tmp_path, mon
 
 def test_rpc_runs_the_janitor_demand_authority_check_once(tmp_path, monkeypatch):
     from lib import janitor_autonomy
-    from lib.runtime_bridge import RuntimeRPCServer
+    from lib.runtime_rpc_server import RuntimeRPCServer
     owner, backends, _agent_id = _make_service(tmp_path)
     runtime = RuntimeRPCServer(tmp_path / "rt.sock", dispatch_service=owner)
     checks = []
@@ -2481,7 +3204,7 @@ def _leak_slot(tmp_path, *, settled_ms_ago):
 
 def test_leaked_slot_of_a_settled_turn_is_released_and_logged(tmp_path, monkeypatch):
     logged = []
-    monkeypatch.setattr(_td, "log", lambda event, msg="": logged.append((event, msg)))
+    patch_shared(monkeypatch, _td, "log", lambda event, msg="": logged.append((event, msg)))
     service, _backends, agent_id = _leak_slot(tmp_path, settled_ms_ago=10 * 60_000)
 
     released = service.release_leaked_slots()
@@ -2764,3 +3487,908 @@ def test_leaked_slot_release_can_be_scoped_to_one_agent(tmp_path):
     assert service.release_leaked_slots(agent_id="someone-else") == {}
     assert _td.runtime_status()["active"][agent_id] == "tA"
     assert service.release_leaked_slots(agent_id=agent_id) == {agent_id: "tA"}
+
+
+# ---- listen-first initiatives: the dispatcher's claim (docs/agent-rings.md) -------------
+
+def _call_open_admitted(tmp_path, monkeypatch):
+    """A listen_first ring answered by a capable phone, then a silence claim:
+    the initiative is admitted as a queued call-open row the drain has not
+    picked up yet. Returns (service, backends, ring opening, queue id)."""
+    from lib import agent_rings, group_calls
+    _td.reset_for_tests()
+    service, backends, agent_id = _make_service(tmp_path)
+    backends.live = False
+    for name, value in (("_kick_queue", lambda: None), ("_push", lambda ring, kind: {}),
+                        ("_push_voip", lambda ring: {}), ("_schedule_expiry", lambda ring: None)):
+        patch_shared(monkeypatch, agent_rings, name, value)
+    ctx = SimpleNamespace(stream=None, tts=None)
+    agent_rings.bind(ctx)
+    group_calls.bind(ctx)
+    monkeypatch.setattr(group_calls, "resolve_name", lambda name, participants=(): {
+        "session": "mike", "persona": "Mike", "agent_id": agent_id})
+    ring = agent_rings.ring(agent="mike", reason="Leak at pump 01", opening_line="Line",
+                            opening_mode="listen_first")["ring"]
+    op = agent_rings.answer("device_phone", ring["ring_id"], opening_mode="listen_first")["opening"]
+    out = agent_rings.opening_claim("device_phone", {
+        "token": op["token"], "epoch": 1, "claim": "silence", "request_id": "rq-silence",
+        "capture_gen": 1, "at_ms": 1250, "watermark_ms": 1290})
+    queue_id = out["opening"]["intent"]["admission_id"]
+    assert out["opening"]["intent"]["state"] == "admitted" and turn_queue.status(queue_id) == "queued"
+    return service, backends, op, queue_id
+
+
+def _greet(op):
+    from lib import agent_rings
+    return agent_rings.greeting("device_phone", token=op["token"], epoch=1, client_msg_id="u-hallo",
+                                trace_id="tr-hallo", session="mike", call_id=op["call_id"])
+
+
+def test_a_greeting_that_withdraws_first_means_the_dispatcher_never_spawns(tmp_path, monkeypatch):
+    from lib import agent_rings
+    service, backends, op, queue_id = _call_open_admitted(tmp_path, monkeypatch)
+    claim = agent_rings.claim_initiative
+    seen = []
+
+    def greeting_wins(qid):
+        # The drain has picked the row; the user's greeting commits first.
+        seen.append(_greet(op)["route"])
+        result = claim(qid)
+        seen.append(result)
+        return result
+    monkeypatch.setattr(agent_rings, "claim_initiative", greeting_wins)
+    service.recover_queued()
+    assert seen == ["greeting", False]
+    assert backends.spawned == []                                  # no spawn on loss
+    assert turn_queue.status(queue_id) == "withdrawn"
+    assert _td._INFLIGHT.get(op["session"] and agents_db.get_by_session("mike")["agent_id"]) is None
+    assert agents_db.conn().execute("SELECT count(*) FROM messages WHERE role='user'").fetchone()[0] == 0
+
+
+def test_a_dispatcher_claim_that_commits_first_spawns_once_and_the_greeting_is_ordinary(tmp_path, monkeypatch):
+    from lib import agent_rings
+    service, backends, op, queue_id = _call_open_admitted(tmp_path, monkeypatch)
+    claim = agent_rings.claim_initiative
+    seen = []
+
+    def claim_wins(qid):
+        result = claim(qid)
+        seen.extend([result, _greet(op)["route"]])               # the greeting lands right after
+        return result
+    monkeypatch.setattr(agent_rings, "claim_initiative", claim_wins)
+    service.recover_queued()
+    assert seen == [True, "ordinary"]
+    assert len(backends.spawned) == 1                             # the initiative runs exactly once
+    assert "Open the conversation" in backends.spawned[0][1]["text"]
+    assert turn_queue.status(queue_id) == "started"
+    assert agent_rings.opening_state(op["ring_id"])["state"] == "initiative_started"
+    assert agents_db.conn().execute("SELECT count(*) FROM messages WHERE role='user'").fetchone()[0] == 0
+    backends.live = False
+    service.recover_queued()
+    assert len(backends.spawned) == 1
+
+
+def test_ordinary_queued_rows_drain_exactly_as_before_without_the_opening_claim(tmp_path, monkeypatch):
+    from lib import agent_rings
+    calls = []
+    # raising=False: the same test runs unchanged on 006e9e70, which has no claim hook.
+    monkeypatch.setattr(agent_rings, "claim_initiative", lambda qid: calls.append(qid) or True, raising=False)
+    service, backends, agent_id = _make_service(tmp_path)
+    backends.live = False
+    for n in (1, 2):
+        turn_queue.enqueue(
+            queue_id=f"u-plain-{n}", agent_id=agent_id, session="mike", text=f"plain {n}",
+            trace_id=f"t-plain-{n}", client_msg_id=f"u-plain-{n}", synthesize_audio=False,
+            origin="user", sender_agent_id="")
+    service.recover_queued()
+    # This fake backend reports no live turn, so recovery drains both, in FIFO order.
+    assert [s[1]["text"] for s in backends.spawned] == ["plain 1", "plain 2"]
+    assert [turn_queue.status(f"u-plain-{n}") for n in (1, 2)] == ["started", "started"]
+    rows = agents_db.conn().execute("SELECT message_id FROM messages WHERE role='user' ORDER BY seq DESC").fetchall()
+    assert sorted(r[0] for r in rows) == ["u-plain-1", "u-plain-2"]           # their user rows, as before
+    assert calls == []                                                        # never consulted
+
+
+# ---- review L1: a claimed opening that never ran is retried exactly once --------------------
+
+def test_a_spawn_failure_after_the_backend_was_invoked_is_unknown_and_never_retried(tmp_path, monkeypatch):
+    # D2: a failure inside spawn_turn may follow a launch; only a failure before
+    # the backend is invoked is evidence that nothing was sent.
+    from lib import agent_rings
+    service, backends, op, queue_id = _call_open_admitted(tmp_path, monkeypatch)
+    calls = {"n": 0}
+    spawn = backends.spawn_turn
+
+    def fails_once(backend, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("the backend did not start")
+        spawn(backend, **kwargs)
+    backends.spawn_turn = fails_once
+    service.recover_queued()
+    assert backends.spawned == []
+    _td._RECOVERY_BACKOFF.clear(agents_db.get_by_session("mike")["agent_id"])
+    turn_queue.reset_stale_claims(max_age_ms=0)
+    service.recover_queued()
+    turn_queue.reset_stale_claims(max_age_ms=0)
+    service.recover_queued()
+    assert calls["n"] == 1 and backends.spawned == []            # never a second launch
+    assert agent_rings.opening_state(op["ring_id"])["state"] == "unknown"
+
+
+def test_a_claim_left_by_a_previous_process_is_unknown_never_run_again(tmp_path, monkeypatch):
+    # D3: a process boundary is never proof that nothing was sent.
+    from lib import agent_rings
+    service, backends, op, queue_id = _call_open_admitted(tmp_path, monkeypatch)
+    assert agent_rings.claim_initiative(queue_id) is True     # claimed, then the process died
+    _td.reset_for_tests()
+    service.recover_queued()
+    service.recover_queued()
+    assert backends.spawned == []
+    assert turn_queue.status(queue_id) == "unknown"
+    assert agent_rings.opening_state(op["ring_id"])["state"] == "unknown"
+
+
+def test_a_retry_after_a_real_start_never_spawns_again(tmp_path, monkeypatch):
+    from lib import agent_rings
+    service, backends, op, queue_id = _call_open_admitted(tmp_path, monkeypatch)
+    service.recover_queued()
+    assert len(backends.spawned) == 1 and turn_queue.status(queue_id) == "started"
+    assert agent_rings.claim_initiative(queue_id) is False
+    turn_queue.reset_stale_claims(max_age_ms=0)
+    service.recover_queued()
+    assert len(backends.spawned) == 1
+
+
+def test_a_retry_rechecks_the_fence(tmp_path, monkeypatch):
+    from lib import agent_rings
+    service, backends, op, queue_id = _call_open_admitted(tmp_path, monkeypatch)
+    assert agent_rings.claim_initiative(queue_id) is True
+    turn_queue.set_paused(agents_db.get_by_session("mike")["agent_id"], True)   # a Stop after the claim
+    assert agent_rings.claim_initiative(queue_id) is False
+    assert agent_rings.opening_state(op["ring_id"])["retired"]["reason"] == "stopped_after_answer"
+
+
+# ---- 2026-10-25 Lumi: an admitted message whose launch never started -----------------------
+# The user row was committed, then the post-COMMIT transcript broadcast (an sse_events INSERT)
+# hit "database is locked" and escaped before any turn opened: no turn, no state, and every
+# same-id retry was refused as "delivery is unconfirmed". The admission now writes a pending
+# launch receipt in the same transaction; it leaves `pending` (fail-closed) right before a
+# backend is handed the prompt, so only a provably unsent message is ever launched again.
+
+def _receipt_state(trace_id):
+    import json
+    from lib import settings_store
+    raw = settings_store.get("launch-receipt:" + trace_id)
+    return json.loads(raw)["state"] if raw else None
+
+
+def _user_rows(agent_id):
+    return agents_db.conn().execute(
+        "SELECT message_id, trace_id FROM messages WHERE role = 'user' AND agent_id = ?",
+        (agent_id,)).fetchall()
+
+
+def _die_once_after_admission(monkeypatch, service):
+    """The process dies after the admission COMMIT and before any launch step."""
+    real = service._enqueue_if_busy
+    calls = {"n": 0}
+
+    def dies(spec, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("process died after admission")
+        return real(spec, **kwargs)
+    monkeypatch.setattr(service, "_enqueue_if_busy", dies)
+
+
+def test_locked_transcript_broadcast_after_admission_still_launches(tmp_path, monkeypatch):
+    import sqlite3
+    from lib.protocol import SSEType
+    backends = _CodexSteerable()
+    service, agent_id = _codex_service(tmp_path, backends)
+    real = _td.events.broadcast
+
+    def locked_transcript(stream, event):
+        if event.get("type") == SSEType.TRANSCRIPT_UPDATED:
+            raise sqlite3.OperationalError("database is locked")
+        return real(stream, event)
+    monkeypatch.setattr(_td.events, "broadcast", locked_transcript)
+
+    result = service.dispatch(text="what did the build log say?", requested_session="cipher",
+                              trace_id="t-lumi", client_msg_id="u-lumi")
+
+    assert result.queued is False
+    assert len(backends.spawned) == 1, "a failed projection must not stop the launch"
+    assert [r["message_id"] for r in _user_rows(agent_id)] == ["u-lumi"]
+    assert _receipt_state("t-lumi") == "attempted"
+
+
+def test_crash_between_admission_and_spawn_relaunches_once_on_same_id_retry(tmp_path, monkeypatch):
+    backends = _CodexSteerable()
+    service, agent_id = _codex_service(tmp_path, backends)
+    _die_once_after_admission(monkeypatch, service)
+    with pytest.raises(RuntimeError, match="process died"):
+        service.dispatch(text="are you there?", requested_session="cipher",
+                         trace_id="t-first", client_msg_id="u-lost")
+    _td.reset_for_tests()                         # the process is gone
+    assert backends.spawned == []
+    assert _receipt_state("t-first") == "pending"
+
+    _assert_retry_delivers_once(service, backends, agent_id)
+    assert _receipt_state("t-first") == "relaunched"
+    assert _receipt_state("t-retry") == "attempted"
+
+
+def test_crash_after_spawn_is_never_launched_again(tmp_path, monkeypatch):
+    backends = _CodexSteerable()
+    service, agent_id = _codex_service(tmp_path, backends)
+
+    def died_after_spawn(spec):
+        raise SystemExit("process died after the backend took the prompt")
+    monkeypatch.setattr(service, "_mark_spawned", died_after_spawn)
+    with pytest.raises(SystemExit):
+        service.dispatch(text="run once", requested_session="cipher",
+                         trace_id="t-ran", client_msg_id="u-ran")
+    assert len(backends.spawned) == 1
+    _td.reset_for_tests()
+    # Its post-launch state never landed either.
+    agents_db.conn().execute("DELETE FROM state_log WHERE agent_id = ?", (agent_id,))
+    assert _receipt_state("t-ran") == "attempted"
+
+    with pytest.raises(DispatchError, match="delivery is unconfirmed"):
+        service.dispatch(text="run once", requested_session="cipher",
+                         trace_id="t-again", client_msg_id="u-ran")
+    assert len(backends.spawned) == 1
+
+
+def test_unrecorded_launch_receipt_refuses_the_handoff_and_retry_runs_once(tmp_path, monkeypatch):
+    import sqlite3
+    from lib import launch_receipts
+    backends = _CodexSteerable()
+    service, agent_id = _codex_service(tmp_path, backends)
+    real = launch_receipts.mark_attempted
+    calls = {"n": 0}
+
+    def locked_once(trace_id, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise sqlite3.OperationalError("database is locked")
+        return real(trace_id, **kwargs)
+    monkeypatch.setattr(launch_receipts, "mark_attempted", locked_once)
+    with pytest.raises(DispatchError, match="was not sent"):
+        service.dispatch(text="full control over the pipeline", requested_session="cipher",
+                         trace_id="t-died", client_msg_id="u-lost")
+    assert backends.spawned == [], "never hand over a prompt the receipt cannot record"
+    assert _td._INFLIGHT.get(agent_id) is None
+    _assert_retry_delivers_once(service, backends, agent_id)
+
+
+def test_concurrent_same_id_retries_of_an_unlaunched_message_launch_once(tmp_path, monkeypatch):
+    import threading
+    backends = _CodexSteerable()
+    service, agent_id = _codex_service(tmp_path, backends)
+    _die_once_after_admission(monkeypatch, service)
+    with pytest.raises(RuntimeError):
+        service.dispatch(text="same message", requested_session="cipher",
+                         trace_id="t-first", client_msg_id="u-concurrent")
+    _td.reset_for_tests()
+    start = threading.Barrier(3)
+    errors, results = [], []
+
+    def retry(trace):
+        try:
+            start.wait(3)
+            results.append(service.dispatch(text="same message", requested_session="cipher",
+                                            trace_id=trace, client_msg_id="u-concurrent"))
+        except BaseException as exc:  # noqa: BLE001
+            errors.append(exc)
+    threads = [threading.Thread(target=retry, args=(f"t-retry-{n}",)) for n in (1, 2)]
+    for thread in threads:
+        thread.start()
+    start.wait(3)
+    for thread in threads:
+        thread.join(5)
+    assert not errors
+    assert len(results) == 2
+    assert len(backends.spawned) == 1, "exactly one launch for one message"
+    assert len(_user_rows(agent_id)) == 1
+
+
+def test_stop_after_an_unlaunched_admission_fences_the_resend(tmp_path, monkeypatch):
+    backends = _CodexSteerable()
+    service, agent_id = _codex_service(tmp_path, backends)
+    _die_once_after_admission(monkeypatch, service)
+    with pytest.raises(RuntimeError):
+        service.dispatch(text="never mind", requested_session="cipher",
+                         trace_id="t-first", client_msg_id="u-stopped")
+    _td.clear_for_agent(agent_id, preserve_queue=True, pause_queue=True)   # the user's Stop
+    _td.finish_stop(SimpleNamespace(), agent_id)
+    assert _receipt_state("t-first") == "fenced"
+
+    # Not "sent" (no 200 dedupe) and not relaunched: the legacy unconfirmed 503.
+    with pytest.raises(DispatchError, match="delivery is unconfirmed") as refused:
+        service.dispatch(text="never mind", requested_session="cipher",
+                         trace_id="t-retry", client_msg_id="u-stopped")
+    assert refused.value.status == 503
+    assert backends.spawned == [], "an automatic resend after Stop is not new intent"
+
+
+def test_retry_while_the_message_waits_behind_a_busy_turn_is_not_launched_twice(tmp_path, monkeypatch):
+    backends = _Backends()
+    agent_id = agents_db.create_agent(
+        persona="Mike", voice_id="V", cwd=str(tmp_path), session="mike", backend="claude")
+    agents_db.start_runtime(agent_id, "mike")
+    ctx = SimpleNamespace(default_session="mike",
+                          agents_path=tmp_path / "unused.json", stream=_Stream())
+    service = TurnDispatchService(ctx, backend_registry=backends, home=tmp_path,
+                                  uuid_factory=lambda: "backend-session-1")
+    # An interactive terminal holds the agent: the send waits in this process's memory.
+    patch_shared(monkeypatch, _td, "_terminal_live", lambda agent: agent == agent_id)
+    service.dispatch(text="later", requested_session="mike", trace_id="t-held",
+                     client_msg_id="u-held")
+    assert _receipt_state("t-held") == "pending"
+    assert _td._SLOTS.has_queued(agent_id, lambda s: getattr(s, "client_msg_id", "") == "u-held")
+
+    service.dispatch(text="later", requested_session="mike", trace_id="t-retry",
+                     client_msg_id="u-held")
+    assert backends.spawned == [], "the held original is the only copy that may launch"
+    assert _td._SLOTS.queue_depth(agent_id) == 1
+
+
+def test_a_message_admitted_without_a_receipt_stays_unknown(tmp_path):
+    # Rows admitted before this receipt existed (e.g. 2026-10-25 u-D0524D85) are never
+    # launched automatically: missing evidence is still not proof.
+    backends = _CodexSteerable()
+    service, agent_id = _codex_service(tmp_path, backends)
+    from lib import message_store, settings_store
+    service.dispatch(text="historic", requested_session="cipher", trace_id="t-old",
+                     client_msg_id="u-old")
+    _td._INFLIGHT.pop(agent_id, None)
+    agents_db.conn().execute("DELETE FROM state_log WHERE agent_id = ?", (agent_id,))
+    settings_store.delete("launch-receipt:t-old")
+    assert message_store.client_message_trace("u-old") == "t-old"
+    with pytest.raises(DispatchError, match="delivery is unconfirmed"):
+        service.dispatch(text="historic", requested_session="cipher", trace_id="t-new",
+                         client_msg_id="u-old")
+    assert len(backends.spawned) == 1
+
+
+def test_a_different_principal_cannot_relaunch_a_pending_message(tmp_path, monkeypatch):
+    backends = _CodexSteerable()
+    service, agent_id = _codex_service(tmp_path, backends)
+    _die_once_after_admission(monkeypatch, service)
+    with pytest.raises(RuntimeError):
+        service.dispatch(text="mine", requested_session="cipher", trace_id="t-first",
+                         client_msg_id="u-mine")
+    _td.reset_for_tests()
+    with pytest.raises(DispatchError, match="delivery is unconfirmed"):
+        service.dispatch(text="mine", requested_session="cipher", trace_id="t-peer",
+                         client_msg_id="u-mine", origin="agent", sender_agent_id="peer")
+    assert backends.spawned == []
+    assert _receipt_state("t-first") == "pending"
+
+
+# ---- launch receipts: deterministic barriers (handoff vs retry vs Stop) ---------------------
+
+def _block_handoff(monkeypatch, trace_id):
+    """Hold the dispatch of `trace_id` right before its receipt leaves `pending`."""
+    import threading
+    from lib import launch_receipts
+    real = launch_receipts.mark_attempted
+    entered, release = threading.Event(), threading.Event()
+
+    def blocked(trace, **kwargs):
+        if trace == trace_id:
+            entered.set()
+            assert release.wait(5)
+        return real(trace, **kwargs)
+    monkeypatch.setattr(launch_receipts, "mark_attempted", blocked)
+    return entered, release
+
+
+def _in_thread(fn):
+    import threading
+    box = {}
+
+    def run():
+        try:
+            box["result"] = fn()
+        except BaseException as exc:  # noqa: BLE001
+            box["error"] = exc
+    thread = threading.Thread(target=run)
+    thread.start()
+    return thread, box
+
+
+def test_retry_between_commit_and_handoff_waits_and_launches_once(tmp_path, monkeypatch):
+    backends = _CodexSteerable()
+    service, agent_id = _codex_service(tmp_path, backends)
+    entered, release = _block_handoff(monkeypatch, "t-first")
+    first, first_box = _in_thread(lambda: service.dispatch(
+        text="once", requested_session="cipher", trace_id="t-first", client_msg_id="u-once"))
+    try:
+        assert entered.wait(5), "the first send is committed and parked before its handoff"
+        assert _receipt_state("t-first") == "pending"
+        # Even without the per-client lock, the slot proves the launch is in progress.
+        slot = service._slot_snapshot(SimpleNamespace(agent_id=agent_id))
+        assert slot == ("t-first", True)
+        assert service._admitted_but_never_launched(
+            SimpleNamespace(agent_id=agent_id, origin="user", sender_agent_id=""),
+            "u-once", slot=slot, held=False) is False
+        retry, retry_box = _in_thread(lambda: service.dispatch(
+            text="once", requested_session="cipher", trace_id="t-retry", client_msg_id="u-once"))
+        retry.join(0.5)
+        assert retry.is_alive(), "the same-id retry waits for the first attempt"
+    finally:
+        release.set()
+    first.join(5)
+    retry.join(5)
+    assert "error" not in first_box and "error" not in retry_box
+    assert len(backends.spawned) == 1
+    assert len(_user_rows(agent_id)) == 1
+    assert _receipt_state("t-first") == "attempted"
+
+
+def test_stop_fence_before_spawn_handoff_refuses_it(tmp_path, monkeypatch):
+    backends = _CodexSteerable()
+    service, agent_id = _codex_service(tmp_path, backends)
+    entered, release = _block_handoff(monkeypatch, "t-first")
+    first, box = _in_thread(lambda: service.dispatch(
+        text="stop me", requested_session="cipher", trace_id="t-first", client_msg_id="u-stop"))
+    try:
+        assert entered.wait(5)
+        # The durable fence lands while this attempt still owns the slot: the
+        # compare-and-set then changes nothing and must not authorize the spawn.
+        from lib import launch_receipts
+        assert launch_receipts.fence_agent(agent_id) == 1
+    finally:
+        release.set()
+    first.join(5)
+    assert isinstance(box.get("error"), DispatchError)
+    assert (box["error"].status, str(box["error"])) == (503, _td.UNCONFIRMED_DELIVERY)
+    assert box["error"].reason == "fenced"                   # internal, diagnostics only
+    assert backends.spawned == []
+    assert _receipt_state("t-first") == "fenced"
+    with pytest.raises(DispatchError, match="delivery is unconfirmed"):
+        service.dispatch(text="stop me", requested_session="cipher", trace_id="t-again",
+                         client_msg_id="u-stop")
+    assert backends.spawned == []
+
+
+def test_real_stop_during_handoff_never_launches_after_stop(tmp_path, monkeypatch):
+    backends = _CodexSteerable()
+    service, agent_id = _codex_service(tmp_path, backends)
+    entered, release = _block_handoff(monkeypatch, "t-first")
+    first, box = _in_thread(lambda: service.dispatch(
+        text="stop me", requested_session="cipher", trace_id="t-first", client_msg_id="u-stop"))
+    try:
+        assert entered.wait(5)
+        _td.clear_for_agent(agent_id, preserve_queue=True, pause_queue=True)
+    finally:
+        release.set()
+    first.join(5)
+    assert "error" in box
+    assert backends.spawned == [], "no provider handoff after Stop"
+    assert _receipt_state("t-first") == "fenced"
+
+
+def test_stop_fence_before_steer_refuses_it(tmp_path, monkeypatch):
+    backends = _CodexSteerable()
+    service, agent_id = _codex_service(tmp_path, backends)
+    service.dispatch(text="long task", requested_session="cipher", trace_id="t-live",
+                     client_msg_id="u-live")
+    assert len(backends.spawned) == 1                       # a live, steerable turn
+    entered, release = _block_handoff(monkeypatch, "t-steer")
+    second, box = _in_thread(lambda: service.dispatch(
+        text="also this", requested_session="cipher", trace_id="t-steer",
+        client_msg_id="u-steer"))
+    try:
+        assert entered.wait(5)
+        from lib import launch_receipts
+        assert launch_receipts.fence_agent(agent_id) == 1
+    finally:
+        release.set()
+    second.join(5)
+    assert isinstance(box.get("error"), DispatchError)
+    assert (box["error"].status, str(box["error"])) == (503, _td.UNCONFIRMED_DELIVERY)
+    assert backends.steered == []
+    assert len(backends.spawned) == 1, "a refused steer never falls through to a preempt"
+
+
+def test_a_failed_stop_fence_write_still_blocks_the_resend(tmp_path, monkeypatch):
+    import sqlite3
+    from lib import launch_receipts
+    backends = _CodexSteerable()
+    service, agent_id = _codex_service(tmp_path, backends)
+    _die_once_after_admission(monkeypatch, service)
+    with pytest.raises(RuntimeError):
+        service.dispatch(text="never mind", requested_session="cipher",
+                         trace_id="t-first", client_msg_id="u-stopped")
+
+    def locked(agent):
+        raise sqlite3.OperationalError("database is locked")
+    monkeypatch.setattr(launch_receipts, "fence_agent", locked)
+    monkeypatch.setattr(_td, "_FENCE_RETRY_DELAYS", ())
+    _td.clear_for_agent(agent_id, preserve_queue=True, pause_queue=True)   # Stop still completes
+    _td.finish_stop(SimpleNamespace(), agent_id)
+    assert _receipt_state("t-first") == "pending", "the durable write failed"
+
+    with pytest.raises(DispatchError, match="delivery is unconfirmed"):
+        service.dispatch(text="never mind", requested_session="cipher",
+                         trace_id="t-retry", client_msg_id="u-stopped")
+    assert backends.spawned == []
+
+
+def test_a_send_held_behind_stop_still_runs_after_a_racing_fence(tmp_path, monkeypatch):
+    from lib import launch_receipts
+    backends = _CodexSteerable()
+    service, agent_id = _codex_service(tmp_path, backends)
+    _td.clear_for_agent(agent_id, preserve_queue=True, pause_queue=True)   # Stop barrier up
+    service.dispatch(text="do this instead", requested_session="cipher",
+                     trace_id="t-newer", client_msg_id="u-newer")
+    assert backends.spawned == []                            # held behind the barrier
+    assert launch_receipts.fence_agent(agent_id) == 1        # a fence that raced it
+    _td.finish_stop(service.ctx, agent_id, backend_registry=backends)
+    assert len(backends.spawned) == 1, "Stop decided it runs; the receipt does not override that"
+    assert _receipt_state("t-newer") == "attempted"
+
+
+def test_handoff_verdicts_never_trust_an_unchanged_row(tmp_path):
+    from lib import launch_receipts
+    launch_receipts.record_pending(agent_id="a", trace_id="t1", client_msg_id="u",
+                                   origin="user")
+    launch_receipts.record_pending(agent_id="a", trace_id="t2", client_msg_id="u",
+                                   origin="user", supersedes="t1")
+    with pytest.raises(launch_receipts.HandoffRefused) as refused:
+        launch_receipts.mark_attempted("t1")
+    assert refused.value.state == "relaunched"
+    with pytest.raises(launch_receipts.HandoffRefused):
+        launch_receipts.mark_attempted("t1", override_fence=True)   # superseded always refuses
+    assert launch_receipts.mark_attempted("t2") == "attempted"
+    assert launch_receipts.mark_attempted("t2") == "already_attempted"
+    assert launch_receipts.mark_attempted("no-such-trace") == "no_receipt"
+    launch_receipts.record_pending(agent_id="a", trace_id="t3", client_msg_id="v",
+                                   origin="user")
+    launch_receipts.fence_agent("a")
+    with pytest.raises(launch_receipts.HandoffRefused):
+        launch_receipts.mark_attempted("t3")
+    assert launch_receipts.mark_attempted("t3", override_fence=True) == "attempted"
+
+
+def test_pruning_is_bounded_and_never_revives_a_fenced_receipt(tmp_path):
+    import json
+    from lib import launch_receipts, maintenance, settings_store
+    launch_receipts.reset_for_tests()
+    old = 1_000
+    for trace, state in (("p", "pending"), ("a", "attempted"), ("f", "fenced")):
+        settings_store.set_text("launch-receipt:" + trace, json.dumps(
+            {"state": state, "agent_id": "ag", "trace_id": trace, "client_msg_id": "u",
+             "origin": "user", "sender_agent_id": "", "admitted_at": old}), updated_at=old)
+    settings_store.set_text("unrelated-key", "keep", updated_at=old)
+    plan = " ".join(str(row[-1]) for row in agents_db.conn().execute(
+        "EXPLAIN QUERY PLAN SELECT key FROM settings WHERE key >= ? AND key < ?",
+        ("launch-receipt:", "launch-receipt;")))
+    assert "INDEX" in plan.upper(), plan
+    # An admission never prunes (F4 N7): the Host maintenance pass does.
+    launch_receipts.record_pending(agent_id="ag", trace_id="fresh", client_msg_id="w",
+                                   origin="user")
+    assert _receipt_state("p") == "pending"
+    maintenance.prune_database(now_ms=launch_receipts.RETENTION_MS + 10 * old)
+    assert _receipt_state("p") is None and _receipt_state("a") is None
+    assert _receipt_state("f") == "fenced", "a fenced receipt is never pruned"
+    assert _receipt_state("fresh") == "pending", "a recent receipt is kept"
+    assert settings_store.get("unrelated-key") == "keep"
+    assert launch_receipts.status("ag", "p") == "unknown", "expiry never yields retryable"
+
+
+def test_a_failed_receipt_write_rolls_back_the_admission(tmp_path, monkeypatch):
+    import sqlite3
+    from lib import launch_receipts
+    backends = _CodexSteerable()
+    service, agent_id = _codex_service(tmp_path, backends)
+    real = launch_receipts.record_pending
+    calls = {"n": 0}
+
+    def locked_once(**kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise sqlite3.OperationalError("database is locked")
+        return real(**kwargs)
+    monkeypatch.setattr(launch_receipts, "record_pending", locked_once)
+    with pytest.raises(sqlite3.OperationalError):
+        service.dispatch(text="atomic", requested_session="cipher", trace_id="t-died",
+                         client_msg_id="u-lost")
+    assert _user_rows(agent_id) == [], "no user row without its receipt"
+    _assert_retry_delivers_once(service, backends, agent_id)
+
+
+def test_a_stop_across_a_restart_still_fences_the_resend(tmp_path, monkeypatch):
+    # Owner boundary + restart: the fence write failed and the process that
+    # recorded the in-memory epoch is gone. The durable Stop generation, moved
+    # in the same transaction as Stop's pause, still refuses the relaunch.
+    import sqlite3
+    from lib import launch_receipts
+    backends = _CodexSteerable()
+    service, agent_id = _codex_service(tmp_path, backends)
+    _die_once_after_admission(monkeypatch, service)
+    with pytest.raises(RuntimeError):
+        service.dispatch(text="never mind", requested_session="cipher",
+                         trace_id="t-first", client_msg_id="u-stopped")
+
+    def locked(agent):
+        raise sqlite3.OperationalError("database is locked")
+    monkeypatch.setattr(launch_receipts, "fence_agent", locked)
+    monkeypatch.setattr(_td, "_FENCE_RETRY_DELAYS", ())
+    _td.clear_for_agent(agent_id, preserve_queue=True, pause_queue=True)   # the user's Stop
+    _td.finish_stop(SimpleNamespace(), agent_id)
+    _td.reset_for_tests()                                   # the runtime restarts
+    assert _receipt_state("t-first") == "pending", "no durable fence was written"
+
+    with pytest.raises(DispatchError, match="delivery is unconfirmed") as refused:
+        service.dispatch(text="never mind", requested_session="cipher",
+                         trace_id="t-retry", client_msg_id="u-stopped")
+    assert refused.value.status == 503
+    assert backends.spawned == []
+
+
+def test_a_maintenance_cancel_barrier_does_not_withdraw_a_user_send(tmp_path, monkeypatch):
+    # begin_stop is also the janitor-cancel barrier: it must not fence the
+    # user's admitted send that is about to be handed over.
+    backends = _CodexSteerable()
+    service, agent_id = _codex_service(tmp_path, backends)
+    entered, release = _block_handoff(monkeypatch, "t-user")
+    first, box = _in_thread(lambda: service.dispatch(
+        text="mine", requested_session="cipher", trace_id="t-user", client_msg_id="u-user"))
+    try:
+        assert entered.wait(5)
+        snapshot, _dropped, _was_paused = _td.begin_stop(agent_id)   # maintenance barrier
+        assert _receipt_state("t-user") == "pending"
+    finally:
+        release.set()
+    first.join(5)
+    assert "error" not in box
+    assert len(backends.spawned) == 1
+    assert _receipt_state("t-user") == "attempted"
+    _td.restore_stop_state(agent_id, snapshot)
+
+
+def test_retry_after_a_relaunch_is_never_a_200_for_the_superseded_attempt(tmp_path, monkeypatch):
+    # The original attempt is superseded by a relaunch; its own late handoff is
+    # refused with the legacy unconfirmed 503, never "sent" and never a launch.
+    from lib import launch_receipts
+    backends = _CodexSteerable()
+    service, agent_id = _codex_service(tmp_path, backends)
+    _die_once_after_admission(monkeypatch, service)
+    with pytest.raises(RuntimeError):
+        service.dispatch(text="hello", requested_session="cipher", trace_id="t-old",
+                         client_msg_id="u-same")
+    _td.reset_for_tests()
+    service.dispatch(text="hello", requested_session="cipher", trace_id="t-new",
+                     client_msg_id="u-same")
+    assert len(backends.spawned) == 1 and _receipt_state("t-old") == "relaunched"
+    with pytest.raises(launch_receipts.HandoffRefused):
+        launch_receipts.mark_attempted("t-old")
+    spec = SimpleNamespace(origin="user", client_msg_id="u-same", trace_id="t-old",
+                           agent_id=agent_id, session="cipher", queue_id="", park_id="",
+                           after_stop=False, prompt_admission_id="")
+    with pytest.raises(DispatchError) as refused:
+        _td._record_launch_attempt(spec)
+    assert (refused.value.status, str(refused.value)) == (503, _td.UNCONFIRMED_DELIVERY)
+    assert refused.value.reason == "relaunched"
+    assert len(backends.spawned) == 1
+
+
+def test_a_maintenance_cancel_and_restore_never_strands_a_pending_user_retry(tmp_path, monkeypatch):
+    # The maintenance cancel installs the Stop barrier and pauses, then restores
+    # the queue; it moves the shared stop generation but is not the user's Stop.
+    # An admitted-but-unlaunched user send must still launch exactly once.
+    from lib import turn_queue
+    backends = _CodexSteerable()
+    service, agent_id = _codex_service(tmp_path, backends)
+    _die_once_after_admission(monkeypatch, service)
+    with pytest.raises(RuntimeError):
+        service.dispatch(text="full control over the pipeline", requested_session="cipher",
+                         trace_id="t-first", client_msg_id="u-lost")
+    before_shared = turn_queue.stop_generation(agent_id)
+    before_user = turn_queue.user_stop_generation(agent_id)
+    snapshot, _dropped, was_paused = _td.begin_stop(agent_id)     # maintenance cancel
+    _td.restore_stop_state(agent_id, snapshot)
+    turn_queue.set_paused(agent_id, was_paused)                   # its restore
+    assert turn_queue.stop_generation(agent_id) > before_shared, "shared consumers unchanged"
+    assert turn_queue.user_stop_generation(agent_id) == before_user
+    assert _receipt_state("t-first") == "pending"
+
+    _assert_retry_delivers_once(service, backends, agent_id)
+    assert _receipt_state("t-retry") == "attempted"
+
+
+def test_only_the_users_stop_moves_the_user_stop_generation(tmp_path):
+    from lib import turn_queue
+    backends = _CodexSteerable()
+    _service, agent_id = _codex_service(tmp_path, backends)
+    shared, user = turn_queue.stop_generation(agent_id), turn_queue.user_stop_generation(agent_id)
+    _td.clear_for_agent(agent_id, preserve_queue=True, pause_queue=True)   # local user Stop
+    _td.finish_stop(SimpleNamespace(), agent_id)
+    after_user = turn_queue.stop_generation(agent_id)
+    assert after_user > shared, "the shared generation still moves for its consumers"
+    assert turn_queue.user_stop_generation(agent_id) == user + 1
+    snapshot, _dropped, was_paused = _td.begin_stop(agent_id)            # maintenance
+    _td.restore_stop_state(agent_id, snapshot)
+    turn_queue.set_paused(agent_id, was_paused)
+    assert turn_queue.stop_generation(agent_id) > after_user
+    assert turn_queue.user_stop_generation(agent_id) == user + 1, "maintenance never moves it"
+    snapshot, _dropped, _was = _td.begin_stop(agent_id, user_stop=True)   # the RPC user route
+    _td.restore_stop_state(agent_id, snapshot)
+    assert turn_queue.user_stop_generation(agent_id) == user + 2
+
+
+def test_a_failed_stop_fence_write_retries_through_the_tracked_scheduler(monkeypatch):
+    # The retry must use the dispatcher's scheduler (tracked and cancelled per
+    # test), never a private timer that could outlive the test that armed it.
+    import sqlite3
+    from lib import launch_receipts
+    calls, scheduled = {"n": 0}, []
+
+    def flaky(agent, **_hooks):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise sqlite3.OperationalError("database is locked")
+        return 0
+    monkeypatch.setattr(launch_receipts, "fence_agent", flaky)
+    monkeypatch.setattr(_td, "_default_retry_scheduler",
+                        lambda delay, fn: scheduled.append((delay, fn)))
+    _td.fence_user_stop("agent-retry")
+    assert [d for d, _fn in scheduled] == [_td._FENCE_RETRY_DELAYS[0]]
+    scheduled[0][1]()                                       # the timer fires
+    assert calls["n"] == 2 and len(scheduled) == 1, "a successful retry schedules nothing more"
+    _td.reset_for_tests()
+
+
+def test_the_stop_override_runs_the_newer_send_but_keeps_the_older_one_fenced(tmp_path, monkeypatch):
+    # The user's Stop fences what was admitted before it; the override only lets
+    # a send that Stop itself held as newer work run. It never unfences the old one.
+    backends = _CodexSteerable()
+    service, agent_id = _codex_service(tmp_path, backends)
+    _die_once_after_admission(monkeypatch, service)
+    with pytest.raises(RuntimeError):
+        service.dispatch(text="old", requested_session="cipher", trace_id="t-old",
+                         client_msg_id="u-old")
+    _td.clear_for_agent(agent_id, preserve_queue=True, pause_queue=True)   # the user's Stop
+    assert _receipt_state("t-old") == "fenced"
+    service.dispatch(text="new", requested_session="cipher", trace_id="t-new",
+                     client_msg_id="u-new")                                # held behind it
+    _td.finish_stop(service.ctx, agent_id, backend_registry=backends)
+    assert [s[1]["trace_id"] for s in backends.spawned] == ["t-new"]
+    assert _receipt_state("t-new") == "attempted" and _receipt_state("t-old") == "fenced"
+    with pytest.raises(DispatchError, match="delivery is unconfirmed"):
+        service.dispatch(text="old", requested_session="cipher", trace_id="t-old-retry",
+                         client_msg_id="u-old")
+    assert len(backends.spawned) == 1
+
+
+def test_an_agent_stop_then_resume_and_restart_keeps_the_pending_user_retry(tmp_path, monkeypatch):
+    from lib import turn_queue
+    backends = _CodexSteerable()
+    service, agent_id = _codex_service(tmp_path, backends)
+    _die_once_after_admission(monkeypatch, service)
+    with pytest.raises(RuntimeError):
+        service.dispatch(text="full control over the pipeline", requested_session="cipher",
+                         trace_id="t-first", client_msg_id="u-lost")
+    user_gen = turn_queue.user_stop_generation(agent_id)
+    _td.clear_for_agent(agent_id, preserve_queue=True, pause_queue=True, user_stop=False)
+    _td.finish_stop(SimpleNamespace(), agent_id)
+    assert turn_queue.is_paused(agent_id)
+    assert turn_queue.user_stop_generation(agent_id) == user_gen
+    assert _receipt_state("t-first") == "pending"
+    turn_queue.set_paused(agent_id, False)                 # the user resumes
+    _td.reset_for_tests()                                  # and the runtime restarts
+    _assert_retry_delivers_once(service, backends, agent_id)
+
+
+def test_a_usage_limit_while_the_credential_switch_waits_fails_visibly_without_failover(
+        tmp_path, monkeypatch):
+    """BACKENDS-06 (c): the account was already switched, but the shared Codex
+    process still runs the old credentials because another agent is busy. A
+    usage limit then does not start another failover (which would loop and
+    mark accounts); the turn ends visibly, saying the switch waits."""
+    coordinator, scheduled = _enable_account_failover(monkeypatch)
+    service, backend, agent_id = _make_service(tmp_path)
+    claude = _td.backends.by_id("claude")
+    monkeypatch.setattr(claude, "credential_switch_pending", lambda message: True, raising=False)
+    service.dispatch(text="hello", requested_session="mike", trace_id="t-limit",
+                     synthesize_audio=False)
+    backend.live = False
+    backend.spawned[-1][1]["on_error"]("You've hit your usage limit. Try again at 3:29 PM.")
+
+    assert not coordinator.recovering and scheduled == []
+    state = agents_db.latest_state(agent_id)
+    assert state["kind"] == AgentState.INTERRUPTED
+    assert "switch" in state["detail"]["message"].lower()
+
+
+class _HeldSessionBackends(_ProcessBackends):
+    """A process outside any turn still holds the agent's native session (a
+    detached, stuck Codex turn: BACKENDS-07b)."""
+
+    def __init__(self):
+        super().__init__()
+        self.holders = []
+
+    def turn_holders(self, backend, agent_id):
+        return [h for h in self.holders if h.alive]
+
+
+def test_a_send_waits_behind_a_process_that_still_holds_the_session(tmp_path):
+    """Lead (stage 1): a send to an agent whose stopped turn is stuck in the
+    shared Codex process is queued until that process is recycled. Failing it
+    loses the composed text in the PWA and desktop, which clear the composer
+    before /send and turn the failed bubble into a normal row on the next sync."""
+    service, _, agent_id = _make_service(tmp_path)
+    backends = _HeldSessionBackends()
+    service.backends = backends
+    service.dispatch(text="first", requested_session="mike", trace_id="t1",
+                     synthesize_audio=False)
+    held = _Process()
+    backends.holders.append(held)
+    backends.processes[0].alive = False
+    backends.spawned[0][1]["on_result"]({"duration_ms": 9})
+
+    sent = service.dispatch(text="after the stop", requested_session="mike",
+                            trace_id="t2", synthesize_audio=False)
+    assert sent.queued is True and len(backends.spawned) == 1
+
+    held.alive = False
+    assert _wait_until(lambda: len(backends.spawned) == 2)
+    assert backends.spawned[1][1]["text"] == "after the stop"
+
+
+def test_a_wait_behind_a_stuck_session_has_its_own_log_line(tmp_path, capsys):
+    """Lead (stage 1): one log line counts the sends that wait behind a
+    stuck Codex session, apart from the ordinary wait behind a process."""
+    service, _, agent_id = _make_service(tmp_path)
+    backends = _HeldSessionBackends()
+    service.backends = backends
+    service.dispatch(text="first", requested_session="mike", trace_id="t1",
+                     synthesize_audio=False)
+    held = _Process()
+    backends.holders.append(held)
+    backends.processes[0].alive = False
+    backends.spawned[0][1]["on_result"]({"duration_ms": 9})
+    capsys.readouterr()
+    service.dispatch(text="after the stop", requested_session="mike",
+                     trace_id="t2", synthesize_audio=False)
+    assert "turnQueuedBehindStuckSession" in capsys.readouterr().err
+    held.alive = False
+    assert _wait_until(lambda: len(backends.spawned) == 2)
+
+
+def test_the_leak_release_leaves_a_send_waiting_behind_a_held_session(tmp_path):
+    """Reviewer A2's probe (Thursday combined pre-review): a send waiting
+    behind a stuck Codex session is not started by the leaked-slot release
+    while the session is still held, even once the stuck turn's terminal row
+    is older than the grace."""
+    from lib import db
+    service, _, agent_id = _make_service(tmp_path)
+    backends = _HeldSessionBackends()
+    service.backends = backends
+    service.dispatch(text="first", requested_session="mike", trace_id="t1",
+                     synthesize_audio=False)
+    held = _Process()
+    backends.holders.append(held)
+    backends.processes[0].alive = False
+    backends.spawned[0][1]["on_result"]({"duration_ms": 9})
+    sent = service.dispatch(text="after the stop", requested_session="mike",
+                            trace_id="t2", synthesize_audio=False)
+    assert sent.queued is True and len(backends.spawned) == 1
+    # The stuck process outlives the 60 s grace (its recycle waits for the
+    # other Codex agents to finish).
+    db.conn().execute("UPDATE state_log SET ts = ts - 600000 WHERE agent_id = ?",
+                      (agent_id,))
+
+    released = service.release_leaked_slots()
+
+    assert len(backends.spawned) == 1, ("started behind a held session", released)
+    assert released == {}
+    held.alive = False
+    assert _wait_until(lambda: len(backends.spawned) == 2)

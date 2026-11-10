@@ -1,6 +1,8 @@
 """Goals: the table, the Codex mirror, adopted continuation turns, routing."""
 from __future__ import annotations
 
+from tests.codex_request import result_reply
+
 import threading
 
 import pytest
@@ -192,6 +194,7 @@ def test_stop_pauses_an_active_goal_before_interrupting(tmp_path):
     client = _client(_Stream())
     sent = []
 
+    @result_reply
     def fake_request(method, params, timeout=30):
         sent.append((method, params))
         if method == "thread/goal/set":
@@ -218,7 +221,7 @@ def test_backends_refuse_goals_outside_codex(tmp_path):
 
 
 def test_runtime_bridge_goal_method_maps_errors(tmp_path, monkeypatch):
-    from lib import runtime_bridge
+    from lib import runtime_rpc_server
 
     class _Ctx:
         stream = _Stream()
@@ -226,7 +229,7 @@ def test_runtime_bridge_goal_method_maps_errors(tmp_path, monkeypatch):
     class _Service:
         ctx = _Ctx()
 
-    server = object.__new__(runtime_bridge.RuntimeRPCServer)
+    server = object.__new__(runtime_rpc_server.RuntimeRPCServer)
     server.dispatch_service = _Service()
     missing = server._dispatch_request("goal", {"agent_id": "nope", "action": "start"})
     assert missing["status"] == 404

@@ -87,7 +87,8 @@ export function backendDetail(raw, catalogue) {
 }
 
 const BUNDLED_IDS = [AgentBackend.CLAUDE, AgentBackend.CODEX, AgentBackend.AGY,
-                     AgentBackend.GROK, AgentBackend.OPENCODE, AgentBackend.DEEPSEEK];
+                     AgentBackend.GROK, AgentBackend.OPENCODE, AgentBackend.DEEPSEEK,
+                     AgentBackend.MUSE];
 
 // The backends a chooser offers: catalogue rows that are installed on this
 // Host and not hidden, plus `current` (the backend an existing agent already

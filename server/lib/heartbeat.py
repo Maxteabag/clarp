@@ -252,14 +252,16 @@ def update_settings(data: dict) -> HeartbeatSettings:
     return get_settings()
 
 
-def pending_heartbeat_agents(*, now: float | None = None) -> list[dict]:
-    """Return enabled idle agents currently eligible for a heartbeat."""
+def pending_heartbeat_agents(*, now: float | None = None,
+                             skip: Callable[[dict], bool] | None = None) -> list[dict]:
+    """Return enabled idle agents currently eligible for a heartbeat. ``skip``
+    drops an agent before any of its state is read (a keeper serves it)."""
     now = time.time() if now is None else now
     if _outside_active_hours(now):
         return []
     due: list[dict] = []
     for agent in agents_db.list_agents():
-        if not heartbeat_enabled(agent):
+        if (skip is not None and skip(agent)) or not heartbeat_enabled(agent):
             continue
         agent_id = agent["agent_id"]
         session = (agent.get("session") or "").strip()
@@ -583,6 +585,33 @@ def _effective_interval_sec(
     return min(cap, interval)
 
 
+def keeper_ownership() -> Callable[[dict], bool]:
+    """Whether a Heartbeat keeper, not the fixed heartbeat, serves an agent:
+    an enabled keeper whose scope covers it, or the scope of a keeper adopted
+    earlier, which pausing or deleting it keeps (Peter, AUT-02 keep_fixed).
+    The keepers and adopted scopes are read once; the returned test reads
+    nothing, so a pass costs one read however many agents it covers."""
+    from . import janitor_builtins, janitors
+
+    def indexed(scope: dict) -> dict:
+        # The same scope with its id lists as sets: a pass tests every agent
+        # against every scope, so membership must not scan a list.
+        return {**scope, **{key: frozenset(scope[key]) for key in ("agent_ids", "exclude_agent_ids")
+                            if scope.get(key)}}
+    keepers = [{**config, "scope": indexed(config["scope"])}
+               for config in janitor_builtins.eligible("heartbeat-decider")]
+    adopted = [indexed(scope) for scope in janitors.adopted_heartbeat_scopes()]
+
+    def owns(agent: dict) -> bool:
+        return (janitor_builtins.select(keepers, agent) is not None
+                or any(janitors._in_scope(scope, agent) for scope in adopted))
+    return owns
+
+
+def keeper_owns_heartbeat(agent: dict) -> bool:
+    return keeper_ownership()(agent)
+
+
 def agent_schedule(agent: dict, *, now: float | None = None) -> dict:
     """Authoritative profile projection for cadence, backoff, and dormancy."""
     current = time.time() if now is None else now
@@ -604,7 +633,8 @@ def agent_schedule(agent: dict, *, now: float | None = None) -> dict:
         state.dormant = True
     interval = int(_effective_interval_sec(state, is_interrupted=is_interrupted))
     next_at = None
-    if agent.get("heartbeat_enabled") and not state.dormant:
+    if (agent.get("heartbeat_enabled") and not state.dormant
+            and not keeper_owns_heartbeat(agent)):
         if latest_kind == AgentState.WAITING or (
             latest_kind == AgentState.INTERRUPTED and _is_user_stopped(latest)
         ):
@@ -844,13 +874,10 @@ class HeartbeatScheduler:
             self._thread.join(timeout=timeout)
 
     def run_once(self) -> int:
-        from . import janitor_builtins
-        if settings_store.get_bool("heartbeat.janitor_adopted") or janitor_builtins.resolve("heartbeat-decider"):
-            # The decision Janitor owns periodic continuity; startup never wakes agents.
-            return 0
         now = self.now()
         sent = 0
-        for agent in pending_heartbeat_agents(now=now):
+        # The decision Janitor owns periodic continuity in its scope; startup never wakes agents.
+        for agent in pending_heartbeat_agents(now=now, skip=keeper_ownership()):
             agent_id = agent["agent_id"]
             session = agent["session"]
             try:

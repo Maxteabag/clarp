@@ -117,6 +117,10 @@ form_event_lost_receipts = 0
 snapshot_delay = [0.0, 0]
 # Seconds an older page (/log?before=) takes; /__control/older-delay sets it.
 older_delay = 0.0
+# Whether a delta pages its backlog by `limit` as the Host does (oldest
+# first, has_more); /__control/page-deltas turns it on. Off, a delta is one
+# page, which the checks that fill a chat at once rely on.
+page_deltas = False
 # Seconds a /send takes to be filed and answered (a slow Host's ack);
 # /__control/send-delay sets it.
 send_delay = 0.0
@@ -1159,6 +1163,12 @@ class Handler(BaseHTTPRequestHandler):
                     limit = int(query.get("limit", "0") or 0)
                     if limit and len(chosen) > limit:
                         chosen, more = chosen[-limit:], True
+                elif page_deltas:
+                    # A backlog of newer rows beyond the limit: the oldest
+                    # first, and more (as the Host pages a delta).
+                    limit = int(query.get("limit", "0") or 0)
+                    if limit and len(chosen) > limit:
+                        chosen, more = chosen[:limit], True
             return self.reply(200, {"conversation_id": cid, "turns": chosen, "latest_revision": latest,
                                     "has_more": more, "missing": False})
         if url.path == "/live":
@@ -1170,17 +1180,20 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/tool-explanations/settings":
             return self.reply(200, tool_explanation_settings)
         if url.path == "/events":
-            self.send_response(200)
-            self.send_header("Content-Type", "text/event-stream")
-            self.send_header("Cache-Control", "no-cache")
-            self.end_headers()
             inbox = queue.Queue()
             # `live=` (blank) asks for status ops only; no parameter, none.
             live = parse_qs(url.query, keep_blank_values=True).get("live", [None])[0]
+            # Subscribed before the 200 goes out: a client counts itself
+            # connected once it has the headers, and an event broadcast then
+            # must already reach this inbox (it is not kept for later).
             with state_lock:
                 subscribers.append(inbox)
                 live_filters[id(inbox)] = None if live is None else {n for n in live.split(",") if n}
             try:
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Cache-Control", "no-cache")
+                self.end_headers()
                 self.wfile.write(b": connected\n\n")
                 self.wfile.flush()
                 while True:
@@ -1355,6 +1368,11 @@ class Handler(BaseHTTPRequestHandler):
             # Test control: the next `count` snapshots answer after `seconds`.
             snapshot_delay[:] = [float(body.get("seconds", 0)), int(body.get("count", 1))]
             return self.reply(200, {"ok": True})
+        if url.path == "/__control/page-deltas":
+            # Test control: deltas page their backlog by `limit`.
+            global page_deltas
+            page_deltas = bool(body.get("on", True))
+            return self.reply(200, {"ok": True})
         if url.path == "/__control/older-delay":
             # Test control: older pages arrive after `seconds`.
             global older_delay
@@ -1364,6 +1382,20 @@ class Handler(BaseHTTPRequestHandler):
             # Test control: each GET /artifacts answers after `seconds`.
             global artifacts_delay
             artifacts_delay = float(body.get("seconds", 0))
+            return self.reply(200, {"ok": True})
+        if url.path == "/__control/delivery":
+            # Test control (F4): the Host's projection of a user send's
+            # delivery state changes without a new revision; clients only get
+            # the delivery-updated hint and re-read /log.
+            session, cid = body["session"], body["client_msg_id"]
+            with state_lock:
+                for turn in turns.get(session, []):
+                    if turn["id"] == "u-" + cid:
+                        turn["delivery"] = {"state": body["state"], "rev": 1, "seq": 1,
+                                            "for": {"client_msg_id": cid, "trace_id": ""}}
+            agent_id = next((a["agent_id"] for a in agents if a["session"] == session), "")
+            broadcast({"type": "delivery-updated", "agent_id": agent_id, "session": session,
+                       "message_id": "u-" + cid})
             return self.reply(200, {"ok": True})
         if url.path == "/__control/send-delay":
             # Test control: each /send is filed and answered after `seconds`.

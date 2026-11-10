@@ -230,20 +230,38 @@ def test_spawn_turn_binds_session_and_results(tmp_path, monkeypatch):
     _install_fake_grok(bin_dir, "".join(json.dumps(row) + "\n" for row in _stream_events()))
     results: list[dict] = []
     sessions: list[str] = []
+    agent_id = agents_db.create_agent(
+        persona="Grok", voice_id="voice-grok", cwd=str(tmp_path),
+        session="grok-queue", backend="grok")
+    trace_id = "grok-queue-trace"
+    agents_db.open_turn(agent_id=agent_id, source="pwa", trace_id=trace_id)
+    agents_db.set_focus(agent_id)
     handle = GROK.start_turn(
         text="hello", cwd=tmp_path, backend_session_id=SID,
+        agent_id=agent_id, session="grok-queue", trace_id=trace_id,
         on_session_init=lambda sid: sessions.append(sid) or True,
-        on_result=results.append, enqueue=lambda **_k: 1,
+        on_result=results.append,
     )
-    handle.drain_thread.join(timeout=5)
-    assert results
-    assert results[0]["last_agent_message"] == "The directory holds one file."
-    assert results[0]["usage"] == {"input_tokens": 240, "output_tokens": 30}
-    assert sessions == [SID]
-    argv = json.loads((tmp_path / "argv.json").read_text())
-    assert argv[0].endswith("grok")
-    assert argv[argv.index("--resume") + 1] == SID
-    assert "-p" in argv
+    try:
+        handle.wait(timeout=5)
+        assert results
+        assert results[0]["last_agent_message"] == "The directory holds one file."
+        assert results[0]["usage"] == {"input_tokens": 240, "output_tokens": 30}
+        assert sessions == [SID]
+        argv = json.loads((tmp_path / "argv.json").read_text())
+        assert argv[0].endswith("grok")
+        assert argv[argv.index("--resume") + 1] == SID
+        assert "-p" in argv
+        rows = agents_db.conn().execute(
+            "SELECT agent_id, text, voice_id, session, trace_id, source, status "
+            "FROM tts_queue WHERE agent_id = ? ORDER BY queue_id", (agent_id,)).fetchall()
+        assert [tuple(row) for row in rows] == [(
+            agent_id, "Hi from Grok.", "voice-grok", "grok-queue",
+            trace_id, "pwa", "queued")]
+    finally:
+        if handle.is_alive():
+            handle.kill()
+        handle.wait(timeout=5)
 
 
 def test_missing_grok_raises(tmp_path, monkeypatch):

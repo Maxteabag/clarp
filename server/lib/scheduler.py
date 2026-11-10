@@ -358,7 +358,14 @@ class AgentScheduleRunner:
         now = now_ms()
         due = due_schedules(now)
         from . import task_goal_recovery
-        dispatched_count = task_goal_recovery.tick(self._dispatch_goal, now=now, cursor=self._goal_cursor) if self._dispatch_goal else 0
+        dispatched_count = 0
+        if self._dispatch_goal:
+            try:
+                dispatched_count = task_goal_recovery.tick(
+                    self._dispatch_goal, now=now, cursor=self._goal_cursor)
+            except Exception as exc:  # noqa: BLE001 - goals never stop the cron schedules (AUT-09)
+                task_goal_recovery.log_failure_throttled(
+                    "agentScheduleGoalTickFail", ("goal-tick",), exc, now)
         for item in due:
             sid = item["schedule_id"]
             session = item["session"]

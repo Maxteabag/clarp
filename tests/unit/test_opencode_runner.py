@@ -77,15 +77,33 @@ def test_spawn_turn_reads_json_events(tmp_path, monkeypatch):
         bin_dir, "".join(json.dumps(row) + "\n" for row in events))
     results: list[dict] = []
     sessions: list[str] = []
+    agent_id = agents_db.create_agent(
+        persona="Opencode", voice_id="voice-opencode", cwd=str(tmp_path),
+        session="opencode-queue", backend="opencode")
+    trace_id = "opencode-queue-trace"
+    agents_db.open_turn(agent_id=agent_id, source="pwa", trace_id=trace_id)
+    agents_db.set_focus(agent_id)
     handle = OPENCODE.start_turn(
-        text="hello", cwd=tmp_path,
+        text="hello", cwd=tmp_path, agent_id=agent_id,
+        session="opencode-queue", trace_id=trace_id,
         on_session_init=lambda sid: sessions.append(sid) or True,
-        on_result=results.append, enqueue=lambda **_k: 1,
+        on_result=results.append,
     )
-    handle.drain_thread.join(timeout=5)
-    assert results
-    assert "OpenCode here" in results[0]["last_agent_message"]
-    assert sessions == ["ses_abc"]
+    try:
+        handle.wait(timeout=5)
+        assert results
+        assert "OpenCode here" in results[0]["last_agent_message"]
+        assert sessions == ["ses_abc"]
+        rows = agents_db.conn().execute(
+            "SELECT agent_id, text, voice_id, session, trace_id, source, status "
+            "FROM tts_queue WHERE agent_id = ? ORDER BY queue_id", (agent_id,)).fetchall()
+        assert [tuple(row) for row in rows] == [(
+            agent_id, "OpenCode here.", "voice-opencode", "opencode-queue",
+            trace_id, "pwa", "queued")]
+    finally:
+        if handle.is_alive():
+            handle.kill()
+        handle.wait(timeout=5)
 
 
 def test_missing_opencode_raises(tmp_path, monkeypatch):
@@ -492,7 +510,9 @@ def test_text_is_responding_and_a_finished_tool_reports_its_call(tmp_path, monke
 
 
 def test_opencode_reasoning_and_running_output_become_live_items():
-    from lib import live_hub, turn_lifecycle as lifecycle
+    from lib import live_hub, live_tools, tool_output, turn_lifecycle as lifecycle
+    assert live_tools.diff_stats is tool_output.diff_stats
+    assert live_tools.output_tail is tool_output.output_tail
     from lib.backend.opencode import _TurnState
 
     hub = live_hub.LiveHub(sink=lambda _e: None)
@@ -516,9 +536,17 @@ def test_opencode_reasoning_and_running_output_become_live_items():
         OPENCODE._on_part(running, st, **kw)
         running["state"]["metadata"]["output"] = "cc a.c\ncc b.c\nlink\n"
         OPENCODE._on_part(running, st, **kw)
+        edit = {"id": "prt_e", "callID": "call_e", "type": "tool", "tool": "edit",
+                "state": {"status": "running", "input": {"filePath": "src/a.ts"},
+                          "metadata": {"diff": "--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1 +1,2 @@\n-old\n+new\n+extra\n"}}}
+        OPENCODE._on_part(edit, st, **kw)
         items = {item["id"]: item for item in hub.snapshot(session="sindre")["items"]}
         assert (items["oc:prt_r"]["status"], items["oc:prt_r"]["text"]) == ("completed", "Look at the build.")
         output = items["oc:call_b"]["tool"]["output"]
         assert (output["tail"], output["total_lines"]) == (["cc a.c", "cc b.c", "link"], 3)
+        diff = items["oc:call_e"]["tool"]["diff"]
+        assert (diff["added"], diff["removed"]) == (2, 1)
+        assert diff["files"] == [{"path": "src/a.ts", "added": 2, "removed": 1}]
+        assert diff["preview"] == "@@ -1 +1,2 @@\n-old\n+new\n+extra"
     finally:
         live_hub.install(None)

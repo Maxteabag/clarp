@@ -75,6 +75,11 @@ class _TransactionOwner:
     begin_sql: str
     last_sql: str
     stack: tuple[str, ...]
+    # Opened by a transcript import's write batch (RM-N7; the long-wait log).
+    is_import: bool = False
+    # Confirmation time, not BEGIN time. For a deferred DML upgrade it is a
+    # lower bound: SQLite acquired the writer sometime before execute returned.
+    write_started_monotonic: float | None = None
 
 
 _TRANSACTION_OWNERS: dict[int, _TransactionOwner] = {}
@@ -124,15 +129,20 @@ def _sql_template(sql: object) -> str:
     return compact[:240]
 
 
-def _record_transaction_begin(connection: sqlite3.Connection, sql: object) -> None:
+def _record_transaction_begin(connection: sqlite3.Connection, sql: object,
+                              *, write_confirmed: bool = False) -> None:
+    template = _sql_template(sql)
+    now = time.monotonic()
     owner = _TransactionOwner(
         connection_id=id(connection),
         thread_id=threading.get_ident(),
         thread_name=threading.current_thread().name,
-        started_monotonic=time.monotonic(),
-        begin_sql=_sql_template(sql),
-        last_sql=_sql_template(sql),
+        started_monotonic=now,
+        begin_sql=template,
+        last_sql=template,
         stack=tuple(traceback.format_stack(limit=14)[:-1]),
+        is_import=bool(getattr(_LOCAL, "import_batch", False)),
+        write_started_monotonic=(now if write_confirmed or template.upper().startswith(_LOCK_BEGINS) else None),
     )
     with _TRANSACTION_LOCK:
         _TRANSACTION_OWNERS[id(connection)] = owner
@@ -147,9 +157,47 @@ def _record_transaction_statement(connection: sqlite3.Connection, sql: object) -
             )
 
 
+def _record_transaction_admission(connection: sqlite3.Connection, sql: object) -> None:
+    """Confirm only successful explicit BEGINs or writes, before logging.
+
+    A deferred BEGIN/SAVEPOINT is not proof of a writer. A successful DML
+    inside it confirms the writer by statement return, never at attempted SQL.
+    """
+    if not connection.in_transaction:
+        return
+    template = _sql_template(sql)
+    verb = template.partition(" ")[0].upper()
+    with _TRANSACTION_LOCK:
+        owner = _TRANSACTION_OWNERS.get(id(connection))
+    if verb in {"BEGIN", "SAVEPOINT"}:
+        if owner is None:
+            _record_transaction_begin(connection, template)
+    elif verb in _WRITE_VERBS:
+        if owner is None:
+            _record_transaction_begin(connection, template, write_confirmed=True)
+        elif owner.write_started_monotonic is None:
+            with _TRANSACTION_LOCK:
+                _TRANSACTION_OWNERS[id(connection)] = _TransactionOwner(
+                    **{**owner.__dict__, "write_started_monotonic": time.monotonic()})
+
+
 def _clear_transaction_owner(connection: sqlite3.Connection) -> None:
     with _TRANSACTION_LOCK:
         _TRANSACTION_OWNERS.pop(id(connection), None)
+    # Every tracked transaction end passes here: write the telemetry rows this
+    # thread's emits queued while it held the transaction (RM-N8b).
+    if not thread_holds_transaction():
+        from .log import flush_deferred
+        flush_deferred()
+
+
+def thread_holds_transaction() -> bool:
+    """Whether this thread's connection is inside a transaction now."""
+    connection = getattr(_LOCAL, "conn", None)
+    try:
+        return connection is not None and connection.in_transaction
+    except sqlite3.ProgrammingError:  # the tracked close has released the transaction
+        return False
 
 
 def _report_database_locked(waiting_sql: object) -> None:
@@ -162,7 +210,9 @@ def _report_database_locked(waiting_sql: object) -> None:
     now = time.monotonic()
     waiting = _sql_template(waiting_sql)
     with _TRANSACTION_LOCK:
-        owners = tuple(_TRANSACTION_OWNERS.values())
+        transactions = tuple(_TRANSACTION_OWNERS.values())
+        owners = tuple(o for o in transactions if o.write_started_monotonic is not None)
+        snapshots = tuple(o for o in transactions if o.write_started_monotonic is None)
         if now - _LAST_LOCK_REPORT_AT < _LOCK_REPORT_INTERVAL_SEC:
             return
         _LAST_LOCK_REPORT_AT = now
@@ -170,16 +220,21 @@ def _report_database_locked(waiting_sql: object) -> None:
     print(
         "sqlite_lock_wait "
         f"waiter_thread={waiter.name!r} waiter_ident={threading.get_ident()} "
-        f"sql={waiting!r} owner_count={len(owners)}",
+        f"sql={waiting!r} owner_count={len(owners)} snapshot_count={len(snapshots)}",
         file=sys.stderr,
         flush=True,
     )
-    for owner in owners:
+    for owner in (*owners, *snapshots):
+        confirmed = owner.write_started_monotonic is not None
+        event = "sqlite_lock_owner" if confirmed else "sqlite_lock_snapshot"
+        write_age = (f"write_age_sec={now - owner.write_started_monotonic:.3f} "
+                     if confirmed else "state=read_or_deferred ")
         stack = "".join(owner.stack).replace("\n", "\\n")
         print(
-            "sqlite_lock_owner "
+            f"{event} "
             f"connection={owner.connection_id} thread={owner.thread_name!r} "
             f"thread_ident={owner.thread_id} age_sec={now - owner.started_monotonic:.3f} "
+            f"{write_age}"
             f"begin_sql={owner.begin_sql!r} last_sql={owner.last_sql!r} "
             f"stack={stack!r}",
             file=sys.stderr,
@@ -261,31 +316,150 @@ def change_stamp() -> tuple[int, int]:
         return data_version, _WRITE_GENERATION
 
 
+# RM-N7. SQLite's busy handler sleeps 1, 2, 5, ... 50 then 100 ms between
+# attempts, so a waiter on its long steps keeps missing a transcript import's
+# short gaps and can wait out the whole import. A statement that only acquires
+# the write lock (and has done nothing when it fails with BUSY) is retried here
+# every few milliseconds instead, up to the same deadline, so it gets in at the
+# next gap. Statements inside a transaction keep SQLite's own handling.
+_LOCK_POLL_SECONDS = 0.002
+_LONG_WRITE_WAIT_SECONDS = 0.25
+_LOCK_BEGINS = ("BEGIN IMMEDIATE", "BEGIN EXCLUSIVE")
+def note_import_holds_lock(holding: bool) -> None:
+    """Called by the transcript import on its own thread just before it opens
+    a write batch, and when the batch ends: the transaction that thread opens
+    meanwhile is recorded as an import's (for the long-wait log line; another
+    process's import is invisible here)."""
+    _LOCAL.import_batch = holding
+
+
+def _import_holds_lock() -> bool:
+    """Whether a transcript import of this process holds a transaction now."""
+    me = threading.get_ident()
+    with _TRANSACTION_LOCK:
+        return any(o.is_import and o.write_started_monotonic is not None and o.thread_id != me
+                   for o in _TRANSACTION_OWNERS.values())
+
+
+def _process_name() -> str:
+    """The program, never its arguments: the basename of argv[0]."""
+    argv = getattr(sys, "argv", None) or [""]
+    return os.path.basename(str(argv[0]))[:40] or "?"
+
+
+def _is_lock_contention(exc: BaseException) -> bool:
+    """Plain SQLITE_BUSY only: another connection holds the write lock, so a
+    later attempt can succeed. Extended codes are not contention a poll can
+    wait out (SQLITE_BUSY_SNAPSHOT: this connection's own read snapshot is
+    stale, e.g. an unfinished autocommit SELECT cursor), and they fail at once
+    as before."""
+    return isinstance(exc, sqlite3.OperationalError) and \
+        getattr(exc, "sqlite_errorcode", 0) == sqlite3.SQLITE_BUSY \
+        and "database is locked" in str(exc).lower()
+
+
+class _PrefetchedCursor:
+    """Autocommit RETURNING rows, using only the two audited caller methods."""
+
+    def __init__(self, rows: list):
+        self._rows = iter(rows)
+
+    def fetchone(self):
+        return next(self._rows, None)
+
+    def fetchall(self):
+        return list(self._rows)
+
+
 class _TrackedConnection(sqlite3.Connection):
     """Connection that records explicit transaction ownership for diagnostics."""
+
+    def _only_acquires_lock(self, template: str) -> bool:
+        """Whether this statement, failing with BUSY, has done nothing: a
+        locking BEGIN, or a single write in autocommit mode with no
+        transaction open (no implicit BEGIN: isolation_level is None)."""
+        if self.in_transaction or self.isolation_level is not None:
+            return False
+        upper = template.upper()
+        return upper.startswith(_LOCK_BEGINS) or upper.partition(" ")[0] in _WRITE_VERBS
+
+    def _execute_polled(self, sql, parameters, template: str):
+        """Run a lock-acquiring statement, retrying plain BUSY every few ms
+        until the connection's own busy deadline; then fail exactly as SQLite
+        would. A wait over 250 ms logs one sqliteWriteWait line, admitted or
+        not; whether this process's import held the lock is sampled while
+        waiting. The line names the process by the basename of argv[0] only:
+        arguments can carry message text."""
+        deadline_ms = int(super().execute("PRAGMA busy_timeout").fetchone()[0])
+        if deadline_ms <= 0:
+            return super().execute(sql, parameters)
+        started = time.monotonic()
+        saw_import = admitted = False
+        super().execute("PRAGMA busy_timeout = 0")
+        try:
+            while True:
+                try:
+                    cursor = super().execute(sql, parameters)
+                    admitted = True
+                    # Successful write admission must be visible while the
+                    # finally block restores the budget and emits diagnostics.
+                    _record_transaction_admission(self, template)
+                    break
+                except sqlite3.OperationalError as exc:
+                    if not _is_lock_contention(exc) or \
+                            (time.monotonic() - started) * 1000 >= deadline_ms:
+                        raise
+                    saw_import = saw_import or _import_holds_lock()
+                time.sleep(_LOCK_POLL_SECONDS)
+            # A polled write has result columns only with RETURNING. SQLite
+            # still holds its autocommit writer until that cursor reaches DONE,
+            # despite in_transaction=False. Fetch outside the BUSY retry loop:
+            # a fetch error must never replay an already-admitted write.
+            if not self.in_transaction and cursor.description is not None:
+                return _PrefetchedCursor(cursor.fetchall())
+            return cursor
+        finally:
+            super().execute(f"PRAGMA busy_timeout = {deadline_ms}")
+            waited = time.monotonic() - started
+            if waited > _LONG_WRITE_WAIT_SECONDS:
+                from .log import sqlite_write_wait
+                sqlite_write_wait(
+                    f"waited_ms={round(waited * 1000)} "
+                    f"outcome={'admitted' if admitted else 'gave_up'} "
+                    f"import_in_process={saw_import} "
+                    f"thread={threading.current_thread().name!r} sql={template[:60]!r} "
+                    f"process={_process_name()!r}", self)
 
     def execute(self, sql, parameters=(), /):  # type: ignore[override]
         template = _sql_template(sql)
         measured = getattr(_LOCAL, "request_metrics", None) is not None
         started = time.perf_counter() if measured else None
+        _record_transaction_statement(self, template)  # current attempted SQL
         try:
-            cursor = super().execute(sql, parameters)
+            if self._only_acquires_lock(template):
+                cursor = self._execute_polled(sql, parameters, template)
+            else:
+                cursor = super().execute(sql, parameters)
+            _record_transaction_admission(self, template)
         except sqlite3.OperationalError as exc:
+            if not self.in_transaction:
+                _clear_transaction_owner(self)
             if "database is locked" in str(exc).lower():
                 _report_database_locked(template)
+            raise
+        except Exception:
+            # SQLite's ON CONFLICT ROLLBACK can end a transaction below the
+            # Python commit/rollback overrides. Do not retain a false holder.
+            if not self.in_transaction:
+                _clear_transaction_owner(self)
             raise
         finally:
             _record_query_metric(template, started)
         verb = template.partition(" ")[0].upper()
         if verb in _WRITE_VERBS:
             _bump_write_generation()
-        if verb == "BEGIN" and self.in_transaction:
-            _record_transaction_begin(self, template)
-        elif verb in {"COMMIT", "ROLLBACK", "END"}:
-            if not self.in_transaction:
-                _clear_transaction_owner(self)
-        elif self.in_transaction:
-            _record_transaction_statement(self, template)
+        if verb in {"COMMIT", "ROLLBACK", "END", "RELEASE"} and not self.in_transaction:
+            _clear_transaction_owner(self)
         return cursor
 
     def executemany(self, sql, seq_of_parameters, /):  # type: ignore[override]
@@ -294,16 +468,22 @@ class _TrackedConnection(sqlite3.Connection):
             _bump_write_generation()
         measured = getattr(_LOCAL, "request_metrics", None) is not None
         started = time.perf_counter() if measured else None
+        _record_transaction_statement(self, template)
         try:
             cursor = super().executemany(sql, seq_of_parameters)
+            _record_transaction_admission(self, template)
         except sqlite3.OperationalError as exc:
+            if not self.in_transaction:
+                _clear_transaction_owner(self)
             if "database is locked" in str(exc).lower():
                 _report_database_locked(template)
             raise
+        except Exception:
+            if not self.in_transaction:
+                _clear_transaction_owner(self)
+            raise
         finally:
             _record_query_metric(template, started)
-        if self.in_transaction:
-            _record_transaction_statement(self, template)
         return cursor
 
     def executescript(self, sql_script, /):  # type: ignore[override]
@@ -332,9 +512,20 @@ class _TrackedConnection(sqlite3.Connection):
             if not self.in_transaction:
                 _clear_transaction_owner(self)
 
+    def __exit__(self, *exc):  # type: ignore[override]
+        # `with connection:` commits or rolls back in C, past commit() and
+        # rollback() above; end the tracked transaction here too.
+        try:
+            return super().__exit__(*exc)
+        finally:
+            if not self.in_transaction:
+                _clear_transaction_owner(self)
+
     def close(self):  # type: ignore[override]
-        _clear_transaction_owner(self)
-        return super().close()
+        try:
+            return super().close()
+        finally:
+            _clear_transaction_owner(self)
 
 
 def _open_connection() -> sqlite3.Connection:
@@ -348,10 +539,9 @@ def _open_connection() -> sqlite3.Connection:
     con.execute("PRAGMA synchronous = NORMAL")
     con.execute("PRAGMA foreign_keys = ON")
     con.execute(f"PRAGMA busy_timeout = {SQLITE_BUSY_TIMEOUT_MS}")
-    # A 600 MB store with 2 MB of page cache re-reads its hot indexes from
-    # disk constantly. 128 MB of cache per connection and a 1 GB mmap window
-    # let the OS page cache serve repeat reads without copying.
-    con.execute("PRAGMA cache_size = -131072")
+    # Private page caches multiply across DB-using threads. Keep a small
+    # per-connection target; bulk reads still use the shared OS mmap cache.
+    con.execute("PRAGMA cache_size = -8192")
     con.execute("PRAGMA mmap_size = 1073741824")
     return con
 
@@ -377,7 +567,13 @@ def conn() -> sqlite3.Connection:
     global _MIGRATED
     c = getattr(_LOCAL, "conn", None)
     if c is not None:
-        return c
+        if getattr(_LOCAL, "discard_conn", None) is not c or _in_transaction(c):
+            return c
+        # A busy-timeout restore failed inside a transaction (see
+        # busy_timeout_at_most): now that it ended, never reuse that
+        # connection with its lowered timeout; open a fresh one.
+        _LOCAL.discard_conn = None
+        close_local()
     # Migrate exactly once per process (idempotent + serialized). WAL means
     # every per-thread connection sees the migrated schema on the shared file.
     with _CONN_LOCK:
@@ -405,6 +601,60 @@ def busy_timeout(timeout_ms: int) -> Iterator[sqlite3.Connection]:
         yield connection
     finally:
         connection.execute(f"PRAGMA busy_timeout = {previous}")
+
+
+def _in_transaction(connection: sqlite3.Connection) -> bool:
+    try:
+        return bool(connection.in_transaction)
+    except sqlite3.Error:
+        return False          # a closed/broken connection holds no transaction
+
+
+@contextmanager
+def busy_timeout_at_most(timeout_ms: int) -> Iterator[sqlite3.Connection]:
+    """Temporarily LOWER this thread's busy timeout to at most *timeout_ms*,
+    restoring the previous value on success and on exception. For optional
+    writes (F4 delivery hints) that must never hold up a launch behind a long
+    writer; a give-up inside is expected and not reported as a lock wait.
+
+    Nesting keeps the outer ``busy_expected`` value. If restoring the timeout
+    fails, the connection is never reused with the lowered value: it is
+    reported (previous, lowered and observed values) and dropped at once, or,
+    when the caller is inside a transaction (dropping it would roll that
+    back), the failure is raised and the connection is replaced as soon as
+    the transaction has ended (``conn``)."""
+    connection = conn()
+    previous = int(connection.execute("PRAGMA busy_timeout").fetchone()[0])
+    lowered = min(int(timeout_ms), previous)
+    prior_expected = getattr(_LOCAL, "busy_expected", False)
+    _LOCAL.busy_expected = True
+    try:
+        connection.execute(f"PRAGMA busy_timeout = {lowered}")
+        yield connection
+    finally:
+        _LOCAL.busy_expected = prior_expected
+        try:
+            connection.execute(f"PRAGMA busy_timeout = {previous}")
+        except Exception as exc:  # noqa: BLE001 - handled explicitly below
+            _busy_restore_failed(connection, previous=previous, lowered=lowered, error=exc)
+
+
+def _busy_restore_failed(connection: sqlite3.Connection, *, previous: int, lowered: int,
+                         error: BaseException) -> None:
+    try:
+        observed: int | str = int(connection.execute("PRAGMA busy_timeout").fetchone()[0])
+    except Exception:  # noqa: BLE001 - the connection may be unusable
+        observed = "unreadable"
+    from .log import log_exception
+    log_exception("busyTimeoutRestoreFail", error,
+                  detail=f"previous={previous} lowered={lowered} observed={observed} "
+                         f"delta_ms={(previous - observed) if isinstance(observed, int) else 'unknown'}")
+    if _in_transaction(connection):
+        _LOCAL.discard_conn = connection
+        raise RuntimeError("busy timeout restore failed inside a transaction; "
+                           "the connection is replaced once it ends") from error
+    if getattr(_LOCAL, "conn", None) is connection:
+        close_local()
 
 
 def best_effort_write(sql: str, parameters=(), *, timeout_ms: int = 20) -> bool:
@@ -462,8 +712,11 @@ def close_local() -> None:
         return
     try:
         c.close()
-    except sqlite3.Error:
-        pass
+    except sqlite3.Error as exc:
+        # Preserve close_local's non-raising contract, but report uncertain
+        # release without a recursive eventlog/telemetry connection or payload.
+        print(f"dbCloseFail store=state code={type(exc).__name__}",
+              file=sys.stderr, flush=True)
     _LOCAL.conn = None
 
 

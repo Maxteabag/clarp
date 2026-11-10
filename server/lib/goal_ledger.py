@@ -19,86 +19,23 @@ import secrets
 from contextlib import contextmanager
 from typing import Any
 
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS goal_events (
-    event_id INTEGER PRIMARY KEY AUTOINCREMENT,
-    plan_id TEXT NOT NULL,
-    at INTEGER NOT NULL,
-    kind TEXT NOT NULL,
-    subject TEXT NOT NULL DEFAULT 'goal',
-    actor_kind TEXT NOT NULL CHECK (actor_kind IN
-        ('owner','user','delegate','system','peer','legacy','unattributed')),
-    actor_agent_id TEXT NOT NULL DEFAULT '',
-    delegation_id TEXT NOT NULL DEFAULT '',
-    basis TEXT NOT NULL DEFAULT '' CHECK (basis IN ('','observed','claimed','inferred')),
-    source_refs TEXT NOT NULL DEFAULT '[]',
-    reason TEXT NOT NULL DEFAULT '',
-    prior_json TEXT,
-    new_json TEXT,
-    plan_revision INTEGER,
-    idempotency_key TEXT NOT NULL,
-    UNIQUE (plan_id, idempotency_key)
-);
-CREATE INDEX IF NOT EXISTS idx_goal_events_plan ON goal_events(plan_id, event_id);
-CREATE TRIGGER IF NOT EXISTS goal_events_no_update BEFORE UPDATE ON goal_events
-BEGIN SELECT RAISE(ABORT, 'goal events are append-only'); END;
-CREATE TRIGGER IF NOT EXISTS goal_events_no_delete BEFORE DELETE ON goal_events
-BEGIN SELECT RAISE(ABORT, 'goal events are append-only'); END;
-
-CREATE TABLE IF NOT EXISTS goal_subgoals (
-    plan_id TEXT NOT NULL,
-    subgoal_id TEXT NOT NULL,
-    title TEXT NOT NULL,
-    intent TEXT NOT NULL DEFAULT '',
-    criteria_json TEXT NOT NULL DEFAULT '[]',
-    owner TEXT NOT NULL DEFAULT '',
-    status TEXT NOT NULL CHECK (status IN
-        ('proposed','active','blocked','done','retired','unknown')),
-    evidence_json TEXT NOT NULL DEFAULT '[]',
-    current_action TEXT NOT NULL DEFAULT '',
-    next_dependency TEXT NOT NULL DEFAULT '',
-    last_observed_at INTEGER,
-    revision INTEGER NOT NULL DEFAULT 1,
-    created_actor_kind TEXT NOT NULL,
-    created_agent_id TEXT NOT NULL DEFAULT '',
-    created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL,
-    PRIMARY KEY (plan_id, subgoal_id)
-);
-CREATE TRIGGER IF NOT EXISTS goal_subgoals_no_delete BEFORE DELETE ON goal_subgoals
-BEGIN SELECT RAISE(ABORT, 'subgoals are retired, never deleted'); END;
-
-CREATE TABLE IF NOT EXISTS goal_delegations (
-    delegation_id TEXT PRIMARY KEY,
-    principal_agent_id TEXT NOT NULL,
-    delegate_agent_id TEXT NOT NULL,
-    status TEXT NOT NULL CHECK (status IN ('active','stopped')),
-    token_hash TEXT NOT NULL,
-    created_at INTEGER NOT NULL,
-    created_reason TEXT NOT NULL,
-    stopped_at INTEGER,
-    stopped_reason TEXT NOT NULL DEFAULT '',
-    message_through INTEGER NOT NULL DEFAULT 0,
-    goal_event_through INTEGER NOT NULL DEFAULT 0,
-    dispatched_message_through INTEGER NOT NULL DEFAULT 0,
-    dispatched_goal_event_through INTEGER NOT NULL DEFAULT 0,
-    last_wake_id TEXT NOT NULL DEFAULT '',
-    last_wake_at INTEGER,
-    last_applied_at INTEGER,
-    last_source_at INTEGER,
-    last_heartbeat_at INTEGER,
-    last_error TEXT NOT NULL DEFAULT '',
-    job_handle TEXT NOT NULL DEFAULT '',
-    unapplied_since INTEGER
-);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_goal_delegations_principal
-    ON goal_delegations(principal_agent_id) WHERE status = 'active';
-CREATE UNIQUE INDEX IF NOT EXISTS idx_goal_delegations_delegate
-    ON goal_delegations(delegate_agent_id) WHERE status = 'active';
-"""
+from .persistence.schema_parts.goal_ledger import SCHEMA
 
 # Imported after SCHEMA: db_schema reads SCHEMA while db is still loading.
 from . import db  # noqa: E402
+from . import lifecycle as lk  # noqa: E402
+from .lifecycle import Edge, Lifecycle, WaitForever  # noqa: E402
+
+# A bookkeeping delegation (docs/architecture/lifecycles.md). This module is the
+# only writer of goal_delegations.status; delegate() inserts the row as active.
+DELEGATION = Lifecycle(
+    name="goal_delegation", owner="lib/goal_ledger.py",
+    table="goal_delegations", key="delegation_id", state_column="status",
+    entered_columns={"stopped": "stopped_at"},
+    initial="active", final=frozenset({"stopped"}),
+    edges=(Edge("stop", frozenset({"active"}), "stopped"),),
+    waits={"active": WaitForever("its owner stops it, or either agent is archived or deleted")},
+)
 
 ACTOR_KINDS = ("owner", "user", "delegate", "system", "peer", "legacy", "unattributed")
 SUBGOAL_STATUSES = ("proposed", "active", "blocked", "done", "retired", "unknown")
@@ -188,27 +125,40 @@ def record_goal_save(con, plan_id: str, old_goal: dict, new_goal: dict) -> None:
     """
     old_history = old_goal.get("history") or []
     new_history = new_goal.get("history") or []
-    start = len(old_history)
-    if len(new_history) < start or new_history[:start] != old_history:
-        start = 0   # rewritten history: keys dedupe what is already recorded
+    # A stored goal keeps only its newest entries; history_offset is the
+    # absolute index of its first one, so keys stay stable as old ones drop.
+    old_offset = int(old_goal.get("history_offset") or 0)
+    new_offset = int(new_goal.get("history_offset") or 0)
+    old_end = old_offset + len(old_history)
+    new_end = new_offset + len(new_history)
+    shared = max(old_offset, new_offset)
+    start = old_end
+    if not (new_offset <= old_end <= new_end) or (
+        new_history[shared - new_offset:old_end - new_offset]
+        != old_history[shared - old_offset:]
+    ):
+        start = new_offset   # rewritten history: keys dedupe what is already recorded
     prior = {f: old_goal.get(f) for f in TRACKED_FIELDS if old_goal.get(f) != new_goal.get(f)}
     new = {f: new_goal.get(f) for f in prior}
     owner = new_goal.get("owner_agent_id", "")
     actor = _attribute(_actor.get(), owner)
-    status = _last_status(con, plan_id)
     entries = []
-    for index in range(start, len(new_history)):
-        kind = str(new_history[index].get("kind") or "change")
+    for index in range(start, new_end):
+        kind = str(new_history[index - new_offset].get("kind") or "change")
         system = kind in SYSTEM_KINDS or (
             kind == "dependency_result" and actor["kind"] == "unattributed")
         entries.append((index, kind, system))
+    # Scheduler history cannot change status. Avoid scanning old ledger JSON
+    # under the writer lock unless a new entry actually needs its prior status.
+    status = _last_status(con, plan_id) if any(
+        kind in STATUS_KINDS for _, kind, _ in entries) else None
     if prior or any(not system for _, _, system in entries):
         guard_principal_goal(con, owner, actor)
     for index, kind, system in entries:
-        entry = new_history[index]
+        entry = new_history[index - new_offset]
         this_actor = {"kind": "system"} if system else actor
         detail = entry.get("detail") or {}
-        first = index == len(new_history) - 1 or index == start
+        first = index == new_end - 1 or index == start
         before = dict(prior) if (first and prior) else {}
         after = {"detail": detail, **({"goal": new} if first and prior else {})}
         if not system and this_actor["kind"] in ("owner", "peer", "unattributed"):
@@ -315,7 +265,8 @@ def backfill(con) -> int:
     for row in con.execute("SELECT plan_id, goal_json, status, revision FROM task_plans "
                            "WHERE goal_json NOT IN ('', '{}')").fetchall():
         goal = json.loads(row[1] or "{}")
-        for index, entry in enumerate(goal.get("history") or []):
+        offset = int(goal.get("history_offset") or 0)
+        for index, entry in enumerate(goal.get("history") or [], start=offset):
             if append(con, row[0], kind=str(entry.get("kind") or "change"),
                       key=f"history:{index}", subject=_history_subject(entry),
                       actor={"kind": "legacy"},
@@ -571,19 +522,17 @@ def enable(principal: dict, delegate: dict, reason: str, *, baseline_messages: i
 
 def stop(delegation_id: str, reason: str) -> dict:
     reason = _clean_text(reason, "reason", required=True, limit=500)
-    db.conn().execute(
-        "UPDATE goal_delegations SET status='stopped', stopped_at=?, stopped_reason=? "
-        "WHERE delegation_id=? AND status='active'", (db.now_ms(), reason, delegation_id))
+    lk.compare_and_set_where(db.conn(), DELEGATION, "stop", where="delegation_id=?",
+                             params=(delegation_id,), now=db.now_ms(),
+                             values={"stopped_reason": reason})
     return delegation(delegation_id)
 
 
 def stop_for_agent(agent_id: str, reason: str) -> int:
     """An agent that is deleted or archived ends every delegation it is part of."""
-    cursor = db.conn().execute(
-        "UPDATE goal_delegations SET status='stopped', stopped_at=?, stopped_reason=? "
-        "WHERE status='active' AND (principal_agent_id=? OR delegate_agent_id=?)",
-        (db.now_ms(), reason[:500], agent_id, agent_id))
-    return int(cursor.rowcount or 0)
+    return lk.compare_and_set_where(
+        db.conn(), DELEGATION, "stop", where="principal_agent_id=? OR delegate_agent_id=?",
+        params=(agent_id, agent_id), now=db.now_ms(), values={"stopped_reason": reason[:500]})
 
 
 _LIVE = "deleted_at IS NULL AND archived_at IS NULL"

@@ -1,0 +1,14 @@
+# Lead800: exact classifier observer carried into S6's existing drain helpers.
+# Ordinary handwritten file, not a generated S4/S6 recipe output.
+# Source payload is byte-identical to C-approved classifier port2732b1eb:
+# blob9380d971e3b430aa10f828336749a953e57f239d. No new behavior.
+# Integration input is PRE-PORT M17 D19e (not2732, whose S4 bodies are newer).
+# Actual final-main base/main/integration blobs MUST match these three guards;
+# any changed blob must stop for a refreshed, reviewed entry.
+# Current main d84 and planned95f have identical Claude input blobs.
+# Existing s3_merge.sh reads metadata and payload ONLY from main.
+path = "server/lib/backend/claude.py"
+resolved = "freeze800-claude.py.resolved"
+base_blob = "a4e753becab0225f9ddec7dec945eba3bea078ba"
+main_blob = "8c6c440207d5104e3f0f96e03766165c45518d30"
+integration_blob = "db6afe3f67977f40402df65f02e284c0a3eae8dd"

@@ -287,8 +287,9 @@ time.sleep(60)
         stat_path = Path(f"/proc/{child_pid}/stat")
         try:
             child_state = stat_path.read_text().split()[2]
-        except FileNotFoundError:
-            # Reaped between observation and read: the child is no longer running.
+        except (FileNotFoundError, ProcessLookupError):
+            # Reaped between observation and read (/proc raises ESRCH from an
+            # already-open stat file): the child is no longer running.
             break
         if child_state == "Z":
             break
@@ -319,12 +320,19 @@ print(json.dumps({"ok": True, "voices": [
     assert custom_tts_adapters.voices(manifest, force=True)[0]["id"] == "warm"
 
     child_pid = int((package / "child-pid").read_text())
-    for _ in range(20):
+    # voices() has already sent SIGKILL to the launcher's process group when it
+    # returns; the child's exit is up to the scheduler, which on a loaded machine
+    # can take longer than a fixed number of short polls (G1 flake). Wait for the
+    # asserted condition itself, dead or a zombie, with a deadline far beyond any
+    # scheduling delay but far below the child's own 60 s.
+    deadline = time.monotonic() + 15
+    while True:
         stat_path = Path(f"/proc/{child_pid}/stat")
         try:
             child_state = stat_path.read_text().split()[2] if stat_path.is_file() else ""
-        except FileNotFoundError:
-            # Reaped between observation and read: cleanup already succeeded.
+        except (FileNotFoundError, ProcessLookupError):
+            # Reaped between observation and read (/proc raises ESRCH from an
+            # already-open stat file): cleanup already succeeded.
             break
         if child_state == "Z":
             break
@@ -332,9 +340,9 @@ print(json.dumps({"ok": True, "voices": [
             os.kill(child_pid, 0)
         except ProcessLookupError:
             break
+        if time.monotonic() >= deadline:
+            raise AssertionError("successful adapter left its child process running")
         time.sleep(0.02)
-    else:
-        raise AssertionError("successful adapter left its child process running")
 
 
 def test_adapter_audio_growth_is_stopped_before_timeout(tmp_path):

@@ -14,8 +14,9 @@ from __future__ import annotations
 
 import pathlib
 import threading
+import time
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 from . import agents as agents_db
 from . import clip_pacing
@@ -24,46 +25,15 @@ from . import health
 from . import tts_queue
 from .clip_delivery import ClipDelivery, ClipDeliverySession
 from .clip_delivery.chunked_file import ChunkedFileDelivery
-from .cartesia_tts import CartesiaError
-from .cartesia_tts import synthesize as cartesia_synthesize
 from .config import load as load_config
-from .eleven_ws import ElevenWSError, synthesize_streaming
 from .log import log_exception
 from .paths import RuntimePaths
-from .voice_markup import strip_emotion_tags
+from .tts_registry import _gemini_voice, _google_voice
+from .tts_service import event_context as _event_context, emit_event as _emit
 from . import tts_mode
 from .voice import (
     CARTESIA, DEEPGRAM, ELEVENLABS, GEMINI, GOOGLE, resolve_voice,
 )
-
-
-def cartesia_synthesize_raw_pcm(**kwargs) -> int:
-    """Lazy wrapper so importing tts_worker doesn't require websocket-client.
-
-    Tests monkeypatch this symbol directly, so keep the seam at module scope
-    while deferring the optional dependency until raw-pcm delivery is actually
-    selected.
-    """
-    from .cartesia_ws import synthesize_raw_pcm
-    return synthesize_raw_pcm(**kwargs)
-
-
-def _event_context(row: dict, agent: dict | None = None):
-    from .eventlog import EventContext
-    return EventContext(
-        trace_id=row.get("trace_id") or None,
-        agent_id=(agent or {}).get("agent_id") or row.get("agent_id") or None,
-        session=row.get("session") or None,
-        backend_session_id=(agent or {}).get("backend_session_id") or None,
-    )
-
-
-def _emit(*a, **kw):
-    try:
-        from . import eventlog
-        eventlog.emit(*a, **kw)
-    except Exception:
-        pass
 
 
 def synth_one(*,
@@ -71,19 +41,25 @@ def synth_one(*,
               stream: Any | None = None,
               herald: Any | None = None,
               broker: Any | None = None,
-              delivery: ClipDelivery | None = None) -> bool:
+              delivery: ClipDelivery | None = None,
+              claim: Callable[[], dict[str, Any] | None] | None = None) -> bool:
     """Claim and process one queued row. Returns True if work was done,
-    False if the queue was empty.
+    False if the queue was empty. The pool passes `claim`, which skips
+    agents it already has in flight.
 
     Idempotent at the row level: synthesis happens under SYNTHESIZING
     status, success advances to DONE, failure to FAILED. Either way the
     row is no longer reclaimable.
     """
-    row = tts_queue.claim_next()
+    row = (claim or tts_queue.claim_next)()
     if row is None:
         return False
 
     queue_id = row["queue_id"]
+    if _opening_fenced(row.get("trace_id")):
+        # A listen-first opening clip that lost its authority (docs/agent-rings.md).
+        tts_queue.mark_failed(queue_id, "listen-first opening fenced")
+        return True
     try:
         agent = agents_db.get_by_agent_id(row["agent_id"])
         # The queue row's trace_id is authoritative — set the agent's
@@ -107,9 +83,11 @@ def synth_one(*,
                 active_delivery = delivery or ChunkedFileDelivery(broker=broker)
                 clip_route = tts_mode.route(voice_config, agent)
                 # Raw PCM is Cartesia's live stream; any other provider's
-                # clip is an MP3 that every client plays from its URL.
-                if (clip_route.provider != CARTESIA
-                        and getattr(active_delivery, "name", "") == "raw-pcm"):
+                # clip, or a Cartesia one with no key or voice, is an MP3
+                # that every client plays from its URL and that can fall
+                # back to the configured provider (VP-02).
+                if (getattr(active_delivery, "name", "") == "raw-pcm"
+                        and not _cartesia_can_stream(voice_config, row, agent, clip_route)):
                     active_delivery = ChunkedFileDelivery(broker=broker)
                 refusal = _google_collision_refusal(voice_config, clip_route)
                 if refusal:
@@ -154,6 +132,8 @@ def synth_one(*,
 
     if not result.ok:
         tts_queue.mark_failed(queue_id, result.error)
+        if result.cancelled:
+            return True
         health.mark_error("tts_worker", result.error)
         _emit("tts_worker", "synthFail",
               context=_event_context(row, agent),
@@ -200,36 +180,11 @@ class _PwaStreamResult:
     target: pathlib.Path | None = None
     error: str = ""
     clip_id: int | None = None
+    cancelled: bool = False
 
 
-def _gemini_voice(cfg, raw_voice, persona: str, agent: dict | None,
-                  route_voice: str | None, cartesia_voice: str | None) -> str | None:
-    """Gemini voice for this clip, or None when the agent has none.
-
-    A helper speaking with a contact's Cartesia voice keeps that contact's
-    Gemini voice. The default voice is only for agents moved to Gemini on
-    purpose; a contact with no voice stays silent, as it would under Cartesia.
-    """
-    return (route_voice or resolve_voice(raw_voice, GEMINI)
-            or cfg.gemini_voice_for(persona)
-            or cfg.gemini_voice_for_cartesia(cartesia_voice)
-            or (cfg.gemini_voice
-                if cfg.tts_override_for(agent).get("provider") == GEMINI else None))
-
-
-def _google_voice(raw_voice: str | None, route_voice: str | None) -> str:
-    """The agent's Google voice: its [tts.agents] google_voice, else its stored google key, else a
-    bare stored id that is a Google voice (a preview passes the voice it auditions). Only an agent
-    with no Google voice at all gets the documented default for a new choice. A saved voice off
-    the allowlist is returned as it is, so synthesis refuses it (voice_unavailable) and it is
-    never replaced by the default."""
-    from . import google_tts
-    saved = route_voice or resolve_voice(raw_voice, GOOGLE)
-    if saved:
-        return saved
-    if raw_voice and raw_voice.strip() in google_tts.VOICES:
-        return raw_voice.strip()
-    return google_tts.DEFAULT_VOICE
+class _RawCancelled(Exception):
+    """An announced raw clip lost its existing turn authority."""
 
 
 def _google_collision_refusal(cfg, clip_route) -> str | None:
@@ -240,6 +195,15 @@ def _google_collision_refusal(cfg, clip_route) -> str | None:
         return None
     from . import google_tts
     return google_tts.collision_code(cfg)
+
+
+def _cartesia_can_stream(cfg, row: dict, agent: dict | None, clip_route) -> bool:
+    """Whether raw-pcm can stream this clip: Cartesia is the routed provider
+    and has a key and a voice for it (as ``_synthesize`` resolves them)."""
+    if clip_route.provider != CARTESIA or not cfg.cartesia_key():
+        return False
+    voice = clip_route.voice or resolve_voice(row["voice_id"], CARTESIA)
+    return bool(voice or cfg.cartesia_voice_for((agent or {}).get("persona", "")))
 
 
 def _route_has_voice(cfg, row: dict, agent: dict | None, clip_route) -> bool:
@@ -267,142 +231,15 @@ def _route_has_voice(cfg, row: dict, agent: dict | None, clip_route) -> bool:
 def _synthesize(*, cfg, row: dict, agent: dict,
                 out_path, on_chunk, trace_id,
                 delivery_fields: dict | None = None,
-                clip_route: "tts_mode.Route | None" = None) -> int:
-    """Provider dispatch for one clip.
-
-    Cartesia (Sonic) is primary; ElevenLabs is the backup. The agent's
-    stored voice_id may carry a per-provider map (see lib.voice) — we
-    resolve the right id for each provider, falling back to the persona
-    keyed Cartesia map for agents whose voice_id predates it.
-
-    On a Cartesia failure (or a persona with no Cartesia voice / no key)
-    we transparently fall back to ElevenLabs. The exception only escapes
-    when the fallback also fails, so the caller surfaces a real outage.
-    """
-    raw_voice = row["voice_id"]
-    persona = (agent or {}).get("persona", "")
-    spoken = row["text"]
-    # [laughing]-style tags are acted out by Gemini and read aloud by every
-    # other engine, so only Gemini receives them (a fallback included).
-    plain = strip_emotion_tags(spoken)
-
-    if clip_route is None:
-        clip_route = tts_mode.Route(
-            cfg.tts_provider, None, tts_mode.fallback_for(cfg, cfg.tts_provider))
-    provider = clip_route.provider
-
-    def voice_for(selected: str) -> str | None:
-        """Per-agent [tts.agents] voice for the routed provider, else stored."""
-        if selected == provider and clip_route.voice:
-            return clip_route.voice
-        return resolve_voice(raw_voice, selected)
-
-    cartesia_voice = voice_for(CARTESIA) or cfg.cartesia_voice_for(persona)
-    eleven_voice = voice_for(ELEVENLABS) or raw_voice
-    want_cartesia = (provider == CARTESIA
-                     and cartesia_voice and cfg.cartesia_key())
-    wants_raw_pcm = (delivery_fields or {}).get("delivery") == "raw-pcm"
-    if wants_raw_pcm:
-        if not want_cartesia:
-            raise CartesiaError(
-                "raw-pcm delivery requires Cartesia provider, key, and voice"
-            )
-        return cartesia_synthesize_raw_pcm(
-            text=plain,
-            voice_id=cartesia_voice,
-            out_path=out_path,
-            api_key=cfg.cartesia_key(),
-            model=cfg.cartesia_model,
-            on_chunk=on_chunk,
-            trace_id=trace_id,
-            encoding=getattr(cfg, "raw_pcm_encoding", "pcm_f32le"),
-            sample_rate=getattr(cfg, "raw_pcm_sample_rate", 44100),
-        )
-
-    spoke: dict[str, str | None] = {}   # the voice the provider that ran actually used
-
-    def run(selected: str) -> int:
-        text = spoken if selected == GEMINI else plain
-        if selected == CARTESIA:
-            if not (cartesia_voice and cfg.cartesia_key()):
-                raise CartesiaError("Cartesia key or voice is not configured")
-            spoke["voice"] = cartesia_voice
-            return cartesia_synthesize(
-                text=text, voice_id=cartesia_voice, out_path=out_path,
-                api_key=cfg.cartesia_key(), model=cfg.cartesia_model,
-                on_chunk=on_chunk, trace_id=trace_id)
-        if selected == ELEVENLABS:
-            if not (eleven_voice and cfg.eleven_key()):
-                raise ElevenWSError("ElevenLabs key or voice is not configured")
-            spoke["voice"] = eleven_voice
-            return synthesize_streaming(
-                text=text, voice_id=eleven_voice, out_path=out_path,
-                api_key=cfg.eleven_key(), model=cfg.eleven_model,
-                speed=cfg.eleven_speed, on_chunk=on_chunk,
-                trace_id=trace_id)
-        if selected == GEMINI:
-            from .gemini_tts import GeminiTTSError, synthesize as gemini_synthesize
-            gemini_voice = _gemini_voice(
-                cfg, raw_voice, persona, agent,
-                clip_route.voice if provider == GEMINI else None, cartesia_voice)
-            if not gemini_voice:
-                raise GeminiTTSError(f"no Gemini voice configured for {persona!r}")
-            spoke["voice"] = gemini_voice
-            return gemini_synthesize(
-                text=text,
-                voice=cfg.gemini_tts_voice(gemini_voice),
-                out_path=out_path, api_key=cfg.gemini_tts_key(),
-                backend=cfg.gemini_backend,
-                model=cfg.gemini_model, on_chunk=on_chunk,
-                trace_id=trace_id)
-        if selected == DEEPGRAM:
-            from .deepgram_tts import synthesize as deepgram_synthesize
-            deepgram_voice = voice_for(DEEPGRAM) or cfg.deepgram_model
-            spoke["voice"] = deepgram_voice
-            return deepgram_synthesize(
-                text=text, voice_id=deepgram_voice, out_path=out_path,
-                api_key=cfg.deepgram_key(), on_chunk=on_chunk,
-                trace_id=trace_id)
-        if selected == GOOGLE:
-            from . import google_tts
-            # First: a legacy custom "google" adapter refuses built-in Google before any voice is
-            # interpreted or credentials are built (raises GoogleIdCollision, str = the bare code).
-            google_tts.refuse_if_collision(cfg)
-            google_voice = _google_voice(raw_voice, clip_route.voice if provider == GOOGLE else None)
-            spoke["voice"] = google_voice
-            return google_tts.synthesize(
-                text=text, voice=google_voice, out_path=out_path,
-                creds=google_tts.credentials(cfg), on_chunk=on_chunk)
-        from .custom_tts_adapters import get as custom_adapter
-        from .tts_providers import VALID_IDS, synthesize as provider_synthesize
-        manifest = custom_adapter(selected, reserved_ids=VALID_IDS)
-        if manifest is not None:
-            adapter_voice = voice_for(selected) or manifest.default_voice
-            spoke["voice"] = adapter_voice
-            return provider_synthesize(
-                selected, text=text, voice=adapter_voice,
-                out_path=out_path, on_chunk=on_chunk)
-        raise RuntimeError(f"unsupported server TTS provider: {selected}")
-
-    try:
-        written = run(provider)
-    except Exception as primary_error:
-        fallback = clip_route.fallback
-        if fallback in {"", "none", provider}:
-            raise
-        _emit("tts_worker", "providerFallback",
-              context=_event_context(row, agent), level="warn",
-              detail={"provider": provider, "error": str(primary_error)[:200],
-                      "fallback": fallback})
-        spoke.clear()
-        written = run(fallback)
-        # Provenance: the provider and voice that actually spoke, not the route's.
-        _emit("tts_worker", "spoke", context=_event_context(row, agent),
-              detail={"provider": fallback, "voice": spoke.get("voice"), "fallback_for": provider})
-        return written
-    _emit("tts_worker", "spoke", context=_event_context(row, agent),
-          detail={"provider": provider, "voice": spoke.get("voice")})
-    return written
+                clip_route: "tts_mode.Route | None" = None,
+                check_active: Callable[[], None] | None = None) -> int:
+    """Synthesize one queued clip through the shared provider service."""
+    from .tts_provider import AudioSink
+    from .tts_service import synth
+    return synth(
+        row["text"], clip_route, AudioSink(out_path, on_chunk, trace_id, delivery_fields),
+        "queue", cfg=cfg, raw_voice=row["voice_id"], agent=agent,
+        emit=_emit, context=lambda: _event_context(row, agent), check_active=check_active)
 
 
 def _synth_pwa_via_delivery(row: dict, agent: dict,
@@ -423,6 +260,10 @@ def _synth_pwa_via_delivery(row: dict, agent: dict,
     """
     cfg = load_config()
     trace_id = row.get("trace_id")
+    raw = delivery.name == "raw-pcm"
+    if raw:
+        from . import turn_queue
+        stop_generation = turn_queue.user_stop_generation(row["agent_id"])
 
     try:
         session = delivery.begin(
@@ -438,11 +279,41 @@ def _synth_pwa_via_delivery(row: dict, agent: dict,
         log_exception("clipDeliveryBeginFail", e, detail=delivery.name)
         return _PwaStreamResult(False, error=f"delivery begin failed: {e}")
 
+    raw_broker = getattr(session, "_broker", None) if raw else None
+    stream_failure_reported = False
+
+    def check_active():
+        nonlocal stream_failure_reported
+        if raw and (turn_queue.user_stop_generation(row["agent_id"]) != stop_generation
+                    or (trace_id and agents_db.get_trace(row["agent_id"], max_age_ms=None) != trace_id)):
+            raise _RawCancelled(tts_queue.CANCELLED_PREFIX + "raw clip authority changed")
+        if raw_broker is not None:
+            live = raw_broker.get(session.clip_id)
+            code = "raw_stream_unavailable" if live is None else ""
+            if live is not None:
+                with live.cond:
+                    if live.failed:
+                        code = ("raw_stream_wait_timeout" if live.error == "stream wait timeout"
+                                else "raw_stream_failed")
+            if code:
+                if not stream_failure_reported:
+                    _emit("tts_worker", "rawStreamFailed", context=_event_context(row, agent),
+                          level="warn", detail={"code": code, "clip_id": session.clip_id})
+                    stream_failure_reported = True
+                raise RuntimeError(code)
+
     # Some deliveries broadcast at begin (ChunkedFile — client subscribes
     # to a live stream that grows). Others must wait until finalize (HLS —
     # the playlist must have #EXT-X-ENDLIST before iOS Safari can play it
     # reliably). Sessions advertise their preference via publish_after_finalize.
     publish_late = getattr(session, "publish_after_finalize", False)
+    if raw:
+        try:
+            check_active()
+        except (_RawCancelled, RuntimeError) as error:
+            session.fail(str(error))
+            return _PwaStreamResult(False, error=str(error),
+                                    cancelled=isinstance(error, _RawCancelled))
     if not publish_late:
         _publish_clip_event(
             stream=stream, herald=herald,
@@ -451,8 +322,13 @@ def _synth_pwa_via_delivery(row: dict, agent: dict,
 
     # Chunk pacing: a pause between provider chunks is the server-side
     # twin of a client stall, and the only way to tell the two apart later.
+    def feed(index, chunk):
+        check_active()
+        session.feed(index, chunk)
+        check_active()
+
     paced_feed, finish_pacing = clip_pacing.track(
-        session.feed,
+        feed if raw else session.feed,
         clip_id=getattr(session, "clip_id", None),
         delivery=getattr(delivery, "name", ""),
         emit=_emit,
@@ -468,13 +344,21 @@ def _synth_pwa_via_delivery(row: dict, agent: dict,
             trace_id=trace_id,
             delivery_fields=session.sse_fields,
             clip_route=clip_route,
+            **({"check_active": check_active} if raw else {}),
         )
+        check_active()
+        if raw:
+            final = session.finalize(total_bytes=bytes_written)
+            # finish() makes the normal writer outcome stable. If it expired
+            # just before finish, its failed bit remains set: never report DONE.
+            check_active()
     except Exception as e:  # provider adapters normalize failures to queue state
         session.fail(str(e))
         finish_pacing("failed")
-        return _PwaStreamResult(False, error=str(e))
+        return _PwaStreamResult(False, error=str(e), cancelled=isinstance(e, _RawCancelled))
 
-    final = session.finalize(total_bytes=bytes_written)
+    if not raw:
+        final = session.finalize(total_bytes=bytes_written)
     finish_pacing("complete")
 
     if publish_late:
@@ -528,6 +412,30 @@ def _publish_tts_error(stream: Any | None, row: dict,
         log_exception("ttsErrorBroadcastFail", e, detail=message)
 
 
+def _opening_fenced(trace_id: str | None) -> bool:
+    """Best effort: skip voicing an opening clip whose authority is gone."""
+    if not trace_id:
+        return False
+    try:
+        from . import agent_rings
+        return agent_rings.skip_opening_synthesis(trace_id)
+    except Exception as exc:  # noqa: BLE001 - never block ordinary speech
+        log_exception("ttsWorkerOpeningFenceFail", exc, detail=str(trace_id))
+        return False
+
+
+def _opening_tag(trace_id: str | None) -> dict:
+    """``call_id`` + ``opening`` for a clip of a listen-first opening turn."""
+    if not trace_id:
+        return {}
+    try:
+        from . import agent_rings
+        return agent_rings.opening_audio(trace_id) or {}
+    except Exception as exc:  # noqa: BLE001 - an untagged clip still plays
+        log_exception("ttsWorkerOpeningTagFail", exc, detail=str(trace_id))
+        return {}
+
+
 def _publish_clip_event(*, stream: Any | None, herald: Any | None,
                         session: ClipDeliverySession,
                         row: dict, agent: dict,
@@ -565,6 +473,8 @@ def _publish_clip_event(*, stream: Any | None, herald: Any | None,
         "text_len": len(row["text"] or ""),
         **fields,
     }
+    tag = _opening_tag(trace_id)
+    meta.update(tag)
     try:
         ts_str = name.split("__", 1)[0].split(".", 1)[0]
         ts = int(ts_str) if ts_str.isdigit() else 0
@@ -577,16 +487,38 @@ def _publish_clip_event(*, stream: Any | None, herald: Any | None,
         except Exception as e:  # noqa: BLE001
             log_exception("ttsWorkerHeraldPublishFail", e, detail=url)
     if stream is not None:
-        events.broadcast(stream, events.audio(
-            url=url,
-            name=name,
-            session=row["session"],
-            clip_id=session.clip_id,
-            agent_id=agent["agent_id"],
-            persona=agent.get("persona"),
-            trace_id=trace_id,
+        # Merge once before the call: raw PCM already supplies the same url.
+        # Explicit keys keep their positions; delivery fields follow as before.
+        payload = {
+            "url": url,
+            "name": name,
+            "session": row["session"],
+            "clip_id": session.clip_id,
+            "agent_id": agent["agent_id"],
+            "persona": agent.get("persona"),
+            "trace_id": trace_id,
             **session.sse_fields,
-        ))
+            **tag,
+        }
+        events.broadcast(stream, events.audio(**payload))
+
+
+
+# A clip claimed this long before a restart is not spoken again (VP-05).
+STALE_IN_FLIGHT_MS = 2 * 60 * 1000
+
+
+def recover_in_flight(*, now_ms: int | None = None) -> dict[str, int]:
+    """At start, before the worker claims anything: speech claimed long ago
+    fails instead of being spoken again, recent speech re-queues, and clips
+    left streaming by the dead process fail (their producer is gone)."""
+    from . import clip_store, db
+    now = db.now_ms() if now_ms is None else now_ms
+    return {
+        "failed": tts_queue.fail_stale_in_flight(now - STALE_IN_FLIGHT_MS),
+        "requeued": tts_queue.reset_in_flight(),
+        "clips_failed": clip_store.fail_streaming_clips("producer ended with a restart"),
+    }
 
 
 class TTSWorker:
@@ -596,8 +528,13 @@ class TTSWorker:
     enqueue→synthesize handoff IS the user-perceptible audio latency.
     The worker spends most of its time sleeping; when work arrives it
     runs flat-out (back-to-back synth_one calls) until the queue drains.
+
+    A pool of POOL_SIZE threads (VP-06) so one slow provider call delays
+    only its own agent. An agent has at most one row in flight, which keeps
+    its chunks in order; `_busy` (under `_busy_lock`) is that set.
     """
     DEFAULT_INTERVAL_SEC = 0.1
+    POOL_SIZE = 3
 
     def __init__(self, *,
                  audio_dir: pathlib.Path,
@@ -617,45 +554,69 @@ class TTSWorker:
         # config knob actually controls anything.
         self.delivery = delivery or ChunkedFileDelivery(broker=broker)
         self._stop = threading.Event()
-        self._thread: threading.Thread | None = None
+        self._threads: list[threading.Thread] = []
+        self._busy: set[str] = set()
+        self._busy_lock = threading.Lock()
 
     def start(self) -> None:
-        if self._thread and self._thread.is_alive():
+        if any(t.is_alive() for t in self._threads):
             return
         # Reset any rows stuck in 'synthesizing' from a previous run that
         # died mid-claim. Idempotent + cheap.
         try:
-            stranded = tts_queue.reset_in_flight()
-            if stranded:
+            recovered = recover_in_flight()
+            if recovered["requeued"]:
                 _emit("tts_worker", "resetInFlight",
-                      detail={"count": stranded})
+                      detail={"count": recovered["requeued"]})
+            if recovered["failed"] or recovered["clips_failed"]:
+                _emit("tts_worker", "staleInFlightFailed",
+                      detail={"count": recovered["failed"],
+                              "clips": recovered["clips_failed"]})
         except Exception as e:  # noqa: BLE001
             log_exception("ttsWorkerResetFail", e)
-        self._thread = threading.Thread(target=self._loop, daemon=True,
-                                         name="tts-worker")
-        self._thread.start()
+        # Once, before any lane runs: a lane's own claim is never reset.
+        self._threads = [
+            threading.Thread(target=self._loop, daemon=True, name=f"tts-worker-{n}")
+            for n in range(self.POOL_SIZE)]
+        for thread in self._threads:
+            thread.start()
 
     def stop(self, timeout: float = 2.0) -> None:
         self._stop.set()
-        if self._thread and self._thread.is_alive():
-            self._thread.join(timeout=timeout)
+        deadline = time.monotonic() + timeout
+        for thread in self._threads:
+            if thread.is_alive():
+                thread.join(timeout=max(0.0, deadline - time.monotonic()))
+
+    def _claim(self, claimed: list[str]) -> dict[str, Any] | None:
+        with self._busy_lock:
+            row = tts_queue.claim_next(frozenset(self._busy))
+            if row is not None:
+                self._busy.add(row["agent_id"])
+                claimed.append(row["agent_id"])
+            return row
 
     def _loop(self) -> None:
         # Tight inner loop while there's work, sleep when empty. Beats a
         # fixed-rate poll when there's a burst of clips (a long Claude
         # turn that emits 4 chunks).
         while not self._stop.is_set():
+            claimed: list[str] = []
             try:
                 worked = synth_one(audio_dir=self.audio_dir,
                                    stream=self.stream,
                                    herald=self.herald,
                                    broker=self.broker,
-                                   delivery=self.delivery)
+                                   delivery=self.delivery,
+                                   claim=lambda: self._claim(claimed))
                 health.mark_success("tts_worker")
             except Exception as e:  # noqa: BLE001
                 health.mark_error("tts_worker", e)
                 log_exception("ttsWorkerLoopFail", e)
                 worked = False
+            finally:
+                with self._busy_lock:
+                    self._busy.difference_update(claimed)
             if worked:
                 continue       # drain back-to-back
             # Sleep with stop-event short-circuit.

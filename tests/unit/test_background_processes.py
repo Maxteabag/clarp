@@ -13,6 +13,7 @@ from lib import agents, background_jobs, turn_lifecycle
 from lib.background_job_watcher import BackgroundJobWatcher
 from lib.policies.helper_state import HelperEvent, Role
 from lib.snapshot import build_agent_snapshot
+from tests.patching import patch_shared
 
 
 _SCRIPT = pathlib.Path(__file__).resolve().parents[2] / "scripts" / "agent_bg.py"
@@ -199,10 +200,66 @@ def test_heartbeat_timeout_applies_even_with_a_live_worker_pid():
     assert background_jobs.get("wedged", reconcile=False)["terminal_reason"] == "heartbeat_expired"
 
 
+
+def test_a_suspend_does_not_fail_a_verified_alive_worker(monkeypatch):
+    """AUT-03: a laptop sleep (or a forward clock step) ages every heartbeat
+    at once; the first reconcile after resume must not fail a worker whose
+    PID and start token still verify, or its wrapper kills a healthy child."""
+    _parent()
+    job = background_jobs.upsert(
+        session="boss", job_id="sleeper", kind="worker", title="Sleeper",
+        heartbeat_timeout_ms=600_000, worker_pid=os.getpid(),
+        worker_start_token=background_jobs.process_start_token(os.getpid()))
+    slept = 15 * 60_000
+    # wall clock minus monotonic clock: the monotonic clock stands still in a suspend
+    offset = {"ms": 0}
+    monkeypatch.setattr(background_jobs, "_clock", {"offset": None, "jump_at": 0},
+                        raising=False)
+    monkeypatch.setattr(background_jobs, "_wall_minus_monotonic_ms",
+                        lambda: offset["ms"], raising=False)
+    heartbeat = job["heartbeat_at"]
+
+    assert background_jobs.reconcile_stale(now_ms=heartbeat + 1) == []
+    offset["ms"] = slept
+    assert background_jobs.reconcile_stale(now_ms=heartbeat + slept) == []
+    assert background_jobs.get("sleeper", reconcile=False)["status"] == "running"
+
+    # A worker that stays silent for a full timeout after the resume is wedged.
+    resumed_timeout = heartbeat + slept + job["heartbeat_timeout_ms"] + 1
+    assert background_jobs.reconcile_stale(now_ms=resumed_timeout) == ["sleeper"]
+    assert background_jobs.get("sleeper", reconcile=False)["terminal_reason"] == "heartbeat_expired"
+
+
+def test_a_host_restart_gives_a_verified_alive_worker_one_timeout():
+    """AUT-03: a Host (re)started after the suspend cannot see the jump, so
+    its own start counts as one: an adopted worker whose last heartbeat is
+    older than a timeout is not failed on the first reconcile."""
+    _parent()
+    job = background_jobs.upsert(
+        session="boss", job_id="adopted", kind="worker", title="Adopted",
+        heartbeat_timeout_ms=600_000, worker_pid=os.getpid(),
+        worker_start_token=background_jobs.process_start_token(os.getpid()))
+    from lib import db
+    before_restart = job["heartbeat_at"] - job["heartbeat_timeout_ms"] - 60_000
+    db.conn().execute("UPDATE background_jobs SET heartbeat_at=?, updated_at=? WHERE job_id=?",
+                      (before_restart, before_restart, "adopted"))
+    # A fresh copy of the module is what a restarted Host process imports.
+    spec = importlib.util.spec_from_file_location(
+        "lib.background_jobs_after_restart", background_jobs.__file__)
+    restarted = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(restarted)
+    started = job["heartbeat_at"]
+
+    assert restarted.reconcile_stale(now_ms=started + 1) == []
+    assert background_jobs.get("adopted", reconcile=False)["status"] == "running"
+    later = started + job["heartbeat_timeout_ms"] + 60_000
+    assert restarted.reconcile_stale(now_ms=later) == ["adopted"]
+
+
 def test_owner_session_can_cancel_but_not_fail_a_fenced_job(monkeypatch):
     _parent()
     _parent("stranger")
-    monkeypatch.setattr(background_jobs, "worker_is_alive", lambda _pid, _token: True)
+    patch_shared(monkeypatch, background_jobs, "worker_is_alive", lambda _pid, _token: True)
     job = background_jobs.upsert(
         session="boss", job_id="fenced", kind="worker", title="Fenced",
         worker_pid=4242, worker_start_token="boot:worker")

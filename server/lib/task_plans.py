@@ -328,17 +328,29 @@ def get(plan_id: str) -> dict | None:
 
 
 def get_with_goal_text(plan_id: str) -> tuple[dict | None, str | None]:
+    plan, goal_text, _bound = get_with_goal_text_and_bound(plan_id)
+    return plan, goal_text
+
+
+def _utf8_bound(text: str) -> int:
+    return len(text) if text.isascii() else 4 * len(text)
+
+
+def get_with_goal_text_and_bound(plan_id: str) -> tuple[dict | None, str | None, int]:
     """The plan as ``get`` returns it, and the exact ``goal_json`` text its goal
-    was decoded from. The artifact list's summary-v1 projection keys its plan
-    history digest on that text: ``_goal_save`` rewrites it without a revision
-    bump, so only the text itself proves the history unchanged."""
+    was decoded from, and an upper bound on the UTF-8 size of the goal's
+    history as read. The artifact list's summary-v1 projection keys its plan
+    history digest on that text (``_goal_save`` rewrites it without a revision
+    bump, so only the text itself proves the history unchanged) and checks the
+    bound before it serializes the history: with ledger references the stored
+    text is small while the expanded history is not."""
     plan = (
         db.conn()
         .execute("SELECT * FROM task_plans WHERE plan_id=?", (plan_id,))
         .fetchone()
     )
     if not plan:
-        return None, None
+        return None, None, 0
     now = db.now_ms()
     items = []
     for row in db.conn().execute(
@@ -365,6 +377,9 @@ def get_with_goal_text(plan_id: str) -> tuple[dict | None, str | None]:
     data = dict(plan)
     goal_text = data.pop("goal_json")
     data["goal"] = json.loads(goal_text or "{}") or None
+    bound = _utf8_bound(goal_text or "")
+    if data["goal"] is not None:
+        bound += _goal_expand(db.conn(), plan_id, data["goal"])
     data["history"] = json.loads(data.pop("history_json") or "[]")
     if data["goal"] is not None:
         from . import goal_ledger
@@ -383,7 +398,7 @@ def get_with_goal_text(plan_id: str) -> tuple[dict | None, str | None]:
         "completed_count": completed,
         "total_count": len(items),
         "server_now": now,
-    }, goal_text
+    }, goal_text, bound
 
 
 def list_for_session(session: str) -> list[dict]:
@@ -404,17 +419,119 @@ def _goal_check_revision(plan, revision):
         raise ValueError("plan changed; reload before editing")
 
 
+# The goal keeps its newest history entries inline; the append-only ledger keeps
+# every entry. Without a bound, routine wake entries grew single goals to tens of
+# megabytes, and every save of such a goal held SQLite's writer lock for seconds.
+GOAL_HISTORY_LIMIT = 200
+
+
+def _goal_bounded(goal):
+    """The goal as stored: at most GOAL_HISTORY_LIMIT history entries, and
+    ``history_offset`` counting the older ones that live only in the ledger."""
+    history = goal.get("history") or []
+    excess = len(history) - GOAL_HISTORY_LIMIT
+    if excess <= 0:
+        return goal
+    return {
+        **goal,
+        "history": history[excess:],
+        "history_offset": int(goal.get("history_offset") or 0) + excess,
+    }
+
+
+def _goal_serialize(goal):
+    """The stored text of a goal; callers can build it outside a transaction."""
+    return json.dumps(_goal_bounded(goal), ensure_ascii=False)
+
+
+def _goal_adopt_bound(goal):
+    """Trim the caller's goal in place to what was stored."""
+    bounded = _goal_bounded(goal)
+    if bounded is not goal:
+        goal["history"] = bounded["history"]
+        goal["history_offset"] = bounded["history_offset"]
+
+
+# A goal history entry's large detail may be stored as a reference to the
+# append-only goal ledger, which mirrors every entry under "history:<index>":
+# {"ledger": key, "shape": key order}. The ledger keeps keys sorted, so the
+# shape records the original order wherever it differs. Reading expands every
+# reference back, byte for byte (AUT-N1b-reader). This build writes none;
+# the writer ships one release later, so a rollback to this build reads them.
+_LEDGER_REF = "ledger"
+_SHAPE = "shape"
+
+
+def _reshape(value, shape):
+    if shape is None:
+        return value
+    if "k" in shape and isinstance(value, dict):
+        kids = shape.get("c") or {}
+        ordered = {key: value[key] for key in shape["k"] if key in value}
+        ordered.update((key, item) for key, item in value.items() if key not in ordered)
+        return {key: _reshape(item, kids.get(key)) for key, item in ordered.items()}
+    if "a" in shape and isinstance(value, list):
+        return [_reshape(item, shape["a"]) for item in value]
+    if "l" in shape and isinstance(value, list):
+        return [_reshape(item, sub) for item, sub in zip(value, shape["l"])] + value[len(shape["l"]):]
+    return value
+
+
+def _goal_expand(con, plan_id, goal):
+    """The goal as clients read it: each spilled detail back from the ledger,
+    in its original key order. Returns an upper bound on the UTF-8 bytes the
+    expansion added."""
+    added = 0
+    for position, entry in enumerate(goal.get("history") or []):
+        detail = entry.get("detail")
+        if not isinstance(detail, dict) or not (set(detail) <= {_LEDGER_REF, _SHAPE}) \
+                or _LEDGER_REF not in detail:
+            continue
+        row = con.execute(
+            "SELECT new_json FROM goal_events WHERE plan_id=? AND idempotency_key=?",
+            (plan_id, detail[_LEDGER_REF])).fetchone()
+        recorded = (json.loads(row[0] or "{}").get("detail") or {}) if row else {}
+        goal["history"][position] = {**entry, "detail": _reshape(recorded, detail.get(_SHAPE))}
+        # The ledger row's text (spaced separators) is longer than the
+        # detail's compact form, so it bounds what this entry adds.
+        added += _utf8_bound(row[0] or "") if row else 0
+    return added
+
+
 def _goal_save(con, plan_id, goal):
     from . import goal_ledger
 
     row = con.execute("SELECT goal_json FROM task_plans WHERE plan_id=?", (plan_id,)).fetchone()
     old = json.loads(row[0] or "{}") if row else {}
+    # Every appended history entry also lands in the append-only ledger, from
+    # the full history, before the stored copy drops its oldest entries.
+    goal_ledger.record_goal_save(con, plan_id, old, goal)
     con.execute(
         "UPDATE task_plans SET goal_json=? WHERE plan_id=?",
-        (json.dumps(goal, ensure_ascii=False), plan_id),
+        (_goal_serialize(goal), plan_id),
     )
-    # Every appended history entry also lands in the append-only ledger.
-    goal_ledger.record_goal_save(con, plan_id, old, goal)
+    _goal_adopt_bound(goal)
+
+
+def _goal_save_if_unchanged(con, plan, expected_text, old, goal, text, *, enrolled):
+    """Store ``text`` (``_goal_serialize(goal)``, built before the transaction)
+    only if the plan still holds ``expected_text`` at the same revision and
+    status. The writer lock covers this comparison and write, not the JSON work.
+    Returns whether it was stored; a changed plan is left for its next reader."""
+    from . import goal_ledger
+
+    sql = (
+        "UPDATE task_plans SET goal_json=? WHERE plan_id=? AND revision=? "
+        "AND status='active' AND goal_json=?"
+    )
+    if enrolled:
+        sql += " AND recovery_enabled=1"
+    cursor = con.execute(sql, (text, plan["plan_id"], plan["revision"], expected_text))
+    if cursor.rowcount != 1:
+        return False
+    goal_ledger.record_goal_save(con, plan["plan_id"], old, goal)
+    _goal_adopt_bound(goal)
+    return True
 
 
 def _goal_initialize(con, plan_id, agent, title, raw, now):
@@ -518,6 +635,11 @@ def _goal_require_completion(con, plan):
         raise ValueError("unfinished legacy work cannot be completed")
 
 
+# Internal callers that act on the plan as it is (Stop's pause) read the
+# revision inside _goal_mutate's own transaction instead of passing one.
+_REVISION_IN_TRANSACTION = object()
+
+
 def _goal_mutate(plan_id, *, revision, action, data=None):
     """Single transaction for checkpoint/evidence/next work and wake registration."""
     from . import task_plans, artifacts
@@ -532,6 +654,8 @@ def _goal_mutate(plan_id, *, revision, action, data=None):
         ).fetchone()
         if not plan:
             raise ValueError("task plan not found")
+        if revision is _REVISION_IN_TRANSACTION:
+            revision = plan["revision"]
         _goal_check_revision(plan, revision)
         goal = json.loads(plan["goal_json"] or "{}")
         was_legacy = not goal
@@ -790,23 +914,29 @@ def _goal_mutate(plan_id, *, revision, action, data=None):
                 keys.add(key)
                 existing = next((r for r in old if r["item_id"] == key), None)
                 if existing:
-                    if (
-                        existing["status"] == "completed"
-                        and str(raw.get("title") or "").strip() != existing["title"]
-                    ):
+                    title = str(raw.get("title") or "").strip()[:500]
+                    if existing["status"] == "completed" and title != existing["title"]:
                         raise ValueError(
                             "completed step meaning is immutable; use a new step id for different work"
                         )
-                    if not str(raw.get("title") or "").strip():
+                    if not title:
                         raise ValueError("step title required")
                     con.execute(
                         "UPDATE task_items SET title=?,position=?,parent_id=NULL WHERE item_id=?",
-                        (raw["title"], position, key),
+                        (title, position, key),
                     )
+                    if existing["status"] == "removed":
+                        # Proposing a retired step again puts it back in the
+                        # plan; left removed it would count as resolved.
+                        con.execute(
+                            "UPDATE task_items SET status='pending',detail=?,started_at=NULL,"
+                            "completed_at=NULL WHERE item_id=?",
+                            (str(raw.get("detail") or "")[:2000], key),
+                        )
                 else:
                     task_plans._insert_item(con, plan_id, key, None, position, raw, now)
             for item in old:
-                if item["item_id"] not in keys and item["status"] != "completed":
+                if item["item_id"] not in keys and item["status"] not in {"completed", "removed"}:
                     elapsed = item["active_ms"] + (
                         max(0, now - item["started_at"]) if item["started_at"] else 0
                     )
@@ -882,19 +1012,27 @@ def pause_recovery_for_agent(agent_id: str, reason: str) -> int:
     rows = (
         db.conn()
         .execute(
-            "SELECT plan_id,revision FROM task_plans WHERE agent_id=? AND goal_json!='{}' AND status='active'",
+            "SELECT plan_id FROM task_plans WHERE agent_id=? AND goal_json!='{}' AND status='active'",
             (agent_id,),
         )
         .fetchall()
     )
     paused = 0
     for row in rows:
-        _goal_mutate(
-            row["plan_id"],
-            revision=row["revision"],
-            action="pause",
-            data={"reason": reason},
-        )
+        # The agent may checkpoint while Stop runs; one goal's failure must not
+        # leave the others active.
+        try:
+            _goal_mutate(
+                row["plan_id"],
+                revision=_REVISION_IN_TRANSACTION,
+                action="pause",
+                data={"reason": reason},
+            )
+        except Exception as exc:  # noqa: BLE001 - attempt every goal
+            from .log import log_exception
+
+            log_exception("goalPauseOnStopFail", exc, detail=row["plan_id"])
+            continue
         paused += 1
     return paused
 

@@ -16,17 +16,19 @@ from typing import Any, Callable, Optional
 from .. import agents as agents_db
 from .. import opencode_transcript
 from .. import tool_explanation_commands
-from .. import tts_queue
+from ..tts_queue_records import enqueue as enqueue_tts
 from ..log import log, log_exception
 from ..proc_util import attach_stderr_drain, stderr_text
 from ..text_util import truncate
 from ..process_registry import TurnHandle
 from ..turn_lifecycle import TurnEvent
 from ..voice_preamble import apply_voice_preamble
-from .base import BackendBrand
+from ..backend_catalogue import OPENCODE
+from .base import CatalogueDefault, BackendBrand
 from . import opencode_serve
 from .opencode_serve import OpenCodeTurnHandle, ServeClient, ServeError
-from .stream_json import StreamJsonBackend, iter_json_dicts, popen_turn
+from .stream_json import StreamJsonBackend, iter_json_dicts, popen_turn, stop_after_drain_failure
+from .long_prompt import ARGV_TEXT_LIMIT
 
 
 @dataclass
@@ -138,7 +140,7 @@ def _live_tool_output(agent_id: str, part: dict, state: dict, st: Any,
                       trace_id: str = "") -> None:
     """A running tool's output as a live tail; an edit's diff stats."""
     from .. import live_hub
-    from ..live_tools import diff_stats, output_tail
+    from ..tool_output import diff_stats, output_tail
     if live_hub.current() is None:
         return
     call_id = _call_id(part)
@@ -202,37 +204,41 @@ class OpenCodeBackend(StreamJsonBackend):
     """One ``opencode serve`` per turn, followed live; ``opencode run`` as the
     fallback. No compaction or terminal yet."""
     # --- catalogue data ---------------------------------------------------
-    id = 'opencode'
-    label = 'OpenCode'
-    required_binary = 'opencode'
-    aliases = ('open-code', 'opencode-ai')
-    badge = 'BackendOpenCode'
-    detail = 'Runs on OpenCode.'
-    symbol = 'chevron.left.forwardslash.chevron.right'
-    brand = BackendBrand('#16352b', '#0b1c16', '#5ee4b5', '#1f8a65')
+    _catalogue_definition = OPENCODE
+    id = CatalogueDefault('id')
+    label = CatalogueDefault('label')
+    required_binary = CatalogueDefault('required_binary')
+    aliases = CatalogueDefault('aliases')
+    badge = CatalogueDefault('badge')
+    detail = CatalogueDefault('detail')
+    symbol = CatalogueDefault('symbol')
+    brand = CatalogueDefault('brand')
     # OpenCode's reasoning variants, least to most. Each model supports its
     # own subset (``opencode models --verbose``), so the catalogue lists
     # efforts per model; ``--variant`` / the prompt's ``variant`` take them.
-    efforts = ('none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max')
-    effort_scope = 'model'
-    runner = 'opencode'
-    config_model_field = 'opencode_model'
-    config_effort_field = 'opencode_effort'
+    efforts = CatalogueDefault('efforts')
+    effort_scope = CatalogueDefault('effort_scope')
+    runner = CatalogueDefault('runner')
+    config_model_field = CatalogueDefault('config_model_field')
+    config_effort_field = CatalogueDefault('config_effort_field')
+    model_providers = CatalogueDefault('model_providers')
     # Shown only when ``opencode models`` cannot be read. OpenCode Zen's own
     # model first (no provider key needed), then models the common providers
     # listed on 2026-09-28.
-    fallback_models = (
-        ('opencode/big-pickle', 'Big Pickle'),
-        ('huggingface/deepseek-ai/DeepSeek-V4.1-Flash', 'DeepSeek V4.1 Flash (Hugging Face)'),
-        ('fireworks-ai/accounts/fireworks/models/kimi-k3', 'Kimi K3 (Fireworks)'),
-        ('huggingface/zai-org/GLM-5.3', 'GLM-5.3 (Hugging Face)'),
-    )
+    fallback_models = CatalogueDefault('fallback_models')
 
 
     transcript = opencode_transcript
     #: Follow turns live through ``opencode serve``. ``CLARP_OPENCODE_LIVE=0``
     #: in the runtime's environment forces the ``opencode run`` path.
     live = True
+
+    def prompt_limit_bytes(self) -> int | None:
+        """``opencode run`` takes the prompt only in argv; a live turn sends it
+        in an HTTP body (BACKENDS-08)."""
+        if self.live and os.environ.get("CLARP_OPENCODE_LIVE", "1") != "0":
+            return None
+        return ARGV_TEXT_LIMIT
 
     @staticmethod
     def turn_env() -> dict[str, str]:
@@ -311,7 +317,7 @@ class OpenCodeBackend(StreamJsonBackend):
             trace_id=trace_id, backend_session_id=backend_session_id,
             on_session_init=on_session_init, on_result=on_result,
             on_error=on_error, stream=stream,
-            enqueue=enqueue or tts_queue.enqueue,
+            enqueue=enqueue or enqueue_tts,
         )
         from .. import provider_background_jobs as provider_jobs
         turn_token, identity = provider_jobs.identity_env(runtime_agent_id)
@@ -349,6 +355,7 @@ class OpenCodeBackend(StreamJsonBackend):
         on_session_init, on_result, on_error, stream, enqueue,
     ) -> None:
         st = _TurnState(session_id=backend_session_id)
+        reported = False        # a terminal outcome reached on_result/on_error
         if backend_session_id:
             self._bind(st, backend_session_id, on_session_init=on_session_init,
                        on_error=on_error, trace_id=trace_id)
@@ -408,6 +415,7 @@ class OpenCodeBackend(StreamJsonBackend):
                                or str(ev.get("message") or "opencode error"))
                         st.failed_error = err
                         if on_error is not None:
+                            reported = True
                             on_error(err)
                         continue
                     if etype in {"text", "message", "assistant", "output"}:
@@ -434,16 +442,20 @@ class OpenCodeBackend(StreamJsonBackend):
                 log("opencodeExitErr", f"rc={rc} trace={trace_id or '∅'} "
                                        f"stderr={(err or '')[:500]!r}")
                 if on_error is not None:
+                    reported = True
                     on_error(err)
             elif on_result is not None and not st.failed_error:
                 result: dict[str, Any] = {"last_agent_message": st.last_agent_message,
                                           "usage": dict(st.usage)}
                 if st.cost is not None:
                     result["total_cost_usd"] = st.cost
+                reported = True
                 on_result(result)
         except Exception as error:  # noqa: BLE001
             log_exception("opencodeDrainFail", error, detail=trace_id)
-            if on_error is not None and not st.failed_error:
+            # Nothing reads this CLI any more: stop it, and end the turn once.
+            stop_after_drain_failure(proc, handle)
+            if on_error is not None and not st.failed_error and not reported:
                 try:
                     on_error(str(error)[:300])
                 except Exception:  # noqa: BLE001

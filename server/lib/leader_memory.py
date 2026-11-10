@@ -10,7 +10,21 @@ import uuid
 from typing import Any
 
 from . import db
+from . import lifecycle as lk
 from . import xdg
+from .lifecycle import Edge, Lifecycle, WaitForever
+
+# A user value fact (docs/architecture/lifecycles.md). This module is the only
+# writer of user_value_facts.status; upsert_user_value_fact() inserts the row as
+# a candidate. Promoting a promoted fact writes nothing.
+VALUE_FACT = Lifecycle(
+    name="user_value_fact", owner="lib/leader_memory.py",
+    table="user_value_facts", key="fact_id", state_column="status",
+    entered_columns={"promoted": "updated_at"},
+    initial="candidate", final=frozenset({"promoted"}),
+    edges=(Edge("promote", frozenset({"candidate"}), "promoted"),),
+    waits={"candidate": WaitForever("the leader promotes it explicitly")},
+)
 
 
 def _root_candidates() -> list[pathlib.Path]:
@@ -294,10 +308,8 @@ def upsert_user_value_fact(*, statement: str, category: str = "preference",
 
 
 def promote_user_value_fact(fact_id: str) -> None:
-    db.conn().execute(
-        "UPDATE user_value_facts SET status = 'promoted', updated_at = ? WHERE fact_id = ?",
-        (db.now_ms(), fact_id),
-    )
+    lk.compare_and_set_where(db.conn(), VALUE_FACT, "promote", where="fact_id = ?",
+                             params=(fact_id,), now=db.now_ms())
 
 
 def latest_promotion_activity() -> int:

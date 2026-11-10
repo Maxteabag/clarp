@@ -1,0 +1,12 @@
+# Freeze800 S7: lead831; B bounded-three route and C exact payload criteria.
+# Reviewed whole port 6f8fd40d197c51c23e89b6568a0a6db9b209456e; staged input 82ff2989567f06af27ef92d06a29893db3d36122.
+# Payload is byte-identical to reviewed and staged S7; no new behavior.
+# SHA256 279e15584a2a5540556fe279704b5a71d04fb3444f709ea46e948183dcd59985; git blob d4ffce642d58da5e1615fc8c9280dbb05eef4691.
+# Bind actual base/main/STAGED integration, not historical pre-port input.
+# Empty base_blob means the path is absent, never a wildcard.
+# Final actual refs must match all three guards or STOP for refreshed review.
+path = "tests/unit/test_raw_attempt_deadline.py"
+resolved = "freeze800-s7-raw-deadline-test.py.resolved"
+base_blob = ""
+main_blob = "d09243ead5debf05778a7e23f1ceb4e1d52e53ed"
+integration_blob = "d4ffce642d58da5e1615fc8c9280dbb05eef4691"

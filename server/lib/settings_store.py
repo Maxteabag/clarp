@@ -84,6 +84,16 @@ def set_text(key: str, value: str, *, updated_at: int | None = None) -> None:
     )
 
 
+def increment(key: str) -> None:
+    """Add one to an integer setting (absent counts as 0)."""
+    conn().execute(
+        """INSERT INTO settings (key, value, updated_at) VALUES (?, '1', ?)
+           ON CONFLICT(key) DO UPDATE SET
+               value = CAST(CAST(settings.value AS INTEGER) + 1 AS TEXT),
+               updated_at = excluded.updated_at""",
+        (key, now_ms()))
+
+
 def set_text_if_blank(key: str, value: str) -> str:
     """Store `value` unless a non-blank value exists; return what is stored."""
     conn().execute(
@@ -98,6 +108,49 @@ def set_text_if_blank(key: str, value: str) -> str:
 
 def delete(key: str) -> None:
     conn().execute("DELETE FROM settings WHERE key = ?", (key,))
+
+
+def set_json_field_if(key: str, field: str, value: str, *, expect: str) -> bool:
+    """Compare-and-set one top-level field of a JSON value: only while it
+    still equals `expect`. Returns whether the row changed."""
+    path = "$." + field
+    return conn().execute(
+        """UPDATE settings SET value = json_set(value, ?, ?), updated_at = ?
+            WHERE key = ? AND json_valid(value) AND json_extract(value, ?) = ?""",
+        (path, value, now_ms(), key, path, expect)).rowcount > 0
+
+
+def _prefix_range(prefix: str) -> tuple[str, str]:
+    """[low, high) bounds of every key starting with `prefix`; unlike LIKE,
+    a range on the key column uses its primary-key index."""
+    return prefix, prefix[:-1] + chr(ord(prefix[-1]) + 1)
+
+
+def set_json_field_for_prefix(prefix: str, field: str, value: str, *, expect: str,
+                              match_field: str, match_value: str) -> int:
+    """`set_json_field_if` for every key under `prefix` whose `match_field`
+    equals `match_value`. Returns the number of rows changed."""
+    path, match = "$." + field, "$." + match_field
+    low, high = _prefix_range(prefix)
+    return conn().execute(
+        """UPDATE settings SET value = json_set(value, ?, ?), updated_at = ?
+            WHERE key >= ? AND key < ? AND json_valid(value)
+              AND json_extract(value, ?) = ? AND json_extract(value, ?) = ?""",
+        (path, value, now_ms(), low, high, path, expect, match, match_value)).rowcount
+
+
+def prune_prefix_keeping(prefix: str, *, updated_before: int, field: str,
+                         keep: tuple[str, ...]) -> int:
+    """Delete keys under `prefix` written before `updated_before`, except rows
+    whose JSON `field` is one of `keep`. Indexed range; at most 500 rows."""
+    low, high = _prefix_range(prefix)
+    placeholders = ",".join("?" * len(keep))
+    return conn().execute(
+        f"""DELETE FROM settings WHERE key IN (
+              SELECT key FROM settings WHERE key >= ? AND key < ? AND updated_at < ?
+                 AND NOT (json_valid(value) AND json_extract(value, ?) IN ({placeholders}))
+               LIMIT 500)""",
+        (low, high, int(updated_before), "$." + field, *keep)).rowcount
 
 
 def prune_prefix(prefix: str, *, updated_before: int) -> int:
@@ -137,6 +190,82 @@ def values_with_prefix(prefix: str, *, updated_after: int | None = None,
         sql += " AND updated_at <= ?"
         params.append(int(updated_through))
     return [str(row["value"]) for row in conn().execute(sql, tuple(params))]
+
+
+def items_in_range(low: str, high: str, *, limit: int) -> list[tuple[str, str]]:
+    """(key, value) for keys in [low, high), in key order, at most ``limit``:
+    one primary-key range read."""
+    rows = conn().execute(
+        "SELECT key, value FROM settings WHERE key >= ? AND key < ? ORDER BY key LIMIT ?",
+        (low, high, int(limit))).fetchall()
+    return [(str(row["key"]), str(row["value"])) for row in rows]
+
+
+def stamped_items_in_range(low: str, high: str, *, limit: int) -> list[tuple[str, str, int]]:
+    """``items_in_range`` with each row's ``updated_at``: (key, value, updated_at)."""
+    rows = conn().execute(
+        "SELECT key, value, updated_at FROM settings WHERE key >= ? AND key < ? ORDER BY key LIMIT ?",
+        (low, high, int(limit))).fetchall()
+    return [(str(row["key"]), str(row["value"]), int(row["updated_at"])) for row in rows]
+
+
+def get_many_stamped(keys: list[str]) -> dict[str, tuple[str, int]]:
+    """``get_many`` with each row's ``updated_at``: key -> (value, updated_at)."""
+    if not keys:
+        return {}
+    rows = conn().execute(
+        f"SELECT key, value, updated_at FROM settings WHERE key IN ({','.join('?' * len(keys))})",
+        tuple(keys)).fetchall()
+    return {str(row["key"]): (str(row["value"]), int(row["updated_at"])) for row in rows}
+
+
+def json_prefix_items(prefix: str, **match: str) -> list[tuple[str, str]]:
+    """(key, value) under ``prefix`` whose JSON top-level fields equal ``match``.
+    A key-range read of the prefix (primary key) filtered per row."""
+    low, high = _prefix_range(prefix)
+    sql = "SELECT key, value FROM settings WHERE key >= ? AND key < ? AND json_valid(value)"
+    params: list[object] = [low, high]
+    for field, value in match.items():
+        sql += " AND json_extract(value, ?) = ?"
+        params += ["$." + field, value]
+    rows = conn().execute(sql + " ORDER BY key", tuple(params)).fetchall()
+    return [(str(row["key"]), str(row["value"])) for row in rows]
+
+
+def prune_candidates(prefix: str, *, updated_before: int, field: str,
+                     keep: tuple[str, ...], limit: int) -> list[tuple[str, str]]:
+    """The rows ``prune_prefix_keeping`` would delete, at most ``limit``."""
+    low, high = _prefix_range(prefix)
+    placeholders = ",".join("?" * len(keep))
+    rows = conn().execute(
+        f"""SELECT key, value FROM settings WHERE key >= ? AND key < ? AND updated_at < ?
+               AND NOT (json_valid(value) AND json_extract(value, ?) IN ({placeholders}))
+             LIMIT ?""",
+        (low, high, int(updated_before), "$." + field, *keep, int(limit))).fetchall()
+    return [(str(row["key"]), str(row["value"])) for row in rows]
+
+
+def delete_keys(keys: list[str]) -> int:
+    if not keys:
+        return 0
+    return conn().execute(
+        f"DELETE FROM settings WHERE key IN ({','.join('?' * len(keys))})",
+        tuple(keys)).rowcount
+
+
+@contextmanager
+def read_snapshot() -> Iterator[None]:
+    """One consistent read (a deferred transaction: WAL snapshot isolation),
+    unless this thread is already inside a transaction."""
+    c = conn()
+    if c.in_transaction:
+        yield
+        return
+    c.execute("BEGIN")
+    try:
+        yield
+    finally:
+        c.execute("COMMIT")
 
 
 @contextmanager

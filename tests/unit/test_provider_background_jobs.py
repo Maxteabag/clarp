@@ -1,12 +1,14 @@
 """Representative Claude 2.1.283 receipts; no paid model or live processes."""
 import json
 import os
+import sqlite3
 import time
 from datetime import datetime, timezone
 
 import pytest
 
 from lib import agents, background_jobs as jobs, db, provider_background_jobs as provider
+from tests.patching import patch_shared
 
 NATIVE = '1ab7df52-76aa-423e-83b3-6eafc7ef8eb2'
 TOOL = 'toolu_01FdHka33VdcPRqDDyLBPdJ1'
@@ -35,6 +37,19 @@ def notice(state='completed', at=None, task=TASK, tool=TOOL):
     return record('queue-operation', at=at, operation='enqueue', content=(
         f'<task-notification><task-id>{task}</task-id><tool-use-id>{tool}</tool-use-id>'
         f'<status>{state}</status><summary>private provider command text</summary></task-notification>'))
+
+
+@pytest.fixture(autouse=True)
+def _no_time_budgets(monkeypatch):
+    """The observer's two time budgets (PARSE_BUDGET_SEC per observe call,
+    BUDGET_SEC per poll) end a pass after 20 or 50 ms of wall time. On a loaded
+    machine a pass then stops before the record a test asserts on, while these
+    tests assert the byte and action bounds and fairness, which never depend on
+    the clock. Without the budgets each pass is bounded by MAX_BYTES and
+    MAX_ACTIONS alone, so it is deterministic. (G1 flakes: bounded_poll twice,
+    already_recorded_stale_receipt once.)"""
+    monkeypatch.setattr(provider, 'PARSE_BUDGET_SEC', 60)
+    monkeypatch.setattr(provider.ProviderJobObserver, 'BUDGET_SEC', 60)
 
 
 @pytest.fixture
@@ -669,7 +684,97 @@ def test_an_unreadable_process_identity_never_closes_a_live_turn(case, monkeypat
     """Out of file descriptors, every /proc read fails; that proves nothing."""
     owner, path, ident = case
     token = _turn(owner)              # this test process: alive
-    monkeypatch.setattr(jobs, 'process_start_token', lambda _pid: '')
+    patch_shared(monkeypatch, jobs, 'process_start_token', lambda _pid: '')
     assert provider.reap_exited_turns() == 0
     assert db.conn().execute('SELECT exited_at FROM provider_turns WHERE turn_token=?',
                              (token,)).fetchone()[0] is None
+
+
+DAY = provider.EVIDENCE_LOST_MS
+
+
+def _stale_unknown_task(owner, path, ident, age=DAY + 60_000):
+    """A task last heard of `age` ago with no turn-exit link: launched before
+    the fence, or by a process Clarp did not start."""
+    at = db.now_ms() - age
+    append(path, launch(at), receipt(at + 1))
+    provider.observe(owner, NATIVE, path)
+    job = jobs.get(ident)
+    assert (job['status'], job['metadata']['provider_state']) == ('queued', 'unknown')
+    return at
+
+
+def test_a_task_with_no_evidence_for_a_day_and_no_turn_ends_with_outcome_unknown(case):
+    owner, path, ident = case
+    _stale_unknown_task(owner, path, ident)
+    provider.ProviderJobObserver().poll_once()
+    job = jobs.get(ident)
+    assert (job['status'], job['outcome_state'], job['terminal_reason']) == (
+        'failed', 'unknown', 'provider_task_evidence_lost')
+    assert job['is_terminal'] and not job['can_cancel']
+    assert job['metadata']['stop_basis'] == 'evidence_lost'
+    assert db.conn().execute('SELECT COUNT(*) FROM background_jobs WHERE terminal_at IS NULL'
+                             ).fetchone()[0] == 0
+
+
+def test_a_task_silent_for_less_than_a_day_stays_unknown(case):
+    owner, path, ident = case
+    _stale_unknown_task(owner, path, ident, age=DAY - 60_000)
+    assert provider.sweep_lost_evidence() == 0
+    assert jobs.get(ident)['terminal_at'] is None
+
+
+def test_a_task_of_a_live_turn_is_never_ended_for_silence_only_by_its_exit(case):
+    owner, path, ident = case
+    token = _turn(owner)          # this test process: alive and identifiable
+    _stale_unknown_task(owner, path, ident)
+    provider.record_task_turn(owner['agent_id'], NATIVE, TOOL, token)
+    assert provider.sweep_lost_evidence() == 0
+    assert jobs.get(ident)['terminal_at'] is None
+    provider.turn_exited(token)
+    assert jobs.get(ident)['terminal_reason'] == 'provider_turn_exited_without_result'
+
+
+def test_an_open_turn_without_process_identity_does_not_keep_a_task_forever(case):
+    owner, path, ident = case
+    unverified = provider.new_turn_token()
+    db.conn().execute("INSERT INTO provider_turns(turn_token,agent_id,provider,pid,start_token,started_at)"
+                      " VALUES (?,?,?,?,'',?)", (unverified, owner['agent_id'], 'claude', 999999,
+                                                 db.now_ms() - 2 * DAY))
+    _stale_unknown_task(owner, path, ident)
+    provider.record_task_turn(owner['agent_id'], NATIVE, TOOL, unverified)
+    assert provider.sweep_lost_evidence() == 1
+    assert jobs.get(ident)['terminal_reason'] == 'provider_task_evidence_lost'
+
+
+def test_a_completion_record_imported_after_evidence_was_lost_still_decides(case):
+    owner, path, ident = case
+    at = _stale_unknown_task(owner, path, ident)
+    assert provider.sweep_lost_evidence() == 1
+    append(path, notice('completed', at=at + 2))
+    provider.observe(owner, NATIVE, path)
+    job = jobs.get(ident)
+    assert (job['status'], job['outcome_state'], job['terminal_reason']) == (
+        'succeeded', 'succeeded', 'provider_completed')
+    assert not {'stop_basis', 'evidence_lost_at'} & set(job['metadata'])
+
+
+def test_the_upgrade_ends_every_long_silent_task_once_and_leaves_recent_ones(case):
+    from lib import db_migrations, db_schema
+    owner, path, ident = case
+    _stale_unknown_task(owner, path, ident)
+    recent = provider.job_id(owner['agent_id'], NATIVE, TOOL2)
+    append(path, record('assistant', at=db.now_ms() - 3_600_000, message={'content': [{
+        'type': 'tool_use', 'id': TOOL2, 'name': 'Bash',
+        'input': {'run_in_background': True, 'command': 'sleep 1'}}]}))
+    provider.observe(owner, NATIVE, path)
+    c = db.conn()
+    c.execute('PRAGMA user_version = 119')
+    c.row_factory = None  # the upgrade must not rely on the Host's Row factory
+    try:
+        db_migrations._migrate(c)
+    finally:
+        c.row_factory = sqlite3.Row
+    assert c.execute('PRAGMA user_version').fetchone()[0] == db_schema._SCHEMA_VERSION
+    assert jobs.get(ident)['terminal_reason'] == 'provider_task_evidence_lost'
+    assert jobs.get(recent)['terminal_at'] is None

@@ -11,6 +11,7 @@ import signal
 import stat
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from typing import Any, Callable
@@ -23,8 +24,11 @@ ACTIVE_STATUSES = frozenset({"queued", "running"})
 TERMINAL_STATUSES = frozenset({"succeeded", "failed", "cancelled"})
 DEFAULT_HEARTBEAT_TIMEOUT_MS = 600_000
 TERMINAL_VISIBILITY_MS = 24 * 60 * 60 * 1000
-WORKER_TERM_TIMEOUT_SEC = 2.0
-WORKER_KILL_TIMEOUT_SEC = 2.0
+from .background_job_process import (  # noqa: E402,F401  (split_apply: background-jobs)
+    WORKER_TERM_TIMEOUT_SEC, WORKER_KILL_TIMEOUT_SEC, process_start_token, current_worker_identity,
+    process_command, process_argv, _parse_macos_procargs, _macos_procargs, adopted_worker_job_ids,
+    worker_is_alive, terminate_worker,
+)
 PROGRESS_MAX = 500
 LOG_TAIL_BYTES = 64 * 1024
 TIMELINE_LIMIT = 200
@@ -102,209 +106,6 @@ def parse_job_handle(raw: str) -> tuple[str, int]:
         if len(parts) == 3 and parts[1].isdigit() and parts[2]:
             return parts[2], int(parts[1])
     return raw, 1
-
-
-def process_start_token(pid: int) -> str:
-    """Stable process identity: boot session plus process start time."""
-    if pid <= 0:
-        return ""
-    if sys.platform == "darwin":
-        try:
-            boot = subprocess.check_output(
-                ["/usr/sbin/sysctl", "-n", "kern.boottime"], text=True,
-                stderr=subprocess.DEVNULL).strip()
-            started = subprocess.check_output(
-                ["/bin/ps", "-p", str(pid), "-o", "lstart="], text=True,
-                stderr=subprocess.DEVNULL).strip()
-            return hashlib.sha256(
-                f"{boot}\0{pid}\0{started}".encode()).hexdigest()
-        except (OSError, subprocess.SubprocessError):
-            return ""
-    try:
-        boot_id = pathlib.Path("/proc/sys/kernel/random/boot_id").read_text().strip()
-        raw = pathlib.Path(f"/proc/{pid}/stat").read_text()
-        tail = raw.rsplit(")", 1)[1].split()
-        return f"{boot_id}:{tail[19]}"
-    except (OSError, IndexError):
-        return ""
-
-
-def current_worker_identity() -> tuple[int, str]:
-    explicit = os.environ.get("CLARP_BACKGROUND_WORKER_PID", "").strip()
-    pid = int(explicit) if explicit.isdigit() else os.getppid()
-    command = process_command(pid)
-    # Existing message-watch is the first adopted detached workflow. Other
-    # callers use explicit heartbeats unless they opt in with the env override.
-    if not explicit and "watch_messages.py" not in command:
-        return 0, ""
-    return pid, process_start_token(pid)
-
-
-def process_command(pid: int) -> str:
-    return " ".join(process_argv(pid))
-
-
-def process_argv(pid: int) -> list[str]:
-    if sys.platform == "darwin":
-        try:
-            return _parse_macos_procargs(_macos_procargs(pid))
-        except (OSError, ValueError):
-            return []
-    try:
-        return [
-            part.decode(errors="replace")
-            for part in pathlib.Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")
-            if part
-        ]
-    except OSError:
-        return []
-
-
-def _parse_macos_procargs(raw: bytes) -> list[str]:
-    """Parse the kern.procargs2 binary payload without losing spaces."""
-    if len(raw) < 5:
-        return []
-    argc = int.from_bytes(raw[:4], byteorder=sys.byteorder, signed=True)
-    if argc <= 0 or argc > 100_000:
-        return []
-    offset = raw.find(b"\0", 4)
-    if offset < 0:
-        return []
-    offset += 1
-    while offset < len(raw) and raw[offset] == 0:
-        offset += 1
-    argv = []
-    for _ in range(argc):
-        end = raw.find(b"\0", offset)
-        if end < 0:
-            return []
-        argv.append(raw[offset:end].decode(errors="replace"))
-        offset = end + 1
-    return argv
-
-
-def _macos_procargs(pid: int) -> bytes:
-    """Read another process's argv through the Darwin KERN_PROCARGS2 MIB."""
-    if pid <= 0:
-        return b""
-    library = ctypes.util.find_library("c")
-    if not library:
-        raise OSError("Darwin libc not found")
-    libc = ctypes.CDLL(library, use_errno=True)
-    mib = (ctypes.c_int * 3)(1, 49, pid)  # CTL_KERN, KERN_PROCARGS2, pid
-    size = ctypes.c_size_t()
-    if libc.sysctl(mib, 3, None, ctypes.byref(size), None, 0) != 0:
-        error = ctypes.get_errno()
-        raise OSError(error, os.strerror(error))
-    buffer = ctypes.create_string_buffer(size.value)
-    if libc.sysctl(mib, 3, buffer, ctypes.byref(size), None, 0) != 0:
-        error = ctypes.get_errno()
-        raise OSError(error, os.strerror(error))
-    return buffer.raw[:size.value]
-
-
-def adopted_worker_job_ids(pid: int, session: str) -> list[str]:
-    """Exact message-watch targets encoded in the adopted worker argv."""
-    argv = process_argv(pid)
-    script_index = next(
-        (index for index, arg in enumerate(argv) if "watch_messages.py" in arg),
-        -1,
-    )
-    if script_index < 0 or script_index + 1 >= len(argv):
-        return []
-    subcommand = argv[script_index + 1]
-    provider = {"whatsapp": "whatsapp", "himalaya": "email"}.get(
-        subcommand, "")
-    if not provider:
-        return []
-    labels: set[str] = set()
-    mapping_flags = {"--watch", "--watch-name", "--from"}
-    for index, arg in enumerate(argv):
-        if arg in mapping_flags:
-            if index + 1 < len(argv):
-                raw = argv[index + 1]
-                labels.add((raw.split("=", 1)[1] if "=" in raw else raw).strip())
-        elif any(arg.startswith(f"{flag}=") for flag in mapping_flags):
-            raw = arg.split("=", 1)[1]
-            labels.add((raw.split("=", 1)[1] if "=" in raw else raw).strip())
-        elif arg == "--subject-keyword" and index + 1 < len(argv):
-            labels.add(argv[index + 1].strip())
-        elif arg.startswith("--subject-keyword="):
-            labels.add(arg.split("=", 1)[1].strip())
-        if arg == "--reply-watch-json" and index + 1 < len(argv):
-            try:
-                data = json.loads(pathlib.Path(argv[index + 1]).read_text())
-                if isinstance(data, dict):
-                    labels.update(str(value).strip() for value in data.values())
-            except (OSError, json.JSONDecodeError):
-                pass
-        elif arg.startswith("--reply-watch-json="):
-            try:
-                data = json.loads(pathlib.Path(arg.split("=", 1)[1]).read_text())
-                if isinstance(data, dict):
-                    labels.update(str(value).strip() for value in data.values())
-            except (OSError, json.JSONDecodeError):
-                pass
-    result = []
-    for label in sorted(label for label in labels if label):
-        digest = hashlib.sha256(
-            f"{session}\0{provider}\0{label}".encode()).hexdigest()[:16]
-        result.append(f"message-watch-{provider}-{digest}")
-    return result
-
-
-def worker_is_alive(pid: int, expected_token: str) -> bool:
-    if not expected_token or process_start_token(pid) != expected_token:
-        return False
-    try:
-        if sys.platform == "darwin":
-            state = subprocess.check_output(
-                ["/bin/ps", "-p", str(pid), "-o", "stat="], text=True,
-                stderr=subprocess.DEVNULL).strip()
-        else:
-            raw = pathlib.Path(f"/proc/{pid}/stat").read_text()
-            state = raw.rsplit(")", 1)[1].split()[0]
-    except (OSError, IndexError, subprocess.SubprocessError):
-        return False
-    return bool(state) and state[0] not in {"Z", "X"}
-
-
-def terminate_worker(
-    pid: int, expected_token: str, *,
-    term_timeout: float = WORKER_TERM_TIMEOUT_SEC,
-    kill_timeout: float = WORKER_KILL_TIMEOUT_SEC,
-    monotonic: Callable[[], float] = time.monotonic,
-    sleep: Callable[[float], None] = time.sleep,
-) -> bool:
-    """Stop one exact PID/start-token identity, escalating only while it matches."""
-    if not worker_is_alive(pid, expected_token):
-        return True
-
-    def wait_until_gone(timeout: float) -> bool:
-        deadline = monotonic() + max(0.0, timeout)
-        while worker_is_alive(pid, expected_token):
-            if monotonic() >= deadline:
-                return False
-            sleep(0.05)
-        return True
-
-    try:
-        os.kill(pid, signal.SIGTERM)
-    except ProcessLookupError:
-        return True
-    except OSError:
-        return False
-    if wait_until_gone(term_timeout):
-        return True
-    if not worker_is_alive(pid, expected_token):
-        return True
-    try:
-        os.kill(pid, signal.SIGKILL)
-    except ProcessLookupError:
-        return True
-    except OSError:
-        return False
-    return wait_until_gone(kill_timeout)
 
 
 def upsert(
@@ -1052,6 +853,32 @@ def run_terminal_generation_cleanup(
         raise
 
 
+# A suspend or a forward clock step ages every heartbeat at once: the wall
+# clock moves while the monotonic clock (which stops in a suspend) does not.
+# A worker whose PID and start token still verify then gets one full timeout
+# from the reconcile that saw the jump before it counts as wedged (AUT-03).
+# This process's start counts as such a moment: it cannot see a jump that
+# happened before it ran, so a worker it adopts gets one timeout too.
+_CLOCK_JUMP_MS = 5_000
+_clock: dict[str, int | None] = {"offset": None, "jump_at": int(time.time() * 1000)}
+_clock_lock = threading.Lock()
+
+
+def _wall_minus_monotonic_ms() -> int:
+    return (time.time_ns() - time.monotonic_ns()) // 1_000_000
+
+
+def _clock_jump_at(now: int) -> int:
+    """`now` of the last reconcile that saw the wall clock jump ahead."""
+    offset = _wall_minus_monotonic_ms()
+    with _clock_lock:
+        last = _clock["offset"]
+        _clock["offset"] = offset
+        if last is not None and offset - last > _CLOCK_JUMP_MS:
+            _clock["jump_at"] = now
+        return int(_clock["jump_at"] or 0)
+
+
 def reconcile_stale(
     *, job_id: str | None = None, now_ms: int | None = None,
     process_probe: Callable[[int, str], bool] | None = None,
@@ -1059,7 +886,8 @@ def reconcile_stale(
 ) -> list[str]:
     """Fail active jobs nobody is running any more.
 
-    Three independent reasons end a running job: its heartbeat is older than
+    Three independent reasons end a running job: its last sign of life (the
+    newer of its heartbeat and its progress line) is older than
     `heartbeat_timeout_ms` (whether or not a worker PID is recorded, since a
     live but wedged worker is no better than a dead one), its recorded
     worker PID no longer matches the start token it registered with, or its
@@ -1076,6 +904,7 @@ def reconcile_stale(
         from . import config
         thresholds = stale_work_policy.from_config(config.load())
     stale_ms = max(0, int(thresholds.job_stale_after_ms))
+    jump_at = _clock_jump_at(now)
     params: list[Any] = [now, stale_ms, now, stale_ms]
     job_clause = ""
     if job_id:
@@ -1084,12 +913,11 @@ def reconcile_stale(
     rows = db.conn().execute(
         f"""SELECT * FROM background_jobs
              WHERE status IN ('queued','running')
-               AND ((? - COALESCE(heartbeat_at, updated_at)) > heartbeat_timeout_ms
+               AND ((? - {_LAST_SIGN_SQL}) > heartbeat_timeout_ms
                     OR (status='running' AND COALESCE(worker_pid, 0) > 0
                         AND worker_start_token != '')
                     OR (status='running' AND owner_kind='agent' AND ? > 0
-                        AND (? - MAX(COALESCE(heartbeat_at, updated_at),
-                                     COALESCE(progress_at, 0))) > ?))
+                        AND (? - {_LAST_SIGN_SQL}) > ?))
                {job_clause}""",
         tuple(params),
     ).fetchall()
@@ -1097,8 +925,8 @@ def reconcile_stale(
     for row in rows:
         if row["heartbeat_source"] == "provider_event":
             continue  # Provider silence is unknown, never a fabricated heartbeat failure.
-        expired = now - int(row["heartbeat_at"] or row["updated_at"]) > int(
-            row["heartbeat_timeout_ms"])
+        last_sign = _last_sign(row)
+        expired = now - last_sign > int(row["heartbeat_timeout_ms"])
         if row["status"] == "queued":
             try:
                 metadata = json.loads(row["metadata_json"] or "{}")
@@ -1113,13 +941,15 @@ def reconcile_stale(
         pid = int(row["worker_pid"] or 0)
         token = str(row["worker_start_token"] or "")
         alive = bool(pid and token and probe(pid, token))
+        if alive and expired and now - max(
+                int(row["heartbeat_at"] or row["updated_at"]), jump_at) <= int(
+                row["heartbeat_timeout_ms"]):
+            continue  # its heartbeat aged across a suspend or clock jump
         if not expired and not (pid and token):
             if str(row["owner_kind"] or "agent") != "agent":
                 continue
             # Nothing to probe: only the stale-work rule can see it is gone.
             # Computer-owned jobs (updates, installs) keep their own timeout.
-            last_sign = max(int(row["heartbeat_at"] or row["updated_at"]),
-                            int(row["progress_at"] or 0))
             verdict = stale_work_policy.job_heartbeat(
                 heartbeat_age_ms=now - last_sign, worker_verified=False,
                 thresholds=thresholds)
@@ -1142,14 +972,24 @@ def reconcile_stale(
     return changed
 
 
+# A job's last sign of life: its heartbeat or its latest progress line,
+# whichever is newer. Every liveness rule in reconcile_stale reads this.
+_LAST_SIGN_SQL = "MAX(COALESCE(heartbeat_at, updated_at), COALESCE(progress_at, 0))"
+
+
+def _last_sign(row: Any) -> int:
+    return max(int(row["heartbeat_at"] or row["updated_at"]), int(row["progress_at"] or 0))
+
+
 def _fail_stale_observation(
     row: Any, *, now: int, reason: str, require_expired: bool = True,
     note: str = "",
 ) -> bool:
     """Fail `row` only if nothing touched it since it was read."""
     observed_heartbeat = int(row["heartbeat_at"] or row["updated_at"])
+    observed_progress = int(row["progress_at"] or 0)
     expiry_clause = (
-        "AND (? - COALESCE(heartbeat_at,updated_at)) > heartbeat_timeout_ms"
+        f"AND (? - {_LAST_SIGN_SQL}) > heartbeat_timeout_ms"
         if require_expired else "AND ? > 0")
     c = db.conn()
     c.execute("BEGIN IMMEDIATE")
@@ -1159,11 +999,12 @@ def _fail_stale_observation(
                   SET status='failed', terminal_at=?, terminal_reason=?, updated_at=?
                 WHERE job_id=? AND status=? AND revision=?
                   AND COALESCE(heartbeat_at,updated_at)=?
+                  AND COALESCE(progress_at,0)=?
                   {expiry_clause}""",
             (
                 now, reason, now, row["job_id"], row["status"],
                 int(row["revision"]),
-                observed_heartbeat, now,
+                observed_heartbeat, observed_progress, now,
             ),
         ).rowcount
         if changed:
@@ -1309,14 +1150,17 @@ def _public(row: Any, *, observed_at: int | None = None) -> dict:
     heartbeat_at = out.get("heartbeat_at")
     age = max(0, now - int(heartbeat_at)) if heartbeat_at is not None else None
     out["heartbeat_age_ms"] = age
+    # Freshness reads the same sign of life as reconcile_stale's fail rule.
+    signs = [int(t) for t in (heartbeat_at, out.get("progress_at")) if t is not None]
+    sign_age = max(0, now - max(signs)) if signs else None
     monitor_lost = out.get("terminal_reason") in {
         "heartbeat_expired", "worker_vanished", stale_work_policy.HEARTBEAT_LOST,
     }
     if monitor_lost:
         freshness = "stale"
-    elif heartbeat_at is None:
+    elif sign_age is None:
         freshness = "unknown"
-    elif age is not None and age <= int(out.get("heartbeat_timeout_ms") or 0):
+    elif sign_age <= int(out.get("heartbeat_timeout_ms") or 0):
         freshness = "fresh"
     else:
         freshness = "stale"
@@ -1355,14 +1199,15 @@ def observe_native_task(c, owner: dict, ident: str, *, native: str, tool: str,
     row = c.execute('SELECT * FROM background_jobs WHERE job_id=?', (ident,)).fetchone()
     if row:
         meta = json.loads(row['metadata_json'])
-        # A turn-exit stop is inferred, not reported: the provider's own
-        # completion record for the task, imported later, still decides.
+        # A turn-exit or lost-evidence stop is inferred, not reported: the
+        # provider's own completion record for the task, imported later, still
+        # decides.
+        inferred_stop = (row['terminal_at'] is not None
+                         and meta.get('stop_basis') in INFERRED_STOP_BASES)
         receipt_after_turn_exit = (
-            row['terminal_at'] is not None and meta.get('stop_basis') == 'turn_exit'
-            and state in {'completed', 'failed'}
+            inferred_stop and state in {'completed', 'failed'}
             and (not task or meta.get('provider_task_id') in ('', task)))
-        if (row['terminal_at'] is not None and meta.get('stop_basis') == 'turn_exit'
-                and state == 'running' and task and not meta.get('provider_task_id')):
+        if inferred_stop and state == 'running' and task and not meta.get('provider_task_id'):
             # The receipt names the task its completion record will cite; keep
             # the stop, but let that record be matched when it is imported.
             meta['provider_task_id'] = task
@@ -1373,7 +1218,7 @@ def observe_native_task(c, owner: dict, ident: str, *, native: str, tool: str,
                 or at < meta['provider_observed_at']):
             return
         if receipt_after_turn_exit:
-            for key in ('stop_basis', 'stop_turn', 'turn_exited_at'):
+            for key in ('stop_basis', 'stop_turn', 'turn_exited_at', 'evidence_lost_at'):
                 meta.pop(key, None)
         if task and meta.get('provider_task_id') not in ('', task):
             return
@@ -1418,6 +1263,35 @@ def observe_native_task(c, owner: dict, ident: str, *, native: str, tool: str,
         progress_text=?,progress_at=?,terminal_at=?,terminal_reason=? WHERE job_id=?''',
         (status, observed, json.dumps(meta), progress, observed, at if terminal else None, reason, ident))
     _record_event(c, ident, observed, note=progress)
+
+
+# Stops Clarp inferred rather than read from the provider; a completion record
+# imported later replaces them.
+INFERRED_STOP_BASES = frozenset({'turn_exit', 'evidence_lost'})
+
+
+def project_native_task_evidence_lost(c, ident: str, *, at: int) -> bool:
+    """No provider evidence for this task in a long time: count it as over.
+
+    Claude ends a background Bash task with the process that launched it, and
+    that process is long gone or was never Clarp's to watch (a task launched
+    before the turn fence existed, from an interactive session, or whose link
+    expired). The outcome stays unknown. Provisional like a turn-exit stop: a
+    completion record imported later supersedes it, and an existing terminal
+    record is never overwritten.
+    """
+    row = c.execute('SELECT * FROM background_jobs WHERE job_id=?', (ident,)).fetchone()
+    if row is None or row['terminal_at'] is not None or row['heartbeat_source'] != 'provider_event':
+        return False
+    meta = json.loads(row['metadata_json'])
+    meta.update(provider_state='stopped', stop_basis='evidence_lost', evidence_lost_at=at)
+    progress = ('No word from Claude about this task for a long time; '
+                'it is treated as ended. Outcome unknown')
+    c.execute('''UPDATE background_jobs SET status='failed',updated_at=?,metadata_json=?,
+        progress_text=?,progress_at=?,terminal_at=?,terminal_reason=? WHERE job_id=?''',
+        (at, json.dumps(meta), progress, at, at, 'provider_task_evidence_lost', ident))
+    _record_event(c, ident, at, note=progress)
+    return True
 
 
 def project_native_task_turn_exit(c, ident: str, *, turn: str, exited_at: int) -> bool:

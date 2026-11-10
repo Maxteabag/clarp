@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import pytest
 
+from tests.patching import patch_shared
+
 from lib import turn_queue
 from lib import turn_dispatch as td
 
@@ -238,7 +240,7 @@ def test_a_second_stop_while_holding_also_holds_the_kept_sends(tmp_path, monkeyp
             world.stop()                      # Stop 2, inside the window
         return result
 
-    monkeypatch.setattr(td, "_stop_holds", holds_then_stop_again)
+    patch_shared(monkeypatch, td, "_stop_holds", holds_then_stop_again)
     _stop_with_arrivals(world, [("u_mid", "user", False)])
     assert fired == ["u_mid"]
     world.service.start_held_work()
@@ -247,3 +249,78 @@ def test_a_second_stop_while_holding_also_holds_the_kept_sends(tmp_path, monkeyp
     assert _waiting(world) == ["p_pre", "u_mid"]
     _resume(world)
     assert world.started == ["t0", "p_pre", "u_mid"]
+
+
+@pytest.mark.parametrize("failing", ["pause", "fence"])
+def test_a_stop_that_fails_on_a_locked_database_does_not_strand_later_sends(
+        tmp_path, monkeypatch, failing):
+    """Live, 2026-11-03 (QUEUE-N1): a Stop on an idle agent failed in the
+    runtime with 'database is locked' after it had installed its barrier.
+    Nothing released the barrier, the pause was never written, and every later
+    send waited behind it; Resume found nothing paused and did nothing."""
+    import sqlite3
+    from lib.runtime_rpc_server import RuntimeRPCServer
+
+    world = World(tmp_path)
+    runtime = RuntimeRPCServer(tmp_path / "runtime.sock",
+                               dispatch_service=world.service, release_id="test")
+    runtime.shutdown = lambda: None
+
+    def locked(*_args, **_kwargs):
+        raise sqlite3.OperationalError("database is locked")
+
+    if failing == "pause":
+        monkeypatch.setattr(turn_queue, "set_paused", locked)
+    else:
+        monkeypatch.setattr(td, "_fence_launch_receipts", locked)
+    try:
+        try:
+            result = runtime.dispatch_request("begin_stop", {
+                "agent_id": world.agent, "backend": "claude",
+                "strict": False, "hold": True})
+        except sqlite3.OperationalError:
+            result = {"ok": False}
+        assert not result["ok"], "the Stop could not be recorded"
+    finally:
+        monkeypatch.undo()
+        runtime.server_close()
+    assert not turn_queue.is_paused(world.agent)
+    world.send("u1")
+    world._collect()
+    assert world.started == ["u1"]
+
+
+def test_a_failed_stop_hands_work_admitted_meanwhile_to_the_free_slot(tmp_path, monkeypatch):
+    """QUEUE-N1 review: work the runtime's recovery admitted while the failed
+    Stop held its barrier must start once the barrier is rolled back, not
+    wait in memory for an unrelated send."""
+    import sqlite3
+    from lib.runtime_rpc_server import RuntimeRPCServer
+
+    world = World(tmp_path)
+    turn_queue.enqueue(queue_id="q-recovered", agent_id=world.agent, session="mike",
+                       text="recovered", trace_id="t-recovered", client_msg_id="recovered",
+                       synthesize_audio=False, origin="agent", sender_agent_id="other-agent")
+    runtime = RuntimeRPCServer(tmp_path / "runtime.sock",
+                               dispatch_service=world.service, release_id="test")
+    runtime.shutdown = lambda: None
+    real_pause = turn_queue.set_paused
+    admitted = []
+
+    def pause(agent_id, paused, **kwargs):
+        if paused:
+            admitted.append(world.service.recover_queued())   # a retry timer fires
+            raise sqlite3.OperationalError("database is locked")
+        return real_pause(agent_id, paused, **kwargs)
+
+    monkeypatch.setattr(turn_queue, "set_paused", pause)
+    try:
+        result = runtime.dispatch_request("begin_stop", {
+            "agent_id": world.agent, "backend": "claude", "strict": False, "hold": True})
+    finally:
+        monkeypatch.undo()
+        runtime.server_close()
+    assert not result["ok"] and admitted == [1]
+    assert not turn_queue.is_paused(world.agent)
+    world._collect()
+    assert world.started == ["recovered"]

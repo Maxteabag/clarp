@@ -398,7 +398,7 @@ def test_quick_opencode_probe_is_remembered_for_the_next_slow_one(monkeypatch):
 
 
 def test_provider_discovery_runs_concurrently():
-    barrier = threading.Barrier(6)
+    barrier = threading.Barrier(7)
     seen: list[str] = []
 
     def resolve(provider_id: str):
@@ -412,7 +412,7 @@ def test_provider_discovery_runs_concurrently():
         run=lambda *_args, **_kwargs: None,
     )
 
-    assert set(seen) == {"claude", "codex", "agy", "grok", "opencode", "deepseek"}
+    assert set(seen) == {"claude", "codex", "agy", "grok", "opencode", "deepseek", "muse"}
 
 
 def test_cache_refresh_is_single_flight_for_concurrent_callers(monkeypatch):
@@ -569,6 +569,7 @@ def test_claude_fallback_names_current_models_and_cli_aliases():
     bundled = [model_id for model_id, _ in capabilities._fallback_model_rows("claude")]
     # Retired ids must not be offered: the API rejects them with a 400.
     assert "claude-fable-5" not in bundled
+    assert "claude-fable-5-2" in bundled
     assert "claude-fable-5-1" in bundled
     # The aliases Claude Code resolves itself; "default" is not one of them.
     assert "fable" in bundled
@@ -579,6 +580,8 @@ def test_claude_fallback_names_current_models_and_cli_aliases():
 
 
 def test_claude_model_pin_drops_legacy_default():
+    from lib.backend import claude_models
+    assert capabilities.claude_model_pin is claude_models.claude_model_pin
     assert capabilities.claude_model_pin("default") == ""
     assert capabilities.claude_model_pin(" DEFAULT ") == ""
     assert capabilities.claude_model_pin(None) == ""
@@ -617,3 +620,85 @@ def test_catalog_rows_advertise_presentation_and_flags():
     # Claude efforts are per model, so the provider row carries none.
     assert claude["supported_efforts"] is None
     assert claude["supports_mcp"] is True and claude["sort_index"] == 0
+
+
+@pytest.mark.parametrize("provider,command,timeout", [
+    ("codex", ["debug", "models"], 2.5),
+    ("agy", ["models"], 5.0),
+    ("grok", ["models"], 5.0),
+])
+@pytest.mark.parametrize("failure", ["timeout", "oserror", "nonzero"])
+def test_model_probe_failures_preserve_version_and_unknown_fallback(
+    provider, command, timeout, failure,
+):
+    calls = []
+
+    def run(argv, **kwargs):
+        if argv[-1] == "--version":
+            return subprocess.CompletedProcess(argv, 0, "probe 9.8.7", "")
+        calls.append((argv, kwargs["timeout"]))
+        if failure == "timeout":
+            raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
+        if failure == "oserror":
+            raise OSError("synthetic missing probe")
+        return subprocess.CompletedProcess(argv, 2, "", "not available")
+
+    row = capabilities._discover_provider(
+        provider, OBSERVED_AT, resolve=lambda value: f"/synthetic/{value}", run=run,
+    )
+    assert calls == [([f"/synthetic/{provider}", *command], timeout)]
+    assert row["cli_version"] == "probe 9.8.7"
+    assert row["availability"] == "unknown"
+    assert row["source"]["kind"] == "static_fallback"
+    assert row["source"]["freshness"] == "unknown"
+    assert row["models"] and all(m["source"]["kind"] == "static_fallback" for m in row["models"])
+
+
+def test_discovery_complete_catalogue_uses_current_strategy_overrides(monkeypatch):
+    from lib import backends
+    from lib.backend.base import Unsupported
+
+    grok = backends.by_id("grok")
+
+    def unsupported(session):
+        raise Unsupported("synthetic unsupported")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(grok, "label", "Temporary Grok")
+        patch.setattr(grok, "login_kind", "none")
+        patch.setattr(grok, "compaction", unsupported)
+        row = capabilities._discover_provider(
+            "grok", OBSERVED_AT, resolve=lambda value: None,
+            run=lambda *args, **kwargs: pytest.fail("missing executable must not probe"),
+        )
+        assert row["label"] == "Temporary Grok"
+        assert row["supports_auth"] is False
+        assert row["supports_compact"] is False
+    restored = capabilities._discover_provider(
+        "grok", OBSERVED_AT, resolve=lambda value: None,
+        run=lambda *args, **kwargs: pytest.fail("missing executable must not probe"),
+    )
+    assert restored["label"] == "Grok"
+    assert restored["supports_auth"] is True
+    assert restored["supports_compact"] is True
+
+
+@pytest.mark.parametrize("provider", ["GROK", "CLAUDE", "antigravity", " CODEX "])
+def test_discovery_probe_selection_requires_exact_registered_id(provider):
+    # Strategy lookup accepts these spellings; discovery historically does not
+    # turn them into a command/cache probe. Preserve the distinct boundaries.
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 2, "", "synthetic unavailable")
+
+    row = capabilities._discover_provider(
+        provider, OBSERVED_AT, resolve=lambda value: "/synthetic/provider", run=run,
+    )
+    assert calls == [["/synthetic/provider", "--version"]]
+    assert row["id"] == provider
+    assert row["availability"] == "unknown"
+    assert row["source"]["kind"] == "static_fallback"
+    assert row["models"]
+    assert all(model["supported_efforts"] is None for model in row["models"])

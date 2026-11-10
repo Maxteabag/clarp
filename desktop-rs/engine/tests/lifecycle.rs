@@ -31,9 +31,9 @@ fn the_catalog_loads_once_live_and_lists_backends_models_and_efforts() {
     assert!(d.changes.contains(&Change::Launch));
     assert_eq!(host.requests("GET", "/agent-model-options").len(), 1);
     assert_eq!(d.engine.backend_options(), vec![json!({"id": "claude", "label": "Claude"}), json!({"id": "codex", "label": "Codex"})]);
-    assert_eq!(d.engine.models_for_backend("claude"), vec![json!({"id": "", "label": "Provider default"}), json!({"id": "opus", "label": "Opus"})]);
+    assert_eq!(d.engine.models_for_backend("claude"), vec![json!({"id": "", "label": "Harness default"}), json!({"id": "opus", "label": "Opus"})]);
     let efforts: Vec<_> = d.engine.efforts_for_model("claude", "opus").iter().map(|e| e["label"].as_str().unwrap().to_owned()).collect();
-    assert_eq!(efforts, ["Provider default", "Low", "High"]);
+    assert_eq!(efforts, ["Harness default", "Low", "High"]);
     assert_eq!(d.engine.efforts_for_model("codex", "gpt-5")[1]["id"], "medium", "a model without efforts uses its provider's");
     assert_eq!(d.engine.default_effort_for_model("claude", "opus"), "high");
     assert!(d.engine.backend_supports_resume("claude") && !d.engine.backend_supports_resume("codex"));
@@ -275,10 +275,75 @@ fn a_failed_send_is_retried() {
     host.control("/__control/outage", json!({"seconds": 1}));
     d.engine.send("Try again");
     d.until("failed", |e| !e.sending() && e.conversation("rachel").unwrap().rows().iter().any(|r| r.delivery_failed));
+    let failed_id = d.engine.conversation("rachel").unwrap().rows().iter().find(|r| r.delivery_failed).unwrap().id.clone();
     d.settle(Duration::from_millis(1200));
     d.engine.retry_latest_failed_message();
     d.until("retried and answered", |e| e.conversation("rachel").unwrap().rows().iter().any(|r| r.text == "Echo: Try again"));
     let rows = d.engine.conversation("rachel").unwrap().rows();
     assert!(!rows.iter().any(|r| r.delivery_failed), "the failed copy is gone");
     assert_eq!(rows.iter().filter(|r| r.text == "Try again").count(), 1);
+    // Resent under its own id, so the Host launches it once (CLIENT-SEND-500).
+    assert!(rows.iter().any(|r| r.id == failed_id && r.text == "Try again"), "same client_msg_id");
+}
+
+#[test]
+fn a_late_answer_after_the_delivery_timer_and_a_chat_switch_confirms_the_chat_that_sent_it() {
+    // Reviewer B on da3fb668: the 20 s timer marks the send failed but the
+    // POST goes on; its 2xx must confirm the chat that sent it, never the one
+    // selected by then, or the row stays failed for good (CLIENT-SEND-500).
+    let host = Host::start("late-send");
+    let mut d = Driver::new(&host.base);
+    d.connect();
+    d.until("rachel open", |e| e.conversation("rachel").is_some_and(|c| c.rows().len() == 2));
+    host.control("/__control/send-delay", json!({"seconds": 23}));
+    d.engine.send("Slow one");
+    d.until_within("the delivery timer marks it failed", Duration::from_secs(30), |e, _| {
+        e.conversation("rachel").unwrap().rows().iter().any(|r| r.text == "Slow one" && r.delivery_failed)
+    });
+    d.engine.select("mike");
+    d.until_within("the late 2xx confirms rachel's send", Duration::from_secs(15), |e, _| {
+        e.conversation("rachel").unwrap().rows().iter().any(|r| r.text == "Slow one" && !r.delivery_failed && !r.pending)
+    });
+}
+
+#[test]
+fn a_late_error_after_the_delivery_timer_shows_the_hosts_reason_in_the_chat_that_sent_it() {
+    // Reviewer B on dddfc512: the timer has marked the send failed when the
+    // Host's late non-2xx arrives; its reason must still reach that chat's
+    // bubble, whichever chat is selected by then (CLIENT-SEND-500).
+    let host = Host::start("late-error");
+    let mut d = Driver::new(&host.base);
+    d.connect();
+    d.until("rachel open", |e| e.conversation("rachel").is_some_and(|c| c.rows().len() == 2));
+    host.control("/__control/send-delay", json!({"seconds": 23}));
+    host.control("/__control/fail", json!({"path": "/send", "status": 500, "count": 1}));
+    d.engine.send("Slow and refused");
+    d.until_within("the delivery timer marks it failed", Duration::from_secs(30), |e, _| {
+        e.conversation("rachel").unwrap().rows().iter().any(|r| r.text == "Slow and refused" && r.delivery_failed)
+    });
+    d.engine.select("mike");
+    d.until_within("the late error's reason on rachel's failed send", Duration::from_secs(15), |e, _| {
+        e.conversation("rachel").unwrap().rows().iter()
+            .any(|r| r.text == "Slow and refused" && r.delivery_failed && !r.delivery_error.is_empty())
+    });
+}
+
+#[test]
+fn a_send_the_hosts_stop_withdrew_shows_as_stopped_after_the_hint() {
+    // F4 (send_delivery_state): the Host marks a saved send withdrawn by a
+    // Stop without a new revision and sends only the delivery-updated hint;
+    // the chat re-reads and its row carries the state.
+    let host = Host::start("delivery-stopped");
+    let mut d = Driver::new(&host.base);
+    d.connect();
+    d.until("rachel open", |e| e.conversation("rachel").is_some_and(|c| c.rows().len() == 2));
+    d.engine.send("Stop me");
+    d.until("delivered", |e| e.conversation("rachel").unwrap().rows().iter()
+        .any(|r| r.text == "Stop me" && !r.pending && !r.delivery_failed));
+    let id = d.engine.conversation("rachel").unwrap().rows().iter()
+        .find(|r| r.text == "Stop me").unwrap().id.clone();
+    let cid = id.strip_prefix("u-").unwrap().to_owned();
+    host.control("/__control/delivery", json!({"session": "rachel", "client_msg_id": cid, "state": "stopped"}));
+    d.until("the row shows the Stop", |e| e.conversation("rachel").unwrap().rows().iter()
+        .any(|r| r.id == id && r.send_state == "stopped"));
 }

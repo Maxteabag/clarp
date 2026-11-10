@@ -1,0 +1,34 @@
+{
+  "case": "S02b-freshness-boundaries-300-900",
+  "janitor_enabled": true,
+  "served_at": 1800000600001,
+  "note": "Claude lane cadence 300 s gives max(600, 600) = 600 s; Codex lane cadence 900 s gives 1800 s. S02a = both at or under their limit, S02b = Claude 1 ms past 600 s, S02c = Codex 1 ms past 1800 s.",
+  "steps": [
+    {"op": "read", "provider": "claude", "received_at": 1800000000000, "payload": {
+      "generated_at": 1800000000.0, "sessions": 1, "error": null,
+      "accounts": [
+        {"alias": "main", "email": "main@example.invalid", "org": null, "plan": "max", "plan_label": "Max 5×",
+         "rate_limit_tier": null, "is_active": true, "error": null, "signin_days_left": 30.0,
+         "usage": {"status": "allowed", "available": true, "limited": false, "severity": null,
+                   "used_5h": 0.25, "reset_5h": 1800010800.25, "used_7d": 0.5, "reset_7d": 1800500000.5,
+                   "scoped": [], "blocked_models": [], "extra_usage_enabled": false,
+                   "extra_usage_reason": null, "plan": "max"}}
+      ]}},
+    {"op": "read", "provider": "codex", "received_at": 1800000000000, "payload": {
+      "unsaved_live": null, "quota_read": true, "quota_age_s": null,
+      "accounts": [
+        {"provider": "codex", "alias": "main", "is_active": true, "saved": true, "email": "cmain@example.invalid",
+         "plan": "plus", "account_id": "acct-main", "token_expires_at": 1800864000.0, "token_hours_left": 240.0,
+         "api_key_present": false,
+         "usage": {"usable": true, "blocked": false, "error": null, "worst_used": 0.4, "reset": 1800500000.5,
+                   "reset_window": "weekly",
+                   "windows": [{"label": "codex primary weekly", "used": 0.4, "reset": 1800500000.5}]}}
+      ]}},
+    {"op": "action", "provider": "claude", "decision": {"action": "noop", "active": "main", "remaining": 75, "rung": 25},
+     "mode": "automatic", "switched": null, "now": 1800000000000, "floor_pct": 25, "cadence_s": 300,
+     "next_due_at": 1800000300000},
+    {"op": "action", "provider": "codex", "decision": {"action": "noop", "active": "main", "remaining": 60, "rung": 10},
+     "mode": "automatic", "switched": null, "now": 1800000000000, "floor_pct": 10, "cadence_s": 900,
+     "next_due_at": 1800000900000}
+  ]
+}

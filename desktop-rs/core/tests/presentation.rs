@@ -123,6 +123,55 @@ fn old_activity_groups_are_lazy_and_visit_scoped() {
 }
 
 #[test]
+fn hidden_activity_keeps_prose_without_tool_rows_or_cards() {
+    let tools = vec![json!({"name": "Bash", "summary": "Run tests"})];
+    let cells = vec![json!({"kind": "command", "title": "Bash"})];
+    let rows = vec![
+        Message { id: "ask".into(), role: "user".into(), display_text: "Fix it".into(), ..Message::default() },
+        Message {
+            id: "activity".into(),
+            activity: true,
+            tool_name: "Bash".into(),
+            display_text: "Running tests".into(),
+            ..Message::default()
+        },
+        Message {
+            id: "tool-only".into(),
+            role: "assistant".into(),
+            origin: "user".into(),
+            tools: tools.clone(),
+            activity_count: 1,
+            ..Message::default()
+        },
+        Message {
+            id: "reply".into(),
+            role: "assistant".into(),
+            origin: "user".into(),
+            display_text: "Fixed and verified.".into(),
+            tools,
+            display_cells: cells,
+            activity_count: 2,
+            tool_details_available: true,
+            ..Message::default()
+        },
+    ];
+    let mut settings = Settings { activity_mode: HIDDEN, ..Settings::default() };
+
+    let presented = present(&rows, &mut settings, None);
+
+    assert_eq!(presented.rows.iter().map(|row| row.message.id.as_str()).collect::<Vec<_>>(), ["ask", "reply"]);
+    let reply = &presented.rows[1];
+    assert_eq!(reply.body, "Fixed and verified.");
+    assert!(reply.tools.is_empty());
+    assert!(reply.display_cells.is_empty());
+    assert_eq!(reply.activity_count, 0);
+    assert!(reply.activity_label.is_empty());
+    assert!(reply.group_label.is_empty());
+    assert_eq!(presented.index_of_message(&rows, "reply"), Some(1));
+    assert_eq!(presented.index_of_message(&rows, "tool-only"), None);
+}
+
+#[test]
 fn ready_mode_preserves_activity_and_hides_only_provisional_body() {
     let tools = vec![json!({"name": "Bash"})];
     let cells = vec![json!({"kind": "command"})];

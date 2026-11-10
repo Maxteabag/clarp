@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from .db import change_stamp, conn
 from . import origins, team_leader
+from . import log as cache_log
 from .revisioned_cache import RevisionedCache
 from .voice_markup import clean_for_display
 from .message_context import _automation_kind, _display_text_for_message
@@ -260,8 +261,10 @@ def last_message_preview(*, agent_id: str, max_len: int = 80) -> str:
 # Per-agent preview entries keyed by the agent's message revisions. A snapshot
 # during quiet minutes reuses every entry; while agents stream, only the
 # agents whose rows changed run their three indexed queries again.
+# Keep bounded headroom above the 1059-agent roster: an ordered scan larger
+# than the old 1024-entry LRU evicted every entry before its next read.
 _PREVIEW_CACHE: RevisionedCache[str, dict[str, Any]] = RevisionedCache(
-    "message_previews.dashboard", max_entries=1024)
+    "message_previews.dashboard", max_entries=4096)
 # The revision map below walks every message's index entry and row (~65 ms on
 # a 180k-message store) on each dashboard poll. It only moves on a committed
 # write, so polls between writes reuse the last map.
@@ -337,30 +340,93 @@ def _dashboard_revisions() -> tuple[dict[str, dict[str, int]], dict[str, dict[st
     return revisions, stamps, live
 
 
-def dashboard_messages(max_len: int = 80) -> dict[str, dict[str, Any]]:
-    """The dashboard projection for every live agent.
+def _cache_stamp():
+    try:
+        stamp = change_stamp()
+    except Exception as exc:  # noqa: BLE001 - cache failure cannot hide the projection
+        cache_log.log("dashboardCacheStampFail", f"error={type(exc).__name__}")
+        return None
+    if stamp[0] < 0:
+        cache_log.log("dashboardCacheStampFail", "code=unavailable")
+        return None
+    return stamp
 
-    Revisions come first (one indexed GROUP BY); they key a per-agent cache so
-    an unchanged agent costs nothing and a changed one costs three index walks
-    that stop after at most 50 rows. The previous window-function query ranked
-    every message of every live agent on each call (100–230 ms each, twice).
+
+def _cache_read(cache, key, revision, failed):
+    if cache.name in failed:
+        return False, None
+    try:
+        return cache.get(key, revision)
+    except Exception as exc:  # noqa: BLE001 - recompute from SQLite
+        failed.add(cache.name)
+        cache_log.log("dashboardCacheReadFail", f"cache={cache.name} error={type(exc).__name__}")
+        return False, None
+
+
+def _cache_write(cache, key, revision, value, failed):
+    if cache.name in failed:
+        return
+    try:
+        cache.put(key, revision, value)
+    except Exception as exc:  # noqa: BLE001 - the fresh result is already available
+        failed.add(cache.name)
+        cache_log.log("dashboardCacheWriteFail", f"cache={cache.name} error={type(exc).__name__}")
+
+
+def _preview_copy(entry):
+    # The two head dictionaries are flat; isolate returned values from cached
+    # heads on both misses and hits. Revisions are attached as a separate copy.
+    return {key: dict(value) if isinstance(value, dict) else value
+            for key, value in entry.items()}
+
+
+def dashboard_messages(max_len: int = 80) -> dict[str, dict[str, Any]]:
+    """Project every live agent, publishing cache fills only after validation.
+
+    A caller's transaction may see uncommitted rows: never read or populate
+    shared caches there. Otherwise validate one database stamp around the whole
+    batch, so an import racing any fill cannot publish that mixed-generation
+    map or preview. Stamp queries do not grow with the roster.
+
+    Shared caching requires callers to exhaust prior implicit read cursors.
+    The snapshot and warm-up caller tests pin this existing boundary; an old
+    borrowed SQLite snapshot is not certified by in_transaction=False.
+    General borrowed-cursor support remains parked under lead780/backlog33.
+    This guard does not make the returned multi-SELECT map an atomic snapshot.
     """
+    database = conn()
+    stamp = None if database.in_transaction else _cache_stamp()
     routine = tuple(sorted(origins.ROUTINE_AUTOMATION_ORIGINS))
-    revisions, stamps, live = _REVISION_CACHE.get_or_compute(
-        "all", change_stamp(), _dashboard_revisions)
+    failed: set[str] = set()
+    map_hit, projection = ((False, None) if stamp is None else
+                          _cache_read(_REVISION_CACHE, "all", stamp, failed))
+    if not map_hit:
+        projection = _dashboard_revisions()
+    revisions, stamps, live = projection
     result: dict[str, dict[str, Any]] = {}
+    pending = []
     for agent_id in live:
         key = tuple(sorted((str(session or ''), rev, stamps.get(agent_id, {}).get(session, 0))
                            for session, rev in revisions.get(agent_id, {}).items()))
-        if max_len == 80:
-            entry = dict(_PREVIEW_CACHE.get_or_compute(
-                agent_id, key, lambda: dict(_agent_preview(agent_id, max_len, routine))))
-        else:
-            entry = _agent_preview(agent_id, max_len, routine)
+        hit, cached = ((False, None) if stamp is None or max_len != 80 else
+                       _cache_read(_PREVIEW_CACHE, agent_id, key, failed))
+        entry = _preview_copy(cached) if hit else _agent_preview(agent_id, max_len, routine)
+        if not hit and stamp is not None and max_len == 80:
+            pending.append((agent_id, key, _preview_copy(entry)))
         if agent_id in revisions:
             entry['revisions'] = dict(revisions[agent_id])
         result[agent_id] = entry
-    _PREVIEW_CACHE.retain(result)
+    if stamp is not None and not database.in_transaction:
+        if stamp == _cache_stamp():
+            if not map_hit:
+                _cache_write(_REVISION_CACHE, "all", stamp, projection, failed)
+            for agent_id, key, entry in pending:
+                _cache_write(_PREVIEW_CACHE, agent_id, key, entry, failed)
+            if _PREVIEW_CACHE.name not in failed:
+                try:
+                    _PREVIEW_CACHE.retain(result)
+                except Exception as exc:  # noqa: BLE001 - bounded keys are never projected as a roster
+                    cache_log.log("dashboardCachePruneFail", f"cache={_PREVIEW_CACHE.name} error={type(exc).__name__}")
     return result
 
 

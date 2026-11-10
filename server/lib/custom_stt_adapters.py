@@ -249,6 +249,8 @@ def transcribe(
     with tempfile.TemporaryDirectory(prefix=f"clarp-stt-{manifest.id}-") as temp:
         audio_path = Path(temp) / f"audio{suffix}"
         audio_path.write_bytes(audio_bytes)
+        from .stt_language import note_handed
+        note_handed(None)                   # the adapter protocol carries no language
         response = _request(manifest, {
             "schema_version": 1,
             "operation": "transcribe",

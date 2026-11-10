@@ -60,7 +60,16 @@ fn in_view(name: &'static str, what: &'static str, next: impl Fn(&crate::AppWind
             return false;
         }
         let cursor = window.get_sidebar_cursor();
-        check(cursor_in_view(window), &format!("{what}: the cursor's row ({cursor}) is in view"));
+        let visible = cursor_in_view(window);
+        check(visible, &format!("{what}: the cursor's row ({cursor}) is in view"));
+        // Failure-only evidence after the verdict: never force a frame or
+        // query extra geometry before deciding whether the cursor is visible.
+        if !visible {
+            let label = name_of(window, &cursor);
+            eprintln!("EXPLORER_FAILURE stage={name} elapsed_ms={} cursor={cursor} row={:?} list={:?}",
+                elapsed.as_millis(), explorer_row(&label), explorer_list());
+            if let Ok(out) = std::env::var("CLARP_EXPLORER_FAILURE_OUT") { shot(&out, "failed-cursor"); }
+        }
         next(window);
         true
     }))

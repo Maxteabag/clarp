@@ -202,7 +202,7 @@ UNVERIFIABLE = "google_id_unverifiable"
 def preview_host(tmp_path, adapters, config_file, boundaries, monkeypatch):
     """The real engine and handler with a global Google primary and a configured fallback, so a
     hidden fallback would show; the legacy adapter would leave a sentinel if it were ever run."""
-    from lib import config, tts_worker
+    from lib import config, tts_service
     from lib.tts_engine import ElevenLabsEngine
     sentinel = tmp_path / "adapter-ran"
     (adapters / "legacy-google" / "adapter").write_text(f"#!/bin/sh\ntouch '{sentinel}'\nexit 1\n")
@@ -211,8 +211,8 @@ def preview_host(tmp_path, adapters, config_file, boundaries, monkeypatch):
                            f'[google_tts]\ncredentials = "{placeholder}"\nproject = "fixture-project"\n')
     config.reset_cache()
     events = []
-    real_emit = tts_worker._emit
-    monkeypatch.setattr(tts_worker, "_emit", lambda *a, **kw: (events.append(a[1] if len(a) > 1 else kw.get("event")),
+    real_emit = tts_service.emit_event
+    monkeypatch.setattr(tts_service, "emit_event", lambda *a, **kw: (events.append(a[1] if len(a) > 1 else kw.get("event")),
                                                                  real_emit(*a, **kw)))
     audio = tmp_path / "preview-audio"
     audio.mkdir()
@@ -279,11 +279,9 @@ def test_without_a_collision_a_post_preview_failure_keeps_its_previous_status(pr
     assert "providerFallback" not in preview_host["events"]
 
 
-def test_a_legacy_non_google_preview_whose_fallback_is_the_refused_google_is_409(preview_host, boundaries,
+def test_a_preview_whose_google_fallback_is_refused_keeps_the_primary_error(preview_host, boundaries,
                                                                                  monkeypatch):
-    """Control: a non-Google primary keeps its PRE-EXISTING fallback preview path (not the strict Google
-    audition; this repair neither adds nor fixes it). When that fallback is the refused built-in Google,
-    only the status of the already-refused Google changes: 409 with the bare code, never a clip."""
+    """VP-10: a guard refusal ends the fallback ladder but cannot replace the primary error."""
     from lib import config, gemini_tts, google_tts
     tried, credentials = [], []
     monkeypatch.setattr(google_tts, "credentials", lambda *a, **kw: credentials.append(1))
@@ -295,9 +293,43 @@ def test_a_legacy_non_google_preview_whose_fallback_is_the_refused_google_is_409
     preview_host["config"].write_text('[tts]\nprovider = "gemini"\nfallback = "google"\n\n'
                                       '[gemini_tts]\nvoice = "Kore"\n')
     config.reset_cache()
-    status, raw = _preview(preview_host, voice="Kore")
-    assert status == 409 and json.loads(raw) == {"error": COLLISION}
+    status, raw = _preview(preview_host, voice=json.dumps({"gemini": "Kore"}))
+    assert tried == ["Kore"]
+    assert status == 500 and json.loads(raw) == {"error": "gemini_unavailable"}
+    assert "providerFallbackFailed" in preview_host["events"]
     assert "providerFallback" in preview_host["events"]         # the failed primary fell back (legacy path)
     assert boundaries["google"] == [] and credentials == []      # no Google synthesis, network or credentials
     assert not preview_host["sentinel"].exists()                 # the legacy adapter never ran
     assert list(preview_host["audio"].iterdir()) == []           # no completed clip
+
+
+@pytest.mark.parametrize("fallback_fails", [False, True], ids=["working-fallback-audio", "failing-fallback-primary-error"])
+def test_a_quota_preview_uses_its_fallback_or_keeps_the_primary_error(
+        preview_host, boundaries, adapters, monkeypatch, fallback_fails):
+    """VP-10: quota is retriable; a failed fallback must not replace the primary HTTP error."""
+    from dataclasses import replace
+    from lib import config, tts_registry
+    for child in (adapters / "legacy-google").iterdir():
+        child.unlink()
+    (adapters / "legacy-google").rmdir()
+    monkeypatch.setattr(config, "_CACHED", replace(
+        config.load(), tts_fallback="elevenlabs", eleven_api_key="fallback-key"))
+    calls = []
+
+    def fallback(*, out_path, **kwargs):
+        calls.append("elevenlabs")
+        if fallback_fails:
+            raise RuntimeError("fallback transport down")
+        pathlib.Path(out_path).write_bytes(b"ID3fallback-audio")
+        return len(b"ID3fallback-audio")
+    monkeypatch.setattr(tts_registry, "synthesize_streaming", fallback)
+    status, raw = _preview(preview_host)
+    assert boundaries["google"] == [AOEDE] and calls == ["elevenlabs"]
+    if fallback_fails:
+        assert status == 500 and json.loads(raw) == {"error": "google_quota"}
+        assert list(preview_host["audio"].iterdir()) == []
+        assert "providerFallbackFailed" in preview_host["events"]
+    else:
+        assert status == 200
+        audio_status, audio = _call(preview_host["base"], "GET", json.loads(raw)["url"])
+        assert audio_status == 200 and audio == b"ID3fallback-audio"

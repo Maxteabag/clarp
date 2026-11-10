@@ -13,7 +13,8 @@ import pytest
 from lib import agents as agents_db
 from lib import live_activity, live_hub, message_store, turn_queue
 from lib import turn_dispatch as td
-from lib.runtime_bridge import RuntimeRPCServer
+from tests.patching import patch_shared
+from lib.runtime_rpc_server import RuntimeRPCServer
 from lib.runtime_release import RuntimeReleaseMonitor
 from lib.turn_dispatch import TurnDispatchService
 
@@ -663,7 +664,7 @@ def _evidence(monkeypatch):
     def capture(event, detail=""):
         if event in ("drainHeldOrder", "queuedRecoveredOrder"):
             lines.append((event, detail))
-    monkeypatch.setattr(td, "log", capture)
+    patch_shared(monkeypatch, td, "log", capture)
     return lines
 
 

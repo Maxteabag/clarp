@@ -13,50 +13,37 @@ import uuid
 
 INSTANCE_ID = str(uuid.uuid4())
 
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS podcast_snapshots (
- sha256 TEXT PRIMARY KEY, content_json TEXT NOT NULL, created_at INTEGER NOT NULL
-);
-CREATE TABLE IF NOT EXISTS podcast_conversations (
- conversation_id TEXT PRIMARY KEY, artifact_id TEXT NOT NULL,
- session TEXT NOT NULL, revision TEXT NOT NULL, position REAL NOT NULL,
- episode_snapshot TEXT NOT NULL REFERENCES podcast_snapshots(sha256),
- source_artifact_id TEXT NOT NULL DEFAULT '',
- source_snapshot TEXT REFERENCES podcast_snapshots(sha256),
- context_json TEXT NOT NULL, configuration_json TEXT NOT NULL,
- model TEXT NOT NULL, voice TEXT NOT NULL, owner_instance TEXT NOT NULL,
- status TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
- closed_at INTEGER, last_event_id INTEGER NOT NULL DEFAULT 0
-);
-CREATE INDEX IF NOT EXISTS idx_podcast_episode ON podcast_conversations(artifact_id,created_at);
-CREATE INDEX IF NOT EXISTS idx_podcast_source ON podcast_conversations(source_artifact_id,created_at);
-CREATE INDEX IF NOT EXISTS idx_podcast_session ON podcast_conversations(session,created_at);
-CREATE TABLE IF NOT EXISTS podcast_images (
- image_id TEXT PRIMARY KEY,
- conversation_id TEXT NOT NULL REFERENCES podcast_conversations(conversation_id),
- asset_id TEXT NOT NULL REFERENCES media_assets(asset_id),
- question TEXT NOT NULL, question_event_id INTEGER NOT NULL,
- created_at INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_podcast_images ON podcast_images(conversation_id,created_at);
-CREATE TABLE IF NOT EXISTS podcast_feedback (
- feedback_id TEXT PRIMARY KEY,
- conversation_id TEXT NOT NULL REFERENCES podcast_conversations(conversation_id),
- target_artifact_id TEXT NOT NULL,
- target_snapshot TEXT NOT NULL REFERENCES podcast_snapshots(sha256),
- through_event_id INTEGER NOT NULL, note TEXT NOT NULL,
- image_ids_json TEXT NOT NULL,
- created_at INTEGER NOT NULL, payload_hash TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_podcast_feedback_target ON podcast_feedback(target_artifact_id,created_at);
-CREATE INDEX IF NOT EXISTS idx_podcast_feedback_conversation ON podcast_feedback(conversation_id,created_at);
-"""
+from .persistence.schema_parts.podcast_history import SCHEMA
 
 SOURCE_TYPES = {"plan", "html_form", "document", "research", "code_change"}
 
 # db imports SCHEMA while constructing its migration plan. Define it first so
 # importing this module directly is also safe.
 from . import db
+from . import lifecycle as lk
+from .lifecycle import Edge, Lifecycle, WaitForever
+
+# A recorded podcast conversation (docs/architecture/lifecycles.md). This module
+# is the only writer of podcast_conversations.status; start() inserts the row
+# as connecting. A repeated session.started renews an active row. Once closed,
+# a conversation stays closed: a late session.started no longer reopens it.
+_CLOSED = ("closed", "interrupted", "failed")
+PODCAST_CONVERSATION = Lifecycle(
+    name="podcast_conversation", owner="lib/podcast_history.py",
+    table="podcast_conversations", key="conversation_id", state_column="status",
+    entered_columns={status: "closed_at" for status in _CLOSED},
+    initial="connecting", final=frozenset(_CLOSED),
+    edges=(
+        Edge("started", frozenset({"connecting", "active"}), "active"),
+        *(Edge(f"finish_{status}", frozenset({"connecting", "active"}), status) for status in _CLOSED),
+    ),
+    waits={
+        "connecting": WaitForever("the voice connection's end calls finish(); a row an earlier"
+                                  " server process left open reads as interrupted"),
+        "active": WaitForever("the voice connection's end calls finish(); a row an earlier"
+                              " server process left open reads as interrupted"),
+    },
+)
 
 
 def _json(value):
@@ -135,8 +122,9 @@ def record(ident, event):
              "session.output_transcript.delta": "podcast.assistant_delta"}
     if kind not in names:
         if kind == "session.started":
-            db.conn().execute("UPDATE podcast_conversations SET status='active',updated_at=? WHERE conversation_id=?",
-                              (db.now_ms(), ident))
+            now = db.now_ms()
+            lk.compare_and_set_where(db.conn(), PODCAST_CONVERSATION, "started", where="conversation_id=?",
+                                     params=(ident,), now=now, values={"updated_at": now})
         return None
     text = event.get("delta")
     if not isinstance(text, str) or not text:
@@ -162,11 +150,12 @@ def record(ident, event):
 
 
 def finish(ident, status="closed"):
-    if status not in {"closed", "interrupted", "failed"}:
+    if status not in _CLOSED:
         raise ValueError("Invalid history status")
     now = db.now_ms()
-    db.conn().execute("""UPDATE podcast_conversations SET status=?,closed_at=?,updated_at=?
-                       WHERE conversation_id=? AND closed_at IS NULL""", (status, now, now, ident))
+    lk.compare_and_set_where(db.conn(), PODCAST_CONVERSATION, f"finish_{status}",
+                             where="conversation_id=? AND closed_at IS NULL",
+                             params=(ident,), now=now, values={"updated_at": now})
 
 
 def save_image(ident, *, encoded, question, question_event_id, media_dir):

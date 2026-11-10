@@ -5,40 +5,11 @@ No primary agent prompt, tool or model executes bookkeeping. Observations descri
 reported lifecycle stages, never acoustic output. Clip identity is Host-local.
 """
 
+import time
 
 ROLE = 'audio-bookkeeper'
 # Statements kept separate so migration remains inside its enclosing transaction.
-SCHEMA_STATEMENTS = [
-"""CREATE TABLE IF NOT EXISTS audio_bookkeeping_events (
- event_id INTEGER PRIMARY KEY AUTOINCREMENT,
- clip_id INTEGER NOT NULL, agent_id TEXT NOT NULL,
- turn_id INTEGER, runtime_id INTEGER, trace_id TEXT,
- stage TEXT NOT NULL, created_at INTEGER NOT NULL,
- run_id TEXT, completed_at INTEGER,
- UNIQUE(clip_id,stage))""",
-"""INSERT OR IGNORE INTO janitor_trigger_definitions
- (trigger_id,version,name,kind,defaults_json) VALUES
- ('audio-lifecycle-observed',1,'When audio lifecycle facts are observed','demand','{}')""",
-"""CREATE TRIGGER IF NOT EXISTS audio_bookkeeping_created AFTER INSERT ON clips
- BEGIN
- INSERT OR IGNORE INTO audio_bookkeeping_events(clip_id,agent_id,turn_id,runtime_id,trace_id,stage,created_at)
- VALUES(NEW.clip_id,NEW.agent_id,NEW.turn_id,NEW.runtime_id,NEW.trace_id,'producer:'||COALESCE(NEW.producer_status,'complete'),NEW.created_at);
- INSERT OR IGNORE INTO audio_bookkeeping_events(clip_id,agent_id,turn_id,runtime_id,trace_id,stage,created_at)
- VALUES(NEW.clip_id,NEW.agent_id,NEW.turn_id,NEW.runtime_id,NEW.trace_id,'client:'||NEW.status,NEW.created_at);
- END""",
-"""CREATE TRIGGER IF NOT EXISTS audio_bookkeeping_producer AFTER UPDATE OF producer_status ON clips
- WHEN NEW.producer_status IS NOT OLD.producer_status
- BEGIN
- INSERT OR IGNORE INTO audio_bookkeeping_events(clip_id,agent_id,turn_id,runtime_id,trace_id,stage,created_at)
- VALUES(NEW.clip_id,NEW.agent_id,NEW.turn_id,NEW.runtime_id,NEW.trace_id,'producer:'||NEW.producer_status,CAST(strftime('%s','now') AS INTEGER)*1000);
- END""",
-"""CREATE TRIGGER IF NOT EXISTS audio_bookkeeping_client AFTER UPDATE OF status ON clips
- WHEN NEW.status IS NOT OLD.status
- BEGIN
- INSERT OR IGNORE INTO audio_bookkeeping_events(clip_id,agent_id,turn_id,runtime_id,trace_id,stage,created_at)
- VALUES(NEW.clip_id,NEW.agent_id,NEW.turn_id,NEW.runtime_id,NEW.trace_id,'client:'||NEW.status,CAST(strftime('%s','now') AS INTEGER)*1000);
- END""",
-]
+from .persistence.schema_parts.audio_bookkeeper import SCHEMA_STATEMENTS
 
 _PENDING_SQL = """SELECT e.* FROM audio_bookkeeping_events e
     JOIN agents a ON a.agent_id=e.agent_id
@@ -104,3 +75,47 @@ def drain(limit=32):
             janitor_store.record_config_run(c,config['agent_id'],now,touch_updated=False)
             done += 1
     return done
+
+
+# Retention (VP-04): small transactions so no delete holds the writer lock for
+# long, a short pause between them, and a cap per maintenance pass.
+PRUNE_BATCH = 200
+PRUNE_LIMIT = 2000
+PRUNE_PAUSE_SEC = 0.05
+
+
+def prune(now_ms, *, max_age_ms):
+    """Delete observations older than `max_age_ms` (drained or not) and the
+    completed audio-bookkeeping janitor runs that finished before then, at
+    most PRUNE_LIMIT of each, PRUNE_BATCH per transaction. Logs the longest
+    batch. Event ids are AUTOINCREMENT, so a pruned id never names a new run."""
+    from . import janitor_store
+    from .log import log
+    cutoff = now_ms - max_age_ms
+    longest = [0.0, 0]
+
+    def batches(step):
+        total = 0
+        while total < PRUNE_LIMIT:
+            if longest[1]:
+                time.sleep(PRUNE_PAUSE_SEC)
+            size = min(PRUNE_BATCH, PRUNE_LIMIT - total)
+            started = time.monotonic()
+            with janitor_store.write() as c:
+                n = step(c, size)
+            longest[0] = max(longest[0], time.monotonic() - started)
+            longest[1] += 1
+            total += n
+            if n < size:
+                break
+        return total
+
+    events = batches(lambda c, size: int(c.execute(
+        """DELETE FROM audio_bookkeeping_events WHERE event_id IN (
+               SELECT event_id FROM audio_bookkeeping_events
+                WHERE created_at < ? ORDER BY event_id LIMIT ?)""", (cutoff, size)).rowcount or 0))
+    runs = batches(lambda c, size: janitor_store.prune_completed_runs(
+        c, run_glob='audio-bookkeeping-*', finished_before=cutoff, limit=size))
+    log('audioBookkeepingPruned',
+        f'events={events} runs={runs} batches={longest[1]} longest_batch_ms={round(longest[0] * 1000)}')
+    return {'events': events, 'runs': runs}

@@ -7,6 +7,7 @@ import os
 import pytest
 
 from lib import backend_usage
+from tests.patching import patch_shared
 
 
 @pytest.fixture(autouse=True)
@@ -18,7 +19,7 @@ def _fake_clis_are_this_tests_own(fake_backend_cli, tmp_path):
 
 @pytest.fixture(autouse=True)
 def _no_recent_agy_attempt(monkeypatch):
-    monkeypatch.setattr(backend_usage, "_AGY_LAST_ATTEMPT_MS", [0], raising=False)
+    patch_shared(monkeypatch, backend_usage, "_AGY_LAST_ATTEMPT_MS", [0], raising=False)
 
 
 def test_backend_usage_response_filters_legacy_non_quota_windows():
@@ -71,11 +72,19 @@ def test_structured_claude_canonicalizes_primary_secondary_aliases():
         == [("five_hour", 31), ("seven_day", 12)]
 
 
-def test_claude_oauth_usage_normalizes_windows(monkeypatch):
+@pytest.mark.parametrize("window", ["five_hour", "seven_day"])
+@pytest.mark.parametrize("utilization", [0, 0.5, 1, 2, 37, 100])
+def test_claude_oauth_usage_normalizes_windows(monkeypatch, window, utilization):
+    # The endpoint's utilization is already a percent (1 means 1 %), so only a
+    # full window may mark Claude exhausted for every Claude agent.
+    other = 12.0
     body = json.dumps({
-        "five_hour": {"utilization": 37.0, "resets_at": "2030-01-01T05:00:00Z"},
+        "five_hour": {
+            "utilization": utilization if window == "five_hour" else other,
+            "resets_at": "2030-01-01T05:00:00Z"},
         "seven_day_oauth_apps": {
-            "utilization": 12.0, "resets_at": "2030-01-07T00:00:00Z"},
+            "utilization": utilization if window == "seven_day" else other,
+            "resets_at": "2030-01-07T00:00:00Z"},
     }).encode()
 
     class Response:
@@ -83,25 +92,30 @@ def test_claude_oauth_usage_normalizes_windows(monkeypatch):
         def __exit__(self, *_args): return False
         def read(self): return body
 
-    monkeypatch.setattr(backend_usage, "_read_claude_auth",
+    patch_shared(monkeypatch, backend_usage, "_read_claude_auth",
                         lambda: ("token", 0, "max_20x"))
     monkeypatch.setattr(backend_usage.urllib.request, "urlopen",
                         lambda *_args, **_kwargs: Response())
 
     result = backend_usage.fetch_claude_usage()
-    assert result["windows"]["five_hour"]["used_percentage"] == 37
+    assert result["windows"][window]["used_percentage"] == utilization
     assert result["windows"]["seven_day"]["window_minutes"] == 10_080
     snapshot = backend_usage.get_backend_usage(refresh_codex=False)["providers"]["claude"]
-    assert [window["kind"] for window in snapshot["windows"]] == ["five_hour", "seven_day"]
+    assert [entry["kind"] for entry in snapshot["windows"]] == ["five_hour", "seven_day"]
+    exhausted = backend_usage.exhausted_backends()
+    if utilization >= 100:
+        assert exhausted[backend_usage.CLAUDE]["window"] == window
+    else:
+        assert backend_usage.CLAUDE not in exhausted
 
 
 def test_codex_direct_failure_uses_app_server_fallback(monkeypatch):
-    monkeypatch.setattr(backend_usage, "_claude_needs_refresh", lambda: False)
-    monkeypatch.setattr(backend_usage, "_codex_needs_refresh", lambda: True)
-    monkeypatch.setattr(backend_usage, "fetch_codex_usage",
+    patch_shared(monkeypatch, backend_usage, "_claude_needs_refresh", lambda: False)
+    patch_shared(monkeypatch, backend_usage, "_codex_needs_refresh", lambda: True)
+    patch_shared(monkeypatch, backend_usage, "fetch_codex_usage",
                         lambda: (_ for _ in ()).throw(RuntimeError("direct down")))
     called = []
-    monkeypatch.setattr(backend_usage, "fetch_codex_usage_app_server",
+    patch_shared(monkeypatch, backend_usage, "fetch_codex_usage_app_server",
                         lambda: called.append(True) or {"limit_events": []})
 
     backend_usage.get_backend_usage()
@@ -186,8 +200,8 @@ def test_codex_usage_force_refresh_bypasses_fresh_cache(monkeypatch):
         calls += 1
         return {}
 
-    monkeypatch.setattr(backend_usage, "fetch_codex_usage", fake_fetch)
-    monkeypatch.setattr(backend_usage, "_codex_needs_refresh", lambda: False)
+    patch_shared(monkeypatch, backend_usage, "fetch_codex_usage", fake_fetch)
+    patch_shared(monkeypatch, backend_usage, "_codex_needs_refresh", lambda: False)
 
     backend_usage.get_backend_usage(refresh_codex=True)
     assert calls == 0
@@ -198,7 +212,7 @@ def test_codex_usage_force_refresh_bypasses_fresh_cache(monkeypatch):
 
 def test_fresh_legacy_row_does_not_suppress_first_structured_refresh(monkeypatch):
     now = 1_800_000_000_000
-    monkeypatch.setattr(backend_usage, "_now_ms", lambda: now)
+    patch_shared(monkeypatch, backend_usage, "_now_ms", lambda: now)
     backend_usage._upsert(
         backend_usage.CODEX, used_percentage=20, resets_at="",
         source="legacy", fetched_at=now,
@@ -224,7 +238,7 @@ def _codex_rate_limits(used: float, *, resets_at: int = 1_900_000_000):
 
 
 def test_structured_codex_usage_is_computer_scoped_and_others_unknown(monkeypatch):
-    monkeypatch.setattr(backend_usage, "_now_ms", lambda: 1_800_000_000_000)
+    patch_shared(monkeypatch, backend_usage, "_now_ms", lambda: 1_800_000_000_000)
     backend_usage.capture_codex_rate_limits(
         _codex_rate_limits(24), identity=("auth-a", "account-a"))
 
@@ -244,7 +258,7 @@ def test_structured_codex_usage_is_computer_scoped_and_others_unknown(monkeypatc
 
 def test_warning_hard_limit_recovery_and_dedupe_reuse_episode(monkeypatch):
     now = [1_800_000_000_000]
-    monkeypatch.setattr(backend_usage, "_now_ms", lambda: now[0])
+    patch_shared(monkeypatch, backend_usage, "_now_ms", lambda: now[0])
     warning = backend_usage.capture_codex_rate_limits(
         _codex_rate_limits(82), identity=("auth-a", "account-a"))
     assert [event["kind"] for event in warning["limit_events"]] == ["warning"]
@@ -270,7 +284,7 @@ def test_warning_hard_limit_recovery_and_dedupe_reuse_episode(monkeypatch):
 
 def test_transitions_back_to_prior_kind_emit_new_event(monkeypatch):
     now = [1_800_000_000_000]
-    monkeypatch.setattr(backend_usage, "_now_ms", lambda: now[0])
+    patch_shared(monkeypatch, backend_usage, "_now_ms", lambda: now[0])
     backend_usage.capture_codex_rate_limits(
         _codex_rate_limits(82), identity=("auth-a", "account-a"))
     now[0] += 1
@@ -293,7 +307,7 @@ def test_transitions_back_to_prior_kind_emit_new_event(monkeypatch):
 
 def test_reset_passage_becomes_stale_unknown_without_recovery(monkeypatch):
     now = [1_800_000_000_000]
-    monkeypatch.setattr(backend_usage, "_now_ms", lambda: now[0])
+    patch_shared(monkeypatch, backend_usage, "_now_ms", lambda: now[0])
     reset_seconds = now[0] // 1000 + 1
     hard = backend_usage.capture_codex_rate_limits(
         _codex_rate_limits(100, resets_at=reset_seconds),
@@ -325,7 +339,7 @@ def test_failed_refresh_preserves_last_observation_for_age_decay(monkeypatch):
 
 def test_sparse_secondary_update_does_not_refresh_absent_five_hour(monkeypatch):
     now = [1_800_000_000_000]
-    monkeypatch.setattr(backend_usage, "_now_ms", lambda: now[0])
+    patch_shared(monkeypatch, backend_usage, "_now_ms", lambda: now[0])
     backend_usage.capture_codex_rate_limits(
         _codex_rate_limits(25), identity=("auth-a", "account-a"))
     original = backend_usage.get_backend_usage(
@@ -356,7 +370,7 @@ def test_sparse_secondary_update_does_not_refresh_absent_five_hour(monkeypatch):
 
 def test_sparse_notification_does_not_suppress_full_refresh(monkeypatch):
     now = [1_800_000_000_000]
-    monkeypatch.setattr(backend_usage, "_now_ms", lambda: now[0])
+    patch_shared(monkeypatch, backend_usage, "_now_ms", lambda: now[0])
     backend_usage.capture_codex_rate_limits({
         "rateLimits": {
             "secondary": {
@@ -376,7 +390,7 @@ def test_sparse_notification_does_not_suppress_full_refresh(monkeypatch):
 def test_classified_terminal_is_fresh_hard_limit_with_unknown_quantities(
     monkeypatch,
 ):
-    monkeypatch.setattr(
+    patch_shared(monkeypatch,
         backend_usage, "_read_codex_auth", lambda: ("token", "account"))
     first = backend_usage.record_classified_usage_limit("codex")
     second = backend_usage.record_classified_usage_limit("codex")
@@ -399,7 +413,7 @@ def test_classified_terminal_is_fresh_hard_limit_with_unknown_quantities(
 
 
 def test_app_server_read_selects_evidenced_300_minute_limit(monkeypatch):
-    monkeypatch.setattr(backend_usage, "_now_ms", lambda: 1_800_000_000_000)
+    patch_shared(monkeypatch, backend_usage, "_now_ms", lambda: 1_800_000_000_000)
     snapshot = backend_usage.capture_codex_rate_limits({
         "rateLimits": {
             "primary": {
@@ -435,7 +449,7 @@ def test_app_server_read_selects_evidenced_300_minute_limit(monkeypatch):
 
 
 def test_app_server_read_prefers_explicit_codex_bucket(monkeypatch):
-    monkeypatch.setattr(backend_usage, "_now_ms", lambda: 1_800_000_000_000)
+    patch_shared(monkeypatch, backend_usage, "_now_ms", lambda: 1_800_000_000_000)
     snapshot = backend_usage.capture_codex_rate_limits({
         "rateLimits": {
             "primary": {"usedPercent": 99, "windowDurationMins": 300,
@@ -456,7 +470,7 @@ def test_app_server_read_prefers_explicit_codex_bucket(monkeypatch):
 
 
 def test_weekly_primary_only_is_persisted_structurally(monkeypatch):
-    monkeypatch.setattr(backend_usage, "_now_ms", lambda: 1_800_000_000_000)
+    patch_shared(monkeypatch, backend_usage, "_now_ms", lambda: 1_800_000_000_000)
     backend_usage.capture_codex_rate_limits({
         "rateLimits": {
             "primary": {
@@ -472,7 +486,7 @@ def test_weekly_primary_only_is_persisted_structurally(monkeypatch):
 
 
 def test_five_hour_secondary_is_detected_by_duration(monkeypatch):
-    monkeypatch.setattr(backend_usage, "_now_ms", lambda: 1_800_000_000_000)
+    patch_shared(monkeypatch, backend_usage, "_now_ms", lambda: 1_800_000_000_000)
     backend_usage.capture_codex_rate_limits({
         "rateLimits": {
             "primary": {"usedPercent": 40, "windowDurationMins": 10_080,
@@ -490,7 +504,7 @@ def test_five_hour_secondary_is_detected_by_duration(monkeypatch):
 
 def test_sparse_update_never_merges_windows_across_auth_generations(monkeypatch):
     now = [1_800_000_000_000]
-    monkeypatch.setattr(backend_usage, "_now_ms", lambda: now[0])
+    patch_shared(monkeypatch, backend_usage, "_now_ms", lambda: now[0])
     backend_usage.capture_codex_rate_limits(
         _codex_rate_limits(25), identity=("auth-a", "account-a"))
     now[0] += 1
@@ -510,7 +524,7 @@ def test_sparse_update_never_merges_windows_across_auth_generations(monkeypatch)
 
 def test_weekly_only_new_auth_invalidates_old_limit_episode(monkeypatch):
     now = [1_800_000_000_000]
-    monkeypatch.setattr(backend_usage, "_now_ms", lambda: now[0])
+    patch_shared(monkeypatch, backend_usage, "_now_ms", lambda: now[0])
     warning = backend_usage.capture_codex_rate_limits(
         _codex_rate_limits(85), identity=("auth-a", "account-a"))
     episode_id = warning["limit_events"][0]["episode_id"]
@@ -528,7 +542,7 @@ def test_weekly_only_new_auth_invalidates_old_limit_episode(monkeypatch):
 
 
 def test_invalid_new_auth_payload_does_not_invalidate_prior_episode(monkeypatch):
-    monkeypatch.setattr(backend_usage, "_now_ms", lambda: 1_800_000_000_000)
+    patch_shared(monkeypatch, backend_usage, "_now_ms", lambda: 1_800_000_000_000)
     warning = backend_usage.capture_codex_rate_limits(
         _codex_rate_limits(85), identity=("auth-a", "account-a"))
     episode_id = warning["limit_events"][0]["episode_id"]
@@ -547,7 +561,7 @@ def test_invalid_new_auth_payload_does_not_invalidate_prior_episode(monkeypatch)
 
 
 def test_authoritative_refresh_drops_omitted_legacy_windows(monkeypatch):
-    monkeypatch.setattr(backend_usage, "_now_ms", lambda: 1_800_000_000_000)
+    patch_shared(monkeypatch, backend_usage, "_now_ms", lambda: 1_800_000_000_000)
     backend_usage.capture_codex_rate_limits({
         "rate_limit": {
             "primary_window": {"used_percent": 10,
@@ -570,7 +584,7 @@ def test_authoritative_refresh_drops_omitted_legacy_windows(monkeypatch):
 
 
 def test_authoritative_omission_invalidates_open_episode(monkeypatch):
-    monkeypatch.setattr(backend_usage, "_now_ms", lambda: 1_800_000_000_000)
+    patch_shared(monkeypatch, backend_usage, "_now_ms", lambda: 1_800_000_000_000)
     warning = backend_usage.capture_codex_rate_limits(
         _codex_rate_limits(85), identity=("auth-a", "account-a"),
         source_detail="account/rateLimits/read")
@@ -592,15 +606,15 @@ def test_authoritative_omission_invalidates_open_episode(monkeypatch):
 
 def test_classified_terminal_does_not_reuse_stale_window(monkeypatch):
     now = [1_800_000_000_000]
-    monkeypatch.setattr(backend_usage, "_now_ms", lambda: now[0])
+    patch_shared(monkeypatch, backend_usage, "_now_ms", lambda: now[0])
     backend_usage.capture_codex_rate_limits(
         _codex_rate_limits(95, resets_at=1_900_000_000),
         identity=("auth-a", "account-a"))
     known_window_id = backend_usage.get_backend_usage(
         refresh_codex=False)["providers"]["codex"]["windows"][0]["window_id"]
-    monkeypatch.setattr(
+    patch_shared(monkeypatch,
         backend_usage, "_read_codex_auth", lambda: ("token-a", "account-a"))
-    monkeypatch.setattr(
+    patch_shared(monkeypatch,
         backend_usage, "_codex_identity",
         lambda _token, _account: ("auth-a", "account-a"))
     now[0] += backend_usage.CODEX_FRESH_MS + 1
@@ -613,8 +627,8 @@ def test_classified_terminal_does_not_reuse_stale_window(monkeypatch):
 
 def test_classified_hard_limit_decays_to_unknown_when_stale(monkeypatch):
     now = [1_800_000_000_000]
-    monkeypatch.setattr(backend_usage, "_now_ms", lambda: now[0])
-    monkeypatch.setattr(
+    patch_shared(monkeypatch, backend_usage, "_now_ms", lambda: now[0])
+    patch_shared(monkeypatch,
         backend_usage, "_read_codex_auth", lambda: ("token", "account"))
     backend_usage.record_classified_usage_limit("codex")
     window = backend_usage.get_backend_usage(
@@ -636,13 +650,13 @@ def test_classified_hard_limit_decays_to_unknown_when_stale(monkeypatch):
 
 
 def test_unknown_terminal_does_not_rebind_five_hour_episode(monkeypatch):
-    monkeypatch.setattr(backend_usage, "_now_ms", lambda: 1_800_000_000_000)
+    patch_shared(monkeypatch, backend_usage, "_now_ms", lambda: 1_800_000_000_000)
     warning = backend_usage.capture_codex_rate_limits(
         _codex_rate_limits(85), identity=("auth-a", "account-a"))
     warning_episode = warning["limit_events"][0]["episode_id"]
-    monkeypatch.setattr(
+    patch_shared(monkeypatch,
         backend_usage, "_read_codex_auth", lambda: ("token-a", "account-a"))
-    monkeypatch.setattr(
+    patch_shared(monkeypatch,
         backend_usage, "_codex_identity",
         lambda _token, _account: ("auth-a", "account-a"))
     terminal = backend_usage.record_classified_usage_limit("codex")
@@ -665,7 +679,7 @@ def test_unknown_terminal_does_not_rebind_five_hour_episode(monkeypatch):
 
 
 def test_unknown_auth_terminal_does_not_invalidate_known_generation(monkeypatch):
-    monkeypatch.setattr(backend_usage, "_now_ms", lambda: 1_800_000_000_000)
+    patch_shared(monkeypatch, backend_usage, "_now_ms", lambda: 1_800_000_000_000)
     warning = backend_usage.capture_codex_rate_limits(
         _codex_rate_limits(85), identity=("auth-a", "account-a"))
     episode_id = warning["limit_events"][0]["episode_id"]
@@ -673,7 +687,7 @@ def test_unknown_auth_terminal_does_not_invalidate_known_generation(monkeypatch)
     def missing_auth():
         raise RuntimeError("auth temporarily unavailable")
 
-    monkeypatch.setattr(backend_usage, "_read_codex_auth", missing_auth)
+    patch_shared(monkeypatch, backend_usage, "_read_codex_auth", missing_auth)
     terminal = backend_usage.record_classified_usage_limit("codex")
     assert terminal["_additional_events"] == []
     row = backend_usage.db.conn().execute(
@@ -742,7 +756,7 @@ def test_spent_weekly_window_marks_codex_exhausted_until_its_reset(monkeypatch):
     Weekly windows raise no limit event, so nothing told a client the next
     send would fail.
     """
-    monkeypatch.setattr(backend_usage, "_now_ms", lambda: 1_800_000_000_000)
+    patch_shared(monkeypatch, backend_usage, "_now_ms", lambda: 1_800_000_000_000)
     backend_usage.capture_codex_rate_limits(
         _WEEKLY_SPENT, identity=("auth-a", "account-a"),
         source_detail="account/rateLimits/read")
@@ -756,7 +770,7 @@ def test_spent_weekly_window_marks_codex_exhausted_until_its_reset(monkeypatch):
 
 
 def test_stale_evidence_never_claims_exhaustion(monkeypatch):
-    monkeypatch.setattr(backend_usage, "_now_ms", lambda: 1_800_000_000_000)
+    patch_shared(monkeypatch, backend_usage, "_now_ms", lambda: 1_800_000_000_000)
     backend_usage.capture_codex_rate_limits(
         _WEEKLY_SPENT, identity=("auth-a", "account-a"),
         source_detail="account/rateLimits/read")
@@ -766,7 +780,7 @@ def test_stale_evidence_never_claims_exhaustion(monkeypatch):
 
 
 def test_classified_out_of_credits_is_exhausted_without_reset(monkeypatch):
-    monkeypatch.setattr(
+    patch_shared(monkeypatch,
         backend_usage, "_read_codex_auth", lambda: ("token", "account"))
     backend_usage.record_classified_usage_limit("codex")
 
@@ -776,7 +790,7 @@ def test_classified_out_of_credits_is_exhausted_without_reset(monkeypatch):
 
 
 def test_healthy_providers_are_not_listed(monkeypatch):
-    monkeypatch.setattr(backend_usage, "_now_ms", lambda: 1_800_000_000_000)
+    patch_shared(monkeypatch, backend_usage, "_now_ms", lambda: 1_800_000_000_000)
     backend_usage.capture_codex_rate_limits({
         "rateLimits": {"primary": {
             "usedPercent": 55, "windowDurationMins": 10_080,
@@ -793,9 +807,9 @@ def test_refresh_worker_announces_only_a_changed_quota_picture(monkeypatch):
         def broadcast(self, event): sent.append(event)
 
     picture = {"codex": {"window": "seven_day", "resets_at": "R"}}
-    monkeypatch.setattr(
+    patch_shared(monkeypatch,
         backend_usage, "get_backend_usage", lambda: {"limit_events": []})
-    monkeypatch.setattr(
+    patch_shared(monkeypatch,
         backend_usage, "exhausted_backends", lambda: dict(picture))
     worker = backend_usage.UsageRefreshWorker(stream=Stream())
 
@@ -820,7 +834,7 @@ def _depleted(rate_limit):
 
 
 def test_depleted_credits_are_told_apart_from_a_spent_window(monkeypatch):
-    monkeypatch.setattr(backend_usage, "_now_ms", lambda: 1_800_000_000_000)
+    patch_shared(monkeypatch, backend_usage, "_now_ms", lambda: 1_800_000_000_000)
     backend_usage.capture_codex_rate_limits(_depleted({
         "allowed": False, "limit_reached": True,
         "primary_window": {"used_percent": 100, "limit_window_seconds": 604_800,
@@ -836,7 +850,7 @@ def test_depleted_credits_are_told_apart_from_a_spent_window(monkeypatch):
 
 def test_blocked_response_without_any_window_is_still_exhausted(monkeypatch):
     """This used to raise "no usable windows" and record nothing at all."""
-    monkeypatch.setattr(backend_usage, "_now_ms", lambda: 1_800_000_000_000)
+    patch_shared(monkeypatch, backend_usage, "_now_ms", lambda: 1_800_000_000_000)
     backend_usage.capture_codex_rate_limits(_depleted({
         "allowed": False, "limit_reached": True,
         "primary_window": None, "secondary_window": None,
@@ -861,8 +875,8 @@ def test_windowless_response_that_is_not_blocked_still_fails(monkeypatch):
 def test_failed_turn_borrows_the_reset_time_the_provider_stated(monkeypatch):
     """A classified usage-limit failure knows no reset time on its own."""
     now = [1_800_000_000_000]
-    monkeypatch.setattr(backend_usage, "_now_ms", lambda: now[0])
-    monkeypatch.setattr(backend_usage, "_read_codex_auth", lambda: ("token", "account"))
+    patch_shared(monkeypatch, backend_usage, "_now_ms", lambda: now[0])
+    patch_shared(monkeypatch, backend_usage, "_read_codex_auth", lambda: ("token", "account"))
     identity = backend_usage._codex_identity("token", "account")
     backend_usage.capture_codex_rate_limits(_depleted({
         "allowed": False, "limit_reached": True,
@@ -876,7 +890,7 @@ def test_failed_turn_borrows_the_reset_time_the_provider_stated(monkeypatch):
 
 
 def test_refilled_account_clears_the_block(monkeypatch):
-    monkeypatch.setattr(backend_usage, "_now_ms", lambda: 1_800_000_000_000)
+    patch_shared(monkeypatch, backend_usage, "_now_ms", lambda: 1_800_000_000_000)
     backend_usage.capture_codex_rate_limits(_depleted({
         "allowed": False, "limit_reached": True,
         "primary_window": None, "secondary_window": None,
@@ -911,8 +925,8 @@ def test_antigravity_quota_comes_from_its_own_usage_command(tmp_path, monkeypatc
                     f"sys.stdout.write(open({str(fixture)!r}).read())\n")
     fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
     monkeypatch.setenv("CLARP_AGY_BIN", str(fake))
-    monkeypatch.setattr(backend_usage, "_claude_needs_refresh", lambda: False)
-    monkeypatch.setattr(backend_usage, "_codex_needs_refresh", lambda: False)
+    patch_shared(monkeypatch, backend_usage, "_claude_needs_refresh", lambda: False)
+    patch_shared(monkeypatch, backend_usage, "_codex_needs_refresh", lambda: False)
     payload = backend_usage.get_backend_usage(refresh_codex=False)
     agy = payload["providers"]["agy"]
     assert agy["source"]["kind"] == "provider_reported"
@@ -934,7 +948,7 @@ def test_a_failed_antigravity_usage_check_keeps_the_last_reading(tmp_path, monke
     fake.write_text("#!/bin/sh\necho 'not signed in' >&2\nexit 1\n")
     fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
     monkeypatch.setenv("CLARP_AGY_BIN", str(fake))
-    monkeypatch.setattr(backend_usage, "_claude_needs_refresh", lambda: False)
+    patch_shared(monkeypatch, backend_usage, "_claude_needs_refresh", lambda: False)
     agy = backend_usage.get_backend_usage(refresh_codex=False)["providers"]["agy"]
     assert agy["windows"] == [] and agy["source"]["kind"] == "unavailable"
     assert "not signed in" in (backend_usage._row("agy") or {}).get("error", "")
@@ -948,8 +962,8 @@ def test_a_failed_antigravity_usage_check_is_not_rerun_on_every_request(tmp_path
     fake.write_text(f"#!/bin/sh\necho run >> {runs}\necho 'not signed in' >&2\nexit 1\n")
     fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
     monkeypatch.setenv("CLARP_AGY_BIN", str(fake))
-    monkeypatch.setattr(backend_usage, "_claude_needs_refresh", lambda: False)
-    monkeypatch.setattr(backend_usage, "_codex_needs_refresh", lambda: False)
+    patch_shared(monkeypatch, backend_usage, "_claude_needs_refresh", lambda: False)
+    patch_shared(monkeypatch, backend_usage, "_codex_needs_refresh", lambda: False)
     for _ in range(3):
         backend_usage.get_backend_usage(refresh_codex=False)
     assert runs.read_text().count("run") == 1

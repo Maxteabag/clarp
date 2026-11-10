@@ -512,6 +512,10 @@ class Config:
     # Hours a helper agent marked done stays in the chat list before the
     # maintenance worker archives it. [agents] helper_archive_grace_hours.
     helper_archive_grace_hours: float = 24.0
+    # Sessions the owner explicitly designates to answer decision cards on
+    # their behalf (lib.artifacts.resolve with on_behalf_session). Empty
+    # disables on-behalf answers. [agents] decision_on_behalf_sessions.
+    decision_on_behalf_sessions: tuple[str, ...] = ()
     # Stale work labels (lib.stale_work, background_jobs.reconcile_stale).
     # A running job whose heartbeat is older than job_stale_after_minutes
     # and whose worker PID cannot be verified gets a timeline note, and after
@@ -532,6 +536,8 @@ class Config:
     opencode_effort: str = ""
     deepseek_model: str = ""             # OpenCode provider/model id of a DeepSeek model
     deepseek_effort: str = ""
+    muse_model: str = ""                 # passed as `muse exec --model`
+    muse_effort: str = ""                # passed as `muse exec --reasoning-effort`
     # MCP scoping for dispatched turns. By default a turn loads NO MCP servers
     # (--strict-mcp-config), so a heavy or flaky server can't block every
     # agent's turn at startup waiting on its handshake. Each agent's selection
@@ -1029,6 +1035,10 @@ def _parse_into_cache(path: pathlib.Path) -> Config:
         claude_effort   = str(agents.get("claude_effort", "")),
         helper_archive_grace_hours=_non_negative_float(
             agents.get("helper_archive_grace_hours"), 24.0),
+        decision_on_behalf_sessions=tuple(dict.fromkeys(
+            str(v).strip() for v in agents.get("decision_on_behalf_sessions", ())
+            if isinstance(v, str) and v.strip()))
+            if isinstance(agents.get("decision_on_behalf_sessions", ()), (list, tuple)) else (),
         job_stale_after_minutes=_non_negative_float(
             agents.get("job_stale_after_minutes"), 15.0),
         job_heartbeat_grace_minutes=_non_negative_float(
@@ -1046,6 +1056,8 @@ def _parse_into_cache(path: pathlib.Path) -> Config:
         opencode_effort = str(agents.get("opencode_effort", "")),
         deepseek_model  = str(agents.get("deepseek_model", "")),
         deepseek_effort = str(agents.get("deepseek_effort", "")),
+        muse_model      = str(agents.get("muse_model", "")),
+        muse_effort     = str(agents.get("muse_effort", "")),
         mcp_strict      = bool(mcp.get("strict", True)),
         # Merge over the built-in roster (never wholesale-replace): a [roster]
         # in config.toml adds or overrides personas, but the built-ins always

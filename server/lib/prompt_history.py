@@ -196,7 +196,8 @@ def _cursor_position(
               AND p.principal_id = 'user'
               AND EXISTS (
                     SELECT 1 FROM messages m
-                     WHERE m.prompt_admission_id = p.admission_id
+                     WHERE m.message_id = p.message_id
+                       AND m.prompt_admission_id = p.admission_id
                        AND m.role = 'user'
               )""",
         (admission_id, agent_id),
@@ -238,7 +239,8 @@ def _metadata_rows(
                AND p.principal_id = 'user'
                AND EXISTS (
                     SELECT 1 FROM messages m
-                     WHERE m.prompt_admission_id = p.admission_id
+                     WHERE m.message_id = p.message_id
+                       AND m.prompt_admission_id = p.admission_id
                        AND m.role = 'user'
                )
                {cursor_sql}

@@ -89,6 +89,17 @@ def test_claude_account_switch_command_requires_explicit_argv(tmp_path, value, e
     assert config.load(path).claude_account_switch_command == expected
 
 
+@pytest.mark.parametrize("value,expected", [
+    ('[" nori-5aac ", "nori-5aac", "front-1"]', ("nori-5aac", "front-1")),
+    ('"nori-5aac"', ()), ('[123]', ()), ('[]', ()),
+])
+def test_decision_on_behalf_sessions_require_an_explicit_list(tmp_path, value, expected):
+    path = tmp_path / "config.toml"
+    path.write_text(f'[agents]\ndecision_on_behalf_sessions = {value}\n')
+    config.reset_cache()
+    assert config.load(path).decision_on_behalf_sessions == expected
+
+
 @pytest.mark.parametrize('mode', ['tailscale', 'lan', 'manual', 'relay'])
 def test_remote_network_mode_requires_authentication(tmp_path, mode):
     path = tmp_path / 'config.toml'

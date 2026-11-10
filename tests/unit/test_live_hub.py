@@ -206,7 +206,8 @@ def test_the_runtime_pushes_live_events_and_answers_snapshots_over_its_socket(tm
 
     from lib.audio_stream import AudioStream
     from lib.live_hub import LiveFanout, LiveRelay
-    from lib.runtime_bridge import RuntimeClient, RuntimeRPCServer
+    from lib.runtime_bridge import RuntimeClient
+    from lib.runtime_rpc_server import RuntimeRPCServer
 
     class _Dispatch:
         pass

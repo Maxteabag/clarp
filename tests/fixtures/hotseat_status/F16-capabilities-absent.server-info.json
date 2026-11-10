@@ -1,0 +1,8 @@
+{
+  "case": "F16-capabilities-absent",
+  "note": "Not a hotseat-status payload and it has no CLI input: an excerpt of GET /server-info from a Host without accounts_hotseat. The client hides the Accounts section and never calls GET /hotseat/status (a 401 or 404 there also hides it, with no retry storm). A Host with the feature lists \"accounts_hotseat\" in capabilities.features and contract.features (contract number 78).",
+  "server_info_excerpt": {
+    "capabilities": {"version": 1, "features": ["backend_quota", "janitor_adaptive_intervals", "janitor_scheduled_tasks", "heartbeat"]},
+    "contract": {"host": 77, "min_ios": 1, "features": {"backend_quota": 3, "janitor_adaptive_intervals": 57, "janitor_scheduled_tasks": 58, "heartbeat": 1}}
+  }
+}

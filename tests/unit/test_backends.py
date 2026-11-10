@@ -58,7 +58,7 @@ def test_capabilities_are_explicit_per_backend():
     assert backends.capabilities("grok").required_binary == "grok"
     assert backends.capabilities("opencode").required_binary == "opencode"
     assert backends.capabilities("deepseek").required_binary == "opencode"
-    assert backends.ids() == ("claude", "codex", "agy", "grok", "opencode", "deepseek")
+    assert backends.ids() == ("claude", "codex", "agy", "grok", "opencode", "deepseek", "muse")
 
 
 def test_spawn_turn_routes_grok_and_opencode(monkeypatch):
@@ -195,7 +195,7 @@ def test_catalogue_fields_carry_presentation_and_capability_flags():
 
 def test_routing_and_auth_adapters_are_derived_from_the_registry():
     assert [a.id for a in backends.routing_adapters()] == list(backends.ids())
-    assert [a.id for a in backends.auth_adapters()] == ["claude", "codex"]
+    assert [a.id for a in backends.auth_adapters()] == ["claude", "codex", "grok"]
 
 
 def test_adapter_rejects_unknown_enumerations():
@@ -204,3 +204,130 @@ def test_adapter_rejects_unknown_enumerations():
         type("Bad", (backends.Backend,), {"id": "x", "label": "X", "required_binary": "x", "login_kind": "magic"})()
     with pytest.raises(ValueError):
         type("Bad", (backends.Backend,), {"id": "x", "label": "X", "required_binary": "x", "effort_ui": "dial"})()
+
+
+def test_catalogue_compaction_uses_current_behavior_and_propagates_errors(monkeypatch):
+    import pytest
+    from lib.backend.base import CompactionStrategy, Unsupported
+
+    codex = backends.by_id("codex")
+    assert backends.catalogue_fields("codex")["supports_compact"] is True
+    assert backends.catalogue_fields("opencode")["supports_compact"] is False
+    calls = []
+
+    def unsupported(session):
+        calls.append(session)
+        raise Unsupported("unavailable")
+
+    def broken(session):
+        raise RuntimeError("compaction lookup failed")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(codex, "compaction", unsupported)
+        assert backends.catalogue_fields("codex")["supports_compact"] is False
+        assert calls == [""]
+        patch.setattr(codex, "compaction", broken)
+        with pytest.raises(RuntimeError, match="compaction lookup failed"):
+            backends.catalogue_fields("codex")
+        patch.setattr(codex, "compaction", lambda session: CompactionStrategy(("fake",), "/c"))
+        assert backends.catalogue_fields("codex")["supports_compact"] is True
+    assert backends.catalogue_fields("codex")["supports_compact"] is True
+
+
+def test_catalogue_class_compaction_override_restores_inherited_sibling(monkeypatch):
+    from lib.backend.base import CompactionStrategy, Unsupported
+    from lib.backend.deepseek import DeepSeekBackend
+    from lib.backend.opencode import OpenCodeBackend
+
+    def supported(self, session):
+        return CompactionStrategy(("fake",), "/c")
+
+    def unsupported(self, session):
+        raise Unsupported("disabled for this subclass")
+
+    assert "compaction" not in vars(DeepSeekBackend)
+    with monkeypatch.context() as parent:
+        parent.setattr(OpenCodeBackend, "compaction", supported)
+        assert backends.catalogue_fields("opencode")["supports_compact"] is True
+        assert backends.catalogue_fields("deepseek")["supports_compact"] is True
+        with monkeypatch.context() as child:
+            child.setattr(DeepSeekBackend, "compaction", unsupported)
+            assert backends.catalogue_fields("deepseek")["supports_compact"] is False
+            assert backends.catalogue_fields("opencode")["supports_compact"] is True
+        assert "compaction" not in vars(DeepSeekBackend)
+        assert backends.catalogue_fields("deepseek")["supports_compact"] is True
+    assert backends.catalogue_fields("opencode")["supports_compact"] is False
+    assert backends.catalogue_fields("deepseek")["supports_compact"] is False
+
+
+def test_catalogue_metadata_overrides_restore_without_sibling_leaks(monkeypatch):
+    from lib.backend.deepseek import DeepSeekBackend
+    from lib.backend.opencode import OpenCodeBackend
+
+    deepseek = backends.by_id("deepseek")
+    original = backends.catalogue_fields("deepseek")
+    assert "hidden" not in vars(DeepSeekBackend)
+    with monkeypatch.context() as parent:
+        parent.setattr(OpenCodeBackend, "hidden", True)
+        assert backends.catalogue_fields("opencode")["hidden"] is True
+        assert backends.catalogue_fields("deepseek")["hidden"] is True
+        with monkeypatch.context() as child:
+            child.setattr(DeepSeekBackend, "hidden", False)
+            child.setattr(deepseek, "label", "One instance")
+            child.setattr(deepseek, "login_kind", "cli")
+            child.setattr(deepseek, "effort_ui", "folded_into_model")
+            child.setattr(deepseek, "effort_scope", "provider_flag")
+            row = backends.catalogue_fields("deepseek")
+            assert row["label"] == "One instance" and row["hidden"] is False
+            assert row["supports_auth"] is True and row["login_kind"] == "cli"
+            assert deepseek.model_carries_effort is True
+            assert deepseek.effort_compatibility_unknown is True
+            assert backends.catalogue_fields("opencode")["label"] == "OpenCode"
+            assert backends.catalogue_fields("opencode")["hidden"] is True
+        assert "hidden" not in vars(DeepSeekBackend)
+        assert backends.catalogue_fields("deepseek")["hidden"] is True
+    assert backends.catalogue_fields("deepseek") == original
+
+
+def test_catalogue_unknown_stays_neutral_while_execution_defaults_to_claude():
+    for unknown in (None, "", " future-cli "):
+        assert backends.normalize(unknown) == "claude"
+        assert backends.by_id(unknown) is backends.by_id("claude")
+        assert backends.get(unknown) is None
+        row = backends.catalogue_fields(unknown)
+        assert row["label"] == str(unknown or "")
+        assert row["supports_compact"] is False
+        assert row["supports_auth"] is False
+        assert row["sort_index"] == 7
+
+
+def test_declared_catalogue_can_be_read_without_loading_execution():
+    import subprocess
+
+    # A new process prevents previous facade imports from hiding a cold backedge.
+    result = subprocess.run([
+        sys.executable, "-c", """
+import sys
+from lib import backend_catalogue as catalogue
+assert catalogue.ids() == ('claude', 'codex', 'agy', 'grok', 'opencode', 'deepseek', 'muse')
+assert catalogue.normalize(' ANTIGRAVITY ') == 'agy'
+assert catalogue.normalize('unknown') == 'claude'
+assert catalogue.get('unknown') is None
+assert catalogue.get('deep-seek').required_binary == 'opencode'
+assert catalogue.for_provider('openai') == 'codex'
+assert catalogue.for_provider('unmatched') == 'unmatched'
+assert catalogue.get('codex').fallback_models[0] == ('gpt-6.1-sol', 'GPT-6.1 Sol')
+loaded = [name for name in sys.modules if name.startswith('lib.')]
+assert loaded == ['lib.backend_catalogue'], loaded
+"""], cwd=_SERVER_DIR, capture_output=True, text=True, check=False)
+    assert result.returncode == 0, result.stderr
+
+
+def test_catalogue_types_keep_legacy_import_identity():
+    from lib import backend_catalogue, protocol
+    from lib.backend import base
+
+    assert protocol.AgentBackend is backend_catalogue.AgentBackend
+    assert backends.BackendBrand is base.BackendBrand is backend_catalogue.BackendBrand
+    assert backends.DEFAULT_BRAND is base.DEFAULT_BRAND is backend_catalogue.DEFAULT_BRAND
+    assert isinstance(backends.by_id("grok").brand, base.BackendBrand)

@@ -17,8 +17,9 @@ def metadata(path):
     return Path(run('git', '-C', str(path), 'rev-parse', '--absolute-git-dir')) / 'clarp-owner.json'
 
 
-def dependencies(path: Path) -> list[str]:
-    """Fail closed when workload inventory cannot be inspected."""
+def dependencies(path: Path, notes: list[str] | None = None) -> list[str]:
+    """Fail closed when workload inventory cannot be inspected. Processes this user
+    may not fully inspect are counted in ``notes`` (when given), not hidden."""
     if sys.platform != 'linux':
         return ['automatic workload inspection currently requires Linux']
     needle = str(path)
@@ -32,21 +33,36 @@ def dependencies(path: Path) -> list[str]:
             parent = int(next(line.split()[1] for line in status.splitlines() if line.startswith('PPid:')))
         except (OSError, StopIteration, ValueError):
             break
+    unreadable_cwd = uninspectable = 0
     for proc in Path('/proc').iterdir():
         if not proc.name.isdigit() or int(proc.name) == os.getpid():
             continue
         try:
-            cwd = str((proc / 'cwd').resolve(strict=True))
             command = (proc / 'cmdline').read_bytes().replace(b'\0', b' ').decode(errors='replace')
-            # Invoking shells naturally contain the target as a CLI argument.
-            # Their cwd still counts; unrelated processes' arguments count too.
-            if cwd == needle or cwd.startswith(needle + '/') or (needle in command and int(proc.name) not in ancestors):
-                found.append(f'process {proc.name}')
-        except FileNotFoundError:
-            continue  # exited during inspection
+        except (FileNotFoundError, ProcessLookupError):
+            continue  # exited during inspection: ENOENT, or ESRCH once the pid is gone (TOOL-01)
         except PermissionError:
-            # Other users' processes cannot be classified as safe.
-            found.append(f'cannot inspect process {proc.name}')
+            uninspectable += 1  # e.g. /proc mounted with hidepid
+            continue
+        try:
+            cwd = str((proc / 'cwd').resolve(strict=True))
+        except (FileNotFoundError, ProcessLookupError):
+            cwd = ''  # exited, or a kernel thread with no cwd
+        except PermissionError:
+            # Other users' (root's) cwd is unreadable; their command line was read.
+            cwd = ''
+            unreadable_cwd += 1
+        # Invoking shells naturally contain the target as a CLI argument.
+        # Their cwd still counts; unrelated processes' arguments count too.
+        if (cwd and (cwd == needle or cwd.startswith(needle + '/'))) or (
+                needle in command and int(proc.name) not in ancestors):
+            found.append(f'process {proc.name}')
+    if notes is not None:
+        if unreadable_cwd:
+            notes.append(f'{unreadable_cwd} processes of other users: working directory not readable '
+                         '(their command lines were checked)')
+        if uninspectable:
+            notes.append(f'{uninspectable} processes could not be inspected at all')
     try:
         ids = run('docker', 'ps', '-aq').split()
         if ids:
@@ -69,8 +85,10 @@ def dependencies(path: Path) -> list[str]:
             units.update(line.split()[0] for line in run(
                 'systemctl', *scope, 'list-units', '--all', '--plain', '--no-legend', '--no-pager').splitlines() if line)
             if units:
-                details = run('systemctl', *scope, 'show', *sorted(unit for unit in units if '@.' not in unit), '--no-pager',
-                              '--property=Id,WorkingDirectory,ExecStart,ExecStartPre,ExecStartPost,ExecStop,FragmentPath')
+                # '--' before the units: '-.mount' and '-.slice' would read as options.
+                details = run('systemctl', *scope, 'show', '--no-pager',
+                              '--property=Id,WorkingDirectory,ExecStart,ExecStartPre,ExecStartPost,ExecStop,FragmentPath',
+                              '--', *sorted(unit for unit in units if '@.' not in unit))
                 for block in details.split('\n\n'):
                     if needle in block:
                         found.append('systemd ' + next((s for s in block.splitlines() if s.startswith('Id=')), 'unit'))
@@ -116,8 +134,9 @@ def main():
     head = run('git', '-C', str(path), 'rev-parse', 'HEAD')
     if subprocess.run(['git', 'merge-base', '--is-ancestor', head, 'origin/main']).returncode:
         reasons.append('worktree commit is not contained in origin/main')
-    reasons.extend(dependencies(path))
-    print(json.dumps({'path': str(path), 'head': head, 'blockers': reasons}, indent=2))
+    notes = []
+    reasons.extend(dependencies(path, notes))
+    print(json.dumps({'path': str(path), 'head': head, 'blockers': reasons, 'notes': notes}, indent=2))
     if reasons:
         raise SystemExit(1)
     if args.action == 'remove':

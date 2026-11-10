@@ -20,6 +20,7 @@ import pytest
 
 from lib import agent_rings as rings
 from lib import cartesia_tts, config, custom_tts_adapters, db, tts_engine, tts_mode, tts_worker
+from lib import tts_registry
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 
@@ -107,8 +108,8 @@ class Env:
         # Built-in providers, recorded at their module boundary (no network).
         monkeypatch.setattr(tts_engine, "synthesize_to_file", recorder("elevenlabs-direct"))
         monkeypatch.setattr(cartesia_tts, "synthesize", recorder("cartesia-direct"))
-        monkeypatch.setattr(tts_worker, "cartesia_synthesize", recorder("cartesia"))
-        monkeypatch.setattr(tts_worker, "synthesize_streaming", recorder("elevenlabs"))
+        monkeypatch.setattr(tts_registry, "cartesia_synthesize", recorder("cartesia"))
+        monkeypatch.setattr(tts_registry, "synthesize_streaming", recorder("elevenlabs"))
         _agent("a-sander", "Sander", "sander-1")
         _agent("a-theo", "Theo", "theo-97e5")
 
@@ -280,7 +281,8 @@ def _preview(env, body):
 
 
 def test_a_voice_preview_speaks_the_explicit_voice_even_for_an_agent_with_an_override(env):
-    env.configure("cartesia", SANDER)
+    # VP-10: the ElevenLabs fallback must now be explicitly configured.
+    env.configure("cartesia", SANDER, fallback="elevenlabs")
     answer = _preview(env, {"voice_id": "candidate-voice", "text": "Hi there"})   # default session: Sander
     assert answer["status"] == 200
     assert env.spoken() == [("elevenlabs-direct", "candidate-voice")]   # today's global path, the explicit voice
@@ -394,7 +396,7 @@ def test_a_google_voice_preview_speaks_the_requested_voice_not_the_agents_overri
 def test_an_agents_google_override_never_hijacks_another_providers_preview(env):
     _record_google(env)
     env.configure("cartesia", {"sander": {"provider": "google",
-                                          "google_voice": "nb-NO-Chirp3-HD-Kore"}})
+                                          "google_voice": "nb-NO-Chirp3-HD-Kore"}}, fallback="elevenlabs")
     answer = _preview(env, {"voice_id": "previewed-voice", "text": "Hello"})   # session: Sander
     assert answer["status"] == 200
     assert env.spoken() == [("elevenlabs-direct", "previewed-voice")]   # today's global path, no google
@@ -412,17 +414,22 @@ def test_a_google_preview_of_a_voice_off_the_list_fails_and_never_plays_the_defa
     assert env.spoken() == []
 
 
-@pytest.mark.parametrize("requested, google_fails", [
-    ("nb-NO-Chirp3-HD-Nobody", False),              # an id off the list
-    ("nb-NO-Chirp3-HD-Aoede", True),                # a valid voice whose synthesis fails
-], ids=["invalid-voice", "provider-failure"])
-def test_a_google_preview_never_falls_back_to_another_provider(env, requested, google_fails):
-    """A preview auditions the requested provider and voice only (FINAL r2), even with a fallback
-    configured that would speak for an ordinary clip: the preview fails truthfully instead."""
+@pytest.mark.parametrize("requested", ["nb-NO-Chirp3-HD-Nobody"], ids=["invalid-voice"])
+def test_a_google_preview_never_falls_back_to_another_provider(env, requested):
+    """VP-10 clarification 2: an unusable requested voice refuses, even with a working fallback."""
     _record_google(env)
-    if google_fails:
-        env.fail.add("google")
     env.configure("google", fallback="elevenlabs")
     answer = _preview(env, {"voice_id": requested, "text": "Hello"})
     assert answer["status"] == 500
-    assert env.spoken() == []                       # no ElevenLabs (or any other) synthesis
+    assert env.spoken() == []
+
+
+def test_a_google_preview_uses_its_configured_fallback_when_synthesis_fails(env):
+    """Quota/outage failures use the explicit fallback; invalid voices are a separate refusal."""
+    _record_google(env)
+    env.fail.add("google")
+    env.configure("google", fallback="elevenlabs")
+    requested = "nb-NO-Chirp3-HD-Aoede"
+    answer = _preview(env, {"voice_id": requested, "text": "Hello"})
+    assert answer["status"] == 200
+    assert env.spoken() == [("elevenlabs", requested)]

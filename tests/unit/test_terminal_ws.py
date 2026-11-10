@@ -96,7 +96,7 @@ def test_launch_argv_is_declared_per_backend(monkeypatch):
         assert answers[0] == answers[1], backend.id
         if answers[0]:
             declared.add(backend.id)
-    assert declared == {backends.CLAUDE, backends.CODEX, backends.AGY}
+    assert declared == {backends.CLAUDE, backends.CODEX, backends.AGY, "muse"}
 
 
 @pytest.mark.parametrize("backend,resume,fresh", [
@@ -105,6 +105,7 @@ def test_launch_argv_is_declared_per_backend(monkeypatch):
     (backends.CODEX, ["codex", "resume", "sid"], ["codex"]),
     (backends.AGY, ["agy", "--dangerously-skip-permissions", "--conversation", "sid"],
      ["agy", "--dangerously-skip-permissions"]),
+    ("muse", ["muse", "--yolo", "resume", "sid"], ["muse", "--yolo"]),
 ])
 def test_launch_argv_per_backend(monkeypatch, backend, resume, fresh):
     monkeypatch.setattr("lib.deployment.plugin_dir", lambda: None)
@@ -144,6 +145,19 @@ def test_unknown_agent_gets_404(agent):
     terminal_ws.serve_terminal(handler, "nobody")
     assert handler.status == 404
     assert handler.wfile.getvalue() == b"no such agent"
+    assert not terminal_ws.has_live_terminal("agent-1")
+
+
+def test_a_janitor_has_no_interactive_terminal(agent, monkeypatch):
+    """HTTP-01b: a maintenance agent is inspection-only; /send, /stop and
+    /repair-slot refuse it, and its terminal does too, for every device."""
+    agent["row"]["is_janitor"] = 1
+    served = []
+    monkeypatch.setattr(terminal_ws, "_serve_pty", lambda *a, **k: served.append(True))
+    monkeypatch.setattr(terminal_ws.shutil, "which", lambda name: "/usr/bin/" + name)
+    handler = FakeHandler(_UPGRADE)
+    terminal_ws.serve_terminal(handler, "theo")
+    assert handler.status == 403 and not served
     assert not terminal_ws.has_live_terminal("agent-1")
 
 

@@ -18,7 +18,7 @@ module; the implementation reads them back through here at call time
 from __future__ import annotations
 
 from .db import conn  # noqa: F401
-from .message_context import (  # noqa: F401
+from .message_text import (  # noqa: F401
     TEAM_CONTEXT_OPEN,
     TEAM_CONTEXT_CLOSE,
     FALLBACK_CONTEXT_OPEN,
@@ -41,6 +41,8 @@ from .message_writes import (  # noqa: F401
     IMPORT_COMMIT_EVERY,
     IMPORT_WRITE_BUDGET_SECONDS,
     IMPORT_WRITER_YIELD_SECONDS,
+    IMPORT_FAIR_YIELD_EVERY_SECONDS,
+    IMPORT_FAIR_YIELD_SECONDS,
     store_transcript_turns,
 )
 from .message_live import (  # noqa: F401

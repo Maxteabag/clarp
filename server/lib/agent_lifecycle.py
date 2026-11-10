@@ -15,7 +15,7 @@ from dataclasses import dataclass, replace
 
 from . import agents as agents_db
 from . import backends, events, identity
-from .agent_store import AGENT_ROSTER, load_agents, save_agents
+from .agent_store import AGENT_ROSTER, load_agents, save_agent
 from .log import log, log_exception
 from .mcp_selection import encode as encode_mcp_selection
 from .policies.agent_spec import AgentSpec, RosterView, SpecError
@@ -95,7 +95,7 @@ class AgentLifecycleService:
     def _roster_view(agents: dict) -> RosterView:
         from . import config as app_config
         from .contact_assignment import available_contacts
-        from .launch_paths import recover_user_path
+        from .workspace_paths import recover_user_path
         from .session_models import launch_default, recorded_model
         cfg = app_config.load()
         return RosterView(
@@ -159,7 +159,9 @@ class AgentLifecycleService:
                 **({"creation_request_id": spec.creation_request_id}
                    if spec.creation_request_id else {}))
         else:
-            save_agents(agents, self.ctx.agents_path)
+            # This agent only: the roster read before the I/O above is stale
+            # for every other agent (TP-03).
+            save_agent(session, agents[session])
         agent = agents_db.get_by_session(session)
         if not agent:
             raise AgentLifecycleError(500, "agent persistence failed")
@@ -286,7 +288,7 @@ def _existing_cwd(raw) -> str:
     cwd = os.path.expanduser(str(raw or "").strip() or str(pathlib.Path.home()))
     candidate = pathlib.Path(cwd)
     if os.environ.get("CLARP_DEPLOYMENT_MODE") == "container":
-        from .launch_paths import validate_workspace_path, workspace_root
+        from .workspace_paths import validate_workspace_path, workspace_root
         try:
             candidate = validate_workspace_path(candidate)
         except ValueError as exc:

@@ -1,0 +1,119 @@
+# S4 cut 2: drain methods, applied after the module split in stage D.
+# Regenerated from main's text; no behavior change.
+source_module = "lib/turn_dispatch.py"
+source_class = "TurnDispatchService"
+
+[[group]]
+name = "turn_drain"
+module = "lib/turn_drain.py"
+class = "DrainMixin"
+members = [
+    "begin_admission_fence", "admission_fenced", "refresh_hold_headlines",
+    "clear_hold_headlines", "lower_admission_fence", "start_held_work",
+    "persist_held", "transfer_recovery_parks",
+]
+
+[[group]]
+name = "turn_retry"
+module = "lib/turn_retry.py"
+class = "RetryMixin"
+members = [
+    "_handle_failure",
+    "_schedule_retry",
+    "_mark_interrupted",
+    "_end_opening_state",
+    "_record_failure_row",
+]
+
+[[group]]
+name = "turn_recovery"
+module = "lib/turn_recovery.py"
+class = "RecoveryMixin"
+members = [
+    "recover_queued",
+    "_rehydrate_once",
+    "_recover_queued_locked",
+    "_recovery_failed",
+    "clear_recovery_backoff",
+    "_retire_goal_queue",
+    "_release_superseded",
+    "release_leaked_slots",
+    "_start_ownerless_queues",
+    "_orphaned_spawn",
+    "repair_slot",
+    "_superseded",
+    "_preempt",
+]
+
+[[group]]
+name = "turn_claim"
+module = "lib/turn_claim.py"
+class = "ClaimMixin"
+members = [
+    "dispatch_queued",
+    "_enqueue_if_busy",
+    "_hold_for_drain",
+    "_running_processes",
+    "_session_holds",
+    "_session_held",
+    "_wait_for_process_exit",
+    "_preempt_for",
+    "_call_opening_claimed",
+    "_has_live_turn",
+    "_agent_has_live_turn",
+]
+
+[[group]]
+name = "turn_handoff"
+module = "lib/turn_handoff.py"
+class = "HandoffMixin"
+members = [
+    "_discard_fenced_janitor",
+    "_finish_turn",
+    "_finish_slot",
+    "_spawn_next",
+    "_resume_and_spawn",
+    "_requeue_failed_handoff",
+    "_retry_handoff",
+    "_hold_stopped_queue",
+    "_resume_and_spawn_claimed",
+    "_mark_spawned",
+    "_broadcast_queue_state",
+]
+
+[[group]]
+name = "turn_launcher"
+module = "lib/turn_launcher.py"
+class = "LauncherMixin"
+members = [
+    "_turn_in_flight",
+    "_bind_new_session",
+    "_spawn_attempt",
+    "_spawn_attempt_owned",
+    "_still_owns",
+    "_interrupt_unowned",
+    "_resume_after_account_switch",
+    "_admit_opening_launch",
+    "_pause_for_account",
+    "_sticky_session",
+    "_attempt_callbacks",
+]
+
+[[group]]
+name = "turn_admission"
+module = "lib/turn_admission.py"
+class = "AdmissionMixin"
+members = [
+    "dispatch",
+    "submit",
+    "_dispatch_owned_marked",
+    "_dispatch_owned",
+    "_end_launched_opening",
+    "_release_unsent_opening",
+    "_abandon_unlaunched",
+    "_retry_unlaunched_marker",
+    "_held_in_memory",
+    "_admitted_but_never_launched",
+    "_record_user_message",
+    "_notify_herald",
+]

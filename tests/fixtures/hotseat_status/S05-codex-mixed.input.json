@@ -1,0 +1,44 @@
+{
+  "case": "S05-codex-mixed",
+  "note": "credits-out (no credits) and capped-new (unknown reason, stored as other) have a no_reset_reason: they stay exhausted and their windows are served with resets_at null, since that reset will not unblock them; the reason itself is internal only (no v2 field). blocked-plain has no reason: its reset passed with no fresh sample, so it is unknown-since-reset.",
+  "janitor_enabled": true,
+  "served_at": 1800000060000,
+  "steps": [
+    {"op": "read", "provider": "codex", "received_at": 1800000000000, "payload": {
+      "unsaved_live": null, "quota_read": true, "quota_age_s": null,
+      "accounts": [
+        {"provider": "codex", "alias": "credits-out", "is_active": true, "saved": true, "email": "c1@example.invalid",
+         "plan": "plus", "account_id": "acct-c1", "token_expires_at": 1800864000.0, "token_hours_left": 240.0,
+         "api_key_present": false,
+         "usage": {"usable": false, "blocked": true, "error": null, "worst_used": 1.0, "reset": 1800000030.0,
+                   "reset_window": "weekly", "no_reset_reason": "no credits",
+                   "windows": [{"label": "codex primary weekly", "used": 1.0, "reset": 1800000030.0}]}},
+        {"provider": "codex", "alias": "capped-new", "is_active": false, "saved": true, "email": "c2@example.invalid",
+         "plan": "plus", "account_id": "acct-c2", "token_expires_at": 1800864000.0, "token_hours_left": 240.0,
+         "api_key_present": false,
+         "usage": {"usable": false, "blocked": true, "error": null, "worst_used": 1.0, "reset": 1800000030.0,
+                   "reset_window": "weekly", "no_reset_reason": "quota policy changed",
+                   "windows": [{"label": "codex primary weekly", "used": 1.0, "reset": 1800000030.0}]}},
+        {"provider": "codex", "alias": "blocked-plain", "is_active": false, "saved": true, "email": "c3@example.invalid",
+         "plan": "plus", "account_id": "acct-c3", "token_expires_at": 1800864000.0, "token_hours_left": 240.0,
+         "api_key_present": false,
+         "usage": {"usable": false, "blocked": true, "error": null, "worst_used": 1.0, "reset": 1800000030.0,
+                   "reset_window": "weekly",
+                   "windows": [{"label": "codex primary weekly", "used": 1.0, "reset": 1800000030.0}]}},
+        {"provider": "codex", "alias": "paused", "is_active": false, "saved": true, "email": "c4@example.invalid",
+         "plan": "plus", "account_id": "acct-c4", "token_expires_at": 1800864000.0, "token_hours_left": 240.0,
+         "api_key_present": false,
+         "usage": {"usable": false, "blocked": false, "error": null, "worst_used": 0.3, "reset": 1800010800.25,
+                   "reset_window": "5-hour",
+                   "windows": [{"label": "codex secondary 5-hour", "used": 0.3, "reset": 1800010800.25}]}},
+        {"provider": "codex", "alias": "spare", "is_active": false, "saved": true, "email": "c5@example.invalid",
+         "plan": "plus", "account_id": "acct-c5", "token_expires_at": 1800864000.0, "token_hours_left": 240.0,
+         "api_key_present": false,
+         "usage": {"usable": true, "blocked": false, "error": null, "worst_used": 0.4, "reset": 1800500000.5,
+                   "reset_window": "weekly",
+                   "windows": [{"label": "codex primary weekly", "used": 0.4, "reset": 1800500000.5},
+                               {"label": "codex secondary 5-hour", "used": 0.1, "reset": 1800010800.25},
+                               {"label": "spark weekly", "used": 0.2, "reset": 1800500000.5}]}}
+      ]}}
+  ]
+}

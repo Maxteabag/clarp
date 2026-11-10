@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import datetime
 import itertools
-import re
 import threading
 import time
 from dataclasses import dataclass, replace
@@ -34,13 +33,12 @@ from .protocol import TurnSource
 from .transcript_watcher import (
     InotifyDispatcher, TranscriptWatcher, WatcherPool,
 )
-from .voice_markup import spoken_chunks_for_tts
+from .voice_markup import extract_speak_blocks, spoken_chunks_for_tts
 
 # Tag the agent wraps voice-bound content in. Everything outside the
 # tag is silent (still visible in the history pane, just not spoken).
 # Non-greedy + DOTALL so a multi-line block is captured wholesale, and
 # multiple blocks in one text payload each fire their own enqueue.
-_SPEAK_RE = re.compile(r"<speak>(.*?)</speak>", re.DOTALL | re.IGNORECASE)
 
 
 def _emit(*a, **kw):
@@ -173,6 +171,14 @@ class TranscriptStreamer:
             log_exception("transcriptStreamerWatchFail", e,
                           detail=str(path))
             return
+        # Catch bytes appended after the watcher's EOF snapshot but before
+        # inotify registration. tick serializes with the dispatcher's reads.
+        try:
+            watcher.tick()
+        except Exception as e:
+            log_exception("transcriptStreamerCatchupFail", e, detail=str(path))
+        if watcher.save_pending:
+            self.dispatcher._wake()  # a failed catchup save may be the only activity
         _emit("transcript_streamer", "bind",
               session=agent.get("session"),
               backend_session_id=backend_session_id,
@@ -243,15 +249,19 @@ class TranscriptStreamer:
             if latest is None:
                 return False
 
-            def import_latest() -> None:
-                transcript_incremental.import_transcript(
+            def import_latest():
+                return transcript_incremental.import_transcript(
                     backend=backend.id, path=latest,
                     agent_id=agent_id,
                     backend_session_id=intent.bsid,
-                    parse=backend.parse_transcript)
+                    parse=backend.parse_transcript,
+                    _defer_full=transcript_incremental._materialized_history(agent_id, intent.bsid))
 
+            importer = transcript_incremental._completion_import(
+                import_latest, backend=backend.id, path=latest,
+                agent_id=agent_id, backend_session_id=intent.bsid)
             return transcript_import_cache.schedule_import(
-                latest, import_latest, owner=agent_id,
+                latest, importer, owner=agent_id,
                 after=lambda: self._after_import(agent_id, intent.bsid, intent.gen, intent.seq))
         except Exception as e:
             log_exception("transcriptStreamerImportFail", e, detail=agent_id)
@@ -356,11 +366,11 @@ class TranscriptStreamer:
             return
 
         spoken: list[tuple[str, bool]] = []
-        for match in _SPEAK_RE.finditer(text):
+        for block in extract_speak_blocks(text, attributes=False):
             spoken.extend(
                 (chunk, index == 0)
                 for index, chunk in enumerate(
-                    spoken_chunks_for_tts(match.group(1).strip()))
+                    spoken_chunks_for_tts(block.strip()))
             )
         if not spoken:
             return

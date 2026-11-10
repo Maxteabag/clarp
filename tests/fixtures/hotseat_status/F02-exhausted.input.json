@@ -1,0 +1,28 @@
+{
+  "case": "F02-exhausted",
+  "janitor_enabled": true,
+  "served_at": 1800000060000,
+  "note": "Exhausted only from the structured flags: Claude limited/status rejected, Codex blocked. Resets are in the future, so it stays exhausted.",
+  "steps": [
+    {"op": "read", "provider": "claude", "received_at": 1800000000000, "payload": {
+      "generated_at": 1800000000.0, "sessions": 1, "error": null,
+      "accounts": [
+        {"alias": "spent", "email": "spent@example.invalid", "org": null, "plan": "pro", "plan_label": "Pro",
+         "rate_limit_tier": null, "is_active": true, "error": null, "signin_days_left": 30.0,
+         "usage": {"status": "rejected", "available": false, "limited": true, "severity": "high",
+                   "used_5h": 1.0, "reset_5h": 1800010800.25, "used_7d": 0.75, "reset_7d": 1800500000.5,
+                   "scoped": [], "blocked_models": [], "extra_usage_enabled": false,
+                   "extra_usage_reason": null, "plan": "pro"}}
+      ]}},
+    {"op": "read", "provider": "codex", "received_at": 1800000000000, "payload": {
+      "unsaved_live": null, "quota_read": true, "quota_age_s": null,
+      "accounts": [
+        {"provider": "codex", "alias": "blocked", "is_active": true, "saved": true, "email": "blocked@example.invalid",
+         "plan": "plus", "account_id": "acct-blocked", "token_expires_at": 1800864000.0, "token_hours_left": 240.0,
+         "api_key_present": false,
+         "usage": {"usable": false, "blocked": true, "error": null, "worst_used": 1.0, "reset": 1800500000.5,
+                   "reset_window": "weekly",
+                   "windows": [{"label": "codex primary weekly", "used": 1.0, "reset": 1800500000.5}]}}
+      ]}}
+  ]
+}

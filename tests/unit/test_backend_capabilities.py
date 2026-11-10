@@ -21,12 +21,12 @@ sys.path.insert(0, str(ROOT / "server"))
 from lib import backends  # noqa: E402
 from lib.backend import registry  # noqa: E402
 
-IDS = ("claude", "codex", "agy", "grok", "opencode", "deepseek")
+IDS = ("claude", "codex", "agy", "grok", "opencode", "deepseek", "muse")
 
 # --- (4) source guard --------------------------------------------------------
 
-_IDS = r"(?:CLAUDE|CODEX|AGY|GROK|OPENCODE|DEEPSEEK)"
-_LIT = r"""['"](?:claude|codex|agy|antigravity|grok|opencode|deepseek)['"]"""
+_IDS = r"(?:CLAUDE|CODEX|AGY|GROK|OPENCODE|DEEPSEEK|MUSE)"
+_LIT = r"""['"](?:claude|codex|agy|antigravity|grok|opencode|deepseek|muse)['"]"""
 _REF = rf"(?:self\.)?(?:backends|AgentBackend)\.{_IDS}\b"
 BRANCH = re.compile(
     rf"(?:==|!=)\s*{_REF}"          # x == backends.CODEX
@@ -182,7 +182,7 @@ def test_declared_values_match_the_behaviour_they_replaced():
     codex = by["codex"]
     assert codex.api_providers == ("openai",) and codex.native_tool_explainer
     assert codex.janitor_default_model == "gpt-5.3-codex-spark"
-    for other in ("claude", "agy", "grok", "opencode", "deepseek"):
+    for other in ("claude", "agy", "grok", "opencode", "deepseek", "muse"):
         a = by[other]
         assert a.api_providers == () and not a.native_tool_explainer, other
         assert a.janitor_default_model == "", other
@@ -190,18 +190,18 @@ def test_declared_values_match_the_behaviour_they_replaced():
     # Account failover pools: Claude and Codex only (a method now).
     assert {b.id: b.account_pool() for b in registry.all()} == {
         "claude": "claude", "codex": "codex", "agy": "", "grok": "",
-        "opencode": "", "deepseek": ""}
+        "opencode": "", "deepseek": "", "muse": ""}
     assert [b.id for b in registry.all() if b.account_pool()] == ["claude", "codex"]
 
     # AGY folds effort into the model id and validates model ids.
     assert by["agy"].effort_compatibility_unknown and by["agy"].model_carries_effort
-    for other in ("claude", "codex", "grok", "opencode", "deepseek"):
+    for other in ("claude", "codex", "grok", "opencode", "deepseek", "muse"):
         assert not by[other].effort_compatibility_unknown, other
 
     # Model families for avatars: Claude and OpenCode front several families.
     assert {a.id: a.model_family for a in registry.all()} == {
         "claude": "", "codex": "codex", "agy": "gemini", "grok": "grok",
-        "opencode": "", "deepseek": "deepseek"}
+        "opencode": "", "deepseek": "deepseek", "muse": "muse"}
 
 
 

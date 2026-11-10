@@ -132,6 +132,7 @@ export component Pane inherits Rectangle {
     callback scroll-journal(string, length, length, float, float, length, length, bool, bool, int);
     callback toggle-activity(string, string);
     callback copy-message(string);
+    callback select-message(string);
     callback silence();
     callback cancel-transcription();
     callback paste-image() -> bool;
@@ -418,6 +419,7 @@ export component Pane inherits Rectangle {
             link-clicked(url) => { root.link-clicked(url); }
             toggle-activity(id, group) => { root.toggle-activity(id, group); }
             copy-message(id) => { root.copy-message(id); }
+            select-message(id) => { root.select-message(id); }
             reached-top => { root.load-older(); }
             journal(cause, old, new, old-place, new-place, content, viewport, at-end, follow, rows) => { root.scroll-journal(cause, old, new, old-place, new-place, content, viewport, at-end, follow, rows); }
           }
@@ -626,6 +628,7 @@ export component Workspace inherits Rectangle {
     callback scroll-journal(string, string, length, length, float, float, length, length, bool, bool, int);
     callback toggle-activity(string, string, string);
     callback copy-message(string, string);
+    callback select-message(string, string);
     callback silence();
     callback cancel-transcription(string);
     callback paste-image(string) -> bool;
@@ -723,6 +726,7 @@ export component Workspace inherits Rectangle {
         scroll-journal(cause, old, new, old-place, new-place, content, viewport, at-end, follow, rows) => { root.scroll-journal(pane.id, cause, old, new, old-place, new-place, content, viewport, at-end, follow, rows); }
         toggle-activity(id, group) => { root.toggle-activity(pane.id, id, group); }
         copy-message(id) => { root.copy-message(pane.id, id); }
+        select-message(id) => { root.select-message(pane.id, id); }
         silence => { root.silence(); }
         cancel-transcription => { root.cancel-transcription(pane.id); }
         paste-image => { return root.paste-image(pane.id); }

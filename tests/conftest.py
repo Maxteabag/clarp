@@ -36,6 +36,22 @@ if _TEMP_ROOT:
     os.environ["PYTEST_DEBUG_TEMPROOT"] = _TEMP_ROOT
 
 
+def _load_no_servers_guard():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "_clarp_no_servers_guard", pathlib.Path(__file__).with_name("no_servers_guard.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+# Under bin/heavy on laptopstudio (CLARP_TEST_NO_SERVERS=1) a test that starts a
+# server or a Host fails fast instead of serving (tests/no_servers_guard.py).
+_no_servers_guard = _load_no_servers_guard()
+if _no_servers_guard.enabled():
+    _no_servers_guard.install()
+
+
 # Match the installed layout: server/lib is imported as the top-level `lib`
 # package. Centralizing this keeps test collection independent of file order.
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "server"))
@@ -140,6 +156,30 @@ def _no_default_host_generation_paths(monkeypatch):
     monkeypatch.setattr(host_generation, "default_boot_id_path", refuse)
 
 
+# The synthetic host generation every test sees (W-1): a fixed boot id and a
+# canonical instance token, never the kernel's or the live data root's.
+PINNED_HOST_GENERATION = ("boot-synthetic-test", "00000000-0000-4000-8000-000000000001")
+
+
+@pytest.fixture(autouse=True)
+def _pinned_host_generation(monkeypatch):
+    """Pin agent_rings' identity seam to PINNED_HOST_GENERATION for every test,
+    before any ring, answer or opening reads the host identity. Tests about
+    identity override ``agent_rings._generation``; requesting this fixture
+    returns the real seam, which must still refuse (the guard above)."""
+    try:
+        from lib import agent_rings, host_generation
+        from tests.patching import patch_shared
+    except ImportError:
+        yield None
+        return
+    original = getattr(agent_rings, "_generation", None)
+    patch_shared(monkeypatch, agent_rings, "_generation",
+                 lambda: host_generation.GenerationRead(PINNED_HOST_GENERATION),
+                 raising=False)
+    yield original
+
+
 @pytest.fixture(autouse=True)
 def _no_real_agy_cli(_transcript_importer_quiescent, monkeypatch, tmp_path):
     """Never run, or read the state of, the developer's real Antigravity CLI from
@@ -208,7 +248,21 @@ def _prepend(var: str, entry: str) -> None:
         os.environ[var] = entry + (os.pathsep + current if current else "")
 
 
+def pytest_addoption(parser):
+    # Inline, so a copy of this conftest (tests that run an inner pytest) needs no
+    # sibling module; tests/ci_timing.py is imported only when the option is used.
+    parser.addoption("--clarp-timing-dir", default="",
+                     help="write per-test phase timings (JSON lines) here")
+
+
 def pytest_configure(config):
+    target = str(config.getoption("clarp_timing_dir", default="") or "")
+    if target and not config.pluginmanager.has_plugin("clarp-ci-timing"):
+        import ci_timing  # opt-in CI timing diagnostics
+        controller = (not os.environ.get("PYTEST_XDIST_WORKER")
+                      and bool(getattr(config.option, "numprocesses", None)))
+        config.pluginmanager.register(ci_timing.Plugin(target, record_tests=not controller),
+                                      "clarp-ci-timing")
     config.addinivalue_line(
         "markers", "probes_provider_clis: the test exercises provider CLI resolution itself, "
                    "so the model-catalog warm-up stub stays off")
@@ -260,6 +314,15 @@ def pytest_configure(config):
     _guard_core.install(child=False)
     BACKEND_CLI_GUARD.log = str(session_log)
     config._clarp_guard = {"root": root, "session_log": str(session_log), "worker": worker}
+
+
+def pytest_collection_modifyitems(config, items):
+    try:
+        import quarantine  # the refactor program's flake list (tests/quarantine.txt)
+    except ImportError:    # a copy of this conftest in a test's temp dir has no sibling modules
+        return
+    if quarantine.active(os.environ):
+        quarantine.skip_listed(items, quarantine.load(), pytest.mark.skip(reason=quarantine.REASON))
 
 
 @pytest.hookimpl(trylast=True)
@@ -413,6 +476,21 @@ def _isolate_agy_skills(_transcript_importer_quiescent, monkeypatch, tmp_path):
         loaded = __import__("sys").modules.get(module)
         if loaded is not None:
             monkeypatch.setattr(loaded, "AGY_SKILLS", target)
+
+
+@pytest.fixture(autouse=True)
+def _reset_delivery_admission(_transcript_importer_quiescent):
+    """F4 delivery admission keeps process-local state (the probe gate and its
+    health counters, the reconcile health counters): every test starts fresh."""
+    for module in ("lib.runtime_attestation", "lib.launch_receipts"):
+        loaded = __import__("sys").modules.get(module)
+        if loaded is None:
+            continue
+        reset = getattr(loaded, "reset_for_tests", None) if module.endswith("attestation") \
+            else getattr(loaded, "reset_health_for_tests", None)
+        if reset is not None:
+            reset()
+    yield
 
 
 @pytest.fixture(autouse=True)

@@ -49,6 +49,12 @@ _SSML_RE = re.compile(r"</?(?:break|speed|volume|emotion)\b[^>]*/?>", re.IGNOREC
 # [laughing], [short pause]. Kept narrow so [x] checkboxes and [1] citations
 # survive.
 _EMOTION_TAG_RE = re.compile(r"\[[a-z][a-z' -]{2,30}\](?![(:])")
+# The <speak> blocks of a reply (S7 step 1d). Two readers, two modes kept
+# as they were: the transcript streamer takes only a bare <speak> tag; the
+# per-message audio lookup also one with attributes. Making them alike is
+# VP-12, a behaviour change.
+_SPEAK_BLOCK_BARE_RE = re.compile(r"<speak>(.*?)</speak>", re.DOTALL | re.IGNORECASE)
+_SPEAK_BLOCK_ATTR_RE = re.compile(r"<speak\b[^>]*>(.*?)</speak>", re.IGNORECASE | re.DOTALL)
 _SPEAK_REGION_RE = re.compile(r"(<speak\b[^>]*>)(.*?)(</speak>|$)",
                               re.DOTALL | re.IGNORECASE)
 _TTS_DROP_SSML_RE = re.compile(r"</?(?:speed|volume|emotion)\b[^>]*/?>", re.IGNORECASE)
@@ -147,6 +153,14 @@ def _drop_vox_for_display(text: str) -> str:
     while (i := s.find(_VOX_SENTINEL)) >= 0:
         s = _close_vox_gap(s, i)
     return s
+
+
+def extract_speak_blocks(text: str, *, attributes: bool) -> list[str]:
+    """The inner text of each closed <speak>...</speak> block, in order and
+    unstripped. ``attributes`` also accepts an opening tag with attributes
+    (``<speak lang="en">``); without it only a bare ``<speak>`` counts."""
+    pattern = _SPEAK_BLOCK_ATTR_RE if attributes else _SPEAK_BLOCK_BARE_RE
+    return pattern.findall(text)
 
 
 def _drop_spoken_emotion_tags(text: str) -> str:

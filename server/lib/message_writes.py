@@ -12,43 +12,54 @@ globals.
 """
 from __future__ import annotations
 
-import datetime as _dt
-import hashlib
 import json
 import time
+from dataclasses import dataclass
 from typing import Any
 
 from .clock import iso_from_ms as _iso_from_ms, now_ms
-from .db import conn
+from .db import conn, note_import_holds_lock
 from . import dreaming, heartbeat, origins, team_leader, team_store
 from .voice_markup import strip_hidden_blocks
-from .message_context import _strip_voice_markup, strip_injected_context
+from .message_text import CALL_OPENING_OPEN, _strip_voice_markup, strip_injected_context
+from .message_import_common import (  # noqa: F401 - facade compatibility
+    _message_id,
+    _client_message_id,
+    _norm_text,
+    _next_revision,
+    _row_payload,
+    _latest_user_provenance,
+    _FINAL_TWIN_WINDOW_S,
+    _RETRY_ECHO_SLACK_S,
+    _parse_timestamp,
+    _is_retry_echo,
+    _PARKED_SEQ_BASE,
+    _client_provenance_rows,
+    _client_provenance,
+)
+from .message_import_rows import (  # noqa: F401 - facade compatibility
+    _park_adopted_occupant,
+    _seq_taken,
+    _restore_unadopted_parked,
+    _parked_twin,
+    _shifted_twin,
+    _FinalRows,
+    _streamed_twin,
+    _diagnose,
+    _related,
+    _final_twins,
+    _delete_slot,
+    _ClientProvenance,
+    _AgyAuthority,
+    _resolve_reply_id,
+    _Upserted,
+    _upsert_row,
+)
 
 
-def _facade():
-    """The `message_store` facade module, looked up at call time so a
-    monkeypatch on it reaches this code path."""
-    from . import message_store
-    return message_store
-
-
-def _message_id(agent_id: str, backend_session_id: str, source_file: str,
-                seq: int) -> str:
-    raw = f"{agent_id}\0{backend_session_id}\0{seq}"
-    return "msg-" + hashlib.sha1(raw.encode("utf-8")).hexdigest()[:20]
-
-
-def _client_message_id(client_msg_id: str) -> str:
-    """Message id for a user message the client authored. The client mints
-    `client_msg_id` once per send and keys its bubble by it; the server stores
-    the durable user row under the SAME id (verbatim) and returns it in /log,
-    so client and server match by identity — never by fuzzy text/sequence
-    reconciliation. Namespaced so it can't collide with transcript ids
-    (which start with 'msg-')."""
-    cid = client_msg_id.strip()
-    return cid if cid.startswith("u-") else f"u-{cid}"
-
-
+from .message_import_writer import (  # noqa: E402,F401  (split_apply: message-import-writer)
+    _facade, _WRITE_VERBS, _TailInvalidated, _WriteNeeded, _ImportWriter, _PlanCursor, _PlanWriter,
+)
 def client_message_trace(client_msg_id: str) -> str:
     """The trace the durable user row was admitted under, or ""."""
     if not client_msg_id.strip():
@@ -61,10 +72,34 @@ def client_message_trace(client_msg_id: str) -> str:
 
 
 def relink_client_message(client_msg_id: str, *, trace_id: str) -> None:
-    """Hand an admitted-but-never-launched user row to a new attempt."""
-    conn().execute(
-        "UPDATE messages SET trace_id = ? WHERE message_id = ? AND role = 'user'",
-        ((trace_id or "").strip() or None, _client_message_id(client_msg_id)),
+    """Hand an admitted-but-never-launched user row to a new attempt.
+
+    The row gets a new revision and its conversation head moves with it, in
+    the caller's transaction, so delta clients see the new trace (RM-N5)."""
+    database = conn()
+    new_trace = (trace_id or "").strip() or None
+    row = database.execute(
+        "SELECT agent_id, backend_session_id, trace_id FROM messages"
+        " WHERE message_id = ? AND role = 'user'",
+        (_client_message_id(client_msg_id),),
+    ).fetchone()
+    if row is None or row["trace_id"] == new_trace:
+        return
+    revision = _next_revision(database)
+    # updated_at stays: it is the row's send order, by which the import links
+    # transcript copies to client rows.
+    database.execute(
+        "UPDATE messages SET trace_id = ?, revision = ?"
+        " WHERE message_id = ? AND role = 'user'",
+        (new_trace, revision, _client_message_id(client_msg_id)),
+    )
+    database.execute(
+        """INSERT INTO conversation_heads (
+               agent_id, backend_session_id, revision, replace_revision
+           ) VALUES (?, ?, ?, 0)
+           ON CONFLICT(agent_id, backend_session_id) DO UPDATE SET
+               revision = MAX(conversation_heads.revision, excluded.revision)""",
+        (row["agent_id"], row["backend_session_id"], revision),
     )
 
 
@@ -75,18 +110,6 @@ def has_client_message(client_msg_id: str) -> bool:
         "SELECT 1 FROM messages WHERE message_id = ? AND role = 'user'",
         (_client_message_id(client_msg_id),),
     ).fetchone() is not None
-
-
-def _norm_text(text: str | None) -> str:
-    return (text or "").strip()
-
-
-def _next_revision(database) -> int:
-    row = database.execute(
-        """UPDATE message_clock SET revision = revision + 1
-            WHERE singleton = 0 RETURNING revision"""
-    ).fetchone()
-    return int(row["revision"])
 
 
 _PHASE_BY_KIND = {"final_answer": "final", "final": "final", "commentary": "commentary"}
@@ -110,32 +133,6 @@ def _row_phases(turns: list[dict[str, Any]]) -> list[str | None]:
         if turn.get("tools") or turn.get("display_cells"):
             work_after = True
     return phases
-
-
-def _row_payload(row) -> tuple:
-    return (
-        row["role"], row["timestamp"], row["text"], row["kind"],
-        row["tool_name"], row["tools_json"], row["display_cells_json"],
-        row["origin"] or "user", row["sender_agent_id"] or "",
-    )
-
-
-def _latest_user_provenance(database, agent_id: str,
-                            backend_session_id: str) -> tuple[str, str, str]:
-    row = database.execute(
-        """SELECT message_id, origin, sender_agent_id
-             FROM messages
-            WHERE agent_id = ? AND backend_session_id = ? AND role = 'user'
-            ORDER BY updated_at DESC, revision DESC, seq DESC
-            LIMIT 1""",
-        (agent_id, backend_session_id),
-    ).fetchone()
-    if row is None:
-        return "", "user", ""
-    return (
-        row["message_id"], row["origin"] or "user",
-        row["sender_agent_id"] or "",
-    )
 
 
 def latest_turn_user_origin(*, agent_id: str, backend_session_id: str = "",
@@ -573,68 +570,11 @@ def carry_conversation(*, agent_id: str, from_session_id: str,
 IMPORT_COMMIT_EVERY = 200
 IMPORT_WRITE_BUDGET_SECONDS = 0.025
 IMPORT_WRITER_YIELD_SECONDS = 0.010
-
-_WRITE_VERBS = frozenset({"INSERT", "UPDATE", "DELETE", "REPLACE"})
-
-
-class _WriteNeeded(Exception):
-    """The probe pass of an import found a row to change."""
-
-
-class _ImportWriter:
-    """The import's connection, in one of two passes.
-
-    An import re-reads the whole transcript on every watcher tick, and almost
-    every time nothing changed (11,385 of 11,396 upserts over twelve live
-    imports on 2026-10-10 rewrote an identical row). The probe pass reads
-    one snapshot (a deferred BEGIN) without the write lock and stops at the
-    first write it would make; it records nothing, so an unchanged transcript
-    writes nothing at all. Otherwise the import runs again as the locked
-    pass: every statement inside BEGIN IMMEDIATE, as before, so a decision
-    read from a live row cannot go stale before the write that acts on it,
-    committed in budgeted batches. Only the locked pass runs the recording
-    helpers (team messages, Oracle delegations, Dreaming, heartbeats), once.
-    """
-
-    def __init__(self, database, *, locked: bool):
-        self._database = database
-        self.locked = locked
-        self.began_at: float | None = None
-        self.began_seq = 0
-        self.seq = 0
-
-    def execute(self, sql, parameters=()):
-        if not self.locked:
-            if str(sql).lstrip().split(None, 1)[0].upper() in _WRITE_VERBS:
-                raise _WriteNeeded
-            if not self._database.in_transaction:
-                # One snapshot for the whole probe: separate autocommit reads
-                # could see a concurrent write half-applied and wrongly
-                # conclude there is nothing to write.
-                self._database.execute("BEGIN")
-        elif self.began_at is None:
-            self._database.execute("BEGIN IMMEDIATE")
-            self.began_at = time.monotonic()
-            self.began_seq = self.seq
-        return self._database.execute(sql, parameters)
-
-    def due(self) -> bool:
-        """Whether the open batch has reached its row count or time budget."""
-        if self.began_at is None:
-            return False
-        every = _facade().IMPORT_COMMIT_EVERY
-        return (every > 0 and self.seq - self.began_seq >= every) or \
-            time.monotonic() - self.began_at >= _facade().IMPORT_WRITE_BUDGET_SECONDS
-
-    def commit(self) -> None:
-        """End the batch; the next statement opens the following one."""
-        if self.began_at is not None:
-            self._database.execute("COMMIT")
-            self.began_at = None
-
-    def __getattr__(self, name):
-        return getattr(self._database, name)
-
+# RM-N7: at least once per second of held lock, yield longer than SQLite's
+# busy handler's longest sleep (100 ms), so a writer waiting in it, in any
+# process and on any connection, wakes inside a gap.
+IMPORT_FAIR_YIELD_EVERY_SECONDS = 1.0
+IMPORT_FAIR_YIELD_SECONDS = 0.110
 
 def store_transcript_turns(*, agent_id: str, backend_session_id: str,
                            source_file: str, turns: list[dict[str, Any]],
@@ -642,6 +582,7 @@ def store_transcript_turns(*, agent_id: str, backend_session_id: str,
                            captured: dict[str, Any] | None = None,
                            on_stored=None,
                            out_seqs: list[int] | None = None,
+                           checkpoint_status: dict | None = None,
                            ) -> list[dict[str, Any]]:
     """Import a whole parsed transcript (the authoritative full import).
 
@@ -657,30 +598,53 @@ def store_transcript_turns(*, agent_id: str, backend_session_id: str,
     # before taking SQLite's single writer lock, once per assistant message.
     visible_replies = _visible_replies(turns)
     database = _facade().conn()
-    for locked in (False, True):
-        writer = _ImportWriter(database, locked=locked)
-        try:
-            out = _store_transcript_turns_txn(
-                writer, agent_id=agent_id,
-                backend_session_id=backend_session_id,
-                source_file=source_file, turns=turns,
-                capture_at=capture_at, captured=captured, out_seqs=out_seqs,
-                visible_replies=visible_replies)
-            if on_stored is not None:
-                _write_checkpoint(writer, database, on_stored, captured)
-            writer.commit()
-            if not locked and database.in_transaction:
-                database.execute("COMMIT")  # the probe's read snapshot
-            return out
-        except _WriteNeeded:
-            if database.in_transaction:
-                database.execute("ROLLBACK")  # end the probe's read snapshot
-            continue
-        except Exception:
-            if database.in_transaction:
-                database.execute("ROLLBACK")
-            raise
-    raise AssertionError("the locked import pass cannot need a write")
+    # Pure transcript work runs once, never while holding the writer. The
+    # database-dependent prelude belongs to the probe's single read snapshot.
+    phases = _row_phases(turns)
+    writer = _ImportWriter(database, locked=False)
+    try:
+        prelude = _prepare_import_prelude(
+            writer, agent_id, backend_session_id, turns, phases=phases)
+        out = _store_transcript_turns_txn(
+            writer, agent_id=agent_id,
+            backend_session_id=backend_session_id,
+            source_file=source_file, turns=turns,
+            capture_at=capture_at, captured=captured, out_seqs=out_seqs,
+            visible_replies=visible_replies, prelude=prelude.for_pass())
+        if on_stored is not None and writer.checkpoint_allowed(checkpoint_status):
+            _write_checkpoint(writer, database, on_stored, captured)
+        if database.in_transaction:
+            database.execute("COMMIT")
+        return out
+    except _WriteNeeded:
+        if database.in_transaction:
+            database.execute("ROLLBACK")
+    except Exception:
+        if database.in_transaction:
+            database.execute("ROLLBACK")
+        raise
+    # Copy consumable lists before admission. Re-read only the prelude's raw
+    # database inputs under BEGIN IMMEDIATE. Unrelated commits do not matter;
+    # changed inputs rebuild just their component, without a second probe or
+    # a new failure path. Row decisions remain protected, as before RM-N10.
+    prepared = prelude.for_pass()
+    writer = _ImportWriter(database, locked=True)
+    try:
+        prepared = _revalidate_import_prelude(writer, agent_id, backend_session_id, prepared)
+        out = _store_transcript_turns_txn(
+            writer, agent_id=agent_id,
+            backend_session_id=backend_session_id,
+            source_file=source_file, turns=turns,
+            capture_at=capture_at, captured=captured, out_seqs=out_seqs,
+            visible_replies=visible_replies, prelude=prepared)
+        if on_stored is not None and writer.checkpoint_allowed(checkpoint_status):
+            _write_checkpoint(writer, database, on_stored, captured)
+        writer.finish()
+        return out
+    except Exception:
+        if database.in_transaction:
+            database.execute("ROLLBACK")
+        raise
 
 
 def _visible_replies(turns: list[dict[str, Any]]) -> list[str]:
@@ -721,90 +685,63 @@ def store_transcript_tail(*, agent_id: str, backend_session_id: str,
                           start_seq: int, carry: dict[str, Any],
                           capture_at: int | None = None,
                           captured: dict[str, Any] | None = None,
+                          on_stored=None,
+                          expected_prelude=None,
+                          checkpoint_status: dict | None = None,
                           ) -> list[dict[str, Any]]:
-    """Store only the turns from ``start_seq`` on, resuming from ``carry``.
+    """Apply a certified tail through the full import's admission protocol.
 
-    The incremental import's store. Production never calls it: the shadow
-    (lib.transcript_incremental) only plans it with ``plan_transcript_tail``;
-    the equivalence tests apply it to prove it matches the full import."""
+    Text/phase work stays outside the writer. One probe snapshot prepares
+    database inputs, which are exactly revalidated under BEGIN IMMEDIATE.
+    The optional durable checkpoint shares the final row transaction and
+    the full import's savepoint failure handling.
+    """
     visible_replies = _visible_replies(turns)
+    phases = _row_phases(turns)
     database = _facade().conn()
-    writer = _ImportWriter(database, locked=True)
+    writer = _ImportWriter(database, locked=False)
     try:
+        prelude = _prepare_import_prelude(
+            writer, agent_id, backend_session_id, turns, phases=phases,
+            guard_carry=expected_prelude is not None)
+        if expected_prelude is not None and not prelude.same_carry_inputs(expected_prelude):
+            raise _TailInvalidated("tail_carry_inputs_changed")
         out = _store_transcript_turns_txn(
             writer, agent_id=agent_id, backend_session_id=backend_session_id,
-            source_file=source_file, turns=turns,
-            start_seq=start_seq, carry=carry,
+            source_file=source_file, turns=turns, start_seq=start_seq, carry=carry,
             capture_at=capture_at, captured=captured,
-            visible_replies=visible_replies)
-        writer.commit()
+            visible_replies=visible_replies, prelude=prelude.for_pass())
+        if on_stored is not None and writer.checkpoint_allowed(checkpoint_status):
+            _write_checkpoint(writer, database, on_stored, captured)
+        if database.in_transaction:
+            database.execute("COMMIT")
+        return out
+    except _WriteNeeded:
+        if database.in_transaction:
+            database.execute("ROLLBACK")
+    except Exception:
+        if database.in_transaction:
+            database.execute("ROLLBACK")
+        raise
+    prepared = prelude.for_pass()
+    writer = _ImportWriter(database, locked=True)
+    try:
+        prepared = _revalidate_import_prelude(writer, agent_id, backend_session_id, prepared)
+        if expected_prelude is not None and not prepared.same_carry_inputs(expected_prelude):
+            raise _TailInvalidated("tail_carry_inputs_changed")
+        out = _store_transcript_turns_txn(
+            writer, agent_id=agent_id, backend_session_id=backend_session_id,
+            source_file=source_file, turns=turns, start_seq=start_seq, carry=carry,
+            capture_at=capture_at, captured=captured,
+            visible_replies=visible_replies, prelude=prepared)
+        if on_stored is not None and writer.checkpoint_allowed(checkpoint_status):
+            _write_checkpoint(writer, database, on_stored, captured)
+        writer.finish()
         return out
     except Exception:
         if database.in_transaction:
             database.execute("ROLLBACK")
         raise
-
-
-class _PlanCursor:
-    def __init__(self, rows=(), rowcount=0):
-        self._rows = list(rows)
-        self.rowcount = rowcount
-
-    def fetchone(self):
-        return self._rows[0] if self._rows else None
-
-    def fetchall(self):
-        return list(self._rows)
-
-
-class _PlanWriter:
-    """Runs the import against one read snapshot and writes nothing.
-
-    Every write is recorded instead: revisions come from a private counter
-    above the current clock, deletes report the rows they would remove. Like
-    the probe it is unlocked, so the recording helpers (team messages,
-    Dreaming, heartbeats) stay untouched."""
-
-    locked = False
-
-    def __init__(self, database):
-        self._database = database
-        self.seq = 0
-        self.began_at = None
-        self.deleted: set[str] = set()
-        self.updated: set[str] = set()
-        if not database.in_transaction:
-            database.execute("BEGIN")
-        row = database.execute(
-            "SELECT revision FROM message_clock WHERE singleton = 0").fetchone()
-        self.revision_floor = int(row["revision"]) if row else 0
-        self._revision = self.revision_floor
-
-    def execute(self, sql, parameters=()):
-        text = str(sql).lstrip()
-        verb = text.split(None, 1)[0].upper()
-        if verb not in _WRITE_VERBS:
-            return self._database.execute(sql, parameters)
-        if "message_clock" in text:
-            self._revision += 1
-            return _PlanCursor([{"revision": self._revision}], 1)
-        if verb == "DELETE" and text.upper().startswith("DELETE FROM MESSAGES"):
-            ids = [row[0] for row in self._database.execute(
-                "SELECT message_id " + text[len("DELETE "):], parameters).fetchall()]
-            self.deleted.update(ids)
-            return _PlanCursor([], len(ids))
-        if verb == "UPDATE" and text.upper().startswith("UPDATE MESSAGES"):
-            self.updated.add(str(parameters[-1]))
-        return _PlanCursor([], 1)
-
-    def due(self) -> bool:
-        return False
-
-    def commit(self) -> None:
-        pass
-
-    def __getattr__(self, name):
-        return getattr(self._database, name)
 
 
 def plan_transcript_tail(*, agent_id: str, backend_session_id: str,
@@ -833,154 +770,84 @@ def plan_transcript_tail(*, agent_id: str, backend_session_id: str,
             database.execute("ROLLBACK")
 
 
-_FINAL_TWIN_WINDOW_S = 600
-# A native copy is sent after its client row is written; allow for clock and
-# write ordering before deciding a copy predates the next row.
-_RETRY_ECHO_SLACK_S = 1.0
+@dataclass(frozen=True)
+class _ImportPrelude:
+    turn_index: Any
+    phases: list[str | None]
+    client_user_provenance: dict[str, list[tuple[str, str, str, str]]]
+    user_provenance: tuple[str, str, str]
+    client_rows: list
+    carry_rows: list | None = None
+    oracle_rows: list | None = None
+
+    def raw_carry_inputs(self) -> tuple:
+        return (self.turn_index._rows, self.client_rows, self.user_provenance,
+                self.carry_rows, self.oracle_rows)
+
+    def same_carry_inputs(self, previous) -> bool:
+        """Exact ordered raw rows; revisions/counts alone cannot certify carry."""
+        expected = previous.raw_carry_inputs() if isinstance(previous, _ImportPrelude) else previous
+        return (self.carry_rows is not None and expected[3] is not None
+                and self.raw_carry_inputs() == expected)
+
+    def for_pass(self) -> _ImportPrelude:
+        return _ImportPrelude(
+            self.turn_index, self.phases,
+            {key: list(rows) for key, rows in self.client_user_provenance.items()},
+            self.user_provenance, self.client_rows, self.carry_rows, self.oracle_rows)
 
 
-def _parse_timestamp(value: Any) -> _dt.datetime | None:
-    try:
-        stamp = _dt.datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    return stamp if stamp.tzinfo else stamp.replace(tzinfo=_dt.timezone.utc)
+def _prepare_import_prelude(database, agent_id, backend_session_id, turns,
+                            *, phases=None, guard_carry=False, raw_only=False):
+    from . import message_turns
+    if raw_only:
+        # A checkpoint callback captures only ordered raw inputs in its final
+        # transaction. No normalization/index/phase work moves under the writer.
+        return (
+            message_turns.TurnIndex.read_rows(database, agent_id),
+            _client_provenance_rows(database, agent_id, backend_session_id),
+            _latest_user_provenance(database, agent_id, backend_session_id),
+            database.execute("SELECT * FROM messages WHERE agent_id=? ORDER BY message_id",
+                             (agent_id,)).fetchall(),
+            database.execute("SELECT * FROM oracle_delegations WHERE agent_id=? ORDER BY delegation_id",
+                             (agent_id,)).fetchall())
+    turn_index = message_turns.TurnIndex(database, agent_id)
+    phases = _row_phases(turns) if phases is None else phases
+    rows = _client_provenance_rows(database, agent_id, backend_session_id)
+    carry_rows = database.execute(
+        "SELECT * FROM messages WHERE agent_id=? ORDER BY message_id", (agent_id,)
+    ).fetchall() if guard_carry else None
+    oracle_rows = database.execute(
+        "SELECT * FROM oracle_delegations WHERE agent_id=? ORDER BY delegation_id", (agent_id,)
+    ).fetchall() if guard_carry else None
+    return _ImportPrelude(turn_index, phases, _client_provenance(rows),
+                          _latest_user_provenance(database, agent_id, backend_session_id),
+                          rows, carry_rows, oracle_rows)
 
 
-def _is_retry_echo(native_timestamp: Any, next_client_timestamp: Any) -> bool:
-    """A native copy of the request just matched, not of the next client row
-    with the same text: that row was written after this copy was sent."""
-    if next_client_timestamp is None:
-        return True
-    native_at = _parse_timestamp(native_timestamp)
-    next_at = _parse_timestamp(next_client_timestamp)
-    return (native_at is not None and next_at is not None
-            and (next_at - native_at).total_seconds() > _RETRY_ECHO_SLACK_S)
-
-
-class _FinalRows:
-    """Finalized live rows of one conversation, read once per write batch.
-
-    Every assistant turn of an import looks for its request's final row or a
-    twin among them. Asking SQLite each time scanned the whole conversation
-    per turn (no index covers ``source_file``): ~33 s of a 45 s import of a
-    13k-row transcript, all of it holding the writer lock. Between commits the
-    rows change through this import's own deletes and upserts, which
-    ``discard`` follows; each commit drops the cache, since other writers
-    may run then.
-    """
-
-    def __init__(self, database, agent_id: str, backend_session_id: str):
-        self._database = database
-        self._key = (agent_id, backend_session_id)
-        self._rows: list[tuple[str, str, str, Any]] | None = None
-
-    def invalidate(self) -> None:
-        self._rows = None
-
-    def discard(self, message_ids) -> None:
-        if self._rows is not None:
-            gone = set(message_ids)
-            self._rows = [row for row in self._rows if row[0] not in gone]
-
-    def rows(self) -> list[tuple[str, str, str, Any]]:
-        """(message_id, source_file, visible text, timestamp) per row."""
-        if self._rows is None:
-            self._rows = [
-                (row["message_id"], row["source_file"],
-                 _strip_voice_markup(row["text"]), row["timestamp"])
-                for row in self._database.execute(
-                    """SELECT message_id, source_file, text, timestamp FROM messages
-                        WHERE agent_id = ? AND backend_session_id = ? AND role = 'assistant'
-                          AND source_file LIKE 'final:%'""",
-                    self._key,
-                ).fetchall()
-            ]
-        return self._rows
-
-
-def _streamed_twin(database, agent_id: str, backend_session_id: str, text: str,
-                   *, exclude: set[str], trace: str) -> str:
-    """The still-live streamed row of this reply's own turn that it completes.
-
-    Kept rows of several turns can coexist, so only a row of the reply's turn
-    qualifies. A reply whose turn is unknown takes none: a missing trace is
-    missing identity, not proof of a shared turn. A text match in another turn
-    is never taken. Exact text wins over a prefix; among equals the oldest."""
-    visible = _strip_voice_markup(text)
-    if not visible or not trace:
-        return ""
-    exact = prefix = elsewhere = ""
-    for row in database.execute(
-            """SELECT message_id, text, trace_id FROM messages
-                WHERE agent_id=? AND backend_session_id=? AND role='assistant'
-                  AND source_file LIKE 'live:%'
-                ORDER BY timestamp, seq""",
-            (agent_id, backend_session_id)).fetchall():
-        if row["message_id"] in exclude:
-            continue
-        streamed = _strip_voice_markup(row["text"])
-        if not _related(visible, streamed):
-            continue
-        if (row["trace_id"] or "") != trace:
-            elsewhere = elsewhere or str(row["message_id"])
-        elif streamed == visible:
-            exact = exact or str(row["message_id"])
-        else:
-            prefix = prefix or str(row["message_id"])
-    if not (exact or prefix) and elsewhere:
-        _diagnose("transcriptLiveTwinOtherTurn",
-                  f"agent={agent_id} trace={trace} kept={elsewhere}")
-    return exact or prefix
-
-
-def _diagnose(event: str, detail: str) -> None:
-    """A diagnostic line that can never fail the import it describes."""
-    try:
-        from .log import log
-        log(event, detail)
-    except Exception:  # noqa: BLE001 - an optional diagnostic must not fail the import
-        pass
-
-
-def _related(a: str, b: str) -> bool:
-    return bool(a and b) and (a.startswith(b) or b.startswith(a))
-
-
-def _final_twins(final_rows: _FinalRows, *, text: str, timestamp: Any,
-                 exclude: set[str]) -> list[str]:
-    """Finalized live rows showing `text`, written near `timestamp`."""
-    visible = _strip_voice_markup(text)
-    if not visible:
-        return []
-    reply_at = _parse_timestamp(timestamp)
-    if reply_at is None:
-        return []
-    twins = []
-    for message_id, _source, row_visible, row_timestamp in final_rows.rows():
-        if message_id in exclude or row_visible != visible:
-            continue
-        written = _parse_timestamp(row_timestamp)
-        if written is None:
-            continue
-        if abs((written - reply_at).total_seconds()) <= _FINAL_TWIN_WINDOW_S:
-            twins.append(message_id)
-    return twins
-
-
-def _delete_slot(database, agent_id: str, backend_session_id: str,
-                 source_file: str, seq: int) -> int:
-    """Clear an import slot, taking the write lock only when it is occupied."""
-    if database.execute(
-            """SELECT 1 FROM messages WHERE agent_id = ? AND backend_session_id = ?
-                  AND source_file = ? AND seq = ? LIMIT 1""",
-            (agent_id, backend_session_id, source_file, seq)).fetchone() is None:
-        return 0
-    return database.execute(
-        """DELETE FROM messages
-            WHERE agent_id = ? AND backend_session_id = ?
-              AND source_file = ? AND seq = ?""",
-        (agent_id, backend_session_id, source_file, seq)).rowcount
+def _revalidate_import_prelude(database, agent_id, backend_session_id,
+                              prelude: _ImportPrelude) -> _ImportPrelude:
+    from . import message_turns
+    # Exact ordered raw-row comparisons cover inserts, edits, deletes, changes
+    # of membership and ordering. A count/MAX fingerprint cannot certify that.
+    # No normalization or index rebuilding is done unless that input changed.
+    turn_rows = message_turns.TurnIndex.read_rows(database, agent_id)
+    client_rows = _client_provenance_rows(database, agent_id, backend_session_id)
+    user = _latest_user_provenance(database, agent_id, backend_session_id)
+    turn_index = prelude.turn_index
+    if turn_rows != turn_index._rows:
+        turn_index = message_turns.TurnIndex.from_rows(turn_rows)
+    provenance = prelude.client_user_provenance
+    if client_rows != prelude.client_rows:
+        provenance = _client_provenance(client_rows)
+    carry_rows = database.execute(
+        "SELECT * FROM messages WHERE agent_id=? ORDER BY message_id", (agent_id,)
+    ).fetchall() if prelude.carry_rows is not None else None
+    oracle_rows = database.execute(
+        "SELECT * FROM oracle_delegations WHERE agent_id=? ORDER BY delegation_id", (agent_id,)
+    ).fetchall() if prelude.carry_rows is not None else None
+    return _ImportPrelude(turn_index, prelude.phases, provenance, user, client_rows,
+                          carry_rows, oracle_rows)
 
 
 def _store_transcript_turns_txn(database, *, agent_id: str,
@@ -992,6 +859,7 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
                                 captured: dict[str, Any] | None = None,
                                 out_seqs: list[int] | None = None,
                                 visible_replies: list[str] | None = None,
+                                prelude: _ImportPrelude | None = None,
                                 ) -> list[dict[str, Any]]:
     """Import ``turns`` as transcript rows ``start_seq`` onward.
 
@@ -1005,36 +873,14 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
     if out_seqs is not None:
         out_seqs.clear()
     latest_revision = 0
-    from . import message_turns
-    # Which turn wrote each row, how that turn ended, and each text row's
-    # phase (docs/live-items.md §9).
-    turn_index = message_turns.TurnIndex(database, agent_id)
-    phases = _row_phases(turns)
+    prelude = prelude or _prepare_import_prelude(database, agent_id, backend_session_id, turns)
+    turn_index, phases = prelude.turn_index, prelude.phases
     touched_traces: set[str] = set()
     newest_trace = ""
-    # User turns the client already recorded durably (keyed by client_msg_id).
-    # Claude's transcript carries its own copy of each; we link those back to
-    # the client rows by text in send order rather than inserting a duplicate.
-    client_user_provenance: dict[str, list[tuple[str, str, str, str]]] = {}
-    for r in database.execute(
-        """SELECT message_id, text, origin, sender_agent_id, timestamp FROM messages
-            WHERE agent_id = ? AND backend_session_id = ?
-              AND source_file LIKE 'client:%'
-            ORDER BY updated_at ASC, seq ASC""",
-        (agent_id, backend_session_id),
-    ).fetchall():
-        key = _norm_text(r["text"])
-        client_user_provenance.setdefault(key, []).append((
-            r["message_id"],
-            r["origin"] or "user",
-            r["sender_agent_id"] or "",
-            r["timestamp"],
-        ))
-    # Client rows this import linked to transcript turns, in match order.
-    consumed_client_ids: list[str] = []
+    provenance = _ClientProvenance(database, agent_id, backend_session_id,
+                                   prepared=prelude.client_user_provenance)
     if carry is None:
-        latest_user_key, current_origin, current_sender_agent_id = _latest_user_provenance(
-            database, agent_id, backend_session_id)
+        latest_user_key, current_origin, current_sender_agent_id = prelude.user_provenance
         # Incremental transcript reads may begin with assistant-only deltas. Carry
         # the durable heartbeat user key across those reads so every partial update
         # is still accounted once per heartbeat turn, never once per delta.
@@ -1042,24 +888,11 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
             latest_user_key if current_origin == "heartbeat" else ""
         )
     else:
-        consumed_client_ids = list(carry["consumed_client_ids"])
-        consumed = set(consumed_client_ids)
-        for key in list(client_user_provenance):
-            remaining = [r for r in client_user_provenance[key] if r[0] not in consumed]
-            if remaining:
-                client_user_provenance[key] = remaining
-            else:
-                del client_user_provenance[key]
+        provenance.resume(carry["consumed_client_ids"])
         current_origin = carry["current_origin"]
         current_sender_agent_id = carry["current_sender_agent_id"]
         current_heartbeat_key = carry["current_heartbeat_key"]
-    assistant_ordinal = 0
-    # Tools of agy turns whose final row the stream owns: trace -> (row, tools, cells).
-    authority_tools: dict[str, tuple[str, list, list]] = {}
-    # A dispatched turn's range stays open until the next Clarp turn binds, so
-    # once a later user message appears its tools are complete: assistant turns
-    # after that (agy run from a terminal, say) are not its own.
-    closed_authority: set[str] = set()
+    agy = _AgyAuthority()
     # The request whose client row was matched last and has had no answer yet.
     # When an attempt fails, the dispatcher sends the same prompt again and
     # the backend records one more copy of it per retry.
@@ -1068,11 +901,10 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
     adopted_final_ids: set[str] = set()
     skipped_slot_removed = False
     final_rows = _FinalRows(database, agent_id, backend_session_id)
+    # Rows this import already wrote: never moved again (RM-N1).
+    placed_ids: set[str] = set()
     if carry is not None:
-        assistant_ordinal = int(carry["assistant_ordinal"])
-        authority_tools = {trace: (entry[0], list(entry[1]), list(entry[2]))
-                           for trace, entry in carry["authority_tools"].items()}
-        closed_authority = set(carry["closed_authority"])
+        agy.resume(carry)
         unanswered_key = carry["unanswered_key"]
         current_request_trace = carry["current_request_trace"]
         adopted_final_ids = set(carry["adopted_final_ids"])
@@ -1082,13 +914,13 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
         """The carried state as the loop stands now (lib.transcript_incremental)."""
         captured.clear()
         captured.update(json.loads(json.dumps({
-            "consumed_client_ids": consumed_client_ids,
+            "consumed_client_ids": provenance.consumed,
             "current_origin": current_origin,
             "current_sender_agent_id": current_sender_agent_id,
             "current_heartbeat_key": current_heartbeat_key,
-            "assistant_ordinal": assistant_ordinal,
-            "authority_tools": authority_tools,
-            "closed_authority": sorted(closed_authority),
+            "assistant_ordinal": agy.ordinal,
+            "authority_tools": agy.tools,
+            "closed_authority": sorted(agy.closed),
             "unanswered_key": unanswered_key,
             "current_request_trace": current_request_trace,
             "adopted_final_ids": sorted(adopted_final_ids),
@@ -1114,7 +946,7 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
         database.commit()
         # SQLite does not promise fair immediate writer reacquisition.
         # Yield outside the transaction so admissions can take the writer.
-        time.sleep(_facade().IMPORT_WRITER_YIELD_SECONDS)
+        database.yield_writer()
         final_rows.invalidate()
 
     # Each assistant reply of this batch with the turn it answers, for the
@@ -1132,20 +964,11 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
         if role == "assistant":
             reply_trace = current_request_trace or turn_index.trace_at(turn.get("timestamp"))
         if role == "user":
-            closed_authority.update(authority_tools)
+            agy.close_open()
         if role == "assistant" and not turn.get("failed"):
             unanswered_key = ""
         if role == "assistant":
-            authority = database.execute(
-                """SELECT trace_id, authoritative_message_id FROM agy_turn_authority
-                     WHERE agent_id=? AND backend_session_id=?
-                       AND assistant_start_ordinal<=?
-                       AND (assistant_end_ordinal IS NULL
-                            OR ?<assistant_end_ordinal)
-                     ORDER BY updated_at DESC LIMIT 1""",
-                (agent_id, backend_session_id, assistant_ordinal,
-                 assistant_ordinal),).fetchone()
-            assistant_ordinal += 1
+            authority = agy.lookup(database, agent_id, backend_session_id)
             visible_reply = visible_replies[index] if visible_replies is not None \
                 else _strip_voice_markup(turn.get("text"))
             if visible_reply:
@@ -1158,18 +981,24 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
                 # authoritative across every later /log or watcher import.
                 # Its text, that is: the tool calls the transcript records for
                 # the turn are carried onto that row below.
-                if authority["authoritative_message_id"] and \
-                        authority["trace_id"] not in closed_authority:
-                    _, tools, cells = authority_tools.setdefault(
-                        authority["trace_id"], (authority["authoritative_message_id"], [], []))
-                    tools.extend(turn.get("tools") or [])
-                    cells.extend(turn.get("display_cells") or [])
+                agy.collect(authority, turn)
+                # Nothing is written at this position: whatever an earlier
+                # import left here would outlive a shift (RM-N1).
+                removed = _delete_slot(database, agent_id, backend_session_id,
+                                       source_file, seq)
+                skipped_slot_removed = skipped_slot_removed or removed > 0
                 continue
         text = str(turn.get("text") or "")
         origin = "user"
         sender_agent_id = ""
         msg_id = str(turn.get("id") or _message_id(
             agent_id, backend_session_id, source_file, seq))
+        if role == "user" and text.lstrip().startswith(CALL_OPENING_OPEN):
+            # A listen-first initiative's input (docs/agent-rings.md): the
+            # agent opens the call; it is never a user row.
+            removed = _delete_slot(database, agent_id, backend_session_id, source_file, seq)
+            skipped_slot_removed = skipped_slot_removed or removed > 0
+            continue
         if role == "user":
             text = strip_injected_context(text)
             if heartbeat.should_skip_heartbeat_prompt(text):
@@ -1189,19 +1018,24 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
         elif role == "assistant":
             text = strip_hidden_blocks(text)
             heartbeat_accounting = ""
-            skip, text = heartbeat.strip_heartbeat_ack(text)
+            # Each token counts only in its own automation's turn (AUT-07).
+            skip, text = origins.ack_for_origin(
+                heartbeat.strip_heartbeat_ack(text), text, token=heartbeat.HEARTBEAT_OK,
+                origin=current_origin, own="heartbeat")
             if skip:
                 if current_origin == "heartbeat":
                     heartbeat_accounting = "noop"
                 text = "Heartbeat check: no action needed."
             # The probe only transforms; the locked pass records, once.
             skip, text = dreaming.process_assistant_text(
-                agent_id, text, live=not database.locked)
+                agent_id, text, live=not database.locked, origin=current_origin)
             if skip:
                 text = "Dreaming check: no action needed."
-            skip, text = team_leader.strip_leader_noop(text)
+            skip, text = origins.ack_for_origin(
+                team_leader.strip_leader_noop(text), text, token=team_leader.LEADER_NOOP,
+                origin=current_origin, own="leader_tick")
             if skip:
-                if database.locked:
+                if database.locked and current_origin == "leader_tick":
                     team_leader.record_leader_noop(agent_id)
                 text = "Leader check: no action needed."
             if (
@@ -1216,7 +1050,7 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
         # second copy; the client row stands in for it (matched by send order).
         if role == "user" and turn.get("id") is None:
             key = _norm_text(text)
-            rows = client_user_provenance.get(key) or []
+            rows = provenance.candidates(key)
             if key and key == unanswered_key and _is_retry_echo(
                     turn.get("timestamp"), rows[0][3] if rows else None):
                 # A retry's copy: the matched client row already stands for
@@ -1227,16 +1061,14 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
                 skipped_slot_removed = skipped_slot_removed or removed > 0
                 continue
             if rows:
-                client_msg_id, current_origin, current_sender_agent_id, _ = rows.pop(0)
-                consumed_client_ids.append(client_msg_id)
+                client_msg_id, current_origin, current_sender_agent_id, _ = \
+                    provenance.take(key, rows)
                 unanswered_key = key
                 authored = database.execute("SELECT trace_id FROM messages WHERE message_id=?", (client_msg_id,)).fetchone()
                 current_request_trace = (authored["trace_id"] or "") if authored else ""
                 current_heartbeat_key = (
                     client_msg_id if current_origin == "heartbeat" else ""
                 )
-                if not rows:
-                    client_user_provenance.pop(key, None)
                 # Nothing is written at this position, so whatever an earlier
                 # import left here would outlive it. When the parser starts
                 # hiding a message every later turn shifts down, and the old
@@ -1255,125 +1087,35 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
         elif role == "assistant":
             origin, sender_agent_id = current_origin, current_sender_agent_id
         if role == "assistant" and not turn.get("id"):
-            # Keep the already visible completion identity when its exact
-            # authored request and final text identify this transcript reply.
-            # Never deduplicate equal replies belonging to different requests.
-            slot = database.execute("SELECT message_id FROM messages WHERE agent_id=? AND backend_session_id=? AND source_file=? AND seq=? AND role='assistant'",
-                (agent_id, backend_session_id, source_file, seq)).fetchone()
-            if slot:
-                msg_id = slot["message_id"]
-            elif current_request_trace:
-                request_source = "final:" + current_request_trace
-                visible = _strip_voice_markup(text)
-                matching = [message_id for message_id, source, row_visible, _ts in final_rows.rows()
-                            if source == request_source and message_id not in adopted_final_ids
-                            and row_visible == visible]
-                if len(matching) == 1:
-                    msg_id = matching[0]
-                    adopted_final_ids.add(msg_id)
-            if not slot and msg_id not in adopted_final_ids:
-                # The row this reply streamed into becomes its durable row,
-                # in place: same id, so no client sees it vanish and return.
-                streamed = _streamed_twin(database, agent_id, backend_session_id,
-                                          text, exclude=adopted_final_ids,
-                                          trace=reply_trace)
-                if streamed:
-                    msg_id = streamed
-                    adopted_final_ids.add(msg_id)
-            if msg_id not in adopted_final_ids:
-                # Without a request trace (the user turn could not be linked
-                # to its client row) the finalized live row was never adopted
-                # and stayed beside this reply as a second, identical bubble.
-                # Match it by visible text within the same few minutes; a
-                # reply already imported sheds an earlier import's twin.
-                twins = _final_twins(final_rows,
-                                     text=text, timestamp=turn.get("timestamp"),
-                                     exclude=adopted_final_ids | {msg_id})
-                if len(twins) == 1 and not slot and not current_request_trace:
-                    msg_id = twins[0]
-                    adopted_final_ids.add(msg_id)
-                elif twins and slot:
-                    removed = database.execute(
-                        f"DELETE FROM messages WHERE message_id IN ({','.join('?' * len(twins))})",
-                        twins).rowcount
-                    final_rows.discard(twins)
-                    skipped_slot_removed = skipped_slot_removed or removed > 0
-        timestamp = turn.get("timestamp")
-        kind = turn.get("kind")
-        tool_name = turn.get("tool_name")
-        tools = turn.get("tools") if isinstance(turn.get("tools"), list) else []
-        display_cells = (
-            turn.get("display_cells")
-            if isinstance(turn.get("display_cells"), list)
-            else []
-        )
-        existing = database.execute(
-            """SELECT role, timestamp, text, kind, tool_name, tools_json,
-                      display_cells_json, updated_at, revision,
-                      origin, sender_agent_id, trace_id, phase, source_file, seq
-                 FROM messages WHERE message_id = ?""",
-            (msg_id,),
-        ).fetchone()
-        row_trace = (current_request_trace if role == "assistant" else str(turn.get("trace_id") or "")) \
-            or turn_index.trace_at(timestamp) or ((existing["trace_id"] or "") if existing else "")
-        outcome = turn_index.outcomes.get(row_trace)
-        tools = message_turns.settle_statuses(tools, outcome)
-        display_cells = message_turns.settle_statuses(display_cells, outcome)
-        phase = phases[index] if role == "assistant" else None
-        newest_trace = row_trace or newest_trace
-        tools_json = json.dumps(tools, separators=(",", ":"))
-        display_cells_json = json.dumps(display_cells, separators=(",", ":"))
-        payload = (
-            role, timestamp, text, kind, tool_name,
-            tools_json, display_cells_json, origin, sender_agent_id,
-        )
-        unchanged = existing is not None and _row_payload(existing) == payload \
-            and (existing["trace_id"] or "") == row_trace and existing["phase"] == phase
-        if row_trace and not unchanged:
+            msg_id, changed = _resolve_reply_id(
+                database, agent_id=agent_id, backend_session_id=backend_session_id,
+                source_file=source_file, seq=seq, msg_id=msg_id, text=text,
+                timestamp=turn.get("timestamp"), request_trace=current_request_trace,
+                reply_trace=reply_trace, final_rows=final_rows,
+                adopted_final_ids=adopted_final_ids, placed_ids=placed_ids,
+                # The prelude normalized raw text before BEGIN. Automation
+                # and hidden-block processing above may replace that text;
+                # those cases retain normalization of the effective value.
+                # An empty prepared value is valid, not a missing value.
+                visible=(visible_replies[index] if visible_replies is not None
+                         and text == str(turn.get("text") or "") else None))
+            skipped_slot_removed = skipped_slot_removed or changed
+        row = _upsert_row(
+            database, agent_id=agent_id, backend_session_id=backend_session_id,
+            source_file=source_file, seq=seq, msg_id=msg_id, turn=turn, role=role,
+            text=text, origin=origin, sender_agent_id=sender_agent_id,
+            request_trace=current_request_trace,
+            phase=phases[index] if role == "assistant" else None,
+            turn_index=turn_index, final_rows=final_rows)
+        timestamp, tools, display_cells = row.timestamp, row.tools, row.display_cells
+        unchanged, revision = row.unchanged, row.revision
+        skipped_slot_removed = skipped_slot_removed or row.changed
+        newest_trace = row.row_trace or newest_trace
+        if row.row_trace and not unchanged:
             # Only turns whose rows changed are re-stamped: an import re-reads
             # the whole transcript, and an untouched turn's summary stands.
-            touched_traces.add(row_trace)
-        revision = int(existing["revision"]) if unchanged else _next_revision(database)
-        updated_at = int(existing["updated_at"]) if unchanged else now_ms()
+            touched_traces.add(row.row_trace)
         latest_revision = max(latest_revision, revision)
-        # The upsert of an identical row still rewrites its pages into the WAL;
-        # skip it when every column it sets already holds that value.
-        rewrite = not unchanged or existing["source_file"] != source_file \
-            or existing["seq"] != seq
-        if rewrite:
-            database.execute(
-                """INSERT INTO messages (
-                   message_id, agent_id, backend_session_id, source_file, seq,
-                   role, timestamp, text, kind, tool_name, tools_json,
-                   display_cells_json, updated_at, revision, origin,
-                   sender_agent_id, trace_id, phase
-               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-               ON CONFLICT(message_id) DO UPDATE SET
-                   trace_id = COALESCE(excluded.trace_id, messages.trace_id),
-                   phase = excluded.phase,
-                   source_file = excluded.source_file,
-                   seq = excluded.seq,
-                   role = excluded.role,
-                   timestamp = excluded.timestamp,
-                   text = excluded.text,
-                   kind = excluded.kind,
-                   tool_name = excluded.tool_name,
-                   tools_json = excluded.tools_json,
-                   display_cells_json = excluded.display_cells_json,
-                   updated_at = excluded.updated_at,
-                   revision = excluded.revision,
-                   origin = excluded.origin,
-                   sender_agent_id = excluded.sender_agent_id""",
-            (msg_id, agent_id, backend_session_id, source_file, seq,
-                 role, timestamp, text, kind, tool_name, tools_json,
-                 display_cells_json, updated_at,
-                 revision, origin, sender_agent_id, row_trace or None, phase),
-            )
-        if source_file.lower().startswith("final:"):
-            final_rows.invalidate()
-        else:
-            # The row now carries this transcript's source_file, not final:.
-            final_rows.discard((msg_id,))
         if role == "assistant" and not unchanged and database.locked:
             if heartbeat_accounting == "noop":
                 heartbeat.record_heartbeat_noop_once(agent_id, current_heartbeat_key)
@@ -1391,6 +1133,7 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
             from . import oracle_delegations
             oracle_delegations.complete_for_trace(
                 trace_id=trace_id, message_id=msg_id, text=text)
+        placed_ids.add(msg_id)
         out.append({
             **turn,
             "id": msg_id,
@@ -1414,6 +1157,24 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
             commit_batch()
         latest_revision = max(latest_revision, stamp_turn(
             database, agent_id, trace, _next_revision))
+    _finish_import(database, agent_id, backend_session_id,
+                   source_file=source_file,
+                   batch_finals=batch_finals, total_turns=total_turns,
+                   skipped_slot_removed=skipped_slot_removed,
+                   latest_revision=latest_revision, authority_tools=agy.tools)
+    return out
+
+
+# --- turn summaries (docs/live-items.md §9; helpers in lib.message_turns) ---
+
+def _finish_import(database, agent_id: str, backend_session_id: str, *,
+                   source_file: str,
+                   batch_finals: list[tuple[str, str]], total_turns: int,
+                   skipped_slot_removed: bool, latest_revision: int,
+                   authority_tools: dict[str, tuple[str, list, list]]) -> None:
+    """The import's work after its rows: leftover live twins, parked replies
+    nothing re-adopted (RM-N1c), the stale tail, the replace revision,
+    stream-owned agy tools and the conversation head."""
     # Compare markup-normalized so a streamed live row (with <speak>/<vox>/…)
     # still matches its durable copy (markup stripped); raw startswith missed it.
     live_replace_revision = 0
@@ -1439,6 +1200,8 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
                 "DELETE FROM messages WHERE message_id = ?",
                 (live["message_id"],),
             )
+    if _restore_unadopted_parked(database, agent_id, backend_session_id, source_file):
+        skipped_slot_removed = True
     stale = database.execute(
         """SELECT 1 FROM messages
             WHERE agent_id = ? AND backend_session_id = ? AND seq >= ?
@@ -1471,7 +1234,7 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
     if database.began_at is None and head is not None \
             and head["revision"] >= latest_revision \
             and head["replace_revision"] >= replace_revision:
-        return out  # nothing written, and the head already covers every row
+        return  # nothing written, and the head already covers every row
     database.execute(
         """INSERT INTO conversation_heads (
                agent_id, backend_session_id, revision, replace_revision
@@ -1484,10 +1247,7 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
                )""",
         (agent_id, backend_session_id, latest_revision, replace_revision),
     )
-    return out
 
-
-# --- turn summaries (docs/live-items.md §9; helpers in lib.message_turns) ---
 
 def _attach_authority_tools(database, agent_id: str,
                             collected: dict[str, tuple[str, list, list]]) -> int:
@@ -1520,12 +1280,13 @@ def _attach_authority_tools(database, agent_id: str,
     return latest
 
 
-def stamp_turn(database, agent_id: str, trace_id: str, next_revision) -> int:
+def turn_stamp(database, agent_id: str, trace_id: str):
+    """What ``stamp_turn`` reads and decides for one turn, without writing:
+    ``(turn, rows, summary)``. ``turn`` is its ``turns`` row or None, ``rows``
+    its message rows across backend sessions in display order, ``summary`` the
+    JSON its last row carries (None while the turn is unsettled or unknown).
+    None when the turn has no rows."""
     from . import message_turns
-    """Re-stamp one turn's rows (inside the caller's write transaction).
-    Returns the highest revision written, 0 when nothing changed."""
-    if not trace_id:
-        return 0
     turn = database.execute(
         """SELECT started_at, settled_at, outcome FROM turns WHERE agent_id = ? AND trace_id = ?
             ORDER BY started_at DESC LIMIT 1""", (agent_id, trace_id)).fetchone()
@@ -1534,7 +1295,7 @@ def stamp_turn(database, agent_id: str, trace_id: str, next_revision) -> int:
              FROM messages WHERE agent_id = ? AND trace_id = ?
             ORDER BY COALESCE(timestamp, ''), seq""", (agent_id, trace_id)).fetchall()
     if not rows:
-        return 0
+        return None
     summary = None
     if turn is not None and turn["settled_at"] is not None:
         started = int(turn["started_at"])
@@ -1543,6 +1304,19 @@ def stamp_turn(database, agent_id: str, trace_id: str, next_revision) -> int:
                               "started_at_ms": started, "ended_at_ms": ended,
                               "worked_ms": ended - started, "tool_count": message_turns.tool_count(rows)},
                              separators=(",", ":"))
+    return turn, rows, summary
+
+
+def stamp_turn(database, agent_id: str, trace_id: str, next_revision) -> int:
+    from . import message_turns
+    """Re-stamp one turn's rows (inside the caller's write transaction).
+    Returns the highest revision written, 0 when nothing changed."""
+    if not trace_id:
+        return 0
+    stamped = turn_stamp(database, agent_id, trace_id)
+    if stamped is None:
+        return 0
+    turn, rows, summary = stamped
     outcome = turn["outcome"] if turn is not None else None
     highest = 0
     last = rows[-1]["message_id"]

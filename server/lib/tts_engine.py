@@ -24,6 +24,35 @@ from .eleven_http import synthesize_to_file
 from .voice_markup import strip_emotion_tags
 
 
+# VP-10 changes preview only. Heralds, rings and context announcements retain
+# this named compatibility policy until the separate VP-10b product decision.
+LEGACY_ONE_OFF_LADDER = "legacy-cartesia-elevenlabs"
+CONFIGURED_PREVIEW_LADDER = "configured-preview"
+
+
+class _FileElevenLabsProvider:
+    """Keep the engine's HTTP transport and constructor settings for a preview.
+
+    Only the fallback selection changes under VP-10, not the engine credentials,
+    model, speed or timeout previously used by the Cartesia/ElevenLabs path.
+    """
+    id = "elevenlabs"
+
+    def __init__(self, engine, raw_voice):
+        from .voice import ELEVENLABS, resolve_voice
+        self.engine = engine
+        self.voice = resolve_voice(raw_voice, ELEVENLABS) or raw_voice
+
+    @property
+    def available(self):
+        return bool(self.engine.api_key and self.voice)
+
+    def synthesize(self, text, sink):
+        return synthesize_to_file(
+            text, self.voice, sink.out_path, api_key=self.engine.api_key,
+            model=self.engine.model, speed=self.engine.speed, timeout=self.engine.timeout)
+
+
 def make_clip_filename(session: str | None = None, *, now_ms: int | None = None) -> str:
     """Build the canonical MP3 filename for a clip.
 
@@ -112,6 +141,47 @@ class ElevenLabsEngine(TTSEngine):
         except CartesiaError:
             return False
 
+    def _synthesize_provider(self, text, voice_id, out_path, session, cfg, agent, route=None,
+                             *, file_eleven=False, purpose="one-off"):
+        from . import tts_mode
+        from .tts_provider import AudioSink
+        from .tts_registry import ProviderRegistry
+        from .tts_service import synth, emit_event, event_context
+        clip_route = route or tts_mode.Route(
+            cfg.tts_provider, None, tts_mode.fallback_for(cfg, cfg.tts_provider))
+        providers = ({"elevenlabs": _FileElevenLabsProvider(self, voice_id)} if file_eleven else None)
+        registry = ProviderRegistry(cfg, voice_id, agent, clip_route, providers=providers)
+        return synth(
+            text, clip_route, AudioSink(out_path, trace_id="", delivery_fields={"delivery": "chunked-file"}),
+            purpose, cfg=cfg, raw_voice=voice_id, agent=agent, registry=registry,
+            emit=emit_event, context=lambda: event_context({"session": session}, agent))
+
+    def _synthesize_audio(self, text, voice_id, out_path, session, cfg, policy):
+        from . import agents, tts_mode
+        if policy == CONFIGURED_PREVIEW_LADDER:
+            # Audition the requested provider/voice, never an agent override.
+            agent = agents.get_by_session(session) if session else {}
+            route = tts_mode.Route(
+                cfg.tts_provider, voice_id.strip() if cfg.tts_provider == "google" else None,
+                tts_mode.fallback_for(cfg, cfg.tts_provider))
+            return self._synthesize_provider(
+                text, voice_id, out_path, session, cfg, agent or {}, route,
+                file_eleven=cfg.tts_provider in {"cartesia", "elevenlabs"}, purpose="preview")
+        # LEGACY_ONE_OFF_LADDER: effective agent overrides and non-legacy
+        # providers already use configured fallback; preserve that distinction.
+        agent = agents.get_by_session(session) if session else None
+        route = tts_mode.route(cfg, agent) if agent else None
+        if route is not None and (route.provider != cfg.tts_provider or route.voice):
+            return self._synthesize_provider(text, voice_id, out_path, session, cfg, agent, route)
+        if cfg.tts_provider not in {"cartesia", "elevenlabs"}:
+            agent = agents.get_by_session(session) if session else {}
+            return self._synthesize_provider(text, voice_id, out_path, session, cfg, agent or {})
+        if not self._synthesize_cartesia(strip_emotion_tags(text), voice_id, out_path, session):
+            from .voice import ELEVENLABS, resolve_voice
+            return synthesize_to_file(
+                strip_emotion_tags(text), resolve_voice(voice_id, ELEVENLABS) or voice_id, out_path,
+                api_key=self.api_key, model=self.model, speed=self.speed, timeout=self.timeout)
+
     def synthesize_herald(self, text, voice_id, *, session=None) -> pathlib.Path:
         return self.synthesize(
             text, voice_id, session=session,
@@ -132,70 +202,12 @@ class ElevenLabsEngine(TTSEngine):
         tmp_path = pathlib.Path(tmp)
         started = _t.time()
         try:
-            # Provider dispatch (mirrors the PWA worker): Cartesia primary,
-            # ElevenLabs fallback. Announcements ("X is ready") were silently
-            # failing once the EL quota ran out — Cartesia keeps them audible.
             from .config import load as _load
             cfg = _load()
             if cfg.tts_provider == "none":
                 raise RuntimeError("server audio is disabled: no voice provider")
-            agent = route = None
-            if session and _agent_route:
-                from . import agents as _agents, tts_mode
-                agent = _agents.get_by_session(session)
-                route = tts_mode.route(cfg, agent) if agent else None
-            if route is not None and (route.provider != cfg.tts_provider or route.voice):
-                # An effective [tts.agents.*] override (another provider, or a
-                # voice for the one in use) takes the agent's route exactly as
-                # the queued worker does (tts_mode.route into _synthesize): its
-                # provider, voice and only its configured fallback, never the
-                # built-in ElevenLabs backup below. A failure raises; every
-                # direct caller already goes on without audio. Fields that
-                # change neither keep the legacy path.
-                from .tts_worker import _synthesize as _provider_synthesize
-                _provider_synthesize(
-                    cfg=cfg,
-                    row={"text": text, "voice_id": voice_id, "session": session},
-                    agent=agent, out_path=tmp_path,
-                    on_chunk=None, trace_id="",
-                    delivery_fields={"delivery": "chunked-file"},
-                    clip_route=route)
-            elif not _agent_route and cfg.tts_provider == "google":
-                # A preview auditions exactly the requested Google voice: as the route's voice,
-                # an id off the list is refused (voice_unavailable), never replaced by the
-                # default, and a failure is the preview's own (no fallback provider speaks).
-                from . import tts_mode
-                from .tts_worker import _synthesize as _provider_synthesize
-                _provider_synthesize(
-                    cfg=cfg,
-                    row={"text": text, "voice_id": voice_id, "session": session or ""},
-                    agent={}, out_path=tmp_path,
-                    on_chunk=None, trace_id="",
-                    delivery_fields={"delivery": "chunked-file"},
-                    clip_route=tts_mode.Route("google", voice_id.strip(), ""))
-            elif cfg.tts_provider not in {"cartesia", "elevenlabs"}:
-                from . import agents as _agents
-                from .tts_worker import _synthesize as _provider_synthesize
-                agent = _agents.get_by_session(session) if session else {}
-                _provider_synthesize(
-                    cfg=cfg,
-                    row={"text": text, "voice_id": voice_id,
-                         "session": session or ""},
-                    agent=agent or {}, out_path=tmp_path,
-                    on_chunk=None, trace_id="",
-                    delivery_fields={"delivery": "chunked-file"})
-            elif not self._synthesize_cartesia(
-                    strip_emotion_tags(text), voice_id, tmp_path, session):
-                # A stored voice may be a {provider: id} map; ElevenLabs
-                # needs its own id, not the whole map.
-                from .voice import ELEVENLABS, resolve_voice
-                synthesize_to_file(
-                    strip_emotion_tags(text), resolve_voice(voice_id, ELEVENLABS) or voice_id, tmp_path,
-                    api_key=self.api_key,
-                    model=self.model,
-                    speed=self.speed,
-                    timeout=self.timeout,
-                )
+            policy = LEGACY_ONE_OFF_LADDER if _agent_route else CONFIGURED_PREVIEW_LADDER
+            self._synthesize_audio(text, voice_id, tmp_path, session, cfg, policy)
             target = self.audio_dir / (
                 _filename_prefix + make_clip_filename(session))
             # B8: must use shutil.move here — tmp and audio_dir may live on

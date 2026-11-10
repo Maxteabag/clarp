@@ -199,10 +199,10 @@ fn optimistic_delivery_stays_visible_until_confirmed() {
     h.clear();
     h.log(logs[1].0.clone(), LoadKind::Delta);
     assert_eq!(h.ids(), ["m0", "u-a", "u-b"]);
-    let confirmed: Vec<&Op> =
-        h.ops.iter().filter(|op| matches!(op, Op::Signal(Signal::DeliveryConfirmed(_)))).collect();
-    assert_eq!(confirmed, [&Op::Signal(Signal::DeliveryConfirmed("a".into()))]);
-    assert!(h.model.rows()[2].pending);
+    // The synced u-a row does not confirm the send: the Host saves the row
+    // before the turn starts, so only the /send answer does (CLIENT-SEND-500).
+    assert_eq!(h.count(|op| matches!(op, Op::Signal(Signal::DeliveryConfirmed(_)))), 0);
+    assert!(h.model.rows()[1].pending && h.model.rows()[2].pending);
 
     let mut cached = Harness::new("cached");
     cached.log(json!({"conversation_id": "conversation", "latest_revision": 1,
@@ -456,4 +456,115 @@ fn a_row_written_after_a_live_row_goes_below_it() {
         {"id": "live-1", "role": "assistant", "kind": "live", "text": "Strea", "revision": 2, "timestamp": "2026-10-03T11:49:07.816Z"}]}), LoadKind::Tail);
     tail.log(json!({"conversation_id": "c", "turns": [{"id": "u-0", "role": "user", "text": "earlier", "revision": 3, "timestamp": "2026-10-03T11:49:00.000Z"}]}), LoadKind::Delta);
     assert_eq!(tail.ids(), ["u-0", "live-1"]);
+}
+
+#[test]
+fn a_failed_send_does_not_pull_later_rows_above_the_sends_after_it() {
+    // Koko on 29 Oct 2026: a send that never filed (25 Oct) kept every later
+    // Host row above it, and every message sent after it below it.
+    let mut h = Harness::new("koko");
+    h.log(json!({"conversation_id": "c", "turns": [
+        {"id": "h1", "role": "assistant", "text": "Earlier", "revision": 1, "timestamp": "2020-01-01T00:00:00.000Z"}]}), LoadKind::Tail);
+    h.optimistic("f", "never filed");
+    h.model.mark_delivery_failed("f");
+    h.sync();
+    h.optimistic("s", "sent");
+    h.log(json!({"conversation_id": "c", "latest_revision": 3, "turns": [
+        {"id": "u-s", "role": "user", "text": "sent", "revision": 2, "timestamp": "2099-01-01T00:00:00.000Z"},
+        {"id": "r1", "role": "assistant", "text": "The answer", "revision": 3, "timestamp": "2099-01-01T00:00:05.000Z"}]}), LoadKind::Delta);
+    assert_eq!(h.ids(), ["h1", "u-f", "u-s", "r1"], "the answer goes below the message it answers");
+}
+
+#[test]
+fn a_tail_load_restores_the_host_order_of_a_cached_chat() {
+    // The cache restored a chat out of order: the answer above its question
+    // and a failed send at the end. The Host's tail puts them back.
+    let mut h = Harness::new("koko");
+    h.log(json!({"conversation_id": "c", "turns": [
+        {"id": "h1", "role": "assistant", "text": "Hi", "revision": 1, "timestamp": "2026-10-25T10:00:00.000Z"},
+        {"id": "r1", "role": "assistant", "text": "Answer", "revision": 4, "timestamp": "2026-10-25T10:02:00.000Z"},
+        {"id": "u-f", "role": "user", "text": "never filed", "revision": 0, "delivery_failed": true, "timestamp": "2026-10-25T10:00:30.000Z"},
+        {"id": "u-1", "role": "user", "text": "Question", "revision": 3, "timestamp": "2026-10-25T10:01:00.000Z"}]}), LoadKind::Tail);
+    h.optimistic("p", "on its way");
+    h.clear();
+    let host = json!({"conversation_id": "c", "latest_revision": 4, "turns": [
+        {"id": "h1", "role": "assistant", "text": "Hi", "revision": 1, "timestamp": "2026-10-25T10:00:00.000Z"},
+        {"id": "u-1", "role": "user", "text": "Question", "revision": 3, "timestamp": "2026-10-25T10:01:00.000Z"},
+        {"id": "r1", "role": "assistant", "text": "Answer", "revision": 4, "timestamp": "2026-10-25T10:02:00.000Z"}]});
+    h.log(host.clone(), LoadKind::Tail);
+    assert_eq!(h.ids(), ["h1", "u-f", "u-1", "r1", "u-p"], "the Host's order, the failed send at its time, the unconfirmed send last");
+    assert_eq!(h.count(|op| matches!(op, Op::Reset(_))), 1);
+    h.clear();
+    h.log(host, LoadKind::Tail);
+    assert_eq!(h.count(|op| matches!(op, Op::Reset(_))), 0, "an order that already is the Host's is left alone");
+}
+
+
+// CLIENT-SEND-500: a /send that failed after the Host saved the row must not
+// look delivered when the next sync carries that row.
+
+#[test]
+fn a_sync_carrying_the_row_does_not_confirm_this_clients_send() {
+    let mut h = Harness::new("cipher");
+    h.optimistic("a", "deploy it");
+    h.clear();
+    h.log(json!({"conversation_id": "c", "latest_revision": 1, "turns": [
+        {"id": "u-a", "role": "user", "text": "deploy it", "revision": 1}]}), LoadKind::Delta);
+    assert_eq!(h.ids(), ["u-a"]);
+    assert!(h.model.rows()[0].pending, "still waiting for the /send answer");
+    assert_eq!(h.count(|op| matches!(op, Op::Signal(Signal::DeliveryConfirmed(_)))), 0);
+}
+
+#[test]
+fn a_failed_send_stays_failed_when_a_sync_carries_its_row() {
+    let mut h = Harness::new("cipher");
+    h.log(json!({"conversation_id": "c", "turns": [turn("m1", 1)]}), LoadKind::Tail);
+    h.optimistic("a", "deploy it");
+    h.model.mark_delivery_failed("a");
+    h.sync();
+    h.log(json!({"conversation_id": "c", "latest_revision": 2, "turns": [
+        {"id": "u-a", "role": "user", "text": "deploy it", "revision": 2}]}), LoadKind::Delta);
+    let row = h.model.rows().iter().find(|m| m.id == "u-a").expect("the row");
+    assert!(row.delivery_failed && !row.pending, "a delta keeps it failed");
+    h.log(json!({"conversation_id": "c2", "turns": [
+        turn("m1", 1), {"id": "u-a", "role": "user", "text": "deploy it", "revision": 2}]}), LoadKind::Tail);
+    let failed: Vec<&Message> = h.model.rows().iter().filter(|m| m.id == "u-a").collect();
+    assert_eq!(failed.len(), 1);
+    assert!(failed[0].delivery_failed, "a replacement keeps it failed");
+}
+
+
+#[test]
+fn a_failed_send_keeps_the_hosts_reason_until_it_is_resent() {
+    // The Host's one-line refusal (e.g. BACKENDS-08's 413) shows on the failed
+    // bubble, so Resend is not pressed into the same refusal blindly.
+    let mut h = Harness::new("cipher");
+    h.optimistic("a", "a very long prompt");
+    h.model.mark_delivery_failed_because("a", "too long for this agent: shorten or split");
+    h.sync();
+    h.log(json!({"conversation_id": "c", "latest_revision": 1, "turns": [
+        {"id": "u-a", "role": "user", "text": "a very long prompt", "revision": 1}]}), LoadKind::Delta);
+    let row = h.model.rows().iter().find(|m| m.id == "u-a").expect("the row");
+    assert!(row.delivery_failed);
+    assert_eq!(row.delivery_error, "too long for this agent: shorten or split", "a sync keeps the reason");
+    assert_eq!(h.model.resend_failed("u-a"), Some(("a".to_owned(), "a very long prompt".to_owned())));
+    h.sync();
+    let row = h.model.rows().iter().find(|m| m.id == "u-a").expect("the row");
+    assert!(row.pending && !row.delivery_failed && row.delivery_error.is_empty(), "a resend clears it");
+}
+
+#[test]
+fn a_stopped_send_keeps_its_state_until_the_host_says_otherwise() {
+    // F4: a read that omits the delivery block (unknown, e.g. after a runtime
+    // restart) keeps the last state the Host gave; a new state replaces it.
+    let mut h = Harness::new("s");
+    let row = |delivery: Value| json!({"conversation_id": "c", "turns": [
+        {"id": "u-abc", "role": "user", "text": "do it", "revision": 1, "delivery": delivery}]});
+    h.log(row(json!({"state": "stopped", "for": {"client_msg_id": "abc"}})), LoadKind::Tail);
+    assert_eq!(h.model.rows()[0].send_state, "stopped");
+    h.log(json!({"conversation_id": "c", "turns": [
+        {"id": "u-abc", "role": "user", "text": "do it", "revision": 1}]}), LoadKind::Tail);
+    assert_eq!(h.model.rows()[0].send_state, "stopped", "unknown never clears a known state");
+    h.log(row(json!({"state": "handed_over", "for": {"client_msg_id": "abc"}})), LoadKind::Tail);
+    assert_eq!(h.model.rows()[0].send_state, "handed_over");
 }

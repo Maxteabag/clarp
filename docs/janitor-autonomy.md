@@ -20,8 +20,10 @@ scope/generation. The exact proposal is persisted before dispatch and carries
 one stable client request ID. The runtime validates that proposal again before
 admission. A model failure records failure and backs off without waking anyone.
 
-After explicitly adopting the keeper, pausing it does not reactivate the former
-rigid periodic loop. Restart continuity remains separate. No archived, internal,
+After explicitly adopting the keeper, pausing or deleting it does not
+reactivate the former rigid periodic loop for the agents in its scope; agents
+outside every adopted keeper's scope keep the fixed heartbeat, and only they
+show a next fixed heartbeat time. Restart continuity remains separate. No archived, internal,
 Janitor or user-stopped target is eligible. Changing durable evidence can trigger
 an earlier review than a prior deferral; no old conversation creates authority.
 

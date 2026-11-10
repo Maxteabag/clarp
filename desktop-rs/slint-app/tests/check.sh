@@ -112,7 +112,7 @@ settings=off; case $name in keymap|fonts) passes=(once restart); settings="$scra
 [ "$name" = form-events ] && passes=(first second)
 for pass in "${passes[@]}"; do
 [ "$pass" = once ] || echo "perf pass: $pass"
-CLARP_CHECK_PASS=$pass env -u WAYLAND_DISPLAY -u DISPLAY -u XDG_SESSION_ID CLARP_BASE_URL="http://127.0.0.1:$(cat "$scratch/port")" CLARP_TOKEN=probe-token CLARP_SETTINGS="$settings" \
+CLARP_EXPLORER_FAILURE_OUT="$out" CLARP_CHECK_PASS=$pass env -u WAYLAND_DISPLAY -u DISPLAY -u XDG_SESSION_ID CLARP_BASE_URL="http://127.0.0.1:$(cat "$scratch/port")" CLARP_TOKEN=probe-token CLARP_SETTINGS="$settings" \
     HOME="$scratch/home" XDG_RUNTIME_DIR="$scratch/run" \
     XDG_CONFIG_HOME="$scratch/c" XDG_CACHE_HOME="$scratch/k" XDG_DATA_HOME="$scratch/d" XDG_STATE_HOME="$scratch/s" \
     CLARP_AUDIO_OUTPUT=null CLARP_AUDIO_INPUT="file:$scratch/voice.wav" CLARP_KEYRING=off \

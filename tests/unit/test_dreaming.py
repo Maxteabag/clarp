@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import time
+import threading
 import pathlib
 import urllib.error
 from datetime import datetime, timezone
 
 import pytest
 
+from tests.patching import patch_shared
 from lib import agents as agents_db
 from lib import dream_seeds, dreaming, location, message_store
 from lib.protocol import AgentState
@@ -330,7 +332,8 @@ def test_custom_dream_settings_shape_new_runs_without_mutating_defaults():
     assert dreaming.DREAM_TARGET_TOKEN_BUDGET == 70_000
 
 
-def test_completed_round_kicks_next_round_without_scheduler_poll():
+@pytest.mark.parametrize("interruption", ["none", "scheduler_stop", "user_stop", "user_stop_resume", "user_stop_resume_new_wake", "run_end", "retry_error"])
+def test_completed_round_kicks_next_round_without_scheduler_poll(monkeypatch, interruption):
     aid = _agent("domi")
     location.set_location("domi", 0, 0, ts=1)
     sent: list[tuple[str, str]] = []
@@ -346,6 +349,36 @@ def test_completed_round_kicks_next_round_without_scheduler_poll():
         # the roleplay arm opens with a different first stage.
         recipe_chooser=lambda: ("control", "full"),
     )
+
+    advance_sent = threading.Event()
+    release_advance = threading.Event()
+    wake_threads = []
+    real_advance = scheduler._advance_run
+    real_start = threading.Thread.start
+
+    def record_start(thread):
+        if thread.name.startswith("dreaming-advance-"):
+            wake_threads.append(thread)  # child registered before its parent can exit
+        return real_start(thread)
+
+    monkeypatch.setattr(threading.Thread, "start", record_start)
+    failures, errors = [], []
+    patch_shared(monkeypatch, dreaming, "log_exception",
+                 lambda event, error, **kw: errors.append((event, str(error))))
+
+    def hold_successful_advance(run):
+        if interruption == "retry_error" and advance_sent.is_set() and not failures:
+            failures.append(True)
+            raise RuntimeError("synthetic retry failure")
+        result = real_advance(run)
+        if result and len(sent) == 2:
+            # The round is durably sent, but its wake worker still owns the
+            # pending slot. Completing it now used to lose the next wake.
+            advance_sent.set()
+            assert release_advance.wait(5), "test releases the pending advance"
+        return result
+
+    monkeypatch.setattr(scheduler, "_advance_run", hold_successful_advance)
 
     def complete_current_round() -> None:
         run = dreaming.list_dream_runs(session="domi")[0]
@@ -382,14 +415,53 @@ def test_completed_round_kicks_next_round_without_scheduler_poll():
         assert "stage=SEED" in sent[-1][1]
 
         complete_current_round()
-        assert _wait_for(lambda: len(sent) == 2)
+        assert advance_sent.wait(5), "hold the successful advance before pending cleanup"
+        assert len(sent) == 2
         assert "stage=FANOUT" in sent[-1][1]
 
         complete_current_round()
-        assert _wait_for(lambda: len(sent) == 3)
-        assert "stage=FANOUT" in sent[-1][1]
+        run_id = dreaming.list_dream_runs(session="domi")[0]["run_id"]
+        for _ in range(5):
+            scheduler.request_advance(run_id)
+        if interruption == "scheduler_stop":
+            scheduler.stop()
+        elif interruption in {"user_stop", "user_stop_resume", "user_stop_resume_new_wake"}:
+            from lib import turn_queue
+            turn_queue.set_paused(aid, True, user_stop=True)
+            if interruption != "user_stop":
+                turn_queue.set_paused(aid, False)  # Resume is not a fresh completion wake
+        elif interruption == "run_end":
+            dreaming.abandon_run(run_id, harvest=False)
+        release_advance.set()
+        if interruption == "retry_error":
+            assert _wait_for(lambda: bool(errors), timeout=5)
+            for thread in wake_threads:
+                thread.join(timeout=5)
+                assert not thread.is_alive()
+            assert errors == [("dreamingAdvanceFail", "synthetic retry failure")]
+            assert len(sent) == 2, "a failed retry does not re-arm itself"
+            scheduler.request_advance(run_id)  # only a new wake retries that failure
+        if interruption in {"none", "retry_error"}:
+            assert _wait_for(lambda: len(sent) == 3, timeout=5)
+            assert "stage=FANOUT" in sent[-1][1]
+        # Drain every worker before teardown Stop: Stop must not hide an old
+        # completion token reviving after the user has paused and resumed.
+        for thread in wake_threads:
+            thread.join(timeout=5)
+            assert not thread.is_alive()
+        expected = 3 if interruption in {"none", "retry_error"} else 2
+        assert len(sent) == expected, "a pre-Stop token cannot revive after Resume"
+        if interruption == "user_stop_resume_new_wake":
+            scheduler.request_advance(run_id)
+            assert _wait_for(lambda: len(sent) == 3, timeout=5)
     finally:
+        release_advance.set()
         scheduler.stop()
+        for thread in wake_threads:
+            thread.join(timeout=5)
+            assert not thread.is_alive(), "advance workers finish before test teardown"
+    expected = 3 if interruption in {"none", "retry_error", "user_stop_resume_new_wake"} else 2
+    assert len(sent) == expected, "coalesced wakes respect Stop and cannot double-dispatch"
 
 
 def test_later_round_prompts_include_bounded_prior_ledger_context():
@@ -549,7 +621,7 @@ def test_isolated_dream_dispatch_uses_snapshot_without_touching_live_chat(monkey
         return object()
 
     monkeypatch.setattr(dreaming.backends, "spawn_turn", fake_spawn_turn)
-    monkeypatch.setattr(dreaming, "_dream_scratch_cwd", lambda _agent, _prompt: pathlib.Path("/tmp/dream-scratch"))
+    patch_shared(monkeypatch, dreaming, "_dream_scratch_cwd", lambda _agent, _prompt: pathlib.Path("/tmp/dream-scratch"))
 
     assert dreaming.dispatch_isolated_dream(agent, dream_round["prompt"]) is True
 
@@ -969,7 +1041,7 @@ def test_harvest_commits_dream_work_to_a_branch_then_removes_the_worktree(
                     str(target), "HEAD"], check=True,
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     (target / "invention.py").write_text("# what the dream built\n")
-    monkeypatch.setattr(dreaming, "_dream_worktree_path", lambda rid: target)
+    patch_shared(monkeypatch, dreaming, "_dream_worktree_path", lambda rid: target)
 
     branch = dreaming.harvest_worktree(run_id)
 
@@ -1001,7 +1073,7 @@ def test_harvest_of_a_clean_worktree_records_no_branch(tmp_path, monkeypatch):
     subprocess.run(["git", "-C", str(root), "worktree", "add", "--detach",
                     str(target), "HEAD"], check=True,
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    monkeypatch.setattr(dreaming, "_dream_worktree_path", lambda rid: target)
+    patch_shared(monkeypatch, dreaming, "_dream_worktree_path", lambda rid: target)
 
     assert dreaming.harvest_worktree(run_id) == ""
     assert dreaming.get_run(run_id)["artifact_branch"] == ""
@@ -1024,7 +1096,7 @@ def test_harvest_keeps_the_worktree_when_committing_fails(tmp_path, monkeypatch)
                     str(target), "HEAD"], check=True,
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     (target / "precious.py").write_text("# unreviewed but real\n")
-    monkeypatch.setattr(dreaming, "_dream_worktree_path", lambda rid: target)
+    patch_shared(monkeypatch, dreaming, "_dream_worktree_path", lambda rid: target)
 
     real_run = subprocess.run
 
@@ -1061,7 +1133,7 @@ def test_disabling_dreaming_mid_run_ends_it_instead_of_stranding_it(monkeypatch)
     assert run["status"] == "active"
 
     harvested: list[str] = []
-    monkeypatch.setattr(dreaming, "harvest_worktree",
+    patch_shared(monkeypatch, dreaming, "harvest_worktree",
                         lambda rid: harvested.append(rid) or "")
 
     agents_db.update_agent(aid, dreaming_enabled=False)
@@ -1116,3 +1188,356 @@ def test_digest_survives_a_transcript_rebuild():
     surviving = dream_rows()
     assert len(surviving) == 1, "the rebuild deleted a row it cannot re-derive"
     assert digest in surviving[0]["text"]
+
+
+def test_google_timezone_is_cached_per_location_and_a_failure_retries_later(monkeypatch):
+    # AUT-12: resolve_tz runs for every agent on every 300 s poll; with a Maps
+    # key each one was a billed, synchronous Google call. The zone id does not
+    # depend on the timestamp, so one lookup per location serves 6 h.
+    import json as _json
+    monkeypatch.setenv("GOOGLE_MAPS_API_KEY", "test-key")
+    calls, fail = [], [False]
+
+    class _Reply:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self):
+            return _json.dumps({"status": "OK", "timeZoneId": "Europe/Oslo"}).encode()
+
+    def urlopen(url, timeout=None):
+        calls.append(url)
+        if fail[0]:
+            raise urllib.error.URLError("offline")
+        return _Reply()
+
+    monkeypatch.setattr(dreaming.urllib.request, "urlopen", urlopen)
+    loc = {"lat": 61.1153, "lng": 10.4662, "session": "rachel"}
+    t = 1_800_000_000
+    for later in (0, 300, 3 * 3600):
+        assert dreaming._google_timezone(loc, t + later).name == "Europe/Oslo"
+    assert len(calls) == 1
+    nearby = {**loc, "lat": 61.1180}                 # same 2-decimal cell (61.12)
+    assert dreaming._google_timezone(nearby, t + 600).name == "Europe/Oslo"
+    assert len(calls) == 1
+    assert dreaming._google_timezone(loc, t + 6 * 3600).name == "Europe/Oslo"
+    assert len(calls) == 2
+
+    other = {"lat": 62.4722, "lng": 6.1495, "session": "rachel"}
+    fail[0] = True
+    assert dreaming._google_timezone(other, t) is None
+    assert dreaming._google_timezone(other, t + 300) is None
+    assert len(calls) == 3                          # a failure is not retried at once
+    fail[0] = False
+    assert dreaming._google_timezone(other, t + 600).name == "Europe/Oslo"
+    assert len(calls) == 4
+
+
+def test_a_dream_that_keeps_failing_ends_and_frees_the_next_night(tmp_path, monkeypatch):
+    """AUT-06: a failed isolated round was re-sent every 90 minutes for ever,
+    and the active run kept the agent from ever dreaming again."""
+    from lib import db
+    aid = agents_db.create_agent(persona="Dreamer", voice_id="v", cwd=str(tmp_path),
+                                 session="dreamer")
+    agents_db.start_runtime(aid, "dreamer")
+    agents_db.update_agent(aid, dreaming_enabled=True)
+    agent = agents_db.get_by_agent_id(aid)
+    run = dreaming.create_dream_run(agent, local_date="2026-01-01", timezone_name="UTC",
+                                    timezone_source="synthetic")
+    callbacks = {}
+    patch_shared(monkeypatch, dreaming, "_dream_scratch_cwd", lambda *_: tmp_path)
+    monkeypatch.setattr(dreaming.backends, "spawn_turn",
+                        lambda _backend, **kw: callbacks.update(kw))
+    monkeypatch.setattr(dreaming.backends, "active_handles", lambda *_: [])
+    clock = [db.now_ms()]
+    monkeypatch.setattr(dreaming.db, "now_ms", lambda: clock[0])
+    scheduler = dreaming.DreamingScheduler(
+        send_dream=lambda _session, prompt: dreaming.dispatch_isolated_dream(agent, prompt),
+        now=lambda: clock[0] / 1000)
+
+    for _ in range(3):
+        current = dreaming.active_run_for_agent(aid)
+        if current is None:
+            break
+        scheduler._advance_run(current)
+        callbacks["on_error"]("synthetic permanent backend rejection")
+        clock[0] += 86_400_000
+
+    assert dreaming.active_run_for_agent(aid) is None
+    ended = dreaming.get_run(run["run_id"])
+    assert ended["status"] != "active" and ended["last_error"]
+
+
+def _live_dream_worker(monkeypatch, tmp_path, agent_id, run, *, pid=True):
+    """Dispatch one isolated round of ``run`` whose worker is a real process
+    (or, with ``pid=False``, a handle that names no process)."""
+    import subprocess
+    from types import SimpleNamespace
+    proc = subprocess.Popen(["sleep", "60"])
+    handle = SimpleNamespace(pid=proc.pid, proc=proc) if pid else SimpleNamespace()
+    patch_shared(monkeypatch, dreaming, "_dream_scratch_cwd", lambda *_: tmp_path)
+    monkeypatch.setattr(dreaming.backends, "spawn_turn", lambda *_a, **_k: handle)
+    prompt = dreaming.next_round_for_run(run)["prompt"]
+    assert dreaming.dispatch_isolated_dream(agents_db.get_by_agent_id(agent_id), prompt)
+    return proc
+
+
+def _stop(proc):
+    proc.kill()
+    proc.wait()
+
+
+def test_a_run_past_its_deadline_is_harvested_only_once_its_worker_stops(tmp_path, monkeypatch):
+    """AUT-06 review: the deadline ends the run at once, but its worktree is
+    committed and removed only when the run's own dream worker has exited."""
+    agent_id, run, _clock = _expired_dream_run(tmp_path, monkeypatch)
+    worker = _live_dream_worker(monkeypatch, tmp_path, agent_id, run)
+    patch_shared(monkeypatch, dreaming, "_dream_worktree_path", lambda run_id: tmp_path)
+    harvested = []
+    patch_shared(monkeypatch, dreaming, "harvest_worktree", harvested.append)
+    scheduler = dreaming.DreamingScheduler(send_dream=lambda *_: False)
+    try:
+        scheduler._advance_run(run)
+        assert dreaming.get_run(run["run_id"])["status"] == "abandoned"
+        assert harvested == []
+    finally:
+        _stop(worker)
+    scheduler.run_once()
+    assert harvested == [run["run_id"]]
+
+
+def test_a_late_digest_does_not_complete_an_abandoned_run(tmp_path, monkeypatch):
+    """AUT-06b (reviewer B's control): a synthesis result that arrives after
+    the run was abandoned (deadline or opt-out) neither completes the run nor
+    delivers its digest."""
+    agent_id = agents_db.create_agent(persona="Late", voice_id="v", cwd=str(tmp_path), session="late")
+    agents_db.update_agent(agent_id, dreaming_enabled=True)
+    run = dreaming.create_dream_run(agents_db.get_by_agent_id(agent_id), local_date="2026-01-01",
+                                    timezone_name="UTC", timezone_source="synthetic")
+    clock = int(run["started_at"]) + dreaming.DREAM_RUN_DEADLINE_SEC * 1000 + 1
+    monkeypatch.setattr(dreaming.db, "now_ms", lambda: clock)
+    harvested, delivered = [], []
+    patch_shared(monkeypatch, dreaming, "harvest_worktree", harvested.append)
+    patch_shared(monkeypatch, dreaming, "_deliver_digest", lambda **kw: delivered.append(kw))
+    round_id = dreaming._insert_round(run_id=run["run_id"], stage="synthesize",
+                                      round_index=100, target_tokens=100)
+    dreaming.mark_round_sent(round_id)
+    dreaming.DreamingScheduler(send_dream=lambda *_: False)._advance_run(run)
+    assert dreaming.get_run(run["run_id"])["status"] == "abandoned"
+
+    dreaming.record_final_digest(agent_id=agent_id, run_id=run["run_id"],
+                                 round_id=round_id, digest="synthetic late digest")
+
+    assert dreaming.get_run(run["run_id"])["status"] == "abandoned"
+    assert delivered == []
+
+
+def _expired_dream_run(tmp_path, monkeypatch, clock=None):
+    agent_id = agents_db.create_agent(persona="Expired", voice_id="v", cwd=str(tmp_path), session="expired")
+    agents_db.update_agent(agent_id, dreaming_enabled=True)
+    run = dreaming.create_dream_run(agents_db.get_by_agent_id(agent_id), local_date="2026-01-01",
+                                    timezone_name="UTC", timezone_source="synthetic")
+    clock = clock if clock is not None else [int(run["started_at"]) + dreaming.DREAM_RUN_DEADLINE_SEC * 1000 + 1]
+    monkeypatch.setattr(dreaming.db, "now_ms", lambda: clock[0])
+    return agent_id, run, clock
+
+
+def test_routine_activity_does_not_hide_a_busy_dream_worker_from_cleanup(tmp_path, monkeypatch):
+    """AUT-06 review 2 (B's control): scheduling ignores routine activity so a
+    dream is not starved, but a live dream worker still keeps its worktree."""
+    agent_id, run, _clock = _expired_dream_run(tmp_path, monkeypatch)
+    worker = _live_dream_worker(monkeypatch, tmp_path, agent_id, run)
+    agents_db.record_state(agent_id, "thinking", {"origin": "heartbeat"})
+    harvested = []
+    patch_shared(monkeypatch, dreaming, "harvest_worktree", harvested.append)
+    try:
+        dreaming.DreamingScheduler(send_dream=lambda *_: False)._advance_run(run)
+    finally:
+        _stop(worker)
+    assert dreaming.get_run(run["run_id"])["status"] == "abandoned"
+    assert harvested == []
+
+
+@pytest.mark.parametrize("runtime_view", ["idle", "unavailable"])
+def test_a_runtime_view_without_the_dream_worker_does_not_free_its_worktree(tmp_path, monkeypatch, runtime_view):
+    """AUT-06 review 3 (B's control): the dream worker is a Host-local
+    process; a separate runtime's activity, idle or unreadable, says nothing
+    about it, so cleanup reads the run's own worker."""
+    agent_id, run, _clock = _expired_dream_run(tmp_path, monkeypatch)
+    worker = _live_dream_worker(monkeypatch, tmp_path, agent_id, run)
+    monkeypatch.setattr(dreaming.backends, "_RUNTIME_CLIENT", object())
+
+    def runtime_status():
+        if runtime_view == "unavailable":
+            raise RuntimeError("synthetic runtime status unavailable")
+        return {"active": {}, "spawning": [], "terminals": []}
+
+    monkeypatch.setattr(dreaming.backends, "runtime_status", runtime_status)
+    harvested = []
+    patch_shared(monkeypatch, dreaming, "harvest_worktree", harvested.append)
+    try:
+        dreaming.DreamingScheduler(send_dream=lambda *_: False)._advance_run(run)
+    finally:
+        _stop(worker)
+    assert harvested == []
+
+
+def test_a_dream_worker_of_unknown_identity_defers_cleanup(tmp_path, monkeypatch):
+    agent_id, run, _clock = _expired_dream_run(tmp_path, monkeypatch)
+    worker = _live_dream_worker(monkeypatch, tmp_path, agent_id, run, pid=False)
+    _stop(worker)
+    patch_shared(monkeypatch, dreaming, "_dream_worktree_path", lambda run_id: tmp_path)
+    harvested = []
+    patch_shared(monkeypatch, dreaming, "harvest_worktree", harvested.append)
+    scheduler = dreaming.DreamingScheduler(send_dream=lambda *_: False)
+    scheduler._advance_run(run)
+    scheduler.run_once()
+    assert harvested == []
+
+
+def test_a_deferred_cleanup_survives_a_day_of_downtime(tmp_path, monkeypatch):
+    """AUT-06 review 2 (B's control): the cleanup a live worker deferred is
+    kept until it succeeds, however long the worker or the Host was away."""
+    agent_id, run, clock = _expired_dream_run(tmp_path, monkeypatch)
+    worker = _live_dream_worker(monkeypatch, tmp_path, agent_id, run)
+    patch_shared(monkeypatch, dreaming, "_dream_worktree_path", lambda _run_id: tmp_path)
+    harvested = []
+    patch_shared(monkeypatch, dreaming, "harvest_worktree", harvested.append)
+    monkeypatch.setattr(dreaming, "pending_dreaming_agents", lambda **_: [])
+    scheduler = dreaming.DreamingScheduler(send_dream=lambda *_: False)
+    try:
+        scheduler._advance_run(run)
+        assert harvested == []
+    finally:
+        _stop(worker)
+
+    clock[0] += 2 * dreaming.DREAM_RUN_DEADLINE_SEC * 1000 + 1
+    scheduler.run_once()
+
+    assert harvested == [run["run_id"]]
+
+
+def test_abandoning_does_not_overwrite_a_completion_that_won(tmp_path, monkeypatch):
+    """AUT-06 review 2 (B's control): a digest that completes the run between
+    abandonment's read and its write keeps the run completed."""
+    agent_id, run, _clock = _expired_dream_run(tmp_path, monkeypatch)
+    round_id = dreaming._insert_round(run_id=run["run_id"], stage="synthesize",
+                                      round_index=100, target_tokens=100)
+    dreaming.mark_round_sent(round_id)
+    patch_shared(monkeypatch, dreaming, "harvest_worktree", lambda *_: None)
+    patch_shared(monkeypatch, dreaming, "_deliver_digest", lambda **_: None)
+    real_get = dreaming.get_run
+    raced = []
+
+    def completion_after_the_read(run_id):
+        snapshot = real_get(run_id)
+        if not raced and snapshot["status"] == "active":
+            raced.append(True)
+            dreaming.record_final_digest(agent_id=agent_id, run_id=run_id,
+                                         round_id=round_id, digest="synthetic completed digest")
+        return snapshot
+
+    patch_shared(monkeypatch, dreaming, "get_run", completion_after_the_read)
+    dreaming.abandon_run(run["run_id"], harvest=False)
+
+    assert raced and real_get(run["run_id"])["status"] == "completed"
+
+
+def test_a_live_worker_whose_start_was_unreadable_is_not_taken_for_gone(monkeypatch):
+    """AUT-06 review 4 (B's control): an unknown recorded start time is no
+    proof that a live pid was reused; only a known, different start is."""
+    import os
+    real_start = dreaming._process_start
+    claim = dreaming._claim_worker("synthetic-unknown-start")
+    patch_shared(monkeypatch, dreaming, "_process_start", lambda _pid: None)
+    dreaming._fill_worker(claim, os.getpid())
+    patch_shared(monkeypatch, dreaming, "_process_start", real_start)
+    assert not dreaming._workers_gone("synthetic-unknown-start")
+
+
+def test_overlapping_dream_spawns_keep_their_own_claims():
+    """AUT-06 review 4 (B's control): two spawns of one run each hold their
+    own claim; the first one finishing does not clear the second's."""
+    import subprocess
+    first = dreaming._claim_worker("synthetic-overlap")
+    dreaming._claim_worker("synthetic-overlap")            # the second spawn, still under way
+    finished = subprocess.Popen(["true"])
+    finished.wait()
+    dreaming._fill_worker(first, finished.pid)
+    assert not dreaming._workers_gone("synthetic-overlap")
+
+
+def test_a_run_whose_workers_all_exited_is_gone():
+    import os
+    import subprocess
+    claim = dreaming._claim_worker("synthetic-all-exited")
+    finished = subprocess.Popen(["true"])
+    finished.wait()
+    dreaming._fill_worker(claim, finished.pid)
+    assert dreaming._workers_gone("synthetic-all-exited")
+    live = dreaming._claim_worker("synthetic-live")
+    dreaming._fill_worker(live, os.getpid())
+    assert not dreaming._workers_gone("synthetic-live")
+
+
+@pytest.mark.parametrize('delayed_old_request',[False,True],ids=['fresh-only','old-read-after-fresh-write'])
+def test_an_older_snapshot_cannot_replace_a_new_generation_wake(monkeypatch,delayed_old_request):
+    from lib import turn_queue
+    aid=_agent('domi')
+    run=dreaming.create_dream_run(agents_db.get_by_agent_id(aid),local_date='2026-06-24',timezone_name='UTC',timezone_source='test',seed_strategy='control',context_dose='full')
+    scheduler=dreaming.DreamingScheduler(send_dream=lambda *a:None,chain_delay_sec=0,chain_retry_sec=0,chain_attempts=1)
+    first_entered=threading.Event();release_first=threading.Event()
+    old_read=threading.Event();release_old=threading.Event();calls=[];workers=[];errors=[]
+    start=threading.Thread.start
+    def register(thread):
+        if thread.name.startswith('dreaming-advance-'):workers.append(thread)
+        return start(thread)
+    monkeypatch.setattr(threading.Thread,'start',register)
+    def advance(run):
+        calls.append(1)
+        if len(calls)==1:
+            first_entered.set()
+            assert release_first.wait(5)
+        return 1
+    monkeypatch.setattr(scheduler,'_advance_run',advance)
+    wake_lock = scheduler._wake_lock
+    class HeldRequestLock:
+        def __enter__(self):
+            # At this point a generation-aware request has already read its
+            # token. The same gate works on original main, which has no token.
+            if threading.current_thread().name == 'old-completion-request':
+                old_read.set()
+                assert release_old.wait(5)
+            return wake_lock.__enter__()
+        def __exit__(self, *args):
+            return wake_lock.__exit__(*args)
+    scheduler._wake_lock = HeldRequestLock()
+    def older():
+        try:scheduler.request_advance(run['run_id'])
+        except BaseException as error:errors.append(type(error).__name__)
+    old_thread=None
+    try:
+        scheduler.request_advance(run['run_id'])
+        assert first_entered.wait(5)
+        if delayed_old_request:
+            old_thread=threading.Thread(target=older,name='old-completion-request')
+            old_thread.start();assert old_read.wait(5)
+        turn_queue.set_paused(aid,True,user_stop=True)
+        turn_queue.set_paused(aid,False)
+        scheduler.request_advance(run['run_id'])  # explicit fresh generation wake
+        release_old.set()
+        if old_thread:
+            old_thread.join(5);assert not old_thread.is_alive()
+        assert errors==[]
+        release_first.set()
+        for thread in workers:
+            thread.join(5);assert not thread.is_alive()
+        assert len(calls)==2, 'fresh post-Stop completion must cause one follow-up despite a delayed old request'
+    finally:
+        release_old.set();release_first.set()
+        if old_thread:old_thread.join(5)
+        for thread in workers:thread.join(5)
+        scheduler.stop()

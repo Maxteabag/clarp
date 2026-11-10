@@ -1,0 +1,68 @@
+# S9 module splits (rf-fix3): dreaming.py, cut 1c.
+# Applied by tools/refactor/split_apply.py; parts in dependency order. Stays in dreaming.py:
+# DreamingScheduler, dispatch_isolated_dream, the Google time-zone chain (urllib is imported
+# twice, a rebinding), ResolvedTimeZone and its helpers (ast_identity reads its field `location`
+# as a use of the location import), the advance-request callback with its readers, and
+# set_advance_request_callback and reset_for_tests (they rebind it with `global`).
+
+[[split]]
+name = "dreaming"
+module = "lib/dreaming.py"
+
+[[split.part]]
+# Constants, settings, the dreaming prompt text and the parsing regexes.
+module = "lib/dreaming_settings.py"
+names = [
+    "DREAMING_OK", "DREAM_HIDDEN_PREFIX", "DREAM_TARGET_HOUR", "DREAM_WINDOW_MINUTES", "DREAM_POLL_INTERVAL_SEC",
+    "DREAM_ACK_MAX_CHARS", "DREAMS_PER_NIGHT_DEFAULT", "DREAMS_PER_NIGHT_MIN", "DREAMS_PER_NIGHT_MAX", "DREAM_DIRECTION_MIN",
+    "DREAM_DIRECTION_MAX", "DREAM_TOKEN_BUDGET_MIN", "DREAM_TOKEN_BUDGET_MAX", "DREAM_MIN_DIRECTIONS", "DREAM_DIRECTION_COUNT",
+    "DREAM_ITERATION_THREAD_COUNT", "DREAM_PLANNED_ROUNDS", "DREAM_TARGET_TOKEN_BUDGET", "DREAM_TARGET_MINUTES", "DREAM_SENT_RECOVERY_SEC",
+    "DREAM_RUN_DEADLINE_SEC", "_DEADLINE_REASON", "DREAM_PRIOR_CONTEXT_MAX_CHARS", "DREAM_PRIOR_ROUND_EXCERPT_CHARS", "_STAGE_TARGET_TOKENS",
+    "KEY_DREAMS_PER_NIGHT", "KEY_DIRECTION_COUNT", "KEY_TOKEN_BUDGET", "KEY_DREAM_BACKEND", "KEY_DREAM_MODEL",
+    "KEY_DREAM_EFFORT", "DreamingSettings", "_clamp_int", "get_settings", "update_settings",
+    "dreaming_prompt_text", "DREAMING_PROMPT", "_TOKEN_EDGE_RE", "_STAGE_OUTPUT_RE", "_DIGEST_DONE_RE",
+    "_MD_PREFIX", "_SLATE_LINE_RE", "_FALLBACK_LINE_RE", "_RUN_ID_RE", "_EVIDENCE_STATUS_RE",
+    "_ALTITUDE_RE", "_ARTIFACT_RE", "_EVIDENCE_SUMMARY_RE", "_GUARDRAIL_REFUSAL_RE",
+]
+
+[[split.part]]
+# Run lookups the prompt and worktree parts read (get_run, _settings_for_run).
+module = "lib/dreaming_run_lookup.py"
+names = [
+    "get_run", "_settings_for_run",
+]
+
+[[split.part]]
+# The dream scratch directory and worktree harvest.
+module = "lib/dreaming_worktree.py"
+names = [
+    "_dream_scratch_cwd", "harvest_worktree", "_dream_worktree_path", "_repo_toplevel", "_dream_fallback_cwd",
+    "_run_id_from_prompt", "_existing_cwd",
+]
+
+[[split.part]]
+# Round prompts, prior-round context and slate parsing.
+module = "lib/dreaming_prompt.py"
+names = [
+    "_parse_slate", "_parse_slate_items", "_clean_slate_title", "_slate_item_is_anti_promoted", "_slate_item_evidence_status",
+    "_build_prompt", "_prior_round_context", "_thread_label", "_metadata_suffix", "_cap_context_lines",
+    "_thread", "_preview", "_random_recipe",
+]
+
+[[split.part]]
+# Runs, rounds, threads, digests, abandonment and dream-worker cleanup.
+module = "lib/dreaming_store.py"
+names = [
+    "_advance_request_lock", "dreaming_enabled", "should_skip_dream_prompt", "strip_dreaming_ack", "mark_dream_started",
+    "dream_runs_for_agent_date", "active_run_for_agent", "active_runs", "ActiveDreamRunExists", "create_dream_run",
+    "_gather_seed_material", "list_dream_runs", "next_round_for_run", "claim_round", "release_round",
+    "mark_round_sent", "record_final_digest", "_AlreadyPublished", "_deliver_digest", "abandon_run",
+    "_CLEANUP_PREFIX", "_CLEANUP_BATCH", "_harvest_abandoned", "_WORKERS_PREFIX", "_process_start",
+    "_claim_worker", "_fill_worker", "_worker_claims", "_forget_workers", "_workers_gone",
+    "_cleanup_quiet", "_harvest_abandoned_runs", "mark_active_noop", "_record_thread_evidence", "_parse_thread_metadata",
+    "_normalize_altitude", "_skip_busy_reason", "_recover_stale_sent_round", "_env_int", "_routine_self_activity_busy",
+    "_resolve_dream_llm", "_assistant_text_from_result", "_dose_snapshot", "_with_isolated_context_snapshot", "_recent_real_context_snapshot",
+    "_insert_round", "_ensure_next_rounds", "_rounds", "_threads", "_stage_exists",
+    "_incomplete_stages", "_next_round_index", "_create_threads_from_seed", "_create_fanout_rounds", "_create_iteration_rounds",
+    "_sync_run_progress",
+]

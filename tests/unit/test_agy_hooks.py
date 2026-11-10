@@ -5,10 +5,11 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+from types import SimpleNamespace
 
 import pytest
 
-from lib import agents, db
+from lib import agents, db, reconcile
 from lib.snapshot import build_agent_snapshot
 from lib.state_watcher import StateLogWatcher
 
@@ -18,6 +19,18 @@ def _fake_clis_are_this_tests_own(fake_backend_cli, tmp_path):
     """This module's fake provider CLIs are files it writes under tmp_path:
     the explicit opt-in of tests/conftest.py's real-CLI guard."""
     fake_backend_cli.dir(tmp_path)
+
+
+@pytest.fixture
+def _reconcile_clock(monkeypatch):
+    """Isolate only INV1's monotonic clock and bounded observation history."""
+    clock = SimpleNamespace(now=1000.0)
+    with reconcile._BUSY_LOCK:
+        reconcile._BUSY_OBSERVATIONS.clear()
+    monkeypatch.setattr(reconcile, "time", SimpleNamespace(monotonic=lambda: clock.now))
+    yield clock
+    with reconcile._BUSY_LOCK:
+        reconcile._BUSY_OBSERVATIONS.clear()
 
 ROOT = Path(__file__).resolve().parents[2]
 CONVERSATION = "11111111-2222-4333-8444-555555555555"
@@ -71,9 +84,13 @@ def test_terminal_turn_reports_working_to_snapshot_and_sse(tmp_path, monkeypatch
     assert agents.latest_state(agent_id)["kind"] == "done"
 
 
-def test_terminal_crash_does_not_leave_working_forever(tmp_path, monkeypatch):
+def test_terminal_crash_does_not_leave_working_forever(tmp_path, monkeypatch, _reconcile_clock):
     make_agent(tmp_path, monkeypatch)
     run_hook("PreInvocation", {"conversationId": CONVERSATION})
+    row = build_agent_snapshot(None)["agents"][0]
+    assert row["busy"] is True
+    assert row["latest_state"] == "thinking"
+    _reconcile_clock.now += 60
     row = build_agent_snapshot(None)["agents"][0]
     assert row["busy"] is False
     assert row["latest_state"] == "idle"
@@ -114,17 +131,21 @@ def test_configuration_observes_lifecycle_without_permission_hooks():
     assert set(hooks) == {"PreInvocation", "Stop"}
 
 
-def test_old_presence_file_and_rebound_session_do_not_keep_busy(tmp_path, monkeypatch):
+def test_old_presence_file_and_rebound_session_do_not_keep_busy(tmp_path, monkeypatch, _reconcile_clock):
     agent_id = make_agent(tmp_path, monkeypatch)
     presence = tmp_path / "agy/presence" / f"{CONVERSATION}.lock"
     presence.parent.mkdir(parents=True)
     presence.touch()
     run_hook("PreInvocation", {"conversationId": CONVERSATION})
+    assert build_agent_snapshot(None)["agents"][0]["busy"] is True
+    _reconcile_clock.now += 60
     assert build_agent_snapshot(None)["agents"][0]["busy"] is False
     with presence.open("r") as owner:
         fcntl.flock(owner, fcntl.LOCK_EX | fcntl.LOCK_NB)
         run_hook("PreInvocation", {"conversationId": CONVERSATION})
         agents.bind_backend_session(agent_id, "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee")
+        assert build_agent_snapshot(None)["agents"][0]["busy"] is True
+        _reconcile_clock.now += 60
         assert build_agent_snapshot(None)["agents"][0]["busy"] is False
 
 

@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import pytest
 
+from tests.patching import patch_shared
+
 from lib import judgment_sites, judgments, settings_store
 
 
@@ -354,7 +356,7 @@ def test_router_falls_back_to_openai_when_unavailable(monkeypatch):
         return {"kind": "agent_message", "target_session": "clarp-ios",
                 "confidence": 0.9, "addressing": True}
 
-    monkeypatch.setattr(orchestrator, "_call_openai", fake_openai)
+    patch_shared(monkeypatch, orchestrator, "_call_openai", fake_openai)
     monkeypatch.setattr(orchestrator.config, "load",
                         lambda: type("C", (), {"openai_key": lambda self: "k",
                                                "typesafe_key": lambda self: ""})())

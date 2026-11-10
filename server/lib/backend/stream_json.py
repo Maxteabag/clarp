@@ -27,7 +27,7 @@ from typing import Any, Callable, Iterator, Optional
 from .. import agents as agents_db
 from .. import turn_lifecycle
 from .. import events
-from ..live_pacing import LivePacer
+from ..stream_pacing import LivePacer
 from ..log import log, log_exception
 from ..proc_util import attach_stderr_drain
 from ..process_registry import TurnHandle
@@ -63,10 +63,34 @@ def popen_turn(cmd: list[str], *, cwd: Any, session: str,
         stdin=stdin,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        text=True,
+        # A CLI may write bytes that are not UTF-8 (a tool's binary output);
+        # strict decoding would stop the reader mid-turn (BACKENDS-03).
+        text=True, errors="replace",
         bufsize=1, start_new_session=(os.name == "posix"),
         env=env,
     )
+
+
+def stop_after_drain_failure(proc: subprocess.Popen,
+                             handle: Optional[TurnHandle]) -> None:
+    """A drain that failed reading leaves no one to read the CLI: stop it, so
+    it cannot keep writing the session nobody follows (BACKENDS-04)."""
+    if proc.poll() is not None:
+        return
+    try:
+        if handle is not None:
+            handle.terminate()
+        else:
+            proc.terminate()
+        proc.wait(timeout=2)
+    except Exception:  # noqa: BLE001
+        try:
+            if handle is not None:
+                handle.kill()
+            else:
+                proc.kill()
+        except Exception as exc:  # noqa: BLE001
+            log_exception("drainFailureStopFail", exc, detail=str(proc.pid))
 
 
 def make_handle(proc: subprocess.Popen) -> TurnHandle:
@@ -384,6 +408,13 @@ class StreamJsonBackend(Backend):
         pacer = getattr(st, "_live_pacer", None)
         if pacer is not None:
             pacer.flush()
+
+    @staticmethod
+    def cancel_live_text(st: Any) -> None:
+        """The turn is over: its pacer writes nothing more and leaves no timer."""
+        pacer = getattr(st, "_live_pacer", None)
+        if pacer is not None:
+            pacer.cancel()
 
     def _write_live_text(self, st: Any, text: str, *, backend_session_id: str,
                          agent_id: str, session: str, trace_id: str,

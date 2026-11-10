@@ -1,0 +1,30 @@
+{
+  "case": "F06-partial",
+  "janitor_enabled": true,
+  "served_at": 1800000060000,
+  "note": "Claude is partial because two scoped windows mapped to the same kind (model:opus) and the lower one was dropped (contract D.4/D.7). Codex's latest read failed (cli_failed): its last-good window is stale, while Claude's windows keep their own freshness. No usage-worker source exists (it is unbound), so partial never comes from a second source here.",
+  "steps": [
+    {"op": "read", "provider": "claude", "received_at": 1800000000000, "payload": {
+      "generated_at": 1800000000.0, "sessions": 1, "error": null,
+      "accounts": [
+        {"alias": "main", "email": "main@example.invalid", "org": null, "plan": "max", "plan_label": "Max 5×",
+         "rate_limit_tier": null, "is_active": true, "error": null, "signin_days_left": 30.0,
+         "usage": {"status": "allowed", "available": true, "limited": false, "severity": null,
+                   "used_5h": 0.25, "reset_5h": 1800010800.25, "used_7d": 0.5, "reset_7d": 1800500000.5,
+                   "scoped": [{"model": "claude-opus-4", "used": 0.2, "severity": "low", "reset": 1800500000.5, "exhausted": false},
+                              {"model": "opus-preview", "used": 0.35, "severity": "low", "reset": 1800500000.5, "exhausted": false}],
+                   "blocked_models": [], "extra_usage_enabled": false, "extra_usage_reason": null, "plan": "max"}}
+      ]}},
+    {"op": "read", "provider": "codex", "received_at": 1800000000000, "payload": {
+      "unsaved_live": null, "quota_read": true, "quota_age_s": null,
+      "accounts": [
+        {"provider": "codex", "alias": "p", "is_active": true, "saved": true, "email": "p@example.invalid",
+         "plan": "plus", "account_id": "acct-p", "token_expires_at": 1800864000.0, "token_hours_left": 240.0,
+         "api_key_present": false,
+         "usage": {"usable": true, "blocked": false, "error": null, "worst_used": 0.4, "reset": 1800500000.5,
+                   "reset_window": "weekly",
+                   "windows": [{"label": "codex primary weekly", "used": 0.4, "reset": 1800500000.5}]}}
+      ]}},
+    {"op": "failure", "provider": "codex", "error": "cli_failed", "now": 1800000030000}
+  ]
+}

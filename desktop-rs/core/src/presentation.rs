@@ -17,10 +17,11 @@ use crate::json::Object;
 use crate::list_ops::ListOp;
 use crate::protocol::{Message, parse_iso_date};
 
-/// Chats → Tool activity: 0 grouped, 1 always visible, 2 group old.
+/// Chats → Tool activity: 0 grouped, 1 always visible, 2 group old, 3 hidden.
 pub const GROUPED: i32 = 0;
 pub const ALWAYS_VISIBLE: i32 = 1;
 pub const GROUP_OLD: i32 = 2;
+pub const HIDDEN: i32 = 3;
 
 #[derive(Debug, Clone)]
 pub struct Settings {
@@ -120,7 +121,7 @@ impl<'a> Pass<'a> {
             .iter()
             .zip(&inline)
             .map(|(message, &inline)| {
-                if inline {
+                if inline || settings.activity_mode == HIDDEN {
                     return false;
                 }
                 if message.activity {
@@ -240,12 +241,38 @@ impl<'a> Pass<'a> {
         if self.settings.show_when_ready && !message.activity && message.role == "assistant" && message.kind == "live" {
             row.body = String::new();
         }
+        if self.settings.activity_mode == HIDDEN {
+            row.activity = false;
+            row.tools.clear();
+            row.display_cells.clear();
+            row.activity_count = 0;
+            row.group_ids.clear();
+            row.group_label.clear();
+            row.group_expanded = false;
+            row.activity_inline = false;
+            row.activity_label.clear();
+        }
         row
     }
 
     fn accepts(&self, index: usize, repeated: &HashSet<usize>) -> bool {
         if repeated.contains(&index) || self.continues_group(index) {
             return false;
+        }
+        if self.settings.activity_mode == HIDDEN {
+            let message = &self.rows[index];
+            if message.activity {
+                return false;
+            }
+            if message.role == "assistant" {
+                if message.display_text.trim().is_empty() {
+                    return false;
+                }
+                if self.settings.show_when_ready && message.kind == "live" {
+                    return false;
+                }
+            }
+            return true;
         }
         if !self.settings.show_when_ready {
             return true;

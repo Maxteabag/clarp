@@ -55,6 +55,8 @@ pub const SNAPSHOT_MIN_INTERVAL: Duration = Duration::from_millis(700);
 pub enum Change {
     Connection,
     ServerInfo,
+    /// The saved Hosts changed (`clarp_core::hosts`).
+    Hosts,
     Roster,
     /// Archived agents changed.
     Archive,
@@ -239,12 +241,22 @@ pub struct Engine {
     snapshot_timeout: Duration,
     freshness: roster_freshness::Freshness,
     log_in_flight: HashSet<String>,
+    /// Chats shown from their cached copy: once caught up, the Host's tail
+    /// checks their order (`Conversation::adopt_tail_order`).
+    order_check: HashSet<String>,
+    // Chats just opened from a cached copy, until their first delta: one
+    // over a page behind is replaced by the latest page, not walked forward.
+    catching_up: HashSet<String>,
     pending_log_mode: HashMap<String, String>,
     transcript_cache: Option<clarp_core::transcript_cache::TranscriptCache>,
     /// Chats with a cache write scheduled, and when each was last written.
     cache_save_due: HashSet<String>,
     cache_saved_at: HashMap<String, Instant>,
     deliveries: HashMap<String, (String, u64)>,
+    /// The chat each /send in flight belongs to and how many POSTs for that
+    /// client id are still unanswered. Outlives the delivery timer: a late
+    /// answer still belongs to the chat that sent it, never the selection.
+    send_owners: HashMap<String, (String, u32)>,
     delivery_counter: u64,
     sending: bool,
     /// In-flight `/message-tool-details` requests: tag → (session, message).
@@ -320,7 +332,10 @@ impl Engine {
         let tools_visible = config.settings.boolean("conversation/toolsVisible", false);
         let presentation = clarp_core::presentation::Settings {
             show_when_ready: config.settings.boolean("conversation/showWhenReady", false),
-            activity_mode: config.settings.integer("conversation/activityDisplayMode", i64::from(tools_visible)).clamp(0, 2) as i32,
+            activity_mode: config
+                .settings
+                .integer("conversation/activityDisplayMode", i64::from(tools_visible))
+                .clamp(0, i64::from(clarp_core::presentation::HIDDEN)) as i32,
             ..clarp_core::presentation::Settings::default()
         };
         // lifecycle
@@ -364,6 +379,8 @@ impl Engine {
             snapshot_timeout: roster_freshness::snapshot_timeout(),
             freshness: Default::default(),
             log_in_flight: HashSet::new(),
+            order_check: HashSet::new(),
+            catching_up: HashSet::new(),
             pending_log_mode: HashMap::new(),
             transcript_cache: config.transcript_cache.clone().map(clarp_core::transcript_cache::TranscriptCache::new),
             cache_save_due: HashSet::new(),
@@ -383,6 +400,7 @@ impl Engine {
             narrator,
             panes: workspace::Panes::new(workspace_store),
             deliveries: HashMap::new(),
+            send_owners: HashMap::new(),
             delivery_counter: 0,
             sending: false,
 
@@ -560,12 +578,13 @@ impl Engine {
         let selected = self.selected.clone();
         self.changes.push(Change::Conversation(selected));
     }
-    /// 0 grouped, 1 always visible, 2 group old (C++ `activityDisplayMode`).
+    /// 0 grouped, 1 always visible, 2 group old, 3 hidden
+    /// (C++ `activityDisplayMode`, extended with hidden).
     pub fn activity_mode(&self) -> i32 {
         self.presentation.activity_mode
     }
     pub fn set_activity_mode(&mut self, mode: i32) {
-        let mode = mode.clamp(0, 2);
+        let mode = mode.clamp(0, clarp_core::presentation::HIDDEN);
         if self.presentation.activity_mode != mode {
             self.presentation.activity_mode = mode;
             self.settings.set("conversation/activityDisplayMode", i64::from(mode));
@@ -646,7 +665,10 @@ impl Engine {
             self.changes.push(Change::Conversation(selected));
         }
         let tools_visible = self.settings.boolean("conversation/toolsVisible", false);
-        let mode = self.settings.integer("conversation/activityDisplayMode", i64::from(tools_visible)).clamp(0, 2) as i32;
+        let mode = self
+            .settings
+            .integer("conversation/activityDisplayMode", i64::from(tools_visible))
+            .clamp(0, i64::from(clarp_core::presentation::HIDDEN)) as i32;
         if self.presentation.activity_mode != mode {
             self.set_activity_mode(mode);
         }
@@ -1128,11 +1150,12 @@ impl Engine {
         let empty = self.conversations.get(session).is_none_or(|c| c.is_empty() && c.latest_revision() == 0);
         if empty && let Some(cache) = &self.transcript_cache {
             let snapshot = cache.load(&self.base_url, session);
-            if !snapshot.is_empty() {
-                self.with_conversation(session, |c| c.restore_cache_snapshot(&snapshot));
+            if !snapshot.is_empty() && self.with_conversation(session, |c| c.restore_cache_snapshot(&snapshot)).unwrap_or(false) {
+                self.order_check.insert(session.to_owned());
             }
         }
         if self.conversations.get(session).is_some_and(|c| c.latest_revision() > 0) {
+            self.catching_up.insert(session.to_owned());
             self.request_delta(session);
         } else {
             self.request_tail(session, false);
@@ -1277,10 +1300,30 @@ impl Engine {
     fn apply_log(&mut self, session: &str, object: &Object, kind: LoadKind) {
         self.log_in_flight.remove(session);
         self.ensure_conversation(session);
+        if kind == LoadKind::Delta && json::boolean(object, "has_more") && self.catching_up.remove(session) {
+            // A chat opened from a copy over a page behind: its latest page
+            // replaces it, so it opens at the end. Walking the backlog forward
+            // a page at a time showed the chat far in the past while it
+            // loaded (and every page moved the view); older rows come on
+            // scrolling up, as for a chat opened fresh.
+            self.order_check.remove(session);
+            self.request_tail(session, true);
+            self.continue_pending_log_request(session);
+            return;
+        }
         self.with_conversation(session, |c| c.apply_log(object, kind));
         self.schedule_cache_save(session);
         if kind == LoadKind::Delta && json::boolean(object, "has_more") {
             self.request_delta(session);
+        } else if kind == LoadKind::Delta && self.order_check.remove(session) {
+            // A cached copy kept the order it was saved in: once caught up,
+            // the Host's tail puts drifted rows back.
+            self.request_tail(session, false);
+        } else if kind != LoadKind::Delta {
+            self.order_check.remove(session);
+        }
+        if kind != LoadKind::Older {
+            self.catching_up.remove(session);
         }
         self.continue_pending_log_request(session);
     }
@@ -1307,6 +1350,19 @@ impl Engine {
         self.mutate_roster(|r| r.record_outgoing_activity(session));
         let client_id = uuid::Uuid::new_v4().to_string();
         self.with_conversation(session, |c| c.add_optimistic(&client_id, trimmed));
+        self.post_send(session, &client_id, trimmed, queue_if_busy, trace, transcription, hands_free);
+    }
+
+    /// Sends a failed message again under its own id (CLIENT-SEND-500).
+    pub(crate) fn resend_failed(&mut self, session: &str, message_id: &str) {
+        let Some((client_id, text)) = self.with_conversation(session, |c| c.resend_failed(message_id)).flatten() else { return };
+        self.post_send(session, &client_id, &text, false, "", "", false);
+    }
+
+    /// POST /send for a row already shown, and wait for its answer.
+    fn post_send(&mut self, session: &str, client_id: &str, text: &str, queue_if_busy: bool, trace: &str, transcription: &str, hands_free: bool) {
+        let trimmed = text;
+        let client_id = client_id.to_owned();
         self.set_sending(true);
         let mut body = json!({
             // "client" tells the Host the desktop sent it, so the reply is
@@ -1323,6 +1379,7 @@ impl Engine {
         // Your own words stop the voice that was speaking.
         self.changes.push(Change::Silence);
         self.api.post_json(&format!("send:{client_id}"), "/send", body, None);
+        self.send_owners.entry(client_id.clone()).or_insert_with(|| (session.to_owned(), 0)).1 += 1;
         self.delivery_counter += 1;
         let token = self.delivery_counter;
         self.deliveries.insert(client_id.clone(), (session.to_owned(), token));
@@ -1336,6 +1393,17 @@ impl Engine {
         if self.deliveries.is_empty() {
             self.set_sending(false);
         }
+    }
+
+    /// One /send for `client_id` was answered: the chat it belongs to.
+    fn send_answered(&mut self, client_id: &str) -> Option<String> {
+        let (session, unanswered) = self.send_owners.get_mut(client_id)?;
+        let session = session.clone();
+        *unanswered -= 1;
+        if *unanswered == 0 {
+            self.send_owners.remove(client_id);
+        }
+        Some(session)
     }
 
     fn delivery_confirmed(&mut self, client_id: &str) {
@@ -1414,6 +1482,12 @@ impl Engine {
             self.server_name = object.get("name").and_then(Value::as_str).unwrap_or("Clarp").to_owned();
             self.server_version = json::string(object, "clarp_version");
             self.changes.push(Change::ServerInfo);
+            // A Host that answered is kept for switching back to it.
+            let before = clarp_core::hosts::list(&self.settings);
+            clarp_core::hosts::remember(&mut self.settings, &self.base_url, &self.server_name);
+            if clarp_core::hosts::list(&self.settings) != before {
+                self.changes.push(Change::Hosts);
+            }
             self.set_connecting(false);
             self.force_snapshot();
             self.live_server_info(object);
@@ -1439,8 +1513,12 @@ impl Engine {
         } else if let Some(session) = tag.strip_prefix("log-older:") {
             self.apply_log(session, object, LoadKind::Older);
         } else if let Some(client_id) = tag.strip_prefix("send:") {
-            let session = self.deliveries.get(client_id).map(|(s, _)| s.clone()).unwrap_or_else(|| self.selected.clone());
-            self.request_delta(&session);
+            // The 2xx is what makes this send delivered (CLIENT-SEND-500), in
+            // the chat that sent it, even after its timer marked it failed.
+            if let Some(session) = self.send_answered(client_id) {
+                self.with_conversation(&session, |c| c.confirm_delivery(client_id));
+                self.request_delta(&session);
+            }
         }
         // select: and other acknowledgements need no action.
     }
@@ -1514,8 +1592,14 @@ impl Engine {
                 c.set_error(&detail);
             });
         } else if let Some(client_id) = tag.strip_prefix("send:") {
-            if let Some((session, _)) = self.deliveries.remove(client_id) {
-                self.with_conversation(&session, |c| c.mark_delivery_failed(client_id));
+            // The chat that sent it, also after its timer marked it failed.
+            let owner = self.send_answered(client_id);
+            let timed = self.deliveries.remove(client_id).map(|(session, _)| session);
+            if let Some(session) = timed.or(owner) {
+                // The Host answered with a reason (e.g. 413 'too long for this
+                // agent'): the bubble says it, so Resend is not pressed blindly.
+                let reason = if status > 0 { message } else { "" };
+                self.with_conversation(&session, |c| c.mark_delivery_failed_because(client_id, reason));
             }
             if self.deliveries.is_empty() {
                 self.set_sending(false);
@@ -1583,6 +1667,13 @@ impl Engine {
                 }
             }
             "agent-roster" => self.request_snapshot(),
+            "delivery-updated" => {
+                // F4: a send's delivery state changed without a new revision;
+                // the hint carries no state, so re-read the chat's tail.
+                if self.conversations.contains_key(&session) {
+                    self.request_tail(&session, false);
+                }
+            }
             "transcript-updated" => {
                 if self.conversations.contains_key(&session) {
                     self.request_delta(&session);

@@ -4,6 +4,7 @@ import json
 
 import pytest
 
+from lib import janitor_runner
 from lib.janitor_runner import JanitorRunner, SQLiteSource, eligible_event, prompt_for_run
 
 
@@ -550,3 +551,82 @@ def test_a_late_tick_measures_the_back_off_from_the_scheduled_time(lane):
     clock[0] = due + 144
     make().tick()  # nothing to review: idle
     assert store.progress["attachment"]["next_run_at"] == due + 2 * QUARTER
+
+
+def test_a_run_whose_turn_never_ends_expires_and_admits_again(lane):
+    # AUT-15: a dispatched turn that vanishes (a removed queue row) leaves no
+    # terminal. Without a deadline the run stays open and the attachment
+    # never admits again.
+    store, source, calls, clock, make = lane
+    source.contexts["worker"] = context()
+    runner = make()
+    runner.tick()
+    first = calls[-1][0]
+    clock[0] = first["created_at"] + janitor_runner.RUN_TTL_MS - 1
+    runner.tick()
+    assert store.runs[first["run_id"]]["status"] == "queued"
+
+    clock[0] = first["created_at"] + janitor_runner.RUN_TTL_MS
+    runner.tick()
+    expired = store.runs[first["run_id"]]
+    assert expired["status"] == "error" and "expired" in expired["error"]
+    clock[0] += 30_000
+    runner.tick()
+    assert len(calls) == 2 and calls[-1][0]["run_id"] != first["run_id"]
+
+
+def test_an_admitted_active_interval_run_expires_while_the_user_is_inactive(lane):
+    # AUT-15 (review C): admission waits for activity, retiring an admitted
+    # run past its deadline does not, and expiry admits nothing while inactive.
+    from lib.janitor_active_interval import DEFAULTS
+    store, source, calls, clock, make = lane
+    store.rows[0].update(trigger_id="active-interval",
+                         config={**DEFAULTS, "interval_seconds": 60, "run_on_resume": True})
+    active = [True]
+    source.application_active = lambda _timeout: active[0]
+    source.contexts["worker"] = context()
+    runner = make()
+    assert runner.tick() == 1
+    first = calls[-1][0]
+    store.runs[first["run_id"]]["created_at"] = clock[0]
+    active[0] = False
+    clock[0] += janitor_runner.RUN_TTL_MS
+    assert runner.tick() == 0
+    assert store.runs[first["run_id"]]["status"] == "error"
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("extra_inactive", [False, True])
+def test_repeated_inactive_expiries_keep_the_same_evidence_retry_budget(lane, monkeypatch, extra_inactive):
+    # AUT-15 (review C round 2): an inactive tick clears pending; the retry
+    # already spent on the same evidence must survive it (MAX_RETRIES).
+    from lib.janitor_active_interval import DEFAULTS
+    store, source, calls, clock, make = lane
+    store.rows[0].update(trigger_id="active-interval",
+                         config={**DEFAULTS, "interval_seconds": 60, "run_on_resume": True})
+    active = [True]
+    source.application_active = lambda _timeout: active[0]
+    source.contexts["worker"] = context()
+    original = store.create_run
+
+    def create(*args, **kwargs):
+        run = original(*args, **kwargs)
+        store.runs[run["run_id"]]["created_at"] = clock[0]
+        return store.get_run(run["run_id"])
+
+    monkeypatch.setattr(store, "create_run", create)
+    runner = make()
+    assert runner.tick() == 1
+    for _ in range(3):
+        run = calls[-1][0]
+        active[0] = False
+        clock[0] = run["created_at"] + janitor_runner.RUN_TTL_MS
+        assert runner.tick() == 0
+        assert store.runs[run["run_id"]]["status"] == "error"
+        clock[0] += 30_000
+        if extra_inactive:
+            assert runner.tick() == 0
+        active[0] = True
+        clock[0] += 30_000
+        runner.tick()
+    assert len(calls) == 2

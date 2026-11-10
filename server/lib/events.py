@@ -42,9 +42,12 @@ _AGENT_RING_FIELDS = (
     "ring_id", "session", "agent_id", "persona", "reason", "opening_line", "opening_audio_url",
     "state", "created_at", "expires_at", "ended_at", "answered_by", "call_id", "server_now",
     "conversation_mode",
+    # Listen-first rings only (docs/agent-rings.md); absent on a say ring.
+    "opening_mode", "opening",
 )
-# Present only on an agent-live ring (agent_ring_live); a classic ring's event is unchanged.
-_AGENT_RING_OPTIONAL = frozenset({"conversation_mode"})
+# Present only where they apply: conversation_mode on an agent-live ring (agent_ring_live),
+# opening_mode/opening on a listen-first ring; a classic say ring's event is unchanged.
+_AGENT_RING_OPTIONAL = frozenset({"conversation_mode", "opening_mode", "opening"})
 
 _GROUP_CALL_FIELDS = (
     "call_id", "host_id", "principal", "state", "reason", "revision", "started_at",
@@ -57,6 +60,8 @@ FIELDS: dict[str, tuple[str, ...]] = {
         "trace_id", "streamable", "delivery", "stream_url", "playlist_url",
         "complete_url", "audio_format", "preview", "herald", "voice_id",
         "phrase_key", "cached_phrase", "replay", "ts",
+        # Clips of a listen-first opening turn only (docs/agent-rings.md).
+        "call_id", "opening",
     ),
     SSEType.SERVER_VERSION: ("version",),
     SSEType.REMOTE_ACTION: (
@@ -85,6 +90,7 @@ FIELDS: dict[str, tuple[str, ...]] = {
         "agent_id", "session", "queue_depth", "queue_paused", "queue_started",
         "queue_revision", "client_msg_id",
     ),
+    SSEType.DELIVERY_UPDATED: ("session", "agent_id", "message_id"),
     SSEType.ARTIFACT_UPDATED: ("session", "agent_id", "artifact_id"),
     SSEType.ATTENTION_UPDATED: ("attention_count",),
     SSEType.BACKGROUND_JOB_UPDATED: (
@@ -312,6 +318,17 @@ def queue_updated(*, session: str, agent_id: str, queue_depth: int,
     ])
 
 
+def delivery_updated(*, session: str, agent_id: str, message_id: str) -> Event:
+    """F4: a send's delivery state may have changed. An invalidation HINT only,
+    carrying no state: clients re-read /log (delivery_since) and merge from
+    there; a hint is never merged into history or cursors."""
+    return _build(SSEType.DELIVERY_UPDATED, [
+        ("session", session),
+        ("agent_id", agent_id),
+        ("message_id", message_id),
+    ])
+
+
 def artifact_updated(*, session: str, agent_id: str,
                      artifact_id: str) -> Event:
     return _build(SSEType.ARTIFACT_UPDATED, [
@@ -459,8 +476,9 @@ def group_call(**fields: Any) -> Event:
 
 def agent_ring(**fields: Any) -> Event:
     """One agent ring record (docs/agent-rings.md)."""
-    return _build(SSEType.AGENT_RING, [(key, fields.get(key, OMIT if key in _AGENT_RING_OPTIONAL else None))
-                                       for key in _AGENT_RING_FIELDS])
+    return _build(SSEType.AGENT_RING, [
+        (key, OMIT if key in _AGENT_RING_OPTIONAL and fields.get(key) is None else fields.get(key))
+        for key in _AGENT_RING_FIELDS])
 def controller_actions_updated(*, revision: int) -> Event:
     return _build(SSEType.CONTROLLER_ACTIONS_UPDATED, [("revision", revision)])
 
@@ -475,6 +493,7 @@ CONSTRUCTORS: dict[str, Callable[..., Event]] = {
     SSEType.AGENT_FOCUS: agent_focus,
     SSEType.TRANSCRIPT_UPDATED: transcript_updated,
     SSEType.QUEUE_UPDATED: queue_updated,
+    SSEType.DELIVERY_UPDATED: delivery_updated,
     SSEType.ARTIFACT_UPDATED: artifact_updated,
     SSEType.ATTENTION_UPDATED: attention_updated,
     SSEType.BACKGROUND_JOB_UPDATED: background_job_updated,

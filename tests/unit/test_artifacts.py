@@ -760,17 +760,40 @@ def test_asking_agent_can_withdraw_its_request_silently(tmp_path):
         artifacts.resolve(decision_id, expected_revision=1, answer={"option_id": "current"})
 
 
-def test_owner_message_supersedes_every_open_request_of_that_agent(tmp_path):
-    agent_id = _agent(tmp_path)
-    question = _question()
-    approval = artifacts.create_decision(session="mike", title="Send", question="Send?")
-    closed = artifacts.close_for_user_message(agent_id)
-    assert set(closed) == {question["artifact_id"], approval["artifact_id"]}
-    assert artifacts.attention(include_questions=True) == []
-    assert artifacts.pending_deliveries() == []
-    assert not artifacts.has_pending_decision(agent_id)
-    assert artifacts.get(approval["artifact_id"])["decision"]["resolved_choice"] == "superseded"
-    assert artifacts.close_for_user_message(agent_id) == []
+def test_designated_agent_answers_on_behalf_with_honest_provenance(tmp_path):
+    _agent(tmp_path)
+    _agent(tmp_path, session="nori")
+    item = _question()
+    decision_id = item["decision"]["decision_id"]
+    with pytest.raises(PermissionError, match="not designated"):
+        artifacts.resolve(decision_id, expected_revision=1,
+                          answer={"option_id": "current"}, on_behalf_session="nori",
+                          designated_sessions=(), verified_session="nori")
+    with pytest.raises(PermissionError, match="verified turn identity"):
+        artifacts.resolve(decision_id, expected_revision=1,
+                          answer={"option_id": "current"}, on_behalf_session="nori",
+                          designated_sessions=("nori",), verified_session="mike")
+    with pytest.raises(PermissionError, match="asking agent"):
+        artifacts.resolve(decision_id, expected_revision=1,
+                          answer={"option_id": "current"}, on_behalf_session="mike",
+                          designated_sessions=("mike", "nori"), verified_session="mike")
+    with pytest.raises(ValueError, match="on-behalf session not found"):
+        artifacts.resolve(decision_id, expected_revision=1,
+                          answer={"option_id": "current"}, on_behalf_session="ghost",
+                          designated_sessions=("ghost",), verified_session="ghost")
+    answered, changed = artifacts.resolve(
+        decision_id, expected_revision=1, answer={"option_id": "current"},
+        on_behalf_session="nori", designated_sessions=("nori",), verified_session="nori")
+    assert changed and answered["decision"]["resolved_by"] == "agent:nori"
+    prompt = artifacts.format_delivery_prompt(artifacts.pending_deliveries()[0])
+    assert "Resolved by: agent:nori" in prompt
+    assert "through agent nori" in prompt
+    _, changed = artifacts.resolve(
+        decision_id, expected_revision=1, answer={"option_id": "current"},
+        on_behalf_session="nori", designated_sessions=("nori",), verified_session="nori")
+    assert not changed
+    with pytest.raises(ValueError, match="already resolved"):
+        artifacts.resolve(decision_id, expected_revision=1, answer={"option_id": "current"})
 
 
 def test_text_input_request_takes_only_typed_text_and_expires_without_deletion(tmp_path, monkeypatch):
@@ -834,3 +857,24 @@ def test_pins_survive_reopen_and_are_independent_of_inbox_archiving(tmp_path, mo
     unpinned, changed = artifacts.pin(newer["artifact_id"], pinned=False)
     assert changed and unpinned["updated_at"] == newer["updated_at"]
     assert [row["artifact_id"] for row in artifacts.list_pinned()] == [older["artifact_id"]]
+
+
+def test_only_a_pending_delivery_is_delivered_or_cancelled(tmp_path, monkeypatch):
+    agent_id = _agent(tmp_path)
+    status = lambda ident: db.conn().execute(
+        "SELECT status, delivered_at FROM decision_deliveries WHERE decision_id=?", (ident,)).fetchone()
+    ids = []
+    for title in ("First", "Second"):
+        created = artifacts.create_decision(session="mike", title=title, question="Go?",
+                                            yes_label="Yes", no_label="No")
+        ids.append(created["decision"]["decision_id"])
+        artifacts.resolve(ids[-1], choice="accepted", expected_revision=1)
+    monkeypatch.setattr(db, "now_ms", lambda: 5_000_000_000_000)
+    artifacts.mark_delivered(ids[0])
+    artifacts.cancel_for_agent(agent_id)
+    monkeypatch.setattr(db, "now_ms", lambda: 6_000_000_000_000)
+    artifacts.mark_delivered(ids[0])
+    artifacts.mark_delivered(ids[1])
+    assert tuple(status(ids[0])) == ("delivered", 5_000_000_000_000)
+    assert tuple(status(ids[1])) == ("cancelled", None)
+    assert artifacts.DECISION_DELIVERY.decide("pending", "deliver") == "delivered"

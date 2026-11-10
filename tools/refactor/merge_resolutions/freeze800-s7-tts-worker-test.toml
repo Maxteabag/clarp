@@ -1,0 +1,12 @@
+# Freeze800 S7: lead831; B bounded-three route and C exact payload criteria.
+# Reviewed whole port 6f8fd40d197c51c23e89b6568a0a6db9b209456e; staged input 82ff2989567f06af27ef92d06a29893db3d36122.
+# Payload is byte-identical to reviewed and staged S7; no new behavior.
+# SHA256 f7bea9895480eaa23dd88c06586ae1d33b5d553ba935e79860301eace9babfae; git blob 0a600b08c88bf3c3ca595f306526a3e7a5e70c30.
+# Bind actual base/main/STAGED integration, not historical pre-port input.
+# Empty base_blob means the path is absent, never a wildcard.
+# Final actual refs must match all three guards or STOP for refreshed review.
+path = "tests/unit/test_tts_worker.py"
+resolved = "freeze800-s7-tts-worker-test.py.resolved"
+base_blob = "7c15dfc70e4ea0e00b5928ec668288916503918f"
+main_blob = "4749b9e2909f4a4b1426acf0ecc9013b0d800941"
+integration_blob = "0a600b08c88bf3c3ca595f306526a3e7a5e70c30"

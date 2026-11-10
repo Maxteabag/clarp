@@ -187,12 +187,16 @@ def status() -> dict:
     models = cloud_models()
     selected_row = next((m for m in models if m["id"] == engine), None)
     from .heard_audio import enabled as retain_audio
-    from . import stt_language
+    from . import call_transcription, stt_language
+    policy = call_transcription.policy_snapshot()
     return {
         "engine": engine,
         "language": stt_language.selected(),
         "agent_languages": stt_language.agent_languages(),
         "agent_engines": stt_language.agent_engines(),
+        "call_languages": policy["languages"],
+        "call_engines": ",".join(policy["engines"]),
+        "call_policy_error": policy["error"],
         "turn_taking": strategy,
         "retain_audio": retain_audio(),
         "long_form_model": long_form_model(),
@@ -224,23 +228,26 @@ def status() -> dict:
 
 def update_settings(data: dict) -> dict:
     """Validate and store the two switches. Raises ValueError on bad input."""
-    engine = data.get("engine", selected_engine())
-    strategy = data.get("turn_taking", selected_turn_taking())
-    if not isinstance(engine, str) or not isinstance(strategy, str):
+    # Only the keys a save names are written; an omitted engine or turn
+    # taking is read inside the transaction below, so a concurrent save of it
+    # is neither reverted nor validated against a stale value.
+    # Omission is the absent key; an explicit null is refused, as before.
+    if any(key in data and not isinstance(data[key], str) for key in ("engine", "turn_taking")):
         raise ValueError("engine and turn_taking must be strings")
-    engine = engine.strip() or LOCAL_ENGINE
-    strategy = strategy.strip() or TURN_NATIVE
-    if engine != LOCAL_ENGINE and _model_row(engine) is None:
-        # Local model ids ("faster-whisper:small.en") are governed by the
-        # installed-model registry, not this catalogue; only reject cloud ids
-        # we do not know.
-        if is_cloud_model(engine) or ":" not in engine:
-            raise ValueError(f"unknown transcription engine: {engine}")
-    if strategy not in VALID_TURN_TAKING:
-        raise ValueError(f"unknown turn-taking strategy: {strategy}")
-    row = _model_row(engine)
-    if strategy == TURN_PROVIDER and not (row and _definition(row["id"].split(":")[0])["turn_detection"] == "own"):
-        raise ValueError("provider-owned turn taking needs an engine that detects turns")
+    engine = data.get("engine")
+    strategy = data.get("turn_taking")
+    if engine is not None:
+        engine = engine.strip() or LOCAL_ENGINE
+        if engine != LOCAL_ENGINE and _model_row(engine) is None:
+            # Local model ids ("faster-whisper:small.en") are governed by the
+            # installed-model registry, not this catalogue; only reject cloud ids
+            # we do not know.
+            if is_cloud_model(engine) or ":" not in engine:
+                raise ValueError(f"unknown transcription engine: {engine}")
+    if strategy is not None:
+        strategy = strategy.strip() or TURN_NATIVE
+        if strategy not in VALID_TURN_TAKING:
+            raise ValueError(f"unknown turn-taking strategy: {strategy}")
     retain = data.get("retain_audio")
     if retain is not None and not isinstance(retain, bool):
         raise ValueError("retain_audio must be boolean")
@@ -275,7 +282,28 @@ def update_settings(data: dict) -> dict:
     agent_languages = data.get("agent_languages")
     if agent_languages is not None:
         agent_languages = stt_language.merge_agent_languages(agent_languages)
-    settings_store.set_text(ENGINE_KEY, engine)
+    from . import call_transcription
+    # The engine, the turn taking and the call pair are checked against one
+    # in-transaction view (what this save names, else what is stored now) and
+    # published together: a reader sees the old settings or the new ones.
+    with settings_store.transaction():
+        current_engine = selected_engine() if engine is None else engine
+        current_strategy = selected_turn_taking() if strategy is None else strategy
+        row = _model_row(current_engine)
+        if current_strategy == TURN_PROVIDER and not (
+                row and _definition(row["id"].split(":")[0])["turn_detection"] == "own"):
+            raise ValueError("provider-owned turn taking needs an engine that detects turns")
+        call_languages, call_engines = call_transcription.validate_settings(
+            data.get("call_languages"), data.get("call_engines"),
+            is_valid=lambda e: _model_row(e) is not None, global_engine=current_engine)
+        if engine is not None:
+            settings_store.set_text(ENGINE_KEY, engine)
+        if strategy is not None:
+            settings_store.set_text(TURN_TAKING_KEY, strategy)
+        if call_languages is not None:
+            settings_store.set_text(call_transcription.CALL_LANGUAGES_KEY, call_languages)
+        if call_engines is not None:
+            settings_store.set_text(call_transcription.CALL_ENGINES_KEY, call_engines)
     if language is not None:
         settings_store.set_text(stt_language.LANGUAGE_KEY, language)
     if agent_languages is not None:
@@ -286,7 +314,6 @@ def update_settings(data: dict) -> dict:
         settings_store.set_text(LONG_FORM_MODEL_KEY, long_model)
     if threshold is not None:
         settings_store.set_int(LONG_FORM_THRESHOLD_KEY, threshold)
-    settings_store.set_text(TURN_TAKING_KEY, strategy)
     if retain is not None:
         from .heard_audio import set_enabled
         set_enabled(retain)
@@ -344,10 +371,14 @@ def transcribe(model_id: str, audio_bytes: bytes, content_type: str,
 
     from .focus import current_focus_session
     session = stt_language.current_session() or current_focus_session()
-    language = stt_language.language_for(session)
+    language = stt_language.current_language() or stt_language.language_for(session)
     if "," in language and provider not in {"google", "elevenlabs"}:
         raise ValueError("agent language-set recognition requires Google Chirp or ElevenLabs Scribe")
-    text, duration = call(language)
+    # The argument handed to the adapter, as the attempt records it: Scribe
+    # drops a set and detects without bound, so it is handed none.
+    handed = None if provider == "elevenlabs" and "," in language else language
+    stt_language.note_handed(handed)
+    text, duration = call(handed)
     from .judgment_sites import is_junk
     text = (text or "").strip()
     if is_junk(text):

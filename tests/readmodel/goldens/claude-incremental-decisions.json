@@ -1,0 +1,42 @@
+{
+ "backend": "claude",
+ "steps": [
+  {
+   "decision": "no_checkpoint",
+   "step": "grow"
+  },
+  {
+   "decision": "incremental",
+   "step": "partial"
+  },
+  {
+   "decision": "incremental",
+   "step": "complete"
+  },
+  {
+   "decision": "incremental",
+   "step": "append"
+  },
+  {
+   "decision": "shrink",
+   "step": "truncate"
+  },
+  {
+   "decision": "incremental",
+   "step": "regrow"
+  },
+  {
+   "decision": "inode",
+   "step": "rotate"
+  }
+ ],
+ "verdicts": [
+  "fallback:no_checkpoint",
+  "match",
+  "match",
+  "match",
+  "fallback:shrink",
+  "match",
+  "fallback:inode"
+ ]
+}

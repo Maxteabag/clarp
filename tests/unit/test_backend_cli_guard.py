@@ -24,7 +24,7 @@ import textwrap
 import pytest
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
-NAMES = ("claude", "clarp", "codex", "agy", "grok", "opencode", "gemini", "tmux")
+NAMES = ("claude", "clarp", "codex", "agy", "grok", "opencode", "gemini", "tmux", "muse")
 
 
 def _sentinel(path: pathlib.Path, marker: pathlib.Path) -> pathlib.Path:

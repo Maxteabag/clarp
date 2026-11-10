@@ -318,26 +318,43 @@ class HeraldManager:
 
         if synth_reason != "synthesized":
             self._herald_inflight.pop(session, None)
-            self._log_decision(
-                session=session, focus=focus, awaiting_active=awaiting_active,
-                action="hold", reason=synth_reason, meta=attempt.meta,
-                settings=attempt.settings)
-            return IngestResult(broadcast=False, herald_emitted=False)
+            return self._fall_back_locked(
+                attempt, focus=focus, awaiting_active=awaiting_active,
+                reason=synth_reason)
 
         herald_emitted = self._broadcast_audio(
             url=herald_url, session=session, ts=0, herald=True)
         self._herald_inflight.pop(session, None)
-        if herald_emitted:
-            self._pending.add(session)
-            log("heraldEmitted", f"{session} → {herald_url}")
-            reason = "herald_emitted"
-        else:
-            reason = "herald_broadcast_failed"
+        if not herald_emitted:
+            return self._fall_back_locked(
+                attempt, focus=focus, awaiting_active=awaiting_active,
+                reason="herald_broadcast_failed")
+        self._pending.add(session)
+        log("heraldEmitted", f"{session} → {herald_url}")
         self._log_decision(
             session=session, focus=focus, awaiting_active=awaiting_active,
-            action="hold", reason=reason, meta=attempt.meta,
+            action="hold", reason="herald_emitted", meta=attempt.meta,
             settings=attempt.settings)
-        return IngestResult(broadcast=False, herald_emitted=herald_emitted)
+        return IngestResult(broadcast=False, herald_emitted=True)
+
+    def _fall_back_locked(
+        self, attempt: _HeraldAttempt, *, focus: str, awaiting_active: bool,
+        reason: str,
+    ) -> IngestResult:
+        """The announcement failed: deliver the held reply as herald.disabled
+        would, in its normal clip order (no herald priority, so it never talks
+        over clips already queued). If that fails too, the session is pending,
+        so a spoken grant can still release it (RTO-11)."""
+        session = attempt.session
+        flushed = self._flush(session, herald=False)
+        if not flushed:
+            self._pending.add(session)
+        log("heraldFallbackFlush", f"{session} reason={reason} flushed={int(flushed)}")
+        self._log_decision(
+            session=session, focus=focus, awaiting_active=awaiting_active,
+            action="broadcast" if flushed else "hold", reason=reason,
+            meta=attempt.meta, settings=attempt.settings)
+        return IngestResult(broadcast=flushed, herald_emitted=False)
 
     def _is_short_reply(self, meta: dict | None, settings: HeraldSettings) -> bool:
         if not settings.short_reply_bypass_enabled:
@@ -463,6 +480,10 @@ class HeraldManager:
         # Preserve the producer-selected delivery URL and any delivery-
         # specific fields (delivery=hls + playlist_url, or stream_url for
         # the chunked-file and raw-pcm paths).
+        # A listen-first opening clip carries its call and opening tag.
+        for key in ("call_id", "opening"):
+            if meta.get(key):
+                fields[key] = meta[key]
         if meta.get("streamable"):
             fields["streamable"] = True
             for key in ("delivery", "playlist_url", "stream_url",

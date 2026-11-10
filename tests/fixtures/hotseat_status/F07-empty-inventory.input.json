@@ -1,0 +1,11 @@
+{
+  "case": "F07-empty-inventory",
+  "janitor_enabled": true,
+  "served_at": 1800000001000,
+  "steps": [
+    {"op": "read", "provider": "claude", "received_at": 1800000000000,
+     "payload": {"generated_at": 1800000000.0, "sessions": 0, "error": null, "accounts": []}},
+    {"op": "read", "provider": "codex", "received_at": 1800000000000,
+     "payload": {"unsaved_live": null, "quota_read": true, "quota_age_s": null, "accounts": []}}
+  ]
+}

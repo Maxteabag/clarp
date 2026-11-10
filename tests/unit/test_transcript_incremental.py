@@ -10,6 +10,8 @@ same rows, heads, revisions and clock.
 """
 from __future__ import annotations
 
+from tests.patching import patch_shared
+
 import json
 import os
 import pathlib
@@ -242,7 +244,7 @@ def shadow_on(monkeypatch):
 @pytest.fixture
 def clock(monkeypatch):
     state = {"ms": 1_791_700_000_000}
-    monkeypatch.setattr(message_writes, "now_ms", lambda: state["ms"])
+    patch_shared(monkeypatch, message_writes, "now_ms", lambda: state["ms"])
     return state
 
 
@@ -384,6 +386,32 @@ def test_edits_and_rewrites_of_earlier_records_force_a_full_import(tmp_path, clo
     assert _decide(cp, "claude", transcript) == "inode"
 
 
+@pytest.mark.parametrize("backend,helper", [
+    (backend, helper)
+    for backend in ["claude", "codex", "agy"]
+    for helper in ["message_import_rows.py", "message_import_common.py", "message_text.py"]
+] + [("codex", "codex_tool_cells.py"), ("agy", "codex_tool_cells.py")])
+def test_parser_version_changes_when_an_import_helper_changes(monkeypatch, backend, helper):
+    """A moved import dependency must invalidate checkpoints on each affected backend."""
+    original = pathlib.Path.read_bytes
+    root = pathlib.Path(inc.__file__).resolve().parent
+
+    def changed_bytes(path):
+        content = original(path)
+        return content + b"\n# changed helper\n" if path == root / helper else content
+
+    inc.parser_version.cache_clear()
+    try:
+        before = inc.parser_version(backend)
+        with monkeypatch.context() as scope:
+            scope.setattr(pathlib.Path, "read_bytes", changed_bytes)
+            inc.parser_version.cache_clear()
+            after = inc.parser_version(backend)
+        assert after != before
+    finally:
+        inc.parser_version.cache_clear()
+
+
 def test_a_checkpoint_from_another_parser_version_is_refused(tmp_path, clock, shadow_on, monkeypatch):
     lines = codex_lines(3)
     transcript, cp = _checkpointed(tmp_path, "codex", lines, len(lines) - 2, clock)
@@ -435,20 +463,32 @@ def test_the_shadow_reports_a_divergence_and_the_full_import_still_wins(tmp_path
     assert len(continued) == 2 and continued.count("u-c3") == 1
 
 
-def test_without_the_shadow_the_import_is_the_plain_full_import(tmp_path, clock, monkeypatch):
+def test_disabled_shadow_preserves_full_rows_without_running_comparison(tmp_path, clock, monkeypatch):
     monkeypatch.setattr(inc, "BUDGET", inc.ShadowBudget())
     _prepare(tmp_path / "a.sqlite", "claude")
+    reference = tmp_path / "reference.sqlite"
+    with sqlite3.connect(reference) as copy:
+        db.conn().backup(copy)
     transcript = tmp_path / "t.jsonl"
     transcript.write_bytes(b"".join(claude_lines(3)))
-    calls = []
-    real = message_store.store_transcript_turns
-    monkeypatch.setattr(message_store, "store_transcript_turns",
-                        lambda **kw: calls.append(sorted(kw)) or real(**kw))
+    events = []
+    real_emit = eventlog.emit
+
+    def emit(source, event, **kw):
+        events.append(event)
+        return real_emit(source, event, **kw)
+
+    monkeypatch.setattr(eventlog, "emit", emit)
     result = inc.import_transcript(backend="claude", path=transcript, agent_id=AGENT,
                                    backend_session_id=SESSION)
+    actual = snapshot()
     assert result["shadow"] == "disabled"
-    assert calls == [["agent_id", "backend_session_id", "source_file", "turns"]]
-    assert db.conn().execute("SELECT count(*) FROM transcript_import_checkpoints").fetchone()[0] == 0
+    assert "import_shadow" not in events
+    db.reset_for_tests(reference)
+    message_store.store_transcript_turns(agent_id=AGENT, backend_session_id=SESSION,
+                                         source_file=str(transcript), turns=inc.parse_range(
+                                             "claude", transcript, 0, transcript.stat().st_size))
+    assert actual == snapshot()
 
 
 def test_the_kill_switch_outranks_the_config(monkeypatch):

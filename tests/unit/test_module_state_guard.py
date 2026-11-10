@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import ast
 import pathlib
+import sys
 
 SERVER = pathlib.Path(__file__).resolve().parents[2] / "server"
 _MUTATORS = frozenset({
@@ -51,7 +52,28 @@ ALLOWED: dict[tuple[str, str], str] = {
     ("lib/backend_auth.py", "_processes"): JOBS,
     ("lib/backend_auth.py", "_tasks"): JOBS,
     ("lib/backend_auth.py", "_validation_cache"): CACHE,
+    ("lib/cartesia_preview_locks.py", "_CARTESIA_PREVIEW_LOCKS"): LOCKS,
+    ("lib/harness_providers.py", "_methods_refresh"): JOBS,
+    ("lib/harness_providers.py", "_sessions"): JOBS,
+    ("lib/harness_providers.py", "_tasks"): JOBS,
     ("lib/backends.py", "_RUNTIME_CLIENT"): CLIENT,
+    # This process's view of its own wall and monotonic clocks (its start and
+    # the last suspend or clock jump it saw); meaningless in any other process.
+    ("lib/background_jobs.py", "_clock"): THROTTLE,
+    ("lib/task_goal_recovery.py", "_FAILURE_LOGGED"): THROTTLE,
+    ("lib/log.py", "_FAULT_LOG_THROTTLE"): THROTTLE,
+    ("lib/log.py", "_FAULT_LOG_COUNTS"): THROTTLE,
+    # Stop's in-process epoch backs up a durable fence write that failed; the
+    # durable fence stays the authority, so losing it on restart is intended.
+    ("lib/launch_receipts.py", "_STOP_EPOCH"): THROTTLE,
+    # F4 delivery admission: health-only, process-local counters (never an
+    # admission input), reset on restart and by reset_*_for_tests.
+    ("lib/launch_receipts.py", "_RECONCILE_HEALTH"): THROTTLE,
+    ("lib/outdated_clients.py", "_OUTDATED_CLIENTS_NOTED"): THROTTLE,
+    ("lib/runtime_attestation.py", "_HEALTH"): THROTTLE,
+    # The one manager-probe slot and start-rate bucket of this Host process: a
+    # rate limit by design; it only withholds work and never proves anything.
+    ("lib/runtime_attestation.py", "_GATE"): THROTTLE,
     ("lib/live_hub.py", "_HUB"): CLIENT,
     ("lib/server_identity.py", "_live_probe"): CLIENT,
     ("lib/static_assets.py", "_hashes"): CACHE,
@@ -59,9 +81,22 @@ ALLOWED: dict[tuple[str, str], str] = {
     ("lib/transcript_import_cache.py", "_deferred"): THROTTLE,
     ("lib/live_hub.py", "_FANOUT"): CLIENT,
     ("lib/backends.py", "_STATUS_CACHE"): CACHE,
+    # Invalidation generation of that window: an F4 O1 never stores a status
+    # fetched before a reconfigure / invalidate.
+    ("lib/backends.py", "_STATUS_GENERATION"): CACHE,
     ("lib/reconcile.py", "_LEAK_CHECK_ASKED"): THROTTLE,
+    ("lib/reconcile.py", "_BUSY_OBSERVATIONS"): (
+        "bounded (1024 entries, 300s idle expiry on access), lock-protected process-local "
+        "DB-epoch-object/agent/same-row temporal history for the signed60s debounce; "
+        "mature evidence is consumed under the lock; eviction/restart only delays repair, "
+        "never supplies durable or cached liveness authority"),
     ("lib/cartesia_voices.py", "_cache"): CACHE,
     ("lib/codex_app_server.py", "_CLIENTS"): CLIENT,
+    # Recycled app-server clients whose process has not been seen to exit;
+    # their threads stay held until it has (BACKENDS-07b).
+    ("lib/codex_app_server.py", "_RETIRING"): JOBS,
+    # Draining app-server generations after a credential change (BACKENDS-06b).
+    ("lib/codex_app_server.py", "_DRAINING"): JOBS,
     ("lib/compaction.py", "_active"): JOBS,
     ("lib/compaction.py", "_runtime_client"): CLIENT,
     ("lib/config.py", "PERSONA_PERSONALITIES"): IMPORT,
@@ -91,6 +126,8 @@ ALLOWED: dict[tuple[str, str], str] = {
     ("lib/elevenlabs_voices.py", "_cache"): CACHE,
     ("lib/google_stt.py", "_TOKENS"): CACHE,
     ("lib/eventlog.py", "LOG_DIR"): PATHS,
+    ("lib/eventlog.py", "_DEFERRED"): "per-thread deferred telemetry rows and sqliteWriteWait sinks; wait sinks flush only after their weakly referenced explicit state transaction ends (RM-N8b/B)",
+    ("lib/eventlog.py", "_DROPPED"): "per-process telemetry row loss and JSONL summary throttle; reset on restart and in tests (RM-N8b)",
     ("lib/health.py", "_STATE"): JOBS,
     ("lib/heartbeat.py", "_STATE_BY_AGENT"): "per-agent heartbeat timers of the running worker; rebuilt from agents rows on start",
     ("lib/janitor_autonomy.py", "_SCHEMA_READY_FOR"): PATHS,
@@ -128,7 +165,7 @@ ALLOWED: dict[tuple[str, str], str] = {
     ("lib/server_identity.py", "FEATURE_CONTRACTS"): IMPORT,
     ("lib/server_update.py", "_cache"): CACHE,
     ("lib/telemetry.py", "TELEMETRY_PATH"): PATHS,
-    ("lib/telemetry.py", "_SCHEMA_READY"): PATHS,
+    ("lib/telemetry.py", "_SCHEMA_READY_PATHS"): PATHS,
     ("lib/terminal_ws.py", "_live"): JOBS,
     ("lib/tool_explanation_commands.py", "_counts"): THROTTLE,
     ("lib/tool_explanation_commands.py", "_misses"): THROTTLE,
@@ -142,6 +179,7 @@ ALLOWED: dict[tuple[str, str], str] = {
     ("lib/transcript_import_cache.py", "_running"): JOBS,
     ("lib/transcript_import_cache.py", "_threads"): JOBS,
     ("lib/transcript_import_cache.py", "_direct_active"): JOBS,
+    ("lib/transcript_import_cache.py", "_host_started_at"): "fixed Host-process origin bound once by composition root; deliberately survives cache/DB resets",
     ("lib/transcript_import_cache.py", "_epoch"): RESET,
     ("lib/transcript_import_cache.py", "_resetting"): RESET,
     ("lib/transcript_import_cache.py", "_reset_owner"): RESET,
@@ -157,6 +195,9 @@ ALLOWED: dict[tuple[str, str], str] = {
     ("lib/turn_dispatch.py", "_JANITOR_SPAWN_LOCKS"): LOCKS,
     ("lib/turn_dispatch.py", "_REQUEST_LOCKS"): LOCKS,
     ("lib/turn_dispatch.py", "_RUNTIME_CLIENT"): CLIENT,
+    ("lib/turn_dispatch.py", "_DELIVERY_STREAM"): (
+        "the turn owner's event stream, bound when its TurnDispatchService is built; "
+        "used only for best-effort F4 delivery hints from module-level transitions"),
     ("lib/viz_learning.py", "_failed_until"): THROTTLE,
     ("lib/viz_learning.py", "_pending"): JOBS,
     ("lib/viz_learning.py", "_active"): JOBS,
@@ -169,8 +210,6 @@ ALLOWED: dict[tuple[str, str], str] = {
     ("lib/viz_owner_avatar.py", "_retry"): THROTTLE,
     ("lib/vocab_compile.py", "_MODEL_BUDGETS"): CACHE,
     ("lib/workspace_vocab.py", "_CACHE"): CACHE,
-    ("server.py", "_CARTESIA_PREVIEW_LOCKS"): LOCKS,
-    ("server.py", "_OUTDATED_CLIENTS_NOTED"): THROTTLE,
 }
 
 
@@ -184,14 +223,18 @@ def _is_container(value: ast.expr | None) -> bool:
     return False
 
 
-def module_state(path: pathlib.Path) -> set[str]:
-    tree = ast.parse(path.read_text(), filename=str(path))
+def _constructed_containers(tree: ast.Module) -> set[str]:
     containers = set()
     for node in tree.body:
         if isinstance(node, ast.Assign) and _is_container(node.value):
             containers |= {t.id for t in node.targets if isinstance(t, ast.Name)}
         elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and _is_container(node.value):
             containers.add(node.target.id)
+    return containers
+
+
+def _tree_state(tree: ast.Module) -> set[str]:
+    containers = _constructed_containers(tree)
     rebound, mutated = set(), set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Global):
@@ -206,9 +249,38 @@ def module_state(path: pathlib.Path) -> set[str]:
     return (containers & mutated) | rebound
 
 
+def module_state(path: pathlib.Path) -> set[str]:
+    return _tree_state(ast.parse(path.read_text(), filename=str(path)))
+
+
 def found() -> set[tuple[str, str]]:
+    # State an S9 split recipe moved into a part is reported under its old
+    # module (the facade's path), so ALLOWED names one place on main and on
+    # integration alike. Only declared state maps; anything else in a part
+    # keeps its own path, and two physical owners of one name both stay
+    # visible (each under its own path), so neither inherits an allowance.
+    from tests.patching import logical_split_tree_map, split_origin
     paths = sorted((SERVER / "lib").rglob("*.py")) + [SERVER / "server.py"]
-    return {(p.relative_to(SERVER).as_posix(), name) for p in paths for name in module_state(p)}
+    logical_live = {rel: _tree_state(tree)
+                    for rel, tree in logical_split_tree_map(paths, SERVER).items()}
+    owners: dict[tuple[str, str], list[str]] = {}
+    for p in paths:
+        rel = p.relative_to(SERVER).as_posix()
+        tree = ast.parse(p.read_text(), filename=str(p))
+        state = _tree_state(tree)  # Preserve the physical scan and new-state owners.
+        for name in _constructed_containers(tree):
+            origin = split_origin(rel, name)
+            # A declared constructor and its declared mutator may move into
+            # different parts. Only declared moved state gets logical liveness;
+            # physical owner counting below still detects separate real owners.
+            if origin != rel and name in logical_live.get(origin, set()):
+                state.add(name)
+        for name in state:
+            owners.setdefault((split_origin(rel, name), name), []).append(rel)
+    out = set()
+    for key, physical in owners.items():
+        out |= {key} if len(physical) == 1 else {(rel, key[1]) for rel in physical} | {key}
+    return out
 
 
 def test_no_new_module_state():
@@ -228,3 +300,53 @@ def test_the_scanner_sees_both_kinds_of_state(tmp_path):
     sample.write_text("CONST = {'a': 1}\n_SEEN = set()\n_N = 0\n"
                       "def f(x):\n    global _N\n    _N += 1\n    _SEEN.add(x)\n")
     assert module_state(sample) == {"_SEEN", "_N"}
+
+
+def test_split_state_maps_only_declared_names_and_keeps_duplicate_owners(tmp_path, monkeypatch):
+    # Review B (S9 cut 1b): a new dict in a part with an old allowed name must
+    # not inherit the old module's allowance; nor may a second physical owner.
+    from tests import patching
+    recipes = tmp_path / "splits"
+    recipes.mkdir()
+    (recipes / "s9.toml").write_text(
+        '[[split]]\nname = "x"\nmodule = "lib/old.py"\n'
+        '[[split.part]]\nmodule = "lib/old_base.py"\nnames = ["_cache"]\n')
+    monkeypatch.setattr(patching, "_RECIPES", recipes)
+    root = tmp_path / "server"
+    (root / "lib").mkdir(parents=True)
+    mutated = "{name} = {{}}\ndef f():\n    {name}['k'] = 1\n"
+    (root / "server.py").write_text("")
+    (root / "lib" / "old_base.py").write_text(mutated.format(name="_cache"))
+    (root / "lib" / "old_other.py").write_text(mutated.format(name="_cache"))
+    monkeypatch.setattr(sys.modules[__name__], "SERVER", root)
+    assert ("lib/old.py", "_cache") in found()                     # declared: the old module's
+    assert ("lib/old_other.py", "_cache") in found()               # not in any recipe: its own
+    (root / "lib" / "old.py").write_text(mutated.format(name="_cache"))
+    owners = found()
+    assert ("lib/old.py", "_cache") in owners and ("lib/old_base.py", "_cache") in owners
+
+
+def test_declared_state_stays_live_when_another_split_part_mutates_it(tmp_path, monkeypatch):
+    from tests import patching
+    recipes = tmp_path / 'splits'
+    recipes.mkdir()
+    (recipes / 's4.toml').write_text(
+        '[[split]]\nname="state"\nmodule="lib/old.py"\n'
+        '[[split.part]]\nmodule="lib/old_state.py"\nnames=["_cache"]\n'
+        '[[split.part]]\nmodule="lib/old_ops.py"\nnames=["put"]\n')
+    monkeypatch.setattr(patching, '_RECIPES', recipes)
+    root = tmp_path / 'server'
+    (root / 'lib').mkdir(parents=True)
+    (root / 'server.py').write_text('')
+    (root / 'lib/old.py').write_text('from .old_state import _cache\nfrom .old_ops import put\n')
+    (root / 'lib/old_state.py').write_text('_cache = {}\n')
+    (root / 'lib/old_ops.py').write_text(
+        'from .old_state import _cache\ndef put(key, value):\n    _cache[key] = value\n')
+    monkeypatch.setattr(sys.modules[__name__], 'SERVER', root)
+    assert found() == {('lib/old.py', '_cache')}
+    # A new same-named physical owner must not inherit that logical allowance.
+    (root / 'lib/old_ops.py').write_text(
+        '_cache = {}\ndef put(key, value):\n    _cache[key] = value\n')
+    owners = found()
+    assert ('lib/old.py', '_cache') in owners
+    assert ('lib/old_ops.py', '_cache') in owners
