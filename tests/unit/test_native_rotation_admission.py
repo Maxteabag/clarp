@@ -88,3 +88,82 @@ def test_restart_without_memory_flag_is_still_fenced_by_durable_intent(tmp_path)
             pytest.fail("durable pending intent cannot be ignored")
     assert caught.value.status == 503
     assert journal.get(agent)["operation_id"] == "operation-a"
+
+
+@pytest.mark.parametrize("entry", ["finish", "retry", "stop", "terminal"])
+def test_selected_callback_survives_stop_removing_its_slot_before_rotation(tmp_path, monkeypatch, entry):
+    from lib import db, turn_dispatch as td
+    from lib.turn_command import _TurnSpec
+    from tests.unit.test_graceful_release_drain import _service
+
+    agent = _agent(tmp_path)
+    old = agents.live_backend_session(agent)
+    service, _provider = _service(tmp_path)
+    head = _TurnSpec(backend="codex", text="selected work", cwd=tmp_path,
+                     backend_session_id=old, is_new_session=False, session="theo",
+                     agent_id=agent, trace_id="selected-trace", context=None,
+                     synthesize_audio=False, bypass_pause=True)
+    selected, finish = threading.Event(), threading.Event()
+    completions, errors = [], []
+
+    def retained_callback(self, agent_id, spec):
+        selected.set()
+        if not finish.wait(5):
+            raise RuntimeError("selected callback did not finish")
+        completions.append(spec.trace_id)
+
+    monkeypatch.setattr(td.TurnDispatchService, "_resume_and_spawn", retained_callback)
+    _SLOTS.enqueue(agent, head)
+    if entry == "finish":
+        _SLOTS.claim(agent, "prior-trace")
+        action = lambda: service._finish_slot(agent, "prior-trace", "codex")
+    elif entry == "retry":
+        action = lambda: service._retry_handoff(agent)
+    elif entry == "stop":
+        _SLOTS.claim(agent, td._STOPPING_SENTINEL)
+        action = lambda: td.finish_stop(service.ctx, agent)
+    else:
+        _SLOTS.claim(agent, td._TERMINAL_SENTINEL)
+        action = lambda: td.drain_after_terminal(service.ctx, agent)
+
+    def run():
+        try:
+            action()
+        except BaseException as exc:
+            errors.append(exc)
+        finally:
+            db.close_local()
+
+    worker = threading.Thread(target=run)
+    worker.start()
+    try:
+        assert selected.wait(5), "real selector never published its callback"
+        # Actual Stop clears the selected slot. Its absence is not absence of
+        # the callback that was already published outside TURN.
+        td.clear_for_agent(agent, preserve_queue=True, pause_queue=True)
+        td.finish_stop(service.ctx, agent)
+        assert _SLOTS.get(agent) is None and _SLOTS.queue_depth(agent) == 0
+        assert not _SLOTS.launch_running(agent)
+        with pytest.raises(journal.RotationConflict):
+            admission.reserve(agent, old, "operation-a")
+        assert journal.get(agent) is None
+    finally:
+        finish.set()
+        worker.join(5)
+    assert not worker.is_alive() and errors == [] and completions == ["selected-trace"]
+    assert admission.reserve(agent, old, "operation-a")["phase"] == "reserved"
+
+
+def test_overlapping_selected_tokens_retire_only_their_own_lifetime(tmp_path):
+    agent = _agent(tmp_path)
+    old = agents.live_backend_session(agent)
+    parent = admission.begin_selected(agent)
+    child = admission.begin_selected(agent)
+    assert parent is not None and child is not None and parent is not child
+    assert admission.finish_selected(agent, parent)
+    assert not admission.finish_selected(agent, parent)
+    assert not admission.finish_selected(agent, object())
+    with pytest.raises(journal.RotationConflict):
+        admission.reserve(agent, old, "operation-a")
+    assert admission.finish_selected(agent, child)
+    assert admission.reserve(agent, old, "operation-a")["phase"] == "reserved"
