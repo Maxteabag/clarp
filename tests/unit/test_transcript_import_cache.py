@@ -201,14 +201,23 @@ def test_completion_observers_release_authority_and_cache_locks(tmp_path, observ
     importer = _TranscriptCompletionInput(path, "observer")
     authority = threading.RLock()
     importer._clarp_transcript_fence = lambda: authority
-    entered, acquired = threading.Event(), threading.Event()
+    entered, acquired, stop = threading.Event(), threading.Event(), threading.Event()
     threads, observed, after = [], [], []
 
     def observe(*_):
         def contender():
-            with authority:
-                with cache._guard:
-                    acquired.set()
+            if stop.is_set() or not authority.acquire(timeout=1):
+                return
+            try:
+                if stop.is_set() or not cache._guard.acquire(timeout=1):
+                    return
+                try:
+                    if not stop.is_set():
+                        acquired.set()
+                finally:
+                    cache._guard.release()
+            finally:
+                authority.release()
 
         thread = threading.Thread(target=contender)
         threads.append(thread)
@@ -234,9 +243,21 @@ def test_completion_observers_release_authority_and_cache_locks(tmp_path, observ
         assert observed == [True], "observer IO retained authority or cache lock"
         assert after == ["accepted"]
     finally:
-        assert cache.reset_for_tests()
-        for thread in threads:
-            thread.join(2)
+        stop.set()
+        try:
+            assert cache.reset_for_tests()
+        finally:
+            errors = []
+            for thread in threads:
+                try:
+                    # A failing start can leave an honestly unstarted object.
+                    if thread.ident is not None:
+                        thread.join(3)
+                    assert not thread.is_alive(), "unknown/live observer contender"
+                except Exception as exc:
+                    errors.append(exc)
+            if errors:
+                raise ExceptionGroup("observer contender cleanup failed", errors)
 
 
 def test_failed_completion_observer_does_not_publish_cache_success(tmp_path):
@@ -282,10 +303,12 @@ def test_running_deferred_import_keeps_capacity_for_its_retry(tmp_path, monkeypa
         if not waiting_release.wait(5):
             raise AssertionError("test did not release the waiting import")
 
+    def completed():
+        after.append("completed")
+
     importer.before_return = hold_import
     try:
-        assert cache.schedule_import(path, importer, owner="reserved",
-                                     after=lambda: after.append("completed"))
+        assert cache.schedule_import(path, importer, owner="reserved", after=completed)
         assert entered.wait(2)
         admitted = [cache.schedule_import(path, waiting, owner=f"waiting-{i}")
                     for i in range(64)]
@@ -294,18 +317,72 @@ def test_running_deferred_import_keeps_capacity_for_its_retry(tmp_path, monkeypa
         assert waiting_entered.wait(2)
         key = f"reserved\0{path}"
         with cache._guard:
-            assert key in cache._deferred, "deferred completion lost its admitted retry"
+            pending, deferred = cache._pending.get(key), cache._deferred.get(key)
+            assert pending is not None or deferred is not None, "completion lost its admitted retry"
+            retained = pending[0] if pending is not None else deferred[0]
+            retained_epoch = pending[1] if pending is not None else deferred[2]
+            assert retained_epoch == cache._epoch
+            assert retained[:3] == (path, importer, "reserved") and retained[3] is completed
+            rank = retained[5]
             assert len(set(cache._pending) | set(cache._deferred)) <= 64
         assert after == []
         importer.outcome = "completed-unchanged"
         importer.before_return = None
         assert cache.schedule_import(path, importer, owner="reserved", urgent=True)
+        with cache._guard:
+            latest = cache._pending.get(key) or cache._deferred.get(key)
+            assert latest is not None and latest[0][3] is completed and latest[0][5] == rank
         waiting_release.set()
         assert cache.wait_for_background(4)
         assert after == ["completed"], "the reserved dirty intent did not complete once"
     finally:
         release.set()
         waiting_release.set()
+        assert cache.reset_for_tests()
+
+
+@pytest.mark.parametrize("reenter", ["lookup", "replace"])
+def test_worker_marker_descriptor_runs_before_locked_request_consumption(tmp_path, reenter):
+    import threading
+
+    cache = transcript_import_cache
+    assert cache.reset_for_tests()
+    path = tmp_path / "marker-descriptor.jsonl"
+    path.write_text("{}\n")
+    observations, calls, after = [], [], []
+
+    class GenericImporter:
+        replaced = False
+
+        @property
+        def _clarp_transcript_completion_v1(self):
+            if threading.current_thread().name == "transcript-import":
+                unlocked = cache._guard.acquire(blocking=False)
+                if unlocked:
+                    cache._guard.release()
+                # A broken baseline must report the held lock, not deadlock
+                # irreapably by entering is_active under that same lock.
+                active = cache.is_active(path, owner="marker") if unlocked else None
+                observations.append((unlocked, active))
+                if unlocked and reenter == "replace" and not self.replaced:
+                    self.replaced = True
+                    assert cache.schedule_import(
+                        path, lambda: calls.append("replacement"), owner="marker",
+                        after=lambda: after.append("replacement"))
+            return False  # a generic callable, not an opted-in completion
+
+        def __call__(self):
+            calls.append("original")
+
+    try:
+        assert cache.schedule_import(path, GenericImporter(), owner="marker",
+                                     after=lambda: after.append("original"))
+        assert cache.wait_for_background(3)
+        assert observations and all(unlocked and active for unlocked, active in observations), (
+            "worker evaluated user marker under its guard or after losing active ownership")
+        expected = ["replacement" if reenter == "replace" else "original"]
+        assert calls == expected and after == expected
+    finally:
         assert cache.reset_for_tests()
 
 
