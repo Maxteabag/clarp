@@ -377,6 +377,39 @@ def requeue_rows(queue_ids) -> int:
     return count
 
 
+def keep_start_parked(agent_id: str, *, skip_trace: str = "") -> int:
+    """Turn the agent's waiting start-park rows into visible queued work, so a
+    Stop's ``discard_parked`` keeps them in the paused queue (TP-N3). Read
+    from the rows themselves, so a Stop retried after a failed write still
+    finds them: a row whose trace has a turn (its launch began) or owns the
+    slot (``skip_trace``) is left to its launch."""
+    count = db.conn().execute(
+        """UPDATE queued_turns SET status = 'queued'
+            WHERE agent_id = ? AND status = 'parked'
+              AND queue_id LIKE 'start-park-%' AND trace_id <> ?
+              AND NOT EXISTS (SELECT 1 FROM turns
+                               WHERE turns.agent_id = queued_turns.agent_id
+                                 AND turns.trace_id = queued_turns.trace_id)""",
+        (agent_id, skip_trace)).rowcount or 0
+    if count:
+        _bump_revision(agent_id)
+    return count
+
+
+def repark(agent_id: str, queue_ids) -> int:
+    """Undo ``keep_start_parked`` for rows whose memory spec a rolled-back Stop
+    restored: memory runs them, and the row is unparked at their launch."""
+    count = 0
+    for queue_id in queue_ids:
+        count += db.conn().execute(
+            """UPDATE queued_turns SET status = 'parked'
+                WHERE queue_id = ? AND agent_id = ? AND status = 'queued'""",
+            (queue_id, agent_id)).rowcount or 0
+    if count:
+        _bump_revision(agent_id)
+    return count
+
+
 def move_to_back(queue_id: str) -> bool:
     """Give an open row a new, newest position, everything else unchanged,
     so rows written later for older work can be ordered in front of it."""

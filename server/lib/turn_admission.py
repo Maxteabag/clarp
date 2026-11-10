@@ -405,10 +405,17 @@ class AdmissionMixin:
         # protocol. Other backends retain their existing dispatch behavior.
         # Behind the release drain's fence a follow-up waits instead: steering
         # would stretch the very turn the drain is waiting for.
-        if (decision.effective.steer_allowed and not _SLOTS.fenced
+        wait_for_start = False
+        if decision.effective.steer_allowed and not _SLOTS.fenced and self._start_pending(spec):
+            # The agent's own turn is still starting (its turn/start not yet
+            # confirmed): the follow-up waits for it, durably (a park row
+            # written before it is acknowledged), rather than preempting the
+            # start or holding this request for it (TP-N3).
+            wait_for_start = True
+        elif (decision.effective.steer_allowed and not _SLOTS.fenced
                 and self._steer_if_supported(spec)):
             return DispatchResult(session=session, backend=backend)
-        if self._enqueue_if_busy(spec, queue_if_busy=queue_if_busy):
+        if self._enqueue_if_busy(spec, queue_if_busy=queue_if_busy, wait_for_start=wait_for_start):
             if queue_if_busy:
                 self._broadcast_queue_state(spec, started=False)
             queue_state = turn_queue.state(spec.agent_id)

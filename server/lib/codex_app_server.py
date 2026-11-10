@@ -81,6 +81,14 @@ class _ActiveTurn:
 # turn/interrupt is detached (BACKENDS-07b); the same 10 s as a CLI turn's
 # stop deadline (process_registry.STOP_KILL_DEADLINE_SEC, BACKENDS-07).
 STOP_DETACH_SEC = 10.0
+# The bound of each RPC of a turn's start (thread/resume or thread/start,
+# then turn/start). The start runs outside the pool lock (TP-N3), so a hung
+# start holds up only its own agent, and only this long.
+START_RPC_TIMEOUT_SEC = 30.0
+
+
+class _StoppedBeforeLaunch(Exception):
+    """A Stop arrived before turn/start was sent: nothing is launched."""
 
 
 class CodexSessionStuck(RuntimeError):
@@ -153,6 +161,9 @@ class _Client:
     # Guards each client's goal-state marks. Taken after self._lock,
     # never before it; the goal mirror takes only this one.
     _goal_state_lock = threading.Lock()
+    # Makes each claim handover one step: registering a turn, its terminal
+    # removal and a failed launch's cleanup (TP-N3). Innermost; held briefly.
+    _claims_lock = threading.Lock()
 
     def __init__(self, agent_id: str, session: str, stream=None):
         argv = _codex_argv()
@@ -398,6 +409,16 @@ class _Client:
             # The detached turn (or a continuation on its stuck thread) must
             # not count as busy again: that would keep the stuck process alive.
             log("codexDetachedTurnIgnored", "a turn on a detached thread started late")
+            turn = params.get("turn") if isinstance(params.get("turn"), dict) else {}
+            late = str(turn.get("id") or params.get("turnId") or "")
+            thread = str(params.get("threadId") or turn.get("threadId") or "")
+            if late and thread and late not in getattr(self, "detached_executions", set()):
+                # A stopped or uncertain launch that started after all: it is
+                # not adopted, and it is interrupted by its exact ids (TP-N3).
+                with self._lock:
+                    self.detached_executions = getattr(self, "detached_executions", set()) | {late}
+                threading.Thread(target=self._interrupt_quietly, args=(thread, late),
+                                 daemon=True, name="codex-late-start").start()
             return
         if active is None and method == "turn/started":
             # Codex starts continuation turns for an active goal on its own.
@@ -410,6 +431,11 @@ class _Client:
         if active is None:
             if method == "turn/completed":
                 self._note_foreign_turn(params, started=False)
+                if getattr(self, "detached_agents", None) and self._detached_execution(params):
+                    # A detached or uncertain execution whose claim is already
+                    # gone ended: the process may be quiet now (TP-N3).
+                    threading.Thread(target=self.recycle_if_quiet, daemon=True,
+                                     name="codex-recycle").start()
             return
         notified_turn = params.get("turn") if isinstance(params.get("turn"), dict) else {}
         event_turn_id = str(params.get("turnId") or notified_turn.get("id") or "")
@@ -420,6 +446,7 @@ class _Client:
             notified_turn = params.get("turn") or {}
             active.turn_id = str(notified_turn.get("id") or active.turn_id)
             active.steer_ready.set()
+            self._stop_learned(active)          # a Stop during the start (TP-N3)
             _backend().transition(active.agent_id, TurnEvent.SPAWN_STARTED,
                                   {"dispatch": "codex", "trace_id": active.trace_id})
             return
@@ -478,10 +505,11 @@ class _Client:
             except Exception as exc:  # noqa: BLE001 - the turn must still end
                 log_exception("codexAppServerFlushFail", exc,
                               detail=active.agent_id)
-            if hasattr(self, "_actives"):
-                self._actives.pop(active.agent_id, None)
-            if self.active is active:
-                self.active = None
+            with self._claims_lock:   # only this claim: a successor may own the slot
+                if getattr(self, "_actives", {}).get(active.agent_id) is active:
+                    self._actives.pop(active.agent_id, None)
+                if self.active is active:
+                    self.active = None
             active.handle._done.set()
             if getattr(self, "detached_agents", None):
                 # Not on the reader: a send may hold the pool lock while it
@@ -917,6 +945,9 @@ class _Client:
         thread_id = str(params.get("threadId") or turn.get("threadId") or "")
         if method != "turn/started" or not thread_id:
             return False
+        own = self._pick_active(params)
+        if own is not None and getattr(own.handle, "stop_requested", False):
+            return False                    # our own stopped claim: _stop_learned handles it
         # The fence lasts as long as the durable marker: until the goal's
         # pause is established, even after a refused launch (round 11).
         if (thread_id not in getattr(self, "pausing_stopped", set())
@@ -1019,7 +1050,8 @@ class _Client:
               is_new_session: bool, session: str, trace_id: str, model: str,
               effort: str, voice: bool, persona: str,
               handle: AppTurnHandle, on_session_init, on_result,
-              on_error, stream, enqueue, agent_id: str = "") -> None:
+              on_error, stream, enqueue, agent_id: str = "",
+              on_claimed: Callable[[], None] | None = None) -> None:
         cwd = pathlib.Path(os.path.expanduser(str(cwd))).resolve()
         owner = agent_id or self.agent_id
         developer_instructions = persona_identity_instruction(persona, session)
@@ -1032,11 +1064,19 @@ class _Client:
             handle, on_result, on_error, stream, enqueue, voice,
         )
         self.stream = stream
-        self.active = active
-        if not hasattr(self, "_actives"):
-            self._actives = {}
-        self._actives[owner] = active
+        with self._claims_lock:   # one claim handover at a time (_forget_claim)
+            self.active = active
+            if not hasattr(self, "_actives"):
+                self._actives = {}
+            self._actives[owner] = active
+        if on_claimed is not None:
+            # The turn is registered (busy to every fence): the caller lets go
+            # of the pool lock before the RPCs below (TP-N3, BACKENDS-01).
+            on_claimed()
+        launched = False
         try:
+            if getattr(handle, "stop_requested", False):
+                raise _StoppedBeforeLaunch()
             if backend_session_id and not is_new_session:
                 result = self._resume_stopped_safely(backend_session_id, lambda: self.request(
                     "thread/resume", {
@@ -1046,7 +1086,7 @@ class _Client:
                         "developerInstructions": developer_instructions,
                         **({"model": model} if model else {}),
                         **_thread_identity(session),
-                    }))
+                    }, timeout=START_RPC_TIMEOUT_SEC))
             else:
                 result = self.request("thread/start", {
                     "cwd": str(cwd), "approvalPolicy": "never",
@@ -1054,7 +1094,7 @@ class _Client:
                     "developerInstructions": developer_instructions,
                     **({"model": model} if model else {}),
                     **_thread_identity(session),
-                })
+                }, timeout=START_RPC_TIMEOUT_SEC)
             thread = result.get("thread") or {}
             thread_id = str(thread.get("id") or backend_session_id)
             if not thread_id:
@@ -1066,6 +1106,10 @@ class _Client:
             if on_session_init:
                 if on_session_init(thread_id) is False:
                     raise RuntimeError("backend session binding rejected")
+            if getattr(handle, "stop_requested", False):
+                # Stopped between the resume and the launch: nothing is sent.
+                raise _StoppedBeforeLaunch()
+            launched = True
             turn_result = self.request("turn/start", {
                 "threadId": thread_id,
                 "input": [{"type": "text", "text": text}],
@@ -1080,18 +1124,75 @@ class _Client:
                 "sandboxPolicy": {"type": "dangerFullAccess"},
                 **({"model": model} if model else {}),
                 **({"effort": effort} if effort else {}),
-            })
+            }, timeout=START_RPC_TIMEOUT_SEC)
             turn = turn_result.get("turn") or {}
             turn_id = str(turn.get("id") or "")
             if not turn_id:
                 raise RuntimeError("Codex app-server returned no turn id")
             active.turn_id = turn_id
+            if handle._done.is_set():
+                # Detached meanwhile (a Stop's deadline passed while the start
+                # was in flight): fence this exact execution too.
+                with self._lock:
+                    self.detached_executions = getattr(self, "detached_executions", set()) | {turn_id}
+            self._stop_learned(active)
+        except _StoppedBeforeLaunch:
+            self._forget_claim(owner, active)
+            log("codexStartStoppedBeforeLaunch", f"agent={owner} trace={trace_id}")
+        except TimeoutError:
+            if launched:
+                # turn/start may have reached codex: its outcome is unknown,
+                # not 'nothing ran'. Keep a conservative hold: the thread is
+                # fenced like a detached execution (late notifications are not
+                # adopted, sends wait, the process is recycled once quiet), and
+                # a turn id learned meanwhile is interrupted (TP-N3).
+                # Marked first: if the reader learns the id at any point from
+                # here on, it interrupts it (_stop_learned, exactly once). Not
+                # stop_requested: this is Clarp's interrupt, not a user Stop,
+                # and stays visible to codexTurnInterruptedUnasked.
+                active.interrupt_on_learn = True
+                with self._lock:
+                    self.detached_agents = getattr(self, "detached_agents", set()) | {owner}
+                    self.detached_executions = getattr(self, "detached_executions", set()) | {
+                        value for value in (active.thread_id, active.turn_id) if value}
+                self._stop_learned(active)
+                log("codexStartUncertain", f"agent={owner} thread={str(active.thread_id)[:8]}")
+            self._forget_claim(owner, active)
+            raise
         except Exception:
-            self._actives.pop(owner, None)
+            self._forget_claim(owner, active)
+            raise
+
+    def _forget_claim(self, owner: str, active: "_ActiveTurn") -> None:
+        """Only this exact claim: a later turn of the same agent may already
+        own the slot once the start runs outside the pool lock (TP-N3). The
+        check and the removal are one step under _claims_lock, like the claim
+        registration and the terminal removal, so a successor registered
+        meanwhile is never removed."""
+        with self._claims_lock:
+            if getattr(self, "_actives", {}).get(owner) is active:
+                self._actives.pop(owner, None)
             if self.active is active:
                 self.active = None
             active.handle._done.set()
-            raise
+
+    def _stop_learned(self, active: "_ActiveTurn") -> None:
+        """A turn the user stopped while its start was in flight, once its id
+        is known (from the reply or the reader's turn/started): pause its goal
+        and interrupt that exact execution, off the caller, once (TP-N3)."""
+        wanted = (getattr(active.handle, "stop_requested", False)
+                  or getattr(active, "interrupt_on_learn", False))
+        if not wanted or not active.turn_id:
+            return
+        with self._lock:
+            if getattr(active, "interrupt_sent", False):
+                return
+            active.interrupt_sent = True
+
+        def run() -> None:
+            self._pause_goal_for_stop(active)
+            self._interrupt_quietly(active.thread_id, active.turn_id)
+        threading.Thread(target=run, daemon=True, name="codex-stop-learned").start()
 
     def steer(self, text: str, client_msg_id: str = "",
               synthesize_audio: bool = False, agent_id: str = "") -> bool:
@@ -1128,10 +1229,17 @@ class _Client:
                 # Only a user's Stop: an internal interrupt (a shutdown, a
                 # move) must stay visible to codexTurnInterruptedUnasked.
                 active.handle.stop_requested = True
-            self._pause_goal_for_stop(active)
             if not active.turn_id:
-                if len(getattr(self, "_actives", {})) <= 1:
-                    self.proc.terminate()
+                # The start is in flight: return at once. The durable
+                # stopped-goal fence is written now; the goal pause and the
+                # exact interrupt follow once the id is known (_stop_learned).
+                if by_user and active.thread_id:
+                    row = agent_goals.get(active.agent_id)
+                    if row and row.get("status") == agent_goals.ACTIVE:
+                        _stop_pause_put(active.thread_id)
+                return
+            self._pause_goal_for_stop(active)
+            if not active.turn_id:  # pragma: no cover - handled above
                 return
             self.request("turn/interrupt", {
                 "threadId": active.thread_id, "turnId": active.turn_id,
@@ -1192,10 +1300,12 @@ class _Client:
                 with self._lock:
                     self.recycled = False
                 return
+            # Its thread stays held (turn_holders) until the process is gone.
+            # Published as retiring BEFORE it leaves the pool, so a lock-free
+            # reader never sees it in neither place (TP-N3).
+            _RETIRING[id(self)] = self
             if _CLIENTS.get(_SHARED_KEY) is self:
                 _CLIENTS.clear()
-            # Its thread stays held (turn_holders) until the process is gone.
-            _RETIRING[id(self)] = self
             log("codexStuckProcessRecycled",
                 f"detached={len(self.detached_agents)}")
             try:
@@ -1401,13 +1511,11 @@ def turn_holders(agent_id: str) -> list:
     """Processes that still hold ``agent_id``'s thread outside any turn: a
     stuck one (BACKENDS-07b) or a draining generation (BACKENDS-06b). A send
     waits behind them instead of failing."""
-    with _LOCK:
-        for key, client in list(_RETIRING.items()):
-            if client.proc.poll() is not None:
-                del _RETIRING[key]
-        clients = list({id(client): client for client in
-                        [*_CLIENTS.values(), *_RETIRING.values()]}.values())
-        draining = list(_DRAINING.values())
+    # Read-only: called under the dispatcher's _TURN_LOCK, so never waits on
+    # _LOCK and mutates nothing (TP-N3); _client() prunes exited retirees.
+    clients = list({id(client): client for client in
+                    [*list(_CLIENTS.values()), *list(_RETIRING.values())]}.values())
+    draining = list(_DRAINING.values())
     holds: list = [_StuckSessionHold(client, agent_id) for client in clients]
     thread_id = agents_db.live_backend_session(agent_id) if draining else ""
     holds += [_MovingThreadHold(client, thread_id) for client in draining if thread_id]
@@ -1495,6 +1603,9 @@ def _client(agent_id: str, session: str, stream=None) -> _Client:
     agent meant a leftover writer blocked ``thread/resume`` with -32600.
     """
     with _LOCK:
+        for key, retired in list(_RETIRING.items()):
+            if retired.proc.poll() is not None:
+                del _RETIRING[key]
         client = _CLIENTS.get(_SHARED_KEY)
         if client is not None:
             fingerprint = _auth_fingerprint()
@@ -1722,9 +1833,11 @@ def _moving_owner(thread_id: str) -> _Client | None:
 
 
 def _all_clients() -> list[_Client]:
-    with _LOCK:
-        return list({id(client): client for client in
-                     [*_CLIENTS.values(), *_DRAINING.values()]}.values())
+    """A snapshot of the pool, never waiting on _LOCK: read-only lookups are
+    called under the dispatcher's _TURN_LOCK and must not wait on a Codex RPC
+    (TP-N3, BACKENDS-01)."""
+    return list({id(client): client for client in
+                 [*list(_CLIENTS.values()), *list(_DRAINING.values())]}.values())
 
 
 def spawn_turn(*, text: str, cwd: pathlib.Path, backend_session_id: str = "",
@@ -1743,7 +1856,15 @@ def spawn_turn(*, text: str, cwd: pathlib.Path, backend_session_id: str = "",
             voice_preamble=voice_preamble, model=model, effort=effort,
             isolated=True,
         )
-    with _LOCK:
+    _LOCK.acquire()
+    released = []
+
+    def release_pool() -> None:
+        if not released:
+            released.append(True)
+            _LOCK.release()
+
+    try:
         client = _client(agent_id, session, stream=stream)
         admit_turn(client, agent_id)   # before turn/start: nothing is sent
         if not is_new_session and _moving_owner(backend_session_id) is not None:
@@ -1754,15 +1875,20 @@ def spawn_turn(*, text: str, cwd: pathlib.Path, backend_session_id: str = "",
         handle = AppTurnHandle(client, agent_id=agent_id)
         agent = agents_db.get_by_agent_id(agent_id) if agent_id else None
         persona = (agent or {}).get("persona") or ""
+        # The decisions above and the turn's registration happen under the
+        # pool lock; the start's RPCs run after it is released (TP-N3).
         client.start(text=text, cwd=cwd, backend_session_id=backend_session_id,
                      is_new_session=is_new_session, session=session,
                      trace_id=trace_id, model=model, effort=effort,
                      voice=voice_preamble, persona=persona, handle=handle,
                      on_session_init=on_session_init, on_result=on_result,
                      on_error=on_error, stream=stream,
-                     enqueue=enqueue or tts_queue.enqueue, agent_id=agent_id)
-        log("codexAppTurnStart", f"agent={agent_id} thread={client.thread_id} trace={trace_id}")
-        return handle
+                     enqueue=enqueue or tts_queue.enqueue, agent_id=agent_id,
+                     on_claimed=release_pool)
+    finally:
+        release_pool()
+    log("codexAppTurnStart", f"agent={agent_id} thread={client.thread_id} trace={trace_id}")
+    return handle
 
 
 
@@ -1813,12 +1939,23 @@ def goal(agent_id: str, action: str, *, objective: str = "", stream=None) -> dic
 
 
 def _shared_client() -> _Client | None:
-    with _LOCK:
-        client = _CLIENTS.get(_SHARED_KEY)
-        if client is None:
-            for item in _CLIENTS.values():
-                return item
-        return client
+    """Read-only, never waiting on _LOCK (see _all_clients)."""
+    client = _CLIENTS.get(_SHARED_KEY)
+    if client is None:
+        for item in list(_CLIENTS.values()):
+            return item
+    return client
+
+
+def start_pending(agent_id: str) -> bool:
+    """The agent's turn is registered but its start has not been confirmed
+    (turn/started not seen yet): a follow-up waits for it instead of
+    preempting it or steering into nothing (TP-N3)."""
+    for client in _all_clients():
+        active = getattr(client, "_actives", {}).get(agent_id)
+        if active is not None and active.handle.is_alive() and not active.steer_ready.is_set():
+            return True
+    return False
 
 
 def _client_running(agent_id: str) -> _Client | None:

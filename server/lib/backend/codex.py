@@ -836,6 +836,9 @@ class CodexBackend(StreamJsonBackend):
     def credential_switch_pending(self, message) -> bool:
         return bool(resolve("codex_app_server", "credential_switch_pending")(message))
 
+    def start_pending(self, agent_id: str) -> bool:
+        return bool(resolve("codex_app_server", "start_pending")(agent_id))
+
     def turn_holders(self, agent_id: str) -> list:
         return list(resolve("codex_app_server", "turn_holders")(agent_id) or [])
 
