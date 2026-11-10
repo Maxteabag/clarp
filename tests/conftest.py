@@ -557,6 +557,10 @@ def _isolated_db(_transcript_importer_quiescent, tmp_path, monkeypatch):
             mod.reset_for_tests(db_path)
         except (ImportError, AttributeError):
             pass
+    # A disposable test root has the same explicit bootstrap boundary as a
+    # fresh install. Ordinary product imports/conn() remain nonowners.
+    from lib.persistence.migration_owner import run as prepare_state
+    prepare_state(db_path)
     # Every RevisionedCache (pair-conversation list, dashboard previews, ...)
     # registers itself; one call empties them all so no test inherits a
     # projection computed against the previous test's database.

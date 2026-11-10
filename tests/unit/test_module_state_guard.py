@@ -116,7 +116,6 @@ ALLOWED: dict[tuple[str, str], str] = {
     ("lib/db.py", "_TRANSACTION_OWNERS"): "diagnostic map of which thread holds a write transaction, under _TRANSACTION_LOCK",
     ("lib/db.py", "DB_PATH"): PATHS,
     ("lib/db.py", "_LAST_LOCK_REPORT_AT"): THROTTLE,
-    ("lib/db.py", "_MIGRATED"): PATHS,
     ("lib/db.py", "_STAMP_CONN"): "the one connection change_stamp() reads PRAGMA data_version from, under _STAMP_LOCK",
     ("lib/db.py", "_WRITE_GENERATION"): "local half of change_stamp(), bumped under its lock",
     ("lib/deepgram_voices.py", "_cache"): CACHE,

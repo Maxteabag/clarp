@@ -71,7 +71,7 @@ def check_connection(connection: sqlite3.Connection, path: Path,
     if file_identity(path) != identity:
         raise SchemaNotReady()
     try:
-        version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+        version = int(sqlite3.Connection.execute(connection, "PRAGMA user_version").fetchone()[0])
     except sqlite3.Error as exc:
         raise SchemaNotReady(sqlite_code=getattr(exc, "sqlite_errorcode", None)) from exc
     require_version(version)

@@ -3,7 +3,8 @@
 Replaces the previous file-marker state and ~/.config/clarp/agents.json
 with a single ACID store at ~/.local/share/clarp/state.sqlite.
 
-Schema is created on first open. user_version drives migrations: to change the
+Schema is prepared explicitly by lib.persistence.migration_owner before activation.
+Ordinary connections check compatibility and never create or migrate. To change the
 schema, edit _SCHEMA_SQL in db_schema.py, bump _SCHEMA_VERSION there, and add a
 `_migrate_to_vN` in db_migrations.py that upgrades an existing database (see
 `_migrate`). Both stay reachable as `db._SCHEMA_SQL`, `db._migrate_to_vN` etc.
@@ -49,6 +50,7 @@ from .timing import (
     SQLITE_LOCK_RETRY_SLEEP_SEC,
 )
 from . import xdg
+from .persistence import schema_readiness
 from .clock import now_ms  # noqa: F401  (re-exported as db.now_ms)
 
 
@@ -59,7 +61,6 @@ DB_PATH = pathlib.Path(os.environ.get(
 
 _LOCAL = threading.local()  # per-thread connection store
 _CONN_LOCK = threading.Lock()
-_MIGRATED = False
 
 
 _LOCK_REPORT_INTERVAL_SEC = 30.0
@@ -269,19 +270,39 @@ def write_generation() -> int:
 # value. Reading it from the per-thread request connections would not work:
 # each has its own count and a write on the same connection leaves it flat.
 _STAMP_LOCK = threading.Lock()
-_STAMP_CONN: sqlite3.Connection | None = None
+class _StampConnection(sqlite3.Connection):
+    store_identity: tuple[int, int]
+    store_path: pathlib.Path
+
+
+_STAMP_CONN: _StampConnection | None = None
 _STAMP_FAILURES = itertools.count(1)
 
 
 def _stamp_connection() -> sqlite3.Connection:
     global _STAMP_CONN
-    if _STAMP_CONN is None:
-        DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-        con = sqlite3.connect(str(DB_PATH), timeout=SQLITE_CONNECT_TIMEOUT_SEC,
-                              isolation_level=None, check_same_thread=False)
+    if _STAMP_CONN is not None:
+        try:
+            if _STAMP_CONN.store_path != DB_PATH:
+                raise schema_readiness.SchemaNotReady()
+            schema_readiness.check_connection(_STAMP_CONN, DB_PATH, _STAMP_CONN.store_identity)
+        except Exception:
+            _close_stamp_connection()
+            raise
+        return _STAMP_CONN
+    identity = schema_readiness.file_identity(DB_PATH)
+    con = sqlite3.connect(DB_PATH.absolute().as_uri() + "?mode=ro", uri=True,
+                          timeout=SQLITE_CONNECT_TIMEOUT_SEC,
+                          isolation_level=None, check_same_thread=False, factory=_StampConnection)
+    try:
+        schema_readiness.check_connection(con, DB_PATH, identity)
         con.execute(f"PRAGMA busy_timeout = {SQLITE_BUSY_TIMEOUT_MS}")
-        _STAMP_CONN = con
-    return _STAMP_CONN
+    except Exception:
+        con.close()
+        raise
+    con.store_identity, con.store_path = identity, DB_PATH
+    _STAMP_CONN = con
+    return con
 
 
 def _close_stamp_connection() -> None:
@@ -529,22 +550,27 @@ class _TrackedConnection(sqlite3.Connection):
 
 
 def _open_connection() -> sqlite3.Connection:
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    con = sqlite3.connect(str(DB_PATH), timeout=SQLITE_CONNECT_TIMEOUT_SEC,
+    identity = schema_readiness.file_identity(DB_PATH)
+    con = sqlite3.connect(DB_PATH.absolute().as_uri() + "?mode=rw", uri=True,
+                          timeout=SQLITE_CONNECT_TIMEOUT_SEC,
                           isolation_level=None,
                           check_same_thread=False,
                           factory=_TrackedConnection)
-    con.row_factory = sqlite3.Row
-    con.execute("PRAGMA journal_mode = WAL")
-    con.execute("PRAGMA synchronous = NORMAL")
-    con.execute("PRAGMA foreign_keys = ON")
-    con.execute(f"PRAGMA busy_timeout = {SQLITE_BUSY_TIMEOUT_MS}")
-    # Private page caches multiply across DB-using threads. Keep a small
-    # per-connection target; bulk reads still use the shared OS mmap cache.
-    con.execute("PRAGMA cache_size = -8192")
-    con.execute("PRAGMA mmap_size = 1073741824")
+    try:
+        schema_readiness.check_connection(con, DB_PATH, identity)
+        con.row_factory = sqlite3.Row
+        con.execute("PRAGMA journal_mode = WAL")
+        con.execute("PRAGMA synchronous = NORMAL")
+        con.execute("PRAGMA foreign_keys = ON")
+        con.execute(f"PRAGMA busy_timeout = {SQLITE_BUSY_TIMEOUT_MS}")
+        # Preserve the existing per-connection settings after admission.
+        con.execute("PRAGMA cache_size = -8192")
+        con.execute("PRAGMA mmap_size = 1073741824")
+    except Exception:
+        con.close()
+        raise
+    _LOCAL.conn_identity, _LOCAL.conn_path = identity, DB_PATH
     return con
-
 
 
 
@@ -564,23 +590,26 @@ def conn() -> sqlite3.Connection:
     a previous thread-local attempt regress. The handful of long-lived worker
     threads keep one connection each for the process lifetime.
     """
-    global _MIGRATED
     c = getattr(_LOCAL, "conn", None)
     if c is not None:
-        if getattr(_LOCAL, "discard_conn", None) is not c or _in_transaction(c):
+        if _in_transaction(c):
+            return c  # The caller owns this connection and read snapshot.
+        if getattr(_LOCAL, "discard_conn", None) is not c:
+            try:
+                identity = getattr(_LOCAL, "conn_identity", None)
+                if getattr(_LOCAL, "conn_path", None) != DB_PATH or identity is None:
+                    raise schema_readiness.SchemaNotReady()
+                schema_readiness.check_connection(c, DB_PATH, identity)
+            except Exception:
+                close_local()
+                raise
             return c
-        # A busy-timeout restore failed inside a transaction (see
-        # busy_timeout_at_most): now that it ended, never reuse that
-        # connection with its lowered timeout; open a fresh one.
+        # A lowered busy-timeout could not be restored. Replace only after
+        # the caller's transaction ends, preserving its rollback authority.
         _LOCAL.discard_conn = None
         close_local()
-    # Migrate exactly once per process (idempotent + serialized). WAL means
-    # every per-thread connection sees the migrated schema on the shared file.
     with _CONN_LOCK:
         c = _open_connection()
-        if not _MIGRATED:
-            db_migrations._migrate(c)
-            _MIGRATED = True
     _LOCAL.conn = c
     return c
 
@@ -718,6 +747,8 @@ def close_local() -> None:
         print(f"dbCloseFail store=state code={type(exc).__name__}",
               file=sys.stderr, flush=True)
     _LOCAL.conn = None
+    _LOCAL.conn_identity = None
+    _LOCAL.conn_path = None
 
 
 # Schema DDL lives in db_schema and the version-by-version upgrades in
@@ -729,13 +760,12 @@ from . import db_migrations, db_schema  # noqa: E402
 
 def reset_for_tests(path: pathlib.Path | None = None) -> None:
     """Test helper: close cached connection so a new path takes effect."""
-    global DB_PATH, _MIGRATED, _LAST_LOCK_REPORT_AT
-    # Opening and migrating a connection form one operation. A worker that
-    # opens the previous test's file must not mark the next file migrated.
+    global DB_PATH, _LAST_LOCK_REPORT_AT
+    # Serialize path replacement with new connection admission. Disposable
+    # fixtures bootstrap explicitly; resetting is not migration authority.
     with _CONN_LOCK:
         if path is not None:
             DB_PATH = path
-        _MIGRATED = False
         close_local()
     with _STAMP_LOCK:
         _close_stamp_connection()
