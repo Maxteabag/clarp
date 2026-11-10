@@ -38,7 +38,9 @@ def _witness(value):
 
 
 def _read(path, max_bytes):
-    fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC)
+    # A bad materialized-path answer must not block on FIFO open, follow a
+    # redirected symlink, or reach a device before its type can be checked.
+    fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NONBLOCK | os.O_NOFOLLOW)
     try:
         before = os.fstat(fd)
         if not stat.S_ISREG(before.st_mode) or not 0 < before.st_size <= max_bytes:
