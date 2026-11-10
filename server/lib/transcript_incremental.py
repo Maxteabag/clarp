@@ -667,7 +667,7 @@ def _tail_weight(key, revision, state) -> int:
 
 
 from .revisioned_cache import RevisionedCache
-_TAIL_STATES = RevisionedCache("transcript-tail-state", max_entries=64,
+_TAIL_STATES = RevisionedCache("transcript-tail-state", max_entries=256,
                               max_weight=32 * 1024 * 1024, weight=_tail_weight)
 
 
