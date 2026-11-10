@@ -1,0 +1,85 @@
+{
+  "name": "Backlog48 exact one-node risk witness",
+  "on": {
+    "push": {
+      "branches": [
+        "ci/backlog48-witness-bd2fd-observe-r2"
+      ]
+    }
+  },
+  "permissions": {
+    "contents": "read"
+  },
+  "jobs": {
+    "one-node": {
+      "if": "github.repository == 'Maxteabag/clarp' && github.event_name == 'push' && github.ref == 'refs/heads/ci/backlog48-witness-bd2fd-observe-r2'",
+      "runs-on": "ubuntu-latest",
+      "timeout-minutes": 3,
+      "steps": [
+        {
+          "name": "Initial absolute clock before checkout and all setup",
+          "shell": "bash",
+          "run": "python3 - <<'CLOCK'\nimport json, os, pathlib, time\np = pathlib.Path(os.environ['GITHUB_WORKSPACE']) / 'witness-clock.json'\nwith p.open('x') as f:\n    json.dump({'monotonic_ns': time.monotonic_ns(), 'boot_id': pathlib.Path('/proc/sys/kernel/random/boot_id').read_text().strip()}, f)\n    f.flush()\n    os.fsync(f.fileno())\nCLOCK"
+        },
+        {
+          "name": "Exact controller",
+          "uses": "actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+          "with": {
+            "ref": "${{ github.sha }}",
+            "path": "controller",
+            "persist-credentials": false
+          }
+        },
+        {
+          "name": "Exact two-file overlay, no old whole candidate",
+          "uses": "actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+          "with": {
+            "ref": "bd2fd2a9d9722332fcbf5d5b2c54538467c3b39c",
+            "path": "source",
+            "persist-credentials": false
+          }
+        },
+        {
+          "name": "Maintained Python dependency tool",
+          "uses": "astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e",
+          "with": {
+            "enable-cache": false
+          }
+        },
+        {
+          "name": "Maintained wrapper Node prerequisite",
+          "uses": "actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
+          "with": {
+            "node-version": "22",
+            "cache": ""
+          }
+        },
+        {
+          "name": "Bounded exact one-node expected RED",
+          "shell": "bash",
+          "timeout-minutes": 3,
+          "run": "python3 controller/tools/backlog48/witness_runner.py"
+        },
+        {
+          "name": "Exact raw and diagnostic allowlist only",
+          "if": "always()",
+          "uses": "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
+          "timeout-minutes": 1,
+          "with": {
+            "name": "backlog48-witness-${{ github.sha }}-${{ github.run_attempt }}",
+            "path": "witness-evidence/setup.stdout\nwitness-evidence/setup.stderr\nwitness-evidence/pytest.stdout\nwitness-evidence/pytest.stderr\nwitness-evidence/node.xml\nwitness-evidence/observer.json\nwitness-evidence/result.json\nwitness-evidence/source-tree.txt\nwitness-evidence/SHA256-INDEX.json\nwitness-evidence/phase-journal.jsonl",
+            "if-no-files-found": "error",
+            "include-hidden-files": false,
+            "retention-days": 14
+          }
+        },
+        {
+          "name": "Final whole-budget status after artifact publication",
+          "if": "always()",
+          "shell": "bash",
+          "run": "python3 - <<'FINAL'\nimport json, os, pathlib, time\nwork = pathlib.Path(os.environ['GITHUB_WORKSPACE'])\nclock = json.loads((work / 'witness-clock.json').read_text())\nassert set(clock) == {'monotonic_ns', 'boot_id'} and type(clock['monotonic_ns']) is int\nassert clock['boot_id'] == pathlib.Path('/proc/sys/kernel/random/boot_id').read_text().strip()\nelapsed = (time.monotonic_ns() - clock['monotonic_ns']) / 1e9\nprint(json.dumps({'phase': 'after_artifact_upload', 'elapsed_from_initial_clock_s': elapsed, 'whole_limit_s': 180}))\nassert 0 <= elapsed < 180, 'whole budget including upload/status exhausted'\nFINAL"
+        }
+      ]
+    }
+  }
+}
