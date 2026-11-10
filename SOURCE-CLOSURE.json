@@ -1,0 +1,75 @@
+{
+  "bindings": {
+    ".disk-maintenance-proof/SHA256SUMS": {
+      "bytes": 1177,
+      "sha256": "0960d885b49392ffe9ef96f198260ec2325dd3341dbdcd36ad0ff81f37fb3fd9"
+    },
+    ".disk-maintenance-proof/SOURCE_COMMIT": {
+      "bytes": 41,
+      "sha256": "159ae0b870c73c018206cd450a73d5c997ce8641a11cad1caa77ca1823d183e7"
+    },
+    ".disk-maintenance-proof/controller-r24/SHA256SUMS": {
+      "bytes": 559,
+      "sha256": "beba66ff6e9978934020cc181bd1c976ea3ac2df0622191cb6804efa162c7e0f"
+    },
+    ".disk-maintenance-proof/controller-r24/child_exec.py": {
+      "bytes": 903,
+      "sha256": "4725312887f7a518910ab555e88db25b9f29396189f6340ef9a10c8362691754"
+    },
+    ".disk-maintenance-proof/controller-r24/controller.py": {
+      "bytes": 61272,
+      "sha256": "9aa8b5ddabea3962d8b6852bafe19394f1deb5970970bf1b8d16652b1b8f7f48"
+    },
+    ".disk-maintenance-proof/controller-r24/effective_class.py": {
+      "bytes": 10662,
+      "sha256": "81166516dbc89589255ea880220fa38f846a44ef81bc53d205ebbad0259b20af"
+    },
+    ".disk-maintenance-proof/controller-r24/owned.py": {
+      "bytes": 10195,
+      "sha256": "e3aee22000f3c6c19efefa72fe7d358f36a29276d8ab5685e26cfc4af10f5c55"
+    },
+    ".disk-maintenance-proof/controller-r24/post_check.py": {
+      "bytes": 4607,
+      "sha256": "9ef4f254b28184ef0dc6f615e6161ae92310c58dd0ff43577a5cfa4d2d5ed164"
+    },
+    ".disk-maintenance-proof/controller-r24/roster.py": {
+      "bytes": 31153,
+      "sha256": "01f535f76e3462497e35dae37c3cc9aa0b3eaa558832ef38604fd435316db12f"
+    },
+    ".disk-maintenance-proof/controller-r24/writer_policy.py": {
+      "bytes": 8089,
+      "sha256": "5e322a996bcbaeb81abb32fc758faa848db4d6ba0df1a7fa94c30dc0d1cd73dd"
+    },
+    ".disk-maintenance-proof/run-proof.sh": {
+      "bytes": 1697,
+      "sha256": "ac053297d2db99456daf833735077b4b6f058f01893c07f9b9e476889eb65b6d"
+    },
+    ".disk-maintenance-proof/run-selected.sh": {
+      "bytes": 2140,
+      "sha256": "8b71edbd984ea9fa02faf0b64ae17a75a9468fb8a9fa3caefb9c66834c7605fb"
+    },
+    ".disk-maintenance-proof/supervisor/protocol.py": {
+      "bytes": 24695,
+      "sha256": "663b67523609f9c524186f82f2a85d841290799e7f045e6884cb2c445dd04361"
+    },
+    ".disk-maintenance-proof/test_manager_residual.py": {
+      "bytes": 28454,
+      "sha256": "67e45c8c2297d325b247a8ab055658529cc8ce16eb77efe467e6962aa78ed84b"
+    },
+    "scripts/ci_contained.sh": {
+      "bytes": 4376,
+      "sha256": "07f228044e915297a84a52201e68e40a34809928fcf0ecb8d300b692ee5d067f"
+    },
+    "scripts/ci_containment_selfcheck.py": {
+      "bytes": 6816,
+      "sha256": "91a5b503b559eb6e7f1ceaf495199496c65851627e361cffdf47dc4be60546fb"
+    }
+  },
+  "controller_source": "fdf3c7967e209f90a923dd1a741bec2e509aea61",
+  "executed_hash_rows": 12,
+  "scope": "ONEmanagerresidualsyntheticcontrol ONLY; no realapproval/profile/nativeinput",
+  "source_B": {
+    "path_opaque": "maintenance-manager-fdf3c796-B-corrected-class-pin-SOURCE-ONE-YES.md",
+    "sha256": "a64feeda9be093c45ed7b6f74d111bb39cc2466a3905396116dcfecc126ff3f0"
+  }
+}
