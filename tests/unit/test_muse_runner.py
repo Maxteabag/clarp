@@ -223,23 +223,48 @@ def fake_muse(tmp_path, monkeypatch, quiet):
     return install
 
 
-def test_a_new_agent_gets_a_minted_session_bound_before_the_run(tmp_path, fake_muse):
-    fake_muse()
+def test_a_new_agent_gets_a_minted_session_bound_before_the_run(tmp_path, monkeypatch):
+    # Use the real agent/queue boundary; fake_muse depends on quiet's fake lookups.
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ.get("PATH", ""))
+    argv_path = tmp_path / "argv.json"
+    monkeypatch.setenv("MUSE_FAKE_ARGV_OUT", str(argv_path))
+    events = [_delta("<speak>Hi from Muse.</speak>")] + _events()
+    _install_fake_muse(bin_dir, "".join(json.dumps(event) + "\n" for event in events))
+    agent_id = agents_db.create_agent(
+        persona="Muse", voice_id="voice-muse", cwd=str(tmp_path),
+        session="muse-queue", backend="muse")
+    trace_id = "muse-queue-trace"
+    agents_db.open_turn(agent_id=agent_id, source="pwa", trace_id=trace_id)
+    agents_db.set_focus(agent_id)
     sessions: list[str] = []
     results: list[dict] = []
     handle = MUSE.start_turn(text="-count lines", cwd=tmp_path, is_new_session=True,
+                             agent_id=agent_id, session="muse-queue", trace_id=trace_id,
                              on_session_init=lambda sid: sessions.append(sid) or True,
-                             on_result=results.append, enqueue=lambda **_k: 1)
-    handle.drain_thread.join(timeout=10)
-    argv = fake_muse.argv()
-    minted = argv[argv.index("--session-id") + 1]
-    assert str(uuid.UUID(minted)) == minted
-    assert sessions and sessions[0] == minted
-    # The prompt (with Clarp's usual preamble) follows "--", so a leading dash
-    # is never read as a flag.
-    assert argv[-2] == "--" and argv[-1].endswith("-count lines")
-    assert results and results[0]["last_agent_message"] == "2"
-    assert results[0]["usage"] == {"input_tokens": 68449, "output_tokens": 154}
+                             on_result=results.append)
+    try:
+        handle.wait(timeout=10)
+        argv = json.loads(argv_path.read_text())
+        minted = argv[argv.index("--session-id") + 1]
+        assert str(uuid.UUID(minted)) == minted
+        assert sessions and sessions[0] == minted
+        # The prompt (with Clarp's usual preamble) follows "--", so a leading dash
+        # is never read as a flag.
+        assert argv[-2] == "--" and argv[-1].endswith("-count lines")
+        assert results and results[0]["last_agent_message"] == "2"
+        assert results[0]["usage"] == {"input_tokens": 68449, "output_tokens": 154}
+        rows = agents_db.conn().execute(
+            "SELECT agent_id, text, voice_id, session, trace_id, source, status "
+            "FROM tts_queue WHERE agent_id = ? ORDER BY queue_id", (agent_id,)).fetchall()
+        assert [tuple(row) for row in rows] == [(
+            agent_id, "Hi from Muse.", "voice-muse", "muse-queue",
+            trace_id, "pwa", "queued")]
+    finally:
+        if handle.is_alive():
+            handle.kill()
+        handle.wait(timeout=10)
 
 
 def test_a_resumed_agent_continues_its_own_session(tmp_path, fake_muse):

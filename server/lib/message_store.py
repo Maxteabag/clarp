@@ -18,7 +18,7 @@ module; the implementation reads them back through here at call time
 from __future__ import annotations
 
 from .db import conn  # noqa: F401
-from .message_context import (  # noqa: F401
+from .message_text import (  # noqa: F401
     TEAM_CONTEXT_OPEN,
     TEAM_CONTEXT_CLOSE,
     FALLBACK_CONTEXT_OPEN,

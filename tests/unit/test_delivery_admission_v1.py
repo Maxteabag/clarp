@@ -93,7 +93,7 @@ def test_a2_is_a_membership_self_report_and_malformed_parts_are_absent():
 
 def test_the_runtime_status_carries_its_attestation_field(monkeypatch):
     import tempfile
-    from lib.runtime_bridge import RuntimeRPCServer
+    from lib.runtime_rpc_server import RuntimeRPCServer
     monkeypatch.setattr(ra, "self_report", lambda: dict(A2))
     sock = Path(tempfile.mkdtemp(prefix="f4v", dir="/var/tmp")) / "a.sock"
     server = RuntimeRPCServer(sock, dispatch_service=SimpleNamespace(ctx=SimpleNamespace(), backends=None),

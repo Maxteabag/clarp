@@ -9,6 +9,8 @@ Discovery is deliberately read-only.  Missing provider evidence remains
 """
 from __future__ import annotations
 
+from .backend.claude_models import claude_model_pin
+
 import copy
 import concurrent.futures
 import os
@@ -190,12 +192,6 @@ def _is_dispatchable_claude_model(value: str) -> bool:
     return model_id.startswith("claude-")
 
 
-def claude_model_pin(value: str | None) -> str:
-    """The --model value to dispatch for a stored pin, "" for the CLI default.
-
-    "default" was once listed as an alias; the CLI never understood it."""
-    model_id = (value or "").strip()
-    return "" if model_id.lower() == "default" else model_id
 
 
 def parse_claude_models(raw: str, *, observed_at: str) -> list[dict[str, Any]]:

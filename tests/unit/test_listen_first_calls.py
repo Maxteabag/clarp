@@ -1286,7 +1286,7 @@ def test_L3_the_stop_generation_and_the_pause_are_one_transaction(env, monkeypat
 
 @pytest.mark.parametrize("paused_before", [True, False])
 def test_Q3_a_failed_stop_retires_the_opening_and_restores_the_pause(env, tmp_path, monkeypatch, paused_before):
-    from lib import backends, runtime_bridge
+    from lib import backends, runtime_rpc_server
     service, spawner = _service(tmp_path)
     _held("u-held-q3")
     if paused_before:
@@ -1294,7 +1294,7 @@ def test_Q3_a_failed_stop_retires_the_opening_and_restores_the_pause(env, tmp_pa
     ring, op = _answered()
     monkeypatch.setattr(backends, "interrupt", lambda backend, agent_id: (_ for _ in ()).throw(
         RuntimeError("the backend did not answer")))
-    server = object.__new__(runtime_bridge.RuntimeRPCServer)
+    server = object.__new__(runtime_rpc_server.RuntimeRPCServer)
     out = server._dispatch_request("begin_stop", {"agent_id": "a-theo", "backend": "codex", "strict": True})
     assert out["ok"] is False                                  # the Stop failed and was rolled back
     assert turn_queue.is_paused("a-theo") is paused_before    # the pause is what it was

@@ -263,7 +263,8 @@ def test_status_reports_external_runtime_health(fake_ctx):
 def test_http_server_can_be_replaced_while_runtime_keeps_active_turn(
     fake_ctx, tmp_path,
 ):
-    from lib.runtime_bridge import RuntimeClient, RuntimeRPCServer
+    from lib.runtime_bridge import RuntimeClient
+    from lib.runtime_rpc_server import RuntimeRPCServer
     from lib.turn_dispatch import DispatchResult
 
     active = {}
@@ -340,7 +341,8 @@ def test_runtime_owned_turn_completes_after_http_server_is_gone(
     fake_ctx, tmp_path,
 ):
     from lib import agents as agents_db
-    from lib.runtime_bridge import RuntimeClient, RuntimeRPCServer
+    from lib.runtime_bridge import RuntimeClient
+    from lib.runtime_rpc_server import RuntimeRPCServer
     from lib.runtime_events import RuntimeEventStream
     from lib.turn_dispatch import TurnDispatchService, clear_for_agent
 

@@ -8,7 +8,7 @@ from tests.patching import patch_shared
 from lib import agents, db, janitors, message_store, turn_queue
 from lib import compaction, oracle_delegations, turn_dispatch as td
 from lib.agent_lifecycle import AgentLifecycleService, AgentLifecycleError
-from lib.runtime_bridge import RuntimeRPCServer
+from lib.runtime_rpc_server import RuntimeRPCServer
 
 
 class Backend:

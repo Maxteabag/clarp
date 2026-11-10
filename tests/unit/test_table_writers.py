@@ -182,8 +182,8 @@ STATUS_WRITERS: dict[tuple[str, str], set[str]] = {
     ("artifact_decisions", "status"): {"lib/artifacts.py"},
     ("artifacts", "status"): {"lib/artifacts.py"},
     ("background_jobs", "status"): {"lib/background_jobs.py"},
-    ("clips", "producer_status"): {"lib/clip_store.py"},
-    ("clips", "status"): {"lib/clip_store.py"},
+    ("clips", "producer_status"): {"lib/clip_records.py"},
+    ("clips", "status"): {"lib/clip_records.py"},
     ("decision_deliveries", "status"): {"lib/artifacts.py"},
     ("decisions", "status"): {"lib/leader_memory.py"},
     ("dream_rounds", "status"): {"lib/dreaming.py"},
@@ -208,7 +208,7 @@ STATUS_WRITERS: dict[tuple[str, str], set[str]] = {
     ("team_inbox", "status"): {"lib/team_store.py"},
     ("tool_explanation_jobs", "status"): {"lib/tool_explanation_queue.py"},
     ("tool_explanation_mappings", "status"): {"lib/tool_explanation_mappings.py"},
-    ("tts_queue", "status"): {"lib/tts_queue.py"},
+    ("tts_queue", "status"): {"lib/tts_queue_records.py"},
     ("user_value_facts", "status"): {"lib/leader_memory.py"},
 }
 

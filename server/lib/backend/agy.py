@@ -18,7 +18,7 @@ from .. import agents as agents_db
 from .. import agy_transcript
 from .. import provider_capabilities
 from .. import server_identity
-from .. import tts_queue
+from ..tts_queue_records import enqueue as enqueue_tts
 from ..log import log, log_exception
 from ..proc_util import stderr_text
 from ..process_registry import TurnHandle
@@ -208,7 +208,7 @@ def _restore_prompt(agent_id: str, conversation_id: str, text: str,
     conversation as Clarp recorded it (at most RESTORE_MAX_BYTES). The record
     sits in an injected-context block, so the chat shows only the new turn."""
     from .. import db
-    from ..message_context import RESTORED_CONTEXT_OPEN, RESTORED_CONTEXT_CLOSE
+    from ..message_text import RESTORED_CONTEXT_OPEN, RESTORED_CONTEXT_CLOSE
     from ..voice_markup import clean_for_display
     blocks: list[str] = []
     for row in db.conn().execute(
@@ -759,7 +759,7 @@ class AgyBackend(StreamJsonBackend):
             session=session, trace_id=trace_id, handle=handle,
             on_session_init=on_session_init, on_result=on_result,
             on_error=on_error, stream=stream,
-            enqueue=enqueue or tts_queue.enqueue,
+            enqueue=enqueue or enqueue_tts,
             expected_conversation_id=(
                 backend_session_id if backend_session_id and not is_new_session
                 else ""),

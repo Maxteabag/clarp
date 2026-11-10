@@ -95,7 +95,7 @@ class AgentLifecycleService:
     def _roster_view(agents: dict) -> RosterView:
         from . import config as app_config
         from .contact_assignment import available_contacts
-        from .launch_paths import recover_user_path
+        from .workspace_paths import recover_user_path
         from .session_models import launch_default, recorded_model
         cfg = app_config.load()
         return RosterView(
@@ -288,7 +288,7 @@ def _existing_cwd(raw) -> str:
     cwd = os.path.expanduser(str(raw or "").strip() or str(pathlib.Path.home()))
     candidate = pathlib.Path(cwd)
     if os.environ.get("CLARP_DEPLOYMENT_MODE") == "container":
-        from .launch_paths import validate_workspace_path, workspace_root
+        from .workspace_paths import validate_workspace_path, workspace_root
         try:
             candidate = validate_workspace_path(candidate)
         except ValueError as exc:
