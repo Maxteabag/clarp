@@ -144,32 +144,50 @@ def test_a_disk_too_full_for_the_copy_empties_the_file_instead(tmp_path, monkeyp
     assert path.stat().st_size == size
 
 
-def test_no_event_is_lost_or_torn_while_a_writer_appends_under_flock(tmp_path):
-    """The event log's writer (append mode, flock per write) against repeated
-    cuts: what is left is always a gapless run of whole lines up to the last."""
+def test_the_copy_runs_unlocked_and_the_finish_holds_the_writers_lock(tmp_path, monkeypatch):
+    """The event log's writer (append mode, flock per write) against a cut,
+    with the overlap forced instead of left to the scheduler: a writer gets
+    through during the copy, is shut out during the finish, and what is left
+    is a gapless run of whole lines up to the last."""
+    monkeypatch.setattr(eventlog, "LOG_DIR", tmp_path)
     path = tmp_path / "2026-11-10.jsonl"
-    path.touch()
-    total = 4000
-    now = datetime.datetime(2026, 11, 10, 12, tzinfo=datetime.timezone.utc)
-    cuts: list[int] = []
+    for n in range(1000):
+        eventlog._write_jsonl(_record(n), NOON)
+    copy, truncate = maintenance._copy_within, os.ftruncate
+    seen: dict[str, object] = {}
 
-    def write():
-        for n in range(total):
-            eventlog._write_jsonl(_record(n), now)
+    def copy_then_write(fd, src, dst, length):
+        end = copy(fd, src, dst, length)
+        if "writer_done_during_copy" not in seen:
+            writer = threading.Thread(
+                target=lambda: [eventlog._write_jsonl(_record(n), NOON) for n in range(1000, 1050)])
+            writer.start()
+            writer.join(30)                       # it takes the flock 50 times: the copy holds none
+            seen["writer_done_during_copy"] = not writer.is_alive()
+        return end
 
-    writer = threading.Thread(target=write)
-    eventlog_dir, eventlog.LOG_DIR = eventlog.LOG_DIR, tmp_path
-    try:
-        writer.start()
-        while writer.is_alive():
-            if path.stat().st_size > 40_000:
-                cuts.append(maintenance.keep_tail(path, 10_000))
-        writer.join()
-    finally:
-        eventlog.LOG_DIR = eventlog_dir
-    assert len(cuts) > 3 and all(cuts)
+    def truncate_under_lock(fd, length):
+        other = os.open(path, os.O_RDWR)
+        try:
+            fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            seen["locked_during_finish"] = False
+            fcntl.flock(other, fcntl.LOCK_UN)
+        except BlockingIOError:
+            seen["locked_during_finish"] = True
+        finally:
+            os.close(other)
+        truncate(fd, length)
+
+    monkeypatch.setattr(maintenance, "_copy_within", copy_then_write)
+    monkeypatch.setattr(maintenance.os, "ftruncate", truncate_under_lock)
+    assert maintenance.keep_tail(path, 10_000) > 0
+    monkeypatch.undo()
+
+    assert seen == {"writer_done_during_copy": True, "locked_during_finish": True}
+    with path.open("a") as f:                     # and the lock is released afterwards
+        fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
     numbers = _ns(path)
-    assert numbers == list(range(numbers[0], total))
+    assert numbers == list(range(numbers[0], 1050))
 
 
 # --- the event-log directory ---------------------------------------------------
@@ -549,17 +567,25 @@ def test_one_failing_size_check_does_not_stop_the_others(tmp_path, monkeypatch):
     assert worker.check_sizes() == {"telemetry_budget_details": 3}
 
 
-def test_the_sizes_are_checked_between_the_hourly_passes(tmp_path):
-    checks: list[int] = []
-    worker = maintenance.MaintenanceWorker(
-        audio_dir=tmp_path, interval_sec=0.2,
-        policy=maintenance.Policy(size_check_interval_sec=0.02))
-    worker.check_sizes = lambda: checks.append(1) or {}
+def test_the_sizes_are_checked_between_the_hourly_passes(tmp_path, monkeypatch):
+    """On a clock the test owns: an hour between passes, a check every five minutes."""
+    clock = [1000.0]
+    checks: list[float] = []
+    worker = maintenance.MaintenanceWorker(audio_dir=tmp_path)
+    monkeypatch.setattr(maintenance.time, "monotonic", lambda: clock[0])
 
-    assert worker._wait_for_next_pass() is False          # the interval ran out: time for a full pass
-    assert 2 <= len(checks) <= 10
+    def wait(seconds):
+        clock[0] += seconds
+        return False
 
-    worker._stop.set()
+    worker._stop.wait = wait
+    worker.check_sizes = lambda: checks.append(clock[0] - 1000.0) or {}
+
+    assert worker._wait_for_next_pass() is False          # the hour ran out: time for a full pass
+    assert checks == [300.0 * n for n in range(1, 12)]    # eleven checks, none at the hour itself
+    assert clock[0] == 1000.0 + 3600
+
     checks.clear()
-    assert worker._wait_for_next_pass() is True           # stopped: no further check
+    worker._stop.wait = lambda seconds: True              # stopped while waiting
+    assert worker._wait_for_next_pass() is True
     assert checks == []
