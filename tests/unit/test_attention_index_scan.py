@@ -14,6 +14,9 @@ import hashlib
 import json
 import time
 import tracemalloc
+from contextlib import contextmanager, nullcontext
+
+import pytest
 
 from lib import agents, artifacts, attention_index, countdown_attention, db, quiet_agents
 
@@ -155,3 +158,97 @@ def test_a_page_reads_only_its_own_payloads(tmp_path):
         tracemalloc.stop()
     assert len(result['artifacts']) == 1
     assert peak < 5_000_000, f"peak allocation {peak / 1e6:.1f} MB for a one-row page"
+
+
+@pytest.mark.parametrize("representation", ["", "flat-v1", "summary-v1"])
+def test_page_sequence_preserves_complete_pages_cursors_and_fresh_budgets(
+        tmp_path, monkeypatch, representation):
+    _seed(tmp_path)
+    expected, cursor = [], ""
+    while True:
+        page = attention_index.page(limit=3, cursor=cursor, representation=representation)
+        reference = _reference_page(limit=3, cursor=cursor, representation=representation)
+        assert page["artifacts"] == reference["artifacts"]
+        expected.append(page)
+        cursor = page["next_cursor"] or ""
+        if not cursor:
+            break
+    assert len(expected) >= 3
+    budgets, released = [], []
+    original_request = artifacts.summary_request
+
+    @contextmanager
+    def request(*args, **kwargs):
+        budget = None
+        try:
+            with original_request(*args, **kwargs) as budget:
+                budgets.append(budget)
+                yield budget
+        finally:
+            released.append(budget)
+
+    monkeypatch.setattr(artifacts, "summary_request", request)
+    actual, cursor = [], ""
+    with attention_index.page_sequence() as read_page:
+        while True:
+            page = read_page(limit=3, cursor=cursor, representation=representation)
+            actual.append(page)
+            cursor = page["next_cursor"] or ""
+            if not cursor:
+                break
+    assert actual == expected
+    assert len(budgets) == len(expected) and len({id(b) for b in budgets}) == len(expected)
+    assert released == budgets and all(not b._scopes for b in budgets)
+    assert not db.conn().in_transaction
+    with pytest.raises(RuntimeError):
+        read_page(limit=3)  # an exited computation must not retain a usable read context
+    assert not db.conn().in_transaction
+
+
+@pytest.mark.parametrize("outer", [False, True], ids=["owned-read", "caller-transaction"])
+@pytest.mark.parametrize("fails", [False, True], ids=["early-exit", "error"])
+def test_page_sequence_releases_early_or_failed_read_without_committing_caller(
+        tmp_path, outer, fails):
+    made = _seed(tmp_path)
+    c = db.conn()
+    original_title = artifacts.get(made[2])["title"]
+    if outer:
+        c.execute("BEGIN")
+        c.execute("UPDATE artifacts SET title='uncommitted' WHERE artifact_id=?", (made[2],))
+    try:
+        with pytest.raises(ValueError, match="synthetic caller failure") if fails else nullcontext():
+            with attention_index.page_sequence() as read_page:
+                page = read_page(limit=1)
+                assert page["next_cursor"] is not None  # deliberately exit before the next page
+                assert c.in_transaction
+                if outer:
+                    assert page["artifacts"][0]["artifact_id"] == made[2]
+                    assert page["artifacts"][0]["title"] == "uncommitted"
+                if fails:
+                    raise ValueError("synthetic caller failure")
+        assert c.in_transaction is outer
+    finally:
+        if c.in_transaction:
+            c.execute("ROLLBACK")
+    assert artifacts.get(made[2])["title"] == original_title
+    assert not c.in_transaction
+
+
+def test_page_sequence_cannot_cross_threads(tmp_path):
+    import threading
+
+    _seed(tmp_path)
+    errors = []
+    with attention_index.page_sequence() as read_page:
+        def foreign_reader():
+            try:
+                read_page(limit=1)
+            except RuntimeError as exc:
+                errors.append(exc)
+        reader = threading.Thread(target=foreign_reader)
+        reader.start()
+        reader.join(timeout=2)
+        assert not reader.is_alive()
+        assert len(errors) == 1
+        assert read_page(limit=1)["artifacts"]  # refusal did not poison the owning reader
+    assert not db.conn().in_transaction
