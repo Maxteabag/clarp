@@ -168,6 +168,17 @@ def _automatic_hotseat_quota_snapshot(provider):
         hotseat_status.diagnose('quotaThresholdOwnerUnavailable',f'provider={provider} error={type(exc).__name__}')
         return None
 
+def _automatic_hotseat_owns_quota(provider):
+    """Configured notification ownership; no probe or successful-action inference."""
+    if provider not in janitor_hotseat.PROVIDERS:return False
+    try:
+        owner=janitor_builtins.resolve(janitor_hotseat.ROLE)
+        return bool(owner and owner['options'].get('mode')=='automatic')
+    except Exception as exc:
+        # Uncertain ownership cannot silence the keeper; never log raw CLI/config data.
+        hotseat_status.diagnose('quotaThresholdOwnerUnavailable',f'provider={provider} error={type(exc).__name__}')
+        return False
+
 class AutonomyJanitors:
     def __init__(self,dispatch,notify,model_call=decision_model,usage_read=None,recover=None,hotseat_read=janitor_hotseat.read_accounts,hotseat_switch=janitor_hotseat.switch_account,label_judge=None):
         self.recover=recover;self.dispatch=dispatch;self.notify=notify;self.model_call=model_call;self.usage_read=usage_read;self.stop_event=threading.Event();self.thread=None
@@ -269,12 +280,10 @@ class AutonomyJanitors:
                 if not janitor_builtins.is_current(run['run_id']):return
                 rid=digest([provider_id,account,window['window_id'],stamp,owner['generation']])
                 payload={'notification_id':rid,'session':owner['session'],'agent_id':owner['agent_id'],'persona':owner['name'],'preview':f"{provider_id}{' '+window['label'] if window.get('label') else ''}: {100-used:g}% quota remaining",'push':True,'reason':'quota_threshold','recovery_mode':owner['options']['recovery_mode'],'owner_generation':owner['generation']}
-                ownership=_automatic_hotseat_quota_snapshot(provider_id)
                 with settings_store.transaction():
+                    # Resolve current ownership at this transaction's decision point.
+                    suppressed=_automatic_hotseat_owns_quota(provider_id)
                     c=db.conn()
-                    # Config/candidate drift is unknown ownership, not a retry or
-                    # a second full resolver/model/cadence call under the writer.
-                    suppressed=ownership is not None and ownership==_hotseat_quota_fingerprint(c)
                     inserted=janitor_store.insert_quota_receipt(rid,run['run_id'],json.dumps(payload),now,c=c)
                     if inserted and suppressed:
                         # Audit stays, but a new pending delivery is never externally visible.
