@@ -105,3 +105,34 @@ def test_handover_is_bounded_data_and_never_overrides_current_identity():
         seeds.handover_seed("x" * 100, expected_thread="old-thread", max_bytes=99)
     with pytest.raises(seeds.SeedUnavailable):
         seeds.handover_seed("  ", expected_thread="old-thread")
+
+
+@pytest.mark.parametrize("later", [None, "tool", "turn", "foreign_goal", "error", "different_summary"])
+def test_manual_handover_must_be_the_last_successful_native_completion(tmp_path, later):
+    path = tmp_path / "rollout.jsonl"
+    summary = "Handover: keep task g1 and pending receipt q2; patch is committed."
+    terminal = {"type": "task_complete", "turn_id": "native-final-1", "last_agent_message": summary}
+    if later == "error":
+        terminal["error"] = {"message": "generation failed"}
+    elif later == "different_summary":
+        terminal["last_agent_message"] = "Older text does not cover this boundary"
+    rows = _record("session_meta", {"id": "old-thread"}) + _record("event_msg", terminal)
+    if later == "tool":
+        rows += _record("response_item", {"type": "function_call_output", "output": "new effects"})
+    elif later == "turn":
+        rows += _record("event_msg", {"type": "task_started", "turn_id": "native-later"})
+    else:
+        rows += _record("event_msg", {"type": "thread_goal_updated", "turn_id": None,
+                                      "thread_id": "foreign" if later == "foreign_goal" else "old-thread",
+                                      "goal": {"status": "paused"}})
+    path.write_bytes(rows)
+    if later is not None:
+        with pytest.raises(seeds.SeedUnavailable):
+            seeds.verified_handover_seed(path, expected_thread="old-thread", summary=summary)
+    else:
+        seed = seeds.verified_handover_seed(path, expected_thread="old-thread", summary=summary)
+        assert seed.kind == "handover" and seed.cutoff == len(rows)
+        content = json.loads(seed.text)
+        assert content["handover"] == summary
+        assert content["source_turn_id"] == "native-final-1"
+        assert content["source_cutoff"] == len(rows)
