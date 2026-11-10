@@ -151,51 +151,169 @@ def test_waiters_behind_a_running_build_get_what_they_asked_for(monkeypatch, fir
     assert numbers.count(1) == 1
 
 
+# --- the pages of the archived listing (round two of the review of PR 252, items 1 and 4) ---------
+#
+# A first page (no cursor) asks for a current listing and builds one. Every later page is cut
+# from whichever listing is held, whoever's first page built it: a cursor is a place in the
+# order, so the builds are one per first page, not one per page.
+
+def _listings(monkeypatch, make):
+    """Count the listing builds; ``make(number)`` is the archived agents of build ``number`` as
+    [(archived_at, agent_id)], most recently archived first."""
+    builds: list[int] = []
+
+    def build(ctx):
+        builds.append(len(builds) + 1)
+        order = make(len(builds))
+        return [{"agent_id": agent_id, "build": len(builds)} for _at, agent_id in order], order
+
+    monkeypatch.setattr(snapshot, "build_archived_listing", build)
+    return builds
+
+
+def _next(shared, ctx, cursor: str, limit: int) -> dict:
+    """One page the way the route asks for it: the cursor is all a client carries."""
+    size, position = snapshot.parse_archived_query(str(limit), cursor)
+    return shared.archived_page(ctx, limit=size, position=position)
+
+
+def _fixed(count: int):
+    return lambda number: [(1000 - n, f"agent-{n:03d}") for n in range(count)]
+
+
 def test_the_pages_of_one_walk_are_cut_from_one_listing(monkeypatch):
-    builds = []
-    rows = [{"n": n} for n in range(7)]
-    order = [(100 - n, f"agent-{n}") for n in range(7)]
-    monkeypatch.setattr(snapshot, "build_archived_listing", lambda ctx: builds.append(ctx) or (rows, order))
+    builds = _listings(monkeypatch, _fixed(7))
     shared, ctx = snapshot.SharedSnapshot(), object()
 
     seen, cursor = [], ""
     for _ in range(10):
-        position, token = snapshot._decode_cursor(cursor) if cursor else (None, "")
-        page = shared.archived_page(ctx, limit=3, position=position, token=token)
-        seen += [row["n"] for row in page["agents"]]
+        page = _next(shared, ctx, cursor, 3)
+        seen += [(row["agent_id"], row["build"]) for row in page["agents"]]
         assert page["total"] == 7
         cursor = page["next_cursor"]
         if cursor is None:
             break
-    assert seen == list(range(7))
-    assert len(builds) == 1                               # three pages, one build
+    assert seen == [(f"agent-{n:03d}", 1) for n in range(7)]
+    assert builds == [1]                                  # three pages, one build
 
-    # A new walk (no cursor) is a new listing: it must see what was written since.
-    again = shared.archived_page(ctx, limit=3)
-    assert len(builds) == 2
-    # Another context never shares it, even with a cursor of this listing.
-    position, token = snapshot._decode_cursor(again["next_cursor"])
-    shared.archived_page(object(), limit=3, position=position, token=token)
-    assert len(builds) == 3
+    # A first page is a current listing: it must see what was written since.
+    again = _next(shared, ctx, "", 3)
+    assert builds == [1, 2] and again["agents"][0]["build"] == 2
+    # Another context never shares it.
+    _next(shared, object(), again["next_cursor"], 3)
+    assert builds == [1, 2, 3]
 
 
-def test_a_walk_slower_than_the_listing_is_held_continues_in_a_new_one(monkeypatch):
-    clock = [1000.0]
-    monkeypatch.setattr(snapshot, "time", types.SimpleNamespace(monotonic=lambda: clock[0]))
-    builds = []
-    rows = [{"n": n} for n in range(6)]
-    order = [(100 - n, f"agent-{n}") for n in range(6)]
-    monkeypatch.setattr(snapshot, "build_archived_listing", lambda ctx: builds.append(ctx) or (rows, order))
+def test_two_clients_paging_at_once_cost_one_build_each_not_one_per_page(monkeypatch):
+    """The reviewer's case: two clients walking 1,019 archived agents alternately were 42 page
+    requests and 42 builds of every archived row, because a first page replaced the listing
+    the other walk was reading and only the cursor of the held listing could reuse it."""
+    builds = _listings(monkeypatch, _fixed(1019))
+    shared, ctx = snapshot.SharedSnapshot(), object()
+    walks = {"a": {"cursor": "", "seen": [], "answered_by": set()},
+             "b": {"cursor": "", "seen": [], "answered_by": set()}}
+
+    requests = 0
+    while any(walk["cursor"] is not None for walk in walks.values()):
+        for walk in walks.values():                       # a page of one, then a page of the other
+            if walk["cursor"] is None:
+                continue
+            page = _next(shared, ctx, walk["cursor"], 50)
+            requests += 1
+            assert requests <= 42, "a walk did not end"
+            walk["seen"] += [row["agent_id"] for row in page["agents"]]
+            walk["answered_by"] |= {row["build"] for row in page["agents"]}
+            walk["cursor"] = page["next_cursor"]
+
+    assert requests == 42
+    assert builds == [1, 2]                               # the two first pages; no other page built
+    everyone = [f"agent-{n:03d}" for n in range(1019)]
+    assert walks["a"]["seen"] == everyone and walks["b"]["seen"] == everyone
+    # The first walk went on in the second walk's listing from where it was.
+    assert walks["a"]["answered_by"] == {1, 2} and walks["b"]["answered_by"] == {2}
+
+
+def test_a_client_refreshing_the_first_page_does_not_make_a_walk_build(monkeypatch):
+    """One client walks; another asks for the first page between every two of its pages, and
+    the archive changes under them: each first page is a build, no page of the walk is, and
+    the walk neither repeats an agent nor loses one that stayed archived."""
+    def archive(number):
+        agents = [(1000 - n, f"agent-{n:02d}") for n in range(20)]
+        # From the second listing on: one agent the walk has passed and one it has not reached
+        # are restored, and with every listing one more agent is archived (newest: at the front).
+        if number >= 2:
+            agents = [place for place in agents if place[1] not in ("agent-01", "agent-15")]
+        return [(2000 + n, f"new-{n}") for n in reversed(range(2, number + 1))] + agents
+
+    builds = _listings(monkeypatch, archive)
     shared, ctx = snapshot.SharedSnapshot(), object()
 
-    first = shared.archived_page(ctx, limit=2)
-    position, token = snapshot._decode_cursor(first["next_cursor"])
-    clock[0] += snapshot.ARCHIVED_LISTING_TTL_S - 1       # still held
-    second = shared.archived_page(ctx, limit=2, position=position, token=token)
-    assert [row["n"] for row in second["agents"]] == [2, 3] and len(builds) == 1
+    seen, totals, refreshes, cursor = [], [], 0, ""
+    for _ in range(20):
+        page = _next(shared, ctx, cursor, 4)
+        seen += [row["agent_id"] for row in page["agents"]]
+        totals.append(page["total"])
+        cursor = page["next_cursor"]
+        if cursor is None:
+            break
+        first = _next(shared, ctx, "", 4)                 # the other client
+        refreshes += 1
+        assert first["agents"][0]["build"] == refreshes + 1 and first["agents"][0]["agent_id"] == f"new-{refreshes + 1}"
 
-    position, token = snapshot._decode_cursor(second["next_cursor"])
-    clock[0] += 2                                         # now past it
-    third = shared.archived_page(ctx, limit=2, position=position, token=token)
-    assert [row["n"] for row in third["agents"]] == [4, 5]    # from the agent the cursor names
-    assert len(builds) == 2 and third["next_cursor"] is None
+    assert builds == list(range(1, refreshes + 2))        # the walk's first page and each refresh
+    assert len(seen) == len(set(seen))                    # nothing twice
+    # Every agent that was archived when the walk came to its place, once and in order: the
+    # one restored behind the walk had been listed, the one restored ahead of it is not, and
+    # neither are the ones archived after the walk began (they sort before its position).
+    assert seen == [f"agent-{n:02d}" for n in range(20) if n != 15]
+    # ``total`` is the held listing's: 20, then 18 that stayed and one more with every refresh.
+    assert totals == [20] + [18 + n for n in range(1, len(totals))]
+
+
+def test_a_page_after_the_listing_expired_builds_a_new_one_and_continues(monkeypatch):
+    clock = [1000.0]
+    monkeypatch.setattr(snapshot, "time", types.SimpleNamespace(monotonic=lambda: clock[0]))
+    builds = _listings(monkeypatch, _fixed(6))
+    shared, ctx = snapshot.SharedSnapshot(), object()
+
+    first = _next(shared, ctx, "", 2)
+    clock[0] += snapshot.ARCHIVED_LISTING_TTL_S           # exactly the limit: still held
+    second = _next(shared, ctx, first["next_cursor"], 2)
+    assert [row["agent_id"] for row in second["agents"]] == ["agent-002", "agent-003"] and builds == [1]
+
+    clock[0] += 1                                         # now past it
+    third = _next(shared, ctx, second["next_cursor"], 2)
+    assert [row["agent_id"] for row in third["agents"]] == ["agent-004", "agent-005"]   # from the agent the cursor names
+    assert builds == [1, 2] and third["next_cursor"] is None
+
+
+def test_an_expired_listing_is_released_by_the_next_request_of_any_kind(monkeypatch):
+    """Round two, item 4: 3.3 MB of rows for 1,019 archived agents stayed in memory until the
+    next listing build, which on a Host whose clients never open the archive is never."""
+    clock = [1000.0]
+    monkeypatch.setattr(snapshot, "time", types.SimpleNamespace(monotonic=lambda: clock[0]))
+    monkeypatch.setattr(snapshot, "build_agent_snapshot", lambda ctx, include_archived=True: {})
+    builds = _listings(monkeypatch, _fixed(6))
+    ctx = object()
+
+    for ask in (lambda shared: shared.body(ctx),
+                lambda shared: shared.body(ctx, include_archived=False),
+                lambda shared: _next(shared, ctx, "", 2)):
+        shared = snapshot.SharedSnapshot()
+        _next(shared, ctx, "", 2)
+        held = shared._archived
+        assert held is not None and len(held.rows) == 6
+        clock[0] += snapshot.ARCHIVED_LISTING_TTL_S
+        shared.body(ctx, include_archived=False)
+        assert shared._archived is held                   # not before its time
+        clock[0] += 0.5
+        ask(shared)
+        assert shared._archived is not held               # gone, or replaced by the build just asked for
+    assert shared._archived is not None and builds == [1, 2, 3, 4]
+
+    # A snapshot request releases it and holds nothing in its place.
+    shared = snapshot.SharedSnapshot()
+    _next(shared, ctx, "", 2)
+    clock[0] += snapshot.ARCHIVED_LISTING_TTL_S + 0.5
+    shared.body(ctx, include_archived=False)
+    assert shared._archived is None
