@@ -193,6 +193,10 @@ def _migrate(con: sqlite3.Connection) -> None:
         # schema moves before this lands, renumber above every source; never reuse a taken number.
         if 0 < version < 121:  # Data only: a new database has nothing to end.
             _migrate_to_v121(con)
+        # 122 is PROVISIONAL: the next free number above main 121 (120 is feat/agent-ring-device-optout's,
+        # unmerged). If main's schema moves before this lands, renumber above every source; never skip a number.
+        if version < 122:
+            _migrate_to_v122(con)
 
         con.execute(f"PRAGMA user_version = {db_schema._SCHEMA_VERSION}")
         con.execute("COMMIT")
@@ -928,6 +932,24 @@ def _migrate_to_v121(con: sqlite3.Connection) -> None:
         expire_lost_evidence(con, limit=None)
     finally:
         con.row_factory = factory
+
+
+def _migrate_to_v122(con: sqlite3.Connection) -> None:
+    """The newest finished run of a janitor's generation and status without reading the rest.
+
+    janitor_attention._episode asks, on every runner tick and for each janitor, for the newest
+    valid completed run and the newest terminal run. With only idx_janitor_runs_agent (agent_id,
+    created_at) each of those read every run of the agent and sorted them: 58,687 rows and about
+    345 MB per query on a Host with 115,807 runs (10 Nov 2026). With this index the same statements
+    walk newest-first within the generation and status and stop at the first match.
+
+    The row id is the last, implicit key of the index, so ``ORDER BY finished_at DESC, rowid DESC``
+    is its own order read backwards. An additive index: older code ignores it, so rolling back
+    needs no down-migration. It is built inside _migrate's one write transaction, once: about
+    0.1 s for 120,000 runs with the table in the page cache, longer when the table must be read
+    from disk first."""
+    con.execute("CREATE INDEX IF NOT EXISTS idx_janitor_runs_newest"
+                " ON janitor_runs(agent_id, generation, status, finished_at)")
 
 
 def _migrate_to_v119(con: sqlite3.Connection) -> None:
