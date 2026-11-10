@@ -7,7 +7,7 @@ Timing excludes process startup and the outside-the-import database oracle.
 from __future__ import annotations
 
 import argparse
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 import json
 import os
 import pathlib
@@ -161,6 +161,73 @@ def assert_checkpoint_parse_equal(database: pathlib.Path, transcript: pathlib.Pa
             "turn_count": cp.turn_count, "store_carry_certified": False}
 
 
+@contextmanager
+def observe_source_reads(path: pathlib.Path, metrics: dict):
+    """Delivered bytes from this source, including hash/sample/range readers.
+
+    Test instrumentation only: never a physical IO/SQLite/whole-ROOT budget
+    certificate. New low-level readers need explicit coverage before GREEN.
+    """
+    import builtins
+    import io
+    target = os.path.abspath(os.fspath(path))
+    metrics["source_read_bytes"] = 0
+
+    def charge(value):
+        if isinstance(value, str):
+            metrics["source_read_bytes"] += len(value.encode("utf-8"))
+        elif isinstance(value, (bytes, bytearray, memoryview)):
+            metrics["source_read_bytes"] += len(value)
+        elif isinstance(value, list):
+            for item in value:
+                charge(item)
+        return value
+
+    class ObservedFile:
+        def __init__(self, native):
+            self.native = native
+
+        def __getattr__(self, name):
+            value = getattr(self.native, name)
+            if name in ("read", "read1", "readall", "readline", "readlines"):
+                def read(*args, **kwargs):
+                    return charge(value(*args, **kwargs))
+                return read
+            if name in ("readinto", "readinto1"):
+                def readinto(*args, **kwargs):
+                    count = value(*args, **kwargs)
+                    metrics["source_read_bytes"] += count or 0
+                    return count
+                return readinto
+            return value
+
+        def __enter__(self):
+            self.native.__enter__()
+            return self
+
+        def __exit__(self, *args):
+            return self.native.__exit__(*args)
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            return charge(next(self.native))
+
+    def observe(opening):
+        def opened(file, *args, **kwargs):
+            native = opening(file, *args, **kwargs)
+            try:
+                matches = os.path.abspath(os.fspath(file)) == target
+            except TypeError:  # integer file descriptors are not pathname opens
+                matches = False
+            return ObservedFile(native) if matches else native
+        return opened
+
+    with patch.object(builtins, "open", observe(builtins.open)), patch.object(io, "open", observe(io.open)):
+        yield
+
+
 def run_lane(database: pathlib.Path, transcript: pathlib.Path, backend: str,
              lane: str, *, tick: int, initialize: bool = True,
              close: bool = True, faults: dict | None = None) -> dict:
@@ -216,6 +283,8 @@ def run_lane(database: pathlib.Path, transcript: pathlib.Path, backend: str,
 
     try:
         with ExitStack() as stack:
+            if (faults or {}).get("source_read_counter"):
+                stack.enter_context(observe_source_reads(transcript, metrics))
             stack.enter_context(patch("time.time", return_value=(BASE_MS + tick * 1000) / 1000))
             stack.enter_context(patch.object(inc, "settings", return_value=dict(inc._DEFAULTS,
                 enabled=lane == "checkpoint", sample_every=1, max_cpu_seconds_per_hour=1e9,
