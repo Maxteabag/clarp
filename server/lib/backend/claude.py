@@ -52,7 +52,8 @@ from ..log import log, log_exception
 from ..proc_util import stderr_text
 from ..process_registry import TurnHandle
 from ..voice_preamble import persona_identity_instruction
-from .base import BackendBrand, Backend, CompactionStrategy, resolve
+from ..backend_catalogue import CLAUDE
+from .base import CatalogueDefault, BackendBrand, Backend, CompactionStrategy, resolve
 from .stream_json import launch, start_drain, stop_after_drain_failure
 
 
@@ -297,47 +298,34 @@ class ClaudeBackend(Backend):
     by transcript file, pre-mints its session id and reports through the hook
     plugin."""
     # --- catalogue data ---------------------------------------------------
-    id = 'claude'
-    label = 'Claude'
-    required_binary = 'claude'
-    badge = 'BackendClaude'
-    detail = 'Runs on Claude Code.'
-    symbol = 'sparkles'
-    brand = BackendBrand('#e08b6a', '#c9603d', '#d97757', '#b85433')
-    supports_fork = True
-    supports_transcript_streaming = True
+    _catalogue_definition = CLAUDE
+    id = CatalogueDefault('id')
+    label = CatalogueDefault('label')
+    required_binary = CatalogueDefault('required_binary')
+    badge = CatalogueDefault('badge')
+    detail = CatalogueDefault('detail')
+    symbol = CatalogueDefault('symbol')
+    brand = CatalogueDefault('brand')
+    supports_fork = CatalogueDefault('supports_fork')
+    supports_transcript_streaming = CatalogueDefault('supports_transcript_streaming')
     supports_transcript_tail_apply = True
-    supports_mcp = True
-    supports_usage = True
-    login_kind = 'cli'
-    efforts = ('low', 'medium', 'high', 'xhigh', 'max')
-    effort_scope = 'model'
-    runner = 'clarp'
-    config_model_field = 'claude_model'
-    config_effort_field = 'claude_effort'
-    config_account_switch_field = 'claude_account_switch_command'
-    context_window = 1000000
+    supports_mcp = CatalogueDefault('supports_mcp')
+    supports_usage = CatalogueDefault('supports_usage')
+    login_kind = CatalogueDefault('login_kind')
+    efforts = CatalogueDefault('efforts')
+    effort_scope = CatalogueDefault('effort_scope')
+    runner = CatalogueDefault('runner')
+    config_model_field = CatalogueDefault('config_model_field')
+    config_effort_field = CatalogueDefault('config_effort_field')
+    config_account_switch_field = CatalogueDefault('config_account_switch_field')
+    context_window = CatalogueDefault('context_window')
     # Host ``claude_cli`` values -> the executable each selects; the first
     # entry is the default an unknown value falls back to.
     executable_choices = (
         ('claude', ('claude', 'claude-code', 'claude_code', 'official')),
         ('clarp', ('clarp', 'clarp-cli', 'clarp_cli')),
     )
-    fallback_models = (
-        ('fable', 'Fable'),
-        ('opus', 'Opus'),
-        ('sonnet', 'Sonnet'),
-        ('haiku', 'Haiku'),
-        ('claude-fable-5-2', 'Claude Fable 5.2'),
-        ('claude-fable-5-1', 'Claude Fable 5.1'),
-        ('claude-opus-5-5', 'Claude Opus 5.5'),
-        ('claude-opus-5', 'Claude Opus 5'),
-        ('claude-sonnet-5-5', 'Claude Sonnet 5.5'),
-        ('claude-sonnet-5', 'Claude Sonnet 5'),
-        ('claude-haiku-4-5', 'Claude Haiku 4.5'),
-        ('claude-opus-4-8', 'Claude Opus 4.8'),
-        ('claude-sonnet-4-6', 'Claude Sonnet 4.6'),
-    )
+    fallback_models = CatalogueDefault('fallback_models')
 
 
     # --- the runner -------------------------------------------------------

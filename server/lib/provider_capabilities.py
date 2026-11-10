@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from . import settings_store
+from . import backend_catalogue
 
 
 SCHEMA_VERSION = 2
@@ -40,13 +41,12 @@ _opencode_refresh_thread: threading.Thread | None = None
 
 
 def _provider_ids() -> tuple[str, ...]:
-    from . import backends
-    return backends.ids()
+    return backend_catalogue.ids()
 
 
 def _adapter(provider_id: str):
-    from . import backends
-    return backends.get(provider_id)
+    from .backend.registry import get
+    return get(provider_id)
 
 
 def _fallback_model_rows(provider_id: str) -> tuple[tuple[str, str], ...]:
@@ -684,7 +684,9 @@ def _probe_cli_version(
 def _fallback_models(provider_id: str, observed_at: str) -> list[dict[str, Any]]:
     source = _source("static_fallback", "bundled compatibility catalog",
                      observed_at, "unknown")
-    efforts = _static_efforts(provider_id) if provider_id == "claude" else None
+    definition = backend_catalogue.get(provider_id)
+    probe = definition.probe if definition and definition.id == provider_id else None
+    efforts = _static_efforts(provider_id) if probe and probe.fallback_efforts else None
     return [
         _model(
             model_id,
@@ -697,6 +699,51 @@ def _fallback_models(provider_id: str, observed_at: str) -> list[dict[str, Any]]
     ]
 
 
+def _probe_models(
+    probe: backend_catalogue.ModelProbe,
+    executable: str,
+    observed_at: str,
+    *,
+    run: Callable[..., subprocess.CompletedProcess[str]],
+) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+    """Execute the chosen probe without another backend identity catalogue."""
+    parse = globals()[probe.parser]
+    models: list[dict[str, Any]] = []
+    remembered_source = None
+    if probe.operation == "command":
+        try:
+            result = run([executable, *probe.argv], timeout=probe.timeout)
+            if result.returncode == 0:
+                models = parse(result.stdout, observed_at=observed_at)
+        except (OSError, subprocess.SubprocessError):
+            pass
+    elif probe.operation == "file":
+        try:
+            path = globals()[probe.cache_path]()
+            if path.is_file():
+                models = parse(
+                    path.read_text(encoding="utf-8", errors="replace"),
+                    observed_at=observed_at)
+        except OSError:
+            pass
+    elif probe.operation == "directory":
+        try:
+            for path in sorted(globals()[probe.cache_path]().glob("*.json")):
+                known = {item["id"] for item in models}
+                models += [item for item in parse(
+                    path.read_text(encoding="utf-8", errors="replace"),
+                    observed_at=observed_at) if item["id"] not in known]
+        except OSError:
+            pass
+    elif probe.operation == "listing":
+        raw, remembered = _opencode_models_listing(executable, observed_at, run=run)
+        if remembered is not None:
+            remembered = dict(remembered, detail=probe.detail + ", remembered")
+            remembered_source = dict(remembered)
+        models = parse(raw, observed_at=observed_at, source=remembered)
+    return models, remembered_source
+
+
 def _discover_provider(
     provider_id: str,
     observed_at: str,
@@ -704,6 +751,8 @@ def _discover_provider(
     resolve: Callable[[str], str | None],
     run: Callable[..., subprocess.CompletedProcess[str]],
 ) -> dict[str, Any]:
+    definition = backend_catalogue.get(provider_id)
+    probe = definition.probe if definition and definition.id == provider_id else None
     executable = resolve(provider_id)
     installed = executable is not None
     cli_version: str | None = None
@@ -719,71 +768,14 @@ def _discover_provider(
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
             version_future = executor.submit(
                 _probe_cli_version, executable, observed_at, run=run)
-            if provider_id == "codex":
-                probe_detail = "codex debug models"
-                try:
-                    result = run([executable, "debug", "models"], timeout=2.5)
-                    if result.returncode == 0:
-                        models = parse_codex_models(
-                            result.stdout, observed_at=observed_at)
-                except (OSError, subprocess.SubprocessError):
-                    pass
-            elif provider_id == "claude":
-                probe_detail = "claude account model cache"
-                try:
-                    path = claude_model_cache_path()
-                    if path.is_file():
-                        models = parse_claude_models(
-                            path.read_text(encoding="utf-8", errors="replace"),
-                            observed_at=observed_at)
-                except OSError:
-                    pass
-            elif provider_id == "agy":
-                probe_detail = "agy models"
-                try:
-                    # AGY fetches its account-scoped catalog remotely and
-                    # routinely takes just under three seconds when healthy.
-                    result = run([executable, "models"], timeout=5.0)
-                    if result.returncode == 0:
-                        models = parse_agy_models(
-                            result.stdout, observed_at=observed_at)
-                except (OSError, subprocess.SubprocessError):
-                    pass
-            elif provider_id == "grok":
-                probe_detail = "grok models"
-                try:
-                    result = run([executable, "models"], timeout=5.0)
-                    if result.returncode == 0:
-                        models = parse_grok_models(
-                            result.stdout, observed_at=observed_at)
-                except (OSError, subprocess.SubprocessError):
-                    pass
-            elif provider_id == "muse":
-                probe_detail = "muse model catalogue cache"
-                try:
-                    for path in sorted(muse_model_catalog_dir().glob("*.json")):
-                        known = {item["id"] for item in models}
-                        models += [item for item in parse_muse_models(
-                            path.read_text(encoding="utf-8", errors="replace"),
-                            observed_at=observed_at) if item["id"] not in known]
-                except OSError:
-                    pass
-            elif provider_id in ("opencode", "deepseek"):
-                # Same binary for both cards; DeepSeek keeps only its rows.
-                probe_detail = ("opencode models" if provider_id == "opencode"
-                                else "opencode models (deepseek)")
-                raw, remembered = _opencode_models_listing(
-                    executable, observed_at, run=run)
-                parse = (parse_opencode_models if provider_id == "opencode"
-                         else parse_deepseek_models)
-                if remembered is not None:
-                    remembered = dict(remembered, detail=probe_detail + ", remembered")
-                    catalog_source_override = dict(remembered)
-                models = parse(raw, observed_at=observed_at, source=remembered)
+            if probe is not None:
+                probe_detail = probe.detail
+                models, catalog_source_override = _probe_models(
+                    probe, executable, observed_at, run=run)
             cli_version, version_source = version_future.result()
 
     observed_catalog = bool(models)
-    if provider_id == "agy" and observed_catalog:
+    if probe and probe.remember_model_ids and observed_catalog:
         try:
             settings_store.set_text(
                 _AGY_LAST_CATALOG_KEY,
@@ -791,7 +783,7 @@ def _discover_provider(
             )
         except Exception:  # noqa: BLE001 - discovery remains available
             pass
-    if provider_id == "claude":
+    if probe and probe.append_fallback:
         known = {item["id"] for item in models}
         models = models + [
             item for item in _fallback_models(provider_id, observed_at)
@@ -801,9 +793,6 @@ def _discover_provider(
         models = _fallback_models(provider_id, observed_at)
     if not installed:
         availability = "unavailable"
-    elif provider_id == "claude":
-        # The account cache is evidence of entitlement, not of a catalog API.
-        availability = "available" if observed_catalog else "unknown"
     else:
         availability = "available" if observed_catalog else "unknown"
 
@@ -813,7 +802,7 @@ def _discover_provider(
     elif observed_catalog:
         # Claude's catalog is read from the CLI's account cache, not from a
         # command that enumerates models; say which one it was.
-        kind = "cli_cache" if provider_id in ("claude", "muse") else "cli_probe"
+        kind = probe.source_kind if probe else "cli_probe"
         catalog_source = _source(kind, probe_detail, observed_at, "fresh")
     else:
         catalog_source = _source(
@@ -825,12 +814,12 @@ def _discover_provider(
     # with the chosen model is unknown.
     effort_scope = adapter.effort_scope if adapter else "provider"
     efforts = list(adapter.efforts) if adapter and adapter.efforts else []
-    from . import backends
+    from .backend.registry import catalogue_fields
     row = {
         "id": provider_id,
         # Presentation and supports_* flags: the client renders these, so a
         # new adapter looks intentional without an app release.
-        **backends.catalogue_fields(provider_id),
+        **catalogue_fields(provider_id),
         "installed": installed,
         "availability": availability,
         "cli_version": cli_version,

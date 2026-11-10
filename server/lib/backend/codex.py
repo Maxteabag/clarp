@@ -53,7 +53,8 @@ from ..proc_util import stderr_text
 from ..process_registry import TurnHandle
 from ..turn_lifecycle import TurnEvent
 from ..voice_preamble import apply_voice_preamble
-from .base import BackendBrand, CompactionStrategy, resolve
+from ..backend_catalogue import CODEX
+from .base import CatalogueDefault, BackendBrand, CompactionStrategy, resolve
 from .stream_json import StreamJsonBackend, stop_after_drain_failure
 from .long_prompt import PromptFile, fits_argv
 
@@ -149,37 +150,30 @@ _TOOL_ITEM_TYPES = {
 class CodexBackend(StreamJsonBackend):
     """Runs through the long-lived Codex app-server (``codex_app_server``)."""
     # --- catalogue data ---------------------------------------------------
-    id = 'codex'
-    label = 'Codex'
-    required_binary = 'codex'
-    badge = 'BackendCodex'
-    detail = 'Runs on the Codex CLI.'
-    symbol = 'terminal'
-    brand = BackendBrand('#2b2f3c', '#14161d', '#c0caf5', '#3c4257')
-    supports_fork = True
-    supports_steer = True
+    _catalogue_definition = CODEX
+    id = CatalogueDefault('id')
+    label = CatalogueDefault('label')
+    required_binary = CatalogueDefault('required_binary')
+    badge = CatalogueDefault('badge')
+    detail = CatalogueDefault('detail')
+    symbol = CatalogueDefault('symbol')
+    brand = CatalogueDefault('brand')
+    supports_fork = CatalogueDefault('supports_fork')
+    supports_steer = CatalogueDefault('supports_steer')
     supports_transcript_tail_apply = True
-    supports_usage = True
-    login_kind = 'device_code'
-    efforts = ('low', 'medium', 'high', 'xhigh', 'max', 'ultra')
-    effort_scope = 'model'
-    runner = 'codex'
-    config_model_field = 'codex_model'
-    config_effort_field = 'codex_reasoning_effort'
-    config_account_switch_field = 'codex_account_switch_command'
-    api_providers = ('openai',)
-    native_tool_explainer = True
-    janitor_default_model = 'gpt-5.3-codex-spark'
-    model_family = 'codex'
-    fallback_models = (
-        ('gpt-6.1-sol', 'GPT-6.1 Sol'),
-        ('gpt-5.4', 'GPT-5.4'),
-        ('gpt-5.4-mini', 'GPT-5.4 Mini'),
-        ('gpt-5.2-codex', 'GPT-5.2 Codex'),
-        ('gpt-5.1-codex-max', 'GPT-5.1 Codex Max'),
-        ('gpt-5.1-codex', 'GPT-5.1 Codex'),
-        ('gpt-5-codex', 'GPT-5 Codex'),
-    )
+    supports_usage = CatalogueDefault('supports_usage')
+    login_kind = CatalogueDefault('login_kind')
+    efforts = CatalogueDefault('efforts')
+    effort_scope = CatalogueDefault('effort_scope')
+    runner = CatalogueDefault('runner')
+    config_model_field = CatalogueDefault('config_model_field')
+    config_effort_field = CatalogueDefault('config_effort_field')
+    config_account_switch_field = CatalogueDefault('config_account_switch_field')
+    api_providers = CatalogueDefault('api_providers')
+    native_tool_explainer = CatalogueDefault('native_tool_explainer')
+    janitor_default_model = CatalogueDefault('janitor_default_model')
+    model_family = CatalogueDefault('model_family')
+    fallback_models = CatalogueDefault('fallback_models')
 
 
     transcript = codex_transcript
