@@ -53,9 +53,9 @@ def test_recorded_model_preserves_tail_and_record_boundaries(tmp_path, monkeypat
 
     small_window, tail_limit = 64 * 1024, 1024 * 1024
     if case == 'latest-valid':
-        data = (record('earlier') + record('<synthetic>')
+        data = (record('earlier')
                 + b'{"type":"turn_context","payload":{"model":"latest"}}\n'
-                + b'not-json\n')
+                + record('<synthetic>') + b'not-json\n')
     elif case == 'wide-record':
         data = record('wide', content='x' * 90000)
     elif case == 'partial-small-window':
