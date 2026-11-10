@@ -10,6 +10,7 @@ import uuid
 from .persistence.schema_parts.oracle_memory import SCHEMA
 
 from . import db
+from .log import log
 from . import lifecycle as lk
 from .lifecycle import Edge, Lifecycle, WaitForever
 
@@ -57,7 +58,11 @@ def age_phrase(ms, now_ms):
 def _dated(row, key, ms, now_ms):
     """row plus when it happened; rows without a stored time are unchanged."""
     if type(ms) is not int: return row
-    return {**row, key: iso_time(ms), "age": age_phrase(ms, now_ms)}
+    try:
+        return {**row, key: iso_time(ms), "age": age_phrase(ms, now_ms)}
+    except (OverflowError, OSError, ValueError) as exc:  # a corrupt stored time must not stop the call
+        log("oracleHistoryTimeUnreadable", f"{key}={ms}: {type(exc).__name__}: {exc}")
+        return {name: value for name, value in row.items() if name != key}
 
 
 def open_thread(owner, contact, *, thread_id=None, connection_id, fresh=False):
