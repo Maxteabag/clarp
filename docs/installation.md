@@ -318,8 +318,9 @@ categories. Operational state remains in `state.sqlite`; opt-in diagnostic
 events are written to the isolated `telemetry.sqlite` store. Detail expires
 after 24 hours and compact hourly summaries expire after 30 days. The
 maintenance worker also trims detail back to a 1 GiB budget, the event-log
-mirror to 2 GiB and `hook.log` to 100 MiB each time it checks; these are not
-hard limits on disk use (see `DEBUGGING.md`).
+mirror to 2 GiB and `hook.log` to 100 MiB each time it checks. That is
+intentional data loss, not rotation, and these are not hard limits on disk
+use (see `DEBUGGING.md`).
 
 Advanced diagnostic families are independently opt-in: interaction
 waterfalls, transcript-import phases, database repetition detection, network

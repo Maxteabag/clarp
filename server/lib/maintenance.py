@@ -41,7 +41,8 @@ class Policy:
     # they held 34 GB, all of it younger than its age limit. The telemetry
     # database's budget is telemetry.DETAIL_BUDGET_BYTES.
     # The event-log directory: the oldest days go first. Today's file is never
-    # deleted; when it alone is over the bound its newest part is kept.
+    # deleted; when it alone is over the bound its newest part is kept. Both,
+    # like the hook.log cut, are intentional data loss, not rotation.
     event_log_max_bytes: int = 2048 * MIB
     event_log_today_keep_bytes: int = 512 * MIB
     # hook.log (hooks and the client log append to it; nothing else trims it).

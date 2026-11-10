@@ -34,9 +34,22 @@ maintenance worker restores each time it checks, not hard limits:
 | `~/.cache/clarp/logs/` | 2 GiB in total; the oldest days go first, and today's file is cut to its newest 512 MiB (`eventLogCut`) | `maintenance.Policy` |
 | `~/.cache/clarp/hook.log` | over 100 MiB it is cut to its newest 20 MiB (`hookLogCut`) | `maintenance.Policy` |
 
-The worker checks at Host start, hourly, and every five minutes in between,
-so whatever is written between two checks can overshoot a budget until the
-next one.
+These cuts and deletes are intentional data loss, not lossless rotation: the
+older events, days and hook lines are gone, and a cut event log keeps only
+its newest part. `telemetry.sqlite` holds the live record while it lasts.
+
+The worker checks at Host start (the first pass runs immediately at boot, so
+a backlog is trimmed then), hourly, and every five minutes in between.
+Whatever is written between two checks can overshoot a budget until the next
+one.
+
+The worker only touches files that are provably Clarp's own logs. The log
+directory and the cache directory must be absolute paths, no symlinks, and
+owned by the Host's user; a log must be a regular file of that user with no
+other hard link (a symlink is never followed), and for the size budgets it
+must also start like an event log or a hook log. Anything else is left alone
+and reported as `eventLogPruneFail` or `hookLogPruneFail`, as is a log that
+cannot be inspected.
 
 The telemetry budget is best-effort reclamation and says nothing about the
 size of the file on disk. It counts pages in use: a delete frees pages for
