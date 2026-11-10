@@ -25,18 +25,25 @@ The JSONL files under `~/.cache/clarp/logs/YYYY-MM-DD.jsonl` mirror the same
 rows for DuckDB analysis with `./scripts/query.sh`; SQLite is the live source
 of truth.
 
-Diagnostics are bounded by size as well as by age, so one noisy code path
-cannot fill the disk:
+Diagnostics are trimmed by size as well as by age. These are budgets the
+maintenance worker restores each time it checks, not hard limits:
 
-| what | bound | where it is set |
+| what | budget | where it is set |
 |---|---|---|
 | `telemetry.sqlite` detail | 1 GiB of live data; the oldest whole hours go first (their rollups stay) | `telemetry.DETAIL_BUDGET_BYTES` |
 | `~/.cache/clarp/logs/` | 2 GiB in total; the oldest days go first, and today's file is cut to its newest 512 MiB (`eventLogCut`) | `maintenance.Policy` |
 | `~/.cache/clarp/hook.log` | over 100 MiB it is cut to its newest 20 MiB (`hookLogCut`) | `maintenance.Policy` |
 
-The maintenance worker checks these at Host start, hourly, and every five
-minutes in between. `telemetry.sqlite` reuses the pages a delete frees, so
-the file stops growing at its budget but does not shrink by itself.
+The worker checks at Host start, hourly, and every five minutes in between,
+so whatever is written between two checks can overshoot a budget until the
+next one.
+
+The telemetry budget is best-effort reclamation and says nothing about the
+size of the file on disk. It counts pages in use: a delete frees pages for
+reuse but the file keeps them, so a file that was large stays large; the WAL
+grows separately until a checkpoint; and the schema and the hourly rollups
+are counted but are not freed by deleting detail. Nothing here shrinks
+`telemetry.sqlite`.
 
 ## Sources
 
