@@ -110,6 +110,33 @@ def test_relaunch_keeping_its_own_voice_is_not_a_clash():
     assert isinstance(clash, SpecError) and clash.message == "voice_in_use"
 
 
+def test_roster_contact_sharing_its_shipped_voice_is_not_a_clash():
+    """Shipped roster contacts deliberately share Cartesia voices (Adam and
+    Claude map to the same id in DEFAULT_CARTESIA_VOICES). Starting Adam
+    while Claude is live must succeed with Adam's own shipped voice; only a
+    custom pick of another agent's voice is a clash."""
+    personas = Personas({
+        "Adam": {"voice_id": '{"elevenlabs": "el-adam", "cartesia": "c1"}'},
+        "Claude": {"voice_id": '{"cartesia": "c1"}'}})
+    view = replace(
+        VIEW,
+        agents={"claude": {"name": "Claude", "voice_id": "c1-plain"}},
+        cartesia_voice_for=lambda name: "c1" if name in ("Adam", "Claude") else None)
+
+    def parse_as(data):
+        return AgentSpec.parse(data, backends=FakeBackends(), roster=view,
+                               personas=personas, janitor=False)
+
+    # Voice defaulted from the persona definition.
+    assert isinstance(parse_as({"name": "Adam"}), AgentSpec)
+    # Same voice sent explicitly (client prefill) is still Adam's own voice.
+    assert isinstance(
+        parse_as({"name": "Adam", "voice_id": '{"cartesia": "c1"}'}), AgentSpec)
+    # A custom-named agent taking that voice is still refused.
+    clash = parse_as({"name": "Bea", "voice_id": '{"cartesia": "c1"}'})
+    assert isinstance(clash, SpecError) and clash.message == "voice_in_use"
+
+
 def test_backend_is_normalised_once():
     fake = FakeBackends()
     assert isinstance(parse({"name": "X", "backend": "Codex"}, backends=fake), AgentSpec)
