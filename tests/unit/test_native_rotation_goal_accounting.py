@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import json
 
 import pytest
 
@@ -122,3 +123,19 @@ def test_exhausted_goal_is_carried_nonrunning_without_a_native_allowance(tmp_pat
     # goal snapshot on its own did not erase the exhausted logical goal.
     agent_goals.mirror_codex("new-thread", None, incarnation="transport-unique-a", user_action="clear")
     assert agent_goals.get(agent) is None and carried.get(agent)["state"] == "retired"
+
+
+@pytest.mark.parametrize("invalid_budget", [False, 0.0, "0"])
+def test_malformed_exhausted_native_budget_is_not_valid_rotation_authority(tmp_path, invalid_budget):
+    agent, _, _ = _bound(tmp_path, budget=0)
+    original_goal = agent_goals.get(agent)
+    record = carried.get(agent)
+    record["offset"]["native_budget"] = invalid_budget
+    settings_store.set_text(carried.key(agent), json.dumps(record))
+    with pytest.raises(accounting.AccountingUnavailable):
+        carried.require_activation(agent, "new-thread", "transport-unique-a")
+    # Failure must be at stored-proof decoding as well, not only the existing
+    # exhausted-goal activation refusal (which would conceal a permissive read).
+    with pytest.raises(accounting.AccountingUnavailable):
+        carried.get(agent)
+    assert agent_goals.get(agent) == original_goal
