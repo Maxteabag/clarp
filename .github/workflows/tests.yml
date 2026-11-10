@@ -3,10 +3,17 @@ name: Tests
 # Only the critical gate (tests/critical.txt, a few minutes) ever runs by itself: on a
 # pull request, and when the Docker workflow calls this one (every push to main). The
 # full suite never starts automatically (owner's rule: no 15-minute runs, no nightly);
-# someone starts it by hand with "Run workflow" when they want it.
+# someone starts it by hand with "Run workflow" when they want it. With "paths" filled
+# in, that manual run executes only those test files (a fix's own tests on a candidate
+# branch) instead of the full suite.
 on:
   pull_request:
   workflow_dispatch:
+    inputs:
+      paths:
+        description: "Test files or node ids under tests/, space separated. Empty = full suite."
+        type: string
+        default: ""
   workflow_call:
     inputs:
       suite:
@@ -21,7 +28,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      SUITE: ${{ (github.event_name == 'workflow_dispatch' || inputs.suite == 'full') && 'full' || 'critical' }}
+      SUITE: ${{ (github.event_name == 'workflow_dispatch' && inputs.paths != '') && 'paths' || ((github.event_name == 'workflow_dispatch' || inputs.suite == 'full') && 'full' || 'critical') }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -50,13 +57,29 @@ jobs:
       - name: Critical gate
         if: env.SUITE == 'critical'
         run: bash scripts/ci_contained.sh .venv/bin/python -m pytest -n0 $(sed -e 's/#.*//' tests/critical.txt) --junitxml=test-results/python.xml
+      - name: Selected test files
+        if: env.SUITE == 'paths'
+        env:
+          TEST_PATHS: ${{ inputs.paths }}
+        run: |
+          set -euo pipefail
+          set -f   # no globbing: node ids contain [ ]
+          files=()
+          # Only paths or node ids under tests/: nothing that could become a pytest option or leave the tree.
+          allowed='^tests/[][A-Za-z0-9_./:-]+$'
+          for p in $TEST_PATHS; do
+            if [[ ! "$p" =~ $allowed || "$p" == *..* ]]; then echo "refusing path: $p"; exit 2; fi
+            files+=("$p")
+          done
+          if [ ${#files[@]} -eq 0 ]; then echo "no test paths given"; exit 2; fi
+          bash scripts/ci_contained.sh .venv/bin/python -m pytest -n0 "${files[@]}" --junitxml=test-results/python.xml
       - name: Python unit, integration and contract tests
         if: env.SUITE == 'full'
         # Per-test phase timings stream into test-results/timing/ (flushed per line), so the
         # always() upload below keeps them even when the job is cancelled at its time limit.
         run: bash scripts/ci_contained.sh .venv/bin/python -m pytest -n 2 --junitxml=test-results/python.xml --clarp-timing-dir=test-results/timing
       - name: JavaScript behavior and contract tests
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && env.SUITE != 'paths' }}
         run: bash scripts/ci_contained.sh npm test -- --reporter=default --reporter=junit --outputFile=test-results/javascript.xml
       - uses: actions/upload-artifact@v4
         if: always()

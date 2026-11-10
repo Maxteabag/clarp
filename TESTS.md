@@ -9,6 +9,8 @@ database schema and migrations, boot and route wiring, authentication and
 device scope, turn dispatch/queue/stop, update and installer, transcript
 import. GitHub runs it on pull requests and, through the Docker workflow, on every push to main. The full suite
 never runs automatically; start it by hand ("Run workflow" on Tests) when wanted.
+To run only a fix's own tests on GitHub, start the same workflow on the candidate
+branch with `paths` set to the test files (space separated); nothing else runs.
 
 | Layer | Command | Where it runs | Time |
 |---|---|---|---|
