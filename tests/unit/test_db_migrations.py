@@ -678,3 +678,16 @@ def test_explicit_owner_refuses_participating_contention_without_creating_db(tmp
         assert "migration_owner_busy" in outcome.stderr
         assert not path.exists(), "a second owner created state before acquiring custody"
         assert companion.stat().st_ino == os.fstat(held.fileno()).st_ino
+
+
+@pytest.mark.parametrize("entrypoint", ["server.py", "runtime.py"])
+def test_direct_startup_refuses_unprepared_store_without_bootstrap(tmp_path, entrypoint):
+    path = tmp_path / "unprepared-parent" / "state.sqlite"
+    root = pathlib.Path(__file__).resolve().parents[2] / "server"
+    environment = {**os.environ, "CLAUDE_PWA_DB": str(path), "PYTHONPATH": str(root)}
+    outcome = subprocess.run([sys.executable, str(root / entrypoint)], env=environment,
+                             capture_output=True, text=True, timeout=20)
+    assert outcome.returncode == 1
+    assert outcome.stdout == ""
+    assert outcome.stderr == "schema_not_ready version=unknown sqlite_code=none\n"
+    assert not path.parent.exists(), "startup implicitly bootstrapped the data root"
