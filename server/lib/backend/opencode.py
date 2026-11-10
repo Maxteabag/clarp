@@ -16,7 +16,7 @@ from typing import Any, Callable, Optional
 from .. import agents as agents_db
 from .. import opencode_transcript
 from .. import tool_explanation_commands
-from .. import tts_queue
+from ..tts_queue_records import enqueue as enqueue_tts
 from ..log import log, log_exception
 from ..proc_util import attach_stderr_drain, stderr_text
 from ..text_util import truncate
@@ -140,7 +140,7 @@ def _live_tool_output(agent_id: str, part: dict, state: dict, st: Any,
                       trace_id: str = "") -> None:
     """A running tool's output as a live tail; an edit's diff stats."""
     from .. import live_hub
-    from ..live_tools import diff_stats, output_tail
+    from ..tool_output import diff_stats, output_tail
     if live_hub.current() is None:
         return
     call_id = _call_id(part)
@@ -317,7 +317,7 @@ class OpenCodeBackend(StreamJsonBackend):
             trace_id=trace_id, backend_session_id=backend_session_id,
             on_session_init=on_session_init, on_result=on_result,
             on_error=on_error, stream=stream,
-            enqueue=enqueue or tts_queue.enqueue,
+            enqueue=enqueue or enqueue_tts,
         )
         from .. import provider_background_jobs as provider_jobs
         turn_token, identity = provider_jobs.identity_env(runtime_agent_id)

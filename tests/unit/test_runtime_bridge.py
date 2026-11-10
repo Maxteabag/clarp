@@ -13,12 +13,12 @@ from lib.runtime_bridge import (
     PROTOCOL_VERSION,
     RuntimeClient,
     RuntimeProtocolError,
-    RuntimeRPCServer,
     RuntimeUnavailable,
     StopLease,
     decode_request,
     encode_request,
 )
+from lib.runtime_rpc_server import RuntimeRPCServer
 from lib import turn_dispatch
 from lib.turn_dispatch import DispatchError, DispatchResult, TurnDispatchService
 

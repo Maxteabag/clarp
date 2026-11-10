@@ -13,14 +13,16 @@ unchanged until someone moves the slider.
 """
 from __future__ import annotations
 
-QUIET = 0
-MILESTONES = 1
-STEPS = 2
-RUNNING = 3
-
-MIN_LEVEL = QUIET
-MAX_LEVEL = RUNNING
-DEFAULT_LEVEL = QUIET
+from .voice_levels import (
+    DEFAULT_LEVEL,
+    MAX_LEVEL,
+    MILESTONES,
+    MIN_LEVEL,
+    QUIET,
+    RUNNING,
+    STEPS,
+    clamp,
+)
 
 LABELS: dict[int, str] = {
     QUIET: "Quiet",
@@ -51,15 +53,6 @@ _CLAUSES: dict[int, str] = {
         "Stay in short <speak> lines so each is spoken while you continue."
     ),
 }
-
-
-def clamp(value: object) -> int:
-    """Coerce anything a client sends into a level this server understands."""
-    try:
-        level = int(value)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
-        return DEFAULT_LEVEL
-    return max(MIN_LEVEL, min(MAX_LEVEL, level))
 
 
 def narration_clause(level: object) -> str:

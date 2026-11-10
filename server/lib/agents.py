@@ -14,7 +14,7 @@ from contextlib import contextmanager
 from typing import Any
 
 from . import origins, turn_lifecycle
-from . import voice_verbosity as voice_verbosity_lib
+from .voice_levels import clamp as _clamp_voice_verbosity
 from .policies import helper_state as helper_policy
 from .db import conn, now_ms
 from .protocol import AgentBackend, AgentState, ClipStatus, TurnSource
@@ -456,7 +456,7 @@ def update_agent(agent_id: str, *, persona: str | None = None,
         values.append(personality)
     if voice_verbosity is not None:
         fields.append("voice_verbosity = ?")
-        values.append(voice_verbosity_lib.clamp(voice_verbosity))
+        values.append(_clamp_voice_verbosity(voice_verbosity))
     if avatar_path is not None:
         fields.append("avatar_path = ?")
         values.append(avatar_path)
@@ -930,7 +930,7 @@ def record_clip(*, agent_id: str, path: str, voice_id: str | None = None,
                 turn_id: int | None = None,
                 producer_status: str | None = None,
                 status: str = ClipStatus.SYNTHESIZED) -> int | None:
-    from .clip_store import record_clip as _record_clip
+    from .clip_records import record_clip as _record_clip
     return _record_clip(
         agent_id=agent_id, path=path, voice_id=voice_id, trace_id=trace_id,
         byte_count=byte_count, turn_id=turn_id, producer_status=producer_status,
@@ -1075,23 +1075,23 @@ def enable_latest_turn_audio(agent_id: str) -> None:
 # ---- canonical wire events --------------------------------------------
 
 def record_sse_event(event: dict[str, Any]) -> int:
-    from .sse_store import record_sse_event as _record
+    from .persistence.sse_events import record_sse_event as _record
     return _record(event)
 
 
 def events_after(event_id: int, limit: int = 500) -> list[dict[str, Any]]:
-    from .sse_store import events_after as _events_after
+    from .persistence.sse_events import events_after as _events_after
     return _events_after(event_id, limit)
 
 
 def events_after_scanned(event_id: int, limit: int = 500, *,
                          internal: bool = False) -> tuple[list[dict[str, Any]], int]:
-    from .sse_store import events_after_scanned as _events_after_scanned
+    from .persistence.sse_events import events_after_scanned as _events_after_scanned
     return _events_after_scanned(event_id, limit, internal=internal)
 
 
 def recent_events(window_ms: int, limit: int = 500) -> list[dict[str, Any]]:
-    from .sse_store import recent_events as _recent_events
+    from .persistence.sse_events import recent_events as _recent_events
     return _recent_events(window_ms, limit)
 
 

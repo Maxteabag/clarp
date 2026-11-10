@@ -266,7 +266,7 @@ _RUNTIME = r"""
 import sys, threading
 sys.path.insert(0, sys.argv[2])
 from lib import tool_explanation_commands as commands
-from lib.runtime_bridge import RuntimeRPCServer
+from lib.runtime_rpc_server import RuntimeRPCServer
 server = RuntimeRPCServer(sys.argv[1], dispatch_service=None, status_provider=lambda: {})
 threading.Thread(target=server.serve_forever, daemon=True).start()
 for command in sys.argv[4:]:

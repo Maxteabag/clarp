@@ -56,7 +56,7 @@ def test_runtime_identity_accepts_only_a_capable_undrained_named_runtime():
 
 
 def test_the_runtime_rpc_status_names_its_instance_and_capability(tmp_path):
-    from lib.runtime_bridge import RuntimeRPCServer
+    from lib.runtime_rpc_server import RuntimeRPCServer
     service = SimpleNamespace(ctx=SimpleNamespace(), backends=None)
     one = RuntimeRPCServer(_sock("a.sock"), dispatch_service=service, release_id="r-A",
                            status_provider=lambda: {})
@@ -73,7 +73,8 @@ def test_the_runtime_rpc_status_names_its_instance_and_capability(tmp_path):
 
 
 def test_s1_carries_the_dispatching_runtime_identity_in_the_same_result(tmp_path):
-    from lib.runtime_bridge import RuntimeClient, RuntimeRPCServer
+    from lib.runtime_bridge import RuntimeClient
+    from lib.runtime_rpc_server import RuntimeRPCServer
 
     class Owner:
         ctx = SimpleNamespace()

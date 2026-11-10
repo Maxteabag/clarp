@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from lib import voice_verbosity as vv
+from lib import voice_levels, voice_verbosity as vv
 
 
 @pytest.mark.parametrize("value,expected", [
@@ -13,6 +13,7 @@ from lib import voice_verbosity as vv
     (None, 0), ("", 0), ("loud", 0), ([], 0), ("1.5", 0),
 ])
 def test_clamp(value, expected):
+    assert vv.clamp is voice_levels.clamp
     assert vv.clamp(value) == expected
 
 
