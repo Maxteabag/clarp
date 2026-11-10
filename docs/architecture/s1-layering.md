@@ -389,3 +389,8 @@ The first thirty-six repaired upward edges are removed from the ratchet; this se
 <!-- Reviewed layering carry map_janitor; source 454cf0af7777fb53931cbc923e3dd02c0bdd9990 -->
 
 Additional explicit lead S1 signature (937): `janitor_store` is classified features → persistence because it owns Janitor table storage, transactions and JSON codecs, imports only standard library code and persistence `db`, and leaves application policy in its callers.
+
+
+## Wave 2: canonical pacing primitive (packet 4)
+
+`stream_pacing` is a new core primitive owning generic markdown prefix pacing, per-instance timer generations and trailing throttling. Feature `live_pacing` preserves exact object exports; provider/runtime core consumers use the canonical owner. The existing feature module retains its classification. Muse timer observers patch the canonical scheduler read by the moved classes. No timer, generation, cancellation or callback behavior changes.

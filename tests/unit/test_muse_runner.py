@@ -70,10 +70,10 @@ def _events_fed_directly_end_their_turn(monkeypatch):
     turn the way the drain's ``finally`` does: no pacer outlives the test.
     Their cancelled timer threads get a bounded moment to exit; nothing is
     cancelled here, so a timer the code itself left running still shows."""
-    from lib import live_pacing
+    from lib import stream_pacing
     started: list = []
-    real = live_pacing._thread_timer
-    monkeypatch.setattr(live_pacing, "_thread_timer",
+    real = stream_pacing._thread_timer
+    monkeypatch.setattr(stream_pacing, "_thread_timer",
                         lambda delay, fn: started.append(real(delay, fn)) or started[-1])
     yield
     while _STATES:
@@ -302,15 +302,15 @@ def test_a_missing_muse_binary_says_how_to_get_it(tmp_path, monkeypatch):
 @pytest.fixture
 def pacer_timers(monkeypatch):
     """Every timer a live pacer starts during the test."""
-    from lib import live_pacing
+    from lib import stream_pacing
     started: list = []
-    real = live_pacing._thread_timer
+    real = stream_pacing._thread_timer
 
     def record(delay, fn):
         timer = real(delay, fn)
         started.append(timer)
         return timer
-    monkeypatch.setattr(live_pacing, "_thread_timer", record)
+    monkeypatch.setattr(stream_pacing, "_thread_timer", record)
     return started
 
 

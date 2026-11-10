@@ -9,6 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from lib import live_pacing, stream_pacing
 from lib.audio_stream import AudioStream
 from lib.live_pacing import LivePacer, TrailingThrottle, stable_prefix
 
@@ -57,6 +58,9 @@ def _pacer(clock, writes, **kw):
 
 
 def test_pacer_releases_whole_paragraphs_at_most_every_interval():
+    assert live_pacing.LivePacer is stream_pacing.LivePacer
+    assert live_pacing.TrailingThrottle is stream_pacing.TrailingThrottle
+    assert live_pacing._thread_timer is stream_pacing._thread_timer
     clock, writes = FakeClock(), []
     pacer = _pacer(clock, writes)
     pacer.offer("First.\n\nSec")
