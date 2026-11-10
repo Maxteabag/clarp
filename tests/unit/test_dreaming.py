@@ -1585,13 +1585,20 @@ def test_historical_full_import_ack_never_noops_a_newer_run(monkeypatch, tmp_pat
 
     turns[1]["text"] = (f"DREAMING_OK run_id={newer['run_id']}"
                          if marker_binding == "claimed-newer-id" else ack)
+    if history_case == "unchanged-replay":
+        # An entirely unchanged probe may return without a locked pass. This
+        # unrelated appended turn forces the real full import to publish while
+        # revisiting the unchanged historical ACK; no writer guard is mocked.
+        turns.append({"role": "user", "text": "An unrelated later request", "timestamp": "3"})
     import_old()  # Real full import: the locked pass sees the historical ACK.
 
     assert dreaming.get_run(newer["run_id"]) == before
     assert dreaming.active_run_for_agent(aid)["run_id"] == newer["run_id"]
     visible = message_store.list_messages(agent_id=aid, backend_session_id="ack-history-transcript")
-    assert [row["text"] for row in visible] == [
-        "Automated dreaming run", "Dreaming check: no action needed."]
+    expected_display = ["Automated dreaming run", "Dreaming check: no action needed."]
+    if history_case == "unchanged-replay":
+        expected_display.append("An unrelated later request")
+    assert [row["text"] for row in visible] == expected_display
 
 
 @pytest.mark.parametrize("case", ["active", "late", "duplicate", "foreign-agent", "missing-id", "unknown-id",
