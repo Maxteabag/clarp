@@ -3,8 +3,11 @@ from __future__ import annotations
 
 import base64
 import json
+import re
+import secrets
 import threading
 import time
+from dataclasses import dataclass
 from typing import Any
 
 
@@ -86,13 +89,16 @@ class SharedSnapshot:
     that build saw every write the request could have expected to see.
 
     The full snapshot and the one without archived agents are different
-    bodies; each is shared among the requests that asked for it, and one lock
-    still lets a single build run at a time.
+    bodies; each is shared among the requests that asked for it. The listing
+    of archived agents is a third projection, shared the same way and also by
+    the pages of one walk (archived_page). One lock lets a single build of
+    any of them run at a time.
     """
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._last: dict[bool, tuple[float, Any, bytes]] = {}
+        self._archived: _ArchivedListing | None = None
 
     def body(self, ctx, *, include_archived: bool = True) -> bytes:
         arrived = time.monotonic()
@@ -108,6 +114,42 @@ class SharedSnapshot:
             self._last[include_archived] = (started, ctx, body)
             return body
 
+    def archived_page(self, ctx, *, limit: int = None, position=None, token: str = "") -> dict[str, Any]:
+        """One page of the archived agents, cut from a shared listing.
+
+        The listing is every archived agent's row, built once. A request
+        without a cursor shares a listing whose build started after the
+        request arrived, like ``body``. A request that carries a cursor
+        continues its own walk: it is answered from the listing that issued
+        the cursor for as long as that is held (ARCHIVED_LISTING_TTL_S), with
+        no build at all, so the pages of one walk are one consistent listing
+        and cost one build, not one each. When that listing is gone the walk
+        goes on in a new one from the agent the cursor names.
+        """
+        limit = _page_limit(ARCHIVED_PAGE_DEFAULT if limit is None else limit)
+        arrived = time.monotonic()
+        with self._lock:
+            listing = self._archived
+            reusable = listing is not None and listing.ctx is ctx and (
+                listing.started >= arrived
+                or (bool(token) and token == listing.token
+                    and arrived - listing.started <= ARCHIVED_LISTING_TTL_S))
+            if not reusable:
+                started = time.monotonic()
+                rows, order = build_archived_listing(ctx)
+                listing = _ArchivedListing(started, ctx, secrets.token_hex(8), rows, order)
+                self._archived = listing
+        return _cut_page(listing.rows, listing.order, listing.token, limit, position)
+
+
+@dataclass(frozen=True)
+class _ArchivedListing:
+    started: float                     # time.monotonic() when its build began
+    ctx: Any
+    token: str                         # names this listing in the cursors it issues
+    rows: list[dict[str, Any]]         # every archived agent's row, most recently archived first
+    order: list[tuple[int, str]]       # (archived_at, agent_id) of each row
+
 
 SHARED = SharedSnapshot()
 
@@ -115,6 +157,9 @@ SHARED = SharedSnapshot()
 # One page of GET /agents/archived.
 ARCHIVED_PAGE_DEFAULT = 50
 ARCHIVED_PAGE_MAX = 200
+# How long the pages of one walk are answered from the listing that began it.
+ARCHIVED_LISTING_TTL_S = 300.0
+_LIMIT_TEXT = re.compile(r"[0-9]{1,3}")     # ASCII digits only: no sign, space, underscore or other script
 
 
 def _not_archived(agent_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -122,7 +167,29 @@ def _not_archived(agent_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _archived_order(agent: dict[str, Any]) -> tuple[int, str]:
-    return int(agent["archived_at"]), str(agent["agent_id"])
+    """Where an archived agent stands in the listing. ``archived_at`` is an
+    integer in every row the Host writes; anything else in that column still
+    marks the agent archived and sorts last, so it cannot break the listing."""
+    value = agent.get("archived_at")
+    return (value if isinstance(value, int) and not isinstance(value, bool) else 0), str(agent["agent_id"])
+
+
+def _page_limit(limit: int) -> int:
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= ARCHIVED_PAGE_MAX:
+        raise ValueError("invalid archived agents limit")
+    return limit
+
+
+def parse_archived_query(limit: str, cursor: str) -> tuple[int, tuple[int, str] | None, str]:
+    """The query of GET /agents/archived as (limit, position, token), or
+    ValueError: ``limit`` is 1 to ARCHIVED_PAGE_MAX in plain digits, and
+    ``cursor`` is one this Host issued. Empty means the default page from the
+    start. Nothing is read from the database here."""
+    if limit and not _LIMIT_TEXT.fullmatch(limit):
+        raise ValueError("invalid archived agents limit")
+    size = _page_limit(int(limit) if limit else ARCHIVED_PAGE_DEFAULT)
+    position, token = _decode_cursor(cursor) if cursor else (None, "")
+    return size, position, token
 
 
 @backends.runtime_status_scope(timeout=2.0)
@@ -135,7 +202,7 @@ def build_agent_snapshot(ctx, *, include_archived: bool = True) -> dict[str, Any
     of the work (1,019 of 1,375 agents on 10 Nov 2026). The rows that remain
     are exactly the rows the full snapshot has for those agents, counts of
     archived children included, and ``archived_count`` says how many were
-    left out; build_archived_agents pages them. The full snapshot, the
+    left out; SharedSnapshot.archived_page pages them. The full snapshot, the
     default, is unchanged: clients that do not ask keep getting every agent.
     """
     snapshot, agent_rows = _project(ctx, None if include_archived else _not_archived)
@@ -145,55 +212,67 @@ def build_agent_snapshot(ctx, *, include_archived: bool = True) -> dict[str, Any
 
 
 @backends.runtime_status_scope(timeout=2.0)
-def build_archived_agents(ctx, *, limit: int = ARCHIVED_PAGE_DEFAULT, cursor: str = "") -> dict[str, Any]:
-    """One page of the archived agents, most recently archived first.
+def build_archived_listing(ctx) -> tuple[list[dict[str, Any]], list[tuple[int, str]]]:
+    """Every archived agent's row, most recently archived first, and each
+    row's place in that order.
 
-    Each row is the row the full snapshot has for that agent, built the same
+    A row is the row the full snapshot has for that agent, built the same
     way, so a client reads it with the decoder it already has, and the
-    snapshot without archived agents plus every page of this is the full
-    snapshot's agent list. Only the page's agents are built.
-
-    The cursor names the last agent of the previous page (its archive time
-    and id), not an offset: an agent archived or restored between two pages
-    neither repeats nor hides another. ``next_cursor`` is None on the last
-    page. Raises ValueError for a cursor this did not issue.
+    snapshot without archived agents plus this listing is the full snapshot's
+    agent list.
     """
-    limit = max(1, min(int(limit), ARCHIVED_PAGE_MAX))
-    after = _decode_cursor(cursor) if cursor else None
-    page: list[dict[str, Any]] = []
-    more = False
+    archived: list[dict[str, Any]] = []
 
     def select(agent_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        nonlocal more
-        archived = sorted((a for a in agent_rows if a.get("archived_at")), key=_archived_order, reverse=True)
-        if after is not None:
-            archived = [a for a in archived if _archived_order(a) < after]
-        more = len(archived) > limit
-        page.extend(archived[:limit])
-        return page
+        archived.extend(sorted((a for a in agent_rows if a.get("archived_at")),
+                               key=_archived_order, reverse=True))
+        return archived
 
-    snapshot, agent_rows = _project(ctx, select)
+    snapshot, _agent_rows = _project(ctx, select)
+    return snapshot["agents"], [_archived_order(a) for a in archived]
+
+
+def build_archived_agents(ctx, *, limit: int = ARCHIVED_PAGE_DEFAULT, cursor: str = "") -> dict[str, Any]:
+    """One page of the archived agents from a listing built for this call.
+    The route goes through SharedSnapshot.archived_page, which builds the
+    listing once for all the pages of a walk; this is the same page without
+    the sharing, for callers that want exactly one. Raises ValueError for a
+    limit outside 1 to ARCHIVED_PAGE_MAX or a cursor this Host did not issue."""
+    limit = _page_limit(limit)
+    position, _token = _decode_cursor(cursor) if cursor else (None, "")
+    rows, order = build_archived_listing(ctx)
+    return _cut_page(rows, order, "", limit, position)
+
+
+def _cut_page(rows: list[dict[str, Any]], order: list[tuple[int, str]], token: str,
+              limit: int, position: tuple[int, str] | None) -> dict[str, Any]:
+    """The ``limit`` rows after ``position`` (the last agent of the previous
+    page; None: from the start). The position is a place in the order, not an
+    offset, so it still means the same agent boundary in a later listing."""
+    start = 0 if position is None else sum(1 for place in order if place >= position)
+    end = start + limit
     return {
-        "agents": snapshot["agents"],
-        "next_cursor": _encode_cursor(_archived_order(page[-1])) if more else None,
-        "total": sum(1 for a in agent_rows if a.get("archived_at")),
+        "agents": rows[start:end],
+        "next_cursor": _encode_cursor(order[end - 1], token) if end < len(rows) else None,
+        "total": len(rows),
     }
 
 
-def _encode_cursor(position: tuple[int, str]) -> str:
-    return base64.urlsafe_b64encode(json.dumps(list(position)).encode()).decode()
+def _encode_cursor(position: tuple[int, str], token: str) -> str:
+    return base64.urlsafe_b64encode(json.dumps([*position, token]).encode()).decode()
 
 
-def _decode_cursor(cursor: str) -> tuple[int, str]:
+def _decode_cursor(cursor: str) -> tuple[tuple[int, str], str]:
     if len(cursor) > 512:
         raise ValueError("invalid archived agents cursor")
     try:
-        archived_at, agent_id = json.loads(base64.urlsafe_b64decode(cursor.encode()))
+        archived_at, agent_id, token = json.loads(base64.urlsafe_b64decode(cursor.encode()))
     except Exception as exc:  # noqa: BLE001 - any malformed cursor is the caller's error
         raise ValueError("invalid archived agents cursor") from exc
-    if isinstance(archived_at, bool) or not isinstance(archived_at, int) or not isinstance(agent_id, str):
+    if (isinstance(archived_at, bool) or not isinstance(archived_at, int)
+            or not isinstance(agent_id, str) or not isinstance(token, str)):
         raise ValueError("invalid archived agents cursor")
-    return archived_at, agent_id
+    return (archived_at, agent_id), token
 
 
 def _project(ctx, select) -> tuple[dict[str, Any], list[dict[str, Any]]]:

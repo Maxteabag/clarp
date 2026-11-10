@@ -400,9 +400,11 @@ class AgentRoutes:
         from lib import snapshot
         query = self._query()
         try:
-            page = snapshot.build_archived_agents(
-                self.ctx, limit=int(query.get("limit", [str(snapshot.ARCHIVED_PAGE_DEFAULT)])[0]),
-                cursor=query.get("cursor", [""])[0])
-        except (ValueError, TypeError):
+            limit, position, token = snapshot.parse_archived_query(
+                query.get("limit", [""])[0], query.get("cursor", [""])[0])
+        except ValueError:
+            # Only the query: a fault while building is the Host's, and is
+            # answered and logged as the snapshot route's are.
             return self._json_error(400, "invalid archived agents query")
-        self._json_ok(page)
+        self._json_ok(snapshot.SHARED.archived_page(
+            self.ctx, limit=limit, position=position, token=token))
