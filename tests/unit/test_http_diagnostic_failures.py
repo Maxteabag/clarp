@@ -207,25 +207,26 @@ def test_finish_preserves_primary_and_cleanup_order(
             raise ImportError(SECRET)
         return original_import(name, globals, locals, fromlist, level)
 
-    monkeypatch.setattr(root.BaseHTTPRequestHandler, "finish", finish)
-    monkeypatch.setattr(root.db, "close_local", close_db)
-    monkeypatch.setattr(telemetry, "close_local", close_telemetry)
-    handler = object.__new__(root.Handler)
-    with sink(monkeypatch, sink_result, order) as calls:
-        with monkeypatch.context() as patch:
-            patch.setattr(builtins, "__import__", import_module)
-            if primary_failed:
-                with pytest.raises(RuntimeError) as caught:
+    with monkeypatch.context() as owner_patch:
+        owner_patch.setattr(root.BaseHTTPRequestHandler, "finish", finish)
+        owner_patch.setattr(root.db, "close_local", close_db)
+        owner_patch.setattr(telemetry, "close_local", close_telemetry)
+        handler = object.__new__(root.Handler)
+        with sink(monkeypatch, sink_result, order) as calls:
+            with monkeypatch.context() as patch:
+                patch.setattr(builtins, "__import__", import_module)
+                if primary_failed:
+                    with pytest.raises(RuntimeError) as caught:
+                        handler.finish()
+                    assert caught.value is primary
+                else:
                     handler.finish()
-                assert caught.value is primary
-            else:
-                handler.finish()
-    expected = ["finish", "db", "import-fail" if telemetry_failure == "import" else "telemetry"]
-    assert order == expected + (["fallback"] if telemetry_failure else [])
-    if telemetry_failure:
-        assert_record(calls, "H02", "IMPORT" if telemetry_failure == "import" else "RUNTIME")
-    else:
-        assert calls == []
+        expected = ["finish", "db", "import-fail" if telemetry_failure == "import" else "telemetry"]
+        assert order == expected + (["fallback"] if telemetry_failure else [])
+        if telemetry_failure:
+            assert_record(calls, "H02", "IMPORT" if telemetry_failure == "import" else "RUNTIME")
+        else:
+            assert calls == []
 
 
 @pytest.mark.parametrize("primary_failed", [False, True])
@@ -242,15 +243,16 @@ def test_finish_db_failure_still_replaces_primary_and_skips_telemetry(monkeypatc
         order.append("db")
         raise cleanup
 
-    monkeypatch.setattr(root.BaseHTTPRequestHandler, "finish", finish)
-    monkeypatch.setattr(root.db, "close_local", close_db)
-    monkeypatch.setattr(telemetry, "close_local", lambda: order.append("telemetry"))
-    with sink(monkeypatch) as calls:
-        with pytest.raises(RuntimeError) as caught:
-            object.__new__(root.Handler).finish()
-    assert caught.value is cleanup
-    assert order == ["finish", "db"]
-    assert calls == []  # adjacent DB-close policy is not repaired in this packet
+    with monkeypatch.context() as owner_patch:
+        owner_patch.setattr(root.BaseHTTPRequestHandler, "finish", finish)
+        owner_patch.setattr(root.db, "close_local", close_db)
+        owner_patch.setattr(telemetry, "close_local", lambda: order.append("telemetry"))
+        with sink(monkeypatch) as calls:
+            with pytest.raises(RuntimeError) as caught:
+                object.__new__(root.Handler).finish()
+        assert caught.value is cleanup
+        assert order == ["finish", "db"]
+        assert calls == []  # adjacent DB-close policy is not repaired in this packet
 
 
 @pytest.mark.parametrize("failed_stage", [None, "metrics", "phases", "eventlog"])

@@ -288,5 +288,6 @@ class ClaimMixin:
             return False
         try:
             return bool(pending(spec.backend, spec.agent_id))
-        except Exception:  # noqa: BLE001 - unknown: the existing path decides
+        except Exception as exc:  # noqa: BLE001 - unknown: the existing path decides
+            log_exception("turnStartPendingCheckFail", exc, detail=spec.agent_id)
             return False

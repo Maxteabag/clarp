@@ -21,6 +21,7 @@ import sqlite3
 
 from lib import launch_receipts, turn_queue
 from lib.backend.registry import by_id
+from tests.patching import patch_shared
 from tests.unit.test_codex_start_head_of_line import _Stream, _agent, _timed, _wait
 from tests.unit.test_codex_generations import fake as gen_fake, _agent as _gen_agent, _turn as _gen_turn, _wait as _gen_wait  # noqa: F401
 
@@ -105,7 +106,7 @@ def test_a_failed_park_refuses_the_follow_up(pool, monkeypatch):
     _timed(lambda: pool.service.dispatch(text="HOLD", requested_session="rachel", trace_id="t-r1",
                                          synthesize_audio=False), 0.0)
     assert held.wait(15)
-    monkeypatch.setattr(td, "_park", lambda spec, prefix="park": "")
+    patch_shared(monkeypatch, td, "_park", lambda spec, prefix="park": "")
     with pytest.raises(td.DispatchError) as error:
         pool.service.dispatch(text="and also", requested_session="rachel", trace_id="t-r2",
                               synthesize_audio=False)
