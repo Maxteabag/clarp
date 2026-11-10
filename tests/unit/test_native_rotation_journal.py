@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import pytest
+import sqlite3
+import threading
+import json
 
 from lib import agents, db, native_rotation_journal as journal, settings_store
 
@@ -182,3 +185,109 @@ def test_new_native_collision_keeps_the_create_intent_and_old_reservation(tmp_pa
     assert journal.get(agent) == intent
     assert agents.live_backend_session(agent) == "old"
     assert agents.live_backend_session(other) == "foreign"
+
+
+def test_canonical_writer_waits_for_reservation_then_observes_its_committed_owner(tmp_path, monkeypatch):
+    agent = _agent(tmp_path)
+    admitted, release = threading.Event(), threading.Event()
+    errors = []
+    actual_write = settings_store.set_text
+
+    def held_write(key, value, **kwargs):
+        if key == journal.key(agent):
+            admitted.set()
+            if not release.wait(5):
+                raise RuntimeError("controlled reservation writer did not release")
+        return actual_write(key, value, **kwargs)
+
+    monkeypatch.setattr(settings_store, "set_text", held_write)
+
+    def reserve():
+        try:
+            journal.reserve(agent, "old", "operation-a")
+        except BaseException as exc:
+            errors.append(exc)
+        finally:
+            db.close_local()
+
+    worker = threading.Thread(target=reserve, name="rotation-reservation")
+    worker.start()
+    con = db.conn()
+    timeout = con.execute("PRAGMA busy_timeout").fetchone()[0]
+    try:
+        assert admitted.wait(5), "real reservation writer was not admitted"
+        con.execute("PRAGMA busy_timeout=1")
+        with pytest.raises(sqlite3.OperationalError) as caught:
+            agents.start_runtime(agent, "replacement")
+        assert caught.value.sqlite_errorcode == sqlite3.SQLITE_BUSY
+        release.set()
+        worker.join(5)
+        assert not worker.is_alive() and errors == []
+        with pytest.raises(journal.RotationConflict):
+            agents.start_runtime(agent, "replacement")
+        assert agents.live_backend_session(agent) == "old"
+    finally:
+        release.set()
+        worker.join(5)
+        con.execute(f"PRAGMA busy_timeout={int(timeout)}")
+
+
+@pytest.mark.parametrize("joined", [False, True])
+def test_resource_cleanup_and_completion_roll_back_together_on_second_delete_failure(tmp_path, joined):
+    agent = _agent(tmp_path)
+    journal.reserve(agent, "old", "operation-a")
+    phases = ("reserved", "quiescing", "quiescent", "create_pending", "created",
+              "final_imported", "chats_carried", "plans_carried")
+    for before, after in zip(phases, phases[1:]):
+        journal.advance(agent, "operation-a", before, after,
+                        **({"new_thread_id": "new"} if after == "created" else {}))
+    journal.bind(agent, "operation-a")
+    phases = ("bound", "archive_pending", "archived", "goal_pending", "ready")
+    for before, after in zip(phases, phases[1:]):
+        journal.advance(agent, "operation-a", before, after)
+    con = db.conn()
+    before = [tuple(row) for row in con.execute("SELECT key,value FROM settings ORDER BY key")]
+    resources = [(key, json.loads(raw)) for key, raw in settings_store.items_in_range(
+        "codex.rotation.v1.thread.", "codex.rotation.v1.thread/", limit=9)]
+    assert len(resources) == 2
+    new_resource = next(key for key, value in resources if value["native_id"] == "new")
+    # Actual statement failure AFTER the old resource delete succeeds. An
+    # outer owner must not be able to commit that first delete by catching it.
+    con.execute("CREATE TEMP TRIGGER deny_new_resource BEFORE DELETE ON settings "
+                "WHEN OLD.key='" + new_resource + "' "
+                "BEGIN SELECT RAISE(ABORT,'new resource delete denied'); END")
+    if joined:
+        con.execute("BEGIN IMMEDIATE")
+        settings_store.set_text("caller-unit", "keep")
+    with pytest.raises(sqlite3.IntegrityError, match="new resource delete denied"):
+        journal.advance(agent, "operation-a", "ready", "complete")
+    assert con.in_transaction is joined
+    if joined:
+        con.execute("COMMIT")
+        assert settings_store.get("caller-unit") == "keep"
+    assert [tuple(row) for row in con.execute(
+        "SELECT key,value FROM settings WHERE key<>'caller-unit' ORDER BY key")] == before
+    con.execute("DROP TRIGGER deny_new_resource")
+    completed = journal.advance(agent, "operation-a", "ready", "complete")
+    assert not journal.blocked(agent)
+    assert journal.reserve(agent, "old", "operation-a") == completed
+    # Both reservations were released by the same completion, including old
+    # which no longer had a live runtime owner after cutover.
+    other = agents.create_agent(persona="Other", voice_id="v", cwd=str(tmp_path),
+                                 session="other", backend="codex")
+    agents.bind_backend_session(other, "old")
+    assert agents.live_backend_session(other) == "old"
+
+
+def test_rotation_capacity_refuses_an_extra_owner_without_partial_reservation(tmp_path):
+    for index in range(5):
+        agent = agents.create_agent(persona=f"Owner {index}", voice_id="v", cwd=str(tmp_path),
+                                     session=f"owner-{index}", backend="codex")
+        agents.bind_backend_session(agent, f"native-{index}")
+        if index < 4:
+            journal.reserve(agent, f"native-{index}", f"operation-{index}")
+        else:
+            with pytest.raises(journal.RotationConflict):
+                journal.reserve(agent, f"native-{index}", f"operation-{index}")
+            assert journal.get(agent) is None
+            assert agents.live_backend_session(agent) == f"native-{index}"
