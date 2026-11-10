@@ -109,6 +109,19 @@ event arrives.
 
 Rules:
 
+- **Archived agents are optional.** A plain `GET /agents/snapshot` carries
+  every agent, archived ones too (`archived_at` set). On a Host that has run
+  for a while most agents are archived helpers, and a client pays for them on
+  every connect. A client that does not need them at connect asks for
+  `GET /agents/snapshot?include_archived=0` (Hosts that advertise the feature
+  `snapshot_without_archived`): `agents` then holds only agents that are not
+  archived, the Host does not build the others at all, and the extra key
+  `archived_count` says how many were left out. Everything else is the same
+  as in the full snapshot, and each remaining row is the row the full
+  snapshot has, `child_count` of archived helpers included. An older Host
+  ignores the parameter and answers the full snapshot, so keep filtering on
+  `archived_at`. The archived agents are read with `GET /agents/archived`,
+  below.
 - `head_revision` and `conversation_id` are the same values `/log` reports.
   If a client already holds a cached chat for this agent, it is current iff
   the cached `conversation_id` matches and the cached revision equals
@@ -166,6 +179,27 @@ Rules:
   `sub-agent`.
 - There is no `/sessions` in this layer. The list of chats is
   `agents[].session` filtered by `archived_at == null`.
+
+#### Archived agents: `GET /agents/archived`
+
+The agents `include_archived=0` leaves out, a page at a time, for an archive
+screen. `limit` is 1 to 200 (default 50); `cursor` is the `next_cursor` of the
+previous page.
+
+```json
+{
+  "agents": [ { "…": "the same row as in /agents/snapshot", "archived_at": 1756800000000 } ],
+  "next_cursor": "<opaque, null on the last page>",
+  "total": 1019
+}
+```
+
+Rows are in the order most recently archived first. The cursor names the
+last agent of the page, not an offset, so an agent archived or restored
+between two requests neither repeats nor hides another. A cursor the Host
+did not issue, or a `limit` that is not a number, is
+`400 {"error": "invalid archived agents query"}`. A Host without the feature
+answers 404; read the archived rows from the full snapshot there.
 
 ### 2. Load a chat: `GET /log`
 

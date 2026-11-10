@@ -666,6 +666,47 @@ def test_get_snapshot_returns_seeded_data(running_server):
     assert next(a for a in data["agents"] if a["session"] == "claude")["persona"] == "Mike"
 
 
+def test_snapshot_leaves_archived_agents_out_only_when_asked(running_server):
+    """Old app builds send no parameter and must keep getting every agent."""
+    from lib import agents as agents_db
+
+    base, _ctx, _srv = running_server
+    rachel = agents_db.get_by_session("rachel")["agent_id"]
+    agents_db.set_archived(rachel, True)
+
+    def sessions(path):
+        status, body = _get(base + path)
+        assert status == 200
+        data = json.loads(body)
+        return {a["session"] for a in data["agents"] if not a["is_janitor"]}, data
+
+    assert sessions("/agents/snapshot")[0] == {"claude", "rachel"}
+    for same_as_default in ("?include_archived=1", "?include_archived=", "?include_archived=no", "?other=0"):
+        names, data = sessions("/agents/snapshot" + same_as_default)
+        assert names == {"claude", "rachel"} and "archived_count" not in data, same_as_default
+
+    names, lean = sessions("/agents/snapshot?include_archived=0")
+    assert names == {"claude"} and lean["archived_count"] == 1
+    full = sessions("/agents/snapshot")[1]
+    assert {k: v for k, v in lean.items() if k not in ("agents", "archived_count")} == {
+        k: v for k, v in full.items() if k != "agents"}
+
+    names, page = sessions("/agents/archived")
+    assert names == {"rachel"} and page["total"] == 1 and page["next_cursor"] is None
+    assert page["agents"][0] == next(a for a in full["agents"] if a["session"] == "rachel")
+
+
+@pytest.mark.parametrize("query", ["?cursor=nonsense", "?limit=many", "?limit=1.5", "?cursor=e30="])
+def test_archived_agents_refuses_a_bad_query(running_server, query):
+    base, _ctx, _srv = running_server
+    with pytest.raises(urllib.error.HTTPError) as error:
+        _get(base + "/agents/archived" + query)
+    assert error.value.code == 400
+    assert json.loads(error.value.read()) == {"error": "invalid archived agents query"}
+    # An empty value is no value: the default page.
+    assert _get(base + "/agents/archived?limit=&cursor=")[0] == 200
+
+
 @pytest.mark.parametrize("endpoint", ["/agent-file", "/agent-files"])
 @pytest.mark.parametrize("credential_kind", ["bearer", "cookie", "query"])
 @pytest.mark.parametrize("scope", ["limited", "full", "administrator"])
