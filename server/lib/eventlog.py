@@ -59,6 +59,16 @@ LOG_DIR = pathlib.Path(os.environ.get(
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 
+# The size bound on one event. A record's serialised ``detail`` never exceeds
+# this, in either sink: one code path logging megabyte tracebacks filled 34 GB
+# in a day while every age-based retention held. Longer string values keep
+# their head and tail (see _bound_detail).
+MAX_DETAIL_BYTES = 32 * 1024
+# String lengths tried, longest first, until the shortened detail fits.
+_STRING_LIMITS = (24576, 16384, 8192, 4096, 2048, 1024, 512, 256)
+# Kept free for the "_truncated" entry that says the detail was shortened.
+_TRUNCATION_NOTE_BYTES = 256
+
 # In-process serialisation. The flock handles cross-process; this avoids
 # interleaving when many threads in the same server emit at once.
 _LOCK = threading.Lock()
@@ -119,6 +129,48 @@ def _sanitize_detail(value: object, key: str = "") -> object:
     if isinstance(value, list):
         return [_sanitize_detail(item) for item in value]
     return value
+
+
+def _shorten(text: str, limit: int) -> str:
+    """``text`` cut to about ``limit`` characters: a third from its head and
+    the rest from its tail, where a traceback names the failure."""
+    head = limit // 3
+    tail = limit - head
+    return f"{text[:head]}\n...[{len(text) - limit} chars omitted]...\n{text[-tail:]}"
+
+
+def _shorten_strings(value: object, limit: int) -> object:
+    if isinstance(value, str):
+        # The slack keeps a string from growing by more than it loses.
+        return _shorten(value, limit) if len(value) > limit + 64 else value
+    if isinstance(value, dict):
+        return {name: _shorten_strings(item, limit) for name, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_shorten_strings(item, limit) for item in value]
+    return value
+
+
+def _bound_detail(detail: object) -> object:
+    """``detail`` as it is when it serialises within MAX_DETAIL_BYTES, else a
+    shortened copy that does, carrying ``_truncated`` with the original size.
+
+    Long string values are shortened first, every one to the same length, so
+    the keys a reader looks for survive. A detail that is too large for other
+    reasons (thousands of small values) becomes a head-and-tail preview of its
+    own JSON text.
+    """
+    encoded = json.dumps(detail, separators=(",", ":"))
+    if len(encoded) <= MAX_DETAIL_BYTES:
+        return detail
+    note = {"original_bytes": len(encoded), "limit_bytes": MAX_DETAIL_BYTES}
+    room = MAX_DETAIL_BYTES - _TRUNCATION_NOTE_BYTES
+    if isinstance(detail, dict):
+        for limit in _STRING_LIMITS:
+            shortened = _shorten_strings(detail, limit)
+            if len(json.dumps(shortened, separators=(",", ":"))) <= room:
+                return {**shortened, "_truncated": note}
+    # Quotes and backslashes double when JSON text is stored as a string.
+    return {"_truncated": note, "_preview": _shorten(encoded, room // 2 - 64)}
 
 
 # Ordinary emits queue only their SQLite row; JSONL stays synchronous. The
@@ -383,15 +435,25 @@ def emit(source: str, event: str, *,
     if detail:
         record["detail"] = _sanitize_detail(detail)
     try:
-        json.dumps(record, separators=(",", ":"))
+        size = len(json.dumps(record, separators=(",", ":")))
     except (TypeError, ValueError):
         # Detail wasn't serialisable — coerce to repr and retry.
         try:
             record["detail"] = {"_repr": repr(detail)}
-            json.dumps(record, separators=(",", ":"))
+            size = len(json.dumps(record, separators=(",", ":")))
         except Exception as error:
             print(f"eventlog serialization failed: {error}", file=sys.stderr)
             return
+    # Only a record over the cap can carry a detail over it, so an ordinary
+    # event pays nothing for the bound. Both sinks get the bounded record.
+    if size > MAX_DETAIL_BYTES and "detail" in record:
+        try:
+            record["detail"] = _bound_detail(record["detail"])
+        except Exception as error:  # noqa: BLE001 - logging must not break the caller
+            print(f"eventlog detail bound failed: {type(error).__name__}", file=sys.stderr)
+            record["detail"] = {"_truncated": {
+                "original_bytes": size, "limit_bytes": MAX_DETAIL_BYTES,
+                "error": type(error).__name__}}
     _write_sqlite(record, now_dt)
     _append_jsonl(record, now_dt)
 

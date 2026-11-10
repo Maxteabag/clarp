@@ -3089,7 +3089,7 @@ def _server_workers(ctx: ServerContext, srv: "ContextHTTPServer", cfg,
         # the transcript streamer, which enqueues into the same queue.
         Worker("tts-worker", start_tts_worker),
         Worker("maintenance", lambda: started(MaintenanceWorker(
-            audio_dir=_paths.audio_dir, stream=ctx.stream))),
+            audio_dir=_paths.audio_dir, stream=ctx.stream, hook_log=_paths.hook_log))),
         Worker("usage-refresh",
                lambda: started(backend_usage.UsageRefreshWorker(stream=ctx.stream))),
         Worker("resource-telemetry", lambda: started(ResourceTelemetryWorker())),
