@@ -170,7 +170,6 @@ def observe_source_reads(path: pathlib.Path, metrics: dict):
     """
     import builtins
     import io
-    target = os.path.abspath(os.fspath(path))
     stat = path.stat()
     source_identity = (stat.st_dev, stat.st_ino)
     metrics["source_read_bytes"] = 0
@@ -228,10 +227,9 @@ def observe_source_reads(path: pathlib.Path, metrics: dict):
     def observe(opening):
         def opened(file, *args, **kwargs):
             native = opening(file, *args, **kwargs)
-            try:
-                matches = os.path.abspath(os.fspath(file)) == target
-            except TypeError:
-                matches = source_fd(file)
+            # Bind the handle actually opened, including named symlink/hardlink
+            # aliases. Unsupported handles must fail measurement, not read as 0.
+            matches = source_fd(native.fileno())
             return ObservedFile(native) if matches else native
         return opened
 
