@@ -95,6 +95,8 @@ class Backend:
     supports_steer: bool = CatalogueDefault('supports_steer')
     supports_transcript_streaming: bool = CatalogueDefault('supports_transcript_streaming')
     supports_transcript_tail_apply: bool = False
+    # Eligibility only: source incarnation and consumed-prefix hash still decide.
+    supports_frozen_transcript_prefix = False
     supports_routing: bool = CatalogueDefault('supports_routing')
     efforts: tuple[str, ...] = CatalogueDefault('efforts')
     aliases: tuple[str, ...] = CatalogueDefault('aliases')
