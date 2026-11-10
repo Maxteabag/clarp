@@ -122,8 +122,8 @@ def test_manual_handover_must_be_the_last_successful_native_completion(tmp_path,
     elif later == "turn":
         rows += _record("event_msg", {"type": "task_started", "turn_id": "native-later"})
     else:
-        rows += _record("event_msg", {"type": "thread_goal_updated", "turn_id": None,
-                                      "thread_id": "foreign" if later == "foreign_goal" else "old-thread",
+        rows += _record("event_msg", {"type": "thread_goal_updated", "turnId": None,
+                                      "threadId": "foreign" if later == "foreign_goal" else "old-thread",
                                       "goal": {"status": "paused"}})
     path.write_bytes(rows)
     if later is not None:
