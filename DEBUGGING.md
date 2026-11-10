@@ -25,6 +25,53 @@ The JSONL files under `~/.cache/clarp/logs/YYYY-MM-DD.jsonl` mirror the same
 rows for DuckDB analysis with `./scripts/query.sh`; SQLite is the live source
 of truth.
 
+Diagnostics are trimmed by size as well as by age. These are budgets the
+maintenance worker restores each time it checks, not hard limits:
+
+| what | budget | where it is set |
+|---|---|---|
+| `telemetry.sqlite` detail | 1 GiB of live data; the oldest whole hours go first (their rollups stay) | `telemetry.DETAIL_BUDGET_BYTES` |
+| `~/.cache/clarp/logs/` | 2 GiB in total; the oldest days go first, and today's file is cut to its newest 512 MiB (`eventLogCut`) | `maintenance.Policy` |
+| `~/.cache/clarp/hook.log` | over 100 MiB it is cut to its newest 20 MiB (`hookLogCut`) | `maintenance.Policy` |
+
+These cuts and deletes are intentional data loss, not lossless rotation: the
+older events, days and hook lines are gone, and a cut event log keeps only
+its newest part. `telemetry.sqlite` holds the live record while it lasts.
+
+The worker checks at Host start (the first pass runs immediately at boot, so
+a backlog is trimmed then), hourly, and every five minutes in between.
+Whatever is written between two checks can overshoot a budget until the next
+one.
+
+The worker only touches files that pass as Clarp's own logs. The log
+directory and the cache directory must be absolute paths, must not
+themselves be symlinks (only the last component is checked; a symlink
+earlier in the path is followed) and must be owned by the Host's user. A log
+must be a regular file of that user with no other hard link (a symlink is
+never followed), and it must start like an event log or a hook log before
+it is deleted, by age or by size, or cut. A cut writes through the same open
+file the checks were made on; a delete is by name in the opened directory
+after the checks. Anything else is left alone, as is a log that cannot be
+inspected. That is reported once per pass and directory as
+`eventLogPruneFail` (how many entries, and the first few) or
+`hookLogPruneFail`.
+
+A rollup is only as exact as the detail it was made from. When the budget
+removes an hour's detail, the hour keeps the rollup it had. A row that then
+arrives late for that hour (an emit that was queued inside a transaction
+which ended after the hour turned, or one carrying an older timestamp) is
+not added to it: a rollup row is replaced only by one made from at least as
+many detail rows. That is a declared loss, not exact accounting. When the
+current hour alone is over the budget its oldest rows are deleted before it
+is ever rolled up, and its rollup counts only the rows that were left.
+
+The telemetry budget is best-effort reclamation and says nothing about the
+size of the file on disk. It counts pages in use: a delete frees pages for
+reuse but the file keeps them, so a file that was large stays large; the WAL
+grows separately until a checkpoint; and the schema and the hourly rollups
+are counted but are not freed by deleting detail. Nothing here shrinks
+`telemetry.sqlite`.
+
 ## Sources
 
 | source              | who writes it                                        |

@@ -154,7 +154,9 @@ def test_prune_event_logs_removes_only_expired_daily_logs(tmp_path):
     today = datetime.date(2026, 9, 29)
     for name in ("2026-09-01.jsonl", "2026-09-14.jsonl", "2026-09-15.jsonl",
                  "2026-09-29.jsonl", "notes.jsonl", "2026-09-01.txt"):
-        (tmp_path / name).write_text("{}\n")
+        # An event-log line: only files that start like one are deleted.
+        (tmp_path / name).write_text(
+            '{"ts":"2026-09-01T12:00:00.000Z","source":"server","event":"x","level":"info"}\n')
 
     removed = maintenance.prune_event_logs(
         tmp_path, max_age_ms=14 * maintenance.DAY_MS, today=today,
