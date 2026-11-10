@@ -208,6 +208,36 @@ def test_inv1_live_work_returning_discards_prior_absence(
     assert reconcile.reconcile_agent(agent_id, "claude", home=tmp_path)["state"] == "thinking"
 
 
+def test_inv1_unavailable_snapshot_discards_prior_absence(tmp_path, reconcile_clock):
+    """An outage cannot age an earlier absence into an immediate recovery repair."""
+    from lib import backends
+    from lib.runtime_bridge import RuntimeUnavailable
+
+    agent_id = _agent(tmp_path)
+    agents_db.record_state(agent_id, "thinking")
+    assert "state" not in reconcile.reconcile_agent(agent_id, "claude", home=tmp_path)
+
+    class UnavailableRuntime:
+        def status_within(self, total_s):
+            raise RuntimeUnavailable("synthetic outage during busy grace")
+
+    try:
+        reconcile_clock.now += 59
+        backends.configure_runtime_client(UnavailableRuntime())
+        build_agent_snapshot(_ctx(tmp_path, "mike"))
+        assert agents_db.latest_state(agent_id)["kind"] == "thinking"
+        backends.configure_runtime_client(None)
+        reconcile_clock.now += 1
+        # The old observation is now 60s old, but the outage forgot it.
+        assert "state" not in reconcile.reconcile_agent(agent_id, "claude", home=tmp_path)
+        reconcile_clock.now += 59
+        assert "state" not in reconcile.reconcile_agent(agent_id, "claude", home=tmp_path)
+        reconcile_clock.now += 1
+        assert reconcile.reconcile_agent(agent_id, "claude", home=tmp_path)["state"] == "thinking"
+    finally:
+        backends.configure_runtime_client(None)
+
+
 @pytest.mark.parametrize("invalid_time", [-1.0, float("nan"), float("inf")])
 def test_inv1_invalid_or_regressed_clock_discards_eligibility(
         tmp_path, reconcile_clock, invalid_time):
