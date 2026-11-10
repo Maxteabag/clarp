@@ -551,7 +551,7 @@ def test_a_failed_final_flush_still_settles_the_turn(monkeypatch):
     from unittest.mock import Mock
 
     client, active = _client_with_turn()
-    monkeypatch.setattr(client, "_callback", lambda callback, value: callback(value))
+    monkeypatch.setattr(client, "_callback", lambda callback, value, **_owner: callback(value))
     monkeypatch.setattr(by_id("codex"), "update_live_text",
                         Mock(side_effect=RuntimeError("database is locked")))
     seen = []
@@ -582,7 +582,7 @@ def test_retiring_a_dead_reader_client_sends_no_request(monkeypatch):
     requests = []
     monkeypatch.setattr(client, "request",
                         lambda method, *_a, **_k: requests.append(method) or {})
-    monkeypatch.setattr(client, "_callback", lambda callback, value: callback(value))
+    monkeypatch.setattr(client, "_callback", lambda callback, value, **_owner: callback(value))
 
     class FakeClient:
         def __init__(self, agent_id, session, stream=None):
@@ -611,7 +611,7 @@ def test_a_client_is_not_reused_while_its_reader_is_cleaning_up(monkeypatch):
     client.auth_fingerprint = codex_app_server._auth_fingerprint()
     client.refresh_requested = False
     client._next_id = 1
-    monkeypatch.setattr(client, "_callback", lambda callback, value: callback(value))
+    monkeypatch.setattr(client, "_callback", lambda callback, value, **_owner: callback(value))
     monkeypatch.setattr(client, "_send", lambda _message: None)
     entered, release = threading.Event(), threading.Event()
 
