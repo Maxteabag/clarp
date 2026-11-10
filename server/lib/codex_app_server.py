@@ -12,6 +12,7 @@ import hashlib
 import itertools
 import os
 import pathlib
+import secrets
 import shutil
 import signal
 import subprocess
@@ -178,6 +179,7 @@ class _Client:
         # BACKENDS-06b: a generation is one app-server process. A draining
         # one takes no new turns and releases its threads at turn boundaries.
         self.generation = next(_GENERATIONS)
+        self.rotation_incarnation = secrets.token_hex(16)
         self.draining = False
         self.unsubscribe_unsupported = False
         # Turns running on threads no Clarp agent owns (codex subagents):
@@ -551,7 +553,8 @@ class _Client:
             # Marks set after this point are newer than what this write saw.
             started_at = getattr(self, "goal_mark_seq", 0)
         try:
-            mirrored = agent_goals.mirror_codex(thread_id, goal)
+            mirrored = agent_goals.mirror_codex(
+                thread_id, goal, incarnation=getattr(self, "rotation_incarnation", None))
             if mirrored is None:
                 return
             agent, row = mirrored
