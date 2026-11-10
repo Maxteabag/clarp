@@ -227,13 +227,12 @@ def test_interrupt_before_turn_id_does_not_kill_shared_process():
 FAKE_CODEX = Path(__file__).resolve().parents[2] / "tests/qa/fake_codex.py"
 
 
-def _install_fake_codex(tmp_path, monkeypatch):
+def _install_fake_codex(tmp_path, monkeypatch, codex_pool_lifecycle):
     home = tmp_path / "codex-home"
     home.mkdir()
     monkeypatch.setenv("CODEX_HOME", str(home))
     monkeypatch.setenv("CLARP_QA_PROVIDER_ROOT", str(home))
     monkeypatch.setattr(by_id("codex"), "required_binary", str(FAKE_CODEX))
-    codex_app_server._CLIENTS.clear()
     return home
 
 
@@ -252,8 +251,8 @@ def _spawn_fake_turn(tmp_path, *, agent_id, session, text, backend_session_id=""
     )
 
 
-def test_two_agents_share_one_fake_appserver(tmp_path, monkeypatch):
-    _install_fake_codex(tmp_path, monkeypatch)
+def test_two_agents_share_one_fake_appserver(tmp_path, monkeypatch, codex_pool_lifecycle):
+    _install_fake_codex(tmp_path, monkeypatch, codex_pool_lifecycle)
     results, errors = {}, {}
     done = threading.Event()
 
@@ -295,8 +294,8 @@ def test_two_agents_share_one_fake_appserver(tmp_path, monkeypatch):
     codex_app_server.recycle_clients()
 
 
-def test_recycle_releases_writer_so_resume_works(tmp_path, monkeypatch):
-    _install_fake_codex(tmp_path, monkeypatch)
+def test_recycle_releases_writer_so_resume_works(tmp_path, monkeypatch, codex_pool_lifecycle):
+    _install_fake_codex(tmp_path, monkeypatch, codex_pool_lifecycle)
     agent_id = agents_db.create_agent(
         persona="Gordon", voice_id="v", cwd=str(tmp_path), session="gordon",
         backend="codex")
@@ -330,8 +329,8 @@ def test_recycle_releases_writer_so_resume_works(tmp_path, monkeypatch):
     codex_app_server.recycle_clients()
 
 
-def test_external_leftover_writer_still_blocks_shared_client(tmp_path, monkeypatch):
-    home = _install_fake_codex(tmp_path, monkeypatch)
+def test_external_leftover_writer_still_blocks_shared_client(tmp_path, monkeypatch, codex_pool_lifecycle):
+    home = _install_fake_codex(tmp_path, monkeypatch, codex_pool_lifecycle)
     leftover = subprocess.Popen(
         [sys.executable, str(FAKE_CODEX), "app-server"],
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -371,8 +370,8 @@ def test_external_leftover_writer_still_blocks_shared_client(tmp_path, monkeypat
         codex_app_server.recycle_clients()
 
 
-def test_credentials_change_retires_idle_connection(tmp_path, monkeypatch):
-    home = _install_fake_codex(tmp_path, monkeypatch)
+def test_credentials_change_retires_idle_connection(tmp_path, monkeypatch, codex_pool_lifecycle):
+    home = _install_fake_codex(tmp_path, monkeypatch, codex_pool_lifecycle)
     auth = home / 'auth.json'
     auth.write_text('old fixture credentials')
     first = codex_app_server._client('one', 'one')
@@ -383,8 +382,8 @@ def test_credentials_change_retires_idle_connection(tmp_path, monkeypatch):
     codex_app_server.recycle_clients()
 
 
-def test_credentials_change_and_recycle_preserve_active_turn(tmp_path, monkeypatch):
-    home = _install_fake_codex(tmp_path, monkeypatch)
+def test_credentials_change_and_recycle_preserve_active_turn(tmp_path, monkeypatch, codex_pool_lifecycle):
+    home = _install_fake_codex(tmp_path, monkeypatch, codex_pool_lifecycle)
     auth = home / 'auth.json'
     auth.write_text('old')
     agent = agents_db.create_agent(persona='Busy', voice_id='v', cwd=str(tmp_path), session='busy', backend='codex')
@@ -415,8 +414,8 @@ def test_unknown_quota_bucket_is_not_regular_quota():
     assert codex_app_server._matching_bucket_blocked(old, matching)
 
 
-def test_failed_other_agent_cannot_refresh_busy_shared_connection(tmp_path, monkeypatch):
-    _install_fake_codex(tmp_path, monkeypatch)
+def test_failed_other_agent_cannot_refresh_busy_shared_connection(tmp_path, monkeypatch, codex_pool_lifecycle):
+    _install_fake_codex(tmp_path, monkeypatch, codex_pool_lifecycle)
     agent = agents_db.create_agent(persona='Busy', voice_id='v', cwd=str(tmp_path), session='busy', backend='codex')
     handle = _spawn_fake_turn(tmp_path, agent_id=agent, session='busy', text='[qa-slow]')
     failure = codex_app_server.CodexTurnFailure('usage limit', handle.client, False)
@@ -653,12 +652,12 @@ def test_a_client_is_not_reused_while_its_reader_is_cleaning_up(monkeypatch):
     assert active.on_error.call_count == 1, "one terminal outcome per turn"
 
 
-def test_the_shared_app_server_speaks_for_no_agent(tmp_path, monkeypatch):
+def test_the_shared_app_server_speaks_for_no_agent(tmp_path, monkeypatch, codex_pool_lifecycle):
     """BACKENDS-N1: one app-server process serves every Codex agent, so its
     environment must not name the agent that happened to start it. Tools in
     any Codex agent's shell that trust CLAUDE_PWA_SESSION would act as that
     agent; without it they refuse instead."""
-    _install_fake_codex(tmp_path, monkeypatch)
+    _install_fake_codex(tmp_path, monkeypatch, codex_pool_lifecycle)
     monkeypatch.setenv("CLAUDE_PWA_SESSION", "the-host-itself")
     seen = []
     real_popen = codex_app_server.subprocess.Popen
@@ -676,11 +675,11 @@ def test_the_shared_app_server_speaks_for_no_agent(tmp_path, monkeypatch):
     assert all("CLARP_PROVIDER_TURN" not in env for env in seen)
 
 
-def test_each_codex_thread_carries_its_own_agent_session(tmp_path, monkeypatch):
+def test_each_codex_thread_carries_its_own_agent_session(tmp_path, monkeypatch, codex_pool_lifecycle):
     """BACKENDS-N1: the shared app-server has no agent identity; each thread
     gets its own agent's session for its shell through the thread's config
     (shell_environment_policy.set), when it starts and when it resumes."""
-    _install_fake_codex(tmp_path, monkeypatch)
+    _install_fake_codex(tmp_path, monkeypatch, codex_pool_lifecycle)
     sent = []
     real_request = codex_app_server._Client.request
 

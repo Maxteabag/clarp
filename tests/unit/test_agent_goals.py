@@ -126,8 +126,8 @@ def test_server_started_turn_is_adopted_streams_and_completes(tmp_path):
     assert "ghost" not in {a.thread_id for a in client._actives.values()}
 
 
-def test_goal_lifecycle_against_fake_appserver(tmp_path, monkeypatch):
-    _install_fake_codex(tmp_path, monkeypatch)
+def test_goal_lifecycle_against_fake_appserver(tmp_path, monkeypatch, codex_pool_lifecycle):
+    _install_fake_codex(tmp_path, monkeypatch, codex_pool_lifecycle)
     agent_id = agents_db.create_agent(
         persona="Ada", voice_id="v", cwd=str(tmp_path), session="ada", backend="codex")
     done = threading.Event()
