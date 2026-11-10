@@ -488,19 +488,22 @@ def record_path_usage(path: str) -> None:
 
 
 def soft_delete(agent_id: str) -> None:
-    c = conn()
-    c.execute("UPDATE agents SET deleted_at = ? WHERE agent_id = ?",
-              (now_ms(), agent_id))
-    from . import task_plans
-    task_plans.cancel_for_agent(agent_id)
-    from . import artifacts
-    artifacts.cancel_for_agent(agent_id)
-    end_current_runtime(agent_id)
-    abandon_children(agent_id)
-    from . import goal_ledger
-    goal_ledger.stop_for_agent(agent_id, "agent deleted")
-    turn_lifecycle.transition(agent_id, turn_lifecycle.TurnEvent.AGENT_DELETED,
-                              {"reason": "deleted"})
+    from . import native_rotation_journal as rotation
+    with rotation.writer():
+        rotation.guard_mutation(agent_id)
+        c = conn()
+        c.execute("UPDATE agents SET deleted_at = ? WHERE agent_id = ?",
+                  (now_ms(), agent_id))
+        from . import task_plans
+        task_plans.cancel_for_agent(agent_id)
+        from . import artifacts
+        artifacts.cancel_for_agent(agent_id)
+        end_current_runtime(agent_id)
+        abandon_children(agent_id)
+        from . import goal_ledger
+        goal_ledger.stop_for_agent(agent_id, "agent deleted")
+        turn_lifecycle.transition(agent_id, turn_lifecycle.TurnEvent.AGENT_DELETED,
+                                  {"reason": "deleted"})
 
 
 # ---- runtime rows ------------------------------------------------------
@@ -511,12 +514,15 @@ def soft_delete(agent_id: str) -> None:
 
 def start_runtime(agent_id: str, session: str) -> int:
     """End any previous live runtime for this agent, open a fresh one."""
-    end_current_runtime(agent_id)
-    cur = conn().execute("""
+    from . import native_rotation_journal as rotation
+    with rotation.writer():
+        rotation.guard_mutation(agent_id)
+        end_current_runtime(agent_id)
+        cur = conn().execute("""
         INSERT INTO runtimes (agent_id, session, started_at)
         VALUES (?, ?, ?)
     """, (agent_id, session, now_ms()))
-    return int(cur.lastrowid or 0)
+        return int(cur.lastrowid or 0)
 
 
 def end_current_runtime(agent_id: str) -> None:
@@ -556,7 +562,7 @@ class SessionAlreadyBound(Exception):
         )
 
 
-def bind_backend_session(agent_id: str, backend_session_id: str) -> None:
+def bind_backend_session(agent_id: str, backend_session_id: str, *, _rotation_permit=None) -> None:
     """Canonical setter for a runtime row's backend_session_id UUID.
 
     Every code path that learns an agent's claude session UUID — the
@@ -578,42 +584,45 @@ def bind_backend_session(agent_id: str, backend_session_id: str) -> None:
         raise ValueError("bind_backend_session requires agent_id")
     if not backend_session_id:
         raise ValueError("bind_backend_session requires non-empty backend_session_id")
+    from . import native_rotation_journal as rotation
+    with rotation.writer():
+        rotation.guard_mutation(agent_id, native_id=backend_session_id, permit=_rotation_permit)
 
-    c = conn()
-    # Ensure a live runtime row exists. record_state and other writers
-    # need one anyway.
-    if current_runtime_id(agent_id) is None:
-        agent = get_by_agent_id(agent_id)
-        if not agent:
-            raise ValueError(f"bind_backend_session: unknown agent_id {agent_id}")
-        start_runtime(agent_id, agent["session"])
+        c = conn()
+        # Ensure a live runtime row exists. record_state and other writers
+        # need one anyway.
+        if current_runtime_id(agent_id) is None:
+            agent = get_by_agent_id(agent_id)
+            if not agent:
+                raise ValueError(f"bind_backend_session: unknown agent_id {agent_id}")
+            start_runtime(agent_id, agent["session"])
 
-    # Idempotent: if the live row already carries this UUID, nothing to do.
-    existing = live_backend_session(agent_id)
-    if existing == backend_session_id:
-        return
+        # Idempotent: if the live row already carries this UUID, nothing to do.
+        existing = live_backend_session(agent_id)
+        if existing == backend_session_id:
+            return
 
-    # Check for cross-binding BEFORE attempting the UPDATE. The partial
-    # unique index would catch it too, but a pre-check lets us raise a
-    # named exception with the conflicting agent.
-    owner = c.execute(
-        """SELECT agent_id FROM runtimes
+        # Check for cross-binding BEFORE attempting the UPDATE. The partial
+        # unique index would catch it too, but a pre-check lets us raise a
+        # named exception with the conflicting agent.
+        owner = c.execute(
+            """SELECT agent_id FROM runtimes
             WHERE backend_session_id = ? AND ended_at IS NULL
               AND agent_id != ?""",
-        (backend_session_id, agent_id),
-    ).fetchone()
-    if owner is not None:
-        raise SessionAlreadyBound(
-            agent_id=agent_id,
-            backend_session_id=backend_session_id,
-            owner_agent_id=owner["agent_id"],
-        )
+            (backend_session_id, agent_id),
+        ).fetchone()
+        if owner is not None:
+            raise SessionAlreadyBound(
+                agent_id=agent_id,
+                backend_session_id=backend_session_id,
+                owner_agent_id=owner["agent_id"],
+            )
 
-    c.execute(
-        """UPDATE runtimes SET backend_session_id = ?
+        c.execute(
+            """UPDATE runtimes SET backend_session_id = ?
             WHERE agent_id = ? AND ended_at IS NULL""",
-        (backend_session_id, agent_id),
-    )
+            (backend_session_id, agent_id),
+        )
 
 
 def current_runtime_id(agent_id: str) -> int | None:
