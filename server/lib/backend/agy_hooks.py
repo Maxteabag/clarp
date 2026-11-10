@@ -17,6 +17,7 @@ from uuid import UUID
 
 from .. import agents, turn_lifecycle
 from .agy_layout import _agy_home
+from ..log import log_fault
 from ..protocol import AgentState
 from ..provider_background_jobs import TURN_ENV
 
@@ -39,7 +40,8 @@ def _started_by_clarp_for(agent_id: str, token: str) -> bool:
             row = agents.conn().execute(
                 "SELECT agent_id, exited_at FROM provider_turns WHERE turn_token = ?",
                 (token,)).fetchone()
-        except Exception:  # noqa: BLE001 - no table: no Clarp turn recorded
+        except Exception as exc:  # noqa: BLE001 - no table: no Clarp turn recorded
+            log_fault("agyHookTurnProbeFailed", exc)
             return False
         if row is not None:
             return row[0] == agent_id and row[1] is None

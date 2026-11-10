@@ -39,7 +39,6 @@ BASELINE: dict[str, int] = {
     'lib/artifacts.py': 1,
     'lib/audio_stream.py': 3,
     'lib/backend/agy.py': 1,
-    'lib/backend/agy_hooks.py': 1,
     'lib/backend/claude.py': 1,
     'lib/backend/grok.py': 1,
     'lib/backend/muse.py': 1,
