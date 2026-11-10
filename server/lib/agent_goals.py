@@ -127,7 +127,8 @@ def clear(agent_id: str) -> bool:
 
 
 
-def mirror_codex(thread_id: str, goal: dict[str, Any] | None, *, incarnation: str | None = None):
+def mirror_codex(thread_id: str, goal: dict[str, Any] | None, *, incarnation: str | None = None,
+                 user_action: str | None = None):
     """Resolve the native owner and mirror under the same SQLite writer.
 
     A callback that resolved an old binding before rotation cannot overwrite
@@ -142,7 +143,7 @@ def mirror_codex(thread_id: str, goal: dict[str, Any] | None, *, incarnation: st
         if not agent:
             return None
         logical, offset, protected = native_rotation_goals.observation(
-            agent["agent_id"], thread_id, goal, incarnation)
+            agent["agent_id"], thread_id, goal, incarnation, user_action=user_action)
         if protected is not None:
             current = get(agent["agent_id"])
             row = (upsert(agent["agent_id"], session=agent["session"], backend="codex",
