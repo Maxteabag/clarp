@@ -701,12 +701,13 @@ def test_each_codex_thread_carries_its_own_agent_session(tmp_path, monkeypatch):
             threads[session] = sent[-1][1].get("threadId") or [
                 result.get("thread", {}).get("id") for method, _p, result in sent
                 if method == "thread/start"][-1]
-        for session, agent_id in agent_ids.items():
-            handle = _spawn_fake_turn(tmp_path, agent_id=agent_id, session=session,
-                                      text=session + " again",
-                                      backend_session_id=threads[session],
-                                      is_new_session=False)
-            assert handle.wait(timeout=8) == 0
+        for suffix in (" again", " once more"):
+            for session, agent_id in agent_ids.items():
+                handle = _spawn_fake_turn(tmp_path, agent_id=agent_id, session=session,
+                                          text=session + suffix,
+                                          backend_session_id=threads[session],
+                                          is_new_session=False)
+                assert handle.wait(timeout=8) == 0
     finally:
         codex_app_server.recycle_clients()
 
@@ -717,4 +718,14 @@ def test_each_codex_thread_carries_its_own_agent_session(tmp_path, monkeypatch):
     assert [(method, identity(params)) for method, params, _r in sent
             if method in ("thread/start", "thread/resume")] == [
         ("thread/start", "one"), ("thread/start", "two"),
+        ("thread/resume", "one"), ("thread/resume", "two"),
         ("thread/resume", "one"), ("thread/resume", "two")]
+    resumes = [(params, result) for method, params, result in sent
+               if method == "thread/resume"]
+    assert len(resumes) == 4
+    assert all(params.get("excludeTurns") is True for params, _result in resumes)
+    # This real fake-server transport returns only the thread ID: the reader,
+    # binding and next-turn/callback path need no hydrated history.
+    assert all("turns" not in result["thread"] for _params, result in resumes)
+    assert all("excludeTurns" not in params for method, params, _result in sent
+               if method == "thread/start")
