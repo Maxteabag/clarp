@@ -16,15 +16,12 @@ from tests.unit.test_codex_app_server import _NullStream, _install_fake_codex
 
 
 @pytest.fixture
-def fake(tmp_path, monkeypatch):
-    home = _install_fake_codex(tmp_path, monkeypatch)
+def fake(tmp_path, monkeypatch, codex_pool_lifecycle):
+    home = _install_fake_codex(tmp_path, monkeypatch, codex_pool_lifecycle)
     monkeypatch.setenv("CLARP_QA_RECORD_AUTH", "1")
     monkeypatch.setenv("CLARP_QA_UNLOAD_DELAY", "0.4")
     (home / "auth.json").write_text("account-one")
     yield home
-    cas.recycle_clients()
-    for client in list(getattr(cas, "_DRAINING", {}).values()):
-        client.shutdown()
 
 
 def _agent(tmp_path, name):

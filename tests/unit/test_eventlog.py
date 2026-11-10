@@ -213,19 +213,45 @@ def test_emit_exception_records_traceback(tmp_path, monkeypatch):
 
 
 def test_emit_concurrent_threads_dont_lose_lines(tmp_path, monkeypatch):
+    import uuid
+    import warnings
+
     monkeypatch.setattr(eventlog, "LOG_DIR", tmp_path)
-    N = 50
+    marker = uuid.uuid4().hex
+    N, per_thread = 50, 20
     def writer(i):
-        for j in range(20):
-            eventlog.emit("test", "burst", detail={"i": i, "j": j})
+        for j in range(per_thread):
+            eventlog.emit("test", "burst", detail={"test_marker": marker, "i": i, "j": j})
     threads = [threading.Thread(target=writer, args=(i,)) for i in range(N)]
     for t in threads: t.start()
     for t in threads: t.join()
-    rows = _read_lines(next(tmp_path.glob("*.jsonl")))
-    assert len(rows) == N * 20
-    # Every line is valid JSON (already asserted by _read_lines).
-    db_count = _db_rows("SELECT count(*) AS n FROM diagnostic_events")[0]["n"]
-    assert db_count == N * 20
+    rows = [row for path in sorted(tmp_path.glob("*.jsonl")) for row in _read_lines(path)]
+    db_rows = [
+        {"source": row["source"], "event": row["event"],
+         "detail": json.loads(row["detail"]) if row["detail"] is not None else None}
+        for row in _db_rows("SELECT source, event, detail FROM diagnostic_events")
+    ]
+    def is_ours(row):
+        return isinstance(row.get("detail"), dict) and row["detail"].get("test_marker") == marker
+    owned = {"jsonl": [row for row in rows if is_ours(row)],
+             "sqlite": [row for row in db_rows if is_ours(row)]}
+    foreign = {"jsonl": [row for row in rows if not is_ours(row)],
+               "sqlite": [row for row in db_rows if not is_ours(row)]}
+    audit = {"test_marker": marker,
+             "total_rows": {"jsonl": len(rows), "sqlite": len(db_rows)},
+             "owned_rows": {sink: len(items) for sink, items in owned.items()},
+             "foreign_rows": foreign,
+             "eventlogDropped": [row for row in rows if row.get("event") == "eventlogDropped"]}
+    if any(foreign.values()):
+        # Visible on passing runs too: neither an unrelated callback nor a
+        # JSONL-only drop summary is silently discarded by marker selection.
+        warnings.warn("eventlog concurrent foreign-row audit: " + json.dumps(audit, sort_keys=True),
+                      pytest.PytestWarning, stacklevel=1)
+    expected = {(i, j) for i in range(N) for j in range(per_thread)}
+    for sink, emitted in owned.items():
+        assert len(emitted) == N * per_thread, (sink, audit)
+        assert {(row["detail"]["i"], row["detail"]["j"]) for row in emitted} == expected, (sink, audit)
+        assert all(row["source"] == "test" and row["event"] == "burst" for row in emitted), (sink, audit)
 
 
 def test_sqlite_event_writers_do_not_hold_a_process_lock_while_waiting(

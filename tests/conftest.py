@@ -97,6 +97,8 @@ def _transcript_importer_quiescent():
     fixtures along the node chain, conftest ones before a module's. Session
     setup (pytest_configure, the session shims) runs once before the first
     test, when no earlier test's work can exist."""
+    from tests.codex_pool_lifecycle import assert_quiescent
+    assert_quiescent()
     importer = sys.modules.get("lib.transcript_import_cache")
     if importer is not None and importer._resetting and not importer.reset_for_tests():
         pytest.fail("transcript importer from an earlier test is still running; test state not set up")
@@ -613,6 +615,8 @@ def _isolated_db(_transcript_importer_quiescent, tmp_path, monkeypatch):
     except (ImportError, AttributeError):
         pass
     yield
+    from tests.codex_pool_lifecycle import assert_quiescent
+    assert_quiescent()
     from lib import transcript_import_cache
     # One deadline for everything (no separate preliminary wait whose failure
     # would skip it): admitted imports, direct callers and window timers must
@@ -646,6 +650,16 @@ def _isolated_db(_transcript_importer_quiescent, tmp_path, monkeypatch):
             mod.reset_for_tests(log_dir)
         except (ImportError, AttributeError):
             pass
+
+
+@pytest.fixture
+def codex_pool_lifecycle(_isolated_db, _guard_backend_clis, monkeypatch):
+    """Close fake pool actors before either shared sink or CLI guard teardown."""
+    from lib import codex_app_server
+    from tests.codex_pool_lifecycle import PoolOwner
+    owner = PoolOwner(codex_app_server, monkeypatch)
+    yield owner
+    owner.close()
 
 
 def _seed_agents_via_db(rows: dict[str, dict]) -> None:

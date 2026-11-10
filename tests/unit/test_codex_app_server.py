@@ -125,16 +125,19 @@ def test_client_factory_attaches_stream_before_initialization(monkeypatch):
             self.proc = type("Proc", (), {"poll": lambda _self: None})()
             created.append(self)
 
-    monkeypatch.setattr(codex_app_server, "_Client", FakeClient)
-    # Its own registry, restored after the test: a FakeClient left in the shared one
-    # (it has no `active`) broke later tests' active_handles() in the same worker.
-    monkeypatch.setattr(codex_app_server, "_CLIENTS", {})
-    client = codex_app_server._client("agent-1", "codex", stream=stream)
-    assert created == [client]
-    assert client.stream is stream
-    second = codex_app_server._client("agent-2", "other")
-    assert second is client
-    assert created == [client]
+    # This pure factory double has no process or actors. Restore its private
+    # namespace before the independent shared-sink foreign-client gate runs.
+    with monkeypatch.context() as factory:
+        factory.setattr(codex_app_server, "_Client", FakeClient)
+        # Its own registry, restored after the test: a FakeClient left in the shared one
+        # (it has no `active`) broke later tests' active_handles() in the same worker.
+        factory.setattr(codex_app_server, "_CLIENTS", {})
+        client = codex_app_server._client("agent-1", "codex", stream=stream)
+        assert created == [client]
+        assert client.stream is stream
+        second = codex_app_server._client("agent-2", "other")
+        assert second is client
+        assert created == [client]
 
 
 class _FakeProc:
@@ -227,13 +230,12 @@ def test_interrupt_before_turn_id_does_not_kill_shared_process():
 FAKE_CODEX = Path(__file__).resolve().parents[2] / "tests/qa/fake_codex.py"
 
 
-def _install_fake_codex(tmp_path, monkeypatch):
+def _install_fake_codex(tmp_path, monkeypatch, codex_pool_lifecycle):
     home = tmp_path / "codex-home"
     home.mkdir()
     monkeypatch.setenv("CODEX_HOME", str(home))
     monkeypatch.setenv("CLARP_QA_PROVIDER_ROOT", str(home))
     monkeypatch.setattr(by_id("codex"), "required_binary", str(FAKE_CODEX))
-    codex_app_server._CLIENTS.clear()
     return home
 
 
@@ -252,8 +254,8 @@ def _spawn_fake_turn(tmp_path, *, agent_id, session, text, backend_session_id=""
     )
 
 
-def test_two_agents_share_one_fake_appserver(tmp_path, monkeypatch):
-    _install_fake_codex(tmp_path, monkeypatch)
+def test_two_agents_share_one_fake_appserver(tmp_path, monkeypatch, codex_pool_lifecycle):
+    _install_fake_codex(tmp_path, monkeypatch, codex_pool_lifecycle)
     results, errors = {}, {}
     done = threading.Event()
 
@@ -295,8 +297,8 @@ def test_two_agents_share_one_fake_appserver(tmp_path, monkeypatch):
     codex_app_server.recycle_clients()
 
 
-def test_recycle_releases_writer_so_resume_works(tmp_path, monkeypatch):
-    _install_fake_codex(tmp_path, monkeypatch)
+def test_recycle_releases_writer_so_resume_works(tmp_path, monkeypatch, codex_pool_lifecycle):
+    _install_fake_codex(tmp_path, monkeypatch, codex_pool_lifecycle)
     agent_id = agents_db.create_agent(
         persona="Gordon", voice_id="v", cwd=str(tmp_path), session="gordon",
         backend="codex")
@@ -330,8 +332,8 @@ def test_recycle_releases_writer_so_resume_works(tmp_path, monkeypatch):
     codex_app_server.recycle_clients()
 
 
-def test_external_leftover_writer_still_blocks_shared_client(tmp_path, monkeypatch):
-    home = _install_fake_codex(tmp_path, monkeypatch)
+def test_external_leftover_writer_still_blocks_shared_client(tmp_path, monkeypatch, codex_pool_lifecycle):
+    home = _install_fake_codex(tmp_path, monkeypatch, codex_pool_lifecycle)
     leftover = subprocess.Popen(
         [sys.executable, str(FAKE_CODEX), "app-server"],
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -371,8 +373,8 @@ def test_external_leftover_writer_still_blocks_shared_client(tmp_path, monkeypat
         codex_app_server.recycle_clients()
 
 
-def test_credentials_change_retires_idle_connection(tmp_path, monkeypatch):
-    home = _install_fake_codex(tmp_path, monkeypatch)
+def test_credentials_change_retires_idle_connection(tmp_path, monkeypatch, codex_pool_lifecycle):
+    home = _install_fake_codex(tmp_path, monkeypatch, codex_pool_lifecycle)
     auth = home / 'auth.json'
     auth.write_text('old fixture credentials')
     first = codex_app_server._client('one', 'one')
@@ -383,8 +385,8 @@ def test_credentials_change_retires_idle_connection(tmp_path, monkeypatch):
     codex_app_server.recycle_clients()
 
 
-def test_credentials_change_and_recycle_preserve_active_turn(tmp_path, monkeypatch):
-    home = _install_fake_codex(tmp_path, monkeypatch)
+def test_credentials_change_and_recycle_preserve_active_turn(tmp_path, monkeypatch, codex_pool_lifecycle):
+    home = _install_fake_codex(tmp_path, monkeypatch, codex_pool_lifecycle)
     auth = home / 'auth.json'
     auth.write_text('old')
     agent = agents_db.create_agent(persona='Busy', voice_id='v', cwd=str(tmp_path), session='busy', backend='codex')
@@ -415,8 +417,8 @@ def test_unknown_quota_bucket_is_not_regular_quota():
     assert codex_app_server._matching_bucket_blocked(old, matching)
 
 
-def test_failed_other_agent_cannot_refresh_busy_shared_connection(tmp_path, monkeypatch):
-    _install_fake_codex(tmp_path, monkeypatch)
+def test_failed_other_agent_cannot_refresh_busy_shared_connection(tmp_path, monkeypatch, codex_pool_lifecycle):
+    _install_fake_codex(tmp_path, monkeypatch, codex_pool_lifecycle)
     agent = agents_db.create_agent(persona='Busy', voice_id='v', cwd=str(tmp_path), session='busy', backend='codex')
     handle = _spawn_fake_turn(tmp_path, agent_id=agent, session='busy', text='[qa-slow]')
     failure = codex_app_server.CodexTurnFailure('usage limit', handle.client, False)
@@ -653,12 +655,12 @@ def test_a_client_is_not_reused_while_its_reader_is_cleaning_up(monkeypatch):
     assert active.on_error.call_count == 1, "one terminal outcome per turn"
 
 
-def test_the_shared_app_server_speaks_for_no_agent(tmp_path, monkeypatch):
+def test_the_shared_app_server_speaks_for_no_agent(tmp_path, monkeypatch, codex_pool_lifecycle):
     """BACKENDS-N1: one app-server process serves every Codex agent, so its
     environment must not name the agent that happened to start it. Tools in
     any Codex agent's shell that trust CLAUDE_PWA_SESSION would act as that
     agent; without it they refuse instead."""
-    _install_fake_codex(tmp_path, monkeypatch)
+    _install_fake_codex(tmp_path, monkeypatch, codex_pool_lifecycle)
     monkeypatch.setenv("CLAUDE_PWA_SESSION", "the-host-itself")
     seen = []
     real_popen = codex_app_server.subprocess.Popen
@@ -676,11 +678,11 @@ def test_the_shared_app_server_speaks_for_no_agent(tmp_path, monkeypatch):
     assert all("CLARP_PROVIDER_TURN" not in env for env in seen)
 
 
-def test_each_codex_thread_carries_its_own_agent_session(tmp_path, monkeypatch):
+def test_each_codex_thread_carries_its_own_agent_session(tmp_path, monkeypatch, codex_pool_lifecycle):
     """BACKENDS-N1: the shared app-server has no agent identity; each thread
     gets its own agent's session for its shell through the thread's config
     (shell_environment_policy.set), when it starts and when it resumes."""
-    _install_fake_codex(tmp_path, monkeypatch)
+    _install_fake_codex(tmp_path, monkeypatch, codex_pool_lifecycle)
     sent = []
     real_request = codex_app_server._Client.request
 
@@ -729,3 +731,276 @@ def test_each_codex_thread_carries_its_own_agent_session(tmp_path, monkeypatch):
     assert all("turns" not in result["thread"] for _params, result in resumes)
     assert all("excludeTurns" not in params for method, params, _result in sent
                if method == "thread/start")
+
+
+# These controls exercise the fixture boundary, not a replacement pool model.
+# Negative cleanup cases use a private namespace/gate so their deliberately
+# FAILED owner remains quarantined without poisoning pytest's shared owner.
+def _private_pool_owner(*, timeout=1.0, mp=None):
+    from types import SimpleNamespace
+    from tests.codex_pool_lifecycle import OwnerGate, PoolOwner
+    namespace = SimpleNamespace(
+        _Client=codex_app_server._Client, threading=threading,
+        _LOCK=threading.RLock(), _CLIENTS={}, _DRAINING={}, _RETIRING={})
+    mp = mp if mp is not None else pytest.MonkeyPatch()
+    gate = OwnerGate()
+    return PoolOwner(namespace, mp, gate=gate, timeout=timeout), namespace, mp, gate
+
+
+def test_fake_pool_close_joins_running_backstop_and_terminal_callback(
+        tmp_path, monkeypatch, codex_pool_lifecycle):
+    from lib import eventlog
+    from tests.codex_pool_lifecycle import QuiescenceError
+    _install_fake_codex(tmp_path, monkeypatch, codex_pool_lifecycle)
+    owner = codex_pool_lifecycle
+    client = codex_app_server._client("fixture-owner", "fixture-owner")
+    # A foreign native turn legitimately keeps the real drain registration
+    # alive, so the actual backstop body must attempt its next timer.
+    client.foreign_turns.add("held-child")
+    entered, release, retiring = threading.Event(), threading.Event(), threading.Event()
+    callback_entered, callback_release = threading.Event(), threading.Event()
+    close_done = threading.Event()
+    callbacks, failures = [], []
+    real_exit, real_retire = client._exit_if_drained, client.retire
+
+    def blocked_exit(*, backstop=False):
+        if backstop:
+            entered.set()
+            assert release.wait(5)
+        real_exit(backstop=backstop)
+
+    def terminal(_value):
+        callback_entered.set()
+        assert callback_release.wait(5)
+        callbacks.append("terminal")
+        codex_app_server.log("codexFixtureTerminal", "owned callback finished")
+
+    def retire():
+        retiring.set()  # close is already CLOSING before this worker runs
+        real_retire()
+        client._callback(terminal, None)
+
+    monkeypatch.setattr(client, "_exit_if_drained", blocked_exit)
+    monkeypatch.setattr(client, "retire", retire)
+    monkeypatch.setattr(codex_app_server, "DRAIN_BACKSTOP_SEC", 0)
+
+    def close():
+        try:
+            owner.close()
+        except BaseException as exc:
+            failures.append(exc)
+        finally:
+            close_done.set()
+
+    closer = threading.Thread(target=close)
+    try:
+        with codex_app_server._LOCK:
+            codex_app_server._begin_drain(client)
+        assert entered.wait(5)
+        closer.start()
+        assert retiring.wait(5) and callback_entered.wait(5)
+        assert not close_done.is_set(), "running backstop/callback must hold cleanup"
+        release.set()
+        callback_release.set()
+        closer.join(10)
+        assert close_done.is_set() and not failures
+        assert callbacks == ["terminal"]
+        assert not client.reader.is_alive() and not client.stderr_reader.is_alive()
+        timers = [actor for actor in owner.actors if isinstance(actor, threading.Timer)]
+        assert len(timers) >= 2, "the actual backstop rearm was not exercised"
+        assert all(not actor.is_alive() for actor in owner.actors)
+        assert id(client) not in codex_app_server._DRAINING
+        # Make a later sink eligible only AFTER proven close. Even a retained
+        # direct timer body invocation cannot write there.
+        later = tmp_path / "later-logs"
+        eventlog.reset_for_tests(later)
+        before = {path.name: path.read_bytes() for path in later.glob("*") if path.is_file()}
+        with pytest.raises(QuiescenceError, match="body after"):
+            timers[0].run()
+        with pytest.raises(QuiescenceError, match="body after"):
+            timers[0].function()
+        with pytest.raises(QuiescenceError, match="body after"):
+            client._callback(terminal, None)
+        after = {path.name: path.read_bytes() for path in later.glob("*") if path.is_file()}
+        assert after == before and callbacks == ["terminal"]
+    finally:
+        release.set()
+        callback_release.set()
+        if closer.ident is not None:
+            closer.join(10)
+
+
+def test_preconstructed_pool_actors_refuse_start_and_body_after_undo():
+    from tests.codex_pool_lifecycle import QuiescenceError
+    owner, namespace, mp, gate = _private_pool_owner()
+    calls = []
+    client = namespace._Client.__new__(namespace._Client)
+    deferred_dispatch = client._callback
+    with owner.producing():
+        timer = namespace.threading.Timer(60, lambda: calls.append("timer"))
+        thread = namespace.threading.Thread(target=lambda: calls.append("thread"))
+    owner.close()
+    owner.close()  # only positive CLOSED is idempotent
+    mp.undo()
+    assert namespace.threading is threading
+    for actor in (timer, thread):
+        with pytest.raises(QuiescenceError, match="start after"):
+            actor.start()
+        with pytest.raises(QuiescenceError, match="body after"):
+            actor.run()
+    with pytest.raises(QuiescenceError, match="body after"):
+        deferred_dispatch(lambda _v: calls.append("late callback"), None)
+    assert calls == []
+    gate.check(namespace)
+
+
+def test_fake_pool_owner_preserves_foreign_replacement_and_refuses_live_foreign():
+    from tests.codex_pool_lifecycle import PoolOwner, QuiescenceError
+    owner, namespace, mp, gate = _private_pool_owner()
+    # Explicit __new__ path registers identity before initialization/actors.
+    owned = namespace._Client.__new__(namespace._Client)
+    owned.proc = _FakeProc()
+    owned.active, owned._actives, owned._pending = None, {}, {}
+    owned._lock = threading.Lock()
+    foreign = object.__new__(codex_app_server._Client)
+    foreign.proc = _FakeProc()
+    namespace._DRAINING[id(owned)] = foreign  # same key, different identity
+    owner.close()
+    assert owned.proc.poll() == 0
+    assert namespace._DRAINING[id(owned)] is foreign
+    assert foreign.proc.signals == []
+    with pytest.raises(QuiescenceError, match="unowned"):
+        gate.check(namespace)
+    fresh_mp = pytest.MonkeyPatch()
+    with pytest.raises(QuiescenceError, match="unowned"):
+        PoolOwner(namespace, fresh_mp, gate=gate)
+    assert vars(fresh_mp).get("undo") is None, "refuse before patch/actor setup"
+    # Foreign bound targets remain foreign even under owned producer context.
+    with owner.producing():
+        actor = namespace.threading.Thread(target=foreign.shutdown)
+    assert type(actor) is threading.Thread
+    assert foreign.proc.signals == []
+    mp.undo()
+
+
+def test_partially_started_pool_actor_stays_quarantined():
+    from tests.codex_pool_lifecycle import QuiescenceError
+    owner, namespace, mp, gate = _private_pool_owner()
+    entered, release = threading.Event(), threading.Event()
+    with owner.producing():
+        actor = namespace.threading.Thread(target=lambda: (entered.set(), release.wait(5)))
+
+    def uncertain_start():
+        threading.Thread.start(actor)
+        raise RuntimeError("start raised after native launch")
+
+    try:
+        with pytest.raises(RuntimeError, match="after native launch"):
+            owner.start(actor, uncertain_start)
+        assert entered.wait(5)
+        release.set()
+        actor.join(5)
+        with pytest.raises(QuiescenceError, match="partially started"):
+            owner.close()
+        assert owner in gate.owners and owner.state == "FAILED"
+        with pytest.raises(QuiescenceError):
+            mp.undo()
+        with pytest.raises(QuiescenceError):
+            owner.close()  # must not erase the earlier uncertainty
+    finally:
+        release.set()
+        actor.join(5)
+    # FAILED owner and its untouched patch stack remain strongly held by gate.
+    assert owner in gate.owners and mp._setattr
+
+
+def test_pool_cleanup_deadline_blocks_reset_next_setup_and_exact_undo(tmp_path, monkeypatch):
+    from tests import conftest
+    from tests import codex_pool_lifecycle as lifecycle
+    from lib import db, eventlog, revisioned_cache
+    owner, namespace, mp, gate = _private_pool_owner(timeout=0.2)
+    paths = {"DB": "old-test-db", "LOG": "old-test-log"}
+    mp.setitem(paths, "DB", "owned-test-db")
+    mp.setitem(paths, "LOG", "owned-test-log")
+    release, retiring = threading.Event(), threading.Event()
+    entered = [threading.Event() for _ in range(4)]
+    with owner.producing():
+        actors = [namespace.threading.Thread(
+            target=lambda event=event: (event.set(), release.wait(5))) for event in entered]
+    for actor in actors:
+        actor.start()
+    assert all(event.wait(5) for event in entered)
+    client = namespace._Client.__new__(namespace._Client)
+    client.proc = _FakeProc()
+    # A blocking stop is part of the ONE budget, not an unbounded preliminary
+    # shutdown followed by a separate join allowance per actor.
+    client.retire = lambda: (retiring.set(), release.wait(5), client.proc.terminate())
+    # Drive the actual DB fixture generator only through its setup, against
+    # this test's existing paths. Its teardown must independently fence reset.
+    db_fixture = conftest._isolated_db.__wrapped__(None, tmp_path, monkeypatch)
+    next(db_fixture)
+    resets = []
+    try:
+        started = time.monotonic()
+        with pytest.raises(lifecycle.QuiescenceError, match="deadline"):
+            owner.close()
+        assert time.monotonic() - started < 1.0
+        assert retiring.is_set()
+        assert owner.state == "FAILED" and owner in gate.owners
+        stacks = (list(mp._setattr), list(mp._setitem))
+        with pytest.raises(lifecycle.QuiescenceError, match="undo"):
+            mp.undo()
+        assert (mp._setattr, mp._setitem) == stacks
+        assert paths == {"DB": "owned-test-db", "LOG": "owned-test-log"}
+        # This context changes ONLY negative-control gate/reset sentinels,
+        # never an actor's CLI/config dependencies. Release/join before unwind.
+        with monkeypatch.context() as control:
+            control.setattr(lifecycle, "GATE", gate)
+            control.setattr(db, "reset_for_tests", lambda *_a: resets.append("db"))
+            control.setattr(eventlog, "reset_for_tests", lambda *_a: resets.append("log"))
+            control.setattr(revisioned_cache, "reset_all", lambda: resets.append("cache"))
+            try:
+                with pytest.raises(lifecycle.QuiescenceError):
+                    next(db_fixture)
+                with pytest.raises(lifecycle.QuiescenceError):
+                    conftest._transcript_importer_quiescent.__wrapped__()
+                assert resets == []
+            finally:
+                release.set()
+                for actor in owner.actors:
+                    if actor.ident is not None:
+                        actor.join(5)
+        assert all(not actor.is_alive() for actor in owner.actors)
+        assert owner.state == "FAILED" and owner in gate.owners
+        with pytest.raises(lifecycle.QuiescenceError):
+            mp.undo()  # completion is not an implicit failed-owner release
+    finally:
+        release.set()
+        for actor in owner.actors:
+            if actor.ident is not None:
+                actor.join(5)
+
+
+def test_healthy_pool_undo_delegates_once_and_preserves_native_errors():
+    calls = []
+
+    class RecordingPatch(pytest.MonkeyPatch):
+        def undo(self):
+            calls.append("undo")
+            return super().undo()
+
+    owner, namespace, mp, gate = _private_pool_owner(mp=RecordingPatch())
+    owner.close()
+    mp.undo()
+    assert calls == ["undo"] and namespace.threading is threading
+    gate.check(namespace)
+
+    class FailingPatch(pytest.MonkeyPatch):
+        def undo(self):
+            raise ValueError("native undo failed")
+
+    owner, namespace, mp, gate = _private_pool_owner(mp=FailingPatch())
+    owner.close()
+    with pytest.raises(ValueError, match="native undo failed"):
+        mp.undo()
+    assert owner.state == "CLOSED"
