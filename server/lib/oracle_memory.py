@@ -9,6 +9,23 @@ import uuid
 from .persistence.schema_parts.oracle_memory import SCHEMA
 
 from . import db
+from . import lifecycle as lk
+from .lifecycle import Edge, Lifecycle, WaitForever
+
+# One admitted voice action (docs/architecture/lifecycles.md). This module is
+# the only writer of oracle_admissions.status; admission() inserts the row as
+# planned. The first result stands: finishing a completed admission again
+# writes nothing. The primary key is (thread_id, revision, action_index), so
+# the kit's single key column is SQLite's rowid.
+ADMISSION = Lifecycle(
+    name="oracle_admission", owner="lib/oracle_memory.py",
+    table="oracle_admissions", key="rowid", state_column="status",
+    entered_column="updated_at",
+    initial="planned", final=frozenset({"completed"}),
+    edges=(Edge("finish", frozenset({"planned"}), "completed"),),
+    waits={"planned": WaitForever("the voice session that admitted the action finishes it;"
+                                  " reconcile() finishes one whose receipt was lost")},
+)
 
 
 def _json(value):
@@ -106,8 +123,10 @@ class ThreadStore:
 
     def finish_admission(self, revision, index, result):
         self._owned(active=True)
-        db.conn().execute("UPDATE oracle_admissions SET status='completed',result_json=?,updated_at=? WHERE thread_id=? AND revision=? AND action_index=?",
-                         (_json(result), db.now_ms(), self.thread_id, revision, index))
+        lk.compare_and_set_where(db.conn(), ADMISSION, "finish",
+                                 where="thread_id=? AND revision=? AND action_index=?",
+                                 params=(self.thread_id, revision, index), now=db.now_ms(),
+                                 values={"result_json": _json(result)})
         if result.get("operation_id"): self.link_work(result["operation_id"])
 
     def admissions(self, revision=None):
