@@ -21,15 +21,18 @@ TELEMETRY_PATH = pathlib.Path(os.environ.get(
 HOUR_MS = 60 * 60 * 1000
 DETAIL_RETENTION_MS = 24 * HOUR_MS
 ROLLUP_RETENTION_MS = 30 * DETAIL_RETENTION_MS
-# The size budget on top of the age bounds: when the live data (pages in use,
-# see live_bytes) is over this at a maintenance pass, the oldest detail goes
+# The size budget on top of the age bounds: when the live data (every page
+# in use, see live_bytes) is over this at a maintenance pass, the oldest detail goes
 # first, however young. Age alone let one noisy code path write 16 GB inside
 # the 24 hours. A budget restored at each pass, not a ceiling on the file.
 DETAIL_BUDGET_BYTES = 1024 ** 3
-# One delete statement on diagnostic_events frees at most this much detail,
-# as well as at most batched_delete.DELETE_BATCH rows. A statement holds the
-# write lock while it frees every page of its rows: 500 rows are nothing at
-# 300 bytes each and 1.6 GB at 3 MB each, which held the lock for seconds.
+# One delete statement on diagnostic_events takes rows until their detail
+# adds up to this, as well as at most batched_delete.DELETE_BATCH rows. A
+# statement holds the write lock while it frees every page of its rows: 500
+# rows are nothing at 300 bytes each and 1.6 GB at 3 MB each, which held the
+# lock for seconds. Not an absolute bound on a statement: a single row with
+# more detail than this goes in a statement of its own, and the promoted
+# columns, the row overhead and the index pages are not counted.
 DELETE_STATEMENT_BYTES = 8 * 1024 * 1024
 # A row's detail size from its record header, without reading the detail
 # (octet_length, SQLite 3.43). An older SQLite reads the value to measure it.
@@ -238,13 +241,14 @@ def _upsert_in_batches(c, statement: str, rows: list) -> None:
 
 
 def live_bytes(c: sqlite3.Connection | None = None) -> int:
-    """Bytes of telemetry.sqlite that hold data: its pages in use.
+    """Bytes of telemetry.sqlite that hold data: all of its pages in use,
+    which is the detail, its indexes, the rollup tables and the schema, not
+    the detail alone. Deleting detail does not free the rollups or the schema.
 
     Not the size on disk. SQLite keeps the pages a delete frees and fills
     them again before it extends the file, so a file that was large stays
     large and nothing here shrinks it; the WAL is a separate file that grows
-    until a checkpoint. The count includes the schema and the rollup tables,
-    which deleting detail does not free.
+    until a checkpoint.
     """
     c = c if c is not None else conn()
     page_size = c.execute("PRAGMA page_size").fetchone()[0]
