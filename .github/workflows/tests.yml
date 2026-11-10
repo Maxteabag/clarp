@@ -1,9 +1,12 @@
 name: Tests
 
-# A pull request runs the critical gate (tests/critical.txt); a dispatch, the nightly
-# schedule and a calling workflow (Docker) run the full suite.
+# A pull request and a push to main run the critical gate (tests/critical.txt), which
+# answers in a few minutes; a dispatch, the nightly schedule and a calling workflow
+# (Docker, also on every push to main) run the full suite.
 on:
   pull_request:
+  push:
+    branches: [main]
   workflow_dispatch:
   schedule:
     - cron: "23 2 * * *"
@@ -21,7 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      SUITE: ${{ (github.event_name == 'pull_request' && inputs.suite != 'full') && 'critical' || 'full' }}
+      SUITE: ${{ ((github.event_name == 'pull_request' || github.event_name == 'push') && inputs.suite != 'full') && 'critical' || 'full' }}
     steps:
       - uses: actions/checkout@v4
         with:
