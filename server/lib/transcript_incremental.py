@@ -199,7 +199,26 @@ class _RangePath(pathlib.PosixPath):
     def open(self, mode="r", buffering=-1, encoding=None, errors=None, newline=None):
         if mode not in ("r", "rt"):
             raise ValueError(f"a transcript range is read-only text, not {mode!r}")
-        raw = _Range(pathlib.Path(self), self.range_start, self.range_end)
+        record = getattr(self, "_full_read", None)
+        if record is None:
+            raw = _Range(pathlib.Path(self), self.range_start, self.range_end)
+        else:
+            class ObservedRange(_Range):
+                def readinto(self, buffer):
+                    count = super().readinto(buffer)
+                    if count:
+                        record["hash"].update(memoryview(buffer)[:count])
+                        record["bytes"] += count
+                    return count
+
+            raw = ObservedRange(pathlib.Path(self), self.range_start, self.range_end)
+            try:
+                stat = os.fstat(raw._file.fileno())
+                record["file"] = (stat.st_dev, stat.st_ino)
+                record["opens"] += 1
+            except BaseException:
+                raw.close()
+                raise
         return io.TextIOWrapper(io.BufferedReader(raw), encoding=encoding,
                                 errors=errors, newline=newline)
 
@@ -1133,10 +1152,17 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, dia
                       imports_since_audit=cp.imports_since_audit + 1, updated_at=db.now_ms())
     raw_inputs = None
     checkpoint_status = {}
+    source_invalidated = False
 
     def publish(database, captured):
-        nonlocal raw_inputs
-        if identity(path) != before:
+        nonlocal raw_inputs, source_invalidated
+        try:
+            current = identity(path)
+        except OSError:
+            source_invalidated = True
+            raise
+        if current != before:
+            source_invalidated = True
             return
         write_checkpoint(database, next_cp)
         raw_inputs = message_writes._prepare_import_prelude(
@@ -1150,19 +1176,37 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, dia
             checkpoint_status=checkpoint_status)
     except message_writes._TailInvalidated:
         return refuse("carry_inputs_changed")
-    _tail_log("tail_applied", backend=backend, size=size)
-    if not _checkpoint_refused(checkpoint_status):
+    try:
+        source_invalidated = source_invalidated or identity(path) != before
+    except OSError:
+        source_invalidated = True
+    if not _checkpoint_refused(checkpoint_status) and not source_invalidated:
         _cache_committed_tail(key, revision, next_cp, raw_inputs, current_hash,
                               reason_token=reason_token)
     else:
         _TAIL_STATES.note_refusal(key, revision, reason_token, _checkpoint_reason(checkpoint_status))
-    return {"rows": next_cp.turn_count, "parse_s": parsed - started,
-            "store_s": time.perf_counter() - parsed, "shadow": "not_sampled_tail",
-            "apply_mode": "tail", "parsed_bytes": before.size - cp.boundary_offset}
+    # Include replacement during process-frontier publication, not just the
+    # transaction callback. A refusal must not become a fresh completion.
+    try:
+        source_invalidated = source_invalidated or identity(path) != before
+    except OSError:
+        source_invalidated = True
+    result = {"rows": next_cp.turn_count, "parse_s": parsed - started,
+              "store_s": time.perf_counter() - parsed, "shadow": "not_sampled_tail",
+              "apply_mode": "tail", "parsed_bytes": before.size - cp.boundary_offset}
+    if source_invalidated:
+        token = _TAIL_STATES.consume(key, revision)
+        _TAIL_STATES.note_refusal(key, revision, token, "publication_file_moved")
+        _tail_log("deferred_tail_source_changed", backend=backend, size=size)
+        result.update(apply_mode="deferred", _clarp_transcript_completion_v1="deferred")
+    else:
+        _tail_log("tail_applied", backend=backend, size=size)
+    return result
 
 
 def _store_full_with_tail_checkpoint(backend, path, agent_id, backend_session_id,
-                                     turns, before, conf, *, reason_token=None):
+                                     turns, before, conf, *, reason_token=None,
+                                     parsed_evidence=None):
     from . import db, message_store, message_writes
     key = _tail_key(path, agent_id, backend_session_id)
     revision = parser_version(backend)
@@ -1173,14 +1217,23 @@ def _store_full_with_tail_checkpoint(backend, path, agent_id, backend_session_id
     checkpoint_status = {}
     refusal = "file_identity_unavailable"
     refusal_logged = False
+    source_invalidated = False
     try:
+        observed = identity(path) if before is not None else None
+        growing_prefix = (parsed_evidence is not None and before is not None
+                          and parsed_evidence[0] == before.size
+                          and parsed_evidence[2:] == (before.device, before.inode)
+                          and (observed.device, observed.inode) == (before.device, before.inode)
+                          and observed.size >= before.size
+                          and observed.mtime_ns >= before.mtime_ns)
         if before is None:
             pass
         elif not turns:
             refusal = "empty_transcript"
         elif turns[0].get("role") != "user":
             refusal = "assistant_prefix"
-        elif identity(path) != before:
+        elif observed != before and not growing_prefix:
+            source_invalidated = parsed_evidence is not None
             refusal = "file_moved_before_bootstrap"
         elif complete_size(path, before.size) != before.size:
             refusal = "partial_record"
@@ -1192,28 +1245,73 @@ def _store_full_with_tail_checkpoint(backend, path, agent_id, backend_session_id
             elif _prefix_has_effects(turns[:boundary.seq]):
                 refusal = "effect_bearing_prefix"
             else:
-                refusal = ""
                 _, current_hash = _tail_file_hashes(path, before.size, before.size)
-                captured = {}
+                # Compare against ACTUAL bytes delivered to the native parser,
+                # not a digest created after the parser saw some older file.
+                if parsed_evidence is not None and current_hash != parsed_evidence[1]:
+                    source_invalidated = True
+                    refusal = "parsed_prefix_changed"
+                else:
+                    final = identity(path)
+                    if ((final.device, final.inode) != (before.device, before.inode)
+                            or final.size < before.size or final.mtime_ns < before.mtime_ns
+                            or (parsed_evidence is None and final != before)):
+                        source_invalidated = parsed_evidence is not None
+                        refusal = "file_moved_before_bootstrap"
+                    else:
+                        observed = final
+                        refusal = ""
+                        captured = {}
 
-                def publish(database, carry):
-                    nonlocal checkpoint, raw_inputs
-                    if not carry or identity(path) != before:
-                        return
-                    now = db.now_ms()
-                    checkpoint = Checkpoint(
-                        agent_id, backend_session_id, str(path), backend, parser_version(backend),
-                        before.device, before.inode, before.size, before.mtime_ns,
-                        boundary.complete_size, boundary.offset, boundary.seq, len(turns),
-                        boundary.prefix_hash, boundary.tail_hash, boundary.prefix_turns_hash,
-                        boundary.parser_carry, dict(carry), 0, now, now)
-                    write_checkpoint(database, checkpoint)
-                    raw_inputs = message_writes._prepare_import_prelude(
-                        database, agent_id, backend_session_id, [], raw_only=True)
+                        def publish(database, carry):
+                            nonlocal checkpoint, raw_inputs, source_invalidated
+                            if not carry:
+                                return
+                            try:
+                                current = identity(path)
+                            except OSError:
+                                source_invalidated = parsed_evidence is not None
+                                raise
+                            if current != observed:
+                                source_invalidated = parsed_evidence is not None
+                                return
+                            now = db.now_ms()
+                            # size/mtime describe the observed file; complete_size
+                            # and all hashes describe ONLY the parsed prefix.
+                            checkpoint = Checkpoint(
+                                agent_id, backend_session_id, str(path), backend, parser_version(backend),
+                                observed.device, observed.inode, observed.size, observed.mtime_ns,
+                                boundary.complete_size, boundary.offset, boundary.seq, len(turns),
+                                boundary.prefix_hash, boundary.tail_hash, boundary.prefix_turns_hash,
+                                boundary.parser_carry, dict(carry), 0, now, now)
+                            write_checkpoint(database, checkpoint)
+                            raw_inputs = message_writes._prepare_import_prelude(
+                                database, agent_id, backend_session_id, [], raw_only=True)
+                            return True
 
-                kwargs = {"capture_at": boundary.seq, "captured": captured, "on_stored": publish}
+                        def prepare_publication():
+                            nonlocal observed, source_invalidated
+                            current = identity(path)
+                            if ((current.device, current.inode) != (before.device, before.inode)
+                                    or current.size < before.size or current.mtime_ns < before.mtime_ns):
+                                source_invalidated = parsed_evidence is not None
+                                return False
+                            _, digest = _tail_file_hashes(path, before.size, before.size)
+                            if digest != current_hash:
+                                source_invalidated = parsed_evidence is not None
+                                return False
+                            observed = identity(path)
+                            valid = ((observed.device, observed.inode) == (before.device, before.inode)
+                                     and observed.size >= before.size
+                                     and observed.mtime_ns >= before.mtime_ns
+                                     and (parsed_evidence is not None or observed == before))
+                            if not valid:
+                                source_invalidated = parsed_evidence is not None
+                            return valid
+
+                        kwargs = {"capture_at": boundary.seq, "captured": captured,
+                                  "on_stored": publish, "recertify_checkpoint": prepare_publication}
     except OSError:
-        # Losing optimization input must not discard an already completed full parse.
         _tail_log("bootstrap_file_io", retention=True)
         refusal_logged = True
         refusal = "bootstrap_file_io"
@@ -1221,9 +1319,20 @@ def _store_full_with_tail_checkpoint(backend, path, agent_id, backend_session_id
     message_store.store_transcript_turns(
         agent_id=agent_id, backend_session_id=backend_session_id,
         source_file=str(path), turns=turns, checkpoint_status=checkpoint_status, **kwargs)
+    if parsed_evidence is not None:
+        # A staged rename can land after the callback's check and before its
+        # transaction commits. Never turn those old-incarnation products into a
+        # fresh completion; the next admission must parse the new source fully.
+        try:
+            after_store = identity(path)
+            if ((after_store.device, after_store.inode) != (before.device, before.inode)
+                    or after_store.size < before.size or after_store.mtime_ns < before.mtime_ns):
+                source_invalidated = True
+        except OSError:
+            source_invalidated = True
     if _checkpoint_refused(checkpoint_status):
         _TAIL_STATES.note_refusal(key, revision, reason_token, _checkpoint_reason(checkpoint_status))
-        return
+        return source_invalidated
     if refusal:
         reason = {"effect_bearing_prefix": "bootstrap_effect",
                   "file_moved_before_bootstrap": "bootstrap_file_moved",
@@ -1240,6 +1349,7 @@ def _store_full_with_tail_checkpoint(backend, path, agent_id, backend_session_id
     else:
         _cache_committed_tail(key, revision, checkpoint, raw_inputs, current_hash,
                               reason_token=reason_token)
+    return source_invalidated
 
 
 def import_transcript(*, backend: str, path: pathlib.Path, agent_id: str,
@@ -1253,10 +1363,13 @@ def import_transcript(*, backend: str, path: pathlib.Path, agent_id: str,
     started = time.perf_counter()
     path = pathlib.Path(path)
     implementation = backends.get(backend)
-    native_parse = parse is None or (
-        isinstance(parse, types.MethodType) and implementation is not None
-        and parse.__self__ is implementation
-        and parse.__func__ is type(implementation).parse_transcript)
+    method = implementation.parse_transcript if implementation is not None else None
+    native_binding = (isinstance(method, types.MethodType)
+                      and method.__self__ is implementation
+                      and method.__func__ is type(implementation).parse_transcript)
+    native_parse = native_binding and (parse is None or (
+        isinstance(parse, types.MethodType) and parse.__self__ is implementation
+        and parse.__func__ is type(implementation).parse_transcript))
     parse = parse or (lambda p: backends.parse_turns(backend, p))
     skip = "unsupported_backend"
     if backend in SUPPORTED_BACKENDS:
@@ -1316,23 +1429,44 @@ def import_transcript(*, backend: str, path: pathlib.Path, agent_id: str,
                 else:
                     _tail_log("full_backend_tail_disabled", backend=backend)
             admission.full_started = True
-            turns = parse(path)
+            parse_path = path
+            if (tail_enabled and before is not None
+                    and getattr(implementation, "supports_frozen_transcript_prefix", False)):
+                parse_path = _RangePath(path, start=0, end=before.size)
+                parse_path._full_read = {"hash": hashlib.blake2b(digest_size=16),
+                                         "bytes": 0, "opens": 0, "file": None}
+            turns = parse(parse_path)
+            parsed_evidence = None
+            if parse_path is not path:
+                read = parse_path._full_read
+                if (read["opens"] == 1 and read["bytes"] == before.size
+                        and read["file"] == (before.device, before.inode)):
+                    parsed_evidence = (before.size, read["hash"].hexdigest(), *read["file"])
+                else:
+                    # Abnormal shrink/replacement/unrecognized parser read:
+                    # retain the legacy complete parse/store response semantics.
+                    turns = parse(path)
             parsed = time.perf_counter()
             if tail_enabled:
-                _store_full_with_tail_checkpoint(backend, path, agent_id, backend_session_id,
+                invalidated = _store_full_with_tail_checkpoint(backend, path, agent_id, backend_session_id,
                                                  turns, before, conf,
-                                                 reason_token=diagnostic.get("token"))
+                                                 reason_token=diagnostic.get("token"),
+                                                 parsed_evidence=parsed_evidence)
                 retained = _TAIL_STATES.peek(_tail_key(path, agent_id, backend_session_id))
                 admission.retained = (retained is not None
                                       and retained[0] == parser_version(backend)
                                       and retained[1] is not None)
             else:
+                invalidated = False
                 message_store.store_transcript_turns(
                     agent_id=agent_id, backend_session_id=backend_session_id,
                     source_file=str(path), turns=turns)
-            return {"rows": len(turns), "parse_s": parsed - started,
-                    "store_s": time.perf_counter() - parsed, "shadow": skip,
-                    "apply_mode": "full", "parsed_bytes": before.size if before else None}
+            result = {"rows": len(turns), "parse_s": parsed - started,
+                      "store_s": time.perf_counter() - parsed, "shadow": skip,
+                      "apply_mode": "full", "parsed_bytes": before.size if before else None}
+            if invalidated is True:
+                result["_clarp_transcript_completion_v1"] = "deferred"
+            return result
     _tail_log("full_shadow_admitted", backend=backend)
     shadow = _Shadow(backend, path, agent_id, backend_session_id, conf)
     try:

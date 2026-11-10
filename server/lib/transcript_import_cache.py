@@ -170,7 +170,7 @@ def source_size(path: pathlib.Path) -> int:
 def _signature(path: pathlib.Path) -> tuple[int, ...]:
     source = source_path(path)
     stat = source.stat()
-    signature: tuple[int, ...] = (stat.st_mtime_ns, stat.st_size)
+    signature: tuple[int, ...] = (stat.st_mtime_ns, stat.st_size, stat.st_dev, stat.st_ino)
     if source != path:
         # A database in WAL mode leaves the main file untouched until a
         # checkpoint; new rows are only in <database>-wal. A stopped OpenCode

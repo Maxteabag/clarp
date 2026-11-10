@@ -147,7 +147,7 @@ def native_full_context(tmp_path, monkeypatch):
     real_store = inc._store_full_with_tail_checkpoint
 
     def parse(backend, path):
-        if not isinstance(path, inc._RangePath):
+        if not isinstance(path, inc._RangePath) or getattr(path, "_full_read", None) is not None:
             state["full_calls"].append(str(path))
             if state["hold"] and len(state["full_calls"]) == 1:
                 state["entered"].set()
