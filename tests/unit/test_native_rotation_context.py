@@ -136,3 +136,27 @@ def test_a_real_user_copy_of_context_text_is_not_lost_to_dual_format_deduplicati
             {"type": "response_item", "payload": ordinary}]
     path.write_text("".join(json.dumps(row) + "\n" for row in rows))
     assert [row["text"] for row in codex_transcript.parse_turns(path)] == [ordinary["content"][0]["text"]]
+
+
+@pytest.mark.parametrize("record", ["{broken json", "[]", "null"])
+@pytest.mark.parametrize("before_seed", [False, True])
+def test_invalid_outer_records_close_admission_without_revoking_a_prior_seed(tmp_path, record, before_seed):
+    item = _item()
+    header = json.dumps({"type": "session_meta", "payload": {"id": "new-thread"}}) + "\n"
+    seed = json.dumps({"type": "response_item", "payload": item}) + "\n"
+    path = tmp_path / "invalid-record.jsonl"
+    path.write_text(header + (record + "\n" + seed if before_seed else seed + record + "\n"))
+    # Invalid outer records retain the ordinary parser's skip policy. Before
+    # the candidate they prevent new suppression; after it they do not change
+    # already-attributed prefix visibility (unlike parsed conflicting metadata).
+    assert [row["text"] for row in codex_transcript.parse_turns(path)] == (
+        [item["content"][0]["text"]] if before_seed else [])
+
+
+@pytest.mark.parametrize("witness", [(), (1, 2), (1, 2, 100),
+                                    (True, 2, 100, 3, 4), (1, 2, 100, -1, 4)])
+def test_context_builder_refuses_incomplete_or_malformed_source_witness(witness):
+    from lib.native_rotation_seed import SeedUnavailable
+    seed = Seed("handover", "old-thread", '{"handover":"saved"}', 100, witness)
+    with pytest.raises(SeedUnavailable):
+        context.build_item(seed, agent_id="agent", new_thread_id="new-thread", operation_id="rotation-a")
