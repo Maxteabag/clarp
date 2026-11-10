@@ -21,9 +21,10 @@ TELEMETRY_PATH = pathlib.Path(os.environ.get(
 HOUR_MS = 60 * 60 * 1000
 DETAIL_RETENTION_MS = 24 * HOUR_MS
 ROLLUP_RETENTION_MS = 30 * DETAIL_RETENTION_MS
-# The size bound on top of the age bounds: when the live data (pages in use,
-# see live_bytes) is over this, the oldest detail goes first, however young.
-# Age alone let one noisy code path write 16 GB inside the 24 hours.
+# The size budget on top of the age bounds: when the live data (pages in use,
+# see live_bytes) is over this at a maintenance pass, the oldest detail goes
+# first, however young. Age alone let one noisy code path write 16 GB inside
+# the 24 hours. A budget restored at each pass, not a ceiling on the file.
 DETAIL_BUDGET_BYTES = 1024 ** 3
 # One delete statement on diagnostic_events frees at most this much detail,
 # as well as at most batched_delete.DELETE_BATCH rows. A statement holds the
@@ -239,9 +240,11 @@ def _upsert_in_batches(c, statement: str, rows: list) -> None:
 def live_bytes(c: sqlite3.Connection | None = None) -> int:
     """Bytes of telemetry.sqlite that hold data: its pages in use.
 
-    Not the file size: SQLite keeps the pages a delete frees and fills them
-    again before it grows the file, so the file stops growing once the live
-    data holds a budget, but it never shrinks by itself.
+    Not the size on disk. SQLite keeps the pages a delete frees and fills
+    them again before it extends the file, so a file that was large stays
+    large and nothing here shrinks it; the WAL is a separate file that grows
+    until a checkpoint. The count includes the schema and the rollup tables,
+    which deleting detail does not free.
     """
     c = c if c is not None else conn()
     page_size = c.execute("PRAGMA page_size").fetchone()[0]
@@ -337,7 +340,7 @@ def _cut_current_hour(c, keep_bytes: int) -> int:
 def rollup_and_prune(*, now_ms: int | None = None, checkpoint: bool = True,
                       budget_bytes: int = DETAIL_BUDGET_BYTES) -> dict[str, int]:
     """Roll every retained hour up, then expire detail and old rollups, then
-    hold the size budget.
+    trim the detail back to the size budget.
 
     The aggregation is a plain read, which in WAL mode blocks no writer; only
     its results are written, in short transactions, and the deletes run in
@@ -348,6 +351,11 @@ def rollup_and_prune(*, now_ms: int | None = None, checkpoint: bool = True,
     The budget (``budget_bytes`` of live data, see live_bytes) drops whole
     hours, oldest first, all of them rolled up above. If the current hour
     alone is still over it, its oldest rows go too (_cut_current_hour).
+
+    It is best-effort reclamation at each pass, not a hard ceiling: what
+    arrives between two passes can overshoot it, the cut of the current hour
+    stops after a few rounds whether or not it got there, and it bounds
+    neither the file on disk nor the WAL (live_bytes).
     """
     now = int(now_ms if now_ms is not None else time.time() * 1000)
     hour = HOUR_MS
