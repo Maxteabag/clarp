@@ -107,16 +107,68 @@ def test_an_unserialisable_giant_detail_is_bounded_too(tmp_path):
     assert "_truncated" in jsonl and "_repr" in jsonl
 
 
-def test_a_failure_while_bounding_never_reaches_the_caller(tmp_path, monkeypatch, capsys):
-    def broken(detail):
-        raise RecursionError("too deep")
+def _events(tmp_path) -> tuple[list[str], list[str]]:
+    from lib import telemetry
+    lines = [json.loads(line)["event"] for path in tmp_path.glob("*.jsonl")
+             for line in path.read_text().splitlines()]
+    rows = [row[0] for row in telemetry.conn().execute("SELECT event FROM diagnostic_events")]
+    return lines, rows
 
-    monkeypatch.setattr(eventlog, "_bound_detail", broken)
+
+def _broken_bounder(detail):
+    raise RecursionError("too deep")
+
+
+def test_a_failure_while_bounding_never_reaches_the_caller(tmp_path, monkeypatch):
+    reported: list[tuple] = []
+    monkeypatch.setattr(eventlog, "_bound_detail", _broken_bounder)
+    monkeypatch.setattr(eventlog, "log_fault",
+                        lambda code, exc, **kw: reported.append((code, type(exc).__name__, kw)))
     eventlog.emit("server", "stillLogged", detail={"blob": "z" * 100_000})
-    jsonl, _ = _sinks(tmp_path)
+    jsonl, sqlite_row = _sinks(tmp_path)
+    assert _events(tmp_path) == (["stillLogged"], ["stillLogged"])
+    assert jsonl == sqlite_row
+    assert set(jsonl) == {"_truncated"}
     assert jsonl["_truncated"]["error"] == "RecursionError"
-    assert jsonl["_truncated"]["original_bytes"] > 100_000
-    assert "eventlog detail bound failed" in capsys.readouterr().err
+    assert jsonl["_truncated"]["limit_bytes"] == CAP
+    # The whole record's size, named as that: the detail alone was not measured.
+    assert jsonl["_truncated"]["record_original_bytes"] > 100_000
+    assert "original_bytes" not in jsonl["_truncated"]
+    assert reported == [("eventlogDetailBoundFailed", "RecursionError", {"structured": False})]
+
+
+def test_a_failing_bounder_with_a_failing_stderr_still_delivers_the_event(tmp_path, monkeypatch):
+    """The report of the failure must not come before, or prevent, the event."""
+    class BrokenStderr:
+        def write(self, value):
+            raise OSError("stderr is gone")
+
+        def flush(self):
+            raise OSError("stderr is gone")
+
+    monkeypatch.setattr(eventlog, "_bound_detail", _broken_bounder)
+    monkeypatch.setattr(sys, "stderr", BrokenStderr())
+    eventlog.emit("server", "stillLogged", level="error", detail={"blob": "z" * 100_000})   # must not raise
+    monkeypatch.undo()
+    jsonl, sqlite_row = _sinks(tmp_path)
+    assert _events(tmp_path) == (["stillLogged"], ["stillLogged"])
+    assert jsonl == sqlite_row
+    assert jsonl["_truncated"]["error"] == "RecursionError"
+    assert jsonl["_truncated"]["record_original_bytes"] > 100_000
+
+
+def test_a_detail_too_deep_for_the_shortening_walk_is_still_delivered(tmp_path):
+    """It serialises (the C encoder) but the recursive walk gives up."""
+    deep: dict = {"leaf": "y" * 100_000}
+    for _ in range(sys.getrecursionlimit() // 2):
+        deep = {"d": deep}
+    try:
+        json.dumps(deep)
+    except RecursionError:
+        pytest.skip("this interpreter cannot serialise the fixture either")
+    eventlog.emit("server", "deep", detail=deep)
+    jsonl, sqlite_row = _sinks(tmp_path)
+    assert jsonl == sqlite_row and "_truncated" in jsonl
 
 
 def test_a_detail_exactly_at_the_cap_is_unchanged_and_one_byte_more_is_shortened(tmp_path):
