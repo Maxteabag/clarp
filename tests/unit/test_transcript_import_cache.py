@@ -1552,8 +1552,9 @@ def test_owner_lease_final_import_is_once_and_rebind_rejects_old_callbacks(tmp_p
 
 
 
-def test_owner_lease_parks_only_existing_capacity_and_retains_refused_dirty_summary(tmp_path):
+def test_owner_lease_parks_only_existing_capacity_and_retains_refused_dirty_summary(tmp_path, monkeypatch):
     import time
+    import threading
 
     cache = transcript_import_cache
     assert cache.reset_for_tests()
@@ -1564,12 +1565,28 @@ def test_owner_lease_parks_only_existing_capacity_and_retains_refused_dirty_summ
     calls = []
     formatting = []
     release_phase = False
+    real_guard = cache._guard
+    held = threading.local()
+
+    class OwnedGuard:
+        def __enter__(self):
+            real_guard.acquire()
+            held.by_this_thread = True
+            return self
+
+        def __exit__(self, *args):
+            held.by_this_thread = False
+            real_guard.release()
+
+    # Only measure cache's with-_guard sections; Condition keeps the original
+    # real lock. No claim of ownership tracking for Condition internals.
+    monkeypatch.setattr(cache, "_guard", OwnedGuard())
 
     class ReentrantPath(type(path)):
         def __str__(self):
             if release_phase:
-                # If release formats queued objects while holding _guard,
-                # this real reentry deadlocks. It is not a mocked receipt.
+                assert not getattr(held, "by_this_thread", False), (
+                    "release formatted an arbitrary queued path under its guard")
                 formatting.append(cache.is_active(path, owner="lease-owner"))
             return super().__str__()
 
@@ -1587,13 +1604,13 @@ def test_owner_lease_parks_only_existing_capacity_and_retains_refused_dirty_summ
         release_phase = True
         dirty = cache.release_owner_lease(lease, binding)
         lease = None
-        assert formatting == []
         assert dirty.dirty and dirty.urgent and dirty.startup_exempt
         assert len(dirty.paths) == cache._BACKGROUND_LIMIT
         assert dirty.first_wait_rank is not None
         assert not cache.is_active(path, owner="lease-owner")
         assert calls == ["other"]
     finally:
+        release_phase = False
         try:
             if lease is not None:
                 cache.release_owner_lease(lease, binding)
