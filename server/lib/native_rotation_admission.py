@@ -19,6 +19,7 @@ class _Owner:
     admissions: int = 0
     selected: set[object] = field(default_factory=set)
     override: int = 0
+    failed_selected: set[object] = field(default_factory=set)
 
 
 _owners: dict[str, _Owner] = {}
@@ -76,6 +77,8 @@ def begin_selected(agent_id):
         owner = _cell(agent_id)
         if owner.operation is not None:
             return None
+        if len(owner.selected) >= _MAX_OWNERS:
+            raise journal.RotationConflict("selected owner capacity exhausted")
         token = object()
         owner.selected.add(token)
         return token
@@ -85,9 +88,11 @@ def finish_selected(agent_id, token):
     with _TURN_LOCK:
         owner = _owners.get(agent_id)
         if owner is None or token not in owner.selected:
-            raise journal.RotationConflict("selected owner token is not current")
+            return False
         owner.selected.remove(token)
+        owner.failed_selected.discard(token)
         _forget_empty(agent_id, owner)
+        return True
 
 
 def closed(agent_id):
@@ -107,6 +112,8 @@ def reserve(agent_id, expected_old_thread_id, operation_id):
         if owner.operation is not None and owner.operation != operation_id:
             raise journal.RotationConflict("another rotation holds admission")
         if owner.operation is None:
+            if owner.failed_selected:
+                raise journal.RotationConflict("selected publication has uncertain ownership")
             if (owner.admissions or owner.selected or _SLOTS.get(agent_id) or
                     _SLOTS.queue_depth(agent_id) or _SLOTS.launch_running(agent_id)):
                 _forget_empty(agent_id, owner)
@@ -158,3 +165,53 @@ def override_generation(agent_id, operation_id):
         if owner is None or owner.operation != operation_id:
             raise journal.RotationConflict("rotation admission owner disappeared")
         return owner.override
+
+
+def select_next(agent_id, *, expected=None, closed_owner=None):
+    """Retain a successor while the actual outer TURN still owns selection."""
+    with _TURN_LOCK:
+        if closed(agent_id):
+            concrete = expected if expected is not None else closed_owner
+            if concrete is not None:
+                _SLOTS.release(agent_id, concrete)
+            return None, None
+        token = begin_selected(agent_id)  # capacity BEFORE destructive pop
+        try:
+            head = _SLOTS.pop_next(agent_id, expected=expected)
+        except BaseException:
+            finish_selected(agent_id, token)
+            raise
+        if head is None:
+            finish_selected(agent_id, token)
+            return None, None
+        return head, token
+
+
+def defer_selected(agent_id, head, token, callback):
+    """Carry the exact token through deferred execution and callback cleanup."""
+    started = False
+
+    def run():
+        nonlocal started
+        started = True
+        try:
+            callback()
+        finally:
+            finish_selected(agent_id, token)
+
+    try:
+        _TURN_LOCK.defer(run)
+    except BaseException:
+        if not started:
+            with _TURN_LOCK:
+                if _SLOTS.owns(agent_id, head.trace_id):
+                    _SLOTS.release(agent_id, head.trace_id)
+                    _SLOTS.requeue_front(agent_id, head)
+                    finish_selected(agent_id, token)
+                else:
+                    # No proof that this selection can be re-published. Keep
+                    # its specific owner visible until explicit reconciliation.
+                    owner = _owners.get(agent_id)
+                    if owner is not None and token in owner.selected:
+                        owner.failed_selected.add(token)
+        raise
