@@ -108,6 +108,26 @@ def test_decision_resolution_is_revision_safe_and_idempotent(tmp_path):
         artifacts.resolve(decision["decision_id"], choice="rejected", expected_revision=1)
 
 
+@pytest.mark.parametrize(("choice", "expected", "forbidden"), [
+    ("accepted", "approved this exact action", "does not approve any broader"),
+    ("rejected", "rejected this exact action", "or a broader version"),
+])
+def test_approval_delivery_restates_exact_action_and_scope(tmp_path, choice, expected, forbidden):
+    _agent(tmp_path)
+    created = artifacts.create_decision(
+        session="mike", title="Deploy", question="Deploy release abc to elitebook?",
+        context="Only the elitebook Host; no other machines.",
+        payload={"host": "elitebook", "release": "abc"})
+    artifacts.resolve(created["decision"]["decision_id"], choice=choice, expected_revision=1)
+
+    prompt = artifacts.format_delivery_prompt(artifacts.pending_deliveries()[0])
+
+    assert expected in prompt
+    assert "Deploy release abc to elitebook?" in prompt
+    assert "Only the elitebook Host; no other machines." in prompt
+    assert forbidden in prompt
+
+
 def test_plan_creation_gets_single_artifact_wrapper(tmp_path):
     _agent(tmp_path)
     plan = task_plans.create(session="mike", title="Ship", items=[{"id": "one", "title": "Build"}])

@@ -144,7 +144,7 @@ claude_account_switch_command = []
 # session must also present its verified turn identity when it answers.
 decision_on_behalf_sessions = []  # e.g. ["nori-5aac"]
 claude_model           = ""
-claude_effort          = ""   # low | medium | high | xhigh | max
+claude_effort          = "high"   # explicit default; "" keeps the Claude CLI default; low | medium | xhigh | max
 codex_model            = ""
 codex_reasoning_effort = ""   # low | medium | high
 agy_model              = ""   # agy has no reasoning-effort knob

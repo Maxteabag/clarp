@@ -508,7 +508,7 @@ class Config:
     claude_account_switch_command: tuple[str, ...] = ()
     codex_account_switch_command: tuple[str, ...] = ()
     claude_model: str = ""
-    claude_effort: str = ""              # "" | low | medium | high | xhigh | max
+    claude_effort: str = "high"          # "" (CLI default) | low | medium | high | xhigh | max
     # Hours a helper agent marked done stays in the chat list before the
     # maintenance worker archives it. [agents] helper_archive_grace_hours.
     helper_archive_grace_hours: float = 24.0
@@ -1032,7 +1032,7 @@ def _parse_into_cache(path: pathlib.Path) -> Config:
             if isinstance(agents.get("claude_account_switch_command", ()), (list, tuple))
             and all(isinstance(arg, str) and arg for arg in
                     agents.get("claude_account_switch_command", ())) else (),
-        claude_effort   = str(agents.get("claude_effort", "")),
+        claude_effort   = str(agents.get("claude_effort", "high")),
         helper_archive_grace_hours=_non_negative_float(
             agents.get("helper_archive_grace_hours"), 24.0),
         decision_on_behalf_sessions=tuple(dict.fromkeys(

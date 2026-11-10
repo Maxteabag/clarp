@@ -108,6 +108,16 @@ def test_agent_override_wins_over_config(monkeypatch):
     assert (model, effort) == ("opus", "high")
 
 
+def test_claude_effort_is_explicitly_high_by_default(monkeypatch):
+    monkeypatch.setattr(config, "_CACHED", config.Config())
+    _model, effort = _resolve_llm({"model": "", "effort": ""}, backends.CLAUDE)
+    assert effort == "high"
+
+    monkeypatch.setattr(config, "_CACHED", config.Config(claude_effort=""))
+    _model, effort = _resolve_llm({"model": "", "effort": ""}, backends.CLAUDE)
+    assert effort == "", "an explicit empty config keeps the CLI default"
+
+
 def test_config_default_fills_when_agent_unset(monkeypatch):
     monkeypatch.setattr(config, "_CACHED",
                         config.Config(codex_model="gpt-5-codex",

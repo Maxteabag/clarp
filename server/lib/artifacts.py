@@ -1255,9 +1255,16 @@ def format_delivery_prompt(delivery: dict) -> str:
         outcome = (f"{actor} answered this clarification: " + json.dumps(answer, ensure_ascii=False)
                    + ". Continue using this answer. This does not grant approval for unrelated protected actions.")
     elif response_type == "approval" and choice in {"accepted", "rejected"}:
-        outcome = (f"{actor} chose: {choice}. " + (
-            "Approval applies only to the described action. Revalidate it before acting."
-            if choice == "accepted" else "Do not perform the protected action."))
+        question = str(delivery.get("question") or "").strip()
+        context = str(delivery.get("context") or "").strip()
+        scope = f" Approved scope/context: {context}" if choice == "accepted" and context else ""
+        outcome = (
+            f"{actor} approved this exact action: {question}{scope} "
+            "Proceed with exactly that action and scope after revalidating the target and payload. "
+            "This does not approve any broader, additional, or repeated action."
+            if choice == "accepted" else
+            f"{actor} rejected this exact action: {question} "
+            "Do not perform it or a broader version of it.")
     else:
         raise ValueError("invalid durable decision delivery")
     return ("[Clarp decision resolved]\n"
