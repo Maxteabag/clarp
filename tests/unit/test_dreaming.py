@@ -1592,13 +1592,15 @@ def test_historical_full_import_ack_never_noops_a_newer_run(monkeypatch, tmp_pat
         turns.append({"role": "user", "text": "An unrelated later request", "timestamp": "3"})
     import_old()  # Real full import: the locked pass sees the historical ACK.
 
-    assert dreaming.get_run(newer["run_id"]) == before
-    assert dreaming.active_run_for_agent(aid)["run_id"] == newer["run_id"]
+    # Prove the real publication/display (including the appended row) before
+    # the regression assertion, so baseline RED cannot bypass that witness.
     visible = message_store.list_messages(agent_id=aid, backend_session_id="ack-history-transcript")
     expected_display = ["Automated dreaming run", "Dreaming check: no action needed."]
     if history_case == "unchanged-replay":
         expected_display.append("An unrelated later request")
     assert [row["text"] for row in visible] == expected_display
+    assert dreaming.get_run(newer["run_id"]) == before
+    assert dreaming.active_run_for_agent(aid)["run_id"] == newer["run_id"]
 
 
 @pytest.mark.parametrize("case", ["active", "late", "duplicate", "foreign-agent", "missing-id", "unknown-id",
