@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 
 import pytest
 
@@ -110,4 +111,26 @@ def test_readback_rejects_oversize_before_consuming_the_file(tmp_path, monkeypat
     monkeypatch.setattr(readback.os, "read", counted)
     with pytest.raises(readback.ReadbackUnavailable):
         readback.verify_seed(path, item, native_thread_id="new-thread", max_bytes=32)
+    assert reads == []
+
+
+@pytest.mark.parametrize("kind", ["fifo", "symlink"])
+def test_readback_refuses_special_or_redirected_source_without_reading(tmp_path, monkeypatch, kind):
+    path, item, rows = _history(tmp_path)
+    target = tmp_path / "different-file.jsonl"
+    _store(target, rows)
+    if kind == "fifo":
+        os.mkfifo(path)
+    else:
+        path.symlink_to(target)
+    reads = []
+    actual_read = readback.os.read
+
+    def counted(fd, size):
+        reads.append(size)
+        return actual_read(fd, size)
+
+    monkeypatch.setattr(readback.os, "read", counted)
+    with pytest.raises(readback.ReadbackUnavailable):
+        readback.verify_seed(path, item, native_thread_id="new-thread")
     assert reads == []
