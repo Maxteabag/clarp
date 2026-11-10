@@ -66,6 +66,7 @@ from lib import events  # noqa: E402
 from lib import identity  # noqa: E402
 from lib.http_utils import HandlerResponder, Principal, redact_query_secrets  # noqa: E402
 from lib.log import log, log_exception  # noqa: E402
+from lib.http_diagnostics import _note_http_failure  # noqa: E402
 from lib.paths import RuntimePaths, _safe_session  # noqa: E402
 from lib.focus import current_focus_session  # noqa: E402
 from lib.send_request import SendRequest, SendRequestError  # noqa: E402
@@ -162,8 +163,8 @@ class ContextHTTPServer(ThreadingHTTPServer):
         if isinstance(exc, (BrokenPipeError, ConnectionResetError, TimeoutError)):
             try:
                 log("clientGone", f"{client_address[0]} {type(exc).__name__}")
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as diagnostic_error:  # noqa: BLE001
+                _note_http_failure("H01", diagnostic_error)
             return
         super().handle_error(request, client_address)
 
@@ -456,8 +457,8 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
             try:
                 from lib import telemetry
                 telemetry.close_local()
-            except Exception:
-                pass
+            except Exception as diagnostic_error:
+                _note_http_failure("H02", diagnostic_error)
 
     _GET_ROUTES = {
         "/": "_send_index",
@@ -737,8 +738,8 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
                     "interaction_id": self._interaction_id(),
                 },
             )
-        except Exception:
-            pass
+        except Exception as diagnostic_error:
+            _note_http_failure("H03", diagnostic_error)
 
     def handle_one_request(self):
         # One Handler serves every request on a keep-alive connection, so
@@ -1973,8 +1974,8 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
                     if getattr(q, "evicted", False):
                         try:
                             eventlog.emit("server", "sseEvictedClose", level="warning")
-                        except Exception:
-                            pass
+                        except Exception as diagnostic_error:
+                            _note_http_failure("H04", diagnostic_error)
                         break
                     # A data event, not a `: ping` comment: EventSource
                     # never surfaces comments, so a quiet stream looked dead
@@ -1985,8 +1986,8 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         except (BrokenPipeError, ConnectionResetError):
             try:
                 eventlog.emit("server", "sseClientGone", level="info")
-            except Exception:
-                pass
+            except Exception as diagnostic_error:
+                _note_http_failure("H05", diagnostic_error)
         finally:
             self.ctx.stream.unsubscribe(q)
 
