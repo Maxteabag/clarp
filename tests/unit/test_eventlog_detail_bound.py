@@ -229,3 +229,64 @@ def test_a_deferred_wait_record_is_bounded_before_it_is_queued(tmp_path, capsys)
     assert bounded["_truncated"] == {
         "original_bytes": len(json.dumps({"msg": oversized}, separators=(",", ":"))), "limit_bytes": CAP}
     assert small == {"msg": "waited 6.2s"}               # under the cap: exactly as before
+
+
+def test_a_failed_bounding_in_the_deferred_path_touches_no_sink_before_the_commit(
+        tmp_path, monkeypatch, capfd):
+    """The two repairs together: the wait record is made while its transaction
+    is open, so preparing it must not write anywhere, a fault report included.
+    The real fault reporter is in place and would print at once if called."""
+    from lib import db, log, telemetry
+
+    def written() -> tuple[list[dict], list]:
+        lines = [json.loads(line) for path in tmp_path.glob("*.jsonl")
+                 for line in path.read_text().splitlines()]
+        rows = telemetry.conn().execute(
+            "SELECT event, detail FROM diagnostic_events ORDER BY event_id").fetchall()
+        return lines, rows
+
+    reports: list[str] = []
+    real_fault = eventlog.log_fault
+
+    def fault(code, exc, **kw):
+        reports.append(code)
+        return real_fault(code, exc, **kw)
+
+    monkeypatch.setattr(eventlog, "log_fault", fault)
+    monkeypatch.setattr(log, "_FAULT_LOG_THROTTLE", {})          # nothing throttled: a report would print
+    monkeypatch.setattr(eventlog, "_bound_detail", _broken_bounder)
+    oversized = "waited " + "w" * 200_000
+    connection = db.conn()
+    telemetry.conn()
+    capfd.readouterr()
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        log.sqlite_write_wait(oversized, connection)
+        eventlog.flush_deferred()                                # a premature flush is refused too
+        eventlog._flush_all_deferred()
+        before = capfd.readouterr()                              # file descriptors 1 and 2, print or raw write
+        assert (before.out, before.err) == ("", "")
+        assert written() == ([], [])
+        assert reports == []
+        queued = [item.record for batch in eventlog._DEFERRED.values() for item in batch]
+        assert [record["detail"]["_truncated"]["error"] for record in queued] == ["RecursionError"]
+        connection.execute("COMMIT")
+    finally:
+        db.close_local()
+
+    lines, rows = written()
+    assert [line["event"] for line in lines] == ["sqliteWriteWait"]
+    assert [row["event"] for row in rows] == ["sqliteWriteWait"]
+    fallback = lines[0]["detail"]
+    assert fallback == json.loads(rows[0]["detail"])
+    assert set(fallback) == {"_truncated"}
+    assert fallback["_truncated"]["error"] == "RecursionError"      # the diagnostic, in both sinks
+    assert fallback["_truncated"]["limit_bytes"] == CAP
+    assert fallback["_truncated"]["record_original_bytes"] > 200_000
+    assert "sqliteWriteWait" in capfd.readouterr().err              # the wait line itself, after the commit
+    assert reports == []
+
+    # The direct path still reports, and the reporter was live all along.
+    eventlog.emit("server", "direct", detail={"blob": "z" * 100_000})
+    assert reports == ["eventlogDetailBoundFailed"]
+    assert "eventlogDetailBoundFailed error_type=RecursionError" in capfd.readouterr().err
