@@ -196,7 +196,6 @@ STATUS_WRITERS: dict[tuple[str, str], set[str]] = {
     ("janitor_runs", "status"): {"lib/janitor_store.py"},
     ("messages", "phase"): {"lib/message_live.py", "lib/message_writes.py"},
     ("oracle_admissions", "status"): {"lib/oracle_memory.py"},
-    ("oracle_delegations", "status"): {"lib/oracle_delegations.py"},
     ("orchestrator_pending_utterances", "status"): {"lib/orchestrator.py"},
     ("provider_limit_episodes", "status"): {"lib/backend_usage.py"},
     ("state_log", "kind"): {"lib/turn_lifecycle.py"},
