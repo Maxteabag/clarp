@@ -654,7 +654,10 @@ def _post_truncated_raw(url: str, body: bytes, advertised_length: int,
     return status, response_body
 
 
-def test_get_snapshot_returns_seeded_data(running_server):
+def test_get_snapshot_returns_seeded_data(running_server, monkeypatch):
+    from concurrent.futures import Future
+    from lib import snapshot
+
     base, _ctx, _srv = running_server
     status, body = _get(base + "/agents/snapshot")
     assert status == 200
@@ -664,6 +667,86 @@ def test_get_snapshot_returns_seeded_data(running_server):
         "clarp-message-delegator", "clarp-tool-explainer", "clarp-audio-bookkeeper", "clarp-heartbeat-decider", "clarp-quota-monitor",
         "clarp-label-auditor"}
     assert next(a for a in data["agents"] if a["session"] == "claude")["persona"] == "Mike"
+
+    # A real client disconnects while its full snapshot is being built. A
+    # later HTTP caller must join that work, not force a replacement build.
+    started, release, selected = threading.Event(), threading.Event(), threading.Event()
+    shared = snapshot.SharedSnapshot()
+    monkeypatch.setattr(snapshot, "SHARED", shared)
+    real_build = snapshot.build_agent_snapshot
+    calls, replies, failures = [], [], []
+
+    def build(ctx):
+        calls.append(ctx)
+        if len(calls) == 1:
+            started.set()
+            assert release.wait(CLIENT_TIMEOUT_S)
+        return real_build(ctx)
+
+    monkeypatch.setattr(snapshot, "build_agent_snapshot", build)
+    tagged = threading.local()
+    real_handler = server_module.Handler._handle_snapshot
+
+    def handle(handler):
+        tagged.late = handler.headers.get("X-Snapshot-Test-Late") == "1"
+        try:
+            return real_handler(handler)
+        finally:
+            tagged.late = False
+
+    monkeypatch.setattr(server_module.Handler, "_handle_snapshot", handle)
+    real_clock, real_result, real_wait = snapshot.time.monotonic, Future.result, threading.Condition.wait
+
+    def observe():
+        if getattr(tagged, "late", False):
+            selected.set()
+
+    def monotonic():
+        now = real_clock()
+        if hasattr(shared, "_last"):  # baseline: observed before its blocking lock
+            observe()
+        return now
+
+    def result(future, *args, **kwargs):
+        observe()
+        return real_result(future, *args, **kwargs)
+
+    def wait(condition, *args, **kwargs):
+        observe()
+        return real_wait(condition, *args, **kwargs)
+
+    monkeypatch.setattr(snapshot, "time", SimpleNamespace(monotonic=monotonic))
+    monkeypatch.setattr(Future, "result", result)
+    monkeypatch.setattr(threading.Condition, "wait", wait)
+    address = urlsplit(base)
+    abandoned = socket.create_connection((address.hostname, address.port), timeout=CLIENT_TIMEOUT_S)
+    late = None
+
+    def request_late():
+        try:
+            replies.append(_get(base + "/agents/snapshot", headers={"X-Snapshot-Test-Late": "1"}))
+        except BaseException as exc:
+            failures.append(exc)
+
+    try:
+        abandoned.sendall(b"GET /agents/snapshot HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+        assert started.wait(CLIENT_TIMEOUT_S)
+        abandoned.shutdown(socket.SHUT_RDWR)
+        abandoned.close()
+        late = threading.Thread(target=request_late, daemon=True)
+        late.start()
+        assert selected.wait(CLIENT_TIMEOUT_S)
+        assert len(calls) == 1
+    finally:
+        abandoned.close()
+        release.set()
+        if late is not None:
+            late.join(CLIENT_TIMEOUT_S)
+    assert late is not None and not late.is_alive()
+    assert failures == []
+    assert len(calls) == 1
+    assert len(replies) == 1 and replies[0][0] == 200
+    assert json.loads(replies[0][1]) == data
 
 
 @pytest.mark.parametrize("endpoint", ["/agent-file", "/agent-files"])
