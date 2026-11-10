@@ -19,6 +19,7 @@ from lib import group_calls, oracle_realtime
 from tests.unit.test_agent_ring_live import OTHER_PHONE, PHONE, _live_ring, sander  # noqa: F401 - fixture
 from tests.unit.test_agent_ring_live_controls import Session, _fallback
 from tests.unit.test_agent_ring_live_socket import Handler, _join, _masked, _ring_of, _serve, call  # noqa: F401
+from tests.unit.test_agent_ring_live_socket import _live_lifecycle  # noqa: F401 - autouse: no session outlives its test
 from tests.unit.test_agent_rings import env  # noqa: F401 - env is a fixture
 
 UNBOUND = {"call_id": "", "call_epoch": 0, "attempt_id": ""}

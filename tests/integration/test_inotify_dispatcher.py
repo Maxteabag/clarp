@@ -73,6 +73,41 @@ def test_inotify_dispatcher_fires_when_file_grows(tmp_path):
         disp.stop()
 
 
+def test_inotify_dispatcher_delivers_when_its_fds_are_above_1024(tmp_path):
+    """A process with many open files hands the dispatcher fds >= 1024. select()
+    rejects those (FD_SETSIZE) and the loop used to swallow that and exit silently,
+    so no transcript change was delivered again (main CI's streamer failures)."""
+    import os
+    import resource
+    soft, _hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    assert soft >= 1100, f"RLIMIT_NOFILE soft limit {soft} cannot place fds above 1024"
+    tx = tmp_path / "tx.jsonl"
+    received: list[str] = []
+    pool = WatcherPool()
+    pool.add("agent-A", TranscriptWatcher(tx, on_text=received.append))
+    disp = InotifyDispatcher(pool)
+    placeholders: list[int] = []
+    try:
+        while True:                       # occupy every free fd number below 1024
+            fd = os.open(os.devnull, os.O_RDONLY)
+            if fd >= 1024:
+                os.close(fd)
+                break
+            placeholders.append(fd)
+        disp.watch("agent-A", tx)
+        disp.start()
+        assert disp._inotify.fileno() >= 1024
+        time.sleep(0.05)
+        _append(tx, _assistant_text("hello high fd"))
+        assert _wait_for(lambda: received[:]) == ["hello high fd"]
+        assert disp._thread.is_alive()
+    finally:
+        disp.stop(timeout=2.0)
+        for fd in placeholders:
+            os.close(fd)
+    assert not disp._thread.is_alive()
+
+
 def test_inotify_dispatcher_multiplexes_multiple_agents(tmp_path):
     """One dispatcher, two agents — each agent's text goes only to its
     own callback. Pin the no-cross-routing invariant at the push layer."""

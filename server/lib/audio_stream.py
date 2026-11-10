@@ -302,7 +302,9 @@ class AudioStream:
             return  # A transient metadata failure must not erase the replay cache.
         cutoff = time.time() - self.AUDIO_RETAIN_SEC
         try:
-            for p in self.audio_dir.glob("*.mp3"):
+            # Raw-pcm clips (VP-03) expire like mp3 ones, sidecars included.
+            clips = [*self.audio_dir.glob("*.mp3"), *self.audio_dir.glob("*.pcm")]
+            for p in clips:
                 try:
                     if p.stat().st_mtime < cutoff and str(p.resolve()) not in protected:
                         p.unlink()

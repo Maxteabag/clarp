@@ -41,6 +41,252 @@ def _store(agent_id: str, turns: list[dict], *, session_id="conversation-1"):
     )
 
 
+@pytest.mark.parametrize("background", [False, True])
+def test_deferred_native_import_serves_committed_history_without_success_metrics(
+        tmp_path, monkeypatch, background):
+    """The native result is INPUT; real conversation/cache decide completion."""
+    import threading
+    from lib import eventlog, transcript_import_cache as cache, transcript_incremental
+
+    cache.reset_for_tests()
+    agent_id = _agent(tmp_path)
+    _store(agent_id, [{"role": "user", "text": "committed history",
+                      "timestamp": "2026-01-01T00:00:00Z"}])
+    source = tmp_path / "deferred.jsonl"
+    source.write_text("{}\n")
+    entered = threading.Event()
+    success_events = []
+    monkeypatch.setattr(backends, "find_session_jsonl", lambda *args: source)
+
+    def deferred_native_import(**kwargs):
+        entered.set()
+        # Keep every old metrics key, so baseline reaches unwanted-success
+        # publication rather than a missing-key/API/setup failure.
+        return {"rows": 0, "parse_s": 0.0, "store_s": 0.0,
+                "_clarp_transcript_completion_v1": "deferred"}
+
+    original_emit = eventlog.emit
+
+    def observe_success(category, event, **kwargs):
+        if (category, event) == ("transcript", "import"):
+            success_events.append(event)
+        return original_emit(category, event, **kwargs)
+
+    monkeypatch.setattr(transcript_incremental, "import_transcript", deferred_native_import)
+    monkeypatch.setattr(eventlog, "emit", observe_success)
+    try:
+        response = _load("reliable", background_import=background)
+        assert [turn["text"] for turn in response["turns"]] == ["committed history"]
+        assert response["conversation_id"] == "conversation-1"
+        assert entered.wait(2), "the real import closure did not consume its native input"
+        assert cache.wait_for_background(2)
+        assert success_events == [], "expected deferral was emitted as completed import"
+        key = f"{agent_id}\0{source}"
+        assert key not in cache._imported
+        assert not cache._validated_at.get(key, cache._epoch)[0]
+    finally:
+        assert cache.reset_for_tests()
+
+
+def test_true_first_open_still_imports_native_history_before_responding(tmp_path, monkeypatch):
+    from tests.readmodel import rm_n14_harness as harness
+    from lib import db, transcript_import_cache as cache
+
+    cache.reset_for_tests()
+    agent_id = _agent(tmp_path)
+    source = tmp_path / "first-open.jsonl"
+    source.write_bytes(harness.append_bytes("claude", 0))
+    claude = backends.by_id("claude")
+    monkeypatch.setattr(claude, "parse_transcript",
+                        type(claude).parse_transcript.__get__(claude))
+    monkeypatch.setattr(backends, "find_session_jsonl", lambda *args: source)
+    try:
+        response = _load("reliable", background_import=True)
+        assert any(turn["text"] == "synthetic request 0" for turn in response["turns"])
+        assert any("synthetic answer 0" in turn["text"] for turn in response["turns"])
+        assert db.conn().execute(
+            "SELECT count(*) FROM messages WHERE agent_id=? AND source_file=?",
+            (agent_id, str(source))).fetchone()[0] > 0
+        assert cache._imported[f"{agent_id}\0{source}"] == cache._signature(source)
+    finally:
+        assert cache.reset_for_tests()
+
+
+@pytest.fixture
+def native_full_context(tmp_path, monkeypatch):
+    """Real native parse/store, with a genuinely unretained weighted frontier."""
+    import time
+    import threading
+    from types import SimpleNamespace
+    from tests.readmodel import rm_n14_harness as harness
+    from lib import db, log, transcript_import_cache as cache, transcript_incremental as inc
+
+    assert cache.reset_for_tests()
+    agent_id = _agent(tmp_path)
+    _store(agent_id, [{"role": "user", "text": "committed history",
+                      "timestamp": "2026-01-01T00:00:00Z"}])
+    source = tmp_path / "native-coalescing.jsonl"
+    source.write_bytes(harness.append_bytes("claude", 0))
+    monkeypatch.setattr(agents_db, "is_busy", lambda *_: True)
+    monkeypatch.setattr(cache, "_BACKGROUND_MIN_INTERVAL", 0.0)
+    claude = backends.by_id("claude")
+    monkeypatch.setattr(claude, "parse_transcript",
+                        type(claude).parse_transcript.__get__(claude))
+    monkeypatch.setattr(backends, "find_session_jsonl", lambda *args: source)
+    monkeypatch.setattr(inc, "settings", lambda: dict(inc._DEFAULTS, enabled=False))
+    # This is a real cache rejection, not a supplied deferred/import receipt.
+    monkeypatch.setattr(inc._TAIL_STATES, "max_weight", 1)
+    state = {"now": 1000.0, "full_calls": [], "logs": [], "hold": False,
+             "entered": threading.Event(), "release": threading.Event(),
+             "stored": [threading.Event(), threading.Event()], "store_workers": [],
+             "decision": threading.Event(),
+             "agent": agent_id, "source": source}
+    monkeypatch.setattr(inc, "time", SimpleNamespace(
+        monotonic=lambda: state["now"], perf_counter=time.perf_counter))
+    real_parse, real_log = backends.parse_turns, log.log
+    real_store = inc._store_full_with_tail_checkpoint
+
+    def parse(backend, path):
+        if not isinstance(path, inc._RangePath):
+            state["full_calls"].append(str(path))
+            if state["hold"] and len(state["full_calls"]) == 1:
+                state["entered"].set()
+                assert state["release"].wait(5), "test did not release the actual full parser"
+        return real_parse(backend, path)
+
+    def capture(event, detail=""):
+        if event == "transcriptTailDecision":
+            state["logs"].append(detail)
+            state["decision"].set()
+        return real_log(event, detail)
+
+    def store(*args, **kwargs):
+        result = real_store(*args, **kwargs)
+        state["store_workers"].append(threading.current_thread())
+        ordinal = len(state["store_workers"]) - 1
+        if ordinal < 2:
+            state["stored"][ordinal].set()
+        return result
+
+    monkeypatch.setattr(backends, "parse_turns", parse)
+    monkeypatch.setattr(log, "log", capture)
+    monkeypatch.setattr(inc, "_store_full_with_tail_checkpoint", store)
+    try:
+        yield state
+    finally:
+        state["release"].set()
+        assert cache.reset_for_tests()
+
+
+def _native_store_finished(state, ordinal):
+    import threading
+    assert state["stored"][ordinal - 1].wait(3), "actual native store did not complete"
+    worker = state["store_workers"][ordinal - 1]
+    if worker is not threading.current_thread():
+        worker.join(3)
+        assert not worker.is_alive(), "selected native worker did not terminate"
+
+
+def test_native_refused_full_is_coalesced_without_renewing_dirty_deadline(native_full_context):
+    from tests.readmodel import rm_n14_harness as harness
+    from lib import transcript_import_cache as cache
+
+    state = native_full_context
+    _load("reliable", background_import=True)
+    _native_store_finished(state, 1)
+    first = _load("reliable")  # already-covered signature, no second parse
+    assert len(state["full_calls"]) == 1
+    before = [(row["id"], row["text"]) for row in first["turns"]]
+    key = f"{state['agent']}\0{state['source']}"
+    signature = cache._imported[key]
+    for ordinal, now in [(1, 1001.0), (2, 1004.0)]:
+        state["now"] = now
+        with state["source"].open("ab") as output:
+            output.write(harness.append_bytes("claude", ordinal))
+        pending = _load("reliable", background_import=True)
+        assert cache.wait_for_background(2)
+        assert [(row["id"], row["text"]) for row in pending["turns"]] == before
+        assert len(state["full_calls"]) == 1, "cooldown reread the entire native file"
+        assert cache._imported[key] == signature, "refused work became fresh"
+        assert cache.is_active(state["source"], owner=state["agent"]), "latest dirty work was lost"
+    assert any("code=deferred_full_cooldown " in line for line in state["logs"])
+    state["now"] = 1005.1  # measured from the FULL, not the most recent poll
+    _load("reliable", background_import=True)
+    _native_store_finished(state, 2)
+    assert len(state["full_calls"]) == 2
+    completed = _load("reliable")
+    assert len(state["full_calls"]) == 2
+    assert any(row["text"] == "synthetic request 2" for row in completed["turns"])
+    assert cache._imported[key] == cache._signature(state["source"])
+    assert all(" backend=claude size=lt1m" in line for line in state["logs"])
+    assert all(str(state["source"]) not in line and state["agent"] not in line
+               for line in state["logs"])
+
+
+@pytest.mark.parametrize("required", ["first_open", "delta", "history_cursor", "new_cache_epoch"])
+def test_native_full_coalescing_preserves_required_legacy_paths(native_full_context, required):
+    from tests.readmodel import rm_n14_harness as harness
+    from lib import db, transcript_import_cache as cache
+
+    state = native_full_context
+    _load("reliable", background_import=True)
+    _native_store_finished(state, 1)
+    first = _load("reliable")
+    assert len(state["full_calls"]) == 1
+    with state["source"].open("ab") as output:
+        output.write(harness.append_bytes("claude", 1))
+    kwargs = {}
+    if required == "first_open":
+        db.conn().execute("DELETE FROM messages WHERE agent_id=? AND backend_session_id=?",
+                          (state["agent"], "conversation-1"))
+        db.conn().commit()
+    elif required == "delta":
+        kwargs["after_revision"] = first["latest_revision"]
+    elif required == "history_cursor":
+        kwargs["before_message_id"] = first["turns"][-1]["id"]
+    else:
+        assert cache.reset_for_tests()
+    state["decision"].clear()
+    _load("reliable", background_import=True, **kwargs)
+    assert state["decision"].wait(3), "required import never reached its real admission decision"
+    assert not state["logs"][-1].startswith("code=deferred_full_"), (
+        "required legacy path was incorrectly coalesced")
+    _native_store_finished(state, 2)
+    response = _load("reliable", **kwargs)
+    assert len(state["full_calls"]) == 2, "required legacy import was held by a stale cooldown"
+    assert response["conversation_id"] == "conversation-1" and "turns" in response
+    if required in ("first_open", "new_cache_epoch"):
+        assert any(row["text"] == "synthetic request 1" for row in response["turns"])
+
+
+def test_same_owner_native_source_alias_does_not_start_another_full_while_running(
+        native_full_context, monkeypatch):
+    from lib import db, transcript_import_cache as cache, transcript_incremental as inc
+
+    state = native_full_context
+    alias = state["source"].with_name("native-alias.jsonl")
+    alias.symlink_to(state["source"])
+    state["hold"] = True
+    try:
+        response = _load("reliable", background_import=True)
+        assert state["entered"].wait(3)
+        assert [row["text"] for row in response["turns"]] == ["committed history"]
+        # Drive the same production native adapter/admission with an alias,
+        # distinct path lock and the same materialized owner/session/file.
+        importer = inc._completion_import(
+            lambda: inc.import_transcript(backend="claude", path=alias, agent_id=state["agent"],
+                                          backend_session_id="conversation-1", _defer_full=True),
+            backend="claude", path=alias, agent_id=state["agent"],
+            backend_session_id="conversation-1")
+        assert not cache.import_if_changed(alias, importer, owner=state["agent"])
+        assert len(state["full_calls"]) == 1, "same context started a second full parser"
+        assert any("code=deferred_full_running " in line for line in state["logs"])
+        assert cache.is_active(alias, owner=state["agent"])
+    finally:
+        state["release"].set()
+        assert cache.reset_for_tests()
+
+
 def test_hidden_automation_does_not_consume_visible_snapshot_limit(tmp_path):
     agent_id = _agent(tmp_path)
     turns = [{"role": "user", "text": "old", "timestamp": "2026-01-01T00:00:00Z"}]
@@ -321,13 +567,19 @@ def test_a_delta_returns_only_rows_newer_than_the_cursor(tmp_path):
         [(t.get("revision"), t["text"][:24]) for t in delta["turns"]]
 
 
-def test_chat_read_returns_stored_rows_without_waiting_for_import(tmp_path, monkeypatch):
+@pytest.mark.parametrize('sparse_large', [False, True])
+def test_chat_read_returns_stored_rows_without_waiting_for_import(tmp_path, monkeypatch, sparse_large):
     import threading
     from lib import backends, transcript_import_cache, db
     agent = _agent(tmp_path)
     _store(agent, [{'role':'user','text':'stored message','timestamp':'2026-01-01T00:00:00Z'}])
     source = tmp_path / 'growing.jsonl'
     source.write_text('changed')
+    if sparse_large:
+        monkeypatch.setattr(transcript_import_cache, '_host_started_at', None)
+        assert transcript_import_cache.note_host_started(transcript_import_cache.time.monotonic())
+        with source.open('r+b') as stream:
+            stream.truncate(50 * 1024 * 1024)
     entered, release, returned = threading.Event(), threading.Event(), threading.Event()
     answers, errors = [], []
     monkeypatch.setattr(backends, 'find_session_jsonl', lambda *a: source)
@@ -408,3 +660,21 @@ def test_claude_subagent_cell_reaches_the_log_intact(tmp_path):
     assert compact["display_cells"][0]["kind"] == "subagents"
     assert compact["display_cells"][0]["ephemeral"] is True
     assert compact["activity_count"] == 1
+
+
+def test_a_delta_after_a_relink_carries_the_new_trace(tmp_path):
+    """RM-N5: re-owning an admitted-but-never-launched user row under a new
+    attempt rewrote its trace with no revision, so delta clients kept the old
+    trace until a full reload."""
+    agent_id = _agent(tmp_path)
+    message_store.record_user_message(
+        agent_id=agent_id, backend_session_id="conversation-1", client_msg_id="c-1",
+        text="please do it", origin="user", sender_agent_id=None, trace_id="t-first")
+    before = _load("reliable")["latest_revision"]
+
+    message_store.relink_client_message("c-1", trace_id="t-second")
+
+    delta = _load("reliable", after_revision=before)
+    rows = [t for t in delta["turns"] if t.get("id") == "u-c-1"]
+    assert [t.get("trace_id") for t in rows] == ["t-second"]
+    assert delta["latest_revision"] > before

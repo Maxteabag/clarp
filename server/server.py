@@ -11,6 +11,11 @@ Endpoints (see Handler.do_GET / do_POST for the dispatch tables):
 """
 from __future__ import annotations
 
+import time
+_HOST_PROCESS_STARTED_AT = time.monotonic()
+from lib import transcript_import_cache as _transcript_import_cache
+_transcript_import_cache.note_host_started(_HOST_PROCESS_STARTED_AT)
+
 from lib import clip_store
 from lib import viz_normalize
 
@@ -26,7 +31,6 @@ import secrets
 import shutil
 import sqlite3
 import sys
-import time
 import threading
 from urllib.parse import parse_qs, unquote, urlparse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -35,7 +39,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).parent))
 
 from lib.agent_store import (  # noqa: E402
     load_agents,
-    save_agents,
+    save_agent,
 )
 from lib.agent_lifecycle import AgentLifecycleError, AgentLifecycleService  # noqa: E402
 from lib.config import persona_personality  # noqa: E402
@@ -47,23 +51,12 @@ from lib.context import ServerContext  # noqa: E402
 from lib import db  # noqa: E402
 from lib import eventlog  # noqa: E402
 
-_OUTDATED_CLIENTS_NOTED: set[str] = set()
-
-
-def _note_outdated_client(client: dict) -> None:
-    """One diagnostic per (platform, build) so an old app polling every few
-    seconds does not flood the event log."""
-    key = f"{client.get('platform')}/{client.get('build')}"
-    if key in _OUTDATED_CLIENTS_NOTED:
-        return
-    _OUTDATED_CLIENTS_NOTED.add(key)
-    eventlog.emit(
-        "server", "clientContractOutdated", level="warning",
-        detail={"platform": client.get("platform"), "build": client.get("build"),
-                "client_contract": client.get("contract"), "reason": client.get("reason")})
+from lib.outdated_clients import _note_outdated_client  # noqa: E402
+from lib.turn_identity import TurnIdentityUnavailable  # noqa: E402
 from lib import audio_metrics, voice_events  # noqa: E402
 from lib import health  # noqa: E402
 from lib import agents as agents_db  # noqa: E402
+from lib.routes import registry as route_registry  # noqa: E402
 from lib import backends  # noqa: E402
 from lib import backend_usage  # noqa: E402
 from lib import media_store  # noqa: E402
@@ -73,6 +66,7 @@ from lib import events  # noqa: E402
 from lib import identity  # noqa: E402
 from lib.http_utils import HandlerResponder, Principal, redact_query_secrets  # noqa: E402
 from lib.log import log, log_exception  # noqa: E402
+from lib.http_diagnostics import _note_http_failure  # noqa: E402
 from lib.paths import RuntimePaths, _safe_session  # noqa: E402
 from lib.focus import current_focus_session  # noqa: E402
 from lib.send_request import SendRequest, SendRequestError  # noqa: E402
@@ -131,18 +125,16 @@ PORT = int(os.environ.get("CLAUDE_PWA_PORT", str(_CFG.port)))
 BIND_ADDR = os.environ.get("CLAUDE_PWA_BIND", _CFG.bind_addr)
 
 
-def _runtime_paths() -> RuntimePaths:
-    return RuntimePaths.from_home(pathlib.Path.home())
-
-
-def _truthy_header(value: str | None) -> bool:
-    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
-
-
+from lib.routes.helpers import _runtime_paths, _truthy_header, _raw_query_value, _PLAY_EVENTS, _clip_session_and_trace, _safe_upload_name  # noqa: E402  (s3_apply)
 # Serializes read-decide-swap of ctx.stt in _activate_transcription_if_default.
 # Request threads never take it: the transcription pipeline reads ctx.stt once
 # per request, so a swap mid-request cannot hand one utterance two engines.
 _STT_ACTIVATION_LOCK = threading.Lock()
+
+
+class StopNotRecorded(RuntimeError):
+    """The Stop ran (process interrupted, barrier released) but its terminal
+    row could not be written after its bounded retries (TP-N1b)."""
 
 
 class ContextHTTPServer(ThreadingHTTPServer):
@@ -171,13 +163,17 @@ class ContextHTTPServer(ThreadingHTTPServer):
         if isinstance(exc, (BrokenPipeError, ConnectionResetError, TimeoutError)):
             try:
                 log("clientGone", f"{client_address[0]} {type(exc).__name__}")
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as diagnostic_error:  # noqa: BLE001
+                _note_http_failure("H01", diagnostic_error)
             return
         super().handle_error(request, client_address)
 
     def __init__(self, addr, handler_cls, ctx: ServerContext):
         self.ctx = ctx
+        # The import-time config snapshot (_CFG), the same object, for handler
+        # code that must not import this module. Set here, not in build_server,
+        # so the LAN listener (a subclass) and directly built servers carry it.
+        self.boot_config = _CFG
         self._close_callbacks = []
         self.local_tls = False
         self.local_transport = None
@@ -246,26 +242,7 @@ def broadcast_boot_version(ctx: ServerContext) -> None:
     events.broadcast(ctx.stream, events.server_version(ctx.sw_version()))
 
 
-_CARTESIA_PREVIEW_LOCKS: dict[str, threading.Lock] = {}
-_CARTESIA_PREVIEW_LOCKS_GUARD = threading.Lock()
-
-
-def _cartesia_preview_lock(voice_id: str) -> threading.Lock:
-    with _CARTESIA_PREVIEW_LOCKS_GUARD:
-        return _CARTESIA_PREVIEW_LOCKS.setdefault(voice_id, threading.Lock())
-
-
-def _raw_query_value(path: str, key: str) -> str:
-    """Decode one query value without form-style `+` to space rewriting.
-
-    Filesystem paths legitimately contain plus signs. Native URLQueryItem may
-    leave them literal, whereas parse_qs assumes HTML form encoding.
-    """
-    for field in urlparse(path).query.split("&"):
-        raw_key, separator, raw_value = field.partition("=")
-        if separator and unquote(raw_key) == key:
-            return unquote(raw_value)
-    return ""
+from lib.cartesia_preview_locks import _cartesia_preview_lock  # noqa: E402
 
 
 def _header_int(raw: str | None) -> int | None:
@@ -273,26 +250,6 @@ def _header_int(raw: str | None) -> int | None:
         return int(float(raw)) if raw not in (None, "") else None
     except (TypeError, ValueError):
         return None
-
-
-# /clips/ack statuses that are moments on the voice timeline.
-_PLAY_EVENTS = {"play-start": "play_start", "play-ok": "play_end",
-                "play-fail": "play_fail"}
-
-
-def _clip_session_and_trace(clip_id: int | None) -> tuple[str | None, str | None]:
-    if clip_id is None:
-        return None, None
-    try:
-        row = db.conn().execute(
-            """SELECT a.session AS session, c.trace_id AS trace_id
-                 FROM clips c LEFT JOIN agents a ON a.agent_id = c.agent_id
-                WHERE c.clip_id = ?""", (clip_id,)).fetchone()
-    except Exception:  # noqa: BLE001
-        return None, None
-    if row is None:
-        return None, None
-    return (row["session"] or None), (row["trace_id"] or None)
 
 
 def _spawn_voice_metrics(audio_bytes: bytes, ctype: str, *, session, trace_id,
@@ -377,7 +334,58 @@ def _byte_range(header: str, total: int) -> tuple[str, int, int]:
     return ("partial", lo, min(total - 1 if hi is None else hi, total - 1))
 
 
-class Handler(BaseHTTPRequestHandler):
+from lib.routes.vocab import VocabRoutes  # noqa: E402  (s3_apply)
+
+
+from lib.routes.settings import SettingsRoutes  # noqa: E402  (s3_apply)
+
+
+from lib.routes.providers import ProviderRoutes  # noqa: E402  (s3_apply)
+
+
+from lib.routes.ops import OpsRoutes  # noqa: E402  (s3_apply)
+
+
+from lib.routes.artifacts import ArtifactRoutes  # noqa: E402  (s3_apply)
+
+
+from lib.routes.media import MediaRoutes  # noqa: E402  (s3_apply)
+
+
+from lib.routes.goals import GoalRoutes  # noqa: E402  (s3_apply)
+
+
+from lib.routes.teams import TeamRoutes  # noqa: E402  (s3_apply)
+
+
+from lib.routes.schedules import ScheduleRoutes  # noqa: E402  (s3_apply)
+
+
+from lib.routes.heartbeat import HeartbeatRoutes  # noqa: E402  (s3_apply)
+
+
+from lib.routes.agents import AgentRoutes  # noqa: E402  (s3_apply)
+
+
+from lib.routes.personas import PersonaRoutes  # noqa: E402  (s3_apply)
+
+
+from lib.routes.calls import CallRoutes  # noqa: E402  (s3_apply)
+
+
+from lib.routes.oracle import OracleRoutes  # noqa: E402  (s3_apply)
+
+
+from lib.routes.voice import VoiceRoutes  # noqa: E402  (s3_apply)
+
+
+from lib.routes.voice_timeline import VoiceTimelineRoutes  # noqa: E402  (s3_apply)
+
+
+from lib.routes.send import SendRoutes  # noqa: E402  (s3_apply)
+
+
+class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRoutes, PersonaRoutes, AgentRoutes, HeartbeatRoutes, ScheduleRoutes, TeamRoutes, GoalRoutes, MediaRoutes, ArtifactRoutes, OpsRoutes, ProviderRoutes, SettingsRoutes, VocabRoutes, BaseHTTPRequestHandler):
     server_version = "ClaudePWA/1.0"
     # HTTP/1.1 so the tailscale-serve reverse proxy (and any direct client)
     # can keep connections alive: at the 1.0 default every request paid a
@@ -449,8 +457,8 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 from lib import telemetry
                 telemetry.close_local()
-            except Exception:
-                pass
+            except Exception as diagnostic_error:
+                _note_http_failure("H02", diagnostic_error)
 
     _GET_ROUTES = {
         "/": "_send_index",
@@ -465,7 +473,10 @@ class Handler(BaseHTTPRequestHandler):
         "/viz": "_send_viz_page",
         "/diagnostics/health": "_handle_diagnostics_health",
         "/backend-usage": "_handle_backend_usage",
+        "/hotseat/status": "_handle_hotseat_status",
         "/backend-auth": "_handle_backend_auth",
+        "/harness-providers": "_handle_harness_providers",
+        "/harness-providers/models": "_handle_harness_provider_models",
         "/managed-skills": "_handle_managed_skills",
         "/transcription-capabilities": "_handle_transcription_capabilities",
         "/transcription-guidance": "_handle_transcription_guidance_get",
@@ -590,6 +601,9 @@ class Handler(BaseHTTPRequestHandler):
         "/backend-auth/login": "_handle_backend_auth_login",
         "/backend-auth/login-code": "_handle_backend_auth_login_code",
         "/backend-auth/logout": "_handle_backend_auth_logout",
+        "/harness-providers/login": "_handle_harness_provider_login",
+        "/harness-providers/login-code": "_handle_harness_provider_login_code",
+        "/harness-providers/logout": "_handle_harness_provider_logout",
         "/server-update": "_handle_server_update",
         "/managed-skills": "_handle_managed_skills_update",
         "/upload": "_handle_upload",
@@ -663,11 +677,13 @@ class Handler(BaseHTTPRequestHandler):
         "/calls/end": "_handle_calls_end",
         "/calls/ring": "_handle_calls_ring",
         "/calls/ring/answer": "_handle_calls_ring_answer",
+        "/calls/ring/opening": "_handle_calls_ring_opening",
         "/calls/ring/decline": "_handle_calls_ring_decline",
         "/calls/ring/cancel": "_handle_calls_ring_cancel",
         "/calls/ring/settings": "_handle_calls_ring_settings_post",
         "/calls/ring/voip-token": "_handle_calls_ring_voip_token",
         "/calls/ring/device": "_handle_calls_ring_device",
+        "/calls/live": "_handle_calls_live",
         "/calls/ring/live/close": "_handle_calls_ring_live_close",
         "/calls/ring/live/fallback": "_handle_calls_ring_live_fallback",
         "/oracle/handoffs/ack": "_handle_oracle_handoff_ack",
@@ -722,8 +738,8 @@ class Handler(BaseHTTPRequestHandler):
                     "interaction_id": self._interaction_id(),
                 },
             )
-        except Exception:
-            pass
+        except Exception as diagnostic_error:
+            _note_http_failure("H03", diagnostic_error)
 
     def handle_one_request(self):
         # One Handler serves every request on a keep-alive connection, so
@@ -744,6 +760,17 @@ class Handler(BaseHTTPRequestHandler):
         self._trace_id = None
         try:
             super().handle_one_request()
+        except TurnIdentityUnavailable as exc:
+            # HTTP-N5: the turn token's lookup failed. Every call site asks before
+            # any side effect or response, so this is a retryable 503. Should a
+            # response already have started, it cannot become one: log and close
+            # the connection so the client never reuses a half-answered socket.
+            if self._status_code:
+                log_exception("turnIdentityAfterResponse", exc)
+                self.close_connection = True
+            else:
+                self._json(503, {"error": "turn identity unavailable", "retryable": True})
+                self.wfile.flush()
         finally:
             # `self.command` and a status set by send_response are only set
             # after super() parses the request line. If the connection dies
@@ -1119,7 +1146,7 @@ class Handler(BaseHTTPRequestHandler):
         return True
 
     _DEVICE_FULL_ONLY_PREFIXES = (
-        "/backend-auth", "/server-update", "/managed-skills",
+        "/backend-auth", "/harness-providers", "/server-update", "/managed-skills",
         "/orchestrator/", "/herald/", "/personalities/",
         "/automation-settings", "/avatar-settings", "/paired-devices",
         "/tts/providers", "/network/", "/server-terminal",
@@ -1140,6 +1167,11 @@ class Handler(BaseHTTPRequestHandler):
             for prefix in self._DEVICE_FULL_ONLY_PREFIXES
         ):
             return True
+        # Exactly the routes, so unmatched paths keep their 404 (HTTP-01/03).
+        # /past-sessions with any scope: a caller-chosen cwd lists that
+        # directory's sessions and their first messages (HTTP-03b).
+        if path in ("/dirs", "/past-sessions") or (path.startswith("/terminal/") and method == "GET"):
+            return True
         if method == "GET":
             return False
         from lib import controller_actions_http
@@ -1148,10 +1180,6 @@ class Handler(BaseHTTPRequestHandler):
         if method == "POST":
             return path not in self._LIMITED_DEVICE_POST_EXACT
         return True
-
-    def _oracle_auth_missing(self, path: str) -> bool:
-        return (path == "/oracle" or path.startswith("/oracle/")) and not bool(
-            getattr(self, "_request_auth_validated", False))
 
     def _auth_failure_retry(self) -> int:
         from lib.request_security import failure_source
@@ -1175,160 +1203,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._json_error(401, "Oracle requires authenticated full-device access")
         if self._device_forbidden(path, "GET"):
             return self._json_error(403, "full device access required")
-        from lib import janitor_http
-        if janitor_http.handles(path):
-            return janitor_http.handle(self, "GET")
-        from lib import controller_actions_http
-        if controller_actions_http.handles(path):
-            return controller_actions_http.handle(self, "GET")
-        if path in self._ROOT_STATIC:
-            return self._send_root_static(path)
-        if path == "/podcast-history" or path.startswith("/podcast-history/"):
-            from lib import podcast_history_http
-            return podcast_history_http.handle(self, "GET")
-        if self._dispatch_exact(self._GET_ROUTES, path):
-            return
-        if path.startswith("/teams/") and path.endswith("/messages"):
-            team_id = path[len("/teams/"):-len("/messages")].strip("/")
-            return self._handle_team_messages(team_id)
-        if path.startswith("/background-jobs/"):
-            return self._handle_background_job_detail(
-                path[len("/background-jobs/"):].strip("/"))
-        if path.startswith("/artifacts/") and path.endswith("/html"):
-            return self._handle_artifact_html(unquote(path[len("/artifacts/"):-len("/html")].strip("/")))
-        if path.startswith("/artifacts/") and path.endswith("/events-config"):
-            return self._handle_artifact_events_config(unquote(path[len("/artifacts/"):-len("/events-config")].strip("/")), write=False)
-        if path.startswith("/artifacts/") and path.endswith("/events"):
-            return self._handle_artifact_events(unquote(path[len("/artifacts/"):-len("/events")].strip("/")), write=False)
-        if path.startswith("/artifacts/") and path.endswith("/revisions"):
-            from lib import html_report_revisions
-            artifact_id = unquote(path[len("/artifacts/"):-len("/revisions")].strip("/"))
-            try:
-                query = parse_qs(urlparse(self.path).query)
-                version = query.get("version", [None])[0]
-                value = html_report_revisions.revisions(artifact_id, version,
-                    limit=int(query.get("limit", [50])[0]), offset=int(query.get("offset", [0])[0]))
-            except (ValueError, TypeError) as exc:
-                return self._json_error(404, str(exc))
-            return self._json_ok({"revision" if version is not None else "revisions": value})
-        if path.startswith("/artifacts/"):
-            return self._handle_artifact_get(unquote(path[len("/artifacts/"):].strip("/")))
-        if path.startswith("/static/"):
-            rel = path[len("/static/"):]
-            target = (self.ctx.static / rel).resolve()
-            if self.ctx.static.resolve() in target.parents or target == self.ctx.static.resolve():
-                return self._send_app_asset(target)
-            return self._send(403, b"forbidden")
-        if path.startswith("/media/"):
-            asset_id = path[len("/media/"):].strip("/")
-            return self._handle_media_content(asset_id)
-        if path.startswith("/agent-portraits/") and path.endswith("/content"):
-            portrait_id = path[len("/agent-portraits/"):-len("/content")].strip("/")
-            return self._handle_agent_portrait_content(portrait_id)
-        if path.startswith("/notification-avatars/"):
-            return self._handle_notification_avatar(
-                path[len("/notification-avatars/"):].strip("/"))
-        if path.startswith("/viz/owner-avatar/"):
-            from lib.viz_owner_avatar import portrait
-            result=portrait(unquote(path[len("/viz/owner-avatar/"):]))
-            return self._send(200,*result) if result else self._send(404,b"not found")
-        if path.startswith("/avatars/"):
-            return self._handle_agent_avatar(path[len("/avatars/"):].strip("/"))
-        if path.startswith("/persona-avatars/"):
-            return self._handle_persona_avatar(path[len("/persona-avatars/"):].strip("/"))
-        if path.startswith("/audio/"):
-            name = path[len("/audio/"):]
-            target = (self.ctx.audio_dir / name).resolve()
-            if self.ctx.audio_dir.resolve() in target.parents:
-                # If the worker is still streaming bytes to this clip
-                # (sidecar present, streamable=true, no `bytes` field yet),
-                # serve with Transfer-Encoding: chunked so we don't send a
-                # truncating Content-Length. iOS Safari falls back to
-                # plain HTTP for audio/mpeg (MSE unsupported), and the
-                # static handler's Content-Length=<partial> would stop
-                # playback after the first few words.
-                from lib.audio_growing import is_in_progress, serve_growing
-                if target.is_file() and is_in_progress(target):
-                    return serve_growing(self, target)
-                return self._send_file(target)
-            return self._send(403, b"forbidden")
-        if path.startswith("/stt/stream"):
-            # Provider-owned turn taking: the phone streams PCM, the relay
-            # forwards it to the chosen recogniser and returns its turn events.
-            from lib.stt_stream import serve_stt_stream
-            parsed = self._query()
-            return serve_stt_stream(
-                self, {k: (v[0] if v else "") for k, v in parsed.items()})
-        if path == "/server-terminal":
-            if not getattr(self, "_request_auth_validated", False):
-                return self._json_error(401, "Server terminal requires authenticated full-device access")
-            if os.name != "posix":
-                return self._json_error(501, "Server terminal is unavailable on this platform")
-            from lib.terminal_ws import serve_server_terminal
-            return serve_server_terminal(self)
-        if path.startswith("/terminal/"):
-            # Interactive terminal WS: spawns the agent's CLI in a PTY resumed
-            # on the same session id and bridges raw bytes both ways.
-            from lib.terminal_ws import serve_terminal
-            session = path[len("/terminal/"):].strip("/")
-            return serve_terminal(self, session)
-        if path.startswith("/clips/") and path.endswith("/stream"):
-            raw = path[len("/clips/"):-len("/stream")].strip("/")
-            try:
-                clip_id = int(raw)
-            except ValueError:
-                return self._send(400, b"bad clip id")
-            from lib.clip_stream import serve_clip_stream
-            return serve_clip_stream(
-                self, self.ctx.clip_broker, clip_id, self.ctx.audio_dir
-            )
-        if path.startswith("/clips/") and path.endswith("/complete.mp3"):
-            raw = path[len("/clips/"):-len("/complete.mp3")].strip("/")
-            try:
-                clip_id = int(raw)
-            except ValueError:
-                return self._send(400, b"bad clip id")
-            return self._send_complete_clip(clip_id)
-        # HLS artifact routes: /clips/<id>/playlist.m3u8 and
-        # /clips/<id>/segment-N.aac. Only present when HlsDelivery is the
-        # active delivery; otherwise the dir just doesn't exist and we 404.
-        if path.startswith("/clips/") and "/" in path[len("/clips/"):]:
-            rest = path[len("/clips/"):]
-            parts = rest.split("/", 1)
-            if len(parts) == 2:
-                try:
-                    clip_id = int(parts[0])
-                except ValueError:
-                    return self._send(400, b"bad clip id")
-                filename = parts[1]
-                from lib.clip_delivery.hls import serve_hls_artifact
-                return serve_hls_artifact(
-                    self, self.ctx.audio_dir, clip_id, filename,
-                )
-        return self._send(404, b"not found")
-
-    def _handle_remote_action_get(self):
-        """GET variant for iOS Shortcuts that use 'Open URL' rather than
-        'Get Contents of URL' with an explicit POST. Accepts ?action=...
-        and broadcasts the same SSE event."""
-        qs = self._query()
-        action = (qs.get("action", [""])[0] or "").strip().lower()
-        if (action not in ClientAction.valid()
-                or action == ClientAction.CONTROLLER_EVENT):
-            return self._json_error(400, "unknown action")
-        events.broadcast_ephemeral(
-            self.ctx.stream, events.remote_action(action, int(time.time() * 1000)))
-        log("remoteAction", f"GET {action}")
-        # Tiny no-cache HTML so Safari shows something blank instead of raw JSON.
-        body = b"<!doctype html><meta charset=utf-8><title>ok</title>"
-        self._send(200, body, "text/html")
-
-    def _handle_agent_avatar(self, agent_id: str):
-        row = identity.lookup(agent_id)
-        path = pathlib.Path(str((row or {}).get("avatar_path") or ""))
-        if not row or not path.is_file():
-            return self._send(404, b"not found")
-        self._send_file(path)
+        return route_registry.dispatch(self, "GET", path)
 
     def _handle_notification_avatar(self, agent_id: str):
         """Serve one short-lived APNs avatar capability without app auth."""
@@ -1362,348 +1237,6 @@ class Handler(BaseHTTPRequestHandler):
         self._send_file(path)
 
     # --- GET handlers ----------------------------------------------------
-
-    def _handle_voices(self):
-        qs = self._query()
-        include_sid = (qs.get("for", [""])[0] or "").strip()
-        agents_map = load_agents(self.ctx.agents_path)
-        out = voices_with_availability(agents_map, include_sid)
-        info = agents_map.get(include_sid) or {}
-        persona = info.get("name") or info.get("persona") or ""
-        bio = persona_personality(persona)
-        prefix = "Personality: "
-        if bio.startswith(prefix):
-            bio = bio[len(prefix):]
-        self._json_ok({"voices": out, "bio": bio,
-                       "persona": persona})
-
-    def _handle_cartesia_voices(self):
-        from lib.cartesia_voices import catalog
-        query = self._query()
-        force = query.get("force", ["0"])[0] in {"1", "true"}
-        try:
-            body = catalog(self.ctx.agents_path, force=force)
-        except Exception as exc:
-            log_exception("cartesiaVoicesFail", exc)
-            return self._json_error(502, "Cartesia voice library unavailable")
-        self._json_ok(body)
-
-    def _handle_voice_catalog(self):
-        from lib.voice_catalog import catalog
-        query = self._query()
-        session = (query.get("for", [""])[0] or "").strip()
-        agents = load_agents(self.ctx.agents_path)
-        self._json_ok(catalog(agents, session))
-
-    def _handle_voice_preview(self):
-        import hashlib
-        from lib import config as app_config
-        from lib.voice_catalog import catalog
-        query = self._query()
-        provider = (query.get("provider", [""])[0] or "").strip().lower()
-        voice_id = (query.get("id", [""])[0] or "").strip()
-        if provider == "google":
-            # First, before the catalog, any cached preview, credentials or voice interpretation.
-            from lib.google_tts import collision_code
-            code = collision_code()
-            if code:
-                return self._json_error(409, code)
-        body = catalog(load_agents(self.ctx.agents_path))
-        provider_row = next((row for row in body["providers"]
-                             if row["id"] == provider), None)
-        voice = next((row for row in (provider_row or {}).get("voices", [])
-                      if row["id"] == voice_id), None)
-        if not provider_row or not provider_row["available"] or not voice:
-            return self._send(404, b"voice unavailable")
-        cfg = app_config.load()
-        from lib.custom_tts_adapters import get as custom_adapter
-        from lib.tts_providers import VALID_IDS
-        custom_manifest = custom_adapter(provider, reserved_ids=VALID_IDS)
-        adapter_revision = ""
-        if custom_manifest is not None:
-            adapter_revision = ":".join((
-                str(custom_manifest.path.stat().st_mtime_ns),
-                str(custom_manifest.executable.stat().st_mtime_ns),
-            ))
-        cache = (_runtime_paths().cache_dir
-                 / "voice-previews")
-        cache.mkdir(mode=0o700, parents=True, exist_ok=True)
-        prompt = f"Hello, I'm {voice['name']}. This is how I'll sound in Clarp."
-        key = hashlib.sha256(
-            f"v3\0{provider}\0{voice_id}\0{adapter_revision}\0{prompt}".encode()
-        ).hexdigest()
-        path = cache / f"{key}.mp3"
-        if not path.is_file():
-            temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-            try:
-                if provider == "cartesia":
-                    from lib.cartesia_tts import synthesize
-                    synthesize(text=prompt, voice_id=voice_id,
-                               out_path=temporary, api_key=cfg.cartesia_key(),
-                               model=cfg.cartesia_model)
-                elif provider == "elevenlabs":
-                    from lib.eleven_ws import synthesize_streaming
-                    from lib.voice_catalog import (
-                        ELEVEN_PREVIEW_MODEL, ELEVEN_PREVIEW_SPEED,
-                    )
-                    synthesize_streaming(
-                        text=prompt, voice_id=voice_id, out_path=temporary,
-                        api_key=cfg.eleven_key(),
-                        model=ELEVEN_PREVIEW_MODEL,
-                        speed=ELEVEN_PREVIEW_SPEED)
-                elif provider == "deepgram":
-                    from lib.deepgram_tts import synthesize
-                    synthesize(text=prompt, voice_id=voice_id,
-                               out_path=temporary, api_key=cfg.deepgram_key())
-                elif provider == "gemini":
-                    from lib.gemini_tts import synthesize
-                    synthesize(text=prompt, voice=cfg.gemini_tts_voice(voice_id),
-                               out_path=temporary, api_key=cfg.gemini_tts_key(),
-                               backend=cfg.gemini_backend, model=cfg.gemini_model)
-                elif provider == "google":
-                    # The requested voice through the shared google backend, never an agent route.
-                    from lib import google_tts
-                    google_tts.synthesize(text=prompt, voice=voice_id, out_path=temporary,
-                                          creds=google_tts.credentials(cfg))
-
-                else:
-                    from lib.custom_tts_adapters import preview as custom_preview
-                    from lib.tts_providers import synthesize
-                    if custom_manifest is not None:
-                        custom_preview(
-                            custom_manifest, text=prompt, voice=voice_id,
-                            out_path=temporary)
-                    else:
-                        synthesize(provider, text=prompt, voice=voice_id,
-                                   out_path=temporary)
-                temporary.replace(path)
-            except Exception as exc:
-                temporary.unlink(missing_ok=True)
-                log_exception("voicePreviewFail", exc,
-                              detail=f"{provider}:{voice_id}")
-                return self._send(502, b"preview unavailable")
-        return self._send_file(path)
-
-    def _handle_controller_narration(self):
-        """One spoken line for the iOS Flic tutorial, in the Host's voice.
-
-        Synthesized once per text and cached; a phone rehearsing the same
-        gesture twice costs one Cartesia call. Feature `controller_narration`.
-        """
-        from lib import config as app_config
-        from lib import controller_narration
-        from lib.cartesia_tts import synthesize, CartesiaError
-        text = controller_narration.normalize_text(
-            _raw_query_value(self.path, "text"))
-        if not text:
-            return self._send(400, b"text required (at most 240 characters)")
-        cfg = app_config.load()
-        voice = controller_narration.voice_id(cfg)
-        if not voice or not cfg.cartesia_key():
-            return self._send(503, b"narration voice unavailable")
-        cache = (_runtime_paths().cache_dir
-                 / "controller-narration")
-        if cache.is_symlink():
-            eventlog.emit("server", "controllerNarrationCacheUnsafe",
-                          level="error", detail=str(cache))
-            return self._send(500, b"narration cache unavailable")
-        cache.mkdir(mode=0o700, parents=True, exist_ok=True)
-        key = controller_narration.cache_key(
-            text=text, voice=voice, model=cfg.cartesia_model)
-        path = cache / (key + ".mp3")
-        with _cartesia_preview_lock("narration:" + key):
-            cached = False
-            try:
-                stat = path.stat(follow_symlinks=False)
-                cached = (path.is_file() and not path.is_symlink()
-                          and stat.st_uid == os.geteuid())
-            except FileNotFoundError:
-                pass
-            if not cached:
-                temporary = path.with_name(
-                    f".{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
-                try:
-                    synthesize(text=text, voice_id=voice, out_path=temporary,
-                               api_key=cfg.cartesia_key(), model=cfg.cartesia_model)
-                    temporary.replace(path)
-                except (CartesiaError, OSError) as exc:
-                    try: temporary.unlink()
-                    except OSError: pass
-                    log_exception("controllerNarrationFail", exc, detail=text[:60])
-                    return self._send(502, b"narration unavailable")
-        return self._send_file(path)
-
-    def _handle_cartesia_voice_preview(self):
-        import hashlib
-        from lib.cartesia_voices import (
-            cached_english_voice, english_voices, has_cached_catalog)
-        from lib.cartesia_tts import synthesize, CartesiaError
-        from lib import config as app_config
-        query = self._query()
-        voice_id = (query.get("id", [""])[0] or "").strip()
-        # The picker must load the catalog first, so validate against that same
-        # in-memory snapshot. Never turn a preview tap into a slow catalog crawl.
-        row = cached_english_voice(voice_id)
-        if row is None and not has_cached_catalog():
-            row = next((item for item in english_voices()
-                        if str(item.get("id") or "") == voice_id), None)
-        if not row:
-            return self._send(404, b"not found")
-        name = str(row.get("name") or "this voice")[:80]
-        cfg = app_config.load()
-        cache = (_runtime_paths().cache_dir
-                 / "voice-previews")
-        if cache.is_symlink():
-            eventlog.emit("server", "cartesiaPreviewCacheUnsafe",
-                          level="error", detail=str(cache))
-            return self._send(500, b"preview cache unavailable")
-        cache.mkdir(mode=0o700, parents=True, exist_ok=True)
-        prompt = f"Hello, I'm {name}. This is how I'll sound in Clarp."
-        # Every input that can alter the bytes belongs in the key. The explicit
-        # version makes future changes to synthesis behavior easy to invalidate.
-        cache_input = "\0".join(("v1", voice_id, name, cfg.cartesia_model, prompt))
-        cache_key = hashlib.sha256(cache_input.encode()).hexdigest()
-        path = cache / (cache_key + ".mp3")
-        lock = _cartesia_preview_lock(cache_key)
-        with lock:
-            cached = False
-            try:
-                stat = path.stat(follow_symlinks=False)
-                cached = (path.is_file() and not path.is_symlink()
-                          and stat.st_uid == os.geteuid())
-            except FileNotFoundError:
-                pass
-            if not cached:
-                temporary = path.with_name(
-                    f".{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
-                try:
-                    synthesize(
-                        text=prompt,
-                        voice_id=voice_id, out_path=temporary,
-                        api_key=cfg.cartesia_key(), model=cfg.cartesia_model)
-                    temporary.replace(path)
-                except (CartesiaError, OSError) as exc:
-                    try: temporary.unlink()
-                    except OSError: pass
-                    log_exception("cartesiaPreviewFail", exc, detail=voice_id)
-                    return self._send(502, b"preview unavailable")
-        return self._send_file(path)
-
-    def _handle_orchestrator_settings_get(self):
-        from lib.orchestrator import provider_options
-        body = json.dumps({
-            "settings": get_orchestrator_settings().__dict__,
-            "providers": provider_options(),
-            "recent_decisions": recent_orchestrator_decisions(5),
-            "ignored_decisions": recent_orchestrator_ignored_decisions(20),
-        }).encode()
-        self._send(200, body, "application/json")
-
-    def _handle_judgments_settings_get(self):
-        from lib import judgments
-        body = json.dumps({
-            "settings": judgments.status(),
-            "sites": list(judgments.SITES),
-            "defaults": {"enabled": False, "timeout_ms": judgments.DEFAULT_TIMEOUT_MS},
-            "limits": {"timeout_ms": [100, judgments.MAX_TIMEOUT_MS]},
-        }).encode()
-        self._send(200, body, "application/json")
-
-    def _handle_judgments_settings_post(self):
-        from lib import judgments
-        data = self._read_json()
-        if not isinstance(data, dict):
-            return self._json_error(400, "bad json")
-        try:
-            settings = judgments.update_settings(data)
-        except ValueError as exc:
-            return self._json_error(400, str(exc))
-        return self._json_ok({"ok": True, "settings": settings})
-
-    def _handle_judgments_decisions_get(self):
-        from lib import judgments
-        query = self._query()
-        site = (query.get("site") or [""])[0]
-        try:
-            limit = int((query.get("limit") or ["50"])[0])
-        except (TypeError, ValueError):
-            limit = 50
-        if site and site not in judgments.SITES:
-            return self._json_error(400, "unknown site")
-        body = json.dumps({"decisions": judgments.recent(limit=limit, site=site)}).encode()
-        self._send(200, body, "application/json")
-
-    def _handle_herald_settings_get(self):
-        body = json.dumps({
-            "settings": get_herald_settings().as_dict(),
-            "defaults": {
-                "speak_if_short_chars": DEFAULT_SPEAK_IF_SHORT_CHARS,
-                "short_reply_bypass_enabled": True,
-            },
-            "limits": {
-                "speak_if_short_chars": [0, MAX_SPEAK_IF_SHORT_CHARS],
-            },
-        }).encode()
-        self._send(200, body, "application/json")
-
-    def _handle_personalities_settings_get(self):
-        body = json.dumps({
-            "settings": get_personality_settings().as_dict(),
-        }).encode()
-        self._send(200, body, "application/json")
-
-    def _handle_agent_model_options(self):
-        from lib import provider_capabilities
-        self._json_ok(provider_capabilities.endpoint_response())
-
-    def _handle_automation_settings_get(self):
-        from lib.automation_settings import get
-        self._json_ok(get())
-
-    def _handle_automation_settings_post(self):
-        from lib.automation_settings import update
-        data = self._read_json()
-        if data is None or not isinstance(data.get("special_treatment"), bool):
-            return self._json_error(400, "special_treatment required")
-        self._json_ok(update(data["special_treatment"]))
-
-    def _handle_avatar_settings_get(self):
-        from lib.avatar_settings import get
-        self._json_ok(get())
-
-    def _handle_avatar_settings_post(self):
-        from lib.avatar_settings import update
-        data = self._read_json()
-        if data is None or not isinstance(data.get("model_avatars"), bool):
-            return self._json_error(400, "model_avatars required")
-        self._json_ok(update(data["model_avatars"]))
-
-    def _handle_launch_directories(self):
-        from lib.launch_directories import lookup
-        query = self._query().get("q", [""])[0]
-        return self._json_ok(lookup(query))
-
-    def _handle_favorite_paths(self):
-        qs = self._query()
-        try:
-            limit = int(qs.get("limit", ["5"])[0])
-        except ValueError:
-            limit = 5
-        self._json_ok({"paths": agents_db.favorite_paths(limit)})
-
-    def _handle_orchestrator_decisions(self):
-        qs = self._query()
-        try:
-            limit = int(qs.get("limit", ["30"])[0])
-        except ValueError:
-            limit = 30
-        self._json_ok({"decisions": recent_orchestrator_decisions(limit)})
-
-    def _handle_agent_conversations(self):
-        """Pair conversations between agents, grouped by stable agent IDs."""
-        from lib import agent_conversations
-        body = json.dumps({"conversations": agent_conversations.list_conversations()}).encode()
-        self._send(200, body, "application/json")
 
     def _handle_viz_events(self):
         """Normalized fleet activity for the map, over a time window."""
@@ -1751,93 +1284,6 @@ class Handler(BaseHTTPRequestHandler):
     def _send_viz_page(self):
         """The fleet map itself; a static page that reads /viz/events."""
         return self._send_file(self.ctx.static / "viz.html")
-
-    def _handle_relay_status(self):
-        relay = self.server.relay
-        status = relay.status() if relay else {"enabled": False, "state": "disabled"}
-        self._json_ok(status)
-
-    def _handle_snapshot(self):
-        """Unified per-agent read model for the dashboard."""
-        from lib import snapshot
-        self._send(200, snapshot.SHARED.body(self.ctx), "application/json")
-
-    def _handle_prompt_history(self):
-        """Authenticated history of prospectively evidenced user prompts."""
-        if not (getattr(self.ctx, "auth_token", "") or ""):
-            return self._json_error(503, "prompt history requires configured authentication")
-        from lib.prompt_history import build_prompt_history
-
-        qs = self._query()
-        session_id = (qs.get("session_id", [""])[0] or "").strip()
-        compatibility_session = (qs.get("session", [""])[0] or "").strip()
-        if not session_id and not compatibility_session:
-            return self._json_error(400, "session_id required")
-        try:
-            limit = int(qs.get("limit", ["50"])[0] or 50)
-        except ValueError:
-            return self._json_error(400, "invalid limit")
-        before = (qs.get("before", [""])[0] or "").strip()
-        try:
-            history = build_prompt_history(
-                session_id=session_id,
-                compatibility_session_slug=compatibility_session,
-                limit=limit,
-                before=before,
-            )
-        except ValueError as exc:
-            return self._json_error(400, str(exc))
-        if history is None:
-            return self._json_error(404, "session not found")
-        self._send(
-            200,
-            json.dumps(history, ensure_ascii=False).encode(),
-            "application/json",
-        )
-
-    def _handle_dirs(self):
-        from lib.launch_paths import recover_user_path
-        qs = self._query()
-        raw = (qs.get("path", [""])[0] or "").strip()
-        raw = str(recover_user_path(raw))
-        if raw.endswith("/"):
-            base, frag = raw[:-1] or "/", ""
-        else:
-            base = os.path.dirname(raw) or "/"
-            frag = os.path.basename(raw).lower()
-        matches: list[str] = []
-        try:
-            for entry in sorted(os.listdir(base)):
-                if entry.startswith("."):
-                    continue
-                full = os.path.join(base, entry)
-                if not os.path.isdir(full):
-                    continue
-                if frag and not entry.lower().startswith(frag):
-                    continue
-                matches.append(full)
-                if len(matches) >= 20:
-                    break
-        except OSError as e:
-            log_exception("dirsListFail", e, detail=base)
-        body = json.dumps({"base": base, "matches": matches}).encode()
-        self._send(200, body, "application/json")
-
-    def _handle_past_sessions(self):
-        from lib.launch_paths import recover_user_path
-        qs = self._query()
-        raw = (qs.get("cwd", [""])[0] or "").strip()
-        raw = str(recover_user_path(raw))
-        backend = backends.normalize(qs.get("backend", [""])[0])
-        all_projects = (qs.get("scope", [""])[0] or "").strip().lower() == "all"
-        limit = 100 if all_projects else 20
-        sessions = backends.list_sessions(
-            backend, raw, limit=limit, all_projects=all_projects)
-        body = json.dumps({
-            "cwd": raw, "scope": "all" if all_projects else "workspace",
-            "sessions": sessions,
-        }).encode()
-        self._send(200, body, "application/json")
 
     @staticmethod
     def _first_user_message(jsonl: pathlib.Path) -> str:
@@ -1889,31 +1335,14 @@ class Handler(BaseHTTPRequestHandler):
             # call never reads as idle (docs/protocol.md "Runtime status").
             from lib.runtime_release import status_view_for
             runtime_payload = status_view_for(runtime_client).block()
+        from lib import runtime_attestation
         body = json.dumps({
             "session": session, "busy": busy,
             "runtime": runtime_payload,
+            "delivery_admission": runtime_attestation.status_block(),
             "deployed_version": self.ctx.deployed_version(),
             "release_id": getattr(
                 self.ctx, "deployed_release_id", lambda: "development")(),
-        }).encode()
-        self._send(200, body, "application/json")
-
-    def _handle_diagnostics_health(self):
-        from lib import tts_queue
-        stt_ready = bool(self.ctx.stt.ready.is_set())
-        ffmpeg_ready = _CFG.delivery != "hls" or shutil.which("ffmpeg") is not None
-        body = json.dumps({
-            "ready": stt_ready and ffmpeg_ready,
-            "checks": {
-                "stt_ready": stt_ready,
-                "ffmpeg_ready": ffmpeg_ready,
-            },
-            "subsystems": health.snapshot(),
-            "tts_queue": {
-                "pending": tts_queue.pending_count(),
-                "in_flight": tts_queue.in_flight_count(),
-            },
-            "deployed_version": self.ctx.deployed_version(),
         }).encode()
         self._send(200, body, "application/json")
 
@@ -1926,7 +1355,7 @@ class Handler(BaseHTTPRequestHandler):
         # module-level load_config alias would bypass the patch.
         from lib.config import load as load_config
         from lib.stt import (DisabledSTT, UnavailableSTT, WhisperSTT,
-                             WhisperCppSTT,
+                             WhisperCppSTT, close_engine,
                              _installed_model_records)
         cfg = load_config()
         provider = getattr(cfg, "whisper_provider", "faster-whisper")
@@ -1964,15 +1393,18 @@ class Handler(BaseHTTPRequestHandler):
             replacement = stt_cls(
                 cfg.whisper_model, cfg.whisper_compute,
                 model_source=record["_local_path"])
-        # Publish loader ownership before starting it. A timed-out recovery
-        # retry must wait on this exact loader rather than create a duplicate.
-        self.ctx.replace_stt(replacement)
+        # Load before publishing: the old engine serves meanwhile, and only a
+        # loaded replacement takes over; the old engine's worker is then
+        # stopped (VP-07). A load past the timeout is still published, so a
+        # recovery retry waits on this exact loader rather than a duplicate.
         replacement.start_loading()
         if not replacement.load_done.wait(timeout=330.0):
+            close_engine(self.ctx.replace_stt(replacement))
             raise RuntimeError(f"installed model did not load: {installed_id}")
         if replacement.load_error is not None:
-            replacement._clarp_activation_failure_reported = True
+            close_engine(replacement)
             raise RuntimeError(str(replacement.load_error))
+        close_engine(self.ctx.replace_stt(replacement))
 
     def _handle_transcription_capabilities(self):
         from lib.transcription_models import recover_completed_installs
@@ -2036,316 +1468,6 @@ class Handler(BaseHTTPRequestHandler):
     def _query_first(self) -> dict[str, str]:
         return {k: (v[0] if v else "") for k, v in self._query().items()}
 
-    def _vocab_body(self) -> dict | None:
-        data = self._read_json()
-        if not isinstance(data, dict):
-            self._json_error(400, "bad json")
-            return None
-        return data
-
-    def _handle_vocab_packs_get(self):
-        from lib import vocab_store
-        counts = vocab_store.pack_term_counts()
-        packs = vocab_store.list_packs()
-        for pack in packs:
-            pack["terms"] = counts.get(pack["pack_id"], 0)
-        self._json_ok({"packs": packs})
-
-    def _handle_vocab_packs_post(self):
-        from lib import vocab_store
-        data = self._vocab_body()
-        if data is None:
-            return
-        name = str(data.get("name") or "").strip()
-        if not name:
-            return self._json_error(400, "name is required")
-        kind = str(data.get("kind") or "static")
-        if kind not in ("static", "dynamic"):
-            return self._json_error(400, "kind must be static or dynamic")
-        try:
-            pack_id = vocab_store.create_pack(
-                name, kind=kind, generator=str(data.get("generator") or ""),
-                priority=float(data.get("priority", 1.0)),
-                floor=int(data.get("floor", 0)),
-                enabled=bool(data.get("enabled", True)))
-        except sqlite3.IntegrityError:
-            return self._json_error(409, "a pack with that name exists")
-        except (TypeError, ValueError) as exc:
-            return self._json_error(400, str(exc))
-        for term in data.get("terms") or []:
-            if isinstance(term, str):
-                vocab_store.add_term(pack_id, term)
-            elif isinstance(term, dict):
-                vocab_store.add_term(
-                    pack_id, str(term.get("text") or ""),
-                    rarity=float(term.get("rarity", 0.5)),
-                    say_as=str(term.get("say_as") or ""),
-                    often_heard_as=str(term.get("often_heard_as") or ""))
-        self._json_ok({"ok": True, "pack_id": pack_id})
-
-    def _handle_vocab_packs_update(self):
-        from lib import vocab_store
-        data = self._vocab_body()
-        if data is None:
-            return
-        pack_id = str(data.get("pack_id") or "")
-        if not pack_id:
-            return self._json_error(400, "pack_id is required")
-        try:
-            if "enabled" in data:
-                vocab_store.set_pack_enabled(pack_id, bool(data["enabled"]))
-            vocab_store.update_pack(
-                pack_id, name=data.get("name"),
-                priority=data.get("priority"), floor=data.get("floor"))
-        except sqlite3.IntegrityError:
-            return self._json_error(409, "a pack with that name exists")
-        except (TypeError, ValueError) as exc:
-            return self._json_error(400, str(exc))
-        self._json_ok({"ok": True})
-
-    def _handle_vocab_packs_delete(self):
-        from lib import vocab_store
-        data = self._vocab_body()
-        if data is None:
-            return
-        pack_id = str(data.get("pack_id") or "")
-        if not pack_id:
-            return self._json_error(400, "pack_id is required")
-        vocab_store.delete_pack(pack_id)
-        self._json_ok({"ok": True})
-
-    def _handle_vocab_terms_get(self):
-        from lib import vocab_store
-        pack_id = self._query_first().get("pack_id", "")
-        if not pack_id:
-            return self._json_error(400, "pack_id is required")
-        self._json_ok({"pack_id": pack_id, "terms": vocab_store.list_terms(pack_id)})
-
-    def _handle_vocab_terms_post(self):
-        from lib import vocab_store
-        from lib.vocab_generators import estimate_rarity
-        data = self._vocab_body()
-        if data is None:
-            return
-        pack_id = str(data.get("pack_id") or "")
-        text = str(data.get("text") or "").strip()
-        if not pack_id or not text:
-            return self._json_error(400, "pack_id and text are required")
-        rarity = data.get("rarity")
-        try:
-            added = vocab_store.add_term(
-                pack_id, text,
-                rarity=float(rarity) if rarity is not None else estimate_rarity(text),
-                say_as=str(data.get("say_as") or ""),
-                often_heard_as=str(data.get("often_heard_as") or ""),
-                source=str(data.get("source") or "manual"))
-        except sqlite3.IntegrityError:
-            return self._json_error(404, "no such pack")
-        except (TypeError, ValueError) as exc:
-            return self._json_error(400, str(exc))
-        self._json_ok({"ok": True, "added": added})
-
-    def _handle_vocab_terms_update(self):
-        from lib import vocab_store
-        data = self._vocab_body()
-        if data is None:
-            return
-        try:
-            term_id = int(data.get("term_id"))
-        except (TypeError, ValueError):
-            return self._json_error(400, "term_id is required")
-        try:
-            updated = vocab_store.update_term(
-                term_id, text=data.get("text"), say_as=data.get("say_as"),
-                often_heard_as=data.get("often_heard_as"), rarity=data.get("rarity"))
-        except sqlite3.IntegrityError:
-            return self._json_error(409, "that term already exists in the pack")
-        except (TypeError, ValueError) as exc:
-            return self._json_error(400, str(exc))
-        self._json_ok({"ok": True, "updated": updated})
-
-    def _handle_vocab_terms_delete(self):
-        from lib import vocab_store
-        data = self._vocab_body()
-        if data is None:
-            return
-        try:
-            term_id = int(data.get("term_id"))
-        except (TypeError, ValueError):
-            return self._json_error(400, "term_id is required")
-        vocab_store.delete_term(term_id)
-        self._json_ok({"ok": True})
-
-    def _handle_vocab_profiles_get(self):
-        from lib import vocab_store
-        self._json_ok({"profiles": vocab_store.list_profiles()})
-
-    def _handle_vocab_profile_get(self):
-        from lib import vocab_store
-        profile_id = self._query_first().get("profile_id", "")
-        detail = vocab_store.profile_detail(profile_id) if profile_id else None
-        if detail is None:
-            return self._json_error(404, "no such profile")
-        self._json_ok(detail)
-
-    def _handle_vocab_profiles_post(self):
-        from lib import vocab_store
-        data = self._vocab_body()
-        if data is None:
-            return
-        name = str(data.get("name") or "").strip()
-        if not name:
-            return self._json_error(400, "name is required")
-        try:
-            profile_id = vocab_store.create_profile(name)
-        except sqlite3.IntegrityError:
-            return self._json_error(409, "a profile with that name exists")
-        for position, pack_id in enumerate(data.get("pack_ids") or []):
-            vocab_store.add_pack_to_profile(profile_id, str(pack_id), position)
-        self._json_ok({"ok": True, "profile_id": profile_id})
-
-    def _handle_vocab_profile_workspace(self):
-        """Turn workspace harvesting on or off for one profile.
-
-        Off is the default and the safe answer: reading an agent's folders is
-        a choice, and the absence of one is what let a package tree write most
-        of a biasing payload.
-        """
-        from lib import vocab_store
-        data = self._vocab_body()
-        if data is None:
-            return
-        profile_id = str(data.get("profile_id") or "").strip()
-        if not profile_id:
-            return self._json_error(400, "profile_id is required")
-        if not isinstance(data.get("enabled"), bool):
-            return self._json_error(400, "enabled must be a boolean")
-        if vocab_store.profile_detail(profile_id) is None:
-            return self._json_error(404, "no such profile")
-        vocab_store.set_profile_harvests_workspace(profile_id, data["enabled"])
-        self._json_ok({
-            "ok": True, "profile_id": profile_id,
-            "harvests_workspace": vocab_store.profile_harvests_workspace(profile_id),
-        })
-
-    def _handle_vocab_profiles_delete(self):
-        from lib import vocab_store
-        data = self._vocab_body()
-        if data is None:
-            return
-        profile_id = str(data.get("profile_id") or "")
-        if not profile_id:
-            return self._json_error(400, "profile_id is required")
-        vocab_store.delete_profile(profile_id)
-        self._json_ok({"ok": True})
-
-    def _handle_vocab_profile_packs_post(self):
-        from lib import vocab_store
-        data = self._vocab_body()
-        if data is None:
-            return
-        profile_id = str(data.get("profile_id") or "")
-        pack_id = str(data.get("pack_id") or "")
-        if not profile_id or not pack_id:
-            return self._json_error(400, "profile_id and pack_id are required")
-        try:
-            vocab_store.add_pack_to_profile(
-                profile_id, pack_id, int(data.get("position", 0)))
-        except sqlite3.IntegrityError:
-            return self._json_error(404, "no such profile or pack")
-        except (TypeError, ValueError) as exc:
-            return self._json_error(400, str(exc))
-        self._json_ok({"ok": True})
-
-    def _handle_vocab_profile_packs_remove(self):
-        from lib import vocab_store
-        data = self._vocab_body()
-        if data is None:
-            return
-        profile_id = str(data.get("profile_id") or "")
-        pack_id = str(data.get("pack_id") or "")
-        if not profile_id or not pack_id:
-            return self._json_error(400, "profile_id and pack_id are required")
-        vocab_store.remove_pack_from_profile(profile_id, pack_id)
-        self._json_ok({"ok": True})
-
-    def _handle_vocab_assignments_get(self):
-        from lib import vocab_store
-        self._json_ok({"assignments": vocab_store.assignments()})
-
-    def _handle_vocab_assign_post(self):
-        from lib import vocab_store
-        data = self._vocab_body()
-        if data is None:
-            return
-        profile_id = str(data.get("profile_id") or "")
-        if not profile_id:
-            return self._json_error(400, "profile_id is required")
-        try:
-            vocab_store.assign_profile(
-                profile_id, agent_id=str(data.get("agent_id") or ""),
-                team_id=str(data.get("team_id") or ""))
-        except ValueError as exc:
-            return self._json_error(400, str(exc))
-        except sqlite3.IntegrityError:
-            return self._json_error(404, "no such profile")
-        self._json_ok({"ok": True})
-
-    def _handle_vocab_unassign_post(self):
-        from lib import vocab_store
-        data = self._vocab_body()
-        if data is None:
-            return
-        agent_id = str(data.get("agent_id") or "")
-        team_id = str(data.get("team_id") or "")
-        if not agent_id and not team_id:
-            return self._json_error(400, "agent_id or team_id is required")
-        vocab_store.unassign(agent_id=agent_id, team_id=team_id)
-        self._json_ok({"ok": True})
-
-    def _handle_vocab_budgets_get(self):
-        from lib import stt_providers
-        from lib.vocab_compile import describe_budgets
-        self._json_ok({"budgets": describe_budgets(),
-                       "engine": stt_providers.selected_engine(),
-                       "models": stt_providers.cloud_models()})
-
-    def _handle_vocab_preview_get(self):
-        query = self._query_first()
-        preview = getattr(self.ctx, "vocab_preview", None)
-        if not callable(preview):
-            return self._json_error(503, "vocabulary preview unavailable")
-        try:
-            payload = preview(
-                session=query.get("session", ""),
-                requested_model=query.get("model", ""),
-                delegated=_truthy_header(query.get("delegated", "")))
-        except Exception as exc:  # noqa: BLE001
-            log_exception("vocabPreviewFail", exc)
-            return self._json_error(500, "vocabulary preview failed")
-        self._json_ok(payload)
-
-    def _handle_vocab_runs_get(self):
-        from lib import vocab_store
-        query = self._query_first()
-        try:
-            limit = max(1, min(200, int(query.get("limit") or 20)))
-        except ValueError:
-            limit = 20
-        self._json_ok({"runs": vocab_store.recent_runs(
-            limit, session=query.get("session", ""))})
-
-    def _handle_vocab_run_get(self):
-        from lib import heard_audio, vocab_store
-        trace_id = self._query_first().get("trace_id", "")
-        run = vocab_store.run_for_trace(trace_id) if trace_id else None
-        if run is None:
-            return self._json_error(404, "no run for that trace")
-        kept = heard_audio.lookup(
-            _runtime_paths().cache_dir, trace_id)
-        run["audio_url"] = f"/transcription-audio?trace_id={trace_id}" if kept else None
-        self._json_ok(run)
-
     def _handle_transcription_audio_get(self):
         """The clip the transcriber was given for one trace, if retained."""
         from lib import heard_audio
@@ -2384,6 +1506,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._json_error(400, str(exc))
         self._json_ok({"ok": True, "model_id": model_id})
 
+    def _handle_hotseat_status(self):
+        """The persisted Hotseat snapshot only: no CLI, subprocess or provider read."""
+        from lib import hotseat_status
+        self._send(200, json.dumps(hotseat_status.payload()).encode(), "application/json")
+
     def _handle_backend_usage(self):
         qs = self._query()
         force = any(str(v).lower() in {"1", "true", "yes"} for v in qs.get("refresh", []))
@@ -2393,469 +1520,13 @@ class Handler(BaseHTTPRequestHandler):
         body = json.dumps(payload).encode()
         self._send(200, body, "application/json")
 
-    def _handle_backend_auth(self):
-        from lib.backend_auth import status, task
-        body = {"backends": status(), "tasks": {
-            adapter.id: task(adapter.id) for adapter in backends.auth_adapters()}}
-        self._json_ok(body)
-
-    def _handle_backend_auth_login(self):
-        from lib.backend_auth import start_login
-        data = self._read_json()
-        if data is None:
-            return self._json_error(400, "bad json")
-        backend = str(data.get("backend") or "").strip().lower()
-        try:
-            result = start_login(backend)
-        except ValueError as exc:
-            return self._json_error(400, str(exc))
-        self._json(202, result)
-
-    def _handle_backend_auth_login_code(self):
-        from lib.backend_auth import submit_login_code
-        data = self._read_json()
-        if data is None:
-            return self._json_error(400, "bad json")
-        backend = str(data.get("backend") or "").strip().lower()
-        try:
-            result = submit_login_code(backend, str(data.get("code") or ""))
-        except ValueError as exc:
-            return self._json_error(400, str(exc))
-        except RuntimeError as exc:
-            return self._json_error(409, str(exc))
-        self._json_ok(result)
-
-    def _handle_backend_auth_logout(self):
-        from lib.backend_auth import logout
-        data = self._read_json()
-        if data is None:
-            return self._json_error(400, "bad json")
-        backend = str(data.get("backend") or "").strip().lower()
-        try:
-            result = logout(backend)
-        except ValueError as exc:
-            return self._json_error(400, str(exc))
-        except RuntimeError as exc:
-            return self._json_error(409, str(exc))
-        self._json_ok(result)
-
-    def _handle_managed_skills(self):
-        from lib.managed_skills import status
-        try:
-            skills = status()
-            if os.environ.get("CLARP_DEPLOYMENT_MODE") == "container":
-                from lib.personal_skills import status as personal_status
-                skills += personal_status()
-            body = {"skills": skills}
-        except (RuntimeError, OSError) as exc:
-            log_exception("managedSkillsStatusFail", exc)
-            return self._json_error(503, str(exc))
-        self._json_ok(body)
-
-    def _handle_managed_skills_update(self):
-        from lib.managed_skills import set_enabled
-        data = self._read_json()
-        if data is None:
-            return self._json_error(400, "bad json")
-        skill_id = str(data.get("skill_id") or "").strip()
-        enabled = data.get("enabled")
-        if not skill_id or not isinstance(enabled, bool):
-            return self._json_error(400, "skill_id and boolean enabled are required")
-        try:
-            skill = set_enabled(skill_id, enabled)
-        except ValueError as exc:
-            return self._json_error(409, str(exc))
-        except OSError as exc:
-            log_exception("managedSkillsUpdateFail", exc, detail=skill_id)
-            return self._json_error(500, str(exc))
-        self._json_ok({"ok": True, "skill": skill})
-
-    def _connection_server_info(self):
-        from lib.server_identity import get_server_info
-        info = get_server_info()
-        transport = self.server.local_transport
-        info["local_connection"] = transport.description() if transport else {"enabled": False}
-        if self.server.local_transport_error:
-            info["local_connection"]["error"] = self.server.local_transport_error
-        return info
-
-    def _handle_server_info(self):
-        from lib.server_identity import CLIENT_HEADER, evaluate_client
-        info = self._connection_server_info()
-        client = evaluate_client(self.headers.get(CLIENT_HEADER))
-        info["client"] = client
-        if client["status"] == "client_outdated":
-            _note_outdated_client(client)
-        self._json_ok(info)
-
-    def _handle_desktop_presence(self):
-        if not getattr(self, "_request_auth_validated", False):
-            return self._json_error(401, "authenticated desktop required")
-        if getattr(self, "_request_device_scope", "") != "full":
-            return self._json_error(403, "full device access required")
-        from lib import desktop_presence
-        data = self._read_json()
-        if not isinstance(data, dict):
-            return self._json_error(400, "object required")
-        try:
-            result = desktop_presence.update(principal=self._request_principal,
-                instance_id=data.get("instance_id"), sequence=data.get("sequence"), active=data.get("active"),
-                sent_at_ms=data.get("sent_at_ms"))
-        except ValueError as error:
-            return self._json_error(400, str(error))
-        self._json_ok(result)
-
-    def _handle_application_activity(self):
-        if not getattr(self, "_request_auth_validated", False):
-            return self._json_error(401, "authentication required")
-        if getattr(self, "_request_device_scope", "") != "full":
-            return self._json_error(403, "full device access required")
-        from lib import application_activity
-        data = self._read_json()
-        if not isinstance(data, dict):
-            return self._json_error(400, "object required")
-        try:
-            result = application_activity.report(self._request_principal,
-                data.get("instance_id"), data.get("sequence"), data.get("foreground"),
-                data.get("input_age_ms"), data.get("sent_at_ms"))
-        except ValueError as error:
-            return self._json_error(400, str(error))
-        self._json_ok(result)
-
-    def _handle_tool_explanations_stats(self):
-        from lib import tool_explanation_learning, tool_explanation_templates
-        from lib.tool_explanations import PROMPT_VERSION
-        query = self._query()
-        try:
-            result = tool_explanation_learning.stats(
-                (query.get("window") or ["24h"])[0], (query.get("bucket") or ["hour"])[0],
-                prompt_version=PROMPT_VERSION, templates_version=tool_explanation_templates.VERSION)
-        except ValueError as error:
-            return self._json_error(400, str(error))
-        self._json_ok(result)
-
-    def _handle_tool_explanation_settings_get(self):
-        from lib import tool_explanation_settings
-        self._json_ok(tool_explanation_settings.get())
-
-    def _handle_tool_explanation_settings_post(self):
-        from lib import tool_explanation_settings
-        data = self._read_json()
-        try:
-            result = tool_explanation_settings.update(data)
-        except ValueError as error:
-            return self._json_error(400, str(error))
-        self._json_ok(result)
-
-    def _handle_tool_explanations(self):
-        data = self._read_json()
-        if not isinstance(data, dict):
-            return self._json_error(400, "object required")
-        session = data.get("session")
-        if not isinstance(session, str) or not (agent := identity.lookup(session)):
-            return self._json_error(404, "agent not found")
-        from lib import tool_explanation_settings
-        if not tool_explanation_settings.enabled():
-            # Turned off on this Host: the explainer is not asked at all.
-            items = data.get("items") if isinstance(data.get("items"), list) else []
-            return self._json_ok({
-                "detail_level": data.get("detail_level"), "model": "",
-                "items": [{"id": item.get("id"), "status": "disabled"}
-                          for item in items[:8] if isinstance(item, dict)]})
-        try:
-            result = self.ctx.tool_explanations.request(
-                data.get("detail_level"), data.get("items"), cwd=agent.get("cwd"),
-                release=data.get("release"), target_agent_id=agent["agent_id"],
-                include_provenance=data.get("include_provenance") is True)
-        except ValueError as error:
-            return self._json_error(400, str(error))
-        self._json_ok(result)
-
-    def _handle_pairing_exchange(self):
-        from lib.device_pairing import PairingError, exchange
-        from lib.server_identity import get_server_info
-        data = self._read_json()
-        if data is None:
-            return self._json_error(400, "bad json")
-        try:
-            device = exchange(
-                str(data.get("code") or ""),
-                device_name=str(data.get("device_name") or ""),
-            )
-        except PairingError as exc:
-            retry = self._auth_failure_retry()
-            if retry:
-                return self._send(429, b'{"error":"too many pairing failures"}',
-                                  "application/json", extra_headers={"Retry-After": str(retry)})
-            return self._json_error(409, str(exc))
-        payload = {"device": device, "server": self._connection_server_info()}
-        self._json(201, payload)
-
-    def _handle_paired_devices(self):
-        from lib.device_pairing import list_devices
-        self._json_ok({"devices": list_devices()})
-
-    def _handle_paired_device_revoke(self):
-        from lib.device_pairing import revoke
-        data = self._read_json()
-        if data is None:
-            return self._json_error(400, "bad json")
-        device_id = str(data.get("device_id") or "").strip()
-        if not device_id:
-            return self._json_error(400, "device_id required")
-        if not revoke(device_id):
-            return self._json_error(404, "device not found")
-        self._json_ok({"ok": True})
-        self.server.disconnect_device(device_id)
-
-    def _handle_tts_providers_get(self):
-        from lib.tts_providers import status
-        self._json_ok(status())
-
-    def _handle_tts_providers_post(self):
-        from lib import config as config_module
-        from lib.config_writer import set_toml_value
-        from lib.tts_providers import status, valid_ids
-        data = self._read_json()
-        if data is None:
-            return self._json_error(400, "bad json")
-        provider = str(data.get("provider") or "").strip().lower()
-        fallback = str(data.get("fallback") or "none").strip().lower()
-        voice = str(data.get("voice") or "").strip()
-        if "google" in (provider, fallback):
-            from lib.google_tts import collision_code
-            code = collision_code()
-            if code:
-                return self._json_error(409, code)
-        allowed = valid_ids()
-        rows = {row["id"]: row for row in status()["providers"]}
-        if (provider not in allowed or fallback not in allowed
-                or (fallback != "none" and not rows.get(
-                    fallback, {}).get("can_fallback", False))):
-            return self._json_error(400, "unsupported TTS provider or fallback")
-        current = status()
-        rows = {row["id"]: row for row in current["providers"]}
-        for selected in {provider, fallback} - {"none"}:
-            if rows[selected]["kind"] == "local" and not rows[selected]["installed"]:
-                return self._json_error(409, f"local TTS provider is not installed: {selected}")
-            if rows[selected].get("custom") and not rows[selected]["available"]:
-                return self._json_error(409, f"custom TTS adapter is unavailable: {selected}")
-        config_path = pathlib.Path(os.environ.get(
-            "CLAUDE_PWA_CONFIG", str(config_module.CONFIG_PATH)))
-        set_toml_value(config_path, "tts", "provider", provider)
-        set_toml_value(config_path, "tts", "fallback", fallback)
-        if voice:
-            set_toml_value(config_path, "local_tts", "voice", voice)
-        restart_required = provider != "cartesia"
-        if restart_required:
-            set_toml_value(config_path, "audio", "delivery", "chunked-file")
-        config_module.reset_cache()
-        payload = status() | {"restart_scheduled": restart_required}
-        self._json_ok(payload)
-        if restart_required:
-            from lib import service_manager
-            timer = threading.Timer(
-                0.5, lambda: service_manager.restart(check=False))
-            timer.daemon = True
-            timer.start()
 
 
-
-
-    def _handle_server_update_status(self):
-        from lib.server_update import get_update_status
-        query = self._query()
-        force = query.get("force", ["0"])[0] in {"1", "true", "yes"}
-        self._json_ok(get_update_status(force=force))
-
-    def _handle_server_update(self):
-        from lib.server_update import request_update
-        status, payload = request_update(self.ctx.default_session)
-        self._json(status, payload)
 
     def _session_cwd(self, session: str) -> pathlib.Path:
         """cwd for an agent is whatever its DB row says — there's no
         live terminal process to query any more."""
         return session_cwd(session)
-
-    def _handle_agent_files(self):
-        from lib.agent_files import AgentFileError, list_directory
-        query = self._query()
-        session = (query.get("session", [""])[0] or "").strip()
-        relative = _raw_query_value(self.path, "path")
-        requested_root = _raw_query_value(self.path, "root")
-        if not session:
-            return self._json_error(400, "session required")
-        agent = identity.lookup(session)
-        if not agent:
-            return self._json_error(404, "agent not found")
-        cwd = requested_root or str(agent.get("cwd") or "")
-        if requested_root.startswith("@"):
-            alias, _, suffix = requested_root.partition("/")
-            if alias not in {"@workspace", "@home"}:
-                return self._json_error(400, "unknown directory root")
-            base = pathlib.Path(str(agent.get("cwd") or "")) if alias == "@workspace" else pathlib.Path.home()
-            candidate = (base / suffix).resolve()
-            try: candidate.relative_to(base.resolve())
-            except ValueError:
-                return self._json_error(403, "directory escapes root")
-            cwd = str(candidate)
-        if not cwd:
-            return self._json_error(404, "agent workspace unavailable")
-        try:
-            root_candidate = pathlib.Path(cwd).expanduser()
-            if requested_root and not root_candidate.is_absolute():
-                return self._json_error(400, "root path must be absolute")
-            # Explorer intentionally follows the authenticated operator trust
-            # model of the terminal/agent CLI: any path readable by the server
-            # user is browseable. It remains read-only and size-bounded.
-            root = root_candidate
-            if not root.is_dir():
-                return self._json_error(404, "agent workspace unavailable")
-            payload = list_directory(root, relative)
-        except AgentFileError as exc:
-            return self._json_error(exc.status, str(exc))
-        except ValueError as exc:
-            return self._json_error(403, str(exc))
-        except (OSError, RuntimeError) as exc:
-            return self._json_error(400, str(exc))
-        self._json_ok(payload)
-
-    def _handle_task_goal_document(self):
-        from lib import task_plans
-        query=self._query()
-        try:
-            raw=query.get("revision", [None])[0]
-            document=task_plans.goal_document(query.get("plan_id", [""])[0],
-                query.get("name", [""])[0], int(raw) if raw is not None else None)
-            self._json_ok({"document": document})
-        except ValueError as exc:
-            self._json_error(404, str(exc))
-
-    def _handle_task_plans(self):
-        from lib import task_plans
-        session = (self._query().get("session", [""])[0] or "").strip()
-        if not session:
-            return self._json_error(400, "session required")
-        self._json_ok({"plans": task_plans.list_for_session(session)})
-
-    def _handle_task_plan_action(self):
-        from lib import task_goal_state, task_plans
-        body = self._read_json()
-        if body is None:
-            return
-        try:
-            plan_id = str(body.get("plan_id") or "")
-            revision = body.get("revision")
-            if not isinstance(revision, int):
-                raise ValueError("revision required")
-            from lib import goal_ledger
-            # The apps call this on the user's behalf; agents use clarp-goal.
-            with goal_ledger.acting_as("user"):
-                result = task_goal_state.mutate(plan_id, revision=revision,
-                    action=str(body.get("action") or ""), data=body.get("data") or {})
-            self._json_ok({"plan": result})
-        except (ValueError, TypeError) as exc:
-            self._json_error(409, str(exc))
-
-    def _handle_goal_ledger(self):
-        from lib import goal_ledger
-        query = self._query()
-        plan_id = (query.get("plan_id", [""])[0] or "").strip()
-        if not plan_id:
-            return self._json_error(400, "plan_id required")
-        try:
-            after = int(query.get("after", ["0"])[0] or 0)
-            limit = int(query.get("limit", ["200"])[0] or 200)
-        except ValueError:
-            return self._json_error(400, "after and limit are integers")
-        self._json_ok(goal_ledger.events(plan_id, after=after, limit=limit))
-
-    def _handle_goal_delegations(self):
-        from lib import goal_ledger
-        session = (self._query().get("session", [""])[0] or "").strip()
-        agent = identity.lookup(session) if session else None
-        if not agent:
-            return self._json_error(404, "agent not found")
-        self._json_ok({"delegations": goal_ledger.delegations_for(agent["agent_id"])})
-
-    def _handle_goal_delegation_enable(self):
-        """Make a helper the bookkeeping delegate of its parent and start its listener."""
-        from lib import agents as agents_db, bookkeeping_listener, goal_ledger
-        body = self._read_json()
-        if body is None:
-            return
-        principal = identity.lookup(str(body.get("principal") or ""))
-        delegate = identity.lookup(str(body.get("delegate") or ""))
-        if not principal or not delegate:
-            return self._json_error(404, "principal or delegate not found")
-        try:
-            result = goal_ledger.enable(
-                agents_db.get_by_agent_id(principal["agent_id"]) or principal,
-                agents_db.get_by_agent_id(delegate["agent_id"]) or delegate,
-                str(body.get("reason") or ""))
-        except goal_ledger.LedgerError as exc:
-            return self._json_error(409, str(exc))
-        result["listener"] = bookkeeping_listener.launch(result["delegation_id"])
-        log("bookkeepingEnabled", f"delegation={result['delegation_id']} "
-            f"principal={principal['session']} delegate={delegate['session']}")
-        self._json_ok(result)
-
-    def _handle_goal_delegation_stop(self):
-        from lib import bookkeeping_listener, goal_ledger
-        body = self._read_json()
-        if body is None:
-            return
-        try:
-            result = goal_ledger.stop(str(body.get("delegation_id") or ""),
-                                      str(body.get("reason") or ""))
-        except goal_ledger.LedgerError as exc:
-            return self._json_error(409, str(exc))
-        result["listener"] = bookkeeping_listener.stop_unit(result["delegation_id"])
-        log("bookkeepingStopped", f"delegation={result['delegation_id']}")
-        self._json_ok(result)
-
-    def _handle_task_plan(self):
-        from lib import task_plans
-        query = self._query()
-        session = (query.get("session", [""])[0] or "").strip()
-        if not session:
-            return self._json_error(400, "session required")
-        self._json_ok({
-            "plan": task_plans.active_for_session(session)
-        })
-
-    def _handle_agent_file(self):
-        from lib.agent_files import AgentFileError, read_text_file
-        query = self._query()
-        session = (query.get("session", [""])[0] or "").strip()
-        relative = _raw_query_value(self.path, "path")
-        requested_root = _raw_query_value(self.path, "root")
-        if not session or not relative:
-            return self._json_error(400, "session and path required")
-        agent = identity.lookup(session)
-        if not agent:
-            return self._json_error(404, "agent not found")
-        cwd = requested_root or str(agent.get("cwd") or "")
-        if not cwd:
-            return self._json_error(404, "agent workspace unavailable")
-        try:
-            root_candidate = pathlib.Path(cwd).expanduser()
-            if requested_root and not root_candidate.is_absolute():
-                return self._json_error(400, "root path must be absolute")
-            # See `_handle_agent_files`: this is an operator capability, not a
-            # sandbox boundary. Descendant traversal still uses no-follow FDs.
-            root = root_candidate
-            if not root.is_dir():
-                return self._json_error(404, "agent workspace unavailable")
-            payload = read_text_file(root, relative)
-        except AgentFileError as exc:
-            return self._json_error(exc.status, str(exc))
-        except ValueError as exc:
-            return self._json_error(403, str(exc))
-        except (OSError, RuntimeError) as exc:
-            return self._json_error(400, str(exc))
-        self._json_ok(payload)
 
     def _handle_log(self):
         """Return the conversation turns for an agent's transcript.
@@ -2910,8 +1581,254 @@ class Handler(BaseHTTPRequestHandler):
         except OSError as e:
             log_exception("logParseFail", e, detail=session)
             return self._json_error(500, str(e))
+        from lib import server_identity
+        if server_identity.feature_advertised(server_identity.SEND_DELIVERY_STATE):
+            try:
+                error = self._add_delivery_state(body_obj, session, qs)
+            except Exception as e:  # noqa: BLE001 - no cursor moves on a failed read
+                log_exception("deliveryReadFail", e, detail=session)
+                return self._json_error(500, "delivery state unavailable")
+            if error:
+                return self._json_error(400, error)
         body = json.dumps(body_obj).encode()
         self._send(200, body, "application/json")
+
+    def _delivery_observation(self, *, fresh: bool, timeout: float):
+        """ONE fresh runtime status RPC bounded as a whole by ``timeout`` (never the
+        client's shared default): an OBSERVATION, never "current". None when it
+        times out or fails; the caller counts every one, and the log line is
+        coalesced (at most one per phase and exception type per 10 s, type name
+        only)."""
+        from lib import runtime_attestation
+        client = getattr(self.ctx, "runtime_client", None)
+        try:
+            return client.status_within(timeout)
+        except Exception as e:  # noqa: BLE001 - unavailable means omit
+            due, label = runtime_attestation.log_due("o2_unavailable" if fresh else "o1_unavailable", e)
+            if due:
+                log("deliveryObservationFail", f"phase={'o2' if fresh else 'o1'} type={label}")
+            return None
+
+    def _add_delivery_state(self, body_obj: dict, session: str, qs: dict) -> str:
+        """F4 (send_delivery_state): S2 on user rows and the seq feed, in ONE
+        read snapshot, bracketed by two runtime observations (E2) and, with an
+        external runtime, ONE fresh bounded manager read (B) between them.
+
+        Fields are added only if O1 (before the snapshot) and O2 (a fresh RPC
+        after it) both name the SAME capable, non-draining runtime identity
+        (release_id, instance) with the SAME attestation, and B bound that
+        attestation to the runtime unit's main process; otherwise nothing is
+        added (omission is never evidence). The bracket shows that the same
+        runtime process answered at both instants, that the manager named it
+        main at B, and that no switch COMPLETED in between. It does NOT prove
+        that this process was the only writer during the read, and a switch
+        right after O2 is caught only by the next SERVED compatible scope (a
+        cursor is valid only for the exact scope returned here). Without an
+        external runtime the Host owns turns itself and uses its own
+        per-process identity. Returns a 400 message, or "" when fine.
+
+        Everything after the parameter checks is the OPTIONAL enrichment of a
+        /log that already succeeded: any Exception there omits all delivery
+        fields (counted by type, coalesced log), never turning into an error;
+        BaseException is not caught."""
+        from lib import runtime_attestation
+        agent = agents_db.get_by_session(session)
+        if not agent:
+            return ""
+        agent_id = agent["agent_id"]
+
+        def number(name: str) -> int | None | str:
+            raw = (qs.get(name, [""])[0] or "").strip()
+            if raw == "":
+                return None
+            # ASCII digits only: str.isdigit() accepts e.g. "²", which int() rejects.
+            if not (raw.isascii() and raw.isdigit()):
+                return f"bad {name}"
+            return int(raw)
+
+        def text(name: str) -> str:
+            return (qs.get(name, [""])[0] or "").strip()
+
+        since, until = number("delivery_since"), number("delivery_until")
+        generation = number("delivery_stop_generation")
+        for value in (since, until, generation):
+            if isinstance(value, str):
+                return value
+        bootstrap = (qs.get("delivery_bootstrap", [""])[0] or "").strip() in {"1", "true"}
+        carried = (text("delivery_runtime_release"), text("delivery_runtime_instance"))
+        try:
+            fields = self._delivery_fields(body_obj, agent_id, since=since, until=until,
+                                           generation=generation, bootstrap=bootstrap,
+                                           carried=carried)
+        except Exception as e:  # noqa: BLE001 - F1: the optional enrichment only; omit
+            if runtime_attestation.note_unexpected(e):
+                log("deliveryEnrichmentFail", f"type={runtime_attestation.type_label(e)}")
+            return ""
+        if fields is None:
+            return ""
+        rows, top = fields
+        for turn in body_obj.get("turns") or []:
+            if turn.get("role") == "user" and str(turn.get("id")) in rows:
+                turn["delivery"] = rows[str(turn.get("id"))]
+        body_obj.update(top)
+        return ""
+
+    def _delivery_fields(self, body_obj: dict, agent_id: str, *, since, until, generation,
+                         bootstrap: bool, carried: tuple[str, str]):
+        """The delivery fields of one /log bracket, or None to omit them all. Nothing
+        is written into the response here: the caller merges only a complete result."""
+        from lib import runtime_attestation
+        # ROOT 17e71bf1: ONE monotonic deadline for this whole optional bracket.
+        budget = runtime_attestation.Budget()
+        try:
+            return self._delivery_bracket(budget, body_obj, agent_id, since=since, until=until,
+                                          generation=generation, bootstrap=bootstrap, carried=carried)
+        finally:
+            budget.finish()
+
+    def _delivery_bracket(self, budget, body_obj: dict, agent_id: str, *, since, until, generation,
+                          bootstrap: bool, carried: tuple[str, str]):
+        from lib import launch_receipts, runtime_attestation, server_identity, settings_store
+        client = getattr(self.ctx, "runtime_client", None)
+        external = client is not None
+        first = first_attestation = None
+        if external:
+            observed = self._first_observation(budget, client)
+            if observed is None:
+                budget.phase("o1")
+                return None
+            observed, reserved = observed
+            try:
+                budget.phase("o1")
+                first = launch_receipts.runtime_identity(observed)
+                if first is None:
+                    return None                # O1 unusable: omit everything
+                first_attestation = runtime_attestation.attestation_key(observed)
+                # B: ONE fresh, bounded manager read for this bracket, outside any
+                # transaction and before the read snapshot; never cached or reused.
+                taken, reserved = reserved, False      # admit() gives a reserved permit back itself
+                # No early-disconnect peek (ROOT 8efe6041): a peek on the request socket
+                # waits under its 120 s timeout. A client that left may let this bounded
+                # optional work finish (<= 2.0 s, 1 in flight, 2 starts/s); the response
+                # write's clientGone handling covers the rest. No cancellation is claimed.
+                admitted = runtime_attestation.admit(observed, in_transaction=db.conn().in_transaction,
+                                                     budget=budget, reserved=taken)
+            finally:
+                if reserved:
+                    runtime_attestation.release_reservation()
+            budget.phase("b")
+            if not admitted:
+                return None
+        # server_id() may mint and store the id on first use: read it before
+        # the read snapshot, which must stay write-free.
+        server_id = server_identity.server_id()
+        users = [dict(turn) for turn in body_obj.get("turns") or []
+                 if turn.get("role") == "user"]
+        page = None
+        if since is not None:
+            # A plain since=0 is the first bootstrap page (packet v4 §1.3d).
+            bootstrap = bootstrap or since == 0
+        if budget.expired():
+            runtime_attestation.note("deadline_exhausted")
+            return None
+        connection = db.conn()
+        try:
+            with settings_store.read_snapshot():
+                # The deadline also bounds the SQL: past it, SQLite interrupts the
+                # running statement. Cleared before the snapshot's COMMIT runs.
+                connection.set_progress_handler(lambda: 1 if budget.expired() else 0, 1000)
+                try:
+                    epoch = launch_receipts.annotate_rows(agent_id, users)
+                    if since is not None:
+                        page = launch_receipts.delivery_page(
+                            agent_id, since=since, until=until, stop_generation=generation,
+                            bootstrap=bootstrap)
+                finally:
+                    connection.set_progress_handler(None, 0)
+        except sqlite3.OperationalError:
+            if not budget.expired():
+                raise
+            runtime_attestation.note("deadline_exhausted")
+            return None
+        budget.phase("snapshot")
+        if external:
+            cap = budget.cap(runtime_attestation.O2_CAP_S)
+            if cap is None:
+                runtime_attestation.note("deadline_exhausted")
+                return None                    # nothing left for O2: nothing of the snapshot escapes
+            observed = self._delivery_observation(fresh=True, timeout=cap)
+            budget.phase("o2")
+            if observed is None:
+                runtime_attestation.note("o2_unavailable")
+                return None
+            second = launch_receipts.runtime_identity(observed)
+            if (second is None or second != first
+                    or runtime_attestation.attestation_key(observed) != first_attestation):
+                runtime_attestation.note("o2_mismatch")
+                return None                    # unusable or switched inside the bracket: omit
+            release, instance = second
+        else:
+            release, instance = (launch_receipts.IN_PROCESS_RELEASE,
+                                 launch_receipts.IN_PROCESS_INSTANCE)
+        rows = {str(turn.get("id")): turn.get("delivery") for turn in users if "delivery" in turn}
+        top = {"delivery_scope": {"server_id": server_id, "agent_id": agent_id,
+                                  "runtime_release": release, "runtime_instance": instance},
+               "delivery_stop_generation": epoch}
+        if page is None:
+            return rows, top
+        continuation = not (bootstrap and since == 0 and until is None)
+        if continuation and carried != (release, instance):
+            # A cursor is valid only within the exact runtime scope it was
+            # taken under (E3): any runtime restart or switch resets it.
+            page = {"updates": [], "cursor": None, "more": False, "expired": True,
+                    "until": None, "skipped": 0}
+        if page["skipped"]:
+            log("deliveryPointerSkipped", f"agent={agent_id} skipped={page['skipped']}")
+        top.update(delivery_updates=page["updates"], delivery_cursor=page["cursor"],
+                   delivery_more=page["more"], delivery_cursor_expired=page["expired"])
+        if bootstrap and not page["expired"]:
+            top.update(delivery_bootstrap=True, delivery_until=page["until"])
+        return rows, top
+
+    def _first_observation(self, budget, client):
+        """O1 (ROOT 6f243300): the shared status window when it holds a success at most
+        1 s old (no RPC; B stays fresh per bracket). On a miss the bracket first takes
+        its probe permit (the same 1-in-flight / 2-per-second gate as B: no O1 RPC while
+        it is exhausted), then makes ONE RPC of at most 0.5 s and offers the result to
+        the shared window without waiting, never over a newer entry. A busy window
+        (another caller's shared RPC) is an omission, not a wait or a second RPC.
+        Returns (observation, permit_reserved) or None (omitted and counted)."""
+        from lib import runtime_attestation
+        shared = backends._RUNTIME_CLIENT is client
+        state, cached, generation = (backends.peek_runtime_status(max_age=1.0) if shared
+                                     else ("miss", None, 0))
+        if state == "busy":
+            runtime_attestation.note("status_contended")
+            return None
+        if state == "hit":
+            return cached, False
+        if not runtime_attestation.reserve(in_transaction=db.conn().in_transaction):
+            return None
+        # From here the permit is held: it goes back on EVERY path out (incl. a
+        # log write or a BaseException raising), unless it is handed to the caller.
+        observed, handed = None, False
+        try:
+            cap = budget.cap(runtime_attestation.O1_CAP_S)
+            if cap is None:
+                runtime_attestation.note("deadline_exhausted")
+            else:
+                fetched_at = backends._clock()
+                observed = self._delivery_observation(fresh=False, timeout=cap)
+                if observed is None:
+                    runtime_attestation.note("o1_unavailable")
+                elif shared:
+                    backends.offer_runtime_status(client, observed, fetched_at=fetched_at,
+                                                  generation=generation)
+            handed = observed is not None
+        finally:
+            if not handed:
+                runtime_attestation.release_reservation()
+        return (observed, True) if handed else None
 
     def _interaction_id(self) -> str:
         value = str(self.headers.get("X-Clarp-Interaction-ID") or "").strip()
@@ -3057,8 +1974,8 @@ class Handler(BaseHTTPRequestHandler):
                     if getattr(q, "evicted", False):
                         try:
                             eventlog.emit("server", "sseEvictedClose", level="warning")
-                        except Exception:
-                            pass
+                        except Exception as diagnostic_error:
+                            _note_http_failure("H04", diagnostic_error)
                         break
                     # A data event, not a `: ping` comment: EventSource
                     # never surfaces comments, so a quiet stream looked dead
@@ -3069,8 +1986,8 @@ class Handler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError):
             try:
                 eventlog.emit("server", "sseClientGone", level="info")
-            except Exception:
-                pass
+            except Exception as diagnostic_error:
+                _note_http_failure("H05", diagnostic_error)
         finally:
             self.ctx.stream.unsubscribe(q)
 
@@ -3100,44 +2017,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._json_error(401, "Oracle requires authenticated full-device access")
         if self._device_forbidden(path, "POST"):
             return self._json_error(403, "full device access required")
-        from lib import janitor_http
-        if janitor_http.handles(path):
-            return janitor_http.handle(self, "POST")
-        from lib import controller_actions_http
-        if controller_actions_http.handles(path):
-            return controller_actions_http.handle(self, "POST")
-        if self._dispatch_exact(self._POST_ROUTES, path):
-            return
-        if path.startswith("/turn-queue/") and path.endswith("/send"):
-            queue_id = path[len("/turn-queue/"):-len("/send")].strip("/")
-            return self._handle_turn_queue_send(queue_id)
-        if path.startswith("/agents/") and path.endswith("/fork"):
-            return self._handle_agent_fork(
-                unquote(path[len("/agents/"):-len("/fork")].strip("/")))
-        if path == "/turn-queue/resume":
-            return self._handle_turn_queue_resume()
-        if path.startswith("/teams/"):
-            rest = path[len("/teams/"):].strip("/")
-            if rest.endswith("/members"):
-                return self._handle_team_add_member(rest[:-len("/members")].strip("/"))
-            return self._handle_team_update(rest)
-        if path.startswith("/decisions/"):
-            for action in ("resolve", "dismiss", "withdraw"):
-                suffix = "/" + action
-                if path.endswith(suffix):
-                    decision_id = unquote(path[len("/decisions/"):-len(suffix)].strip("/"))
-                    return getattr(self, "_handle_decision_" + action)(decision_id)
-        if path.startswith("/podcast-history/"):
-            from lib import podcast_history_http
-            return podcast_history_http.handle(self, "POST")
-        if path.startswith("/artifacts/"):
-            for action in ("archive", "discard", "submit", "pin", "events", "events-config"):
-                suffix = "/" + action
-                if path.endswith(suffix):
-                    artifact_id = unquote(path[len("/artifacts/"):-len(suffix)].strip("/"))
-                    return getattr(self, "_handle_artifact_" + action.replace("-", "_"))(artifact_id)
-            return self._handle_artifact_update(unquote(path[len("/artifacts/"):].strip("/")))
-        return self._send(404, b"not found")
+        return route_registry.dispatch(self, "POST", path)
 
     def do_PUT(self):
         if not self._authorized():
@@ -3145,89 +2025,7 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.split("?", 1)[0]
         if self._device_forbidden(path, "PUT"):
             return self._json_error(403, "full device access required")
-        if self._dispatch_exact(self._PUT_ROUTES, path):
-            return
-        if path.startswith("/turn-queue/"):
-            return self._handle_turn_queue_update(path[len("/turn-queue/"):].strip("/"))
-        return self._send(404, b"not found")
-
-    def _handle_focus(self):
-        """Client tells us which agent view the user is looking at. Drives the
-        herald system's decision of whether to suppress an off-focus agent."""
-        data = self._read_json()
-        if self._reject_janitor_control(data):
-            return
-        if data is None:
-            return self._json_error(400, "bad json")
-        sid = (data.get("session") or "").strip()
-        if not sid:
-            return self._json_error(400, "session required")
-        agent = identity.lookup(sid)
-        if agent:
-            from lib import client_chat
-            client_chat.record(self.principal().principal, sid)
-        herald = getattr(self.ctx, "herald", None)
-        if agent and herald is not None:
-            try:
-                with agents_db.focus_guard():
-                    agents_db.set_focus(agent["agent_id"])
-                    herald.set_focus(sid)
-            except Exception as e:
-                log_exception("focusDbWriteFail", e, detail=sid)
-        elif agent:
-            try:
-                agents_db.set_focus(agent["agent_id"])
-            except Exception as e:
-                log_exception("focusDbWriteFail", e, detail=sid)
-        elif herald is not None:
-            try:
-                herald.set_focus(sid)
-            except Exception as e:
-                log_exception("focusSetFail", e, detail=sid)
-        return self._json_ok({"ok": True})
-
-    def _handle_register_device(self):
-        """Register an iOS APNs device token for push notifications. The device
-        POSTs its token (optionally the session it's focused on); when any agent
-        finishes its turn the server pushes a "your turn" alert to it. Body:
-        {"token": "<hex>", "session": "...", "environment": "production",
-         "base_url": "http://private-overlay-address:7682",
-         "push_grant": "pg1.…"}. The optional push grant is issued by the
-        phone through Audio Central and lets this Host push to it without an
-        APNs key or Audio Central account of its own."""
-        data = self._read_json()
-        if data is None:
-            return self._json_error(400, "bad json")
-        token = (data.get("token") or "").strip()
-        if not token:
-            return self._json_error(400, "token required")
-        from lib import apns
-        from lib.agent_ring_live import device_ok
-        from lib.http_utils import principal_of
-        # Provenance: only the AUTHENTICATED paired, full-scope, non-revoked device owns what it registers
-        # (never a body field or the client-supplied session); every other registrant leaves it unbound.
-        who = principal_of(self)
-        owner = who.principal if (who.full_scope and who.principal.startswith("device_")
-                                  and device_ok(who.principal)) else ""
-        try:
-            apns.register_token(
-                token,
-                session=(data.get("session") or "").strip() or None,
-                environment=(data.get("environment") or "").strip() or None,
-                platform=(data.get("platform") or "ios").strip() or "ios",
-                base_url=(data.get("base_url") or "").strip(),
-                push_grant=str(data.get("push_grant") or ""),
-                owner=owner,
-            )
-        except apns.InvalidDeviceToken:
-            return self._json(400, {"ok": False, "error": "device_token_invalid"})
-        except apns.TokenOwnedElsewhere:
-            log("deviceTokenOwnerConflict", f"registrant={owner or who.principal or '-'} token={token[:12]}…")
-            return self._json(409, {"ok": False, "error": "device_token_owned_elsewhere"})
-        except Exception as e:  # noqa: BLE001
-            log_exception("deviceRegisterFail", e)
-            return self._json_error(500, "register failed")
-        return self._json_ok({"ok": True})
+        return route_registry.dispatch(self, "PUT", path)
 
     def _handle_live_activity_register(self):
         """POST /devices/live-activity: register (or with "ended": true,
@@ -3259,1359 +2057,30 @@ class Handler(BaseHTTPRequestHandler):
             token=str(data.get("token") or query.get("token", [""])[0] or ""))
         return self._json_ok({"ok": True, "removed": removed})
 
-    def _handle_set_location(self):
-        """The app POSTs the user's current GPS fix for a session (one-shot
-        CoreLocation, When-In-Use). Body: {"session","lat","lng","accuracy"?}."""
-        data = self._read_json()
-        if data is None:
-            return self._json_error(400, "bad json")
-        session = (data.get("session") or "").strip()
-        if not session:
-            return self._json_error(400, "session required")
-        try:
-            lat = float(data["lat"])
-            lng = float(data["lng"])
-        except (KeyError, TypeError, ValueError):
-            return self._json_error(400, "lat/lng required")
-        acc = data.get("accuracy")
-        from lib import location
-        try:
-            row = location.set_location(
-                session, lat, lng, float(acc) if acc is not None else None)
-        except ValueError as e:
-            return self._json_error(400, str(e))
-        except Exception as e:  # noqa: BLE001
-            log_exception("setLocationFail", e)
-            return self._json_error(500, "store failed")
-        return self._json_ok({"ok": True, **row})
-
-    def _handle_get_location(self):
-        """Latest stored fix for ?session=<id>. {} when none shared yet —
-        read by the request-location skill."""
-        qs = self._query()
-        session = (qs.get("session", [""])[0] or "").strip()
-        from lib import location
-        loc = location.get_location(session)
-        return self._json_ok(loc or {})
-
-    def _handle_teams_list(self):
-        from lib import team_store
-        body = {"teams": team_store.list_teams()}
-        return self._json_ok(body)
-
-    def _handle_team_create(self):
-        from lib import team_store
-        data = self._read_json()
-        if data is None:
-            return self._json_error(400, "bad json")
-        try:
-            team = team_store.create_team(
-                str(data.get("name") or ""),
-                color=str(data.get("color") or ""),
-                parent_team_id=data.get("parent_team_id"),
-            )
-        except ValueError as e:
-            return self._json_error(400, str(e))
-        return self._json_ok({"ok": True, "team": team})
-
-    def _handle_team_update(self, team_id: str):
-        from lib import team_store
-        data = self._read_json()
-        if data is None:
-            return self._json_error(400, "bad json")
-        try:
-            team = team_store.update_team(team_id, **{
-                key: data[key] for key in (
-                    "name", "color", "archived", "parent_team_id", "leader",
-                    "leader_enabled", "communication_enabled"
-                ) if key in data
-            })
-        except ValueError as e:
-            return self._json_error(400, str(e))
-        if team is None:
-            return self._json_error(404, "team not found")
-        return self._json_ok({"ok": True, "team": team})
-
-    def _handle_team_nudging(self):
-        """Enable/disable autonomous leader nudging for a team."""
-        from lib import team_store
-        data = self._read_json()
-        if data is None:
-            return self._json_error(400, "bad json")
-        team_id = str(data.get("team_id") or "").strip()
-        if not team_id:
-            return self._json_error(400, "team_id required")
-        if "nudge_enabled" not in data:
-            return self._json_error(400, "nudge_enabled required")
-        team = team_store.set_nudge_enabled(team_id, data.get("nudge_enabled") is True)
-        if team is None:
-            return self._json_error(404, "team not found")
-        return self._json_ok({"ok": True, "team": team})
-
-    def _handle_team_add_member(self, team_id: str):
-        from lib import team_store
-        data = self._read_json()
-        if data is None:
-            return self._json_error(400, "bad json")
-        agent_id = str(data.get("agent_id") or "").strip()
-        if not agent_id:
-            return self._json_error(400, "agent_id required")
-        if not team_store.add_member(team_id, agent_id):
-            return self._json_error(404, "team or agent not found")
-        return self._json_ok({
-            "ok": True,
-            "team": team_store.get_team(team_id),
-        })
-
-    def _handle_team_remove_member(self, team_id: str, agent_id: str):
-        from lib import team_store
-        if not team_id or not agent_id:
-            return self._json_error(404, "team or agent not found")
-        team_store.remove_member(team_id, agent_id)
-        return self._json_ok({
-            "ok": True,
-            "team": team_store.get_team(team_id),
-        })
-
-    def _handle_team_delete(self, team_id: str):
-        from lib import team_store
-        if not team_id:
-            return self._json_error(404, "team not found")
-        if not team_store.delete_team(team_id):
-            return self._json_error(404, "team not found")
-        return self._json_ok({"ok": True})
-
-    def _handle_team_messages(self, team_id: str):
-        from lib import team_store
-        if not team_id:
-            return self._json_error(404, "team not found")
-        qs = self._query()
-        try:
-            limit = int(qs.get("limit", ["100"])[0] or 100)
-        except ValueError:
-            limit = 100
-        body = {
-            "team_id": team_id,
-            "messages": team_store.list_team_messages(team_id, limit=limit),
-        }
-        return self._json_ok(body)
-
-    def _handle_request_location(self):
-        """An agent asks the app for the user's location: broadcast a request the
-        focused client surfaces as a one-tap Share-location prompt. Body:
-        {"session": "..."}."""
-        data = self._read_json()
-        if data is None:
-            return self._json_error(400, "bad json")
-        session = (data.get("session") or "").strip()
-        if not session:
-            return self._json_error(400, "session required")
-        events.broadcast(self.ctx.stream, events.location_request(session=session))
-        return self._json_ok({"ok": True})
-
-    def _handle_request_calendar(self):
-        """An agent asks the app to add an Apple Calendar event. Body:
-        {"session":"...", "title":"...", "start":"ISO8601", "end":"ISO8601",
-         "time_zone":"Europe/Oslo", "location":"...", "notes":"...",
-         "url":"...", "all_day":false, "calendar":"Work"}."""
-        data = self._read_json()
-        if data is None:
-            return self._json_error(400, "bad json")
-        request_id = f"cal-{secrets.token_hex(8)}"
-        try:
-            request = build_calendar_request(data, request_id=request_id)
-        except CalendarRequestError as exc:
-            return self._json_error(400, str(exc))
-        events.broadcast(self.ctx.stream, events.calendar_request(**asdict(request)))
-        return self._json_ok({"ok": True, "request_id": request_id})
-
-    def _handle_crash(self):
-        """Receive a MetricKit diagnostic payload from the iOS app.
-
-        Payloads carry crash, hang, CPU-exception, disk-write, and slow-launch
-        call stacks.
-        """
-        data = self._read_json()
-        if data is None:
-            return self._json_error(400, "bad json")
-        try:
-            from lib.ios_diagnostics import diagnostic_counts
-            diagnostic_dir = pathlib.Path(db.DB_PATH).parent / "crashes"
-            diagnostic_dir.mkdir(parents=True, exist_ok=True)
-            ts = int(time.time() * 1000)
-            out = diagnostic_dir / f"ios-diagnostic-{ts}-{secrets.token_hex(4)}.json"
-            blob = json.dumps(data, indent=2)
-            out.write_text(blob)
-            counts = diagnostic_counts(data)
-            eventlog.emit(
-                "server",
-                "iosDiagnosticReport",
-                level="warn" if counts["hangs"] or counts["crashes"] else "info",
-                detail={"file": out.name, "bytes": len(blob), **counts},
-            )
-            log(
-                "iosDiagnosticReport",
-                f"{out.name} crashes={counts['crashes']} hangs={counts['hangs']} "
-                f"cpu={counts['cpu_exceptions']} disk={counts['disk_write_exceptions']} "
-                f"launches={counts['slow_launches']} bytes={len(blob)}",
-            )
-        except Exception as e:  # noqa: BLE001
-            log_exception("crashStoreFail", e)
-            return self._json_error(500, "store failed")
-        return self._json_ok({"ok": True})
-
-    def _handle_remote_action(self):
-        """Receive a fire-and-forget remote action (typically from an iOS
-        Shortcut driving the Action Button). Broadcasts it over SSE so the
-        already-running PWA can act without a page reload."""
-        data = self._read_json()
-        if data is None:
-            return self._json_error(400, "bad json")
-        action = (data.get("action") or "").strip().lower()
-        if action not in ClientAction.valid():
-            return self._json_error(400, "unknown action")
-        if action == ClientAction.CONTROLLER_EVENT:
-            try:
-                event = events.remote_action_from(build_controller_event(data))
-            except ControllerEventError as exc:
-                return self._json_error(400, str(exc))
-        else:
-            event = events.remote_action(action, int(time.time() * 1000))
-        events.broadcast_ephemeral(self.ctx.stream, event)
-        log("remoteAction", action)
-        body = {"ok": True}
-        if action == ClientAction.CONTROLLER_EVENT:
-            body["controller_event_id"] = event["controller_event_id"]
-        return self._json_ok(body)
-
     # --- POST handlers ---------------------------------------------------
-
-    def _handle_agent_voice(self):
-        data = self._read_json()
-        if self._reject_janitor_control(data):
-            return
-        if data is None:
-            return self._json_error(400, "bad json")
-        session = (data.get("session") or "").strip()
-        voice_id = (data.get("voice_id") or "").strip()
-        provider = (data.get("provider") or "").strip().lower()
-        if not session or not voice_id:
-            return self._json_error(400, "session and voice_id required")
-        if provider == "google":
-            # Only the built-in google provider is validated: its voices are a fixed allowlist.
-            # A legacy custom "google" adapter refuses it first, before the allowlist.
-            from lib import google_tts
-            code = google_tts.collision_code()
-            if code:
-                return self._json_error(409, code)
-            if voice_id not in google_tts.VOICES:
-                return self._json_error(400, "unknown voice")
-        agents = load_agents(self.ctx.agents_path)
-        if session not in agents:
-            return self._json_error(404, "no such agent")
-        from lib.voice import merge_voice, resolve_voice
-        for sid, info in agents.items():
-            if sid == session:
-                continue
-            occupied = ((resolve_voice((info or {}).get("voice_id"), provider)
-                         if provider else (info or {}).get("voice_id")))
-            if occupied == voice_id:
-                return self._json(409, {"error": "voice taken",
-                                        "by": (info or {}).get("name") or sid})
-        agents[session]["voice_id"] = (
-            merge_voice(agents[session].get("voice_id"), provider, voice_id)
-            if provider else voice_id)
-        save_agents(agents, self.ctx.agents_path)
-        return self._json_ok({"ok": True})
-
-    def _handle_agent_llm(self):
-        """Set a running agent's model and/or reasoning effort. Read fresh on
-        the agent's next turn, so this re-tunes a live agent without relaunch.
-        Send "" for a field to clear the override (fall back to config default).
-        Only fields present in the body are changed."""
-        from lib import config
-        data = self._read_json()
-        if self._reject_janitor_control(data):
-            return
-        if data is None:
-            return self._json_error(400, "bad json")
-        session = (data.get("session") or "").strip()
-        if not session:
-            return self._json_error(400, "session required")
-        agent = identity.lookup(session)
-        if not agent:
-            return self._json_error(404, "no such agent")
-        backend = backends.normalize(agent.get("backend"))
-        valid = list(backends.valid_efforts(backend))
-        update: dict[str, str] = {}
-        if "model" in data:
-            if data.get("model") is not None and not isinstance(data.get("model"), str):
-                return self._json_error(400, "model must be string or null")
-            model = (data.get("model") or "").strip()
-            if not backends.is_valid_model(backend, model):
-                return self._json(400, {
-         "error": "invalid model for backend", "backend": backend,
-     })
-            update["model"] = model
-        if "effort" in data:
-            if data.get("effort") is not None and not isinstance(data.get("effort"), str):
-                return self._json_error(400, "effort must be string or null")
-            effort = (data.get("effort") or "").strip().lower()
-            if effort and effort not in valid:
-                return self._json(400, {"error": "invalid effort for backend",
-                                        "backend": backend, "valid_efforts": valid})
-            update["effort"] = effort
-        next_model = update.get("model", str(agent.get("model") or "").strip())
-        effort_compatibility_unknown = backends.by_id(backend).effort_compatibility_unknown
-        if effort_compatibility_unknown and not next_model:
-            next_model = backends.default_model_effort(backend, config.load())[0]
-        next_effort = update.get("effort", str(agent.get("effort") or "").strip())
-        if effort_compatibility_unknown and next_model and next_effort:
-            return self._json(400, {
-     "error": "AGY model-specific effort compatibility is unknown",
-     "backend": backend,
- })
-        if update:
-            agents_db.update_agent(agent["agent_id"], **update)
-        fresh = identity.lookup(session) or {}
-        return self._json_ok({
-            "ok": True, "backend": backend,
-            "model": fresh.get("model", ""), "effort": fresh.get("effort", ""),
-            "valid_efforts": valid,
-        })
-
-    def _handle_agent_mcp(self):
-        """Set which MCP servers an agent loads (user-driven, from the app).
-        Body: {"session": "...", "mcp_servers": ["name", ...]}. Names are
-        validated against the global ~/.claude.json catalog; unknown names are
-        dropped. Read fresh on the agent's next turn — no relaunch."""
-        from lib import config
-        data = self._read_json()
-        if self._reject_janitor_control(data):
-            return
-        if data is None:
-            return self._json_error(400, "bad json")
-        session = (data.get("session") or "").strip()
-        if not session:
-            return self._json_error(400, "session required")
-        agent = identity.lookup(session)
-        if not agent:
-            return self._json_error(404, "no such agent")
-        catalog = config.read_global_mcp_servers()
-        requested = data.get("mcp_servers")
-        if not isinstance(requested, list):
-            return self._json_error(400, "mcp_servers must be a list")
-        # Keep only known servers, de-duplicated, in request order.
-        chosen: list[str] = []
-        for name in requested:
-            n = str(name).strip()
-            if n in catalog and n not in chosen:
-                chosen.append(n)
-        from lib.mcp_selection import encode
-        agents_db.update_agent(agent["agent_id"], mcp_servers=encode(chosen))
-        return self._json_ok({
-            "ok": True,
-            "session": session,
-            "mcp_servers": chosen,
-            "available_mcp_servers": sorted(catalog.keys()),
-        })
-
-    def _handle_agent_heartbeat(self):
-        """Enable/disable autonomous heartbeat for a single live agent."""
-        from lib import heartbeat
-        data = self._read_json()
-        if self._reject_janitor_control(data):
-            return
-        if data is None:
-            return self._json_error(400, "bad json")
-        session = (data.get("session") or "").strip()
-        if not session:
-            return self._json_error(400, "session required")
-        if "heartbeat_enabled" not in data:
-            return self._json_error(400, "heartbeat_enabled required")
-        if not isinstance(data.get("heartbeat_enabled"), bool):
-            return self._json_error(400, "heartbeat_enabled must be boolean")
-        agent = identity.lookup(session)
-        if not agent:
-            return self._json_error(404, "no such agent")
-        enabled = bool(data["heartbeat_enabled"])
-        agents_db.update_agent(
-            agent["agent_id"],
-            heartbeat_enabled=enabled,
-        )
-        heartbeat.record_heartbeat_activity(agent["agent_id"])
-        fresh = identity.lookup(session) or {}
-        return self._json_ok({
-            "ok": True,
-            "session": session,
-            "heartbeat_enabled": bool(fresh.get("heartbeat_enabled")),
-        })
-
-    def _handle_agent_schedules_get(self):
-        from lib import scheduler
-        query = self._query()
-        session = (query.get("session", [""])[0] or "").strip()
-        agent_id = (query.get("agent_id", [""])[0] or "").strip()
-        schedules = scheduler.list_schedules(
-            session=session if session else None,
-            agent_id=agent_id if agent_id else None,
-        )
-        return self._json_ok({"schedules": schedules})
-
-    def _handle_agent_schedules_post(self):
-        from lib import scheduler
-        data = self._read_json()
-        if self._reject_janitor_control(data):
-            return
-        if not isinstance(data, dict):
-            return self._json_error(400, "bad json")
-        session = str(data.get("session") or "").strip()
-        name = str(data.get("name") or "").strip()
-        cron = str(data.get("cron_expression") or data.get("cron") or "").strip()
-        prompt = str(data.get("prompt") or "").strip()
-        enabled = bool(data.get("enabled", True))
-        if not session or not name or not cron or not prompt:
-            return self._json_error(400, "session, name, cron_expression, and prompt are required")
-        try:
-            item = scheduler.create_schedule(session, name, cron, prompt, enabled=enabled)
-        except ValueError as exc:
-            return self._json_error(400, str(exc))
-        return self._json(201, {"ok": True, "schedule": item})
-
-    def _handle_agent_schedules_toggle(self):
-        from lib import scheduler
-        data = self._read_json()
-        if not isinstance(data, dict):
-            return self._json_error(400, "bad json")
-        schedule_id = str(data.get("schedule_id") or "").strip()
-        enabled = data.get("enabled")
-        if not schedule_id or not isinstance(enabled, bool):
-            return self._json_error(400, "schedule_id and enabled boolean required")
-        item = scheduler.update_schedule(schedule_id, enabled=enabled)
-        if not item:
-            return self._json_error(404, "schedule not found")
-        return self._json_ok({"ok": True, "schedule": item})
-
-    def _handle_agent_schedules_delete(self):
-        from lib import scheduler
-        data = self._read_json()
-        if not isinstance(data, dict):
-            return self._json_error(400, "bad json")
-        schedule_id = str(data.get("schedule_id") or "").strip()
-        if not schedule_id:
-            return self._json_error(400, "schedule_id required")
-        ok = scheduler.delete_schedule(schedule_id)
-        return self._json_ok({"ok": ok})
-
-    def _handle_schedule_patch(self, schedule_id: str):
-        from lib import scheduler
-        data = self._read_json()
-        if not isinstance(data, dict):
-            return self._json_error(400, "bad json")
-        enabled = data.get("enabled")
-        name = data.get("name")
-        cron = data.get("cron_expression") or data.get("cron")
-        prompt = data.get("prompt")
-        try:
-            item = scheduler.update_schedule(
-                schedule_id,
-                enabled=enabled if isinstance(enabled, bool) else None,
-                name=str(name).strip() if name else None,
-                cron_expression=str(cron).strip() if cron else None,
-                prompt=str(prompt).strip() if prompt else None,
-            )
-        except ValueError as exc:
-            return self._json_error(400, str(exc))
-        if not item:
-            return self._json_error(404, "schedule not found")
-        return self._json_ok({"ok": True, "schedule": item})
-
-    def _handle_schedule_delete(self, schedule_id: str):
-        from lib import scheduler
-        ok = scheduler.delete_schedule(schedule_id)
-        if not ok:
-            return self._json_error(404, "schedule not found")
-        return self._json_ok({"ok": True})
-
-    def _handle_agent_archive(self):
-        data = self._read_json()
-        if self._reject_janitor_control(data):
-            return
-        if not isinstance(data, dict):
-            return self._json_error(400, "bad json")
-        session = str(data.get("session") or "").strip()
-        archived = data.get("archived")
-        if not session or not isinstance(archived, bool):
-            return self._json_error(400, "session and archived required")
-        agent = identity.lookup(session)
-        if not agent:
-            return self._json_error(404, "no such agent")
-        agents_db.set_archived(agent["agent_id"], archived)
-        return self._json_ok({"ok": True, "session": session,
-                              "archived": archived})
-
-    def _handle_agent_helper_state_get(self):
-        """One agent's lineage and helper state, without a full snapshot."""
-        query = self._query()
-        session = (query.get("session", [""])[0] or "").strip()
-        if not session:
-            return self._json_error(400, "session required")
-        row = identity.lookup(session)
-        row = agents_db.get_by_agent_id(row["agent_id"]) if row else None
-        if not row:
-            return self._json_error(404, "agent_not_found")
-        return self._json_ok({key: row.get(key) for key in (
-            "agent_id", "session", "role", "parent_agent_id", "helper_state",
-            "helper_completed_at", "archived_at")})
-
-    def _handle_agent_helper_state(self):
-        """Mark a helper agent done, failed or running again.
-
-        ``by`` names the marking agent when an agent does it (only the
-        helper's parent may); without it the mark is the user's."""
-        from lib import helper_agents
-        data = self._read_json()
-        if not isinstance(data, dict):
-            return self._json_error(400, "bad json")
-        session = str(data.get("session") or "").strip()
-        state = str(data.get("state") or "").strip()
-        if not session or not state:
-            return self._json_error(400, "session and state required")
-        try:
-            new = helper_agents.mark(self.ctx.stream, session, state,
-                                     by=str(data.get("by") or "").strip())
-        except helper_agents.HelperStateError as e:
-            return self._json(e.status, {"error": e.code, "message": str(e)})
-        return self._json_ok({"ok": True, "session": session, "helper_state": new})
-
-    def _handle_agent_goal_get(self):
-        """The goal an agent is working toward on its own, or null."""
-        from lib import agent_goals
-        query = self._query()
-        session = (query.get("session", [""])[0] or "").strip()
-        if not session:
-            return self._json_error(400, "session required")
-        agent = identity.lookup(session)
-        if not agent:
-            return self._json_error(404, "no such agent")
-        return self._json_ok({
-            "session": session,
-            "goal": agent_goals.public(agent_goals.get(agent["agent_id"])),
-        })
-
-    def _handle_agent_goal_start(self):
-        return self._goal_action("start")
-
-    def _handle_agent_goal_pause(self):
-        return self._goal_action("pause")
-
-    def _handle_agent_goal_resume(self):
-        return self._goal_action("resume")
-
-    def _handle_agent_goal_clear(self):
-        return self._goal_action("clear")
-
-    def _goal_action(self, action: str):
-        """Start, pause, resume or clear an agent's goal.
-
-        Body: {"session": "...", "objective": "..."} (objective for start only).
-        The backend owns the goal (Codex: thread/goal/*), so the call goes to
-        the runtime that holds the app-server connection; the answer is the
-        goal as the backend now reports it. Backends without goal control
-        answer 501 rather than pretending.
-        """
-        data = self._read_json()
-        if self._reject_janitor_control(data):
-            return
-        if data is None:
-            return self._json_error(400, "bad json")
-        session = (data.get("session") or "").strip()
-        if not session:
-            return self._json_error(400, "session required")
-        objective = str(data.get("objective") or "").strip()
-        if action == "start" and not objective:
-            return self._json_error(400, "objective required")
-        agent = identity.lookup(session)
-        if not agent:
-            return self._json_error(404, "no such agent")
-        try:
-            goal = backends.goal(
-                str(agent.get("backend") or ""), agent["agent_id"], action,
-                objective=objective, stream=self.ctx.stream)
-        except backends.GoalUnsupported as exc:
-            return self._json_error(501, str(exc))
-        except ValueError as exc:
-            return self._json_error(400, str(exc))
-        except Exception as exc:  # noqa: BLE001 - relay the backend's own refusal
-            log_exception("agentGoalFail", exc, detail=f"{session}:{action}")
-            return self._json_error(502, str(exc))
-        return self._json_ok({
-            "ok": True, "session": session, "action": action, "goal": goal,
-        })
-
-    def _handle_agent_heartbeat_status(self):
-        """Return one Agent's scheduler projection and recent heartbeat outcomes."""
-        from lib import heartbeat
-        query = self._query()
-        session = (query.get("session", [""])[0] or "").strip()
-        agent = identity.lookup(session)
-        if not agent:
-            return self._json_error(404, "no such agent")
-        rows = db.conn().execute(
-            """SELECT message_id, text, timestamp, updated_at
-                 FROM messages
-                WHERE agent_id=? AND role='assistant' AND origin='heartbeat'
-                ORDER BY updated_at DESC LIMIT 20""",
-            (agent["agent_id"],),
-        ).fetchall()
-        history = [{
-            "id": row["message_id"], "text": row["text"],
-            "timestamp": row["timestamp"], "updated_at": row["updated_at"],
-        } for row in rows]
-        return self._json_ok({
-            "ok": True, "session": session,
-            "schedule": heartbeat.agent_schedule(agent), "history": history,
-        })
-
-    def _handle_heartbeat_settings_get(self):
-        """Return the heartbeat policy owned by this Computer."""
-        from lib import heartbeat
-        return self._json_ok({
-            "ok": True,
-            "settings": heartbeat.get_settings().as_dict(),
-            "heartbeat_prompt": heartbeat.HEARTBEAT_PROMPT,
-        })
-
-    def _handle_heartbeat_settings_post(self):
-        """Atomically update the heartbeat policy for this Computer."""
-        from lib import heartbeat
-        data = self._read_json()
-        if not isinstance(data, dict):
-            return self._json_error(400, "bad json")
-        try:
-            settings = heartbeat.update_settings(data)
-        except ValueError as exc:
-            return self._json_error(400, str(exc))
-        return self._json_ok({
-            "ok": True,
-            "settings": settings.as_dict(),
-            "heartbeat_prompt": heartbeat.HEARTBEAT_PROMPT,
-        })
-
-    def _handle_diagnostics_settings_get(self):
-        """Return opt-in developer diagnostics owned by this Computer."""
-        from lib import diagnostics_settings
-        return self._json_ok({
-            "ok": True, "settings": diagnostics_settings.get().public(),
-        })
-
-    def _handle_diagnostics_settings_post(self):
-        from lib import diagnostics_settings
-        data = self._read_json()
-        if not isinstance(data, dict):
-            return self._json_error(400, "bad json")
-        try:
-            settings = diagnostics_settings.update(data)
-        except ValueError as exc:
-            return self._json_error(400, str(exc))
-        return self._json_ok({
-            "ok": True, "settings": settings.public(),
-        })
-
-    def _handle_agent_dreaming(self):
-        """Enable/disable nightly creative dreaming for a single live agent."""
-        from lib import dreaming
-        data = self._read_json()
-        if self._reject_janitor_control(data):
-            return
-        if data is None:
-            return self._json_error(400, "bad json")
-        session = (data.get("session") or "").strip()
-        if not session:
-            return self._json_error(400, "session required")
-        if "dreaming_enabled" not in data:
-            return self._json_error(400, "dreaming_enabled required")
-        agent = identity.lookup(session)
-        if not agent:
-            return self._json_error(404, "no such agent")
-        enabled = data.get("dreaming_enabled") is True
-        agents_db.update_agent(agent["agent_id"], dreaming_enabled=enabled)
-        fresh = identity.lookup(session) or {}
-        settings = dreaming.get_settings()
-        return self._json_ok({
-            "ok": True,
-            "session": session,
-            "dreaming_enabled": bool(fresh.get("dreaming_enabled")),
-            "dream_target_hour": dreaming.DREAM_TARGET_HOUR,
-            "dream_planned_rounds": settings.planned_rounds,
-            "dream_target_tokens": settings.target_token_budget,
-            "dream_min_directions": settings.min_directions,
-            "dream_settings": settings.as_dict(),
-            "dream_prompt": dreaming.dreaming_prompt_text(),
-        })
-
-    def _handle_voice_humanness_get(self):
-        from lib import voice_humanness
-        self._json_ok(voice_humanness.get())
-
-    def _handle_voice_humanness_post(self):
-        """Set the Host default and per-agent humanness (0-10) of spoken
-        replies. Read on the next spoken turn, so no relaunch is needed."""
-        from lib import voice_humanness
-        try:
-            result = voice_humanness.update(self._read_json())
-        except ValueError as error:
-            return self._json_error(400, str(error))
-        self._json_ok(result)
-
-    def _handle_agent_voice_verbosity(self):
-        """Set how much one agent narrates aloud while it is still working.
-
-        Read fresh on the next turn dispatch, so moving the slider re-tunes a
-        running agent without a relaunch.
-        """
-        from lib import voice_verbosity
-        data = self._read_json()
-        if data is None:
-            return self._json_error(400, "bad json")
-        session = (data.get("session") or "").strip()
-        if not session:
-            return self._json_error(400, "session required")
-        if "voice_verbosity" not in data:
-            return self._json_error(400, "voice_verbosity required")
-        raw = data.get("voice_verbosity")
-        if isinstance(raw, bool) or not isinstance(raw, int):
-            return self._json_error(400, "voice_verbosity must be an integer")
-        if not voice_verbosity.MIN_LEVEL <= raw <= voice_verbosity.MAX_LEVEL:
-            return self._json(400, {
-     "error": "voice_verbosity out of range",
-     "min": voice_verbosity.MIN_LEVEL,
-     "max": voice_verbosity.MAX_LEVEL,
- })
-        agent = identity.lookup(session)
-        if not agent:
-            return self._json_error(404, "no such agent")
-        agents_db.update_agent(agent["agent_id"], voice_verbosity=raw)
-        fresh = identity.lookup(session) or {}
-        return self._json_ok({
-            "ok": True,
-            "session": session,
-            "voice_verbosity": int(fresh.get("voice_verbosity") or 0),
-            "options": voice_verbosity.options(),
-        })
-
-    def _handle_agent_mute(self):
-        """Mute/unmute APNs pushes for a single live agent.
-
-        Badges/unread remain enabled for user-facing speak turns; this flag
-        only removes the interruption.
-        """
-        data = self._read_json()
-        if self._reject_janitor_control(data):
-            return
-        if data is None:
-            return self._json_error(400, "bad json")
-        session = (data.get("session") or "").strip()
-        if not session:
-            return self._json_error(400, "session required")
-        if "muted" not in data:
-            return self._json_error(400, "muted required")
-        agent = identity.lookup(session)
-        if not agent:
-            return self._json_error(404, "no such agent")
-        muted = data.get("muted") is True
-        agents_db.update_agent(agent["agent_id"], muted=muted)
-        fresh = identity.lookup(session) or {}
-        return self._json_ok({
-            "ok": True,
-            "session": session,
-            "muted": bool(fresh.get("muted")),
-        })
-
-    def _handle_agent_assign(self):
-        from lib.contact_assignment import assign_contact
-        data = self._read_json()
-        if data is None:
-            return self._json_error(400, "bad json")
-        if self._reject_janitor_control(data):
-            return
-        try:
-            result = assign_contact(str(data.get("session") or ""),
-                                    str(data.get("mode") or "auto"), data.get("name"))
-        except AgentLifecycleError as exc:
-            return self._json(exc.status, exc.response())
-        except ValueError as exc:
-            return self._json_error(409, str(exc))
-        if data.get("mode") != "options":
-            events.broadcast(self.ctx.stream, events.agent_roster(
-                "contact-assigned", session=result["session"], name=result["name"]))
-        return self._json_ok(result)
-
-    def _handle_agent_rename(self):
-        """Change an agent's display name, keeping every stable identifier.
-
-        The name is `agents.persona`. `session` and `agent_id` are untouched, so
-        addressing, transcripts, pairings and routing all survive the rename.
-        """
-        data = self._read_json()
-        if data is None:
-            return self._json_error(400, "bad json")
-        if self._reject_janitor_control(data):
-            return
-        session = (data.get("session") or "").strip()
-        if not session:
-            return self._json_error(400, "session required")
-        # Collapse internal runs of whitespace: this is a display name, and a
-        # name that only differs by spacing is not a different contact.
-        name = " ".join(str(data.get("name") or "").split())
-        if not name or len(name) > 60:
-            return self._json_error(400, "name required (maximum 60 characters)")
-        agent = identity.lookup(session)
-        if not agent:
-            return self._json_error(404, "no such agent")
-        # Agent creation permits one live session per contact name, and the
-        # persona-to-session lookup relies on it. A rename has to hold the same
-        # line or that lookup becomes ambiguous.
-        owner = next((a for a in agents_db.list_agents()
-                      if a["agent_id"] != agent["agent_id"]
-                      and str(a["persona"] or "").strip().casefold() == name.casefold()),
-                     None)
-        if owner is not None:
-            return self._json(409, {
-     "error": "contact_occupied",
-     "message": f"{owner['persona']} already has an active session.",
-     "owner": owner["persona"], "session": owner["session"],
- })
-        if str(agent.get("persona") or "") != name:
-            agents_db.update_agent(agent["agent_id"], persona=name)
-            events.broadcast(self.ctx.stream, events.agent_roster(
-                "agent-renamed", session=session, name=name))
-        return self._json_ok({
-            "ok": True, "session": session, "name": name,
-        })
-
-    def _handle_dreaming_runs(self):
-        """Inspect recent deep dreaming run/thread/round ledger entries."""
-        from lib import dreaming
-        qs = self._query()
-        session = (qs.get("session", [""])[0] or "").strip()
-        try:
-            limit = int(qs.get("limit", ["10"])[0] or "10")
-        except ValueError:
-            limit = 10
-        runs = dreaming.list_dream_runs(session=session, limit=limit)
-        settings = dreaming.get_settings()
-        return self._json_ok({
-            "ok": True,
-            "runs": runs,
-            "contract": settings.as_dict(),
-        })
-
-    def _dreaming_backend_options(self):
-        """Backends the dreaming picker may offer, with their effort levels.
-
-        Model lists are deliberately not duplicated here — a client already
-        fetches `/agent-model-options` for the full catalogue and can filter it
-        by the chosen backend id.
-        """
-        from lib import provider_capabilities
-        # Model ids come from the same catalogue the agent picker uses, so the
-        # dreaming picker can never drift from what the CLIs actually accept.
-        # A probe failure degrades to backends-only rather than failing the
-        # settings read.
-        models: dict[str, list[dict[str, str]]] = {}
-        try:
-            catalog = provider_capabilities.capability_catalog()
-            providers = catalog.get("providers") or {}
-            rows = (providers.values() if isinstance(providers, dict)
-                    else providers)
-            for row in rows:
-                provider_id = str(row.get("id") or "")
-                if not provider_id:
-                    continue
-                models[provider_id] = [
-                    {
-                        "id": str(m.get("id") or m.get("slug") or ""),
-                        "label": str(m.get("label") or m.get("display_name")
-                                     or m.get("id") or m.get("slug") or ""),
-                    }
-                    for m in (row.get("models") or [])
-                    if (m.get("id") or m.get("slug"))
-                ]
-        except Exception as e:  # noqa: BLE001
-            log_exception("dreamingBackendOptionsModelsFail", e)
-        options = [{
-            "id": "",
-            "label": "Same as the agent",
-            "efforts": [],
-            "models": [],
-        }]
-        for backend_id in backends.ids():
-            fields = backends.catalogue_fields(backend_id)
-            options.append({
-                "id": backend_id,
-                "label": fields.get("label") or backend_id,
-                "efforts": list(backends.valid_efforts(backend_id)),
-                "models": models.get(backend_id, []),
-            })
-        return options
-
-    def _handle_dreaming_run_post(self):
-        """Start one dream immediately, with an optional pinned recipe."""
-        from lib import dreaming
-        data = self._read_json()
-        if data is None:
-            return self._json_error(400, "bad json")
-        session = str(data.get("session") or "").strip()
-        if not session:
-            return self._json_error(400, "session required")
-        try:
-            run = dreaming.start_manual_run(
-                session,
-                seed_strategy=str(data.get("seed_strategy") or "").strip(),
-                context_dose=str(data.get("context_dose") or "").strip(),
-            )
-        except ValueError as e:
-            return self._json_error(409, str(e))
-        return self._json_ok({
-            "ok": True,
-            "run_id": run.get("run_id"),
-            "session": run.get("session"),
-            "seed_strategy": run.get("seed_strategy"),
-            "context_dose": run.get("context_dose"),
-            "seed_material": run.get("seed_material"),
-        })
-
-    def _handle_dreaming_settings_get(self):
-        from lib import dream_seeds, dreaming
-        return self._json_ok({
-            "ok": True,
-            "settings": dreaming.get_settings().as_dict(),
-            "limits": {
-   "dreams_per_night": [
-       dreaming.DREAMS_PER_NIGHT_MIN,
-       dreaming.DREAMS_PER_NIGHT_MAX,
-   ],
-   "direction_count": [
-       dreaming.DREAM_DIRECTION_MIN,
-       dreaming.DREAM_DIRECTION_MAX,
-   ],
-   "target_token_budget": [
-       dreaming.DREAM_TOKEN_BUDGET_MIN,
-       dreaming.DREAM_TOKEN_BUDGET_MAX,
-   ],
-            },
-            # Everything a client needs to draw the dreaming backend/model/
-            # effort pickers without shipping its own catalogue. An empty
-            # choice means "inherit the agent's own backend".
-            "options": {
-   "backends": self._dreaming_backend_options(),
-   "seed_strategies": list(dream_seeds.STRATEGIES),
-   "context_doses": list(dream_seeds.CONTEXT_DOSES),
-            },
-        })
-
-    def _handle_dreaming_settings_put(self):  # noqa: D401
-        from lib import dreaming
-        data = self._read_json()
-        if data is None:
-            return self._json_error(400, "bad json")
-        settings = dreaming.update_settings(data)
-        return self._json_ok({
-            "ok": True,
-            "settings": settings.as_dict(),
-        })
-
-    def _handle_compact(self):
-        """Compact a conversation on demand (from the app). Drives the backend
-        CLI's interactive /compact (claude/codex) or /compress (agy) in a
-        throwaway tmux session resumed on the same session id, keeping the id.
-        Body: {"session": "..."}. Returns immediately; the app watches the
-        snapshot's `compacting` flag + `context_tokens` for progress."""
-        from lib import compaction
-        data = self._read_json()
-        if self._reject_janitor_control(data):
-            return
-        if data is None:
-            return self._json_error(400, "bad json")
-        session = (data.get("session") or "").strip()
-        if not session:
-            return self._json_error(400, "session required")
-        result = compaction.compact_session(session)
-        status = 200 if result.get("ok") else 409
-        return self._json(status, result)
-
-    def _handle_orchestrator_addressing(self):
-        """Choose how an unaddressed spoken turn picks its agent.
-
-        `ai` is the default and the only mode that ever calls the model, so
-        the others are also the cheap ones.
-        """
-        from lib import addressing
-        data = self._read_json()
-        if data is None:
-            return self._json_error(400, "bad json")
-        try:
-            chosen = addressing.set_mode(str(data.get("mode") or ""))
-        except ValueError:
-            return self._json(400, {
-     "error": "unknown addressing mode",
-     "modes": list(addressing.MODES),
- })
-        return self._json_ok({
-            "ok": True, "mode": chosen, "modes": list(addressing.MODES),
-        })
-
-    def _handle_orchestrator_settings_post(self):
-        data = self._read_json()
-        if data is None:
-            return self._json_error(400, "bad json")
-        try:
-            settings = update_orchestrator_settings(data)
-        except ValueError as exc:
-            return self._json_error(400, str(exc))
-        return self._json_ok({"ok": True, "settings": settings.__dict__})
-
-    def _handle_herald_settings_post(self):
-        data = self._read_json()
-        if not isinstance(data, dict):
-            return self._json_error(400, "bad json")
-        try:
-            settings = update_herald_settings(data)
-        except ValueError as exc:
-            return self._json_error(400, str(exc))
-        return self._json_ok({"ok": True, "settings": settings.as_dict()})
-
-    def _handle_personalities_settings_post(self):
-        data = self._read_json()
-        if data is None:
-            return self._json_error(400, "bad json")
-        settings = update_personality_settings(data)
-        return self._json_ok({"ok": True, "settings": settings.as_dict()})
-
-    def _handle_preview(self):
-        data = self._read_json()
-        if data is None:
-            return self._json_error(400, "bad json")
-        voice_id = (data.get("voice_id") or "").strip()
-        text = (data.get("text") or "Hi there, this is what I sound like.").strip()
-        session = (data.get("session") or self.ctx.default_session).strip() or self.ctx.default_session
-        if not voice_id:
-            return self._json_error(400, "voice_id required")
-        from lib.google_tts import GoogleIdCollision
-        try:
-            path = self.ctx.tts.synthesize_preview(text[:200], voice_id, session=session)
-        except GoogleIdCollision as refused:
-            # Built-in Google refused by a legacy custom "google" adapter: only these two guard
-            # codes become 409 (raised before any voice, credential or clip); the strict preview
-            # route has no fallback, and every other failure keeps its 500.
-            return self._json_error(409, str(refused))
-        except Exception as e:
-            log_exception("previewSynthFail", e, detail=voice_id)
-            return self._json_error(500, str(e))
-        # A preview plays on request, so it bypasses herald arbitration and
-        # goes straight to every connected client.
-        name = pathlib.Path(str(path)).name
-        events.broadcast(self.ctx.stream, events.audio(
-            url=f"/audio/{name}", name=name, session=session, preview=True))
-        return self._json_ok({"ok": True, "url": f"/audio/{name}"})
-
-    def _handle_oracle_status(self):
-        from lib.oracle_realtime import capability
-        return self._json_ok(capability())
-
-    def _handle_oracle_contact_get(self):
-        """The Host-owned Oracle contact, validated against the live roster."""
-        from lib import oracle_contact
-        return self._json_ok(oracle_contact.get())
-
-    def _oracle_handoff_principal(self):
-        """The full-scope caller, or None after answering 401."""
-        from lib.http_utils import principal_of, require_full_scope
-        who = principal_of(self)
-        denied = require_full_scope(who, message="Oracle handoffs require full-device authentication")
-        if denied:
-            self._json_error(401, denied)
-            return None
-        return who.principal
-
-    def _handle_oracle_connect(self):
-        """Put the caller's Oracle call through to an agent, or back to Oracle.
-        Body: {"agent": "<session|persona|oracle>", "principal"?}. See
-        docs/oracle-handoff.md; waits until the phone settles the handoff."""
-        from lib import oracle_handoffs
-        principal = self._oracle_handoff_principal()
-        if principal is None:
-            return
-        data = self._read_json()
-        if data is None:
-            return self._json_error(400, "bad json")
-        oracle_handoffs.bind(self.ctx)
-        try:
-            result = oracle_handoffs.connect(principal, str(data.get("agent") or ""),
-                                             principal=data.get("principal") or None)
-        except oracle_handoffs.HandoffError as exc:
-            return self._json(exc.status, exc.body())
-        return self._json_ok(result)
 
     # ---- group calls (docs/group-calls.md) ----
 
-    def _calls_principal(self):
-        """The full-scope caller, or None after answering 401."""
-        from lib.http_utils import principal_of, require_full_scope
-        who = principal_of(self)
-        denied = require_full_scope(who, message="Group calls require full-device authentication")
-        if denied:
-            self._json_error(401, denied)
-            return None
-        return who.principal
-
     def _turn_caller(self) -> str:
-        """The agent whose Clarp turn sent this request (X-Clarp-Turn), or ""."""
+        """The agent whose Clarp turn sent this request (X-Clarp-Turn), or ""
+        when the request carries no turn token. A token whose lookup fails is
+        unknown identity, not "no turn": it raises TurnIdentityUnavailable,
+        which handle_one_request answers with a retryable 503 (HTTP-N5)."""
         from lib import turn_identity
         from lib.provider_background_jobs import TURN_ENV
         try:
             return turn_identity.caller_agent_id(
                 {TURN_ENV: (getattr(self, "headers", None) or {}).get("X-Clarp-Turn", "")})
-        except Exception:  # noqa: BLE001 - no proof means no refusal
-            return ""
-
-    def _calls_by(self, data: dict) -> str:
-        """The agent making a change: its turn identity, else the session it names."""
-        from lib import turn_identity
-        from lib.provider_background_jobs import TURN_ENV
-        try:
-            agent_id = turn_identity.caller_agent_id(
-                {TURN_ENV: (getattr(self, "headers", None) or {}).get("X-Clarp-Turn", "")})
-        except Exception:  # noqa: BLE001 - attribution only
-            agent_id = ""
-        agent = identity.lookup(agent_id) if agent_id else None
-        if agent:
-            return str(agent["session"])
-        named = identity.lookup(str(data.get("by") or "").strip()) if data.get("by") else None
-        return str(named["session"]) if named else ""
-
-    def _handle_calls_get(self):
-        from lib import group_calls
-        principal = self._calls_principal()
-        if principal is None:
-            return
-        wanted = (self._query().get("principal") or [""])[0] if principal == group_calls.ADMINISTRATOR else ""
-        group_calls.bind(self.ctx)
-        try:
-            return self._json_ok(group_calls.snapshot(principal, principal=wanted))
-        except group_calls.CallError as exc:
-            return self._json(exc.status, exc.body())
-
-    def _handle_calls_start(self):
-        from lib import group_calls
-        principal = self._calls_principal()
-        if principal is None:
-            return
-        data = self._read_json()
-        if not isinstance(data, dict) or not isinstance(data.get("agents"), list):
-            return self._json_error(400, "agents must be a list")
-        group_calls.bind(self.ctx)
-        try:
-            return self._json_ok(group_calls.start(
-                principal, [str(a) for a in data["agents"]], request_id=str(data.get("request_id") or ""),
-                principal=str(data.get("principal") or ""), by=self._calls_by(data)))
-        except group_calls.CallError as exc:
-            return self._json(exc.status, exc.body())
-
-    def _handle_calls_action(self, action: str):
-        from lib import group_calls
-        principal = self._calls_principal()
-        if principal is None:
-            return
-        data = self._read_json()
-        if not isinstance(data, dict):
-            return self._json_error(400, "bad json")
-        group_calls.bind(self.ctx)
-        scope = {"call_id": str(data.get("call_id") or ""), "principal": str(data.get("principal") or ""),
-                 "by": self._calls_by(data)}
-        try:
-            if action == "end":
-                return self._json_ok(group_calls.end(principal, **scope))
-            return self._json_ok(group_calls.change(principal, action, str(data.get("agent") or ""), **scope))
-        except group_calls.CallError as exc:
-            return self._json(exc.status, exc.body())
-
-    def _handle_calls_add(self):
-        return self._handle_calls_action("add")
-
-    def _handle_calls_remove(self):
-        return self._handle_calls_action("remove")
-
-    def _handle_calls_hold(self):
-        return self._handle_calls_action("hold")
-
-    def _handle_calls_resume(self):
-        return self._handle_calls_action("resume")
-
-    def _handle_calls_switch(self):
-        return self._handle_calls_action("switch")
-
-    def _handle_calls_transfer(self):
-        return self._handle_calls_action("transfer")
-
-    def _handle_calls_end(self):
-        return self._handle_calls_action("end")
+        except Exception as exc:  # noqa: BLE001 - fail closed: refused, logged and retryable
+            log_exception("turnCallerLookupFail", exc)
+            raise turn_identity.TurnIdentityUnavailable() from exc
 
     # ---- agent rings (docs/agent-rings.md) ----
-
-    def _calls_ring_run(self, work, *, body: bool = True):
-        from lib import agent_rings, group_calls
-        principal = self._calls_principal()
-        if principal is None:
-            return
-        data = self._read_json() if body else {}
-        if not isinstance(data, dict):
-            return self._json_error(400, "bad json")
-        agent_rings.bind(self.ctx)
-        group_calls.bind(self.ctx)
-        try:
-            return self._json_ok(work(agent_rings, principal, data))
-        except group_calls.CallError as exc:
-            return self._json(exc.status, exc.body())
-
-    def _handle_calls_ring_get(self):
-        def work(rings, principal, _data):
-            ring_id = (self._query().get("ring_id") or [""])[0]
-            ring = rings.get(ring_id) if ring_id else rings.current(principal)
-            if ring is not None and not rings.event_visible(ring, principal) and \
-                    ring.get("answered_by") != principal:
-                ring = None                     # a Live ring is invisible to a phone that cannot run it (H6)
-            if ring_id and ring is None:
-                raise rings.CallError(404, "unknown call")
-            return {"ring": ring, "settings": rings.settings()}
-        return self._calls_ring_run(work, body=False)
-
-    def _handle_calls_ring(self):
-        return self._calls_ring_run(lambda rings, _p, data: rings.ring(
-            caller_agent_id=self._turn_caller(), agent=str(data.get("agent") or ""),
-            reason=str(data.get("reason") or ""), opening_line=str(data.get("opening_line") or ""),
-            conversation_mode=data.get("conversation_mode"), event_context=data.get("event_context")))
-
-    def _handle_calls_ring_answer(self):
-        return self._calls_ring_run(lambda rings, principal, data: rings.answer(
-            principal, str(data.get("ring_id") or ""), conversation_mode=data.get("conversation_mode"),
-            request_id=data.get("request_id"), client_nonce=data.get("client_nonce")))
 
     # Agent-live rings (WIRE-v2): the Live call's socket and its owner's controls.
     def _handle_calls_ring_live_socket(self):
         from lib.agent_ring_live_socket import serve
         return serve(self)
-
-    def _handle_calls_ring_live_close(self):
-        from lib import agent_ring_live
-        return self._calls_ring_run(lambda _r, principal, data: agent_ring_live.close(principal, data))
-
-    def _handle_calls_ring_live_fallback(self):
-        from lib import agent_ring_live
-        return self._calls_ring_run(lambda _r, principal, data: agent_ring_live.fallback(principal, data))
-
-    def _handle_calls_ring_decline(self):
-        return self._calls_ring_run(lambda rings, principal, data: rings.decline(
-            principal, str(data.get("ring_id") or "")))
-
-    def _handle_calls_ring_cancel(self):
-        return self._calls_ring_run(lambda rings, _p, data: rings.cancel(
-            self._turn_caller(), str(data.get("ring_id") or "")))
-
-    def _handle_calls_ring_voip_token(self):
-        return self._calls_ring_run(lambda rings, principal, data: rings.register_voip_token(
-            principal, str(data.get("token") or ""), environment=str(data.get("environment") or ""),
-            supported_conversation_modes=data.get("supported_conversation_modes")))
-
-    def _handle_calls_ring_device(self):
-        """POST /calls/ring/device {"receive_rings": bool, "push_token"?: "<this phone's APNs alert token>"}:
-        this phone switches agent rings on or off for itself (docs/agent-rings.md)."""
-        return self._calls_ring_run(lambda rings, principal, data: rings.set_receive_rings(principal, data))
-
-    def _handle_calls_ring_device_get(self):
-        return self._calls_ring_run(lambda rings, principal, _d: rings.get_device_state(principal), body=False)
-
-    def _handle_calls_ring_settings_get(self):
-        return self._calls_ring_run(lambda rings, _p, _d: {
-            "ok": True, "settings": rings.settings(), "audit": rings.audit()[:50]}, body=False)
-
-    def _handle_calls_ring_settings_post(self):
-        return self._calls_ring_run(lambda rings, _p, data: {
-            "ok": True, "settings": rings.update_settings(data), "audit": rings.audit()[:50]})
-
-    def _apply_group_call(self, req):
-        """A /send in a group call: (request routed to a reachable participant,
-        the participants the orchestrator may pick), or (None, None) after
-        answering 409. A send without ``call_id`` passes through unchanged."""
-        if not req.call_id:
-            return req, None
-        from dataclasses import replace
-        from lib import group_calls
-        from lib.http_utils import principal_of
-        group_calls.bind(self.ctx)
-        try:
-            routed = group_calls.route(principal_of(self).principal, req.call_id, req.session)
-        except group_calls.CallError as exc:
-            self._json(exc.status, exc.body())
-            return None, None
-        return replace(req, session=routed["session"]), tuple(routed["reachable"])
-
-    def _handle_oracle_handoff_get(self):
-        from lib import oracle_handoffs
-        principal = self._oracle_handoff_principal()
-        if principal is None:
-            return
-        if principal == oracle_handoffs.ADMINISTRATOR:
-            principal = (self._query().get("principal") or [principal])[0]
-        return self._json_ok(oracle_handoffs.snapshot(principal))
-
-    def _handle_oracle_handoff_ack(self):
-        from lib import oracle_handoffs
-        principal = self._oracle_handoff_principal()
-        if principal is None:
-            return
-        data = self._read_json()
-        if data is None:
-            return self._json_error(400, "bad json")
-        oracle_handoffs.bind(self.ctx)
-        try:
-            return self._json_ok(oracle_handoffs.ack(principal, data))
-        except oracle_handoffs.HandoffError as exc:
-            return self._json(exc.status, exc.body())
-
-    def _handle_oracle_contact_post(self):
-        """Set or clear the Oracle contact. Body: {"session": "<session|persona|''>"}."""
-        from lib import oracle_contact
-        data = self._read_json()
-        if data is None:
-            return self._json_error(400, "bad json")
-        try:
-            result = oracle_contact.set(str(data.get("session") or ""))
-        except ValueError as exc:
-            return self._json_error(409, str(exc))
-        log("oracleContactSet", f"session={result['session'] or '-'}")
-        return self._json_ok(result)
-
-    def _handle_oracle_voice_provider_get(self):
-        """Which voice model Oracle v2 calls use (docs/oracle-gemini-live.md)."""
-        from lib import config, oracle_voice_provider
-        return self._json_ok(oracle_voice_provider.status(config.load()))
-
-    def _handle_oracle_voice_provider_post(self):
-        """Choose the Oracle v2 voice model. Body: {"provider": "openai"|"gemini"}.
-        Applies to the next call; a call in progress keeps its model."""
-        from lib import config, oracle_voice_provider
-        data = self._read_json()
-        if data is None:
-            return self._json_error(400, "bad json")
-        try:
-            oracle_voice_provider.set_provider(data.get("provider"))
-        except ValueError as exc:
-            return self._json_error(400, str(exc))
-        result = oracle_voice_provider.status(config.load())
-        log("oracleVoiceProvider", f"selected={result['selected']} effective={result['provider']}")
-        return self._json_ok(result)
 
     def _handle_oracle_v2(self):
         from lib.oracle_mode import voice_handler
@@ -4620,156 +2089,6 @@ class Handler(BaseHTTPRequestHandler):
     def _handle_oracle_realtime(self):
         from lib.oracle_realtime import serve
         return serve(self)
-
-    def _handle_oracle_delegations_get(self):
-        from lib import oracle_delegations, turn_dispatch
-        oracle_delegations.reconcile_orphans(
-            is_live=turn_dispatch.owns_inflight_trace)
-        query = self._query()
-        try:
-            limit = int(query.get("limit", ["50"])[0] or "50")
-        except ValueError:
-            limit = 50
-        include_all = str(query.get("all", ["0"])[0]).lower() in {
-            "1", "true", "yes",
-        }
-        principal = str(self._request_principal or "administrator")
-        rows = (oracle_delegations.recent(
-                    owner_principal=principal, limit=limit) if include_all
-                else oracle_delegations.undelivered(
-                    owner_principal=principal, limit=limit))
-        return self._json_ok({"delegations": rows})
-
-    def _handle_oracle_call_status(self):
-        from lib import oracle_calls
-        query = self._query()
-        rows = oracle_calls.call_results(str(self._request_principal), query.get("attempt_id", [""])[0])
-        return self._json_ok({"delegations": rows})
-
-    def _handle_oracle_live_call_status(self):
-        from lib.oracle_live_calls import handle
-        return handle(self, "status")
-
-    def _handle_oracle_context_image(self):
-        from lib.oracle_live_calls import context_image
-        return context_image(self)
-
-    def _handle_oracle_live_call_create(self):
-        from lib.oracle_live_calls import handle
-        return handle(self, "create")
-
-    def _handle_oracle_live_call_close(self):
-        from lib.oracle_live_calls import handle
-        return handle(self, "close")
-
-    def _handle_oracle_live_call_control(self):
-        from lib.oracle_live_calls import handle
-        return handle(self, "control")
-
-    def _handle_oracle_call_create(self):
-        from lib import oracle_calls, oracle_contact
-        data = self._read_json()
-        if not isinstance(data, dict):
-            return self._json_error(400, "bad json")
-        try:
-            result = oracle_calls.create_call(ctx=self.ctx,
-                principal=str(self._request_principal),
-                attempt_id=str(data.get("attempt_id") or ""), sdp=data.get("sdp"),
-                fallback=oracle_contact.effective(data.get("oracle_session"), source="v1-webrtc"),
-                stop=lambda session: self._stop_agent_session(session, strict=True, defer_finish=True)[1])
-            return self._json_ok(result)
-        except ValueError as exc:
-            return self._json_error(400, str(exc))
-        except Exception as exc:
-            log_exception("oracleCallCreateFail", exc)
-            return self._json_error(502, "Oracle connection unavailable")
-
-    def _handle_oracle_call_close(self):
-        from lib import oracle_calls
-        data = self._read_json()
-        if not isinstance(data, dict):
-            return self._json_error(400, "bad json")
-        oracle_calls.close_call(str(self._request_principal), str(data.get("attempt_id") or ""))
-        return self._json_ok({"closed": True})
-
-    def _handle_oracle_delegation_create(self):
-        from lib import oracle_delegations
-        data = self._read_json()
-        if not isinstance(data, dict):
-            return self._json_error(400, "bad json")
-        try:
-            row = oracle_delegations.dispatch(
-                ctx=self.ctx,
-                delegation_id=str(data.get("delegation_id") or ""),
-                session=str(data.get("session") or ""),
-                request_text=str(data.get("request") or ""),
-                authenticated_at_admission=bool(
-                    getattr(self, "_request_auth_validated", False)
-                    and (getattr(self.ctx, "auth_token", "") or "")
-                ),
-                owner_principal=str(self._request_principal or "administrator"),
-            )
-        except oracle_delegations.DelegationCollision as exc:
-            return self._json_error(409, str(exc))
-        except (ValueError, LookupError) as exc:
-            return self._json_error(400 if isinstance(exc, ValueError) else 404, str(exc))
-        except Exception as exc:  # noqa: BLE001
-            status = int(getattr(exc, "status", 500))
-            log_exception("oracleDelegationFail", exc)
-            return self._json_error(status, str(exc))
-        return self._json_ok({"delegation": row})
-
-    def _handle_oracle_delegation_ack(self):
-        from lib import oracle_delegations
-        data = self._read_json()
-        if not isinstance(data, dict):
-            return self._json_error(400, "bad json")
-        try:
-            delegation_id = oracle_delegations.normalize_id(
-                str(data.get("delegation_id") or ""))
-        except ValueError as exc:
-            return self._json_error(400, str(exc))
-        if not oracle_delegations.acknowledge(
-                delegation_id,
-                owner_principal=str(self._request_principal or "administrator")):
-            return self._json_error(404, "terminal delegation not found")
-        return self._json_ok({"ok": True})
-
-    def _handle_oracle_delegation_cancel(self):
-        from lib import oracle_delegations
-        data = self._read_json()
-        if not isinstance(data, dict):
-            return self._json_error(400, "bad json")
-        principal = str(self._request_principal or "administrator")
-        session = str(data.get("session") or "").strip()
-        if session:
-            try:
-                rows = oracle_delegations.cancel_for_session(
-                    session,
-                    stop=lambda: self._stop_agent_session(
-                        session, strict=True, defer_finish=True)[1],
-                    owner_principal=principal)
-            except ValueError as exc:
-                return self._json_error(400, str(exc))
-            except Exception as exc:  # noqa: BLE001
-                log_exception("oracleAgentCancelFail", exc, detail=session)
-                return self._json_error(502, "agent cancellation failed")
-            return self._json_ok({
-   "cancelled_count": len(rows), "delegations": rows,
-            })
-        try:
-            delegation_id = oracle_delegations.normalize_id(
-                str(data.get("delegation_id") or ""))
-        except ValueError as exc:
-            return self._json_error(400, str(exc))
-        try:
-            row = oracle_delegations.cancel(
-                delegation_id, owner_principal=principal)
-        except oracle_delegations.DelegationNotCancellable as exc:
-            return self._json_error(409, str(exc))
-        if row is None:
-            return self._json_error(404, "delegation not found")
-        return self._json_ok({"delegation": row})
 
     def _handle_stop(self):
         """Terminate any in-flight clarp turn for the given agent. With
@@ -4783,9 +2102,12 @@ class Handler(BaseHTTPRequestHandler):
         actor, verified = self._control_actor(data)
         reason = str(data.get("reason") or "").strip()[:200]
         effects: dict = {}
-        n = self._stop_agent_session(session, strict=False, actor=actor,
-                                     actor_verified=verified, reason=reason,
-                                     effects=effects)
+        try:
+            n = self._stop_agent_session(session, strict=False, actor=actor,
+                                         actor_verified=verified, reason=reason,
+                                         effects=effects)
+        except StopNotRecorded:
+            return self._json_error(503, "stop was not recorded; send it again")
         # queue_paused and goals_paused appear only as committed effects read
         # back after the Stop; absent means unknown, never "not paused".
         return self._json_ok({"ok": True, "terminated": n, "stop_actor": actor,
@@ -4798,16 +2120,12 @@ class Handler(BaseHTTPRequestHandler):
         An agent is verified by the Host-issued identity of the turn its tool
         runs in (X-Clarp-Turn, lib.turn_identity); a paired device acts for
         its user. Anything else is the caller's claim (default "user") and is
-        reported as unverified; a verified identity replaces the claim."""
-        from lib import turn_identity
-        from lib.provider_background_jobs import TURN_ENV
+        reported as unverified; a verified identity replaces the claim. A turn
+        token whose lookup fails is refused (retryable 503 through _turn_caller),
+        never read as the claim: an agent's Stop applied as the user's would
+        withdraw the user's sends (HTTP-N5)."""
         claimed = str(data.get("actor") or "").strip()[:80] or "user"
-        try:
-            agent_id = turn_identity.caller_agent_id(
-                {TURN_ENV: (self.headers.get("X-Clarp-Turn") or "")})
-        except Exception as exc:  # noqa: BLE001 - attribution falls back to the claim
-            log_exception("controlActorIdentityFail", exc)
-            agent_id = ""
+        agent_id = self._turn_caller()
         agent = identity.lookup(agent_id) if agent_id else None
         if agent:
             actor = f"agent:{agent['session']}"
@@ -4867,6 +2185,7 @@ class Handler(BaseHTTPRequestHandler):
         effects: dict | None = None,
     ):
         """Authoritative local stop shared by /stop and Oracle cancellation."""
+        from lib import tts_queue
         from lib import turn_dispatch
         from lib import turn_queue
         agent = identity.lookup(session)
@@ -4874,15 +2193,21 @@ class Handler(BaseHTTPRequestHandler):
         dropped = 0
         if agent:
             agent_id = agent["agent_id"]
+            # Only the user's Stop withdraws the agent's admitted-but-unlaunched
+            # user sends. A Stop by another agent, proven by the Host-issued turn
+            # identity (never a claimed name), stops the work but leaves them.
+            fence_user_receipts = not (actor_verified and str(actor).startswith("agent:"))
             runtime_client = getattr(self.ctx, "runtime_client", None)
             remote_lease = None
             if runtime_client is not None:
                 try:
+                    stop_options = {"strict": strict, "hold": True}
+                    if not fence_user_receipts:
+                        stop_options["fence_user_receipts"] = False
                     remote_lease = runtime_client.begin_stop(
                         agent_id,
                         backends.normalize(agent.get("backend")),
-                        strict=strict,
-                        hold=True,
+                        **stop_options,
                     )
                     n = remote_lease.terminated
                     dropped = remote_lease.dropped
@@ -4896,7 +2221,8 @@ class Handler(BaseHTTPRequestHandler):
                 stop_snapshot = turn_dispatch.snapshot_stop_state(agent_id)
                 queue_was_paused = bool(turn_queue.state(agent_id)["paused"])
                 dropped = turn_dispatch.clear_for_agent(
-                    agent_id, preserve_queue=True, pause_queue=True)
+                    agent_id, preserve_queue=True, pause_queue=True,
+                    user_stop=fence_user_receipts)
                 try:
                     n = backends.interrupt(
                         backends.normalize(agent.get("backend")), agent_id)
@@ -4918,6 +2244,14 @@ class Handler(BaseHTTPRequestHandler):
             # state so clients update immediately instead of on the next poll.
             # Durable user-requested queue entries remain visible and paused;
             # stopping work must never silently delete acknowledged messages.
+            # Pausing goals must not skip recording the stop and its events.
+            if fence_user_receipts:
+                # The user's Stop drops the agent's speech not yet synthesized
+                # instead of speaking it late (VP-06).
+                try:
+                    tts_queue.cancel(agent_id, reason="user stop")
+                except Exception as exc:  # stop already succeeded
+                    log_exception("turnStopSpeechCancelFail", exc, detail=agent_id)
             try:
                 from lib import goal_ledger, task_plans
                 if actor == "user":
@@ -4930,11 +2264,22 @@ class Handler(BaseHTTPRequestHandler):
                         agent_id, f"{stopped_by}: {reason}" if reason else stopped_by)
                 if effects is not None:
                     effects["goals_paused"] = int(goals_paused)
-                stopped = turn_lifecycle.try_transition(
-                    agent_id, TurnEvent.STOP_REQUESTED,
-                    {"source": "user_stop", "message": "Turn stopped",
-                     "stop_actor": actor, "stop_actor_verified": actor_verified,
-                     "stop_reason": reason})
+            except Exception as exc:  # stop already succeeded
+                log_exception("turnStopBookkeepingFail", exc, detail=agent_id)
+            stop_unrecorded: Exception | None = None
+            try:
+                try:
+                    stopped = turn_lifecycle.try_transition(
+                        agent_id, TurnEvent.STOP_REQUESTED,
+                        {"source": "user_stop", "message": "Turn stopped",
+                         "stop_actor": actor, "stop_actor_verified": actor_verified,
+                         "stop_reason": reason})
+                except Exception as exc:  # the write failed after its bounded retries
+                    # The barrier is still released below; the caller hears the
+                    # Stop was not recorded and can send it again (TP-N1b).
+                    log_exception("turnStopRecordFail", exc, detail=agent_id)
+                    stop_unrecorded = exc
+                    raise
                 if getattr(self.ctx, "stream", None) is not None:
                     if stopped is not None:
                         # The persisted row's ts and detail, as the state
@@ -4974,6 +2319,9 @@ class Handler(BaseHTTPRequestHandler):
                             agent_id, stop_snapshot, cancelled_trace_ids)
                         turn_dispatch.finish_stop(
                             self.ctx, agent_id, backend_registry=backends)
+                # A deferred Stop (Oracle cancellation) completes even when its
+                # row could not be written: its caller releases the barrier
+                # through ``release``; the failure is logged (turnStopRecordFail).
                 log("turnStop", f"session={session} terminated={n} barrier=held")
                 return n, release
             elif runtime_client is not None:
@@ -4981,6 +2329,8 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 turn_dispatch.finish_stop(
                     self.ctx, agent_id, backend_registry=backends)
+            if stop_unrecorded is not None:
+                raise StopNotRecorded(agent_id) from stop_unrecorded
         log("turnStop", f"session={session} terminated={n} actor={actor} "
                         f"reason={reason!r} queued_preserved={turn_queue.pending_count(agent_id) if agent else 0}")
         if defer_finish:
@@ -4993,40 +2343,16 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.split("?", 1)[0]
         if self._device_forbidden(path, "DELETE"):
             return self._json_error(403, "full device access required")
-        from lib import janitor_http
-        if janitor_http.handles(path):
-            return janitor_http.handle(self, "DELETE")
-        if path.startswith("/teams/") and "/members/" in path:
-            rest = path[len("/teams/"):]
-            team_id, agent_id = rest.split("/members/", 1)
-            return self._handle_team_remove_member(team_id.strip("/"), agent_id.strip("/"))
-        if path.startswith("/teams/"):
-            return self._handle_team_delete(path[len("/teams/"):].strip("/"))
-        if path.startswith("/background-jobs/"):
-            return self._handle_background_job_cancel(
-                path[len("/background-jobs/"):].strip("/"))
-        if path.startswith("/turn-queue/"):
-            return self._handle_turn_queue_delete(path[len("/turn-queue/"):].strip("/"))
-        if path.startswith("/transcription-results/"):
-            return self._handle_transcription_result_delete(
-                path[len("/transcription-results/"):].strip("/"))
-        if path.startswith("/schedules/"):
-            return self._handle_schedule_delete(path[len("/schedules/"):].strip("/"))
-        if path == "/devices/live-activity":
-            return self._handle_live_activity_delete()
-        if path.startswith("/agents/"):
-            return self._handle_delete_agent(path[len("/agents/"):])
-        if path.startswith("/personas/"):
-            return self._handle_delete_persona(path[len("/personas/"):].strip("/"))
-        return self._send(404, b"not found")
+        return route_registry.dispatch(self, "DELETE", path)
 
     def do_PATCH(self):
         if not self._authorized():
             return self._reject_unauthorized()
         path = self.path.split("?", 1)[0]
-        if path.startswith("/schedules/"):
-            return self._handle_schedule_patch(path[len("/schedules/"):].strip("/"))
-        return self._send(404, b"not found")
+        if path.startswith("/schedules/") and self._device_forbidden(path, "PATCH"):
+            # Only the route: an unmatched PATCH keeps its 404 (HTTP-02).
+            return self._json_error(403, "full device access required")
+        return route_registry.dispatch(self, "PATCH", path)
 
     def _handle_transcription_result_delete(self, job_id: str):
         from lib import transcription_results
@@ -5036,78 +2362,6 @@ class Handler(BaseHTTPRequestHandler):
             return self._json_error(400, str(e))
         transcription_results.delete(job_id)
         return self._json_ok({"ok": True})
-
-    def _handle_background_jobs(self):
-        from lib import background_jobs
-        return self._json_ok(background_jobs.snapshot())
-
-    def _handle_background_job_detail(self, job_id: str):
-        from lib import background_jobs
-        job_id = unquote(job_id)
-        if not job_id or "/" in job_id:
-            return self._send(404, b"not found")
-        # A log may hold anything the worker printed; a limited device gets
-        # the timeline and progress but not the file contents.
-        limited = getattr(self, "_request_device_scope", "") == "limited"
-        detail = background_jobs.detail(job_id, include_log=not limited)
-        if detail is None:
-            return self._json_error(404, "job not found")
-        return self._json_ok(detail)
-
-    def _broadcast_artifact(self, artifact: dict) -> None:
-        if getattr(self.ctx, "stream", None) is None:
-            return
-        events.broadcast(self.ctx.stream, events.artifact_updated(
-            session=artifact.get("session", ""),
-            agent_id=artifact.get("agent_id", ""),
-            artifact_id=artifact.get("artifact_id", "")))
-        from lib import artifacts
-        attention_count = len(artifacts.attention(include_questions=True))
-        events.broadcast(self.ctx.stream, events.attention_updated(
-            attention_count=attention_count))
-        pusher = getattr(self.server, "live_activity_pusher", None)
-        if pusher is not None:
-            from lib import live_activity
-            threading.Thread(target=lambda: pusher.set_attention(live_activity.badge_attention()),
-                             daemon=True, name="live-activity-attention").start()
-
-    def _handle_artifacts_list(self):
-        from lib import artifacts
-        qs = self._query()
-        representation = qs.get("representation", [""])[0]
-        if representation not in artifacts.REPRESENTATIONS:
-            return self._json_error(400, "unsupported artifact representation")
-        try:
-            limit = int(qs.get("limit", ["100"])[0] or 100)
-            offset = int(qs.get("offset", ["0"])[0] or 0)
-            created_from = int(qs["created_from"][0]) if qs.get("created_from") else None
-            created_to = int(qs["created_to"][0]) if qs.get("created_to") else None
-        except (TypeError, ValueError):
-            return self._json_error(400, "invalid limit")
-        rows = artifacts.list_artifacts(
-            session=(qs.get("session", [""])[0] or "").strip(),
-            agent_id=(qs.get("agent_id", [""])[0] or "").strip(),
-            type=(qs.get("type", [""])[0] or "").strip(),
-            search=(qs.get("search", [""])[0] or "").strip(),
-            created_from=created_from, created_to=created_to,
-            limit=limit, offset=offset,
-            order=(qs.get("order", ["updated"])[0] or "updated").strip(),
-        )
-        with artifacts.summary_request() as budget:
-            body = {"artifacts": [
-                artifacts.response_representation(row, representation, budget=budget)
-                for row in rows]}
-        return self._json_ok(body)
-
-    def _handle_artifact_events_config(self, artifact_id: str, *, write: bool = True):
-        if getattr(self, "_request_device_scope", "") == "limited":
-            return self._json_error(403, "full device access required")
-        from lib import html_form_events
-        try:
-            return self._json_ok(html_form_events.configure(artifact_id, self._read_json()) if write
-                                 else html_form_events.configuration(artifact_id))
-        except (ValueError, TypeError) as exc:
-            return self._json_error(400, str(exc))
 
     def _handle_artifact_events(self, artifact_id: str, *, write: bool = True):
         # Telemetry may contain personal answers; limited devices cannot read it.
@@ -5130,264 +2384,8 @@ class Handler(BaseHTTPRequestHandler):
         except (ValueError, TypeError) as exc:
             return self._json_error(409 if write else 400, str(exc))
 
-    def _handle_artifact_submit(self, artifact_id: str):
-        from lib import html_forms
-        data = self._read_json()
-        if not isinstance(data, dict):
-            return self._json_error(400, "JSON object required")
-        try:
-            receipt = html_forms.submit(artifact_id, data)
-        except html_forms.ReadOnlyForm as exc:
-            return self._json_error(400, str(exc))
-        except ValueError as exc:
-            return self._json_error(409, str(exc))
-        return self._json_ok(receipt)
-
-    def _handle_artifact_html(self, artifact_id: str):
-        if getattr(self, "_request_device_scope", "") == "limited":
-            return self._json_error(403, "full device access required")
-        # The page's own scripts can read document.URL and may fetch declared
-        # connect_origins, so a ?token= credential would leak to them.
-        if getattr(self, "_request_auth_source", "") == "query":
-            return self._json_error(403, "send the credential in a header or cookie, not the URL")
-        from lib import artifacts, html_forms
-        row = artifacts.get(artifact_id)
-        if not row or row["type"] != "html_form":
-            return self._json_error(404, "HTML artifact not found")
-        body, policy = html_forms.render_html(row["payload"])
-        return self._send(200, body, "text/html; charset=utf-8", {
-            "Content-Security-Policy": policy, "X-Content-Type-Options": "nosniff",
-            "Referrer-Policy": "no-referrer"})
-
-    def _handle_artifact_get(self, artifact_id: str):
-        from lib import artifacts
-        row = artifacts.get(artifact_id)
-        if not row:
-            return self._json_error(404, "artifact not found")
-        # Exactly flat-v1 drops the duplicate `payload`; any other value is
-        # ignored, as it always was (no new 400 on this route).
-        if self._query().get("representation", [""])[0] == "flat-v1":
-            row = artifacts.response_representation(row, "flat-v1")
-        return self._json_ok({"artifact": row})
-
-    def _handle_artifact_create(self):
-        from lib import artifacts
-        data = self._read_json()
-        if not isinstance(data, dict): return self._json_error(400, "json object required")
-        if str(data.get("type") or "").strip().lower() in {"decision", "question", "plan"}:
-            return self._json_error(409, "reserved artifact type")
-        try:
-            row = artifacts.create(
-                session=str(data.get("session") or ""), type=str(data.get("type") or ""),
-                title=str(data.get("title") or ""), summary=str(data.get("summary") or ""),
-                status=str(data.get("status") or "ready"),
-                reference_id=str(data.get("reference_id") or ""), payload=data.get("payload"),
-                artifact_id=str(data.get("artifact_id") or ""), expected_version=data.get("expected_version"))
-        except (ValueError, sqlite3.IntegrityError) as exc:
-            return self._json_error(409, str(exc))
-        self._broadcast_artifact(row)
-        return self._json(201, {"artifact": row})
-
-    def _handle_artifact_update(self, artifact_id: str):
-        from lib import artifacts
-        data = self._read_json()
-        if not isinstance(data, dict): return self._json_error(400, "json object required")
-        try: row = artifacts.update(artifact_id, data)
-        except ValueError as exc:
-            return self._json_error(409, str(exc))
-        self._broadcast_artifact(row)
-        return self._json_ok({"artifact": row})
-
-    def _handle_decision_create(self):
-        from lib import artifacts
-        data = self._read_json()
-        if not isinstance(data, dict): return self._json_error(400, "json object required")
-        try:
-            row = artifacts.create_decision(
-                session=str(data.get("session") or ""), title=str(data.get("title") or "Decision"),
-                question=str(data.get("question") or ""), context=str(data.get("context") or ""),
-                yes_label=str(data.get("yes_label") or "Yes"), no_label=str(data.get("no_label") or "No"),
-                payload=data.get("payload"), reference_id=str(data.get("reference_id") or ""),
-                expires_at=data.get("expires_at"),
-                response_type=data.get("response_type", "approval"),
-                options=data.get("options"), allow_custom_text=data.get("allow_custom_text"),
-                recommended_option_id=data.get("recommended_option_id"),
-                blocks_progress=data.get("blocks_progress", False),
-                priority_reason=data.get("priority_reason", ""),
-                urgency=data.get("urgency", "normal"),
-                response_effort=data.get("response_effort", "review"),
-                deadline_at=data.get("deadline_at"),
-                input_hint=data.get("input_hint"))
-        except (ValueError, sqlite3.IntegrityError) as exc:
-            return self._json_error(409, str(exc))
-        self._broadcast_artifact(row)
-        return self._json(201, {"artifact": row})
-
-    def _handle_decision_resolve(self, decision_id: str):
-        from lib import artifacts
-        # This is a cooperative consent workflow, not a hostile-code sandbox:
-        # local agents already share the host and SQLite file. `resolved_by`
-        # records the user-facing API action; skills are required to stop and
-        # await it rather than self-resolve.
-        data = self._read_json()
-        if not isinstance(data, dict): return self._json_error(400, "json object required")
-        choice = data.get("choice")
-        answer = data.get("answer")
-        if (choice is None) == (answer is None):
-            return self._json_error(400, "exactly one of choice or answer is required")
-        if choice is not None:
-            if not isinstance(choice, str) or choice.strip().lower() not in {"accepted", "rejected"}:
-                return self._json_error(400, "invalid decision choice")
-            choice = choice.strip().lower()
-        raw_revision = data.get("expected_revision")
-        if isinstance(raw_revision, bool) or not isinstance(raw_revision, int):
-            return self._json_error(400, "expected_revision must be an integer")
-        revision = raw_revision
-        try:
-            row, changed = artifacts.resolve(
-                decision_id, choice=choice, answer=answer, expected_revision=revision)
-        except ValueError as exc:
-            return self._json_error(409, str(exc))
-        self._broadcast_artifact(row)
-        self._deliver_pending_decisions()
-        return self._json_ok({"artifact": row, "changed": changed,
-                              "delivery_pending": artifacts.delivery_pending(decision_id)})
-
     def _deliver_pending_decisions(self) -> set[str]:
         return _dispatch_adapters(self.ctx).deliver_pending_decisions()
-
-    def _handle_decision_dismiss(self, decision_id: str):
-        from lib import artifacts
-        data = self._read_json()
-        if not isinstance(data, dict):
-            return self._json_error(400, "json object required")
-        revision = data.get("expected_revision")
-        if isinstance(revision, bool) or not isinstance(revision, int):
-            return self._json_error(400, "expected_revision must be an integer")
-        try:
-            row, changed = artifacts.dismiss(decision_id, expected_revision=revision)
-        except ValueError as exc:
-            return self._json_error(409, str(exc))
-        self._broadcast_artifact(row)
-        self._deliver_pending_decisions()
-        return self._json_ok({
-            "artifact": row, "changed": changed,
-            "delivery_pending": artifacts.delivery_pending(decision_id),
-        })
-
-    def _handle_decision_withdraw(self, decision_id: str):
-        """The asking agent revokes its own request; silent for both sides."""
-        from lib import artifacts
-        data = self._read_json()
-        if not isinstance(data, dict):
-            return self._json_error(400, "json object required")
-        session = data.get("session")
-        if not isinstance(session, str) or not session.strip():
-            return self._json_error(400, "session required")
-        try:
-            row, changed = artifacts.withdraw(decision_id, session=session)
-        except PermissionError as exc:
-            return self._json_error(403, str(exc))
-        except ValueError as exc:
-            return self._json_error(409, str(exc))
-        self._broadcast_artifact(row)
-        return self._json_ok({"artifact": row, "changed": changed})
-
-    def _close_requests_for_user_message(self, session: str) -> None:
-        """A message from the owner answers whatever the agent asked before."""
-        from lib import artifacts
-        try:
-            agent = identity.resolve(session) if session else None
-            if agent is None:
-                return
-            for artifact_id in artifacts.close_for_user_message(agent.agent_id):
-                row = artifacts.get(artifact_id)
-                if row:
-                    self._broadcast_artifact(row)
-        except Exception as e:  # noqa: BLE001 - never fail an admitted send
-            log_exception("decisionSupersedeFail", e, detail=session)
-
-    def _handle_artifact_archive(self, artifact_id: str):
-        return self._handle_artifact_inbox_action(artifact_id, discard=False)
-
-    def _handle_artifact_discard(self, artifact_id: str):
-        return self._handle_artifact_inbox_action(artifact_id, discard=True)
-
-    def _handle_artifact_inbox_action(self, artifact_id: str, *, discard: bool):
-        from lib import artifacts
-        data = self._read_json()
-        if not isinstance(data, dict):
-            return self._json_error(400, "json object required")
-        updated_at = data.get("expected_updated_at")
-        if isinstance(updated_at, bool) or not isinstance(updated_at, int):
-            return self._json_error(400, "expected_updated_at must be an integer")
-        if not discard and not isinstance(data.get("archived"), bool):
-            return self._json_error(400, "archived must be a boolean")
-        try:
-            if discard:
-                row, changed = artifacts.discard(artifact_id, expected_updated_at=updated_at)
-            else:
-                row, changed = artifacts.archive(
-                    artifact_id, archived=data["archived"], expected_updated_at=updated_at)
-        except ValueError as exc:
-            return self._json_error(409, str(exc))
-        self._broadcast_artifact(row)
-        return self._json_ok({"artifact": row, "changed": changed})
-
-    def _handle_artifact_pin(self, artifact_id: str):
-        from lib import artifacts
-        data = self._read_json()
-        if not isinstance(data, dict):
-            return self._json_error(400, "json object required")
-        if not isinstance(data.get("pinned"), bool):
-            return self._json_error(400, "pinned must be a boolean")
-        try:
-            row, changed = artifacts.pin(artifact_id, pinned=data["pinned"])
-        except ValueError as exc:
-            status = 404 if str(exc) == "artifact not found" else 409
-            return self._json_error(status, str(exc))
-        if changed:
-            self._broadcast_artifact(row)
-        return self._json_ok({"artifact": row, "changed": changed})
-
-    def _handle_pinned_artifacts(self):
-        from lib import artifacts
-        representation = self._query().get("representation", [""])[0]
-        if representation not in artifacts.REPRESENTATIONS:
-            return self._json_error(400, "unsupported artifact representation")
-        with artifacts.summary_request() as budget:
-            body = {"artifacts": [
-                artifacts.response_representation(row, representation, budget=budget)
-                for row in artifacts.list_pinned()]}
-        return self._json_ok(body)
-
-    def _handle_attention_inbox(self):
-        from lib import attention_index
-        query = self._query()
-        try:
-            result = attention_index.page(limit=int(query.get("limit", ["100"])[0]),
-                                          cursor=query.get("cursor", [""])[0],
-                                          representation=query.get("representation", [""])[0])
-        except attention_index.StaleCursor as exc:
-            return self._json_error(409, str(exc))
-        except (ValueError, TypeError):
-            return self._json_error(400, "invalid attention query")
-        return self._json_ok(result)
-
-    def _handle_attention(self):
-        from lib import artifacts, janitor_attention
-        query = self._query()
-        items = artifacts.attention(
-            include_questions=query.get("decision_format", [""])[0] == "2",
-            include_archived=query.get("include_archived", [""])[0] == "1")
-        self._deliver_pending_decisions()
-        # An explicit format advertisement lets helpers reject older Hosts
-        # which otherwise silently interpret question creation as approval.
-        return self._json_ok({
-            "items": items, "count": len(items), "decision_format": 2,
-            "janitor_items": janitor_attention.pending(
-   include_archived=query.get("include_archived", [""])[0] == "1"),
-        })
 
     def _handle_turn_queue(self):
         from lib import turn_queue
@@ -5451,6 +2449,10 @@ class Handler(BaseHTTPRequestHandler):
     def _handle_turn_queue_update(self, queue_id: str):
         from lib import turn_queue
         queue_id = unquote(queue_id)
+        if turn_queue.status(queue_id) == "unknown":
+            # A listen-first opening whose launch cannot be known: the durable
+            # audit, never queued work (docs/agent-rings.md "Claimed once").
+            return self._json_error(409, "opening launch unknown")
         row = turn_queue.get(queue_id)
         data = self._read_json()
         if row and self._reject_janitor_control({"session": row["session"]}):
@@ -5466,6 +2468,8 @@ class Handler(BaseHTTPRequestHandler):
     def _handle_turn_queue_delete(self, queue_id: str):
         from lib import turn_queue
         queue_id = unquote(queue_id)
+        if turn_queue.status(queue_id) == "unknown":
+            return self._json_error(409, "opening launch unknown")      # kept as the audit
         row = turn_queue.get(queue_id)
         if row and self._reject_janitor_control({"session": row["session"]}):
             return
@@ -5542,8 +2546,10 @@ class Handler(BaseHTTPRequestHandler):
         # Cancellation immediately closes the durable gate checked by workers
         # before each delivery/action. The prompt is cleanup: it lets the owner
         # tear down or reconfigure a shared process, but correctness does not
-        # depend on that best-effort dispatch succeeding.
-        if cancellation_changed:
+        # depend on that best-effort dispatch succeeding. A computer-owned job
+        # (no session) has no owner to clean up; an empty forced session would
+        # route the prompt to the default or sticky agent (AUT-04).
+        if cancellation_changed and job.get("session"):
             try:
                 import shlex
                 cancelled_handle = background_jobs.job_handle(job)
@@ -5579,299 +2585,13 @@ class Handler(BaseHTTPRequestHandler):
         A bookkeeping delegate is held to its scope; an agent it starts would not
         be. The creator is the turn identity the CLI sent (X-Clarp-Turn), not a
         name in the request; the named parent or fork source is checked too."""
-        from lib import goal_ledger, turn_identity
-        from lib.provider_background_jobs import TURN_ENV
-        creator = turn_identity.caller_agent_id(
-            {TURN_ENV: self.headers.get("X-Clarp-Turn", "")})
+        from lib import goal_ledger
+        creator = self._turn_caller()   # a failed lookup is a retryable 503 (HTTP-N5)
         candidates = [creator] + [(identity.lookup(n) or {}).get("agent_id", "") for n in names if n]
         if any(goal_ledger.descends_from_active_delegate(a) for a in candidates if a):
             return "a bookkeeping delegate does not start helpers or forks"
         return ""
 
-    def _handle_create_agent(self):
-        data = self._read_json()
-        if data is None:
-            return self._json_error(400, "bad json")
-        refusal = self._bookkeeping_lineage_refusal(str(data.get("parent") or ""))
-        if refusal:
-            return self._json_error(409, refusal)
-        try:
-            result = AgentLifecycleService(self.ctx).create(data)
-        except AgentLifecycleError as e:
-            # Log the rejection reason so a failed start is never invisible —
-            # greppable as `agentCreateRejected` alongside the POST line.
-            log("agentCreateRejected",
-                f"status={e.status} code={e.code} :: {e.message}")
-            return self._json(e.status, e.response())
-        from lib.mcp_selection import decode as decode_mcp
-        from lib.avatar_urls import versioned_avatar_url
-        row = identity.lookup(result.session) or {}
-        agent = {key: row.get(key) for key in (
-            "agent_id", "session", "persona", "backend", "cwd", "model", "effort",
-            "voice_id", "avatar_symbol", "muted", "heartbeat_enabled", "dreaming_enabled",
-            "parent_agent_id", "role", "helper_state")}
-        from lib.session_models import agent_model
-        agent["model"] = agent_model(row, identity.backend_session(row))
-        state = agents_db.latest_state(row["agent_id"]) or {}
-        agent.update(alive=True, latest_state=state.get("kind") or "idle", last_activity=row.get("created_at", 0),
-                     mcp_servers=decode_mcp(row.get("mcp_servers"))[1],
-                     avatar_url=versioned_avatar_url("/avatars", row.get("agent_id", ""), row.get("avatar_path") or ""))
-        return self._json_ok({
-            "ok": True, "session": result.session, "name": result.persona, "agent": agent,
-        })
-
-    def _handle_agent_fork(self, session: str):
-        """Fork an agent into helper agents that start from its conversation
-        (``lib.agent_fork``); each child is sent its task from the parent."""
-        from lib import agent_fork
-        data = self._read_json()
-        if data is None:
-            return self._json_error(400, "bad json")
-        refusal = self._bookkeeping_lineage_refusal(session)
-        if refusal:
-            return self._json_error(409, refusal)
-        try:
-            result = agent_fork.fork(self.ctx, session, data)
-        except agent_fork.ForkError as e:
-            log("agentForkRejected", f"{session} status={e.status} code={e.code} :: {e}")
-            return self._json(e.status, e.response())
-        return self._json_ok({"ok": True, **result})
-
-    def _handle_create_persona(self):
-        from lib import personas
-        data = self._read_json()
-        if data is None:
-            return self._json_error(400, "bad json")
-        try:
-            row = personas.create(
-                name=str(data.get("name") or ""),
-                voice_id=str(data.get("voice_id") or ""),
-                avatar_symbol=str(data.get("avatar_symbol") or ""),
-                personality=str(data.get("personality") or ""),
-                avatar_base64=str(data.get("avatar_base64") or ""),
-            )
-        except (ValueError, OSError) as exc:
-            return self._json_error(409, str(exc))
-        events.broadcast(self.ctx.stream, events.agent_roster("persona-created"))
-        return self._json(201, {"persona": personas.public(row)})
-
-    def _handle_update_persona(self):
-        from lib import personas
-        data = self._read_json()
-        if data is None:
-            return self._json_error(400, "bad json")
-        try:
-            row = personas.update(
-                original_name=str(data.get("original_name") or ""),
-                name=str(data.get("name") or ""),
-                voice_id=str(data.get("voice_id") or ""),
-                avatar_symbol=str(data.get("avatar_symbol") or ""),
-                personality=str(data.get("personality") or ""),
-                avatar_base64=str(data.get("avatar_base64") or ""),
-            )
-        except (ValueError, OSError) as exc:
-            return self._json_error(409, str(exc))
-        events.broadcast(self.ctx.stream, events.agent_roster("persona-updated"))
-        return self._json_ok({"persona": personas.public(row)})
-
-    def _handle_delete_persona(self, name: str):
-        from lib import personas
-        try:
-            removed = personas.delete(unquote(name))
-        except ValueError as exc:
-            return self._json_error(409, str(exc))
-        if not removed:
-            return self._json_error(404, "personality not removable")
-        events.broadcast(self.ctx.stream, events.agent_roster("persona-deleted"))
-        return self._json_ok({"ok": True})
-
-    def _handle_persona_avatar(self, persona_id: str):
-        from lib import personas
-        row = next((p for p in personas.list_all() if p["persona_id"] == persona_id), None)
-        path = pathlib.Path(str((row or {}).get("avatar_path") or ""))
-        return self._send_file(path) if row and path.is_file() else self._send(404, b"not found")
-
-
-    def _handle_delete_agent(self, session: str):
-        from lib import turn_dispatch
-        session = unquote(session).strip("/")
-        agent = identity.lookup(session)
-        if self._reject_janitor_control({"session": session}):
-            return
-        if agent and self._turn_caller() == agent["agent_id"]:
-            # An agent deleting itself from its own turn: Koko, a copy of
-            # Theo, deleted itself as a stray on 2026-10-10. Only the user
-            # (the apps, or a shell without a turn) removes an agent's self.
-            return self._json(403, {"error": "self_delete",
-                                    "message": "an agent cannot delete itself from its own turn; "
-                                               "ask the user"})
-        if agent and getattr(self.ctx, "runtime_client", None) is None:
-            # Invalidate dispatch state before delete interrupts the backend;
-            # its terminal callback must not drain queued work after deletion.
-            turn_dispatch.clear_for_agent(agent["agent_id"])
-        try:
-            AgentLifecycleService(self.ctx).delete(session)
-        except AgentLifecycleError as e:
-            return self._json(e.status, e.response())
-        return self._json_ok({"ok": True})
-
-    def _handle_clog(self):
-        data = self._read_json()
-        if data is None:
-            return self._json_error(400, "bad json")
-        from lib import diagnostics_settings
-        if not diagnostics_settings.accepts_client_uploads():
-            return self._json_ok({"ok": True, "captured": False})
-        # Accept either a single event {event, detail, ...} or a batch
-        # {events: [...]}. Batched form keeps the PWA from spamming one
-        # request per state transition.
-        items = data.get("events") if isinstance(data.get("events"), list) else [data]
-
-        # Legacy line-based file (humans still read it) — single combined append.
-        log_path = pathlib.Path(os.environ.get(
-            "CLAUDE_PWA_CLIENT_LOG",
-            str(_runtime_paths().hook_log),
-        ))
-        try:
-            log_path.parent.mkdir(parents=True, exist_ok=True)
-            with log_path.open("a") as f:
-                for it in items:
-                    line_detail = it.get('detail', '')
-                    if isinstance(line_detail, dict):
-                        line_detail = json.dumps(line_detail, separators=(",", ":"))
-                    f.write(f"{time.strftime('%H:%M:%S')} client   "
-                            f"{it.get('event','?')} {line_detail}\n")
-        except OSError as e:
-            log_exception("clogWriteFail", e, detail=str(log_path))
-
-        # Structured eventlog rows — one per event.
-        request_trace_ids = {
-            (it.get("trace_id") or "").strip()
-            for it in items
-            if isinstance(it, dict) and (it.get("trace_id") or "").strip()
-        }
-        if len(request_trace_ids) == 1:
-            self._trace_id = next(iter(request_trace_ids))
-        for it in items:
-            try:
-                ev_name = (it.get("event") or "log")[:64]
-                detail = it.get("detail")
-                if isinstance(detail, str) and detail:
-                    detail = {"msg": detail}
-                clip_id = it.get("clip_id")
-                try:
-                    clip_id = int(clip_id) if clip_id not in (None, "") else None
-                except (TypeError, ValueError):
-                    clip_id = None
-                eventlog.emit(
-                    "client", ev_name,
-                    session=(it.get("session") or None),
-                    agent_id=(it.get("agent_id") or None),
-                    backend_session_id=(it.get("backend_session_id") or None),
-                    persona=(it.get("persona") or None),
-                    clip_id=clip_id,
-                    clip_url=(it.get("clip_url") or None),
-                    client_id=(it.get("client_id") or None),
-                    duration_ms=it.get("duration_ms"),
-                    trace_id=(it.get("trace_id") or None),
-                    detail=detail if isinstance(detail, dict) else None,
-                )
-            except Exception as e:
-                log_exception("clogEmitFail", e)
-        self._json_ok({"ok": True})
-
-    def _handle_select(self):
-        data = self._read_json()
-        if self._reject_janitor_control(data):
-            return
-        if data is None:
-            return self._json_error(400, "bad json")
-        session = (data.get("session") or "").strip()
-        if not session or not all(c.isalnum() or c in "._-" for c in session):
-            return self._json_error(400, "bad session name")
-        agent = identity.lookup(session)
-        if not agent:
-            return self._json_error(404, "no such session")
-        from lib import client_chat
-        client_chat.record(self.principal().principal, session)
-        # Persist focus in the DB (what transcribe, upload and the herald read
-        # via lib.focus) and mirror it into the small focus-state file kept for
-        # anything outside this process.
-        herald = getattr(self.ctx, "herald", None)
-        if agent and herald is not None:
-            try:
-                with agents_db.focus_guard():
-                    agents_db.set_focus(agent["agent_id"])
-                    herald.set_focus(session)
-            except Exception as e:  # noqa: BLE001
-                log_exception("focusDbWriteFail", e, detail=session)
-        elif agent:
-            try:
-                agents_db.set_focus(agent["agent_id"])
-            except Exception as e:  # noqa: BLE001
-                log_exception("focusDbWriteFail", e, detail=session)
-        state_path = _runtime_paths().app_session
-        try:
-            state_path.parent.mkdir(parents=True, exist_ok=True)
-            state_path.write_text(session + "\n")
-        except OSError as e:
-            log_exception("selectStateWriteFail", e, detail=str(state_path))
-            return self._json_error(500, "could not persist selection")
-        # Tell the herald manager the user's focus changed — if that agent
-        # had a pending herald, their held buffer drains now.
-        # Push focus change so the client doesn't have to poll for it.
-        events.broadcast(self.ctx.stream, events.agent_focus(
-            session=session, agent_id=(agent or {}).get("agent_id")))
-        self._json_ok({"ok": True, "session": session})
-
-    def _handle_orchestrator_route_delegation(self):
-        self._orchestrator_fallback_request = True
-        return self._handle_send()
-
-    def _handle_send(self):
-        data = self._read_json()
-        if self._reject_janitor_control(data):
-            return
-        if data is None:
-            return self._send(400, b"bad json")
-        try:
-            req = SendRequest.from_payload(
-                data,
-                default_session=self.ctx.default_session,
-                trace_id_factory=_trace.new_trace_id,
-                authenticated=bool(
-                    getattr(self, "_request_auth_validated", False)
-                    and (getattr(self.ctx, "auth_token", "") or "")
-                ),
-                orchestrator_fallback=getattr(
-                    self, "_orchestrator_fallback_request", False),
-                caller_agent_id=self._turn_caller(),
-            )
-        except SendRequestError as e:
-            return self._send_request_error(e)
-        self._trace_id = req.trace_id
-        # The admission row is filed before the empty-text refusal so a
-        # rejected send is still accounted for.
-        prompt_admission = req.admit()
-        try:
-            req.require_text()
-        except SendRequestError as e:
-            return self._send_request_error(e)
-        req, call_sessions = self._apply_group_call(req)
-        if req is None:
-            return
-        if not req.force_session:
-            handled = self._send_via_orchestrator(req, prompt_admission, only_sessions=call_sessions)
-            if handled:
-                return
-        self._send_direct(req, prompt_admission)
-
-    def _send_request_error(self, e: SendRequestError) -> None:
-        if e.trace_id:
-            self._trace_id = e.trace_id
-        if e.json_body:
-            return self._json_error(e.status, str(e))
-        return self._send(e.status, str(e).encode())
 
     def _send_via_orchestrator(self, req: SendRequest, prompt_admission,
                                only_sessions: tuple[str, ...] | None = None) -> bool:
@@ -5931,9 +2651,6 @@ class Handler(BaseHTTPRequestHandler):
             body["error"] = orchestrated.error
         if orchestrated.ok and req.transcription_id:
             transcription_results.delete(req.transcription_id)
-        if (orchestrated.ok and orchestrated.session and req.origin == "user"
-                and not req.sender_agent_id):
-            self._close_requests_for_user_message(orchestrated.session)
         if orchestrated.ok and req.voice_utterance_id:
             self._record_voice(
                 "send", session=orchestrated.session or None,
@@ -5944,7 +2661,7 @@ class Handler(BaseHTTPRequestHandler):
         self._json(status, body)
         return True
 
-    def _send_direct(self, req: SendRequest, prompt_admission) -> None:
+    def _send_direct(self, req: SendRequest, prompt_admission, opening=None) -> None:
         from lib import transcription_results
         try:
             result = TurnDispatchService(self.ctx).submit(DispatchCommand(
@@ -5959,11 +2676,13 @@ class Handler(BaseHTTPRequestHandler):
                 unheard_audio_sessions=tuple(req.unheard_audio_sessions),
             ))
         except DispatchError as e:
+            if opening is not None and opening["route"] == "greeting":
+                self._greeting_admitted(opening, req, ok=False)
             return self._send(e.status, str(e).encode(), "text/plain")
+        if opening is not None and opening["route"] == "greeting":
+            self._greeting_admitted(opening, req, ok=True)
         if req.origin == "agent" and req.sender_agent_id:
             self._note_helper_message(req.sender_agent_id, result.session)
-        if req.origin == "user" and not req.sender_agent_id:
-            self._close_requests_for_user_message(result.session)
         if req.transcription_id:
             transcription_results.delete(req.transcription_id)
         # File the timeline row before answering: a client that reads
@@ -5975,12 +2694,23 @@ class Handler(BaseHTTPRequestHandler):
                 detail={"dispatch": result.backend, "queued": result.queued,
                         "client_msg_id": req.client_msg_id,
                         "hands_free": req.hands_free})
-        self._json_ok({"ok": True, "session": result.session,
-                       "dispatch": result.backend,
-                       "queued": result.queued,
-                       "queue_depth": result.queue_depth,
-                       "queue_revision": result.queue_revision,
-                       "trace_id": req.trace_id})
+        body = {"ok": True, "session": result.session,
+                "dispatch": result.backend,
+                "queued": result.queued,
+                "queue_depth": result.queue_depth,
+                "queue_revision": result.queue_revision,
+                "trace_id": req.trace_id}
+        if opening is not None:
+            body["opening"] = opening["opening"]
+        # F4: a /send 200 carries no delivery state (the client learns it only
+        # from a bracketed GET /log); any delivery a dispatch result still
+        # carries internally is never forwarded.
+        self._json_ok(body)
+
+    @staticmethod
+    def _greeting_admitted(opening, req, *, ok: bool) -> None:
+        from lib import agent_rings
+        agent_rings.greeting_admitted(opening["opening"]["ring_id"], req.client_msg_id, ok=ok)
 
     def _note_helper_message(self, sender_agent_id: str, target_session: str) -> None:
         """A helper reporting to its parent, or a parent re-tasking it."""
@@ -5993,61 +2723,6 @@ class Handler(BaseHTTPRequestHandler):
                     target_agent_id=target.agent_id)
         except Exception as e:  # noqa: BLE001 - never fail an admitted send
             log_exception("helperMessageNoteFail", e, detail=sender_agent_id)
-
-    def _handle_clip_ack(self):
-        data = self._read_json()
-        if data is None:
-            return self._json_error(400, "bad json")
-        status = (data.get("status") or "").strip()
-        clip_id = data.get("clip_id")
-        try:
-            clip_id = int(clip_id) if clip_id not in (None, "") else None
-        except (TypeError, ValueError):
-            return self._json_error(400, "bad clip_id")
-        url = (data.get("url") or "").strip()
-        error = (data.get("error") or "").strip() or None
-        trace_id = (data.get("trace_id") or None)
-        self._trace_id = trace_id
-        try:
-            ok = clip_store.mark_clip_status(
-                clip_id=clip_id,
-                url=url,
-                status=status,
-                error=error,
-            )
-        except ValueError:
-            return self._json_error(400, "bad status")
-        eventlog.emit("client", "clipAck",
-                      trace_id=trace_id,
-                      clip_id=clip_id,
-                      clip_url=url or None,
-                      detail={"clip_id": clip_id, "status": status,
-                              "updated": ok, "error": error})
-        play_event = _PLAY_EVENTS.get(status)
-        if play_event:
-            clip_session, clip_trace = _clip_session_and_trace(clip_id)
-            self._record_voice(
-                play_event, session=clip_session, trace_id=trace_id or clip_trace,
-                detail={"clip_id": clip_id, "url": url or None, "error": error})
-        self._json_ok({"ok": True, "updated": ok})
-
-    def _handle_message_clips(self):
-        from lib.message_audio import retained_events
-        query = self._query()
-        session = str(query.get("session", [""])[0]).strip()
-        message_id = str(query.get("message_id", [""])[0]).strip()
-        if not session or not message_id or len(session) > 256 or len(message_id) > 1024:
-            return self._json_error(400, "session and message_id required")
-        events = retained_events(session=session, message_id=message_id, audio_dir=self.ctx.audio_dir)
-        if not events:
-            return self._json_error(404, "Retained audio is unavailable for this message")
-        self._json_ok({"events": events})
-
-    def _handle_recoverable_clips(self):
-        query = self._query()
-        session = str(query.get("session", [""])[0] or "").strip()
-        events = clip_store.recoverable_events(session=session)
-        self._json_ok({"events": events})
 
     def _handle_transcribe(self):
         from lib import transcription_results
@@ -6098,6 +2773,18 @@ class Handler(BaseHTTPRequestHandler):
             return self._json_error(400, str(e))
         fingerprint = transcription_results.request_fingerprint(
             audio_bytes, ctype, requested_model, hands_free)
+        call_scope = None
+        if self.headers.get("X-Clarp-Call-Id") is not None:
+            # A clip that names its call is validated before anything else,
+            # a cached result and any provider included: it refuses rather
+            # than silently becoming chat transcription (docs/group-calls.md).
+            from lib import call_transcription, group_calls
+            try:
+                call_scope = call_transcription.validate_scope(
+                    self.principal().principal, self.headers.get("X-Clarp-Call-Id") or "",
+                    (self.headers.get("X-Transcription-Session") or "").strip())
+            except group_calls.CallError as exc:
+                return self._json(exc.status, exc.body())
 
         # A retry can arrive while the original request is still finishing.
         # Serialize equal IDs, then consult the durable result before invoking
@@ -6123,7 +2810,8 @@ class Handler(BaseHTTPRequestHandler):
                 utterance_id=utterance_id, client_ts=client_ts,
                 record_voice=self._record_voice,
                 spawn_voice_metrics=_spawn_voice_metrics,
-                **({"focus_session": lambda: target} if target else {}))
+                **({"call_scope": call_scope} if call_scope is not None
+                   else {"focus_session": lambda: target} if target else {}))
             if outcome.trace_id:
                 self._trace_id = outcome.trace_id
             return self._json(outcome.status, outcome.payload)
@@ -6139,204 +2827,8 @@ class Handler(BaseHTTPRequestHandler):
         last = client_chat.current(self.principal().principal)
         return last if last and identity.lookup(last) else ""
 
-    def _record_voice(self, event: str, **fields) -> None:
-        """Best-effort voice-timeline row; never fails the request."""
-        try:
-            session = fields.pop("session", None)
-            if session is None:
-                session = self._focused_session() or self.ctx.default_session or None
-            voice_events.record(event, source="server", session=session, **fields)
-        except Exception as e:  # noqa: BLE001
-            log_exception("voiceEventRecordFail", e, detail=event)
-
-    def _record_voice_corrupt(self, utterance_id: str, client_ts: int | None,
-                              reason: str, **detail) -> None:
-        self._record_voice("corrupt", utterance_id=utterance_id or None,
-                           client_ts=client_ts,
-                           detail={"reasons": [reason], **detail})
-
     def _focused_session(self) -> str:
         return current_focus_session()
-
-    def _handle_voice_events_post(self):
-        """Client half of the voice timeline (lib/voice_events.py).
-
-        Body: {"source": "ios"|"pwa", "client_id": "...", "sent_at": <client
-        wall-clock ms>, "session": "<default>", "events": [{"event", "ts",
-        "mono_ms", "utterance_id", "trace_id", "session", "duration_ms",
-        "level_db", "peak_db", "text", "detail"}]}. The server measures the
-        clock offset from sent_at and stores corrected timestamps.
-        """
-        data = self._read_json()
-        if data is None:
-            return self._json_error(400, "bad json")
-        events = data.get("events")
-        if not isinstance(events, list):
-            return self._json_error(400, "events must be a list")
-        if len(events) > voice_events.MAX_BATCH:
-            return self._json_error(413, "batch too large")
-        source = str(data.get("source") or "other").strip().lower()
-        result = voice_events.record_batch(
-            source=source, events=events,
-            client_id=(str(data.get("client_id") or "").strip() or None),
-            sent_at=data.get("sent_at"),
-            default_session=(str(data.get("session") or "").strip() or None),
-        )
-        body = {"ok": True, "stored": result["stored"],
-                "clock_offset_ms": result["clock_offset_ms"],
-                "server_now": voice_events.now_ms()}
-        self._json_ok(body)
-
-    def _voice_query_params(self) -> dict:
-        qs = self._query()
-        def one(name):
-            return (qs.get(name, [""])[0] or "").strip()
-        def num(name):
-            raw = one(name)
-            if not raw:
-                return None
-            try:
-                return int(float(raw))
-            except ValueError:
-                return None
-        return {"session": one("session") or None, "since": num("since"),
-                "until": num("until"), "utterance_id": one("utterance_id") or None,
-                "trace_id": one("trace_id") or None, "event": one("event") or None,
-                "limit": num("limit")}
-
-    def _handle_voice_events_get(self):
-        """GET /voice-events?session=&since=&until=&utterance_id=&trace_id=&event=&limit="""
-        params = self._voice_query_params()
-        limit = params.pop("limit") or 500
-        rows = voice_events.query(limit=limit, **params)
-        self._json_ok({"events": rows})
-
-    def _handle_voice_utterances_get(self):
-        """GET /voice-events/utterances?session=&since=&until=&limit= — one row per utterance."""
-        params = self._voice_query_params()
-        rows = voice_events.utterances(
-            session=params["session"], since=params["since"],
-            until=params["until"], limit=params["limit"] or 100)
-        self._json_ok({"utterances": rows})
-
-    def _handle_upload(self):
-        """Receive a raw file body from a client (e.g. an image picked on the
-        phone) and save it under this server's per-session uploads dir. Returns
-        the absolute path so the client can drop it into the prompt — agents
-        run with --dangerously-skip-permissions, so they read it directly."""
-        from lib import upload_results
-        try:
-            n = int(self.headers.get("Content-Length", "0"))
-            if n <= 0 or n > 50 * 1024 * 1024:  # cap at 50 MB per upload
-                return self._json_error(400, "bad size")
-            blob = self.rfile.read(n)
-            self._body_consumed = True
-        except (ValueError, OSError) as e:
-            log_exception("uploadReadFail", e)
-            return self._json_error(400, str(e))
-        if len(blob) != n:
-            self.close_connection = True
-            return self._json_error(408, "incomplete upload")
-
-        # Which agent/session this attaches to: explicit header, then the
-        # focused session, then the default — same precedence the rest of the
-        # API uses.
-        session = (self.headers.get("X-Session") or "").strip()
-        if not session:
-            session = current_focus_session()
-        if not session:
-            session = self.ctx.default_session
-
-        name = _safe_upload_name(
-            unquote((self.headers.get("X-File-Name") or "").strip()),
-            self.headers.get("Content-Type", ""),
-        )
-        base = self.ctx.uploads_dir or _runtime_paths().uploads_dir
-        dest_dir = base / _safe_session(session)
-        try:
-            dest_dir.mkdir(parents=True, exist_ok=True)
-            upload_id = (self.headers.get("X-Upload-ID") or "").strip()
-            if upload_id:
-                dest = upload_results.store(
-                    session_dir=dest_dir, upload_id=upload_id, name=name,
-                    content_type=self.headers.get("Content-Type", ""), blob=blob,
-                    record_root=base)
-            else:
-                # No idempotency key: every request stores a new file.
-                dest = dest_dir / f"{secrets.token_hex(4)}-{name}"
-                dest.write_bytes(blob)
-        except upload_results.UploadIDCollisionError as e:
-            return self._json_error(409, str(e))
-        except ValueError as e:
-            return self._json_error(400, str(e))
-        except OSError as e:
-            log_exception("uploadWriteFail", e)
-            return self._json_error(500, str(e))
-
-        eventlog.emit("server", "upload", session=session or None,
-                      detail={"name": name, "size": len(blob), "path": str(dest)})
-        body = json.dumps({"ok": True, "path": str(dest), "name": name,
-                           "size": len(blob), "session": session}).encode()
-        self._send(200, body, "application/json")
-
-    def _handle_media_publish(self):
-        """Publish an agent-produced image or allowlisted artifact file.
-
-        Agents call this via the clarp-media helper. The server performs the
-        two-phase work (blob copy + SQLite row) so agents never have to update
-        both a directory and the DB themselves.
-        """
-        try:
-            n = int(self.headers.get("Content-Length", "0"))
-            if n <= 0 or n > media_store.MAX_MEDIA_BYTES:
-                return self._json_error(400, "bad size")
-            blob = self.rfile.read(n)
-            self._body_consumed = True
-            if len(blob) != n:
-                return self._json_error(400, "incomplete body")
-        except (ValueError, OSError) as e:
-            log_exception("mediaReadFail", e)
-            return self._json_error(400, str(e))
-
-        session = (self.headers.get("X-Session") or "").strip()
-        if not session:
-            session = self.ctx.default_session
-        name = unquote((self.headers.get("X-File-Name") or "").strip())
-        caption = unquote((self.headers.get("X-Caption") or "").strip())
-        created_by = (self.headers.get("X-Created-By") or "agent").strip()
-        try:
-            asset = media_store.publish(
-                session=session,
-                blob=blob,
-                source_name=name,
-                content_type=self.headers.get("Content-Type", ""),
-                caption=caption,
-                created_by=created_by,
-                media_dir=self.ctx.media_dir or _runtime_paths().media_dir,
-            )
-        except media_store.MediaError as e:
-            return self._json_error(e.status, str(e))
-        except OSError as e:
-            log_exception("mediaWriteFail", e)
-            return self._json_error(500, str(e))
-
-        eventlog.emit("server", "mediaPublish", session=session or None,
-                      detail={"asset_id": asset["asset_id"],
-                              "name": asset["source_name"],
-                              "size": asset["bytes"]})
-        body = json.dumps({"ok": True, "asset": asset, **asset}).encode()
-        self._send(200, body, "application/json")
-
-    def _handle_media_list(self):
-        qs = self._query()
-        session = (qs.get("session", [self.ctx.default_session])[0]
-                   or self.ctx.default_session).strip()
-        try:
-            limit = int(qs.get("limit", ["100"])[0] or 100)
-        except ValueError:
-            limit = 100
-        assets = media_store.list_for_session(session, limit=limit)
-        self._json_ok({"session": session, "assets": assets})
 
     def _handle_media_content(self, asset_id: str):
         if not asset_id or "/" in asset_id or "." in pathlib.PurePath(asset_id).parts:
@@ -6349,102 +2841,6 @@ class Handler(BaseHTTPRequestHandler):
         if not path.is_file() or (path != root and root not in path.parents):
             return self._send(404, b"not found")
         return self._send_file(path, str(row["mime_type"]), secure=True)
-
-    def _handle_agent_portraits_list(self):
-        from lib import agent_portraits
-        query = self._query()
-        session = (query.get("session", [self.ctx.default_session])[0]
-                   or self.ctx.default_session).strip()
-        portrait_dir = self.ctx.media_dir or _runtime_paths().media_dir
-        try:
-            result = agent_portraits.list_for_session(
-                session, portrait_dir=portrait_dir)
-        except agent_portraits.PortraitError as exc:
-            return self._json_error(exc.status, str(exc))
-        self._json_ok(result)
-
-    def _handle_agent_portraits_update(self):
-        from lib import agent_portraits
-        data = self._read_json()
-        if self._reject_janitor_control(data):
-            return
-        if data is None:
-            return self._json_error(400, "bad json")
-        action = str(data.get("action") or "").strip()
-        session = str(data.get("session") or self.ctx.default_session).strip()
-        portrait_dir = self.ctx.media_dir or _runtime_paths().media_dir
-        try:
-            if action == "add_media_asset":
-                result = agent_portraits.add_media_asset(
-                    session=session, asset_id=str(data.get("asset_id") or ""),
-                    portrait_dir=portrait_dir)
-                changed = False
-            elif action == "select_primary":
-                result = agent_portraits.select_primary(
-                    session=session,
-                    portrait_id=str(data.get("portrait_id") or ""),
-                    portrait_dir=portrait_dir)
-                changed = True
-            else:
-                raise agent_portraits.PortraitError("unsupported portrait action")
-        except agent_portraits.PortraitError as exc:
-            return self._json_error(exc.status, str(exc))
-        if changed:
-            events.broadcast(self.ctx.stream, events.agent_roster(
-                "portrait-selected", session=session))
-        self._json_ok(result)
-
-    def _handle_agent_portrait_generation_status(self):
-        from lib import portrait_generation
-        query = self._query()
-        session = (query.get("session", [self.ctx.default_session])[0]
-                   or self.ctx.default_session).strip()
-        portrait_dir = self.ctx.media_dir or _runtime_paths().media_dir
-        result = portrait_generation.capability(
-            session, media_dir=portrait_dir)
-        self._json_ok(result)
-
-    def _handle_agent_portrait_generation_start(self):
-        from lib import portrait_generation
-        data = self._read_json()
-        if self._reject_janitor_control(data):
-            return
-        if data is None or not isinstance(data, dict):
-            return self._json_error(400, "bad json")
-        session = str(data.get("session") or self.ctx.default_session).strip()
-        portrait_dir = self.ctx.media_dir or _runtime_paths().media_dir
-        try:
-            result = portrait_generation.start(session, media_dir=portrait_dir)
-        except portrait_generation.GenerationError as exc:
-            return self._json_error(409, str(exc))
-        self._json(202, result)
-
-    def _handle_agent_portrait_content(self, portrait_id: str):
-        from lib import agent_portraits
-        if not portrait_id or "/" in portrait_id:
-            return self._send(400, b"bad portrait id")
-        row = agent_portraits.get_content(unquote(portrait_id))
-        path = pathlib.Path(str((row or {}).get("storage_path") or ""))
-        if not row or not path.is_file():
-            return self._send(404, b"not found")
-        return self._send_file(path)
-
-
-def _safe_upload_name(raw: str, content_type: str = "") -> str:
-    """Reduce a client-supplied filename to a safe basename, preserving the
-    extension so the agent's Read tool recognises images. Blocks path
-    traversal (no separators / leading dots survive); falls back to a
-    type-derived name when nothing usable is sent."""
-    base = os.path.basename((raw or "").replace("\\", "/")).strip()
-    cleaned = "".join(c for c in base if c.isalnum() or c in "._- ()")
-    cleaned = cleaned.strip().replace(" ", "_").lstrip(".")
-    primary_type = content_type.split(";", 1)[0].strip()
-    if not cleaned:
-        ext = mimetypes.guess_extension(primary_type) or ".bin"
-        cleaned = "upload" + ext
-    elif "." not in cleaned:
-        cleaned += mimetypes.guess_extension(primary_type) or ""
-    return cleaned[:128]
 
 
 def _dispatch_service(ctx: ServerContext):
@@ -6531,6 +2927,7 @@ def _server_workers(ctx: ServerContext, srv: "ContextHTTPServer", cfg,
         """What watches the live events in this process: the tool explainer
         and the Live Activity pusher (docs/live-items.md §6, §8)."""
         from lib import apns, live_activity
+        from lib.agents import list_agents as agents_db_list
         from lib.live_explain import LiveExplainer
         explainer = LiveExplainer(lambda: ctx.tool_explanations, patch)
         from concurrent.futures import ThreadPoolExecutor
@@ -6542,7 +2939,7 @@ def _server_workers(ctx: ServerContext, srv: "ContextHTTPServer", cfg,
 
         pusher = live_activity.LiveActivityPusher(
             lambda payload, priority: sender.submit(apns.send_live_activity, payload, priority),
-            attention=live_activity.badge_attention, background=in_background)
+            attention=live_activity.badge_attention, roster=agents_db_list, background=in_background)
         srv.live_activity_pusher = pusher
 
         class _Observers:
@@ -6732,6 +3129,22 @@ def _server_workers(ctx: ServerContext, srv: "ContextHTTPServer", cfg,
     ]
 
 
+def _recover_queued_after_start(ctx: ServerContext) -> None:
+    try:
+        recovered_queues = TurnDispatchService(ctx).recover_queued()
+    except Exception as exc:  # runtime may still be starting; its own boot recovers
+        from lib.runtime_bridge import RuntimeUnavailable
+        if not isinstance(exc, RuntimeUnavailable):
+            if getattr(ctx, "runtime_client", None) is None:
+                raise
+            log_exception("runtimeQueueRecoveryFail", exc)
+            return
+        log_exception("runtimeQueueRecoveryDeferred", exc)
+        recovered_queues = 0
+    if recovered_queues:
+        log("queuedRecovery", f"recovered={recovered_queues}")
+
+
 def _recover_after_start(ctx: ServerContext, workers: WorkerSet, *,
                          restart_recovery: bool) -> None:
     """Boot-time repair, after the boot workers and before serving listeners."""
@@ -6747,16 +3160,24 @@ def _recover_after_start(ctx: ServerContext, workers: WorkerSet, *,
             stream=getattr(ctx, "stream", None))
         if interrupted:
             log("turnRestartRecovery", f"marked={len(interrupted)}")
+    if runtime_client is None:
+        _recover_queued_after_start(ctx)
+    else:
+        # The runtime owns the queue and recovers it on its own boot; asking
+        # it here is a courtesy that must never hold up listening (a busy
+        # runtime once kept a new Host silent past the installer's 20 s check).
+        threading.Thread(target=_recover_queued_after_start, args=(ctx,),
+                         name="queued-recovery", daemon=True).start()
     try:
-        recovered_queues = TurnDispatchService(ctx).recover_queued()
-    except Exception as exc:  # runtime may still be starting; its own boot recovers
-        from lib.runtime_bridge import RuntimeUnavailable
-        if not isinstance(exc, RuntimeUnavailable):
-            raise
-        log_exception("runtimeQueueRecoveryDeferred", exc)
-        recovered_queues = 0
-    if recovered_queues:
-        log("queuedRecovery", f"recovered={recovered_queues}")
+        # A listen-first initiative resolved but never admitted (the Host died
+        # in between) is admitted now, exactly once (docs/agent-rings.md).
+        from lib import agent_rings
+        agent_rings.bind(ctx)
+        recovered_openings = agent_rings.recover_openings()
+        if recovered_openings:
+            log("agentRingOpeningRecovery", f"admitted={recovered_openings}")
+    except Exception as exc:  # noqa: BLE001 - a boot never fails on it
+        log_exception("agentRingOpeningRecoveryFail", exc)
 
 
 def build_server(ctx: ServerContext, port: int,

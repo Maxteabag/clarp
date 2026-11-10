@@ -1,0 +1,327 @@
+#!/usr/bin/env bash
+# Merge main into refactor/integration for S3 (docs/architecture/route-registry.md, section 11).
+#
+#   tools/refactor/s3_merge.sh <main-ref> <integration-ref> <work-branch>
+#
+# server/server.py is never merged by hand: the result takes main's server.py,
+# replays the S3 seam and preparatory server.py diffs (tools/refactor/s3_replay.txt)
+# with `git apply --3way`, then regenerates the moves with s3_apply (helpers step,
+# then groups), committing each stage so ast_identity can verify it:
+#   A  merge commit: main's server.py + replayed diffs, generated files removed
+#   B  s3_apply --helpers      verified: ast_identity A B server.py=server.py,lib/routes/helpers.py
+#   C  s3_apply --group <name>, one commit per group in recipe order ("s3_apply: group <name>"),
+#      each verified: ast_identity <previous> <this> server.py::Handler=<that group's mixin>
+#   D  S9 module splits (tools/refactor/splits/*.toml, owner rf-fix3; S7 entries rf-fix2):
+#      the old modules were taken from main in A and the split parts removed; one commit
+#      per split ("split_apply: <name>") and per repoint ("split_apply: repoint <name>"),
+#      each verified: ast_identity <previous> <this> <old>=<old>,<part>,... (top-level mode)
+# then the remote gates. It prints the G1 and G2 commands for the merge captain;
+# G2 compares main against D and must show zero differences. With no recipe in
+# tools/refactor/splits/ stage D does nothing and D is C.
+#
+# Exit codes: 0 done (gates green; run G1/G2 next), 2 usage or dirty tree,
+# 3 a merge conflict outside server.py and the generated files, 4 a replayed diff
+# does not apply, 5 s3_apply refused, 6 ast_identity failed, 7 a local gate failed,
+# 8 a split refused or a split module was edited on integration (rf-fix3 / rf-fix2),
+# 9 ast_identity failed for a split or repoint (rf-fix3 / rf-fix2), 11 method refused,
+# 12 method identity failed, 10 a merge resolution
+# entry in tools/refactor/merge_resolutions/ does not match this merge's blobs (stale).
+# The work branch is left as it stopped, for inspection; nothing is pushed.
+set -uo pipefail
+die() { echo "s3_merge: STOP ($1): $2" >&2; exit "$1"; }
+[ $# -eq 3 ] || die 2 "usage: $0 <main-ref> <integration-ref> <work-branch>"
+main=$(git rev-parse --verify "$1^{commit}") || die 2 "unknown ref $1"
+integration=$(git rev-parse --verify "$2^{commit}") || die 2 "unknown ref $2"
+work=$3
+root=$(git rev-parse --show-toplevel)
+cd "$root" || die 2 "no repository"
+status=$(git status --porcelain --untracked-files=all -- server tools/refactor scripts/refactor) \
+  || die 2 "git status failed"
+[ -z "$status" ] || die 2 "uncommitted or untracked files under server/, tools/refactor/ or scripts/refactor/:
+$status"
+tracked_status=$(git status --porcelain --untracked-files=no) || die 2 "git status failed"
+[ -z "$tracked_status" ] || die 2 "the working tree has uncommitted changes:
+$tracked_status"
+PY=${S3_PYTHON:-$root/.venv/bin/python}
+export PYTHONDONTWRITEBYTECODE=1   # the stages' Python must leave no untracked files
+[ -x "$PY" ] || die 2 "no project python at $PY (uv sync, or set S3_PYTHON)"
+
+git switch -q -c "$work" "$integration" || die 2 "cannot create $work"
+echo "s3_merge: merging $main into $integration on $work"
+# rerere off: a resolution recorded on this machine must never resolve a conflict
+# silently; only a reviewed merge_resolutions entry may (below).
+merge_out=$(git -c rerere.enabled=false merge --no-commit --no-ff "$main" 2>&1)
+merge_rc=$?
+# Always shown, so the log records what git merged and which paths conflicted.
+printf '%s\n' "$merge_out" | sed 's/^/s3_merge: git merge: /'
+git rev-parse -q --verify MERGE_HEAD >/dev/null || die 3 "git merge did not start a merge (exit $merge_rc):
+$merge_out"
+[ "$(git rev-parse MERGE_HEAD)" = "$main" ] || die 3 "MERGE_HEAD is not $main"
+conflicts=$(git diff --name-only --diff-filter=U)
+if [ "$merge_rc" -ne 0 ] && [ -z "$conflicts" ]; then
+  die 3 "git merge failed without conflicts (exit $merge_rc):
+$merge_out"
+fi
+# The recipe and replay list as they stand in the merged tree.
+git checkout "$main" -- tools/refactor/s3_moves.toml tools/refactor/s3_replay.txt 2>/dev/null || true
+# S9 split tooling comes from main only: remove the merged tree's copies first, so a
+# recipe (or a split_apply.py) that exists only on integration is never listed or run.
+for path in tools/refactor/splits tools/refactor/split_apply.py; do
+  git rm -r -q --cached --ignore-unmatch -- "$path" || die 8 "cannot clear $path"
+  rm -rf -- "$path" || die 8 "cannot remove the merged tree's $path"
+  [ ! -e "$path" ] || die 8 "the merged tree's $path is still there after removal"
+  if git cat-file -e "$main:$path" 2>/dev/null; then
+    git checkout "$main" -- "$path" || die 8 "cannot take main's $path"
+  fi
+  extra=$(git ls-files --others -- "$path") || die 8 "git ls-files failed for $path"
+  [ -z "$extra" ] || die 8 "files that are not main's under $path:
+$extra"
+done
+# S4/S6 method recipes and their mover/orchestrator are pinned-main inputs.
+# Clear before listing: integration-only recipes/tools must never execute.
+for path in tools/refactor/methods tools/refactor/s3_methods.py tools/refactor/s3_apply.py; do
+  git rm -r -q --cached --ignore-unmatch -- "$path" || die 11 "cannot clear $path"
+  rm -rf -- "$path" || die 11 "cannot remove merged $path"
+  [ ! -e "$path" ] || die 11 "merged $path remains after removal"
+  if git cat-file -e "$main:$path" 2>/dev/null; then
+    git checkout "$main" -- "$path" || die 11 "cannot take main's $path"
+  fi
+  extra=$(git ls-files --others -- "$path") || die 11 "cannot list $path"
+  [ -z "$extra" ] || die 11 "non-main method inputs under $path: $extra"
+done
+method_specs=""
+method_affected=""
+if [ -f tools/refactor/s3_methods.py ] && [ -d tools/refactor/methods ]; then
+  method_specs=$("$PY" tools/refactor/s3_methods.py --root "$root" --list) || die 11 "cannot list method recipes"
+  method_affected=$("$PY" tools/refactor/s3_methods.py --root "$root" --affected) || die 11 "cannot list method families"
+fi
+method_sources=$(printf '%s\n' "$method_specs" | awk 'NF {print "server/" $3}' | sort -u)
+method_generated=$(printf '%s\n' "$method_specs" | awk 'NF {print "server/" $4}')
+# S9: one line per split or repoint, "split|repoint NAME OLD=OLD,PART,...", in apply order.
+split_specs=""
+if [ -f tools/refactor/split_apply.py ] && [ -d tools/refactor/splits ]; then
+  split_specs=$("$PY" tools/refactor/split_apply.py --root "$root" --list) || die 8 "cannot read tools/refactor/splits/"
+fi
+split_old=$(printf '%s\n' "$split_specs" | awk 'NF {split($3, m, "="); print "server/" m[1]}' | sort -u)
+split_generated=$(printf '%s\n' "$split_specs" | awk '$1 == "split" {split($3, m, "="); n = split(m[2], p, ","); for (i = 2; i <= n; i++) print "server/" p[i]}')
+# Generated files: the helpers module and every group mixin in the recipe.
+generated=$("$PY" - "$root/tools/refactor/s3_moves.toml" <<'PYEOF'
+import sys, tomllib
+data = tomllib.loads(open(sys.argv[1]).read())
+paths = ["server/" + g["module"] for g in data.get("group", [])]
+if data.get("helpers", {}).get("names"):
+    paths.insert(0, "server/lib/routes/helpers.py")
+print("\n".join(paths))
+PYEOF
+) || die 2 "cannot read tools/refactor/s3_moves.toml"
+helpers_paths=$(printf '%s\n' "$generated" | grep -x 'server/lib/routes/helpers.py' || true)
+# One line per group in recipe order: name, server/<module>, <module>::<class>.
+group_specs=$("$PY" - "$root/tools/refactor/s3_moves.toml" <<'PYEOF'
+import sys, tomllib
+data = tomllib.loads(open(sys.argv[1]).read())
+for g in data.get("group", []):
+    print(g["name"], "server/" + g["module"], f"{g['module']}::{g['class']}")
+PYEOF
+) || die 2 "cannot read the groups of tools/refactor/s3_moves.toml"
+replay=$(grep -v '^\s*#' tools/refactor/s3_replay.txt | awk 'NF {print $1}')
+
+# Reviewed merge resolutions (tools/refactor/merge_resolutions/*.toml): one per
+# conflicted file outside S3's own, naming the exact merge-base, main and
+# integration blobs it resolves and the resolved file. Entries and payloads are
+# read only from main's tree (git ls-tree/show "$main"), never from the merged
+# working tree, so an entry that exists only on integration can never apply. An
+# entry applies only when all three blobs match this merge; anything else is
+# still a conflict that stops with 3, a stale entry with 10.
+merge_base=$(git merge-base "$main" "$integration") || die 3 "no merge base"
+resolved=$("$PY" - "$merge_base" "$main" "$integration" $conflicts <<'PYEOF'
+import subprocess, sys, tomllib
+base, main, integration, *conflicts = sys.argv[1:]
+FOLDER = "tools/refactor/merge_resolutions"
+def git(*args, binary=False):
+    return subprocess.run(["git", *args], capture_output=True, check=True, text=not binary).stdout
+def blob(ref, path):
+    out = subprocess.run(["git", "rev-parse", "-q", "--verify", f"{ref}:{path}"],
+                         capture_output=True, text=True)
+    return out.stdout.strip() if out.returncode == 0 else ""
+names = [n for n in git("ls-tree", "--name-only", f"{main}:{FOLDER}").split() if n.endswith(".toml")] \
+    if blob(main, FOLDER) else []
+for name in sorted(names):
+    spec = tomllib.loads(git("show", f"{main}:{FOLDER}/{name}"))
+    path = spec["path"]
+    if path not in conflicts:
+        continue
+    want = (spec["base_blob"], spec["main_blob"], spec["integration_blob"])
+    have = (blob(base, path), blob(main, path), blob(integration, path))
+    if want != have:
+        print(f"STALE {name} {path} recorded={'/'.join(want)} now={'/'.join(have)}")
+        continue
+    with open(path, "wb") as target:
+        target.write(git("show", f"{main}:{FOLDER}/{spec['resolved']}", binary=True))
+    subprocess.run(["git", "add", "--", path], check=True)
+    print(f"APPLIED {name[:-5]} {path} {'/'.join(have)}")
+PYEOF
+) || die 3 "cannot read $main's tools/refactor/merge_resolutions"
+stale=$(printf '%s\n' "$resolved" | grep '^STALE ' || true)
+[ -z "$stale" ] || die 10 "a merge resolution entry does not match this merge's blobs (stale or partial; refresh it with its reviewers):
+$stale"
+printf '%s\n' "$resolved" | awk '$1 == "APPLIED" {print "s3_merge: merge_resolution " $2 ": applied to " $3 ", blobs base/main/int = " $4}'
+resolved=$(printf '%s\n' "$resolved" | awk '$1 == "APPLIED" {print $3}')
+
+for path in $conflicts; do
+  printf '%s\n' "$resolved" | grep -qx "$path" && continue
+  case "$path" in
+    server/server.py) ;;
+    tools/refactor/methods/*|tools/refactor/s3_methods.py|tools/refactor/s3_apply.py) ;;
+    *) printf '%s\n' "$generated" $split_old $split_generated $method_sources $method_generated | grep -qx "$path" \
+         || die 3 "conflict outside server.py and the generated files: $path" ;;
+  esac
+done
+
+# One strict pre-A reconstruction uses merge-base recipe DATA for history.
+# Current pinned-main recipes still exclusively drive cleanup and D/E below.
+# Run even with no current entries: retired historical families must not vanish.
+base=$(git merge-base "$main" "$integration") || die 8 "no merge base"
+[ -f tools/refactor/s3_methods.py ] || die 8 "missing pinned-main historical validator"
+"$PY" tools/refactor/s3_methods.py --root "$root" --validate "$base" "$integration" \
+  || die 8 "a generated family differs from its historical recipe/source or has an unsupported recipe migration"
+
+# A: main's server.py + the replayed S3 diffs; generated files removed.
+git checkout "$main" -- server/server.py || die 4 "cannot take main's server.py"
+for path in $generated; do git rm -q --cached --ignore-unmatch "$path"; rm -f "$path"; done
+for path in $split_old; do git checkout "$main" -- "$path" || die 8 "cannot take main's $path"; done
+for path in $split_generated; do git rm -q --cached --ignore-unmatch "$path"; rm -f "$path"; done
+# A method source produced by a split is recreated in D; every other source
+# comes from pinned main after baseline validation. Generated mixins are removed.
+for path in $method_sources; do
+  printf '%s\n' "$split_generated" | grep -qx "$path" && continue
+  git checkout "$main" -- "$path" || die 11 "cannot take main method source $path"
+done
+for path in $method_generated; do
+  git rm -q --cached --ignore-unmatch "$path" || die 11 "cannot clear method output $path"
+  rm -f "$path" || die 11 "cannot remove method output $path"
+  [ ! -e "$path" ] || die 11 "method output remains: $path"
+done
+for sha in $replay; do
+  case "$sha" in
+    file:*)   # a reviewed port of a replayed diff, kept on main as a patch file
+      git show "$main:tools/refactor/${sha#file:}" | git apply --3way --index - \
+        || die 4 "the replay patch ${sha#file:} does not apply to main's server.py; port it by hand and update s3_replay.txt" ;;
+    *)
+      git diff "$sha^" "$sha" -- server/server.py | git apply --3way --index - \
+        || die 4 "the server.py diff of $sha does not apply to main's server.py; port it by hand and update s3_replay.txt" ;;
+  esac
+done
+git add server/server.py $split_old
+for path in $method_sources; do
+  printf '%s\n' "$split_generated" | grep -qx "$path" && continue
+  git add "$path" || die 11 "cannot stage method source $path"
+done
+git -c core.hooksPath=/dev/null commit -q -m "merge main $(git rev-parse --short "$main") into integration (S3: server.py replayed, moves to regenerate)" \
+  || die 4 "cannot commit the merge"
+A=$(git rev-parse HEAD)
+
+# B: helpers step.
+"$PY" tools/refactor/s3_apply.py --root "$root" --helpers || die 5 "s3_apply --helpers refused"
+B=$A
+stage_status=$(git status --porcelain --untracked-files=all -- server/server.py $helpers_paths) || die 5 "git status failed"
+if [ -n "$stage_status" ]; then
+  git add -A -- server/server.py $helpers_paths && git -c core.hooksPath=/dev/null commit -q -m "s3_apply: helpers step" \
+    || die 5 "cannot commit the helpers step"
+  B=$(git rev-parse HEAD)
+  "$PY" scripts/refactor/ast_identity.py "$A" "$B" server.py=server.py,lib/routes/helpers.py \
+    || die 6 "ast_identity (top-level) failed for the helpers step"
+fi
+
+# C: one commit per group, in recipe order, so each move-only commit stays the
+# size of its group and is verified on its own.
+C=$B
+while read -r name path mixin; do
+  [ -n "$name" ] || continue
+  "$PY" tools/refactor/s3_apply.py --root "$root" --group "$name" </dev/null || die 5 "s3_apply --group $name refused"
+  stage_status=$(git status --porcelain --untracked-files=all -- server/server.py "$path") || die 5 "git status failed"
+  [ -n "$stage_status" ] || continue
+  git add -A -- server/server.py "$path" && git -c core.hooksPath=/dev/null commit -q -m "s3_apply: group $name" \
+    || die 5 "cannot commit group $name"
+  prev=$C
+  C=$(git rev-parse HEAD)
+  "$PY" scripts/refactor/ast_identity.py "$prev" "$C" "server.py::Handler=$mixin" </dev/null \
+    || die 6 "ast_identity (method mode) failed for group $name"
+done <<< "$group_specs"
+
+# D: S9 module splits, one commit per split or repoint, each verified on its own.
+D=$C
+while read -r kind name move; do
+  [ -n "$kind" ] || continue
+  old=${move%%=*}
+  parts=$(printf '%s' "${move#*=}" | tr ',' ' ')
+  "$PY" tools/refactor/split_apply.py --root "$root" "--$kind" "$name" </dev/null || die 8 "split_apply refused $kind $name"
+  paths=$(for p in $parts; do printf 'server/%s ' "$p"; done)
+  outside=$(git status --porcelain --untracked-files=all -- server tools scripts) || die 8 "git status failed"
+  for p in $paths; do outside=$(printf '%s\n' "$outside" | grep -v " $p$" || true); done
+  [ -z "$(printf '%s' "$outside" | tr -d '[:space:]')" ] || die 8 "split_apply $kind $name changed files outside its spec:
+$outside"
+  stage_status=$(git status --porcelain --untracked-files=all -- $paths) || die 8 "git status failed"
+  [ -n "$stage_status" ] || continue
+  label=$([ "$kind" = split ] && echo "$name" || echo "repoint $name")
+  git add -A -- $paths && git -c core.hooksPath=/dev/null commit -q -m "split_apply: $label" \
+    || die 8 "cannot commit $kind $name"
+  prev=$D
+  D=$(git rev-parse HEAD)
+  "$PY" scripts/refactor/ast_identity.py "$prev" "$D" "$move" </dev/null \
+    || die 9 "ast_identity (top-level) failed for $kind $name"
+  echo "s3_merge: $kind $name: ast_identity $move ok"
+done <<< "$split_specs"
+
+# E: named-source methods run after D creates module parts. D remains the final
+# gate head for compatibility; advance it for each method commit as well.
+while read -r recipe name source output move; do
+  [ -n "$recipe" ] || continue
+  "$PY" tools/refactor/s3_apply.py --root "$root" --recipe "tools/refactor/methods/$recipe" --group "$name" \
+    </dev/null || die 11 "method group $name refused"
+  paths="server/$source server/$output"
+  outside=$(git status --porcelain --untracked-files=all -- server tools scripts) || die 11 "git status failed"
+  for p in $paths; do outside=$(printf '%s\n' "$outside" | grep -v " $p$" || true); done
+  [ -z "$(printf '%s' "$outside" | tr -d '[:space:]')" ] || die 11 "method $name changed paths outside its spec: $outside"
+  stage_status=$(git status --porcelain --untracked-files=all -- $paths) || die 11 "git status failed"
+  [ -n "$stage_status" ] || continue
+  git add -A -- $paths && git -c core.hooksPath=/dev/null commit -q -m "s3_apply: method $name" \
+    || die 11 "cannot commit method $name"
+  prev=$D
+  D=$(git rev-parse HEAD)
+  "$PY" scripts/refactor/ast_identity.py "$prev" "$D" "$move" </dev/null \
+    || die 12 "method identity failed for $name"
+  echo "s3_merge: method $name: ast_identity $move ok"
+done <<< "$method_specs"
+
+stray=$(git status --porcelain --untracked-files=all -- server tools scripts) || die 5 "git status failed"
+stray=$(printf '%s\n' "$stray" | grep -v -e ' server/server.py$' || true)
+for path in $generated $split_old $split_generated $method_sources $method_generated; do stray=$(printf '%s\n' "$stray" | grep -v " $path$" || true); done
+[ -z "$(printf '%s' "$stray" | tr -d '[:space:]')" ] || die 5 "s3_apply left changes outside server.py and the generated files:
+$stray"
+git merge-base --is-ancestor "$main" HEAD || die 3 "the result does not contain $main"
+
+# Every test runs on the buildbox, including these single-file gates (Peter's
+# laptop RAM order, 5 Nov). Keep separate pytest processes as before. The local
+# $PY is only for the Git/AST transformation above; the VM uses its own Python.
+heavy=/var/tmp/clarp-refactor-program/bin/heavy-remote
+for test in tests/integration/test_route_goldens.py tests/unit/test_import_layers.py \
+            tests/unit/test_handler_boundary.py tests/integration/test_s3_helpers_identity.py \
+            tests/unit/test_swallowed_excepts.py tests/unit/test_split_apply.py; do
+  [ -f "$test" ] || continue
+  "$heavy" uv run --frozen --group dev python -m pytest -n 0 -q -p no:cacheprovider "$test" \
+    || die 7 "remote gate failed: $test"
+  echo "s3_merge: gate ok: $test"
+done
+
+cat <<EOT
+s3_merge: done. A=$A B=$B C=$C D=$D (work branch $work)
+Next (merge captain), on the buildbox (these gates start test servers, never on the laptop):
+  Server gates: /var/tmp/clarp-refactor-program/bin/heavy-remote uv run --frozen --group dev python -m pytest -n 0 -q \
+                  tests/integration/test_route_registry.py tests/integration/test_route_response_goldens.py \
+                  tests/unit/test_s3_apply.py tests/unit/test_s3_methods.py tests/unit/test_s3_merge.py
+  G1: /var/tmp/clarp-refactor-program/bin/heavy-remote uv run --frozen --group dev python -m pytest -q
+  G2 (merge parity, lead condition 2: main against the merged integration, zero differences):
+      python3 tests/replay/run.py prepare $main $D --prune
+      /var/tmp/clarp-refactor-program/bin/heavy-remote uv run --frozen --group dev python tests/replay/run.py --jobs 8 compare --base $main --head $D
+  This does not replace a slice's own G2 against its refactor/integration base.
+EOT

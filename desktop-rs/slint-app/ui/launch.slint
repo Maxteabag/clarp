@@ -65,7 +65,7 @@ export component IconButton inherits Rectangle {
     }
 }
 
-// A small caption above a section ("PROVIDER", "MODEL", …).
+// A small caption above a section ("HARNESS", "MODEL", …).
 export component Caption inherits Text {
     color: Palette.muted;
     font-size: 11 * Look.unit;
@@ -396,7 +396,7 @@ export component NewSessionHub inherits Modal {
                 HorizontalLayout {
                     spacing: 10px;
                     alignment: start;
-                    Caption { text: "PROVIDER"; }
+                    Caption { text: "HARNESS"; }
                     KeyTag { text: "ctrl+← →"; }
                 }
                 HorizontalLayout {
@@ -651,11 +651,11 @@ export component StartAgentDialog inherits Modal {
                 VerticalLayout {
                     spacing: 4px;
                     horizontal-stretch: 1;
-                    Label { text: "Backend"; }
+                    Label { text: "Harness"; }
                     ComboBox {
                         model: StartAgent.backend-labels;
                         current-index <=> StartAgent.backend-index;
-                        accessible-label: "Backend";
+                        accessible-label: "Harness";
                         selected => { StartAgent.backend-chosen(self.current-index); }
                     }
                 }

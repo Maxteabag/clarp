@@ -89,7 +89,8 @@ const G: Scope = Scope::Global;
 const WEIGHTS: &[(&str, &str)] = &[("300", "Light"), ("400", "Regular"), ("500", "Medium"), ("600", "Semibold")];
 const DENSITIES: &[(&str, &str)] = &[("compact", "Compact"), ("comfortable", "Comfortable"), ("spacious", "Spacious")];
 const CLOCKS: &[(&str, &str)] = &[("12h", "12-hour (6:10 PM)"), ("24h", "24-hour (18:10)")];
-const ACTIVITY: &[(&str, &str)] = &[("grouped", "Grouped"), ("visible", "Always visible"), ("group-old", "Group old")];
+const ACTIVITY: &[(&str, &str)] =
+    &[("grouped", "Grouped"), ("visible", "Always visible"), ("group-old", "Group old"), ("hidden", "Hidden")];
 const DETAIL: &[(&str, &str)] =
     &[("raw", "Raw (no AI)"), ("brief", "Brief"), ("plain", "Plain English"), ("explained", "Explained"), ("teaching", "Teaching")];
 const LINKS: &[(&str, &str)] = &[("browser", "Open in the browser"), ("copy", "Copy the address")];
@@ -411,8 +412,8 @@ pub static SPECS: &[Spec] = &[
         name: "toolactivity",
         key: "conversation/activityDisplayMode",
         label: "Tool activity",
-        description: "How tool calls show: grouped under a 'Worked for' line, always visible, or only old ones grouped",
-        aliases: &["tool calls", "worked for", "fold tools", "collapse tools", "expand tools", "grouping"],
+        description: "How tool calls show: grouped under a 'Worked for' line, always visible, only old ones grouped, or hidden",
+        aliases: &["tool calls", "worked for", "fold tools", "collapse tools", "expand tools", "grouping", "hide tools", "no tools"],
         section: CHAT,
         kind: Kind::Choice { default: "grouped", options: ACTIVITY, indexed: true },
         scope: G,

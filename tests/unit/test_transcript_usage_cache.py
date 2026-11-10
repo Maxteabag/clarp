@@ -1,7 +1,15 @@
 import json
+import os
+import time
 from pathlib import Path
 
 from lib.claude_transcript import context_tokens_from_jsonl
+
+
+def _settled(path):
+    """Backdate the transcript as if its last write was an hour ago."""
+    then = time.time_ns() - 3600 * 10**9
+    os.utime(path, ns=(then, then))
 
 
 def test_unchanged_transcript_is_not_reopened_and_replacement_invalidates(tmp_path, monkeypatch):
@@ -9,6 +17,7 @@ def test_unchanged_transcript_is_not_reopened_and_replacement_invalidates(tmp_pa
     def content(tokens):
         return json.dumps({'type': 'assistant', 'message': {'usage': {'input_tokens': tokens}}}) + '\n'
     path.write_text(content(11))
+    _settled(path)
     calls = []
     original = Path.open
     def observe(self, *args, **kwargs):
@@ -23,7 +32,15 @@ def test_unchanged_transcript_is_not_reopened_and_replacement_invalidates(tmp_pa
     replacement.write_text(content(22))
     replacement.replace(path)
     assert context_tokens_from_jsonl(path) == 22
+    # RM-N4: ext4 takes timestamps from a coarse clock, so a same-size rewrite
+    # inside one tick keeps every stat field the cache keys on. Freeze the
+    # stat to make that tick deterministic.
+    frozen = path.stat()
     path.write_text(content(33))
+    original_stat = Path.stat
+    def coarse_clock(self, *args, **kwargs):
+        return frozen if self == path else original_stat(self, *args, **kwargs)
+    monkeypatch.setattr(Path, 'stat', coarse_clock)
     assert context_tokens_from_jsonl(path) == 33
 
 
@@ -34,6 +51,7 @@ def test_a_fleet_larger_than_256_transcripts_is_answered_from_cache(tmp_path, mo
     for i in range(600):
         path = tmp_path / f'session-{i}.jsonl'
         path.write_text(json.dumps({'type': 'assistant', 'message': {'usage': {'input_tokens': i}}}) + '\n')
+        _settled(path)
         paths.append(path)
     for path in paths:
         context_tokens_from_jsonl(path)

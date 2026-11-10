@@ -1,0 +1,836 @@
+{
+  "source_base": "5f698140552e4b9fdd24a0a008aa01fffc18dafb",
+  "original_source_sha256": "5dd71eda5ee01130a814caa1b69d132bee1fcf69685900a2f0c52c208f35d813",
+  "moves": [
+    {
+      "name": "TOOL_OUTPUT_LINE_LIMIT",
+      "from": "lib/codex_transcript.py",
+      "to": "lib/codex_tool_cells.py",
+      "ast_sha256": "7ae3c96fcbd2366879e82f40a468d7457a00f88710e61f884a052f93241f9041"
+    },
+    {
+      "name": "TOOL_OUTPUT_CHAR_LIMIT",
+      "from": "lib/codex_transcript.py",
+      "to": "lib/codex_tool_cells.py",
+      "ast_sha256": "0eca03206ca83dad837c970eb93198416ea003d7cc4f7b35e1750ca7f3fca335"
+    },
+    {
+      "name": "CELL_LINE_CHAR_HARD_LIMIT",
+      "from": "lib/codex_transcript.py",
+      "to": "lib/codex_tool_cells.py",
+      "ast_sha256": "eb563c4fbafd86c6886dda1f2569c504ac9cb2a339aed7960c458fbe97c2864a"
+    },
+    {
+      "name": "CELL_LINE_COUNT_HARD_LIMIT",
+      "from": "lib/codex_transcript.py",
+      "to": "lib/codex_tool_cells.py",
+      "ast_sha256": "2317ec4de5c66677900c04ea820da228210d72872951af5897948452aa2cce84"
+    },
+    {
+      "name": "CELL_BYTES_HARD_LIMIT",
+      "from": "lib/codex_transcript.py",
+      "to": "lib/codex_tool_cells.py",
+      "ast_sha256": "e5856fcf748719b830ecea4be3d2dd2ce1549673cc7e403db115d69f5b538405"
+    },
+    {
+      "name": "_exec_command_str",
+      "from": "lib/codex_transcript.py",
+      "to": "lib/codex_tool_cells.py",
+      "ast_sha256": "ee7435171b5729a2cf307ac7ffccdd40756e3867add24399b130834716a9071d"
+    },
+    {
+      "name": "_safe_id",
+      "from": "lib/codex_transcript.py",
+      "to": "lib/codex_tool_cells.py",
+      "ast_sha256": "794be5be8b51402b6337c775db77eecdcc57212da21c25c2c316d736f99fdc01"
+    },
+    {
+      "name": "_display_line",
+      "from": "lib/codex_transcript.py",
+      "to": "lib/codex_tool_cells.py",
+      "ast_sha256": "67687bb143895a3b925424fc0684f21cf07401cf57c999e788749edbc8e6ec27"
+    },
+    {
+      "name": "_display_cell",
+      "from": "lib/codex_transcript.py",
+      "to": "lib/codex_tool_cells.py",
+      "ast_sha256": "2c2378dc0fccdeaeff8ca044431ee2d1d9cf6668d1933a94b7124194857ae243"
+    },
+    {
+      "name": "_shell_words",
+      "from": "lib/codex_transcript.py",
+      "to": "lib/codex_tool_cells.py",
+      "ast_sha256": "ca830eaa366b87a666a82cc39001e59fccd048c63af1598f6962bbcc4d388550"
+    },
+    {
+      "name": "_split",
+      "from": "lib/codex_transcript.py",
+      "to": "lib/codex_tool_cells.py",
+      "ast_sha256": "e4d05c5ca093c8b48b4319944f7d21bbbe37128f21224e44d34dab92c1bf59f7"
+    },
+    {
+      "name": "_SPLIT_CACHE_MAX_CHARS",
+      "from": "lib/codex_transcript.py",
+      "to": "lib/codex_tool_cells.py",
+      "ast_sha256": "4ec4662513d98b096896bd0c8aa9a303f22802a922ae367d8ff80080985447b7"
+    },
+    {
+      "name": "_cached_split",
+      "from": "lib/codex_transcript.py",
+      "to": "lib/codex_tool_cells.py",
+      "ast_sha256": "226ff7da9f64371cdf3c378c7270187ab399ca6ea18826270628bfd1fb2c404e"
+    },
+    {
+      "name": "_QUOTED_WRAPPER",
+      "from": "lib/codex_transcript.py",
+      "to": "lib/codex_tool_cells.py",
+      "ast_sha256": "823e256c816e021b8a61c54c2140e9cee504c183f42600cd9d71c5af17c72be7"
+    },
+    {
+      "name": "_QUOTE_ESCAPE",
+      "from": "lib/codex_transcript.py",
+      "to": "lib/codex_tool_cells.py",
+      "ast_sha256": "c6257da100f713c8021abce5ac32340502182849ecf8bb7efbeca07afe59c2bd"
+    },
+    {
+      "name": "_quoted_wrapper_words",
+      "from": "lib/codex_transcript.py",
+      "to": "lib/codex_tool_cells.py",
+      "ast_sha256": "d8ea09eea9f81c06427dcc2e107fefccc5040e393d89e51159d65310cbac8a45"
+    },
+    {
+      "name": "_SHELLS",
+      "from": "lib/codex_transcript.py",
+      "to": "lib/codex_tool_cells.py",
+      "ast_sha256": "282ce7eb37defced1f9955ee9e0b68bc3595608ae63c641d8390c3a8106f3fda"
+    },
+    {
+      "name": "_EXPLORERS",
+      "from": "lib/codex_transcript.py",
+      "to": "lib/codex_tool_cells.py",
+      "ast_sha256": "4a5ad0211e8af5b460b2c66e52ca272ab3354d06a8f9a5779a437c43ec047a1d"
+    },
+    {
+      "name": "_PLAIN_FIRST_WORD",
+      "from": "lib/codex_transcript.py",
+      "to": "lib/codex_tool_cells.py",
+      "ast_sha256": "cafad3ec93268d260a99c7a904807bbf2706e1a2d29845150e6bf089a787ed9b"
+    },
+    {
+      "name": "_first_word_rules_out",
+      "from": "lib/codex_transcript.py",
+      "to": "lib/codex_tool_cells.py",
+      "ast_sha256": "4ee4bb2b2f22a8e73d9ea70fa76ae0b500a0c255e00d83bc81547601e2e7357f"
+    },
+    {
+      "name": "_strip_shell_wrapper",
+      "from": "lib/codex_transcript.py",
+      "to": "lib/codex_tool_cells.py",
+      "ast_sha256": "96834da6d1e82aad9b02e1d465af2a72197860c943d597136f87c942d1178596"
+    },
+    {
+      "name": "_looks_like_path",
+      "from": "lib/codex_transcript.py",
+      "to": "lib/codex_tool_cells.py",
+      "ast_sha256": "93d0c46b6f8cc65ba62e9a72886869e2fef86f150965d18c0845383419dd27bf"
+    },
+    {
+      "name": "_classify_exploration",
+      "from": "lib/codex_transcript.py",
+      "to": "lib/codex_tool_cells.py",
+      "ast_sha256": "b09e43685e6f5803e1d840a34d03ea0e0ee9c8a2d2fe5fb59d88de017f365341"
+    },
+    {
+      "name": "_preview_output",
+      "from": "lib/codex_transcript.py",
+      "to": "lib/codex_tool_cells.py",
+      "ast_sha256": "61cb2164cd67cf07d3fffb366b8cfe0a191203983b26c56fbd788e839343bbab"
+    },
+    {
+      "name": "_truncate_output_line",
+      "from": "lib/codex_transcript.py",
+      "to": "lib/codex_tool_cells.py",
+      "ast_sha256": "ad612c77675dcd1c90eed63d84355121d3762a511cb85b28bd7830db8a1c3ae2"
+    },
+    {
+      "name": "_cap_cell",
+      "from": "lib/codex_transcript.py",
+      "to": "lib/codex_tool_cells.py",
+      "ast_sha256": "2037e3d9a7d89eb5a0b74ff5f9f9d7b413173a6fa5abac08fbd15f0e7a52402d"
+    },
+    {
+      "name": "_clean_tool_output",
+      "from": "lib/codex_transcript.py",
+      "to": "lib/codex_tool_cells.py",
+      "ast_sha256": "2f82a2a2ab97473555936975a8bc630287e7c4e7b23577e5e9fa93e282d96ed4"
+    },
+    {
+      "name": "_tool_output_exit_code",
+      "from": "lib/codex_transcript.py",
+      "to": "lib/codex_tool_cells.py",
+      "ast_sha256": "20d73ea03143ec1abf469f3938fcf3cb9fe2f82a48242aa73d02752a24813075"
+    },
+    {
+      "name": "_command_cell",
+      "from": "lib/codex_transcript.py",
+      "to": "lib/codex_tool_cells.py",
+      "ast_sha256": "05182677c2b49dc37766aa9c36d9e24b3f9e18af9159fd393d303c541afdb29d"
+    },
+    {
+      "name": "_patch_cell",
+      "from": "lib/codex_transcript.py",
+      "to": "lib/codex_tool_cells.py",
+      "ast_sha256": "e36193c01f2c9dd9424319dbe60e7cd448e6e22b86b0da80b88fc2f27f2f830e"
+    },
+    {
+      "name": "_patch_file_paths",
+      "from": "lib/codex_transcript.py",
+      "to": "lib/codex_tool_cells.py",
+      "ast_sha256": "97d5f72056fcc8354fbce36a38d39f6792753e7b8a71152757fc9d80c380e8a7"
+    },
+    {
+      "name": "_patch_edits",
+      "from": "lib/codex_transcript.py",
+      "to": "lib/codex_tool_cells.py",
+      "ast_sha256": "f57fd31dc43cf92b2e2282793d37f82870424aa6ed766817807f2b18c265357f"
+    },
+    {
+      "name": "_generic_tool_cell",
+      "from": "lib/codex_transcript.py",
+      "to": "lib/codex_tool_cells.py",
+      "ast_sha256": "cf0aea78dad8afba12679f8519fa004a2cfc4b55c451cffbbb0cb639be4d4dac"
+    },
+    {
+      "name": "_mcp_cell",
+      "from": "lib/codex_transcript.py",
+      "to": "lib/codex_tool_cells.py",
+      "ast_sha256": "5171a22d4d44f25e3d6c126b3bcb4fe752615ad09727937809c5ac36eba33f0d"
+    },
+    {
+      "name": "_web_search_cell",
+      "from": "lib/codex_transcript.py",
+      "to": "lib/codex_tool_cells.py",
+      "ast_sha256": "21375f6a605c0c26bb3052f5580365aacadd0940e9fac69994242bf4e43945e9"
+    },
+    {
+      "name": "_json_obj",
+      "from": "lib/codex_transcript.py",
+      "to": "lib/codex_tool_cells.py",
+      "ast_sha256": "c18e7b951aa8482a2d94a28c64e05cf56ebb982492235aaf2071b8e58963106b"
+    },
+    {
+      "name": "_token",
+      "from": "lib/codex_transcript.py",
+      "to": "lib/codex_tool_cells.py",
+      "ast_sha256": "633fc6f4e7f895d63b4a75ede6549df122c58b2cebaccad3ce1e51b85233803b"
+    },
+    {
+      "name": "_get_any",
+      "from": "lib/codex_transcript.py",
+      "to": "lib/codex_tool_cells.py",
+      "ast_sha256": "d714ad8a3d30b927d6ed25eb66cf7967d437255e5d5872c500e68349580a46df"
+    },
+    {
+      "name": "_status_text",
+      "from": "lib/codex_transcript.py",
+      "to": "lib/codex_tool_cells.py",
+      "ast_sha256": "3636d38eb7e1e0e6ec3def0f8bbbd3e980dcd4357baee09da9d9baec1e3dd22d"
+    },
+    {
+      "name": "_status_cell_state",
+      "from": "lib/codex_transcript.py",
+      "to": "lib/codex_tool_cells.py",
+      "ast_sha256": "69cbbed4944121700a37923f3e01ad3dc944ea75674885e2d5ce11ae50cccde9"
+    },
+    {
+      "name": "_agent_label",
+      "from": "lib/codex_transcript.py",
+      "to": "lib/codex_tool_cells.py",
+      "ast_sha256": "4d7ce31acd28bd3a56c7e208421cab47a2de628257661326ec5234ee7aec8322"
+    },
+    {
+      "name": "_agent_state_lines",
+      "from": "lib/codex_transcript.py",
+      "to": "lib/codex_tool_cells.py",
+      "ast_sha256": "feb286d4a532f3da00486feec8c82707345c00dab11cec6ceee6ab363abcc36f"
+    },
+    {
+      "name": "_subagent_tool_cell",
+      "from": "lib/codex_transcript.py",
+      "to": "lib/codex_tool_cells.py",
+      "ast_sha256": "7281026292bc96089d6d584912f1930ffc26ada631ba0ccbf9809ee3248fed26"
+    },
+    {
+      "name": "_subagent_output_cell",
+      "from": "lib/codex_transcript.py",
+      "to": "lib/codex_tool_cells.py",
+      "ast_sha256": "5dd6affef3eb00044f8a2abd743179170623dbb02bf7d11ca6041180b35d8eae"
+    },
+    {
+      "name": "_collab_details",
+      "from": "lib/codex_transcript.py",
+      "to": "lib/codex_tool_cells.py",
+      "ast_sha256": "79d51232774e26cf6376b9d6f421f31afc187c0bddf709b41ed818b5a89d6cfe"
+    },
+    {
+      "name": "_collab_tool_cell",
+      "from": "lib/codex_transcript.py",
+      "to": "lib/codex_tool_cells.py",
+      "ast_sha256": "29a10f6327ef316c265ff660974c0ccd989c21af7a08ce66fa86c369f5450273"
+    },
+    {
+      "name": "_collab_protocol_cell",
+      "from": "lib/codex_transcript.py",
+      "to": "lib/codex_tool_cells.py",
+      "ast_sha256": "1f9b77f96c985f166abd0ef0803c9cdb781fd5fe4c4154b34d3d1706bd3379ce"
+    },
+    {
+      "name": "_replace_or_append_cell",
+      "from": "lib/codex_transcript.py",
+      "to": "lib/codex_tool_cells.py",
+      "ast_sha256": "262a7ae6a468e535f6c709b9c21b25eab7ae62a9ed82eb9154f0c06c91d21e9d"
+    },
+    {
+      "name": "_codex_tool",
+      "from": "lib/codex_transcript.py",
+      "to": "lib/codex_tool_cells.py",
+      "ast_sha256": "e3faca0ca94ad17580af411e19900a6bb6eaf49a9cff9ed2c34f1624bff6dfaf"
+    },
+    {
+      "name": "_attach_output",
+      "from": "lib/codex_transcript.py",
+      "to": "lib/codex_tool_cells.py",
+      "ast_sha256": "1608929c41d1330b45c524ae542a6f6b45a9be77232297f088f4f5c0dfaf1038"
+    },
+    {
+      "name": "_NESTED_TOOL_RE",
+      "from": "lib/codex_transcript.py",
+      "to": "lib/codex_tool_cells.py",
+      "ast_sha256": "6fdada174a9a0ed30f6fd30c28cdfd4c0d88156a08cfcc6254bd5bdcc6565b89"
+    },
+    {
+      "name": "_JSON_CMD_RE",
+      "from": "lib/codex_transcript.py",
+      "to": "lib/codex_tool_cells.py",
+      "ast_sha256": "f891a02b0c988f908620eb922226f205a1abc8e6baa4f9909843326d6e1c29a3"
+    },
+    {
+      "name": "_legacy_tool_category",
+      "from": "lib/codex_transcript.py",
+      "to": "lib/codex_tool_cells.py",
+      "ast_sha256": "a8d4004a3b89c4bf257cd68ca817b0d1f0b321cc9e29653ce1d7db30201e99d5"
+    },
+    {
+      "name": "_nested_exec_cell",
+      "from": "lib/codex_transcript.py",
+      "to": "lib/codex_tool_cells.py",
+      "ast_sha256": "cc5e56d38b0cc44f29dc1630b95a191550c5f6678f25c050fe1f09a61a75a280"
+    },
+    {
+      "name": "_legacy_function_cell",
+      "from": "lib/codex_transcript.py",
+      "to": "lib/codex_tool_cells.py",
+      "ast_sha256": "2fc66a1d8c2e83a65fc62bdeced72119df0352f88331426c11a8416b31b073fd"
+    }
+  ],
+  "unchanged_parser_bindings": [
+    "_codex_home",
+    "_clean_user_text",
+    "_last_assistant_turn",
+    "_coalesce_exploration_cells",
+    "_handle_modern_item",
+    "_OFFICIAL_ITEM_TYPES",
+    "_normalize_official_item",
+    "_official_item_text",
+    "_official_item_category",
+    "_turn_id",
+    "_mark_legacy",
+    "_drop_superseded_legacy_items",
+    "_response_message_text",
+    "_is_injected_user_context",
+    "_append_visible_message",
+    "parse_turns",
+    "_head_session_meta_and_preview",
+    "list_sessions",
+    "find_latest_jsonl"
+  ],
+  "canonical": {
+    "parse_turns": "lib/codex_transcript.py",
+    "list_sessions": "lib/codex_transcript.py",
+    "find_latest_jsonl": "lib/codex_transcript.py",
+    "tool_and_display_cells": "lib/codex_tool_cells.py"
+  },
+  "g0": {
+    "source": "server/lib/codex_transcript.py",
+    "source_sha256": "5dd71eda5ee01130a814caa1b69d132bee1fcf69685900a2f0c52c208f35d813",
+    "hit": 589,
+    "total": 676,
+    "percent": 87.1301775147929,
+    "entry_pass": true,
+    "definitions": {
+      "_exec_command_str": {
+        "start": 62,
+        "end": 75,
+        "hit": 11,
+        "total": 13,
+        "missing": [
+          67,
+          68
+        ]
+      },
+      "_safe_id": {
+        "start": 78,
+        "end": 80,
+        "hit": 3,
+        "total": 3,
+        "missing": []
+      },
+      "_display_line": {
+        "start": 83,
+        "end": 88,
+        "hit": 2,
+        "total": 2,
+        "missing": []
+      },
+      "_display_cell": {
+        "start": 91,
+        "end": 108,
+        "hit": 3,
+        "total": 3,
+        "missing": []
+      },
+      "_shell_words": {
+        "start": 111,
+        "end": 117,
+        "hit": 6,
+        "total": 7,
+        "missing": [
+          117
+        ]
+      },
+      "_split": {
+        "start": 120,
+        "end": 124,
+        "hit": 3,
+        "total": 5,
+        "missing": [
+          123,
+          124
+        ]
+      },
+      "_quoted_wrapper_words": {
+        "start": 140,
+        "end": 147,
+        "hit": 7,
+        "total": 8,
+        "missing": [
+          146
+        ]
+      },
+      "_first_word_rules_out": {
+        "start": 159,
+        "end": 167,
+        "hit": 3,
+        "total": 3,
+        "missing": []
+      },
+      "_strip_shell_wrapper": {
+        "start": 170,
+        "end": 177,
+        "hit": 7,
+        "total": 8,
+        "missing": [
+          177
+        ]
+      },
+      "_looks_like_path": {
+        "start": 180,
+        "end": 185,
+        "hit": 2,
+        "total": 2,
+        "missing": []
+      },
+      "_classify_exploration": {
+        "start": 188,
+        "end": 242,
+        "hit": 34,
+        "total": 48,
+        "missing": [
+          191,
+          198,
+          199,
+          200,
+          201,
+          202,
+          203,
+          204,
+          205,
+          208,
+          213,
+          219,
+          221,
+          242
+        ]
+      },
+      "_preview_output": {
+        "start": 245,
+        "end": 266,
+        "hit": 16,
+        "total": 17,
+        "missing": [
+          248
+        ]
+      },
+      "_truncate_output_line": {
+        "start": 269,
+        "end": 272,
+        "hit": 4,
+        "total": 4,
+        "missing": []
+      },
+      "_cap_cell": {
+        "start": 275,
+        "end": 307,
+        "hit": 24,
+        "total": 26,
+        "missing": [
+          288,
+          289
+        ]
+      },
+      "_clean_tool_output": {
+        "start": 310,
+        "end": 326,
+        "hit": 14,
+        "total": 16,
+        "missing": [
+          316,
+          317
+        ]
+      },
+      "_tool_output_exit_code": {
+        "start": 329,
+        "end": 338,
+        "hit": 8,
+        "total": 10,
+        "missing": [
+          337,
+          338
+        ]
+      },
+      "_command_cell": {
+        "start": 341,
+        "end": 362,
+        "hit": 8,
+        "total": 8,
+        "missing": []
+      },
+      "_patch_cell": {
+        "start": 365,
+        "end": 451,
+        "hit": 34,
+        "total": 54,
+        "missing": [
+          369,
+          378,
+          394,
+          395,
+          402,
+          403,
+          404,
+          405,
+          406,
+          407,
+          408,
+          415,
+          416,
+          417,
+          431,
+          433,
+          435,
+          439,
+          441,
+          443
+        ]
+      },
+      "_patch_file_paths": {
+        "start": 454,
+        "end": 463,
+        "hit": 9,
+        "total": 10,
+        "missing": [
+          462
+        ]
+      },
+      "_patch_edits": {
+        "start": 466,
+        "end": 495,
+        "hit": 23,
+        "total": 23,
+        "missing": []
+      },
+      "_generic_tool_cell": {
+        "start": 498,
+        "end": 506,
+        "hit": 3,
+        "total": 3,
+        "missing": []
+      },
+      "_mcp_cell": {
+        "start": 509,
+        "end": 539,
+        "hit": 17,
+        "total": 21,
+        "missing": [
+          518,
+          519,
+          525,
+          526
+        ]
+      },
+      "_web_search_cell": {
+        "start": 542,
+        "end": 549,
+        "hit": 2,
+        "total": 2,
+        "missing": []
+      },
+      "_json_obj": {
+        "start": 552,
+        "end": 561,
+        "hit": 9,
+        "total": 10,
+        "missing": [
+          554
+        ]
+      },
+      "_token": {
+        "start": 564,
+        "end": 574,
+        "hit": 9,
+        "total": 10,
+        "missing": [
+          569
+        ]
+      },
+      "_get_any": {
+        "start": 577,
+        "end": 581,
+        "hit": 5,
+        "total": 5,
+        "missing": []
+      },
+      "_status_text": {
+        "start": 584,
+        "end": 599,
+        "hit": 9,
+        "total": 10,
+        "missing": [
+          596
+        ]
+      },
+      "_status_cell_state": {
+        "start": 602,
+        "end": 615,
+        "hit": 14,
+        "total": 14,
+        "missing": []
+      },
+      "_agent_label": {
+        "start": 618,
+        "end": 632,
+        "hit": 11,
+        "total": 11,
+        "missing": []
+      },
+      "_agent_state_lines": {
+        "start": 635,
+        "end": 653,
+        "hit": 14,
+        "total": 15,
+        "missing": [
+          641
+        ]
+      },
+      "_subagent_tool_cell": {
+        "start": 656,
+        "end": 714,
+        "hit": 27,
+        "total": 27,
+        "missing": []
+      },
+      "_subagent_output_cell": {
+        "start": 717,
+        "end": 751,
+        "hit": 28,
+        "total": 28,
+        "missing": []
+      },
+      "_collab_details": {
+        "start": 754,
+        "end": 758,
+        "hit": 5,
+        "total": 5,
+        "missing": []
+      },
+      "_collab_tool_cell": {
+        "start": 761,
+        "end": 805,
+        "hit": 25,
+        "total": 27,
+        "missing": [
+          765,
+          787
+        ]
+      },
+      "_collab_protocol_cell": {
+        "start": 808,
+        "end": 948,
+        "hit": 66,
+        "total": 67,
+        "missing": [
+          948
+        ]
+      },
+      "_replace_or_append_cell": {
+        "start": 951,
+        "end": 959,
+        "hit": 9,
+        "total": 9,
+        "missing": []
+      },
+      "_codex_tool": {
+        "start": 962,
+        "end": 1006,
+        "hit": 27,
+        "total": 33,
+        "missing": [
+          993,
+          994,
+          995,
+          997,
+          1004,
+          1005
+        ]
+      },
+      "_attach_output": {
+        "start": 1009,
+        "end": 1044,
+        "hit": 25,
+        "total": 30,
+        "missing": [
+          1039,
+          1040,
+          1041,
+          1042,
+          1043
+        ]
+      },
+      "_legacy_tool_category": {
+        "start": 1338,
+        "end": 1375,
+        "hit": 21,
+        "total": 23,
+        "missing": [
+          1345,
+          1375
+        ]
+      },
+      "_nested_exec_cell": {
+        "start": 1378,
+        "end": 1414,
+        "hit": 17,
+        "total": 23,
+        "missing": [
+          1387,
+          1388,
+          1397,
+          1399,
+          1404,
+          1414
+        ]
+      },
+      "_legacy_function_cell": {
+        "start": 1417,
+        "end": 1480,
+        "hit": 25,
+        "total": 33,
+        "missing": [
+          1427,
+          1438,
+          1454,
+          1473,
+          1477,
+          1478,
+          1479,
+          1480
+        ]
+      }
+    }
+  },
+  "g0_binding_declarations_covered": [
+    {
+      "name": "CELL_BYTES_HARD_LIMIT",
+      "line": 45
+    },
+    {
+      "name": "CELL_LINE_CHAR_HARD_LIMIT",
+      "line": 43
+    },
+    {
+      "name": "CELL_LINE_COUNT_HARD_LIMIT",
+      "line": 44
+    },
+    {
+      "name": "TOOL_OUTPUT_CHAR_LIMIT",
+      "line": 36
+    },
+    {
+      "name": "TOOL_OUTPUT_LINE_LIMIT",
+      "line": 35
+    },
+    {
+      "name": "_EXPLORERS",
+      "line": 151
+    },
+    {
+      "name": "_JSON_CMD_RE",
+      "line": 1333
+    },
+    {
+      "name": "_NESTED_TOOL_RE",
+      "line": 1332
+    },
+    {
+      "name": "_PLAIN_FIRST_WORD",
+      "line": 156
+    },
+    {
+      "name": "_QUOTED_WRAPPER",
+      "line": 136
+    },
+    {
+      "name": "_QUOTE_ESCAPE",
+      "line": 137
+    },
+    {
+      "name": "_SHELLS",
+      "line": 150
+    },
+    {
+      "name": "_SPLIT_CACHE_MAX_CHARS",
+      "line": 129
+    },
+    {
+      "name": "_cached_split",
+      "line": 130
+    }
+  ],
+  "ownership": "tools/refactor/handwritten/s5-codex.toml (not generator input)",
+  "cache": "One lru_cache wrapper initialized after _split in original order; codex_transcript re-exports that same object.",
+  "parser_version_sources": [
+    "codex",
+    "agy"
+  ],
+  "fwdport": "handwritten: captain adds source/functions to forward-port watch on landing"
+}

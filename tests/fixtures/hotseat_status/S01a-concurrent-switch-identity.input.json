@@ -1,0 +1,44 @@
+{
+  "case": "S01a-concurrent-switch-identity",
+  "janitor_enabled": true,
+  "served_at": 1800000002000,
+  "note": "The third step is a read that began before the switch and finished after it (received_at older than the stored read): it is ignored, so 'a' stays the active default of the stored read and nothing is relabelled.",
+  "steps": [
+    {"op": "read", "provider": "claude", "received_at": 1800000000000, "payload": {
+      "generated_at": 1800000000.0, "sessions": 1, "error": null,
+      "accounts": [
+        {"alias": "a", "email": "a@example.invalid", "org": null, "plan": "max", "plan_label": "Max 5×",
+         "rate_limit_tier": null, "is_active": true, "error": null, "signin_days_left": 30.0,
+         "usage": {"status": "allowed", "available": true, "limited": false, "severity": "high",
+                   "used_5h": 0.9, "reset_5h": 1800010800.25, "used_7d": 0.5, "reset_7d": 1800500000.5,
+                   "scoped": [], "blocked_models": [], "extra_usage_enabled": false,
+                   "extra_usage_reason": null, "plan": "max"}},
+        {"alias": "b", "email": "b@example.invalid", "org": null, "plan": "max", "plan_label": "Max 5×",
+         "rate_limit_tier": null, "is_active": false, "error": null, "signin_days_left": 30.0,
+         "usage": {"status": "allowed", "available": true, "limited": false, "severity": null,
+                   "used_5h": 0.1, "reset_5h": 1800010800.25, "used_7d": 0.2, "reset_7d": 1800500000.5,
+                   "scoped": [], "blocked_models": [], "extra_usage_enabled": false,
+                   "extra_usage_reason": null, "plan": "max"}}
+      ]}},
+    {"op": "action", "provider": "claude",
+     "decision": {"action": "switch", "active": "a", "remaining": 10, "target": "b", "target_remaining": 90, "rung": 25},
+     "mode": "automatic", "switched": true, "now": 1800000001000, "floor_pct": 25, "cadence_s": 300,
+     "next_due_at": 1800000301000},
+    {"op": "read", "provider": "claude", "received_at": 1799999995000, "payload": {
+      "generated_at": 1799999995.0, "sessions": 1, "error": null,
+      "accounts": [
+        {"alias": "a", "email": "a@example.invalid", "org": null, "plan": "max", "plan_label": "Max 5×",
+         "rate_limit_tier": null, "is_active": false, "error": null, "signin_days_left": 30.0,
+         "usage": {"status": "allowed", "available": true, "limited": false, "severity": "high",
+                   "used_5h": 0.95, "reset_5h": 1800010800.25, "used_7d": 0.5, "reset_7d": 1800500000.5,
+                   "scoped": [], "blocked_models": [], "extra_usage_enabled": false,
+                   "extra_usage_reason": null, "plan": "max"}},
+        {"alias": "b", "email": "b@example.invalid", "org": null, "plan": "max", "plan_label": "Max 5×",
+         "rate_limit_tier": null, "is_active": true, "error": null, "signin_days_left": 30.0,
+         "usage": {"status": "allowed", "available": true, "limited": false, "severity": null,
+                   "used_5h": 0.2, "reset_5h": 1800010800.25, "used_7d": 0.2, "reset_7d": 1800500000.5,
+                   "scoped": [], "blocked_models": [], "extra_usage_enabled": false,
+                   "extra_usage_reason": null, "plan": "max"}}
+      ]}}
+  ]
+}

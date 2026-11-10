@@ -29,6 +29,7 @@ mod settings_view;
 mod look;
 mod switcher;
 mod search_view;
+mod select_text;
 mod mention_view;
 mod view;
 mod vim;
@@ -155,6 +156,21 @@ fn settings() -> Settings {
             None => Settings::in_memory(),
         },
     }
+}
+
+/// The saved Hosts as the connection page lists them, the one in use marked:
+/// the six most recent, the one in use always among them.
+pub(crate) fn saved_host_rows(engine: &Engine) -> ModelRc<SavedHostRow> {
+    const SHOWN: usize = 6;
+    let current = engine.base_url().to_owned();
+    let hosts = engine.saved_hosts();
+    let mut shown: Vec<_> = hosts.iter().filter(|h| h.url == current).chain(hosts.iter().filter(|h| h.url != current)).take(SHOWN).collect();
+    shown.sort_by_key(|h| hosts.iter().position(|x| x.url == h.url));
+    let rows: Vec<SavedHostRow> = shown
+        .into_iter()
+        .map(|host| SavedHostRow { url: host.url.clone().into(), name: host.label().into(), current: host.url == current })
+        .collect();
+    ModelRc::new(VecModel::from(rows))
 }
 
 /// The compact explorer's width: an average row (avatar and name), so most
@@ -392,6 +408,9 @@ impl App {
         window.set_selected_name(if selected.is_empty() { String::new() } else { engine.chat_name(&selected) }.into());
         window.set_connection(engine.connection_state().into());
         window.set_base_url(engine.base_url().into());
+        if changes.iter().any(|c| matches!(c, Change::Hosts | Change::ServerInfo | Change::Endpoint)) {
+            window.set_saved_hosts(saved_host_rows(&engine));
+        }
         window.set_connecting(matches!(engine.connection_state(), "connecting" | "pairing"));
         window.set_stored_credential(engine.has_stored_credential());
         window.set_has_agents(!engine.roster().agents().is_empty());
@@ -780,20 +799,17 @@ fn main() {
         }
     });
     window.on_copy_message(|pane, id| with_window(|app, _| {
-        let session = app.session_of(&pane);
-        let text = app.engine.borrow().conversation(&session).and_then(|c| {
-            c.rows().iter().find(|m| m.id == id.as_str()).map(|m| match clarp_core::decision_receipt::parse(&m.text) {
-                // A receipt copies as it reads, not as the Host's prompt.
-                Some(receipt) => format!("{}\n{}", receipt.question, receipt.outcome.label()),
-                // A reply copies its written form only.
-                None if m.display_text.is_empty() && m.role == "user" => m.text.clone(),
-                None => m.display_text.clone(),
-            })
-        });
+        let text = select_text::message_text(app, &pane, &id);
         match text.map(|text| platform::clipboard::copy(&text)) {
             Some(Ok(())) => {}
             Some(Err(error)) => app.engine.borrow_mut().report_error(&format!("Could not copy: {error}")),
             None => eprintln!("clarp-slint: no message {id} to copy"),
+        }
+    }));
+    window.on_select_message(|pane, id| with_window(|app, window| select_text::open_message(app, window, &pane, &id)));
+    window.on_select_copy_all(|| with_window(|app, window| {
+        if let Err(error) = platform::clipboard::copy(&window.get_select_body()) {
+            app.engine.borrow_mut().report_error(&format!("Could not copy: {error}"));
         }
     }));
     window.on_paste_image(|pane| {
@@ -891,6 +907,10 @@ fn main() {
     }));
     window.on_forget_host(|| with_window(|app, _| {
         app.engine.borrow_mut().forget_credential();
+        pump_now(app);
+    }));
+    window.on_remove_saved_host(|url| with_window(|app, _| {
+        app.engine.borrow_mut().forget_saved_host(&url);
         pump_now(app);
     }));
     window.on_overlay_closed(|| with_window(|app, window| commands::close_overlay(app, window)));

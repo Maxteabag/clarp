@@ -87,6 +87,8 @@ pub struct Options {
     pub expanded: HashSet<String>,
     /// Host time now (`LiveView::host_now_ms`), for running items.
     pub host_now_ms: i64,
+    /// The reader opted out of process rows: only messages show.
+    pub hide_activity: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -329,7 +331,10 @@ pub fn present(view: &LiveView, rows: &[Message], options: &Options) -> Presente
     presented.hidden_rows = rows.iter().filter(|m| m.kind == "live" && claimed.contains(m.id.as_str())).map(|m| m.id.clone()).collect();
 
     let rows_of = rows_of.into_iter().map(|(id, entry)| (id.to_owned(), entry)).collect();
-    let entries = arrange(&turn_id, turn.expect("a turn"), settled, &shown, rows_of, options);
+    let mut entries = arrange(&turn_id, turn.expect("a turn"), settled, &shown, rows_of, options);
+    if options.hide_activity {
+        entries.retain(|entry| entry.kind == Kind::Message);
+    }
     presented.entries = entries;
     presented.turn_id = turn_id;
     presented.started_at_ms = turn.and_then(|t| int(t, "started_at_ms"));

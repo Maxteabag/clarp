@@ -20,6 +20,8 @@ HTTP/2, so we use httpx with the h2 backend.
 from __future__ import annotations
 
 import pathlib
+import math
+import os
 import json
 import re
 import hashlib
@@ -41,7 +43,7 @@ _HOST_SANDBOX = "https://api.sandbox.push.apple.com"
 _TOKEN_TTL_SEC = 50 * 60
 
 _jwt_lock = threading.Lock()
-_jwt_cache: tuple[str, int] | None = None  # (token, minted_at_epoch)
+_jwt_cache: tuple[str, int, tuple] | None = None  # (token, minted_at_epoch, identity)
 
 # APNs requests are synchronous but notification classification is dispatched
 # from independent daemon threads.  Serialize each conversation so an older,
@@ -311,11 +313,18 @@ def _auth_jwt(cfg) -> str:
     global _jwt_cache
     import os
     import jwt  # PyJWT
+    key_path = os.path.expanduser(cfg.apns_key_file())
+    try:
+        key_mtime = os.stat(key_path).st_mtime_ns
+    except OSError:
+        key_mtime = 0    # the open below reports a missing key
+    # A token belongs to the team, key id and key file it was minted for: a
+    # fixed team id or a rotated key mints a new one at once (AUT-10).
+    identity = (cfg.apns_team_id, cfg.apns_key_id, os.path.realpath(key_path), key_mtime)
     with _jwt_lock:
         now = int(time.time())
-        if _jwt_cache and now - _jwt_cache[1] < _TOKEN_TTL_SEC:
+        if _jwt_cache and _jwt_cache[2] == identity and now - _jwt_cache[1] < _TOKEN_TTL_SEC:
             return _jwt_cache[0]
-        key_path = os.path.expanduser(cfg.apns_key_file())
         with open(key_path) as fh:
             private_key = fh.read()
         token = jwt.encode(
@@ -324,7 +333,7 @@ def _auth_jwt(cfg) -> str:
             algorithm="ES256",
             headers={"kid": cfg.apns_key_id},
         )
-        _jwt_cache = (token, now)
+        _jwt_cache = (token, now, identity)
         return token
 
 
@@ -374,9 +383,14 @@ def _close_quietly(client) -> None:
         pass
 
 
-def _reset_pooled_client() -> None:
+def _reset_pooled_client(expected=None) -> None:
+    """Drop the shared client. With ``expected``, only if it is still that
+    client: a batch that held an older one must not close the replacement
+    every other batch is using (AUT-19)."""
     global _CLIENT, _CLIENT_CTOR
     with _CLIENT_LOCK:
+        if expected is not None and _CLIENT is not expected:
+            return
         client, _CLIENT, _CLIENT_CTOR = _CLIENT, None, None
     _close_quietly(client)
 
@@ -400,6 +414,7 @@ def _avatar_details(
         return None, False
 
     identity = str(agent_id or "").strip()
+    row = None
     if identity:
         from . import agents as agents_db
         from .avatar_urls import (
@@ -430,11 +445,13 @@ def _avatar_details(
                 query = urlencode({"v": version})
             return f"{base}{route}?{query}", True
 
-    allowed = set("abcdefghijklmnopqrstuvwxyz0123456789_-")
-    slug = "".join(
-        character for character in persona.strip().lower()
-        if character in allowed)
-    return (f"{base}/static/avatars/{slug}.png", False) if slug else (None, False)
+    from .avatar_urls import static_persona_avatar_url
+    from .context import resolve_root
+
+    static_root = resolve_root(pathlib.Path(__file__).resolve(), os.environ) / "static"
+    route = static_persona_avatar_url(
+        persona, str((row or {}).get("backend") or "claude"), static_root=static_root)
+    return (f"{base}{route}", False) if route else (None, False)
 
 
 def turn_done_payload(persona: str, session: str | None,
@@ -550,6 +567,7 @@ def _send_one(client, base: str, auth: str, bundle_id: str,
 
 # APNs reasons that mean "this token is permanently dead — stop sending".
 _DEAD_REASONS = {"BadDeviceToken", "Unregistered", "DeviceTokenNotForTopic"}
+_PROVIDER_TOKEN_REJECTED = {"InvalidProviderToken", "ExpiredProviderToken"}
 
 
 # --------------------------------------------------------------------------
@@ -566,20 +584,47 @@ class _DirectTransport:
 
     def send(self, token: str, environment: str, payload: dict, *,
              push_type: str = "alert", priority: str = "10",
-             collapse_id: str | None = None) -> tuple[int, str, str]:
-        return _send_one(self._client, _host(environment), self._auth,
-                         self._cfg.apns_bundle_id, token, payload,
-                         push_type=push_type, priority=priority,
-                         collapse_id=collapse_id)
+             collapse_id: str | None = None,
+             expiration: int | None = None) -> tuple[int, str, str]:
+        # Two retries, each at most once and in either order, and only where
+        # nothing reached Apple: a client another batch closed before this
+        # request went out (AUT-19), and a refused provider token (AUT-10).
+        client_retry = token_retry = True
+        while True:
+            try:
+                result = _send_one(self._client, _host(environment), self._auth,
+                                   self._cfg.apns_bundle_id, token, payload,
+                                   push_type=push_type, priority=priority,
+                                   collapse_id=collapse_id, expiration=expiration)
+            except RuntimeError as e:
+                if not client_retry or "client has been closed" not in str(e):
+                    raise
+                client_retry = False
+                self._client = _pooled_client()
+                continue
+            if token_retry and result[0] == 403 and result[1] in _PROVIDER_TOKEN_REJECTED:
+                token_retry = False
+                reset_jwt_cache()
+                self._auth = _auth_jwt(self._cfg)
+                continue
+            return result
 
     def reset(self) -> None:
-        _reset_pooled_client()
+        _reset_pooled_client(self._client)
         self._client = _pooled_client()
 
 
 class _RelayUnavailable(Exception):
-    """Audio Central could not take the push at all (down, not deployed, or
-    not configured for push) — as opposed to Apple rejecting one token."""
+    """Relay outage with conservative, per-call push uncertainty.
+
+    False is used only before a push could be accepted: registration, cached
+    unavailability, client construction/closed-before-wire, or an unconfigured
+    endpoint's definitive 404/405. Unknown send outcomes default to True.
+    """
+
+    def __init__(self, message="", *, push_uncertain: bool = True):
+        super().__init__(message)
+        self.push_uncertain = push_uncertain
 
 
 # Tokens already bound to this Computer at Audio Central in this process,
@@ -636,7 +681,7 @@ class _RelayTransport:
         # One outage per batch: later tokens fail (or fall back) immediately
         # instead of each waiting out the timeout.
         if self._down:
-            raise _RelayUnavailable(self._down)
+            raise _RelayUnavailable(self._down, push_uncertain=False)
         try:
             return self._checked(method, path, body)
         except _RelayUnavailable as e:
@@ -645,12 +690,21 @@ class _RelayTransport:
 
     def _checked(self, method: str, path: str, body: dict):
         try:
-            resp = _relay_client().request(
+            client = _relay_client()
+        except Exception as e:  # noqa: BLE001 - no request has been attempted
+            raise _RelayUnavailable(type(e).__name__, push_uncertain=False) from e
+        try:
+            resp = client.request(
                 method, f"{self._base}{path}", headers=self._headers, json=body)
-        except Exception as e:  # noqa: BLE001 - network failure
-            raise _RelayUnavailable(f"{type(e).__name__}") from e
+        except Exception as e:  # noqa: BLE001 - request outcome may be unknown
+            closed_before_wire = (isinstance(e, RuntimeError)
+                                  and "client has been closed" in str(e))
+            raise _RelayUnavailable(type(e).__name__, push_uncertain=(
+                path == "/v1/push/send" and not closed_before_wire)) from e
         if resp.status_code in (404, 405) or resp.status_code >= 500:
-            raise _RelayUnavailable(f"{path} HTTP {resp.status_code}")
+            raise _RelayUnavailable(
+                f"{path} HTTP {resp.status_code}",
+                push_uncertain=(path == "/v1/push/send" and resp.status_code >= 500))
         return resp
 
     def _register(self, token: str, environment: str) -> bool:
@@ -691,6 +745,9 @@ class _RelayTransport:
                 return 401, "RelayRegistrationRejected", ""
             resp = self._post("POST", "/v1/push/send", {"notifications": [notification]})
             if resp.status_code != 200:
+                if resp.status_code == 429:
+                    # The shared relay budget is spent: Live Activity waits (APNS-N1).
+                    _rate_limited_response(resp)
                 if resp.status_code == 401:
                     # A revoked credential: registrations it made are gone too.
                     self._forget(token)
@@ -700,6 +757,8 @@ class _RelayTransport:
             except Exception:  # noqa: BLE001
                 return 502, "RelayBadResponse", ""
             status = int(result.get("status") or 0)
+            if status == 429:
+                _rate_limited_response(resp)
             reason = str(result.get("reason") or "")
             if reason == "RelayDeliveryFailed":
                 # The relay is up but could not reach Apple: an outage of
@@ -740,6 +799,10 @@ class _AutoTransport:
         try:
             return self._active.send(token, environment, payload, **kwargs)
         except _RelayUnavailable as e:
+            if kwargs.get("push_type") == "liveactivity" and e.push_uncertain:
+                # An uncertain relay outcome cannot authorize a second
+                # potentially accepted send under the same LA reservation.
+                raise
             if self._active.name != "relay" or not self._cfg.apns_direct_ready():
                 raise
             log("apnsRelayFallback", f"reason={e} using=direct")
@@ -775,7 +838,7 @@ class _GrantTransport:
     def send(self, grant: str, payload: dict, *, push_type: str = "alert",
              priority: str = "10", collapse_id: str | None = None) -> tuple[int, str, str]:
         if self._down:
-            raise _RelayUnavailable(self._down)
+            raise _RelayUnavailable(self._down, push_uncertain=False)
         notification = {
             "pushType": push_type,
             "priority": priority,
@@ -784,20 +847,30 @@ class _GrantTransport:
             "payload": payload,
         }
         try:
-            resp = _relay_client().request(
+            client = _relay_client()
+        except Exception as e:  # noqa: BLE001 - no request has been attempted
+            self._down = type(e).__name__
+            raise _RelayUnavailable(self._down, push_uncertain=False) from e
+        try:
+            resp = client.request(
                 "POST", f"{self._base}/v1/push/send",
                 headers={"authorization": f"Bearer {grant}"},
                 json={"notifications": [notification]})
         except Exception as e:  # noqa: BLE001 - network failure
             self._down = type(e).__name__
-            raise _RelayUnavailable(self._down) from e
+            closed_before_wire = (isinstance(e, RuntimeError)
+                                  and "client has been closed" in str(e))
+            raise _RelayUnavailable(self._down, push_uncertain=not closed_before_wire) from e
         if resp.status_code in (404, 405) or resp.status_code >= 500:
             self._down = f"grant send HTTP {resp.status_code}"
-            raise _RelayUnavailable(self._down)
+            raise _RelayUnavailable(self._down, push_uncertain=resp.status_code >= 500)
         if resp.status_code == 401:
             # The phone revoked this server's grant: stop pushing to it.
             return 410, "GrantRevoked", ""
         if resp.status_code != 200:
+            if resp.status_code == 429:
+                # The shared relay budget is spent: Live Activity waits (APNS-N1).
+                _rate_limited_response(resp)
             return resp.status_code, _relay_error(resp) or f"Relay{resp.status_code}", ""
         try:
             result = (resp.json().get("results") or [{}])[0]
@@ -807,7 +880,10 @@ class _GrantTransport:
         if reason == "RelayDeliveryFailed":
             self._down = "relay could not reach APNs"
             raise _RelayUnavailable(self._down)
-        return int(result.get("status") or 0), reason, str(result.get("apnsId") or "")
+        status = int(result.get("status") or 0)
+        if status == 429:
+            _rate_limited_response(resp)
+        return status, reason, str(result.get("apnsId") or "")
 
 
 class _Router:
@@ -837,6 +913,8 @@ class _Router:
                 if self._base is None:
                     return result
             except _RelayUnavailable as e:
+                if kwargs.get("push_type") == "liveactivity" and e.push_uncertain:
+                    raise
                 if self._cfg.apns_mode != "auto" or not self._cfg.apns_direct_ready():
                     raise
                 if self._direct_fallback is None:
@@ -1268,18 +1346,294 @@ def on_decision_created(artifact: dict) -> None:
     ).start()
 
 
+# One internal, expand-compatible key. Old binaries ignore it; restoring an
+# older database or running an old writer is outside the shared-cap guarantee.
+_LA_DAY_KEY = "apns.live_activity_day_budget.v1"
+_LA_DAY_LIMIT = 300
+_LA_MAX_WALL = 253402300799.0  # Last UTC second in year 9999.
+
+
+def _la_valid_wall(value) -> bool:
+    return (type(value) in (int, float) and math.isfinite(value)
+            and 0 <= value <= _LA_MAX_WALL)
+
+
+def _la_validate_day(raw: str, now: float) -> dict:
+    if len(raw) > 1024:
+        raise ValueError("la_day_state_size")
+    state = json.loads(raw)
+    fields = {"version", "day", "count", "paused_until", "last_wall"}
+    if not isinstance(state, dict) or set(state) != fields:
+        raise ValueError("la_day_state_shape")
+    if (type(state["version"]) is not int or state["version"] != 1
+            or type(state["day"]) is not int or state["day"] < 0
+            or type(state["count"]) is not int or not 0 <= state["count"] <= _LA_DAY_LIMIT
+            or not _la_valid_wall(state["last_wall"])
+            or not _la_valid_wall(state["paused_until"])
+            or state["day"] != int(state["last_wall"] // 86400)
+            or state["last_wall"] > now
+            or (state["paused_until"] and state["paused_until"] < state["day"] * 86400)):
+        raise ValueError("la_day_state_invalid")
+    return state
+
+
+def _la_day_update(*, reserve: bool, pause_until: float = 0.0) -> tuple[bool, float]:
+    """Commit one reservation or pause, never holding the writer over network.
+
+    The 20ms scope caps SQLite busy waits, not filesystem/COMMIT wall time.
+    Unknown commits deliberately lose credit; no network is authorized on error.
+    """
+    from . import db, settings_store
+    if not _la_valid_wall(pause_until):
+        raise ValueError("la_day_clock_invalid")
+    connection = db.conn()
+    if connection.in_transaction:
+        raise ValueError("la_day_borrowed_transaction")
+    allowed = False
+    with db.busy_timeout_at_most(20):
+        with settings_store.transaction():
+            # UTC may change while BEGIN IMMEDIATE waits for another writer.
+            # Snapshot only after acquisition, then use this one value throughout.
+            now = time.time()
+            if not _la_valid_wall(now):
+                raise ValueError("la_day_clock_invalid")
+            raw = settings_store.get(_LA_DAY_KEY)
+            day = int(now // 86400)
+            state = ({"version": 1, "day": day, "count": 0,
+                      "paused_until": 0.0, "last_wall": now}
+                     if raw is None else _la_validate_day(raw, now))
+            if state["day"] < day:
+                state["day"], state["count"] = day, 0
+                if state["paused_until"] <= now:
+                    state["paused_until"] = 0.0
+            state["last_wall"] = now
+            state["paused_until"] = max(state["paused_until"], pause_until)
+            if reserve and state["paused_until"] <= now and state["count"] < _LA_DAY_LIMIT:
+                state["count"] += 1
+                allowed = True
+            wait = max(0.0, state["paused_until"] - now)
+            if reserve and state["count"] >= _LA_DAY_LIMIT and not allowed:
+                wait = max(wait, (day + 1) * 86400 - now)
+            settings_store.set_text(_LA_DAY_KEY, json.dumps(state, allow_nan=False, sort_keys=True),
+                                    updated_at=int(now * 1000))
+    return allowed, wait
+
+
+class _LiveActivityGate:
+    """Live Activity's share of the relay budget (APNS-N1).
+
+    The relay counts Live Activity and alerts against this Computer's one
+    window (30/min, 2000/UTC day) for every device and activity token. Live
+    Activity gets one Host-wide budget counted in sends (one per activity
+    token per state): a burst of 10 and 300 a day refilled evenly, so alerts
+    always keep at least 20/min and 1700/day. Any 429 from the relay (an
+    alert's too) backs Live Activity off for max(retryAfter, a floor from
+    60 s doubling to 30 min); a delivered push resets the floor. A held
+    update is kept per token, latest wins, and goes out on a timer when the
+    budget allows."""
+
+    BURST, REFILL_SEC = 10.0, 86_400 / 300
+    FLOOR_MIN_SEC, FLOOR_MAX_SEC = 60.0, 1800.0
+
+    def __init__(self, clock: Callable[[], float] = time.monotonic, schedule=None):
+        self._clock = clock
+        self._schedule = schedule
+        self._lock = threading.Lock()
+        self._level: tuple[float, float] | None = None
+        self._pending: dict[str, tuple[dict, dict, str]] = {}
+        self._paused_until = 0.0
+        self._pause_to_persist = 0.0
+        self.floor = 0.0
+        self._timer = None
+
+    @staticmethod
+    def _refilled(level, now, burst, refill):
+        if level is None:
+            return burst
+        value, at = level
+        return min(burst, value + (now - at) / refill)
+
+    def rate_limited(self, retry_after: float, *, day_window: bool = False) -> None:
+        # The public relay has no day/minute discriminator (lead 759). Longer
+        # than an hour conservatively means day exhaustion. Never shorten the
+        # advertised wait, even if it extends beyond the next UTC reset.
+        wait = retry_after if math.isfinite(retry_after) and retry_after > 0 else 0.0
+        wall = time.time()
+        if day_window:
+            wait = max(wait, 86400 - wall % 86400)
+        with self._lock:
+            self.floor = (self.FLOOR_MIN_SEC if not self.floor
+                          else min(self.floor * 2, self.FLOOR_MAX_SEC))
+            self._paused_until = max(self._paused_until,
+                                     self._clock() + max(wait, self.floor))
+            if day_window:
+                self._pause_to_persist = max(self._pause_to_persist, wall + wait)
+        if day_window:
+            self._persist_pause()
+
+    def _persist_pause(self) -> None:
+        # Alert observers never acquire the LA send lock, nor keep the gate
+        # lock while waiting for SQLite. A failed write informs THIS process
+        # only; it is not a durable cross-process pause acknowledgement.
+        with self._lock:
+            pending = self._pause_to_persist
+        try:
+            _la_day_update(reserve=False, pause_until=pending)
+        except Exception as exc:  # noqa: BLE001 - alert result is independent of optional state
+            log("apnsLiveActivityBudgetUnavailable", f"phase=pause code={type(exc).__name__}")
+            return
+        with self._lock:
+            if self._pause_to_persist <= pending:
+                self._pause_to_persist = 0.0
+
+    def reserve(self) -> bool:
+        with self._lock:
+            pending = self._pause_to_persist
+        try:
+            allowed, wait = _la_day_update(reserve=True, pause_until=pending)
+        except Exception as exc:  # noqa: BLE001 - no confirmed commit means no LA network
+            log("apnsLiveActivityBudgetUnavailable", f"phase=reserve code={type(exc).__name__}")
+            allowed, wait = False, 60.0
+        else:
+            with self._lock:
+                if self._pause_to_persist <= pending:
+                    self._pause_to_persist = 0.0
+        if not allowed:
+            with self._lock:
+                self._paused_until = max(self._paused_until, self._clock() + max(wait, 1.0))
+        return allowed
+
+    def delivered(self) -> None:
+        with self._lock:
+            self.floor = 0.0
+
+    def offer(self, rows: list[dict], payload: dict, priority: str) -> None:
+        """The latest state for every token. Tokens still waiting keep their
+        places in the queue; a token that was just sent joins at the back,
+        so none starves. Unregistered tokens drop out."""
+        with self._lock:
+            by_token = {row["token"]: row for row in rows}
+            queue = {token: (by_token[token], payload, priority)
+                     for token in self._pending if token in by_token}
+            for token, row in by_token.items():
+                queue.setdefault(token, (row, payload, priority))
+            self._pending = queue
+
+    def paused(self) -> bool:
+        with self._lock:
+            return self._clock() < self._paused_until
+
+    def requeue(self, items: list[tuple[dict, dict, str]], flush: Callable[[], None]) -> None:
+        """Put back what was taken but not delivered (a newer state for the
+        token wins), give its budget back, and wake up when sending is
+        allowed again, without waiting for another state."""
+        with self._lock:
+            for row, payload, priority in items:
+                self._pending.setdefault(row["token"], (row, payload, priority))
+            if self._level is not None:
+                value, at = self._level
+                self._level = (min(self.BURST, value + len(items)), at)
+            self._arm_locked(self._clock(), flush)
+
+    def _arm_locked(self, now: float, flush: Callable[[], None]) -> None:
+        if not self._pending or self._timer is not None:
+            return
+        level = self._refilled(self._level, now, self.BURST, self.REFILL_SEC)
+        wait = max(self._paused_until - now, (1 - level) * self.REFILL_SEC, 0.0)
+
+        def fire():
+            with self._lock:
+                self._timer = None
+            flush()
+        schedule = self._schedule
+        if schedule is None:
+            from .live_pacing import _thread_timer as schedule
+        self._timer = schedule(min(wait, threading.TIMEOUT_MAX), fire)
+
+    def due(self, flush: Callable[[], None]) -> list[tuple[dict, dict, str]]:
+        """Take what may go now; arm one timer for the rest."""
+        with self._lock:
+            now = self._clock()
+            ready = []
+            for token in list(self._pending):
+                level = self._refilled(self._level, now, self.BURST, self.REFILL_SEC)
+                if now < self._paused_until or level < 1:
+                    break
+                self._level = (level - 1, now)
+                ready.append(self._pending.pop(token))
+            self._arm_locked(now, flush)
+            return ready
+
+
+_LA_GATE = _LiveActivityGate()
+# One ordered sender: a timer's retry and an ordinary update never send at the
+# same time, so an older state cannot land after a newer one. The gate's own
+# lock still never covers network I/O.
+_LA_SEND_LOCK = threading.Lock()
+
+
+def _retry_header(resp) -> float:
+    """Only the public integer HEADER can identify a relay day window."""
+    try:
+        headers = getattr(resp, "headers", {})
+        raw = str(headers.get("Retry-After") or headers.get("retry-after") or "").strip()
+        value = float(raw) if raw.isascii() and raw.isdecimal() else 0.0
+        return value if math.isfinite(value) else 0.0
+    except (ValueError, OverflowError, TypeError, AttributeError):
+        return 0.0  # No valid header; the legacy body or bounded floor applies.
+
+
+def _retry_after(resp) -> float:
+    """Never shorten either a valid header or a legacy internal JSON wait."""
+    header = _retry_header(resp)
+    try:
+        body = float((resp.json() or {}).get("retryAfter") or 0)
+    except (ValueError, OverflowError, TypeError, AttributeError):
+        body = 0.0
+    return max(header, body if math.isfinite(body) and body > 0 else 0.0)
+
+
+def _rate_limited_response(resp) -> None:
+    _LA_GATE.rate_limited(_retry_after(resp), day_window=_retry_header(resp) > 3600)
+
+
 def send_live_activity(payload: dict, priority: str = "5") -> dict:
     """Push one Live Activity content state to every registered activity
-    token (docs/live-items.md §8). Best effort; never raises."""
+    token (docs/live-items.md §8), within Live Activity's share of the relay
+    budget (APNS-N1); a held state goes out later, the latest one. Best
+    effort; never raises."""
     from . import config, live_activity
     cfg = config.load()
     rows = live_activity.tokens()
     if not rows or not cfg.apns_enabled():
         return {"enabled": cfg.apns_enabled(), "sent": 0, "failed": 0, "disabled": 0}
+    _LA_GATE.offer(rows, payload, priority)
+    return _flush_live_activity()
+
+
+def _flush_live_activity() -> dict:
+    with _LA_SEND_LOCK:
+        return _flush_live_activity_locked()
+
+
+def _flush_live_activity_locked() -> dict:
+    from . import config, live_activity
+    cfg = config.load()
     sent = failed = disabled = 0
     try:
+        ready = _LA_GATE.due(_flush_live_activity)
+        if not ready:
+            return {"enabled": True, "sent": 0, "failed": 0, "disabled": 0}
         transport = _transport(cfg)
-        for row in rows:
+        held: list[tuple[dict, dict, str]] = []
+        for index, (row, payload, priority) in enumerate(ready):
+            if _LA_GATE.paused():
+                # A 429 in this batch paused Live Activity: the rest wait it out.
+                held.extend(ready[index:])
+                break
+            if not _LA_GATE.reserve():
+                held.extend(ready[index:])
+                break
             token = row["token"]
             try:
                 status, reason, _apns_id = transport.send(
@@ -1292,13 +1646,26 @@ def send_live_activity(payload: dict, priority: str = "5") -> dict:
                 failed += 1
                 continue
             if status == 200:
+                _LA_GATE.delivered()
                 sent += 1
+                try:
+                    log("apnsLiveActivityAccepted", "status=200 count=1")
+                except Exception as e:  # noqa: BLE001 - diagnostics never abort a reserved batch
+                    log_exception("apnsLiveActivityDiagnosticFail", e)
             elif status == 410 or reason in _DEAD_REASONS:
                 live_activity.unregister(token=token)
                 disabled += 1
             else:
                 log("apnsLiveActivityRejected", f"status={status} reason={reason}")
                 failed += 1
+                if status == 429:
+                    # The relay's 429 already backed off (its transport); Apple's
+                    # own TooManyRequests does too. The state is kept, not lost.
+                    if not _LA_GATE.paused():
+                        _LA_GATE.rate_limited(0)
+                    held.append((row, payload, priority))
+        if held:
+            _LA_GATE.requeue(held, _flush_live_activity)
     except Exception as e:  # noqa: BLE001
         log_exception("apnsLiveActivityFail", e)
     return {"enabled": True, "sent": sent, "failed": failed, "disabled": disabled}
@@ -1475,9 +1842,9 @@ def send_agent_ring_voip(ring: dict, tokens: list[dict]) -> dict:
         transport = _DirectTransport(cfg)
         for row in tokens:
             try:
-                status, reason, _apns_id = _send_one(
-                    transport._client, _host(row.get("environment") or cfg.apns_environment), transport._auth,
-                    cfg.apns_bundle_id, row["token"], payload, push_type="voip", priority="10",
+                status, reason, _apns_id = transport.send(
+                    row["token"], row.get("environment") or cfg.apns_environment, payload,
+                    push_type="voip", priority="10",
                     collapse_id=agent_ring_collapse_id(ring), expiration=expiration)
             except Exception as e:  # noqa: BLE001
                 log_exception("apnsRingVoipSendFail", e, detail=f"ring={ring.get('ring_id')}")

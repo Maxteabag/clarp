@@ -24,7 +24,7 @@ import pathlib
 import re
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from .deployment import LAYOUT
@@ -229,9 +229,121 @@ def build_snapshot(agent: dict, context: dict) -> dict:
         "opening_text": context["opening_text"], "language": "nb-NO",
         "provider": PROVIDER, "model": MODEL, "voice": VOICE,
     }
+    from . import agent_live_tools
+    tools = agent_live_tools.frozen_config(profile, context["story"])
+    if tools is not None:                   # opt-in only: a profile without live_tools keeps its exact snapshot
+        snapshot[agent_live_tools.SNAPSHOT_KEY] = tools
     if len(canonical(snapshot)) > SNAPSHOT_BYTES:
         raise CallError(409, CONTEXT_UNAVAILABLE)
     return snapshot
+
+
+# ---- user-initiated Live calls (issue #216): a truthful USER_CALL context, never a fake event
+#
+# When the USER calls an agent whose operator-approved profile opts it in
+# (``"user_call_default": "live"`` plus an approved ``stories.user_call`` and
+# ``user_call_opening``), the Host builds this context itself. The phone
+# supplies only the agent and its request id: no path, prompt, event or text.
+# It carries no event and no observation, so nothing of a leak-watch event can
+# reach such a call. CONTEXT-v1 (rings) is unchanged and still refuses it.
+
+USER_CALL_KIND = "user_call"
+USER_CALL_STORY = "user_call"
+USER_CALL_SOURCE = "user-initiated"
+USER_CALL_DEFAULT_KEY = "user_call_default"
+USER_CALL_OPENING_KEY = "user_call_opening"
+CALL_ACTIVE = "live_call_active"
+USER_CALL_ORIGIN = "user_call"
+PROFILE_SCAN_LIMIT = 64
+
+
+USER_CALL_BINDINGS_KEY = "agent_ring.user_call_bindings"
+
+
+def user_call_profiles(*, strict: bool = True) -> dict[str, str | None]:
+    """Bounded registry admission with durable, fail-closed discovery of known opt-ins.
+
+    A malformed unrelated profile cannot disable Normal calls. Previously observed
+    Live sessions stay Live until a readable profile explicitly opts them out; the
+    strict POST scan still refuses an incomplete or ambiguous registry.
+    """
+    import os
+    from . import settings_store
+    from . import agent_rings
+    with agent_rings._lock:
+        raw = settings_store.get(USER_CALL_BINDINGS_KEY)
+        try:
+            known = set(json.loads(raw)) if raw else set()
+            if any(not isinstance(session, str) or not session for session in known):
+                raise ValueError("invalid binding")
+        except (ValueError, TypeError):
+            raise CallError(409, CONTEXT_UNAVAILABLE) from None
+        matches, normal, uncertain = {}, set(), False
+        try:
+            with os.scandir(ROOT / "profiles") as entries:
+                folders = []
+                for entry in entries:
+                    if len(folders) >= PROFILE_SCAN_LIMIT:
+                        uncertain = True
+                        break  # detected overflow; strict admission below always refuses
+                    folders.append(entry)
+            for entry in folders:
+                try:
+                    if not _PROFILE_ID.fullmatch(entry.name) or not entry.is_dir(follow_symlinks=False):
+                        raise ValueError("invalid profile folder")
+                    with (pathlib.Path(entry.path) / "profile.json").open("rb") as handle:
+                        raw_profile = handle.read(65537)
+                    if len(raw_profile) > 65536:
+                        raise ValueError("profile too large")
+                    data = json.loads(raw_profile)
+                    if not isinstance(data, dict) or data.get("profile_id") != entry.name:
+                        raise ValueError("invalid profile")
+                    session = data.get("agent_session")
+                    if not isinstance(session, str) or not session:
+                        raise ValueError("missing binding")
+                    if data.get(USER_CALL_DEFAULT_KEY) == "live":
+                        if session in matches:
+                            uncertain = True
+                        matches[session] = entry.name
+                    else:
+                        normal.add(session)
+                except (OSError, ValueError):
+                    uncertain = True
+        except FileNotFoundError:
+            uncertain = bool(known)
+        except OSError:
+            uncertain = True
+        # An explicit readable opt-out clears its observed binding only after a
+        # complete scan, so another unreadable/overflowed opt-in cannot be hidden.
+        if not uncertain:
+            known -= normal - matches.keys()
+        known.update(matches)
+        serialized = json.dumps(sorted(known))
+        if serialized != raw:
+            settings_store.set_text(USER_CALL_BINDINGS_KEY, serialized)
+        if uncertain and strict:
+            raise CallError(409, CONTEXT_UNAVAILABLE)
+        return {session: matches.get(session) for session in known}
+
+
+def user_call_profile_id(agent: dict) -> str | None:
+    return user_call_profiles().get(str(agent.get("session") or ""))
+
+
+def user_call_context(profile_id: str, agent: dict, request_id: Any) -> dict:
+    """The Host-built context of one user-initiated Live call (raises CallError; nothing is cut)."""
+    if not _request_id_ok(request_id):
+        raise CallError(400, REQUEST_INVALID)
+    _folder, profile = _profile(profile_id, agent)
+    if profile.get(USER_CALL_DEFAULT_KEY) != "live":
+        raise CallError(409, CONTEXT_UNAVAILABLE)
+    opening = profile.get(USER_CALL_OPENING_KEY)
+    if not isinstance(opening, str) or not opening.strip() or len(opening) > OPENING_TEXT_CHARS:
+        raise CallError(409, CONTEXT_UNAVAILABLE)
+    return {"version": 1, "kind": USER_CALL_KIND, "profile_id": profile_id, "story": USER_CALL_STORY,
+            "source": USER_CALL_SOURCE, "request_id": request_id,
+            "requested_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "opening_text": " ".join(opening.split())}
 
 
 def snapshot_of(ring_id: str) -> dict | None:
@@ -555,6 +667,8 @@ def fallback(principal: str, data: Any) -> dict:
         with agent_rings._lock:
             records = agent_rings._load()
             ring = _owned(records, principal, data)
+            if ring.get("_user_call"):
+                raise CallError(409, FALLBACK_NOT_ALLOWED)
             epoch = _epoch(data, "expected_epoch")
             if data.get("audio_stopped") is not True or not _request_id_ok(data.get("request_id")):
                 raise CallError(400, REQUEST_INVALID)

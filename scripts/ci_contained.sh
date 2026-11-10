@@ -8,8 +8,9 @@
 # The runner's passwordless sudo is used ONLY to create the namespaces. The command then runs as the
 # runner user with no_new_privs, no supplementary groups and no capabilities, so sudo (or any setuid
 # helper) cannot re-elevate. The runner user's home (runner install, _temp, caches, tokens on disk)
-# is hidden except the workspace and the venv's interpreter, /tmp and /var/tmp are fresh, the Docker
-# sockets are masked, and a self-check proves all of that before the command starts.
+# is hidden except the workspace and the venv's interpreter, /tmp is a fresh tmpfs, /var/tmp is a
+# fresh private directory on the workspace's disk, the Docker sockets are masked, and a self-check
+# proves all of that before the command starts.
 set -euo pipefail
 
 for tool in sudo unshare setpriv ip mount; do
@@ -47,6 +48,13 @@ mount --rbind "$work" "$stage/work"
 if under_home "$python_root"; then mkdir -p "$stage/python"; mount --rbind "$python_root" "$stage/python"; fi
 alias_link=""
 if under_home "$python_alias" && [ -L "$python_alias" ]; then alias_link=$(readlink "$python_alias"); fi
+# /var/tmp is pytest's temp root (tests/conftest.py default_temp_root). A RAM tmpfs there is capped at
+# half the runner's memory, which the suite outgrows, so the sandbox gets ONE fresh directory on the
+# workspace's own disk instead: beside the checkout (never inside it), owned by the runner user alone,
+# and bound before the home is hidden. The host's /var/tmp stays out of sight.
+vartmp=$(mktemp -d "$(dirname "$work")/.ci-vartmp.XXXXXXXX")
+chown "$uid:$gid" "$vartmp" && chmod 0700 "$vartmp"
+mount --bind "$vartmp" /var/tmp
 mount -t tmpfs -o mode=0755 tmpfs "$runner_home"
 mkdir -p "$work"
 mount --rbind "$stage/work" "$work"
@@ -54,7 +62,6 @@ if under_home "$python_root"; then mkdir -p "$python_root"; mount --rbind "$stag
 if [ -n "$alias_link" ]; then mkdir -p "$(dirname "$python_alias")"; ln -s "$alias_link" "$python_alias"; fi
 if [ -n "$runner_temp" ] && [ -d "$runner_temp" ]; then mount -t tmpfs tmpfs "$runner_temp"; fi
 mount -t tmpfs -o mode=1777 tmpfs /tmp
-mount -t tmpfs -o mode=1777 tmpfs /var/tmp
 mkdir -p "$fresh_home" && chown "$uid:$gid" "$fresh_home" && chmod 0700 "$fresh_home"
 cd "$work"
 exec setpriv --reuid="$uid" --regid="$gid" --clear-groups --no-new-privs \

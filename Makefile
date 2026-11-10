@@ -1,6 +1,11 @@
-.PHONY: test py js e2e docker-test isolated-codex install-py deploy deploy-static deploy-detached deploy-status deploy-log
+.PHONY: test test-critical py js e2e docker-test isolated-codex install-py deploy deploy-static deploy-detached deploy-status deploy-log
 
 test: py js
+
+# The pre-push gate: only what can brick the Host or lose data (tests/critical.txt).
+# Serial on purpose, so forty agents running it do not each take every core.
+test-critical:
+	uv run --frozen --group dev python -m pytest -n0 $$(sed -e 's/#.*//' tests/critical.txt)
 
 py:
 	uv run --frozen --group dev python -m pytest

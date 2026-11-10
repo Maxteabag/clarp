@@ -8,8 +8,8 @@ import { MessageRow, ReceiptRow, MessageBlock, MessageImage, TableRow, ToolRow, 
 import { Workspace, PaneView, SplitView, WorkspaceTab, DraftMirror } from "workspace.slint";
 import { Switcher, SwitcherRow } from "switcher.slint";
 import { Settings, SettingRow } from "settings.slint";
-import { KeymapEditor, KeymapRow, ConnectionPage } from "dialogs.slint";
-export { KeymapRow }
+import { KeymapEditor, KeymapRow, ConnectionPage, SavedHostRow, SelectTextPage } from "dialogs.slint";
+export { KeymapRow, SavedHostRow }
 import { PreviewPanel, PreviewBanner, PreviewWindow, PreviewVersion } from "preview.slint";
 // ---- updates and teams
 import { Updates, AttentionView, JobView, ArtifactView } from "updates.slint";
@@ -236,6 +236,16 @@ export component AppWindow inherits Window {
     callback scroll-journal(string, string, length, length, float, float, length, length, bool, bool, int);
     callback toggle-activity(string, string, string);
     callback copy-message(string, string);
+    // The selectable view of a message (pane, message id).
+    callback select-message(string, string);
+    // What the select-text page shows, and its buttons.
+    in property <string> select-title;
+    in property <string> select-body;
+    // What starts selected on it (UTF-8 offsets; equal: only the caret).
+    in property <int> select-from;
+    in property <int> select-to;
+    callback select-copy-all();
+    public function open-select-text() { select-text-page.open(); }
     callback silence();
     callback cancel-transcription(string);
     callback paste-image(string) -> bool;
@@ -382,9 +392,11 @@ export component AppWindow inherits Window {
     in property <bool> connecting;
     in property <bool> stored-credential;
     in property <bool> has-agents;
+    in property <[SavedHostRow]> saved-hosts;
     callback connect-host(string, string);
     callback pair-host(string, string);
     callback forget-host();
+    callback remove-saved-host(string);
     public function open-connection-page() { connection-page.open(); }
     public function open-font-picker() { font-picker.open(); }
     // ---- preview versions
@@ -545,6 +557,7 @@ export component AppWindow inherits Window {
                     scroll-journal(id, cause, old, new, old-place, new-place, content, viewport, at-end, follow, rows) => { root.scroll-journal(id, cause, old, new, old-place, new-place, content, viewport, at-end, follow, rows); }
                     toggle-activity(id, message, group) => { root.toggle-activity(id, message, group); }
                     copy-message(id, message) => { root.copy-message(id, message); }
+                    select-message(id, message) => { root.select-message(id, message); }
                     silence => { root.silence(); }
                     cancel-transcription(id) => { root.cancel-transcription(id); }
                     paste-image(id) => { return root.paste-image(id); }
@@ -652,6 +665,17 @@ export component AppWindow inherits Window {
                 }
             }
         }
+        select-text-page := SelectTextPage {
+            visible: root.overlay == "select-text";
+            width: parent.width;
+            height: parent.height;
+            title: root.select-title;
+            body: root.select-body;
+            from: root.select-from;
+            to: root.select-to;
+            copy-all => { root.select-copy-all(); }
+            close => { root.overlay-closed(); }
+        }
         connection-page := ConnectionPage {
             visible: root.overlay == "connection";
             width: parent.width;
@@ -662,7 +686,9 @@ export component AppWindow inherits Window {
             connecting: root.connecting;
             can-cancel: root.has-agents;
             stored: root.stored-credential;
+            hosts: root.saved-hosts;
             connect(url, token) => { root.connect-host(url, token); }
+            remove(url) => { root.remove-saved-host(url); }
             pair(url, code) => { root.pair-host(url, code); }
             forget => { root.forget-host(); }
             cancel => { root.overlay-closed(); }

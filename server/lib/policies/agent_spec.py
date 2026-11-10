@@ -292,7 +292,15 @@ def _parse(data: dict, *, backends, roster: RosterView, personas,
         resolve_voice((current or {}).get("voice_id"), CARTESIA)
         or roster.cartesia_voice_for(str((current or {}).get("name") or ""))
     ) if replace_sid else ""
-    if selected_cartesia and selected_cartesia != own_cartesia:
+    # The shipped roster deliberately gives some contacts the same Cartesia
+    # voice (Adam and Claude, Mike and Clarp, ...), so a create that keeps
+    # the persona's own shipped voice is sharing by design, not a clash.
+    # Only a custom pick of another agent's voice is refused below.
+    persona_cartesia = (
+        resolve_voice((persona_definition or {}).get("voice_id"), CARTESIA)
+        or roster.cartesia_voice_for(persona))
+    if selected_cartesia and selected_cartesia != own_cartesia \
+            and selected_cartesia != persona_cartesia:
         for sid, info in agents.items():
             if sid == replace_sid or (info or {}).get("is_janitor"):
                 continue

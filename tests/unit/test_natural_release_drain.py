@@ -12,6 +12,7 @@ import pytest
 
 from lib import config, turn_queue
 from lib import turn_dispatch as td
+from tests.patching import patch_shared
 from lib.runtime_release import (NATURAL_CHECK_SEC, RuntimeReleaseMonitor,
                                  release_drain_mode)
 
@@ -244,7 +245,7 @@ def test_an_arrival_during_the_seal_check_lowers_the_fence_and_runs(tmp_path, mo
     def arrival_during_the_check(*args, **kwargs):
         if not arrived:
             arrived.append(True)
-            monkeypatch.setattr(td, "provider_turns", lambda: ["codex-agent"])
+            patch_shared(monkeypatch, td, "provider_turns", lambda: ["codex-agent"])
             _send(service, "during the seal check")      # held by the fence
             assert provider.texts() == []
         return original(*args, **kwargs)

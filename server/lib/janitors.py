@@ -140,6 +140,8 @@ def autonomy_templates():
             {"key":"codex_min_remaining","label":"Codex floor: weekly window percent remaining","type":"integer","default":10,"min":0,"max":100},
             {"key":"mode","label":"Switching","type":"choice","default":"automatic","choices":[{"value":"notify","label":"Notify only"},{"value":"automatic","label":"Switch through Hotseat"}]},
             {"key":"hotseat_command","label":"Hotseat command","type":"string","default":"hotseat"},
+            {"key":"auto_repair_auth","label":"Repair saved Claude authentication","type":"boolean","default":False,
+             "description":"Optional exact-profile repair; repaired authentication is verified separately from usable quota and model limits."},
             # Backing off would leave an exhausted account in use: fixed unless configured.
             _max_interval_option(0)])
         ]]
@@ -573,10 +575,48 @@ def set_enabled(session: str, expected_revision: int, enabled: bool) -> dict:
         now = db.now_ms()
         if enabled and row["template_id"] == "heartbeat-decider":
             from . import settings_store
+            # Before the latch flips: an adoption made before scopes were
+            # recorded must survive this record (AUT-02s review).
+            legacy = adopted_heartbeat_scopes()
             settings_store.set_bool("heartbeat.janitor_adopted", True)
+            _record_adopted_heartbeat_scope(_decode(row["scope_json"], {}), legacy=legacy)
         _fence(c, a["agent_id"], now)
         store.set_config_enabled(c, a["agent_id"], enabled, now)
     return get(session)
+
+
+_ADOPTED_HEARTBEAT_SCOPES = "heartbeat.janitor_adopted_scopes"
+
+
+def _record_adopted_heartbeat_scope(scope: dict, *, legacy: list[dict]) -> None:
+    """Remember where a Heartbeat keeper took over from the fixed heartbeat:
+    pausing or deleting it keeps fixed heartbeats off there (AUT-02s). The
+    first record starts from what was adopted before records existed
+    (``legacy``: the latch's fallback scopes, empty on a fresh Host)."""
+    from . import settings_store
+    stored = _decode(settings_store.get_text(_ADOPTED_HEARTBEAT_SCOPES, default="[]"), [])
+    scopes = list(stored) or list(legacy)
+    if scope not in scopes:
+        scopes.append(scope)
+    if scopes != stored:
+        # The seeded legacy list is stored even when this scope is already in
+        # it: it is derived from keepers that may be deleted later.
+        settings_store.set_text(_ADOPTED_HEARTBEAT_SCOPES, _json(scopes))
+
+
+def adopted_heartbeat_scopes() -> list[dict]:
+    """Every scope a Heartbeat keeper was adopted for. A keeper adopted before
+    scopes were recorded counts with the scopes of the keepers that exist, or
+    for every agent when none does."""
+    from . import settings_store
+    if not settings_store.get_bool("heartbeat.janitor_adopted"):
+        return []
+    scopes = _decode(settings_store.get_text(_ADOPTED_HEARTBEAT_SCOPES, default="[]"), [])
+    if scopes:
+        return scopes
+    known = [config["scope"] for config in list_janitors(include_runtime=False)
+             if config["template_id"] == "heartbeat-decider"]
+    return known or [{}]
 
 
 def remove(session: str, expected_revision: int) -> bool:

@@ -1,0 +1,80 @@
+name: Replay
+
+# The refactor program's replay gate (tests/replay/README.md): a slice head
+# against its base commit (compare), or the harness proof on one commit
+# (self-check). Contained like tests.yml: no network, no credentials.
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: self-check or compare
+        type: choice
+        options: [self-check, compare]
+        default: self-check
+      ref:
+        description: self-check commit
+        type: string
+        default: HEAD
+      base:
+        description: compare base commit
+        type: string
+        default: ''
+      head:
+        description: compare head commit
+        type: string
+        default: ''
+  workflow_call:
+    inputs:
+      mode:
+        type: string
+        default: self-check
+      ref:
+        type: string
+        default: HEAD
+      base:
+        type: string
+        default: ''
+      head:
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The job token must not sit in .git/config where the replayed Host could read it.
+          persist-credentials: false
+          # compare checks out the base and head commits as worktrees.
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --frozen --group dev
+      - name: Replay
+        env:
+          MODE: ${{ inputs.mode }}
+          REF: ${{ inputs.ref }}
+          BASE: ${{ inputs.base }}
+          HEAD_REF: ${{ inputs.head }}
+        run: |
+          set -o pipefail
+          mkdir -p replay-report
+          if [ "$MODE" = compare ]; then
+            bash scripts/ci_contained.sh .venv/bin/python tests/replay/run.py compare \
+              --base "$BASE" --head "$HEAD_REF" | tee replay-report/report.txt
+          else
+            bash scripts/ci_contained.sh .venv/bin/python tests/replay/run.py self-check \
+              --ref "$REF" --verbose | tee replay-report/report.txt
+          fi
+      # The report prints structure, counts and codes only; raw captures stay on the runner.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: replay-report
+          path: replay-report/

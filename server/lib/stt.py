@@ -6,6 +6,8 @@ on `ready` only when a `/transcribe` request arrives.
 """
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import json
 import io
 import os
@@ -22,6 +24,26 @@ from typing import Iterable
 
 from .judgment_sites import is_junk
 from .log import log, log_exception
+
+
+# How long a variant request may wait for another variant's selection, load
+# and inference before it is busy. None waits as long as that takes; the
+# transcription pipeline bounds it only when a fallback engine follows (VP-08).
+_SELECTION_WAIT: contextvars.ContextVar[float | None] = contextvars.ContextVar(
+    "transcription_selection_wait", default=None)
+
+
+@contextlib.contextmanager
+def bounded_selection_wait(seconds: float | None):
+    token = _SELECTION_WAIT.set(seconds)
+    try:
+        yield
+    finally:
+        _SELECTION_WAIT.reset(token)
+
+
+def current_selection_wait() -> float | None:
+    return _SELECTION_WAIT.get()
 
 
 class STTBusyError(RuntimeError):
@@ -211,7 +233,16 @@ class WhisperSTT:
         # Serialize selection + loading + inference so two requests cannot warm
         # different multi-gigabyte variants at once. The inner inference lock is
         # still shared with the configured default model.
-        with self._selection_lock:
+        limit = current_selection_wait()
+        if limit is None:
+            self._selection_lock.acquire()
+        elif not (self._selection_lock.acquire(timeout=limit) if limit > 0
+                  else self._selection_lock.acquire(blocking=False)):
+            # A wait that ran out after a swap closed this engine is the swap's
+            # doing: the request runs on the new engine (VP-07), not on a fallback.
+            self._raise_if_replaced()
+            raise STTBusyError("transcription model busy")
+        try:
             with self._variants_lock:
                 variant = self._variants.get(selected)
                 if variant is None:
@@ -248,6 +279,12 @@ class WhisperSTT:
                     f"could not load transcription model {selected}: {variant.load_error}")
             return variant.transcribe_bytes(
                 audio_bytes, content_type, vocab_prompt, wait=wait)
+        finally:
+            self._selection_lock.release()
+
+    def _raise_if_replaced(self) -> None:
+        """An in-process engine is never closed by a swap; SubprocessWhisperSTT
+        raises STTEngineReplacedError once it is."""
 
     def start_loading(self) -> None:
         threading.Thread(target=self._load, daemon=True).start()
@@ -329,6 +366,10 @@ class WhisperSTT:
             if not acquired:
                 raise STTBusyError("whisper busy")
             try:
+                # The boundary for every faster-whisper path (in process, the
+                # worker loaded with this language, and its fallback).
+                from .stt_language import note_handed
+                note_handed(self.language)
                 segments = self._run_inference(path, vocab_prompt)
             finally:
                 self._lock.release()
@@ -396,6 +437,9 @@ class WhisperCppSTT(WhisperSTT):
                 ]
                 if vocab_prompt:
                     command += ["--prompt", vocab_prompt]
+                # whisper.cpp's boundary: the -l value it actually runs with.
+                from .stt_language import note_handed
+                note_handed(command[command.index("-l") + 1])
                 completed = subprocess.run(
                     command, capture_output=True, text=True,
                     timeout=self.PROCESS_TIMEOUT_SEC)
@@ -463,6 +507,20 @@ def _join_confident_segments(segments: Iterable) -> str:
     return "".join(kept).strip()
 
 
+class STTEngineReplacedError(RuntimeError):
+    """The engine a request started with was closed by a model swap."""
+
+
+def close_engine(engine) -> None:
+    """Stop a replaced STT engine's worker, if it has one (VP-07)."""
+    close = getattr(engine, "close", None)
+    if callable(close):
+        try:
+            close()
+        except Exception as e:  # noqa: BLE001 - the swap itself has happened
+            log_exception("sttCloseFail", e)
+
+
 class SubprocessWhisperSTT(WhisperSTT):
     """WhisperSTT whose inference runs in a worker process (lib.stt_worker).
 
@@ -479,9 +537,11 @@ class SubprocessWhisperSTT(WhisperSTT):
         self._proc: subprocess.Popen | None = None
         self._proc_lock = threading.Lock()
         self._pending: dict[str, tuple[threading.Event, dict]] = {}
+        self._pending_workers: dict[str, subprocess.Popen] = {}
         self._pending_lock = threading.Lock()
         self._fallback_in_process = False
         self._load_event_text: str | None = None
+        self._closed = False
 
     # -- worker lifecycle -------------------------------------------------
     def _worker_cmd(self) -> list[str]:
@@ -548,7 +608,8 @@ class SubprocessWhisperSTT(WhisperSTT):
                     continue
                 rid = str(msg.get("id") or "")
                 with self._pending_lock:
-                    slot = self._pending.get(rid)
+                    slot = (self._pending.get(rid)
+                            if self._pending_workers.get(rid) is proc else None)
                 if slot is not None:
                     slot[1].update(msg)
                     slot[0].set()
@@ -560,10 +621,42 @@ class SubprocessWhisperSTT(WhisperSTT):
                 ready.set()
             # Fail every request still waiting on this (now dead) worker.
             with self._pending_lock:
-                waiting = list(self._pending.values())
+                waiting = [slot for rid, slot in self._pending.items()
+                           if self._pending_workers.get(rid) is proc]
             for ev, box in waiting:
                 box.setdefault("error", "stt worker exited")
                 ev.set()
+
+    def close(self) -> None:
+        """Stop the worker when this engine is replaced (VP-07). The worker
+        reads its stdin in order, so quit runs after anything already sent;
+        it is killed if it has not exited within WORKER_TIMEOUT_SEC."""
+        with self._proc_lock:
+            proc, self._proc = self._proc, None
+            self._closed = True
+        if proc is None:
+            return
+        try:
+            proc.stdin.write(json.dumps({"op": "quit"}) + "\n")
+            proc.stdin.flush()
+            proc.stdin.close()
+        except (OSError, ValueError) as e:
+            log_exception("sttWorkerQuitFail", e)
+        threading.Thread(target=self._reap, args=(proc,), daemon=True,
+                         name="stt-worker-reap").start()
+
+    def _raise_if_replaced(self) -> None:
+        """A worker failure after a swap closed this engine is the swap's doing:
+        report it as replaced, so the request runs on the new engine."""
+        if self._closed:
+            raise STTEngineReplacedError("stt engine was replaced")
+
+    def _reap(self, proc: subprocess.Popen) -> None:
+        try:
+            proc.wait(timeout=self.WORKER_TIMEOUT_SEC)
+        except subprocess.TimeoutExpired:
+            log("sttWorkerQuitTimeout", f"pid={proc.pid}; killing")
+            self._kill(proc)
 
     @staticmethod
     def _kill(proc: subprocess.Popen | None) -> None:
@@ -596,34 +689,46 @@ class SubprocessWhisperSTT(WhisperSTT):
     def _run_inference(self, path: str, vocab_prompt: str) -> list:
         if self._fallback_in_process:
             return super()._run_inference(path, vocab_prompt)
-        with self._proc_lock:
-            proc = self._proc
-            if proc is None or proc.poll() is not None:
-                log("sttWorkerRespawn", "worker not running; respawning")
-                if not self._spawn_worker():
-                    raise RuntimeError("stt worker unavailable")
-                proc = self._proc
         rid = uuid.uuid4().hex
         ev = threading.Event()
         box: dict = {}
         with self._pending_lock:
             self._pending[rid] = (ev, box)
         try:
-            try:
-                proc.stdin.write(json.dumps({
-                    "op": "transcribe", "id": rid, "path": path,
-                    "prompt": vocab_prompt or "",
-                }) + "\n")
-                proc.stdin.flush()
-            except (OSError, ValueError) as e:
-                raise RuntimeError(f"stt worker write failed: {e}") from e
+            # Choose the worker and send under _proc_lock, which close() takes
+            # too: a request reaches the worker before its quit, or finds the
+            # engine replaced and is retried on the new one (VP-07).
+            with self._proc_lock:
+                if self._closed:
+                    raise STTEngineReplacedError("stt engine was replaced")
+                proc = self._proc
+                if proc is None or proc.poll() is not None:
+                    log("sttWorkerRespawn", "worker not running; respawning")
+                    if not self._spawn_worker():
+                        raise RuntimeError("stt worker unavailable")
+                    proc = self._proc
+                # A request registered before respawn has no worker yet. A
+                # retired reader must never fail that request or its successor.
+                with self._pending_lock:
+                    self._pending_workers[rid] = proc
+                try:
+                    proc.stdin.write(json.dumps({
+                        "op": "transcribe", "id": rid, "path": path,
+                        "prompt": vocab_prompt or "",
+                    }) + "\n")
+                    proc.stdin.flush()
+                except (OSError, ValueError) as e:
+                    raise RuntimeError(f"stt worker write failed: {e}") from e
             if not ev.wait(timeout=self.WORKER_TIMEOUT_SEC):
                 self._kill(proc)
+                self._raise_if_replaced()
                 raise RuntimeError("stt worker timed out")
         finally:
             with self._pending_lock:
                 self._pending.pop(rid, None)
+                self._pending_workers.pop(rid, None)
         if box.get("error"):
+            self._raise_if_replaced()
             raise RuntimeError(f"stt worker: {box['error']}")
         return [types.SimpleNamespace(text=str(seg.get("text") or ""),
                                       no_speech_prob=float(seg.get("no_speech_prob") or 0.0))
@@ -683,6 +788,9 @@ class OpenAIWhisperSTT:
                 raise STTBusyError("whisper busy")
             t0 = time.time()
             try:
+                # OpenAI whisper's boundary: the language= handed to inference.
+                from .stt_language import note_handed
+                note_handed(self.language)
                 result = self._model.transcribe(
                     path, language=self.language, fp16=False,
                     initial_prompt=vocab_prompt or None,

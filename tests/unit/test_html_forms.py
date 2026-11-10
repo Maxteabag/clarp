@@ -161,3 +161,33 @@ def test_network_policy_is_version_bound_and_survives_flat_response(tmp_path):
         artifacts.update(row['artifact_id'], {'payload_patch': {'connect_origins': []}})
     assert artifacts.get(row['artifact_id'])['connect_origins'] == expected
     assert 'connect_origins' not in artifacts.get(f['artifact_id'])['payload']
+
+
+def test_a_deleted_agents_forms_neither_retry_nor_block_the_others(tmp_path):
+    """AUT-08: submissions for a deleted agent are not dispatched again and
+    again, and 100 of them must not hold back a live agent's submission."""
+    f = form(tmp_path)
+    gone = agents.create_agent(persona='Gone', voice_id='V', cwd=str(tmp_path), session='gone')
+    with db.conn() as con:
+        for index in range(100):
+            con.execute(
+                "INSERT INTO form_submissions(submission_id,artifact_id,version,session,answers_json,"
+                "payload_hash,prompt,created_at) VALUES(?,?,?,?,?,?,?,?)",
+                (f'gone-{index:03}', f['artifact_id'], '1', 'gone', '{}', 'h', 'p', index))
+    agents.soft_delete(gone)
+    live = html_forms.submit(f['artifact_id'], {'submission_id': 'b' * 32, 'version': '1',
+                                                'answers': {'budget': 7}})
+    assert [row['submission_id'] for row in html_forms.pending()] == [live['submission_id']]
+
+
+def test_a_delivered_submission_keeps_its_first_delivery_time(tmp_path, monkeypatch):
+    f=form(tmp_path)
+    body={'submission_id':'b'*32,'version':'1','answers':{'budget':1}}
+    html_forms.submit(f['artifact_id'],body)
+    monkeypatch.setattr(db,'now_ms',lambda: 1000)
+    html_forms.mark_delivered(body['submission_id'])
+    monkeypatch.setattr(db,'now_ms',lambda: 2000)
+    html_forms.mark_delivered(body['submission_id'])
+    row=db.conn().execute('SELECT status,delivered_at FROM form_submissions').fetchone()
+    assert tuple(row)==('delivered',1000)
+    assert html_forms.FORM_SUBMISSION.decide('pending','deliver')=='delivered'

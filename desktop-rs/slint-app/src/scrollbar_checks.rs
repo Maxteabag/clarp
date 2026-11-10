@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, json};
 
 use super::{Stage, check, control, report, rows, run_stages, shot};
-use slint::ComponentHandle;
+use slint::{ComponentHandle, Model};
 
 use crate::headless;
 
@@ -26,6 +26,23 @@ const TURNS: usize = 240;
 /// chat it is at its smallest.
 const SHORT: &str = "steady-short";
 const SHORT_ROWS: usize = 99;
+/// A pass is bounded by what it does, not by how fast the host is. Each
+/// pass names `green`, the inputs (wheel notches or key presses) measured
+/// in the green runs. On a slower runner every pass that ended took the
+/// same; its long first pass up ran out at 74 inputs without reaching its
+/// endpoint, so what a slow run needs to finish is not measured. A pass's
+/// samples are one per settled input plus the endpoint's: inputs + 1. Its
+/// polls come on the stage runner's ticks and have no bound of their own;
+/// only the allowance below limits them. A pass gets twice its green
+/// inputs; past them it has not reached its endpoint, and fails as a wrong
+/// pass.
+/// A separate per-pass resource allowance of wall time: 25 stages of 12 s,
+/// each inside the stage runner's 15 s, about 2.5 times the 120 s at which
+/// the slow runner's long first pass up ran out. It is not shown to exceed
+/// twice what a slow run needs. Running out of it is still a failure,
+/// labelled RESOURCE rather than a wrong pass.
+const SEGMENTS: usize = 25;
+const SEGMENT: Duration = Duration::from_secs(12);
 
 /// The thumb and the track it travels (window coordinates).
 #[derive(Debug, Clone, Copy, Default)]
@@ -207,6 +224,10 @@ struct Sample {
     /// The reader's place by the rows drawn: the measured height above the
     /// topmost row on screen less how far up it is (-1 when unknown).
     truth: f32,
+    /// Same measured book and viewport used to place the visible thumb.
+    book_total: f32,
+    viewport_height: f32,
+    measured: (usize, usize),
 }
 
 /// The reader's place by the rows drawn (see `Sample::truth`).
@@ -229,35 +250,80 @@ fn truth(window: &crate::AppWindow) -> f32 {
     slint::Model::row_data(&before, index).map_or(-1.0, |start| start + (top - row_top))
 }
 
+#[derive(Debug, PartialEq)]
+enum Step { Wait, Advance, End, Stalled }
+
+/// Settling belongs to one dispatched input, not the previous one's polls.
+#[derive(Default)]
+struct StepGate {
+    last_offset: Option<f32>,
+    last_rows: usize,
+    action_offset: Option<f32>,
+    still: usize,
+}
+
+impl StepGate {
+    fn poll(&mut self, offset: f32, rows: usize, measuring: bool, endpoint: bool, down: bool) -> Step {
+        if self.last_offset.is_some_and(|old| (old - offset).abs() < 0.5) && self.last_rows == rows && !measuring {
+            self.still += 1;
+        } else {
+            self.still = 0;
+        }
+        self.last_offset = Some(offset);
+        self.last_rows = rows;
+        if self.still < 2 { return Step::Wait; }
+        if self.action_offset.is_none_or(|old| (old - offset).abs() >= 0.5) { return Step::Advance; }
+        if self.still < if down { 4 } else { 10 } { return Step::Wait; }
+        if endpoint { Step::End } else { Step::Stalled }
+    }
+
+    fn acted(&mut self, offset: f32) {
+        self.action_offset = Some(offset);
+        self.still = 0;
+    }
+}
+
 #[derive(Default)]
 struct Pass {
     samples: Vec<Sample>,
-    last_offset: Option<f32>,
-    last_rows: usize,
-    still: usize,
+    gate: StepGate,
     acts: usize,
     done: bool,
     since: Option<Instant>,
 }
 
+impl Pass {
+    /// The last bounded segment must return its failed pass and leave no
+    /// samples, pending input or direction state for the next pass.
+    fn expire_segment(&mut self, last: bool) -> Option<Self> {
+        if last { Some(std::mem::take(self)) } else { None }
+    }
+}
+
 /// A pass through the chat: act (a wheel notch, a key), wait until the
 /// offset holds for two polls with no row waiting to be measured, sample
 /// the thumb, and again, until the offset no longer moves. `down`: the direction the reader goes.
-fn pass(state: Rc<RefCell<Pass>>, label: &'static str, down: bool, by_key: bool, first: bool) -> Vec<Stage> {
+fn pass(state: Rc<RefCell<Pass>>, label: &'static str, down: bool, by_key: bool, first: bool, green: usize) -> Vec<Stage> {
     let mut stages: Vec<Stage> = Vec::new();
+    let most = 2 * green;
     // A stage times out after 15 s: the pass spans several.
-    for part in 0..10 {
+    for part in 0..SEGMENTS {
         let state = state.clone();
         stages.push((label, Box::new(move |app, window, elapsed| {
             let mut st = state.borrow_mut();
             if st.done {
-                if part == 9 {
+                if part == SEGMENTS - 1 {
                     verdict(label, &st.samples, down, first);
                     *st = Pass::default();
                 }
                 return true;
             }
-            if elapsed > Duration::from_secs(12) {
+            if elapsed > SEGMENT {
+                if let Some(expired) = st.expire_segment(part == SEGMENTS - 1) {
+                    check(false, &format!("RESOURCE, not a wrong pass: {label}: pass ran past its {} s wall cap ({} inputs, {} samples); state cleared before the next direction",
+                        SEGMENTS as u64 * SEGMENT.as_secs(), expired.acts, expired.samples.len()));
+                    verdict(label, &expired.samples, down, first);
+                }
                 return true;
             }
             let offset = report().offset;
@@ -265,37 +331,43 @@ fn pass(state: Rc<RefCell<Pass>>, label: &'static str, down: bool, by_key: bool,
             // A step is read once the rows that landed in it are measured:
             // their heights move the thumb in the step they landed in, not
             // in the next one, however long measuring takes.
-            let measuring = app.measured_height("").1 .1 > 0;
-            if st.last_offset.is_some_and(|o| (o - offset).abs() < 0.5) && count == st.last_rows && !measuring {
-                st.still += 1;
-            } else {
-                st.still = 0;
+            let measured = app.measured_height("").1;
+            let measuring = measured.1 > 0;
+            let drawn_thumb = thumb();
+            let endpoint = drawn_thumb.is_some_and(|t| if down {
+                (t.top + t.height - t.track_bottom).abs() <= 1.5
+            } else { (t.top - t.track_top).abs() <= 1.5 });
+            let step = st.gate.poll(offset, count, measuring, endpoint, down);
+            if step == Step::Wait { return false; }
+            // One sample per settled input (including its final endpoint),
+            // never duplicate a sample just because the next event is pending.
+            if let Some(thumb) = drawn_thumb {
+                let before = super::view().before;
+                let book_total = before.row_data(before.row_count().saturating_sub(1)).unwrap_or(-1.0);
+                let viewport_height = viewport().map_or(-1.0, |(_, _, _, height)| height);
+                st.samples.push(Sample { thumb, offset, rows: count, truth: truth(window), book_total, viewport_height, measured });
             }
-            st.last_offset = Some(offset);
-            st.last_rows = count;
-            if st.still < 2 {
-                return false;
-            }
-            if let Some(thumb) = thumb() {
-                st.samples.push(Sample { thumb, offset, rows: rows(window).len(), truth: truth(window) });
-            }
-            let moved = st.samples.len() >= 2 && (st.samples[st.samples.len() - 2].offset - offset).abs() >= 0.5;
-            // Going up, an older page may still land at the top: hold longer.
-            if st.acts > 0 && !moved && st.still >= if down { 4 } else { 10 } || st.acts > 400 {
+            if step == Step::End || step == Step::Stalled || st.acts >= most {
+                // Optional CI-only accessibility probe, read after deciding
+                // whether this input ended or stalled (never drives scrolling).
+                use i_slint_backend_testing::ElementQuery;
+                let probe = ElementQuery::from_root(window).match_type_name("Transcript").find_first().and_then(|e| e.accessible_value());
+                eprintln!("SCROLL_STOP label={label} step={step:?} acts={} still={} report={:?} measuring={measuring} probe={probe:?}", st.acts, st.gate.still, report());
+                check(step == Step::End, &format!("{label}: the input reaches its actual endpoint (report {:?}, measuring {measuring}, thumb {drawn_thumb:?})", report()));
+                if step != Step::End && st.acts >= most {
+                    check(false, &format!("{label}: the pass did not reach its endpoint within its input budget ({} of {most} inputs, twice the {green} of the green runs)", st.acts));
+                }
                 st.done = true;
                 return false;
             }
-            if st.since.is_none() {
-                st.since = Some(Instant::now());
-            }
-            if moved || st.acts == 0 || st.still == 2 {
-                st.acts += 1;
-                match (by_key, down) {
-                    (true, true) => headless::press(slint::platform::Key::PageDown),
-                    (true, false) => headless::press(slint::platform::Key::PageUp),
-                    (false, true) => wheel(-1200.0),
-                    (false, false) => wheel(1200.0),
-                }
+            if st.since.is_none() { st.since = Some(Instant::now()); }
+            st.acts += 1;
+            st.gate.acted(offset);
+            match (by_key, down) {
+                (true, true) => headless::press(slint::platform::Key::PageDown),
+                (true, false) => headless::press(slint::platform::Key::PageUp),
+                (false, true) => wheel(-1200.0),
+                (false, false) => wheel(1200.0),
             }
             false
         })));
@@ -317,7 +389,7 @@ fn verdict(label: &str, samples: &[Sample], down: bool, first: bool) {
         .iter()
         .enumerate()
         .filter(|(_, w)| back(*w) > 1.0)
-        .map(|(n, w)| format!("step {}: {:.1} → {:.1} (offset {:.0} → {:.0}, read {:.0} → {:.0})", n + 1, w[0].thumb.top, w[1].thumb.top, w[0].offset, w[1].offset, w[0].truth, w[1].truth))
+        .map(|(n, w)| format!("step {}: {:.1} → {:.1} (offset {:.0} → {:.0}, read {:.0} → {:.0}, book {:.1} → {:.1}, viewport {:.1} → {:.1}, measured {:?} → {:?})", n + 1, w[0].thumb.top, w[1].thumb.top, w[0].offset, w[1].offset, w[0].truth, w[1].truth, w[0].book_total, w[1].book_total, w[0].viewport_height, w[1].viewport_height, w[0].measured, w[1].measured))
         .collect();
     let read_back = steady.iter().filter(|w| w[0].truth >= 0.0 && w[1].truth >= 0.0 && if down { w[1].truth < w[0].truth - 1.0 } else { w[1].truth > w[0].truth + 1.0 }).count();
     let trace: Vec<String> = samples.iter().step_by((samples.len() / 12).max(1)).map(|s| format!("{:.0}/{:.0}", s.thumb.top, s.thumb.height)).collect();
@@ -432,14 +504,14 @@ pub(super) fn scrollbar_check(out: String) {
             true
         })),
     ];
-    stages.extend(pass(state.clone(), "short chat: first pass up by wheel", false, false, true));
-    stages.extend(pass(state.clone(), "short chat: down by wheel", true, false, false));
+    stages.extend(pass(state.clone(), "short chat: first pass up by wheel", false, false, true, 12));
+    stages.extend(pass(state.clone(), "short chat: down by wheel", true, false, false, 13));
     stages.push(("short chat: focus", Box::new(|app, _, _| {
         app.focus_transcript();
         true
     })));
-    stages.extend(pass(state.clone(), "short chat: up by Page Up", false, true, false));
-    stages.extend(pass(state.clone(), "short chat: down by Page Down", true, true, false));
+    stages.extend(pass(state.clone(), "short chat: up by Page Up", false, true, false, 22));
+    stages.extend(pass(state.clone(), "short chat: down by Page Down", true, true, false, 21));
     let long: Vec<Stage> = vec![
         ("fill", Box::new({
             let count = count.clone();
@@ -484,7 +556,7 @@ pub(super) fn scrollbar_check(out: String) {
         })),
     ];
     stages.extend(long);
-    stages.extend(pass(state.clone(), "first pass up by wheel", false, false, true));
+    stages.extend(pass(state.clone(), "first pass up by wheel", false, false, true, 74));
     stages.push(("all pages", Box::new(|app, window, elapsed| {
         let (_, (measured, waiting)) = app.measured_height("");
         if waiting > 0 && elapsed < Duration::from_secs(10) {
@@ -495,13 +567,13 @@ pub(super) fn scrollbar_check(out: String) {
         check(waiting == 0 && measured == shown, &format!("and every row of it is measured ({measured} measured, {waiting} waiting)"));
         true
     })));
-    stages.extend(pass(state.clone(), "down by wheel", true, false, false));
+    stages.extend(pass(state.clone(), "down by wheel", true, false, false, 65));
     stages.push(("focus", Box::new(|app, _, _| {
         app.focus_transcript();
         true
     })));
-    stages.extend(pass(state.clone(), "up by Page Up", false, true, false));
-    stages.extend(pass(state.clone(), "down by Page Down", true, true, false));
+    stages.extend(pass(state.clone(), "up by Page Up", false, true, false, 125));
+    stages.extend(pass(state.clone(), "down by Page Down", true, true, false, 125));
     stages.push(("end", Box::new(move |_, _, elapsed| {
         if elapsed < Duration::from_millis(500) {
             return false;
@@ -602,4 +674,66 @@ pub(super) fn scrollbar_check(out: String) {
         }
     })));
     run_stages(stages);
+}
+
+#[cfg(test)]
+mod settling_tests {
+    use super::{Pass, Sample, Step, StepGate, Thumb};
+
+    #[test]
+    fn delayed_wheel_gets_fresh_settling_and_only_the_real_endpoint_finishes() {
+        let mut gate = StepGate::default();
+        assert_eq!(gate.poll(0.0, 99, false, false, true), Step::Wait);
+        assert_eq!(gate.poll(0.0, 99, false, false, true), Step::Wait);
+        assert_eq!(gate.poll(0.0, 99, false, false, true), Step::Advance);
+        gate.acted(0.0);
+        // The old counter carried still=2 across dispatch: these two polls
+        // reached still=4 and ended the pass before its delayed wheel moved.
+        let mut legacy_still = 2;
+        let mut legacy_done = false;
+        for _ in 0..2 {
+            legacy_still += 1;
+            legacy_done |= legacy_still >= 4; // original down/no-movement stop
+            assert_eq!(gate.poll(0.0, 99, false, false, true), Step::Wait, "fresh wheel must receive its own settling polls");
+        }
+        assert!(legacy_done, "negative control: old counter stops before the queued movement");
+        assert_eq!(gate.poll(-1200.0, 99, false, false, true), Step::Wait);
+        assert_eq!(gate.poll(-1200.0, 99, false, false, true), Step::Wait);
+        assert_eq!(gate.poll(-1200.0, 99, false, true, true), Step::Advance);
+        gate.acted(-1200.0);
+        for _ in 0..3 { assert_eq!(gate.poll(-1200.0, 99, false, true, true), Step::Wait); }
+        assert_eq!(gate.poll(-1200.0, 99, false, true, true), Step::End);
+    }
+
+    #[test]
+    fn a_genuinely_unmoving_input_fails_away_from_the_endpoint() {
+        let mut gate = StepGate::default();
+        gate.poll(0.0, 99, false, false, true);
+        gate.poll(0.0, 99, false, false, true);
+        assert_eq!(gate.poll(0.0, 99, false, false, true), Step::Advance);
+        gate.acted(0.0);
+        for _ in 0..3 { assert_eq!(gate.poll(0.0, 99, false, false, true), Step::Wait); }
+        assert_eq!(gate.poll(0.0, 99, false, false, true), Step::Stalled);
+    }
+    #[test]
+    fn exhausted_pass_fails_and_cannot_leak_into_the_next_direction() {
+        let mut pass = Pass { acts: 74, ..Pass::default() };
+        pass.samples.push(Sample { thumb: Thumb::default(), offset: -1200.0, rows: 576, truth: 12813.0, book_total: 59574.0, viewport_height: 688.0, measured: (576, 0) });
+        pass.gate.acted(-1200.0);
+        // Earlier segments retain progress; only the final budget exit is
+        // a terminal failure. This is the actual callback's state owner.
+        assert!(pass.expire_segment(false).is_none());
+        assert_eq!(pass.acts, 74);
+        let expired = pass.expire_segment(true);
+        assert_eq!(pass.acts, 0, "budget expiry must isolate the next direction");
+        assert!(pass.samples.is_empty() && pass.gate.action_offset.is_none());
+        let expired = expired.expect("genuine budget exhaustion must report failure, not success");
+        assert_eq!(expired.acts, 74);
+        assert_eq!(expired.samples.len(), 1, "failed-pass evidence is retained for its own verdict");
+        assert_eq!((expired.samples[0].truth, expired.samples[0].book_total), (12813.0, 59574.0));
+        assert_eq!(pass.gate.poll(0.0, 576, false, false, true), Step::Wait);
+        assert_eq!(pass.gate.poll(0.0, 576, false, false, true), Step::Wait);
+        assert_eq!(pass.gate.poll(0.0, 576, false, false, true), Step::Advance);
+    }
+
 }

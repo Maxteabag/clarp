@@ -15,7 +15,7 @@ from __future__ import annotations
 
 # Versions 81 and 82 also exist on installed Hosts with additive indexing
 # migrations. History must run when upgrading those Hosts, not only main's v80.
-_SCHEMA_VERSION = 118  # ledger-confirmed next above main 117 (device_tokens.principal); stop and renumber if main's schema moves first
+_SCHEMA_VERSION = 121  # PROVISIONAL (stale provider tasks over main 119; 120 is feat/agent-ring-device-optout's): renumber at the landing if taken
 
 
 # The schema below is the complete current shape. It is applied in one step to
@@ -130,6 +130,7 @@ CREATE TABLE state_log (
     detail TEXT
 );
 CREATE INDEX idx_state_log_agent_ts ON state_log(agent_id, ts DESC);
+CREATE INDEX idx_state_log_agent_state ON state_log(agent_id, state_id);
 
 CREATE TABLE focus (
     singleton INTEGER PRIMARY KEY CHECK (singleton = 0),
@@ -1213,18 +1214,18 @@ CREATE TABLE tool_explanation_releases (
 CREATE INDEX tool_explanation_releases_expiry ON tool_explanation_releases(expires_at);
 """
 _SCHEMA_SQL += _EXPLANATION_CACHE_SCHEMA
-from .tool_explanation_mappings import SCHEMA as _EXPLANATION_MAPPINGS_SCHEMA
+from .persistence.schema_parts.tool_explanation_mappings import SCHEMA as _EXPLANATION_MAPPINGS_SCHEMA
 _SCHEMA_SQL += _EXPLANATION_MAPPINGS_SCHEMA
-from .tool_explanation_learning import SCHEMA as _EXPLANATION_LEARNING_SCHEMA
+from .persistence.schema_parts.tool_explanation_learning import SCHEMA as _EXPLANATION_LEARNING_SCHEMA
 _SCHEMA_SQL += _EXPLANATION_LEARNING_SCHEMA
-from .html_forms import SCHEMA as _HTML_FORMS_SCHEMA
+from .persistence.schema_parts.html_forms import SCHEMA as _HTML_FORMS_SCHEMA
 _SCHEMA_SQL += _HTML_FORMS_SCHEMA
-from .model_fallbacks import SCHEMA as _MODEL_FALLBACK_SCHEMA
+from .persistence.schema_parts.model_fallbacks import SCHEMA as _MODEL_FALLBACK_SCHEMA
 _SCHEMA_SQL += _MODEL_FALLBACK_SCHEMA
-from .podcast_history import SCHEMA as _PODCAST_HISTORY_SCHEMA
+from .persistence.schema_parts.podcast_history import SCHEMA as _PODCAST_HISTORY_SCHEMA
 _SCHEMA_SQL += _PODCAST_HISTORY_SCHEMA
-from .agent_goals import SCHEMA as _AGENT_GOALS_SCHEMA
-from .oracle_memory import SCHEMA as _ORACLE_MEMORY_SCHEMA
+from .persistence.schema_parts.agent_goals import SCHEMA as _AGENT_GOALS_SCHEMA
+from .persistence.schema_parts.oracle_memory import SCHEMA as _ORACLE_MEMORY_SCHEMA
 _SCHEMA_SQL += _ORACLE_MEMORY_SCHEMA
 _SCHEMA_SQL += _AGENT_GOALS_SCHEMA
 
@@ -1384,14 +1385,14 @@ BEGIN SELECT RAISE(ABORT,'Demand trigger versions are immutable'); END;
 _SCHEMA_SQL += _BUILTIN_JANITOR_SCHEMA
 
 
-from .audio_bookkeeper import SCHEMA_STATEMENTS as _AUDIO_BOOKKEEPING_SCHEMA
+from .persistence.schema_parts.audio_bookkeeper import SCHEMA_STATEMENTS as _AUDIO_BOOKKEEPING_SCHEMA
 _SCHEMA_SQL += ";\n".join(_AUDIO_BOOKKEEPING_SCHEMA) + ";"
 
-from .html_report_revisions import SCHEMA as _HTML_REPORT_REVISIONS_SCHEMA
+from .persistence.schema_parts.html_report_revisions import SCHEMA as _HTML_REPORT_REVISIONS_SCHEMA
 _SCHEMA_SQL += "\n" + _HTML_REPORT_REVISIONS_SCHEMA + "\n"
 
-from .html_form_events import SCHEMA as _HTML_FORM_EVENTS_SCHEMA
+from .persistence.schema_parts.html_form_events import SCHEMA as _HTML_FORM_EVENTS_SCHEMA
 _SCHEMA_SQL += "\n" + _HTML_FORM_EVENTS_SCHEMA + "\n"
 
-from .goal_ledger import SCHEMA as _GOAL_LEDGER_SCHEMA
+from .persistence.schema_parts.goal_ledger import SCHEMA as _GOAL_LEDGER_SCHEMA
 _SCHEMA_SQL += "\n" + _GOAL_LEDGER_SCHEMA + "\n"

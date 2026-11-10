@@ -108,6 +108,16 @@ def test_current_v88_database_gets_context_notification_dedup_table():
             "reference_ts", "stale", "sent_at"} <= columns
 
 
+def test_the_first_result_of_an_admission_stands():
+    store = memory.open_thread("phone", "mira", connection_id="one")
+    store.admission(1, 0, "delegate_to_agent", {"agent": "mira", "request": "Audit"})
+    store.finish_admission(1, 0, {"status": "accepted"})
+    store.finish_admission(1, 0, {"status": "failed"})
+    row = store.admissions(1)[0]
+    assert (row["status"], json.loads(row["result_json"])) == ("completed", {"status": "accepted"})
+    assert memory.ADMISSION.decide("planned", "finish") == "completed"
+
+
 DAY = 86_400_000
 NOW = 1_792_152_000_000  # 2026-10-16T12:00:00Z
 

@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Deterministic provider process; the real dispatcher/runner own everything else."""
+import fcntl
 import json
 import sys
 import time
 import threading
+import tempfile
 import uuid
 import os
 from pathlib import Path
@@ -53,6 +55,87 @@ def app_server():
     cancel_by_turn = {}
     current_thread = str(uuid.uuid4())
     goals = {}
+    # BACKENDS-06b knobs. A thread Clarp unsubscribed closes (lock released,
+    # thread/closed) once no turn runs on it, after CLARP_QA_UNLOAD_DELAY
+    # seconds ("never": it never closes); CLARP_QA_UNSUBSCRIBE=unsupported
+    # answers -32601 like an app-server without the method.
+    running = {}
+    unloading = set()
+    state_lock = threading.Lock()
+    home = os.environ.get("CODEX_HOME")
+    auth_file = Path(home) / "auth.json" if home else None
+    auth_tag = auth_file.read_text().strip() if auth_file and auth_file.is_file() else ""
+
+    # Goal state lives under CODEX_HOME like codex's state database, so a
+    # second process on the same home sees the goals the first one set.
+    goals_file = Path(home) / "fake-goals.json" if home else None
+
+    def save_goal(thread_id):
+        if goals_file is None:
+            return
+        # Lock the stable sidecar, not the inode that publication replaces.
+        # Read/merge must be inside both fences to preserve other processes' goals.
+        with state_lock, goals_file.with_suffix(".json.lock").open("a") as fence:
+            fcntl.flock(fence.fileno(), fcntl.LOCK_EX)
+            stored = json.loads(goals_file.read_text()) if goals_file.exists() else {}
+            if thread_id in goals:
+                stored[thread_id] = goals[thread_id]
+            else:
+                stored.pop(thread_id, None)
+            payload = json.dumps(stored)
+            temporary = None
+            try:
+                with tempfile.NamedTemporaryFile(
+                    mode="w", encoding="utf-8", dir=goals_file.parent,
+                    prefix=".fake-goals-", suffix=".tmp", delete=False,
+                ) as stream:
+                    temporary = Path(stream.name)
+                    stream.write(payload)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                os.replace(temporary, goals_file)
+            finally:
+                if temporary is not None:
+                    temporary.unlink(missing_ok=True)
+
+    def load_goal(thread_id):
+        if goals_file is None or not goals_file.exists():
+            return
+        try:
+            stored = json.loads(goals_file.read_text()).get(thread_id)
+        except json.JSONDecodeError:
+            print("fake_codex: retrying goal-file JSON decode once", file=sys.stderr, flush=True)
+            stored = json.loads(goals_file.read_text()).get(thread_id)
+        if stored is not None:
+            goals[thread_id] = stored
+        else:
+            goals.pop(thread_id, None)
+
+    def record_auth(kind, thread_id):
+        if os.environ.get("CLARP_QA_RECORD_AUTH"):
+            record(kind, {"threadId": thread_id, "authTag": auth_tag, "pid": os.getpid()})
+
+    def turn_running(thread_id, delta):
+        with state_lock:
+            running[thread_id] = running.get(thread_id, 0) + delta
+
+    def close_when_idle(thread_id):
+        delay = os.environ.get("CLARP_QA_UNLOAD_DELAY", "0.1")
+        if delay == "never":
+            return
+        time.sleep(float(delay))
+        while True:
+            with state_lock:
+                if thread_id not in unloading:
+                    return            # subscribed again
+                if not running.get(thread_id):
+                    unloading.discard(thread_id)
+                    lock = held_locks.pop(thread_id, None)
+                    break
+            time.sleep(0.02)
+        if lock:
+            lock.close()
+        emit({"method": "thread/closed", "params": {"threadId": thread_id}})
 
     def goal_payload(thread_id):
         goal = goals.get(thread_id)
@@ -60,7 +143,8 @@ def app_server():
             return None
         return {"threadId": thread_id, "objective": goal["objective"], "status": goal["status"],
                 "tokenBudget": None, "tokensUsed": goal["tokens"], "timeUsedSeconds": 1,
-                "createdAt": goal["created"], "updatedAt": int(time.time() * 1000)}
+                "createdAt": goal["created"],
+                "updatedAt": goal.get("updated") or goal["created"]}
 
     def goal_turn(thread_id):
         """Codex continues an active goal with a turn nobody requested."""
@@ -69,17 +153,37 @@ def app_server():
         if goal is None or goal["status"] != "active":
             return
         turn_id = str(uuid.uuid4())
-        emit({"method": "turn/started", "params": {
-            "threadId": thread_id, "turn": {"id": turn_id, "threadId": thread_id}}})
-        mid = str(uuid.uuid4())
-        emit({"method": "item/completed", "params": {"threadId": thread_id, "turnId": turn_id,
-              "item": {"id": mid, "type": "agentMessage", "text": "Goal step: " + goal["objective"]}}})
-        goal["tokens"] += 7
-        goal["status"] = "complete"
-        emit({"method": "thread/goal/updated", "params": {
-            "threadId": thread_id, "turnId": turn_id, "goal": goal_payload(thread_id)}})
-        emit({"method": "turn/completed", "params": {
-            "threadId": thread_id, "turn": {"id": turn_id, "threadId": thread_id, "status": "completed"}}})
+        stop = threading.Event()
+        cancel_by_turn[turn_id] = stop
+        turn_running(thread_id, 1)
+        try:
+            emit({"method": "turn/started", "params": {
+                "threadId": thread_id, "turn": {"id": turn_id, "threadId": thread_id}}})
+            record_auth("goal_turn", thread_id)
+            # CLARP_QA_GOAL_TURN_HOLD keeps the continuation running that long.
+            if stop.wait(float(os.environ.get("CLARP_QA_GOAL_TURN_HOLD", "0"))):
+                emit({"method": "turn/completed", "params": {"threadId": thread_id,
+                      "turn": {"id": turn_id, "threadId": thread_id, "status": "interrupted"}}})
+                record_auth("goal_turn_interrupted", thread_id)
+                return
+            mid = str(uuid.uuid4())
+            goal = goals.get(thread_id) or goal   # a get may have reloaded it meanwhile
+            emit({"method": "item/completed", "params": {"threadId": thread_id, "turnId": turn_id,
+                  "item": {"id": mid, "type": "agentMessage", "text": "Goal step: " + goal["objective"]}}})
+            goal["tokens"] += 7
+            # Codex accounts usage on paused goals too and bumps updatedAt
+            # (state/runtime/goals.rs account_thread_goal_usage).
+            goal["updated"] = int(time.time() * 1000) + 1
+            if goal["status"] == "active":   # a pause during the turn stays a pause
+                goal["status"] = "complete"
+            save_goal(thread_id)
+            emit({"method": "thread/goal/updated", "params": {
+                "threadId": thread_id, "turnId": turn_id, "goal": goal_payload(thread_id)}})
+            emit({"method": "turn/completed", "params": {
+                "threadId": thread_id, "turn": {"id": turn_id, "threadId": thread_id, "status": "completed"}}})
+            record_auth("goal_turn_end", thread_id)
+        finally:
+            turn_running(thread_id, -1)
 
     def sessions_root():
         return Path(os.environ.get("CLARP_QA_PROVIDER_ROOT", "/nonexistent")) / "sessions"
@@ -109,12 +213,34 @@ def app_server():
         return lock
 
     def complete(params, turn_id, stop, thread_id):
+        turn_running(thread_id, 1)
+        try:
+            _complete(params, turn_id, stop, thread_id)
+        finally:
+            turn_running(thread_id, -1)
+        # The idle hook: an active goal continues once the thread is idle.
+        if (goals.get(thread_id) or {}).get("status") == "active":
+            threading.Thread(target=goal_turn, args=(thread_id,), daemon=True).start()
+
+    def _complete(params, turn_id, stop, thread_id):
         time.sleep(0.05)  # let turn/start's response establish ownership
         base = {"threadId": thread_id, "turnId": turn_id}
         emit({"method": "turn/started", "params": {
             **base, "turn": {"id": turn_id, "threadId": thread_id}}})
         text = "QA reply: " + "".join(
             item.get("text", "") for item in params.get("input", []))
+        if "[qa-subagent]" in text:
+            # A subagent thread codex spawned runs while this turn runs.
+            sub_thread, sub_turn = str(uuid.uuid4()), str(uuid.uuid4())
+            emit({"method": "turn/started", "params": {"threadId": sub_thread,
+                  "turn": {"id": sub_turn, "threadId": sub_thread}}})
+            stop.wait(float(os.environ.get("CLARP_QA_SUBAGENT_HOLD", "1")))
+            emit({"method": "turn/completed", "params": {"threadId": sub_thread,
+                  "turn": {"id": sub_turn, "threadId": sub_thread, "status": "completed"}}})
+        if "[qa-self-interrupt]" in text:
+            emit({"method": "turn/completed", "params": {**base, "turn": {
+                "id": turn_id, "status": "interrupted"}}})
+            return
         if quota_mode in ("stale", "blocked", "unknown-blocked", "partial"):
             if quota_mode == "stale":
                 quota_file.unlink(missing_ok=True)  # only a NEW process recovers
@@ -196,9 +322,29 @@ def app_server():
                     "message": f"thread {thread_id} already has an active writer",
                 }})
                 continue
+            with state_lock:
+                unloading.discard(thread_id)
+            load_goal(thread_id)
             persist(thread_id, "session_meta", {
                 "id": thread_id, "cwd": params.get("cwd", "")})
             result = {"thread": {"id": thread_id}}
+            # Real codex: a resumed idle thread with an active goal continues
+            # it by itself (probe 128; app-server thread_processor.rs:4214-4217).
+            if (goals.get(thread_id) or {}).get("status") == "active":
+                threading.Thread(target=goal_turn, args=(thread_id,), daemon=True).start()
+        elif method == "thread/unsubscribe":
+            thread_id = str(params.get("threadId") or "")
+            if os.environ.get("CLARP_QA_UNSUBSCRIBE") == "unsupported":
+                emit({"id": request["id"], "error": {
+                    "code": -32601, "message": "Method not found"}})
+                continue
+            with state_lock:
+                loaded = thread_id in held_locks
+                if loaded:
+                    unloading.add(thread_id)
+            result = {"status": "unsubscribed" if loaded else "notLoaded"}
+            if loaded:
+                threading.Thread(target=close_when_idle, args=(thread_id,), daemon=True).start()
         elif method == "thread/fork":
             # Real Codex forks a thread another process is writing (checked
             # against codex-cli 0.159): no writer lock, a copy under a new id.
@@ -215,6 +361,7 @@ def app_server():
         elif method == "turn/start":
             thread_id = params.get("threadId") or current_thread
             record("turn/start", params)
+            record_auth("turn/start.auth", thread_id)
             cancelled = threading.Event()
             turn_id = str(uuid.uuid4())
             cancel_by_turn[turn_id] = cancelled
@@ -232,24 +379,33 @@ def app_server():
             result = {}
         elif method == "thread/goal/set":
             thread_id = params.get("threadId") or current_thread
+            if thread_id not in goals:
+                load_goal(thread_id)
             goal = goals.get(thread_id) or {"objective": "", "status": "active", "tokens": 0,
                                             "created": int(time.time() * 1000)}
             if params.get("objective"):
                 goal["objective"] = params["objective"]
             if params.get("status"):
                 goal["status"] = params["status"]
+            goal["updated"] = max(int(time.time() * 1000), goal.get("updated", 0) + 1)
             goals[thread_id] = goal
-            result = {"goal": goal_payload(thread_id)}
+            save_goal(thread_id)
+            emit({"id": request["id"], "result": {"goal": goal_payload(thread_id)}})
             emit({"method": "thread/goal/updated", "params": {
                 "threadId": thread_id, "goal": goal_payload(thread_id)}})
-            if goal["status"] == "active":
+            with state_lock:
+                busy = bool(running.get(thread_id))
+            if goal["status"] == "active" and not busy:
                 threading.Thread(target=goal_turn, args=(thread_id,), daemon=True).start()
+            continue
         elif method == "thread/goal/get":
             thread_id = params.get("threadId") or current_thread
+            load_goal(thread_id)
             result = {"goal": goal_payload(thread_id)}
         elif method == "thread/goal/clear":
             thread_id = params.get("threadId") or current_thread
             result = {"cleared": goals.pop(thread_id, None) is not None}
+            save_goal(thread_id)
             emit({"method": "thread/goal/cleared", "params": {"threadId": thread_id}})
         emit({"id": request["id"], "result": result})
         if method == "turn/start":

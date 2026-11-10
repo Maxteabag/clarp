@@ -14,12 +14,14 @@ apps without an app release.
 from __future__ import annotations
 
 import pathlib
+from contextlib import contextmanager
+from contextvars import ContextVar
 import threading
 import time
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from .protocol import AgentBackend
+from .backend_catalogue import AgentBackend, ids, normalize, is_valid, for_provider
 
 CLAUDE = AgentBackend.CLAUDE
 CODEX = AgentBackend.CODEX
@@ -42,6 +44,54 @@ _STATUS_LOCK = threading.Lock()
 _STATUS_CACHE: tuple[Any | None, float, dict | None, BaseException | None] = (
     None, 0.0, None, None)
 _clock = time.monotonic
+# Bumped (under _STATUS_LOCK) whenever the window is reconfigured or invalidated,
+# so a status fetched before that is never stored into it afterwards.
+_STATUS_GENERATION = 0
+
+
+@dataclass
+class _ScopedRuntimeStatus:
+    client: Any
+    timeout: float
+    # Ordinary reads and destructive ownership revalidation each get one
+    # result (or one remembered failure) for this build, independent of TTL.
+    samples: dict[bool, tuple[dict | None, Exception | None]]
+
+    def read(self, *, fresh: bool) -> dict:
+        if fresh not in self.samples:
+            try:
+                # Unlike a per-socket timeout, status_within bounds connect,
+                # send and all response chunks by one deadline.
+                result = self.client.status_within(self.timeout)
+                self.samples[fresh] = (result if isinstance(result, dict) else {}, None)
+            except Exception as exc:  # noqa: BLE001 - remembered for the build
+                from .log import log_exception
+                log_exception("runtimeStatusUnavailable", exc,
+                              detail="snapshot-fresh" if fresh else "snapshot-status")
+                self.samples[fresh] = (None, exc)
+        result, error = self.samples[fresh]
+        if error is not None:
+            raise error
+        return result if result is not None else {}
+
+
+_STATUS_SCOPE: ContextVar[_ScopedRuntimeStatus | None] = ContextVar(
+    "runtime_status_scope", default=None)
+
+
+@contextmanager
+def runtime_status_scope(*, timeout: float):
+    """Pin snapshot reads, with one extra bounded read for the first repair.
+
+    No shared-cache lock is taken: another caller's default 10 s RPC must
+    not consume the snapshot's budget. Other threads and calls after exit
+    retain the ordinary shared TTL and timeout, including on build failure.
+    """
+    token = _STATUS_SCOPE.set(_ScopedRuntimeStatus(_RUNTIME_CLIENT, timeout, {}))
+    try:
+        yield
+    finally:
+        _STATUS_SCOPE.reset(token)
 
 
 def configure_runtime_client(client: Any | None) -> None:
@@ -53,9 +103,10 @@ def configure_runtime_client(client: Any | None) -> None:
 
 def invalidate_runtime_status() -> None:
     """Forget the shared status window, e.g. right after this process dispatched."""
-    global _STATUS_CACHE
+    global _STATUS_CACHE, _STATUS_GENERATION
     with _STATUS_LOCK:
         _STATUS_CACHE = (None, 0.0, None, None)
+        _STATUS_GENERATION += 1
 
 
 def runtime_status(*, max_age: float | None = None) -> dict:
@@ -68,6 +119,9 @@ def runtime_status(*, max_age: float | None = None) -> dict:
     global _STATUS_CACHE
     if _RUNTIME_CLIENT is None:
         raise RuntimeError("no external runtime client configured")
+    scope = _STATUS_SCOPE.get()
+    if scope is not None:
+        return scope.read(fresh=max_age == 0)
     ttl = RUNTIME_STATUS_TTL if max_age is None else max_age
     with _STATUS_LOCK:
         client, fetched_at, result, error = _STATUS_CACHE
@@ -83,6 +137,60 @@ def runtime_status(*, max_age: float | None = None) -> dict:
         if error is not None:
             raise error
         return result if isinstance(result, dict) else {}
+
+
+def runtime_status_for_repair() -> dict | None:
+    """Fresh ownership after this candidate's checks, or unknown (None).
+
+    A snapshot permits only one fresh RPC. Its result can authorize repair
+    only for the first candidate: later binding checks happen after that
+    sample and may race a new admission, so later candidates stay owned.
+    Outside a snapshot every candidate keeps its own fresh read.
+    """
+    scope = _STATUS_SCOPE.get()
+    if scope is not None and True in scope.samples:
+        return None
+    return runtime_status(max_age=0)
+
+
+def peek_runtime_status(*, max_age: float) -> tuple[str, dict | None, int]:
+    """For a caller with its own deadline (F4 O1): ("hit", result, generation)
+    for a success at most ``max_age`` seconds old, ("miss", None, generation)
+    otherwise, or ("busy", None, -1) when the window's lock is held (another
+    caller's shared RPC may be in flight: the caller omits rather than wait or
+    start a duplicate). Never waits for, starts or refreshes an RPC."""
+    if not _STATUS_LOCK.acquire(blocking=False):
+        return "busy", None, -1
+    try:
+        client, fetched_at, result, error = _STATUS_CACHE
+        generation = _STATUS_GENERATION
+    finally:
+        _STATUS_LOCK.release()
+    if (_RUNTIME_CLIENT is None or client is not _RUNTIME_CLIENT or error is not None
+            or not isinstance(result, dict) or _clock() - fetched_at >= max_age):
+        return "miss", None, generation
+    return "hit", result, generation
+
+
+def offer_runtime_status(client: Any, result: dict, *, fetched_at: float, generation: int) -> bool:
+    """Store a successful status this caller fetched itself (F4 O1, bounded RPC)
+    into the shared window, stamped with when its RPC STARTED. Only if the lock
+    is free right now (never waits), ``client`` is still the configured one,
+    nothing reconfigured or invalidated the window since ``generation`` and the
+    entry there is not newer. status(), its default timeout and runtime_status()
+    are unchanged for every other caller."""
+    global _STATUS_CACHE
+    if not _STATUS_LOCK.acquire(blocking=False):
+        return False
+    try:
+        current_client, current_at = _STATUS_CACHE[0], _STATUS_CACHE[1]
+        if (client is not _RUNTIME_CLIENT or generation != _STATUS_GENERATION
+                or (current_client is client and current_at >= fetched_at)):
+            return False
+        _STATUS_CACHE = (client, fetched_at, dict(result), None)
+        return True
+    finally:
+        _STATUS_LOCK.release()
 
 
 @dataclass(frozen=True)
@@ -104,28 +212,18 @@ from .backend.base import (  # noqa: E402
     BackendBrand, DEFAULT_BRAND, DEFAULT_SYMBOL, LOGIN_KINDS, EFFORT_UIS, EFFORT_SCOPES)
 
 
-def ids() -> tuple[str, ...]:
-    return tuple(b.id for b in _all())
 
 
-def catalogue_fields(backend: str | None) -> dict[str, Any]:
-    """Presentation + capability flags for one ``/agent-model-options`` row.
-
-    An unregistered id gets the neutral defaults so a catalogue row is
-    always complete; ``sort_index`` follows registry order.
-    """
-    row = get(backend)
-    if row is None:
-        neutral = type("UnregisteredBackend", (Backend,), {
-            "id": str(backend or ""), "label": str(backend or ""),
-            "required_binary": ""})()
-        return neutral.catalogue_fields(len(_all()))
-    return row.catalogue_fields(_all().index(row))
 
 
 def routing_adapters() -> tuple["Backend", ...]:
     """Backends that can answer one isolated orchestrator request."""
     return tuple(b for b in _all() if b.supports_routing)
+
+
+def all_adapters() -> tuple["Backend", ...]:
+    """Every registered backend, in registry order."""
+    return tuple(_all())
 
 
 def auth_adapters() -> tuple["Backend", ...]:
@@ -138,16 +236,6 @@ def get(backend: str | None):
     return by_id(backend) if is_valid(backend) else None
 
 
-def for_provider(provider: str) -> str:
-    """The backend id that executes a routing provider.
-
-    A registered backend id passes through; an API-key provider maps to the
-    CLI whose adapter fronts it (``openai`` runs through Codex).
-    """
-    for b in _all():
-        if provider in b.api_providers:
-            return b.id
-    return provider
 
 
 def valid_efforts(backend: str) -> tuple[str, ...]:
@@ -162,21 +250,8 @@ def is_valid_model(backend: str, model: str | None) -> bool:
     return by_id(backend).is_valid_model(model)
 
 
-def normalize(backend: str | None) -> str:
-    """Coerce an arbitrary string to a registered backend, else Claude.
-
-    Unknown / empty values fall back to Claude so a malformed agent row can
-    never strand a user with a backend that has no runner. Registered ids
-    (including ones a client has never seen) pass through.
-    """
-    b = (backend or "").strip().lower()
-    b = _ALIASES.get(b, b)
-    return b if b in _BY_ID else DEFAULT
 
 
-def is_valid(backend: str | None) -> bool:
-    b = (backend or "").strip().lower()
-    return _ALIASES.get(b, b) in _BY_ID
 
 
 def label(backend: str | None) -> str:
@@ -194,6 +269,11 @@ def capabilities(backend: str | None) -> BackendCapabilities:
 
 def spawn_turn(backend: str, **kwargs: Any):
     return by_id(backend).spawn_turn(**kwargs)
+
+
+def prompt_limit_bytes(backend: str) -> int | None:
+    """See Backend.prompt_limit_bytes (BACKENDS-08)."""
+    return by_id(backend).prompt_limit_bytes()
 
 
 def interrupt(backend: str, agent_id: str) -> int:
@@ -216,6 +296,16 @@ def interrupt_any(agent_id: str) -> int:
 
 def external_live_work(backend: str, agent_id: str) -> bool:
     return by_id(normalize(backend)).external_live_work(agent_id)
+
+
+def start_pending(backend: str, agent_id: str) -> bool:
+    """See Backend.start_pending; held in this process, so never via the runtime."""
+    return by_id(normalize(backend)).start_pending(agent_id)
+
+
+def turn_holders(backend: str, agent_id: str) -> list:
+    """See Backend.turn_holders; held in this process, so never via the runtime."""
+    return by_id(normalize(backend)).turn_holders(agent_id)
 
 
 def active_handles(backend: str, agent_id: str) -> list:
@@ -299,7 +389,7 @@ ResultCb = Callable[[dict], None]
 # from the adapter rows above on first use, so neither import order
 # (facade first or package first) sees a half-initialised module.
 from .backend.base import Backend, CompactionStrategy, Unsupported  # noqa: E402
-from .backend.registry import by_id  # noqa: E402
+from .backend.registry import by_id, catalogue_fields  # noqa: E402
 from .backend.registry import all as _all  # noqa: E402
 
 # Lookup tables derived from the classes. Built here, after the package

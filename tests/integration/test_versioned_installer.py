@@ -151,7 +151,7 @@ def test_installer_creates_versioned_release_and_compatibility_links(tmp_path):
     for name in (
         "clarp-admin", "clarp-tui", "clarp-goal", "clarp-agent-tasks", "clarp-agent-artifacts",
         "clarp-podcast-history",
-        "clarp-media-publish", "clarp-agent-bg", "clarp-adopt",
+        "clarp-media-publish", "clarp-agent-bg", "clarp-adopt", "clarp-status-fork",
         "clarp-runtime-service",
     ):
         wrapper = home / ".local/bin" / name

@@ -9,15 +9,19 @@ Ordering is asserted on what was actually written or called, not on flags or lar
 """
 from __future__ import annotations
 
+import time
+
 import pytest
 
+from tests.patching import patch_shared
 from lib import agent_ring_live as live
 from lib import agent_ring_live_socket as sock
 from lib import agent_rings as rings
 from lib import group_calls
 from tests.unit.test_agent_ring_live import PHONE, sander  # noqa: F401 - sander is a fixture
 from tests.unit.test_agent_ring_live_socket import (AUDIO, Handler, _admitted, _join, _masked, _ready, _ring_of,
-                                                     _serve, _types, _wait, call)  # noqa: F401 - call is a fixture
+                                                     _serve, _settles, _types, _wait, call)  # noqa: F401 - call is a fixture
+from tests.unit.test_agent_ring_live_socket import _live_lifecycle  # noqa: F401 - autouse: no session outlives its test
 from tests.unit.test_agent_rings import env  # noqa: F401 - env is a fixture
 
 DELTA = {"type": "session.output_audio.delta", "delta": AUDIO}
@@ -112,9 +116,10 @@ def test_a_close_whose_audit_fails_still_ends_the_session_and_a_retry_is_ok(call
         if entry.get("outcome") == "live_closed":
             raise OSError("settings store down")
         return audit(entry)
-    monkeypatch.setattr(rings, "_audit", broken)
+    patch_shared(monkeypatch, rings, "_audit", broken)
     assert _close(call.grant)["state"] == "retired"
     thread.join(15)
+    _settles(lambda: not thread.is_alive() and h.wfile.frames()[-1]["reason"] == "user_hangup" and call.up.closed)
     assert not thread.is_alive() and h.wfile.frames()[-1]["reason"] == "user_hangup" and call.up.closed
     assert _close(call.grant)["ok"] is True                   # the same close, retried
 
@@ -132,6 +137,7 @@ def test_a_close_whose_save_fails_still_stops_the_session_and_says_so(call, monk
     monkeypatch.setattr(rings, "_save", broken)
     assert _close(call.grant)["state"] == "retired"                # the second save, after the stop, held
     thread.join(15)
+    _settles(lambda: broke and session.closed.is_set() and not thread.is_alive() and call.up.closed)
     assert broke and session.closed.is_set() and not thread.is_alive() and call.up.closed
     assert _ring_of(call.grant)["_live_phase"] == "retired"
 
@@ -154,6 +160,7 @@ def test_a_close_whose_save_and_logging_both_fail_still_stops_the_session(call, 
     monkeypatch.setattr(logmod, "log_exception", no_logging)
     _close(call.grant)
     thread.join(15)
+    _settles(lambda: session.closed.is_set() and not thread.is_alive() and call.up.closed)
     assert session.closed.is_set() and not thread.is_alive() and call.up.closed
 
 
@@ -187,6 +194,7 @@ def test_a_close_whose_saves_both_fail_still_stops_the_session_and_says_so(call,
         _close(call.grant)
     assert exc.value.status == 503 and len(broke) == 2
     thread.join(15)
+    _settles(lambda: session.closed.is_set() and not thread.is_alive() and call.up.closed)
     assert session.closed.is_set() and not thread.is_alive() and call.up.closed
 
 
@@ -198,6 +206,7 @@ def test_a_session_retired_on_its_record_whose_stop_never_arrived_ends_itself(ca
         live._CLOSURES.pop(call.grant["call_id"])
     _close(call.grant)
     thread.join(15)
+    _settles(lambda: session.closed.is_set() and not thread.is_alive())
     assert session.closed.is_set() and not thread.is_alive()
     assert next(f for f in h.wfile.frames() if f["type"] == "agent_live.error")["code"] == "live_call_stale"
 
@@ -217,6 +226,7 @@ def test_fallback_stops_live_before_the_classic_call_starts(call, monkeypatch):
     assert seen == [(True, "retired")]                             # Live already stopped and retired
     assert out["conversation_mode"] == "classic" and _ring_of(call.grant)["_live_phase"] == "classic"
     thread.join(15)
+    _settles(lambda: h.wfile.frames()[-1]["reason"] == "fallback" and call.up.closed)
     assert h.wfile.frames()[-1]["reason"] == "fallback" and call.up.closed
 
 
@@ -233,6 +243,7 @@ def test_a_fallback_whose_classic_start_fails_leaves_live_retired_and_no_classic
     stored = _ring_of(call.grant)
     assert stored["_live_phase"] == "retired" and stored["_live_call_epoch"] == 2 and not stored.get("call_id")
     thread.join(15)
+    _settles(lambda: session.closed.is_set() and call.up.closed)
     assert session.closed.is_set() and call.up.closed
     with pytest.raises(group_calls.CallError) as again:              # never retried into two audio paths
         _fallback(call.grant, expected_epoch=2, request_id="q2")
@@ -256,6 +267,7 @@ def test_a_fallback_whose_claim_save_fails_still_stops_live_and_starts_nothing_c
         _fallback(call.grant)
     assert exc.value.status == 503 and not started
     thread.join(15)
+    _settles(lambda: session.closed.is_set() and call.up.closed)
     assert session.closed.is_set() and call.up.closed
     assert _ring_of(call.grant)["_live_phase"] == "retired"
 
@@ -368,6 +380,7 @@ def test_a_socket_whose_retirement_save_fails_still_stops(call, monkeypatch):
     monkeypatch.setattr(rings, "_save", broken)
     h.send({"type": "session.close"})
     thread.join(15)
+    _settles(lambda: session.closed.is_set() and not thread.is_alive() and call.up.closed)
     assert session.closed.is_set() and not thread.is_alive() and call.up.closed
 
 
@@ -379,18 +392,23 @@ def test_a_fallback_whose_audit_fails_still_has_stopped_live_and_started_classic
         if entry.get("outcome") == "live_fallback":
             raise OSError("settings store down")
         return audit(entry)
-    monkeypatch.setattr(rings, "_audit", broken)
+    patch_shared(monkeypatch, rings, "_audit", broken)
     out = _fallback(call.grant)
     assert out["conversation_mode"] == "classic"
     thread.join(15)
+    _settles(lambda: call.up.closed and _ring_of(call.grant)["_live_phase"] == "classic")
     assert call.up.closed and _ring_of(call.grant)["_live_phase"] == "classic"
 
 
 # ---- H-5 ------------------------------------------------------------------------------------
 
 def test_without_client_ready_no_silence_goes_upstream_and_the_readiness_deadline_retires_the_call(call, monkeypatch):
-    monkeypatch.setattr(sock, "READY_S", 0.5)
+    # As in the ping test below: the window is shortened only once the provider is
+    # ready, and ends 0.5 s from then. Shortened before the join, a loaded machine ran
+    # it out before the provider was ready (G1 flake: 'condition not met').
     h, thread = _provider_ready(call)
+    session = _session(call)
+    monkeypatch.setattr(sock, "READY_S", time.monotonic() - session.joined_at + 0.5)
     thread.join(15)
     assert not call.up.of("session.input_audio.append")
     assert next(f for f in h.wfile.frames() if f["type"] == "agent_live.error")["code"] == "live_unavailable"
@@ -398,13 +416,24 @@ def test_without_client_ready_no_silence_goes_upstream_and_the_readiness_deadlin
 
 
 def test_pings_do_not_extend_the_readiness_deadline(call, monkeypatch):
-    monkeypatch.setattr(sock, "READY_S", 0.5)
+    # The provider becomes ready under the normal window; only then is the window
+    # shortened. Shortened before the join, a loaded machine could run it out before the
+    # provider was ready, and provider_ready never came (G1 flake: 'condition not met').
     h, thread = _provider_ready(call)
     session = _session(call)
-    while not session.closed.is_set() and thread.is_alive():
+    # The window counts from the join and is read on every tick: it ends 0.5 s from now,
+    # however long the provider took, so pings really run inside it before it ends.
+    monkeypatch.setattr(sock, "READY_S", time.monotonic() - session.joined_at + 0.5)
+    deadline = time.monotonic() + 15                                # pings that extend it fail, not hang
+    pings = 0
+    while not session.closed.is_set() and thread.is_alive() and time.monotonic() < deadline:
         h.rfile.feed(_masked(0x9, b"p"))                            # ping traffic only
+        pings += 1
         thread.join(0.05)
+    assert pings >= 2, "the window ended before any ping traffic ran in it"
+    assert time.monotonic() < deadline, "the session outlived its window while pings ran"
     thread.join(15)
+    _settles(lambda: _ring_of(call.grant)["_live_retired_reason"] == "not_ready")
     assert _ring_of(call.grant)["_live_retired_reason"] == "not_ready"
     assert not call.up.of("session.input_audio.append")
 

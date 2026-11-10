@@ -13,6 +13,8 @@ from urllib.parse import urlsplit
 from typing import Any
 
 from . import agents, db, media_store
+from . import lifecycle as lk
+from .lifecycle import Edge, Lifecycle, WaitForever
 from .revisioned_cache import RevisionedCache
 from .voice_markup import strip_hidden_blocks
 
@@ -330,21 +332,24 @@ def _public(row) -> dict:
             item["decision"]["input_hint"] = _input_hint(item["payload"])
     elif item["type"] == "plan" and item.get("reference_id"):
         from . import task_plans
-        plan, goal_text = task_plans.get_with_goal_text(item["reference_id"])
-        item["plan"] = _PlanWithGoalText(plan, goal_text) if plan is not None else None
+        plan, goal_text, bound = task_plans.get_with_goal_text_and_bound(item["reference_id"])
+        item["plan"] = _PlanWithGoalText(plan, goal_text, bound) if plan is not None else None
     return item
 
 
 class _PlanWithGoalText(dict):
-    """A plan dict that also remembers the exact goal_json text it came from.
+    """A plan dict that also remembers the exact goal_json text it came from,
+    and an upper bound on its history's UTF-8 size as read.
 
     It serializes exactly like the plain dict; only summary-v1 reads
-    ``goal_text`` to key the history digest (see _history_marker)."""
-    __slots__ = ("goal_text",)
+    ``goal_text`` to key the history digest and ``history_bound`` to budget
+    it (see _history_marker)."""
+    __slots__ = ("goal_text", "history_bound")
 
-    def __init__(self, plan: dict, goal_text: str | None) -> None:
+    def __init__(self, plan: dict, goal_text: str | None, history_bound: int | None = None) -> None:
         super().__init__(plan)
         self.goal_text = goal_text
+        self.history_bound = history_bound
 
 
 REPRESENTATIONS = ("", "flat-v1", "summary-v1")
@@ -583,10 +588,16 @@ def _history_marker(plan: dict, history: Any, goal_text: str | None,
         found, digest = _HISTORY_DIGEST.get(plan_id, goal_text, scope=scope)
         if not found:
             digest = None
-            # The canonical history is a part of the stored goal text, so its
-            # UTF-8 size is at most the text's: characters when ASCII, at most
-            # four bytes per character otherwise. Checked before serializing.
-            bound = len(goal_text) if goal_text.isascii() else 4 * len(goal_text)
+            # The canonical history's UTF-8 size is at most the stored text's
+            # (characters when ASCII, at most four bytes per character
+            # otherwise) plus what reading expanded from the goal ledger:
+            # history_bound, carried by the plan. Checked before serializing.
+            bound = getattr(plan, "history_bound", None)
+            if bound is None:
+                # No bound carried: the text bounds the history only when it
+                # holds no ledger reference; otherwise leave the digest pending.
+                bound = (float("inf") if '"ledger": "history:' in goal_text
+                         else len(goal_text) if goal_text.isascii() else 4 * len(goal_text))
             if bound <= budget.remaining:
                 canonical = json.dumps(
                     history, sort_keys=True, separators=(",", ":"), ensure_ascii=False
@@ -912,6 +923,25 @@ def _answer(row, *, choice: Any, answer: Any) -> tuple[str, dict]:
     return "answered", {"text": text.strip()}
 
 
+# A resolved decision's delivery to the asking agent
+# (docs/architecture/lifecycles.md). This module is the only writer of
+# decision_deliveries.status; _queue_delivery() inserts the row as pending.
+# Only a pending delivery moves: a cancelled one is never marked delivered, and
+# a delivered one is not cancelled when its agent is deleted.
+DECISION_DELIVERY = Lifecycle(
+    name="decision_delivery", owner="lib/artifacts.py",
+    table="decision_deliveries", key="decision_id", state_column="status",
+    entered_columns={"delivered": "delivered_at"},
+    initial="pending", final=frozenset({"delivered", "cancelled"}),
+    edges=(
+        Edge("deliver", frozenset({"pending"}), "delivered"),
+        Edge("cancel", frozenset({"pending"}), "cancelled"),
+    ),
+    waits={"pending": WaitForever("dispatch delivers it to the asking agent, or the agent's"
+                                  " deletion cancels it")},
+)
+
+
 def _queue_delivery(con, row, *, choice: str, answer: dict | None, now: int) -> None:
     artifact = con.execute("SELECT session,reference_id,payload_json FROM artifacts WHERE artifact_id=?",
                            (row["artifact_id"],)).fetchone()
@@ -925,18 +955,46 @@ def _queue_delivery(con, row, *, choice: str, answer: dict | None, now: int) -> 
 
 
 def resolve(decision_id: str, *, expected_revision: int,
-            choice: str | None = None, answer: Any = None) -> tuple[dict, bool]:
+            choice: str | None = None, answer: Any = None,
+            on_behalf_session: str | None = None,
+            designated_sessions=(), verified_session: str = "") -> tuple[dict, bool]:
     _integer(expected_revision, "expected_revision", minimum=1)
+    if verified_session and on_behalf_session is None:
+        raise PermissionError("agent resolution requires on_behalf_session")
+    acting_session = ""
+    if on_behalf_session is not None:
+        if not isinstance(on_behalf_session, str) or not on_behalf_session.strip():
+            raise ValueError("on_behalf_session must be a nonempty session")
+        acting_session = on_behalf_session.strip()
+        designated = {str(v).strip() for v in designated_sessions or ()
+                      if isinstance(v, str) and v.strip()}
+        if acting_session not in designated:
+            raise PermissionError("session is not designated to answer on the user's behalf")
+        if (verified_session or "").strip() != acting_session:
+            raise PermissionError(
+                "on-behalf answer requires the designated agent's verified turn identity")
+    resolved_by = f"agent:{acting_session}" if acting_session else "user"
     _expire_decisions()
     con = db.conn(); con.execute("BEGIN IMMEDIATE")
     try:
         row = con.execute("SELECT * FROM artifact_decisions WHERE decision_id=?", (decision_id,)).fetchone()
         if not row: raise ValueError("decision not found")
         outcome, normalized = _answer(row, choice=choice, answer=answer)
+        if acting_session:
+            artifact_row = con.execute(
+                "SELECT session FROM artifacts WHERE artifact_id=?", (row["artifact_id"],)).fetchone()
+            if not artifact_row: raise ValueError("artifact not found")
+            if artifact_row["session"] == acting_session:
+                raise PermissionError("the asking agent may not answer its own request")
+            if not con.execute(
+                    "SELECT 1 FROM agents WHERE session=? AND deleted_at IS NULL",
+                    (acting_session,)).fetchone():
+                raise ValueError("on-behalf session not found")
         if row["status"] != "pending":
             if row["status"] == "expired":
                 raise ValueError("decision expired")
-            if row["status"] != outcome or json.loads(row["answer_json"] or "null") != normalized:
+            if (row["status"] != outcome or row["resolved_by"] != resolved_by
+                    or json.loads(row["answer_json"] or "null") != normalized):
                 raise ValueError("decision already resolved with a different choice or answer")
             con.execute("COMMIT"); return get(row["artifact_id"]) or {}, False
         if row["expires_at"] is not None and row["expires_at"] <= db.now_ms():
@@ -946,8 +1004,9 @@ def resolve(decision_id: str, *, expected_revision: int,
         if not artifact: raise ValueError("artifact not found")
         now = max(db.now_ms(), artifact["updated_at"] + 1)
         con.execute("""UPDATE artifact_decisions SET status=?,resolved_choice=?,answer_json=?,resolved_at=?,
-                     resolved_by='user',revision=revision+1 WHERE decision_id=?""",
-                    (outcome, outcome, json.dumps(normalized, ensure_ascii=False), now, decision_id))
+                     resolved_by=?,revision=revision+1 WHERE decision_id=?""",
+                    (outcome, outcome, json.dumps(normalized, ensure_ascii=False), now,
+                     resolved_by, decision_id))
         con.execute("UPDATE artifacts SET status='completed',updated_at=?,completed_at=? WHERE artifact_id=?",
                     (now, now, row["artifact_id"]))
         _queue_delivery(con, row, choice=outcome, answer=normalized, now=now)
@@ -1022,23 +1081,6 @@ def withdraw(decision_id: str, *, session: str) -> tuple[dict, bool]:
         if row["status"] != "pending": raise ValueError("decision is no longer pending")
         _close_pending(con, [row], choice="withdrawn", by="agent", now=db.now_ms())
         con.execute("COMMIT"); return get(row["artifact_id"]) or {}, True
-    except BaseException:
-        con.execute("ROLLBACK"); raise
-
-
-def close_for_user_message(agent_id: str) -> list[str]:
-    """The owner wrote to the agent after it asked: their message supersedes
-    every request the agent still has open. Returns the closed artifact IDs."""
-    agent_id = (agent_id or "").strip()
-    if not agent_id: return []
-    con = db.conn(); con.execute("BEGIN IMMEDIATE")
-    try:
-        rows = con.execute(
-            """SELECT d.decision_id,d.artifact_id FROM artifact_decisions d JOIN artifacts a
-                ON a.artifact_id=d.artifact_id WHERE a.agent_id=? AND d.status='pending'""",
-            (agent_id,)).fetchall()
-        closed = _close_pending(con, rows, choice="superseded", by="user_message", now=db.now_ms())
-        con.execute("COMMIT"); return closed
     except BaseException:
         con.execute("ROLLBACK"); raise
 
@@ -1187,7 +1229,9 @@ def attention(*, include_questions: bool = False, include_archived: bool = False
 def pending_deliveries() -> list[dict]:
     return [{**dict(row), "answer": json.loads(row["answer_json"] or "null")}
             for row in db.conn().execute(
-        """SELECT x.* FROM decision_deliveries x JOIN agents g ON g.session=x.session
+        """SELECT x.*,d.resolved_by FROM decision_deliveries x
+            JOIN agents g ON g.session=x.session
+            JOIN artifact_decisions d ON d.decision_id=x.decision_id
             WHERE x.status='pending' AND g.deleted_at IS NULL ORDER BY x.created_at""")]
 
 
@@ -1195,6 +1239,9 @@ def format_delivery_prompt(delivery: dict) -> str:
     """One durable snapshot interpretation for foreground and retry delivery."""
     choice = delivery["choice"]
     response_type = delivery.get("response_type", "approval")
+    resolved_by = str(delivery.get("resolved_by") or "user")
+    actor = (f"The user, through agent {resolved_by[6:]}" if resolved_by.startswith("agent:")
+             else "The user")
     answer = delivery.get("answer")
     if answer is None:
         answer = json.loads(delivery.get("answer_json") or "null")
@@ -1205,24 +1252,24 @@ def format_delivery_prompt(delivery: dict) -> str:
         outcome = ("The user discarded this request. This is not an answer or approval. Do not "
                    "guess permission or repeat the unchanged request. Continue independent work only.")
     elif response_type in ("single_choice", "text_input") and choice == "answered" and isinstance(answer, dict):
-        outcome = ("The user answered this clarification: " + json.dumps(answer, ensure_ascii=False)
+        outcome = (f"{actor} answered this clarification: " + json.dumps(answer, ensure_ascii=False)
                    + ". Continue using this answer. This does not grant approval for unrelated protected actions.")
     elif response_type == "approval" and choice in {"accepted", "rejected"}:
-        outcome = (f"The user chose: {choice}. " + (
+        outcome = (f"{actor} chose: {choice}. " + (
             "Approval applies only to the described action. Revalidate it before acting."
             if choice == "accepted" else "Do not perform the protected action."))
     else:
         raise ValueError("invalid durable decision delivery")
     return ("[Clarp decision resolved]\n"
             f"Decision ID: {delivery['decision_id']}\nArtifact ID: {delivery['artifact_id']}\n"
+            f"Resolved by: {resolved_by}\n"
             f"Question: {delivery['question']}\nContext: {delivery['context']}\n"
             f"Reference: {delivery['reference_id']}\nPayload: {delivery['payload_json']}\n{outcome}")
 
 
 def mark_delivered(decision_id: str) -> None:
-    db.conn().execute(
-        "UPDATE decision_deliveries SET status='delivered',delivered_at=? WHERE decision_id=?",
-        (db.now_ms(), decision_id))
+    lk.compare_and_set_where(db.conn(), DECISION_DELIVERY, "deliver", where="decision_id=?",
+                             params=(decision_id,), now=db.now_ms())
 
 
 def delivery_pending(decision_id: str) -> bool:
@@ -1236,9 +1283,8 @@ def cancel_for_agent(agent_id: str) -> None:
     now = db.now_ms(); con = db.conn()
     agent = con.execute("SELECT session FROM agents WHERE agent_id=?", (agent_id,)).fetchone()
     if agent:
-        con.execute(
-            "UPDATE decision_deliveries SET status='cancelled' WHERE session=? AND status='pending'",
-            (agent["session"],))
+        lk.compare_and_set_where(con, DECISION_DELIVERY, "cancel", where="session=?",
+                                 params=(agent["session"],), now=now)
     ids = [row["artifact_id"] for row in con.execute(
         "SELECT artifact_id FROM artifacts WHERE agent_id=? AND type IN ('decision','question') AND status='active'",
         (agent_id,)).fetchall()]
@@ -1249,9 +1295,10 @@ def cancel_for_agent(agent_id: str) -> None:
         con.executemany(
             "UPDATE artifacts SET status='cancelled',updated_at=MAX(?,updated_at+1),completed_at=? WHERE artifact_id=?",
             [(now, now, artifact_id) for artifact_id in ids])
-        con.executemany(
-            "UPDATE decision_deliveries SET status='cancelled' WHERE decision_id IN (SELECT decision_id FROM artifact_decisions WHERE artifact_id=?)",
-            [(artifact_id,) for artifact_id in ids])
+        for artifact_id in ids:
+            lk.compare_and_set_where(
+                con, DECISION_DELIVERY, "cancel", now=now, params=(artifact_id,),
+                where="decision_id IN (SELECT decision_id FROM artifact_decisions WHERE artifact_id=?)")
     con.execute(
         """UPDATE artifacts SET status='cancelled',updated_at=MAX(?,updated_at+1),completed_at=?
              WHERE agent_id=? AND status='active'""",

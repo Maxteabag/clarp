@@ -56,7 +56,8 @@ def env(tmp_path, monkeypatch):
     yield tmp_path
 
 
-def test_streamer_advances_cursor_so_hook_sees_no_new_text(env):
+@pytest.mark.parametrize("bind_write", ["before_watch", "after_watch"])
+def test_streamer_advances_cursor_so_hook_sees_no_new_text(env, monkeypatch, bind_write):
     """Streamer consumes a text block → cursor_positions.position is at
     end-of-file. A fresh TranscriptCursor (which is what the Stop hook
     uses) sees no new text on advance()."""
@@ -74,21 +75,25 @@ def test_streamer_advances_cursor_so_hook_sees_no_new_text(env):
     projects = tmp_path / ".claude" / "projects" / "p"
     projects.mkdir(parents=True)
     tx = projects / f"{backend_session_id}.jsonl"
-    tx.touch()
+    # The prompt this reply answers. Without it a fresh cursor's first run voices
+    # nothing whatever the streamer saved, and the assertion below could not fail
+    # (review flake-hook-b43e60ef): with it, a lost offset is heard twice.
+    tx.write_text(json.dumps({"type": "user", "message": {
+        "role": "user", "content": "synthetic prompt"}}) + "\n")
 
     streamer = TranscriptStreamer(reconcile_interval_sec=0.05)
+    from tests.streamer_bind_race import force_bind_write
+    written, event_tick = force_bind_write(
+        monkeypatch, streamer, agent_id, tx, _assistant_text("the only text"), bind_write)
     streamer.start()
     try:
-        _wait_for(lambda: streamer.pool.has(agent_id), timeout=2.0)
-
-        # Now write a text block. Streamer should consume it + enqueue it +
-        # advance cursor_positions.position.
-        with tx.open("a") as f:
-            f.write(json.dumps(_assistant_text("the only text")) + "\n")
+        assert written.wait(5), "the boundary write completed without another file write"
+        if bind_write == "after_watch":
+            assert event_tick.wait(5), "the real inotify event also ticks the shared cursor"
 
         _wait_for(lambda: bool([r for r in tts_queue.recent()
                                   if r["agent_id"] == agent_id]),
-                  timeout=3.0)
+                  timeout=15.0)
 
         # Snapshot how many rows the streamer enqueued.
         streamer_rows = [r for r in tts_queue.recent()

@@ -1,0 +1,8 @@
+{
+ "backend": "agy",
+ "cuts": 40,
+ "decisions": {
+  "incremental": 38,
+  "no_checkpoint": 2
+ }
+}

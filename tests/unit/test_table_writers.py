@@ -9,8 +9,13 @@ from __future__ import annotations
 
 import ast
 import collections
+import functools
 import pathlib
 import re
+
+import pytest
+
+from tests.patching import logical_split_trees
 
 ROOT = pathlib.Path(__file__).resolve().parents[2] / "server"
 _WRITE = re.compile(
@@ -38,7 +43,10 @@ ALLOWED = {
     ("message_clock", "lib/db_migrations.py"): _MIGRATION,
     ("teams", "lib/db_migrations.py"): _MIGRATION,
     ("janitor_trigger_definitions", "lib/db_schema.py"): _MIGRATION,
-    ("janitor_trigger_definitions", "lib/audio_bookkeeper.py"): _MIGRATION + " (its SCHEMA seeds the audio trigger)",
+    ("janitor_trigger_definitions", "lib/persistence/schema_parts/audio_bookkeeper.py"):
+        _MIGRATION + " (the audio_bookkeeper schema seeds the audio trigger)",
+    ("audio_bookkeeping_events", "lib/persistence/schema_parts/audio_bookkeeper.py"):
+        _MIGRATION + " (the audio_bookkeeper schema's trigger; S1 moved it out of lib/audio_bookkeeper.py)",
     # Retention sweeps: maintenance.py deletes expired rows from many tables.
     ("background_job_events", "lib/maintenance.py"): "retention sweep",
     ("state_log", "lib/maintenance.py"): "retention sweep",
@@ -82,12 +90,12 @@ def writers() -> dict[str, set[str]]:
         rel = path.relative_to(ROOT).as_posix()
         if "/tests/" in rel:
             continue
-        tree = ast.parse(path.read_text(), filename=str(path))
-        for text in _sql_strings(tree):
-            for match in _WRITE.finditer(text):
-                table = match.group(1)
-                if table not in _NOT_TABLES:
-                    found[table].add(rel)
+        for origin, tree in logical_split_trees(rel, ast.parse(path.read_text(), filename=str(path))):
+            for text in _sql_strings(tree):
+                for match in _WRITE.finditer(text):
+                    table = match.group(1)
+                    if table not in _NOT_TABLES:
+                        found[table].add(origin)
     return found
 
 
@@ -122,3 +130,252 @@ def test_allowlist_entries_are_still_real():
     found = writers()
     stale = sorted(key for key in ALLOWED if key[1] not in found.get(key[0], set()))
     assert not stale, f"remove stale ALLOWED entries: {stale}"
+
+
+# Status columns: docs/architecture/lifecycles.md, property 1. A status
+# column is written only by the owner of its declared lifecycle. Columns not
+# converted yet start from today's writers; an entry that no longer matches a
+# real writer fails, so the list only shrinks. An UPDATE with a dynamic SET
+# (or an INSERT with a dynamic column list) counts as writing every status
+# column of its table.
+# SQLite accepts an identifier bare or quoted as "x", `x` or [x].
+_TABLE = r"[\"`\[]?([a-z_][a-z0-9_]*)[\"`\]]?"
+_UPDATE_SET = re.compile(rf"\bUPDATE(?:\s+OR\s+\w+)?\s+{_TABLE}\s+SET\b", re.I)
+_CLAUSE_END = re.compile(r"\b(?:WHERE|RETURNING|FROM)\b", re.I)
+
+
+def _set_clause(text: str, start: int) -> str:
+    """The SET list from `start` to the first WHERE/RETURNING/FROM outside parentheses."""
+    depth, quote = 0, ""
+    for i in range(start, len(text)):
+        ch = text[i]
+        if quote:
+            quote = "" if ch == quote else quote
+            continue
+        if ch in "'\"`[":
+            quote = "]" if ch == "[" else ch  # strings and quoted identifiers, e.g. [from]
+            continue
+        depth += ch == "("
+        depth -= ch == ")"
+        if depth == 0 and ch.isalpha() and (i == 0 or not text[i - 1].isalnum()) and _CLAUSE_END.match(text, i):
+            return text[start:i]
+    return text[start:]
+
+
+def _update_sets(text: str):
+    """(table, SET list) for every UPDATE in text."""
+    for match in _UPDATE_SET.finditer(text):
+        yield match.group(1), _set_clause(text, match.end())
+_INSERT_COLUMNS = re.compile(
+    rf"\b(?:INSERT(?:\s+OR\s+\w+)?|REPLACE)\s+INTO\s+{_TABLE}\s*(?:\(([^)]*)\))?", re.I)
+
+
+def _names_column(text: str, column: str, *, assigned: bool) -> bool:
+    quoted = rf"(?<![\w\"`\[])[\"`\[]?{column}[\"`\]]?(?![\w\"`\]])"
+    return re.search(quoted + (r"\s*=" if assigned else ""), text, re.I) is not None
+_DYNAMIC = "{?}"
+
+STATUS_WRITERS: dict[tuple[str, str], set[str]] = {
+    ("agent_goals", "status"): {"lib/agent_goals.py"},
+    ("agents", "helper_state"): {"lib/agents.py"},
+    ("agy_turn_authority", "terminal_status"): {"lib/message_live.py"},
+    ("artifact_decisions", "status"): {"lib/artifacts.py"},
+    ("artifacts", "status"): {"lib/artifacts.py"},
+    ("background_jobs", "status"): {"lib/background_jobs.py"},
+    ("clips", "producer_status"): {"lib/clip_records.py"},
+    ("clips", "status"): {"lib/clip_records.py"},
+    ("decisions", "status"): {"lib/leader_memory.py"},
+    ("dream_rounds", "status"): {"lib/dreaming.py"},
+    ("dream_runs", "status"): {"lib/dreaming.py"},
+    ("dream_threads", "evidence_status"): {"lib/dreaming.py"},
+    ("dream_threads", "status"): {"lib/dreaming.py"},
+    ("goal_subgoals", "status"): {"lib/goal_ledger.py"},
+    ("janitor_continuity", "status"): {"lib/janitor_store.py"},
+    ("janitor_runs", "status"): {"lib/janitor_store.py"},
+    ("messages", "phase"): {"lib/message_live.py", "lib/message_writes.py"},
+    ("orchestrator_pending_utterances", "status"): {"lib/orchestrator.py"},
+    ("provider_limit_episodes", "status"): {"lib/backend_usage.py"},
+    ("state_log", "kind"): {"lib/turn_lifecycle.py"},
+    ("task_items", "status"): {"lib/task_plans.py"},
+    ("task_plans", "status"): {"lib/task_plans.py"},
+    ("tool_explanation_jobs", "status"): {"lib/tool_explanation_queue.py"},
+    ("tool_explanation_mappings", "status"): {"lib/tool_explanation_mappings.py"},
+    ("tts_queue", "status"): {"lib/tts_queue_records.py"},
+}
+
+
+def _sql_texts(tree: ast.AST):
+    """Like _sql_strings, but an f-string is one text with {?} for each hole."""
+    inner = {v.value for node in ast.walk(tree) if isinstance(node, ast.JoinedStr)
+             for v in node.values if isinstance(v, ast.Constant)}
+    yield from (text for text in _sql_strings(tree) if text not in inner)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.JoinedStr):
+            yield "".join(v.value if isinstance(v, ast.Constant) else _DYNAMIC for v in node.values)
+
+
+def status_writes(text: str, by_table: dict[str, set[str]]) -> set[tuple[str, str]]:
+    """The (table, status column) pairs one SQL text may write."""
+    out = set()
+    for table, assigned in _update_sets(text):
+        out |= {(table, c) for c in by_table.get(table, ())
+                if _DYNAMIC in assigned or _names_column(assigned, c, assigned=True)}
+    for match in _INSERT_COLUMNS.finditer(text):
+        table, names = match.groups()
+        out |= {(table, c) for c in by_table.get(table, ())
+                if names is None or _DYNAMIC in names or _names_column(names, c, assigned=False)}
+    return out
+
+
+@functools.cache
+def status_writers() -> dict[tuple[str, str], set[str]]:
+    from test_lifecycle_guards import status_columns
+    columns = status_columns()
+    by_table: dict[str, set[str]] = collections.defaultdict(set)
+    for table, column in columns:
+        by_table[table].add(column)
+    found: dict[tuple[str, str], set[str]] = collections.defaultdict(set)
+    for path in sorted(ROOT.rglob("*.py")):
+        rel = path.relative_to(ROOT).as_posix()
+        if "/tests/" in rel:
+            continue
+        for origin, tree in logical_split_trees(rel, ast.parse(path.read_text(), filename=str(path))):
+            for text in _sql_texts(tree):
+                for key in status_writes(text, by_table):
+                    found[key].add(origin)
+    return found
+
+
+@pytest.mark.parametrize("source,writes", [
+    ("'UPDATE jobs SET note = ? WHERE id = ?'", False),
+    ("'UPDATE jobs SET status = ?, note = ? WHERE status = ?'", True),
+    ("f'UPDATE jobs SET {fields} WHERE id = ?'", True),
+    ("'UPDATE OR IGNORE \"jobs\" SET \"status\" = ? WHERE id = ?'", True),
+    ("'UPDATE jobs SET [status]=? WHERE id = ?'", True),
+    ("'UPDATE jobs SET status_note = ?, `status` = ? WHERE id = ?'", True),
+    ("'UPDATE jobs SET old_status = ?, status_at = ? WHERE status = ?'", False),
+    ("'UPDATE jobs SET n = (SELECT 1 FROM t WHERE x = 1), status = ? WHERE id = ?'", True),
+    ("\"UPDATE jobs SET note = '(', status = ? WHERE id = ?\"", True),
+    ("'UPDATE jobs SET [from] = ?, status = ? WHERE id = ?'", True),
+    ("'UPDATE jobs SET \"where\" = ?, `returning` = ?, status = ? WHERE id = ?'", True),
+    ("\"UPDATE jobs SET note = 'it''s FROM', status = ? WHERE id = ?\"", True),
+    ("f'INSERT INTO jobs ({cols}) VALUES ({marks})'", True),
+    ("'INSERT INTO \"jobs\" (id, \"status\") VALUES (?, ?)'", True),
+    ("'INSERT INTO jobs (id, note) VALUES (?, ?)'", False),
+    ("'INSERT OR REPLACE INTO jobs VALUES (?, ?)'", True),
+])
+def test_status_writer_scan_sees_literal_quoted_and_dynamic_writes(source, writes):
+    texts = _sql_texts(ast.parse("x = " + source))
+    found = any(status_writes(text, {"jobs": {"status"}}) for text in texts)
+    assert found is writes
+
+
+def status_writer_problems(found, owners, allowlist) -> list[str]:
+    """Writers outside the owner. A declared column has exactly one writer:
+    legacy exemptions end with the conversion."""
+    problems = []
+    for key, modules in sorted(found.items()):
+        allowed = {owners[key]} if key in owners else allowlist.get(key, set())
+        if modules - allowed:
+            problems.append(f"{key[0]}.{key[1]} written by {sorted(modules - allowed)}; go through its lifecycle owner")
+    return problems
+
+
+def stale_status_writers(found, owners, allowlist) -> list[tuple[tuple[str, str], str]]:
+    """Allowlist entries that no longer write, or whose column is now declared."""
+    return sorted((key, module) for key, modules in allowlist.items() for module in modules
+                  if module not in found.get(key, set()) or key in owners)
+
+
+def test_a_declared_owner_ends_the_legacy_exemptions():
+    key = ("clips", "status")
+    found = {key: {"lib/clip_store.py", "lib/new_clip_owner.py"}}
+    allowlist = {key: {"lib/clip_store.py"}}
+    assert status_writer_problems(found, {}, allowlist) == [
+        "clips.status written by ['lib/new_clip_owner.py']; go through its lifecycle owner"]
+    owners = {key: "lib/new_clip_owner.py"}
+    assert status_writer_problems(found, owners, allowlist) == [
+        "clips.status written by ['lib/clip_store.py']; go through its lifecycle owner"]
+    assert stale_status_writers(found, owners, allowlist) == [(key, "lib/clip_store.py")]
+    assert stale_status_writers({key: set()}, {}, allowlist) == [(key, "lib/clip_store.py")]
+
+
+def test_status_columns_are_written_only_through_their_lifecycle():
+    from test_lifecycle_guards import lifecycle_owners
+    problems = status_writer_problems(status_writers(), lifecycle_owners(), STATUS_WRITERS)
+    assert not problems, "\n".join(problems)
+
+
+def test_status_writer_allowlist_entries_are_still_real():
+    from test_lifecycle_guards import lifecycle_owners
+    stale = stale_status_writers(status_writers(), lifecycle_owners(), STATUS_WRITERS)
+    assert not stale, f"remove stale STATUS_WRITERS entries: {stale}"
+
+
+@pytest.mark.parametrize("split", [False, True])
+def test_writer_guards_survive_a_split_and_still_reject_violations(tmp_path, monkeypatch, split):
+    from tests import patching
+    import test_lifecycle_guards as lifecycle_guards
+    root = tmp_path / "server"
+    (root / "lib").mkdir(parents=True)
+    recipes = tmp_path / "splits"
+    recipes.mkdir()
+    (recipes / "store.toml").write_text(
+        '[[split]]\nname="store"\nmodule="lib/store.py"\n'
+        '[[split.part]]\nmodule="lib/store_part.py"\nnames=["write"]\n')
+    monkeypatch.setattr(patching, "_RECIPES", recipes)
+    monkeypatch.setitem(globals(), "ROOT", root)
+    monkeypatch.setitem(globals(), "OWNERS", {"things": "lib/store.py", "forbidden": "lib/other.py"})
+    monkeypatch.setitem(globals(), "ALLOWED", {})
+    monkeypatch.setitem(globals(), "STATUS_WRITERS", {("things", "status"): {"lib/store.py"}})
+    monkeypatch.setattr(lifecycle_guards, "status_columns", lambda: [("things", "status"), ("forbidden", "status")])
+    monkeypatch.setattr(lifecycle_guards, "lifecycle_owners", lambda: {})
+    owner = root / "lib/store.py"
+    source = root / "lib/store_part.py" if split else owner
+    if split:
+        owner.write_text("from .store_part import write\n")
+    good = "def write(conn):\n    conn.execute(\"UPDATE things SET status='done'\")\n"
+    source.write_text(good)
+    status_writers.cache_clear()
+    try:
+        test_every_table_has_one_writer_or_an_allowed_reason()
+        test_status_columns_are_written_only_through_their_lifecycle()
+        test_status_writer_allowlist_entries_are_still_real()
+        source.write_text(good + "    conn.execute(\"UPDATE forbidden SET status='done'\")\n")
+        status_writers.cache_clear()
+        with pytest.raises(AssertionError, match="forbidden"):
+            test_every_table_has_one_writer_or_an_allowed_reason()
+        with pytest.raises(AssertionError, match="forbidden.status"):
+            test_status_columns_are_written_only_through_their_lifecycle()
+        if split:
+            source.write_text(good + "def unlisted(conn):\n    conn.execute(\"UPDATE things SET status='done'\")\n")
+            status_writers.cache_clear()
+            with pytest.raises(AssertionError, match="lib/store_part.py"):
+                test_every_table_has_one_writer_or_an_allowed_reason()
+            with pytest.raises(AssertionError, match="lib/store_part.py"):
+                test_status_columns_are_written_only_through_their_lifecycle()
+    finally:
+        status_writers.cache_clear()
+
+
+def test_a_moved_sql_constant_counts_as_its_old_module_and_an_unlisted_writer_stays_physical(tmp_path):
+    # Review B on cut 1c (P2): a constant moves with the functions that use
+    # it, so a recipe-listed constant's SQL is the old module's; a new,
+    # unlisted writer in the same part keeps the part's own path, and the
+    # generated docstring is no SQL source.
+    (tmp_path / "s9.toml").write_text(
+        '[[split]]\nname = "x"\nmodule = "lib/old.py"\n'
+        '[[split.part]]\nmodule = "lib/old_part.py"\nnames = ["moved_writer", "MOVED_SQL"]\n')
+    tree = ast.parse(
+        '"""Moved out of lib/old.py: UPDATE dream_runs SET status = ?"""\n'
+        'MOVED_SQL = "UPDATE dream_runs SET status = ? WHERE id = ?"\n'
+        'def moved_writer(con):\n    con.execute("DELETE FROM dream_runs WHERE id = ?")\n'
+        'def unlisted_new_writer(con):\n    con.execute("UPDATE dream_runs SET status = ?")\n')
+    found = {origin: sorted(text for text in _sql_strings(sub) if "dream_runs" in text)
+             for origin, sub in logical_split_trees("lib/old_part.py", tree, tmp_path)}
+    assert found == {
+        "lib/old.py": ["DELETE FROM dream_runs WHERE id = ?", "UPDATE dream_runs SET status = ? WHERE id = ?"],
+        "lib/old_part.py": ["UPDATE dream_runs SET status = ?"],
+    }
+    # A file no recipe lists is one origin: itself, with its own Module object.
+    assert list(logical_split_trees("lib/other.py", tree, tmp_path)) == [("lib/other.py", tree)]

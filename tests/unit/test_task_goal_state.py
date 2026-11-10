@@ -11,9 +11,10 @@ from lib import (
 )
 
 
-def make_goal(tmp_path, **options):
+def make_goal(tmp_path, backend=None, **options):
     agent = agents.create_agent(
-        persona="Goal", voice_id="v", cwd=str(tmp_path), session="goal-owner"
+        persona="Goal", voice_id="v", cwd=str(tmp_path), session="goal-owner",
+        **({"backend": backend} if backend else {}),
     )
     agent = agents.get_by_session("goal-owner")
     agents.start_runtime(agent["agent_id"], agent["session"])
@@ -240,7 +241,7 @@ def test_wrong_native_owner_suppresses_wake(tmp_path):
 def test_native_provider_loop_never_competes(tmp_path):
     from lib import agent_goals
 
-    p = make_goal(tmp_path)
+    p = make_goal(tmp_path, backend="codex")
     agent_goals.upsert(
         p["agent_id"],
         session=p["session"],
@@ -253,6 +254,44 @@ def test_native_provider_loop_never_competes(tmp_path):
         )
         == 0
     )
+    assert (
+        task_plans.get(p["plan_id"])["goal"]["continuation"]["observed_state"]
+        == "native_owned"
+    )
+
+
+def test_a_native_goal_of_a_backend_the_agent_left_does_not_park_host_goals(tmp_path):
+    """AUT-20: the native row is cleared only by a Codex notification; after a
+    switch to Claude it must not park the Host goals for ever."""
+    from lib import agent_goals
+
+    p = make_goal(tmp_path, backend="claude")
+    agent_goals.upsert(
+        p["agent_id"],
+        session=p["session"],
+        backend="codex",
+        goal={"objective": "Native objective", "status": "paused"},
+    )
+    recovery.tick(lambda *args: {"queued": False}, now=db.now_ms() + 999999)
+    assert (
+        task_plans.get(p["plan_id"])["goal"]["continuation"]["observed_state"]
+        != "native_owned"
+    )
+
+
+def test_an_active_native_goal_of_a_left_backend_still_parks_host_goals(tmp_path):
+    """The shared Codex app-server may still continue an active native goal
+    after the switch: never run the Host goal beside it."""
+    from lib import agent_goals
+
+    p = make_goal(tmp_path, backend="claude")
+    agent_goals.upsert(
+        p["agent_id"],
+        session=p["session"],
+        backend="codex",
+        goal={"objective": "Native objective", "status": "active"},
+    )
+    recovery.tick(lambda *args: pytest.fail("a second driver"), now=db.now_ms() + 999999)
     assert (
         task_plans.get(p["plan_id"])["goal"]["continuation"]["observed_state"]
         == "native_owned"
@@ -757,3 +796,251 @@ def test_a_conversation_the_host_continued_keeps_its_goal_and_running_wake(tmp_p
     # Only a goal bound to the conversation that was continued moves.
     assert task_plans.carry_native_session(
         p["agent_id"], "native-goal-test", "elsewhere", "pruned") == []
+
+
+def _second_goal(first):
+    return task_plans.create(
+        session="goal-owner",
+        title="Second outcome",
+        items=[{"id": "other", "title": "Other method"}],
+        goal={"criteria": ["Other works"], "limits": "None", "enroll": True},
+    )
+
+
+def test_stop_pauses_a_goal_whose_revision_moved_after_the_scan(tmp_path, monkeypatch):
+    # The agent checkpoints while the user presses Stop: the pause must use the
+    # revision it reads inside its own transaction, not the one it scanned.
+    first = make_goal(tmp_path)
+    second = _second_goal(first)
+    real = task_plans._goal_mutate
+    moved = []
+
+    def checkpoint_first(plan_id, **kw):
+        if not moved:
+            moved.append(plan_id)
+            plan = task_plans.get(first["plan_id"])
+            act(plan, "checkpoint", {"progress": "Agent checkpoint during Stop",
+                                       "next_work": "Continue"})
+        return real(plan_id, **kw)
+
+    monkeypatch.setattr(task_plans, "_goal_mutate", checkpoint_first)
+    assert task_plans.pause_recovery_for_agent(first["agent_id"], "User stopped") == 2
+    for plan in (first, second):
+        assert task_plans.get(plan["plan_id"])["status"] == "paused"
+
+
+def test_stop_still_pauses_other_goals_when_one_pause_fails(tmp_path, monkeypatch):
+    first = make_goal(tmp_path)
+    second = _second_goal(first)
+    real = task_plans._goal_mutate
+
+    def locked_first(plan_id, **kw):
+        if plan_id == first["plan_id"]:
+            raise RuntimeError("database is locked")
+        return real(plan_id, **kw)
+
+    monkeypatch.setattr(task_plans, "_goal_mutate", locked_first)
+    assert task_plans.pause_recovery_for_agent(first["agent_id"], "User stopped") == 1
+    assert task_plans.get(first["plan_id"])["status"] == "active"
+    assert task_plans.get(second["plan_id"])["status"] == "paused"
+
+
+def test_idle_ticks_before_the_due_time_do_not_rewrite_the_goal(tmp_path, monkeypatch):
+    # The scheduler ticks every 15 s. A goal that is not due yet and has not
+    # changed must not be rewritten each tick: goal_json can be megabytes.
+    p = make_goal(tmp_path)
+    due = task_plans.get(p["plan_id"])["goal"]["continuation"]["due_at"]
+    assert due > db.now_ms() + 2000
+    saves = []
+    real = goals._save
+    monkeypatch.setattr(goals, "_save", lambda con, plan_id, goal: (
+        saves.append(plan_id), real(con, plan_id, goal)))
+
+    def events():
+        return db.conn().execute(
+            "SELECT COUNT(*) FROM goal_events WHERE plan_id=?", (p["plan_id"],)
+        ).fetchone()[0]
+
+    no_dispatch = lambda *args: pytest.fail("a goal that is not due must not dispatch")
+    recovery.tick(no_dispatch, now=due - 2000)
+    after_first, saves_first = events(), len(saves)
+    recovery.tick(no_dispatch, now=due - 1000)
+
+    assert saves_first <= 1
+    assert len(saves) == saves_first, "an unchanged goal was rewritten"
+    assert events() == after_first
+
+
+def _history_keys(plan_id):
+    return sorted(
+        int(row[0].split(":", 1)[1])
+        for row in db.conn().execute(
+            "SELECT idempotency_key FROM goal_events WHERE plan_id=? "
+            "AND idempotency_key LIKE 'history:%'",
+            (plan_id,),
+        )
+    )
+
+
+def test_stored_history_is_bounded_and_the_ledger_keeps_every_entry(tmp_path):
+    p = make_goal(tmp_path)
+    plan_id = p["plan_id"]
+    goal = json.loads(
+        db.conn().execute("SELECT goal_json FROM task_plans WHERE plan_id=?", (plan_id,)).fetchone()[0]
+    )
+    first = len(goal["history"])
+    extra = task_plans.GOAL_HISTORY_LIMIT + 50
+    for n in range(extra):
+        goal["history"].append(dict(at=n, kind="wake_claim", revision=0, detail={"n": n}))
+    with recovery._transaction() as con:
+        goals._save(con, plan_id, goal)
+    stored = json.loads(
+        db.conn().execute("SELECT goal_json FROM task_plans WHERE plan_id=?", (plan_id,)).fetchone()[0]
+    )
+    total = first + extra
+    assert len(stored["history"]) == task_plans.GOAL_HISTORY_LIMIT
+    assert stored["history_offset"] == total - task_plans.GOAL_HISTORY_LIMIT
+    assert stored["history"][-1]["detail"] == {"n": extra - 1}
+    # The ledger holds every entry, keyed by its absolute position.
+    assert _history_keys(plan_id) == list(range(total))
+    # The next entry continues the numbering instead of colliding with old keys.
+    stored["history"].append(dict(at=extra, kind="wake_claim", revision=0, detail={"n": "next"}))
+    with recovery._transaction() as con:
+        goals._save(con, plan_id, stored)
+    assert _history_keys(plan_id) == list(range(total + 1))
+    again = json.loads(
+        db.conn().execute("SELECT goal_json FROM task_plans WHERE plan_id=?", (plan_id,)).fetchone()[0]
+    )
+    assert len(again["history"]) == task_plans.GOAL_HISTORY_LIMIT
+    assert again["history"][-1]["detail"] == {"n": "next"}
+
+
+def test_wake_claim_and_result_do_no_json_work_under_the_writer_lock(tmp_path, monkeypatch):
+    p = make_goal(tmp_path)
+
+    class Guard:
+        def __init__(self, real):
+            self.real = real
+
+        def __getattr__(self, name):
+            attr = getattr(self.real, name)
+            if name not in {"loads", "dumps"}:
+                return attr
+
+            def guarded(*args, **kwargs):
+                assert not db.conn().in_transaction, f"json.{name} under the writer lock"
+                return attr(*args, **kwargs)
+
+            return guarded
+
+    monkeypatch.setattr(recovery, "json", Guard(json))
+    monkeypatch.setattr(task_plans, "json", Guard(json))
+    now = db.now_ms() + 130000
+    claimed = recovery._claim(p["plan_id"], now)
+    assert claimed, "the due goal is claimed"
+    request = claimed[1]["continuation"]["request_id"]
+    recovery._result(p["plan_id"], request, now, "admitted", "accepted")
+    goal = task_plans.get(p["plan_id"])["goal"]
+    assert goal["continuation"]["state"] == "admitted"
+    assert [h["kind"] for h in goal["history"][-2:]] == ["wake_claim", "dispatch_admitted"]
+
+
+def test_a_goal_changed_after_the_snapshot_is_not_overwritten_by_a_claim(tmp_path, monkeypatch):
+    p = make_goal(tmp_path)
+    now = db.now_ms() + 130000
+    real_boundary = recovery.boundary
+
+    def concurrent_checkpoint(plan, goal, **kwargs):
+        # Another writer saves the goal after the claim read its snapshot.
+        if kwargs.get("check_live", True):
+            act(task_plans.get(p["plan_id"]), "checkpoint", {"progress": "moved on", "next_work": "x"})
+        return real_boundary(plan, goal, **kwargs)
+
+    monkeypatch.setattr(recovery, "boundary", concurrent_checkpoint)
+    assert recovery._claim(p["plan_id"], now) is None
+    goal = task_plans.get(p["plan_id"])["goal"]
+    assert goal["continuation"]["state"] != "dispatching"
+    assert goal["history"][-1]["kind"] == "checkpoint"
+
+
+def _replan(p, reason, steps):
+    return act(p, "replan", {"reason": reason, "steps": steps})
+
+
+def _item(p, stable_id):
+    return next(i for i in p["items"] if i["item_id"].endswith(stable_id))
+
+
+def test_replan_restores_a_retired_step_it_proposes_again(tmp_path):
+    # AUT-14 (a): a removed step counts as resolved, so a restored required
+    # step that stayed removed would let the goal finish without it.
+    p = make_goal(tmp_path)
+    p = _replan(p, "Probe says the method is not needed", [])
+    assert _item(p, "method")["status"] == "removed"
+    p = _replan(p, "Second probe says it is needed after all",
+                [{"id": "method", "title": "Initial method"}])
+    restored = _item(p, "method")
+    assert restored["status"] == "pending"
+    assert p["counts"].get("removed", 0) == 0
+
+
+def test_replan_keeps_the_reason_and_time_of_already_retired_steps(tmp_path):
+    # AUT-14 (b): later replans must not re-stamp a retired step.
+    p = make_goal(tmp_path)
+    p = _replan(p, "First reason", [{"id": "other", "title": "Other method"}])
+    first = _item(p, "method")
+    p = _replan(p, "Second reason", [{"id": "third", "title": "Third method"}])
+    again = _item(p, "method")
+    assert again["status"] == "removed"
+    assert again["detail"] == "First reason" == first["detail"]
+    assert again["completed_at"] == first["completed_at"]
+
+
+def test_replan_caps_a_kept_step_title_like_a_new_one(tmp_path):
+    p = make_goal(tmp_path)
+    p = _replan(p, "Longer title", [{"id": "method", "title": "x" * 600}])
+    assert len(_item(p, "method")["title"]) == 500
+
+
+def test_scheduler_ledger_work_is_bounded_by_the_new_entry(tmp_path):
+    """A scheduler CAS must not scan old ledger JSON while holding the writer."""
+    from lib import goal_ledger
+
+    p = make_goal(tmp_path)
+    con = db.conn()
+    payload = json.dumps({"detail": {"synthetic": "x" * 1024}})
+    with recovery._transaction():
+        con.executemany(
+            "INSERT INTO goal_events (plan_id,at,kind,actor_kind,new_json,idempotency_key) "
+            "VALUES (?,0,'wake_claim','system',?,?)",
+            [(p["plan_id"], payload, f"synthetic:{i}") for i in range(2000)],
+        )
+    for kind in sorted(goal_ledger.SYSTEM_KINDS | {"dependency_result"}):
+        row = con.execute("SELECT * FROM task_plans WHERE plan_id=?", (p["plan_id"],)).fetchone()
+        text = row["goal_json"]
+        stored, goal = json.loads(text), json.loads(text)
+        goal["history"].append(dict(at=db.now_ms(), kind=kind, revision=row["revision"],
+                                    detail={"request_id": "synthetic-wake"}))
+        held_steps = 0
+
+        def bound_writer_work():
+            nonlocal held_steps
+            if con.in_transaction:
+                held_steps += 100
+            return int(held_steps > 5000)
+
+        con.set_progress_handler(bound_writer_work, 100)
+        try:
+            assert recovery._commit(row, text, stored, goal)
+        finally:
+            con.set_progress_handler(None, 0)
+        event = con.execute(
+            "SELECT kind,actor_kind,new_json FROM goal_events WHERE plan_id=? "
+            "ORDER BY event_id DESC LIMIT 1", (p["plan_id"],)
+        ).fetchone()
+        assert (event["kind"], event["actor_kind"]) == (kind, "system")
+        assert json.loads(event["new_json"])["detail"] == {"request_id": "synthetic-wake"}
+        saved = json.loads(con.execute(
+            "SELECT goal_json FROM task_plans WHERE plan_id=?", (p["plan_id"],)
+        ).fetchone()[0])
+        assert saved["history"][-1]["kind"] == kind

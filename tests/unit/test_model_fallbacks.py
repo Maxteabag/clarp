@@ -228,3 +228,18 @@ def test_structured_fallback_rejects_a_non_routing_provider():
         )
 
 
+
+
+def test_an_attempt_finishes_once_and_only_with_a_declared_status(agent):
+    from lib import db
+    from lib.lifecycle import LifecycleError
+    assert fallback.claim(agent["agent_id"], "r", 0, GEMINI, "quota")
+    with pytest.raises(LifecycleError):
+        fallback.finish(agent["agent_id"], "r", 0, status="exploded")
+    assert fallback.attempts(agent["agent_id"], "r")[0]["status"] == "running"
+    fallback.finish(agent["agent_id"], "r", 0, status="failed", result={"why": "quota"})
+    fallback.finish(agent["agent_id"], "r", 0, status="completed")
+    row = fallback.attempts(agent["agent_id"], "r")[0]
+    assert (row["status"], row["result_json"]) == ("failed", '{"why": "quota"}')
+    assert row["finished_at"] is not None
+    assert not db.conn().in_transaction

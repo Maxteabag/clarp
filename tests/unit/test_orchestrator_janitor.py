@@ -197,7 +197,7 @@ def test_model_failure_records_only_bounded_error_and_uses_existing_fallback():
 def test_retry_after_pause_replays_control_receipt_without_becoming_chat():
     calls = []
     configured, send, dispatched, _, speech = setup_router(
-        lambda *_: calls.append(True) or {"kind": "control", "control_action": "current_agent"})
+        lambda *_: calls.append(True) or {"kind": "control", "control_action": "current_agent", "confidence": .99})
     assert send().action == "control"
     owner = janitors.get(configured["session"])
     janitors.set_enabled(owner["session"], owner["revision"], False)
@@ -325,7 +325,7 @@ def test_scoped_subscriber_can_require_fallback_even_if_builtin_policy_does_not(
 
 
 def test_routing_control_uses_selected_janitor_voice_option():
-    _, send, _, _, speech = setup_router(lambda *_: {"kind": "control", "control_action": "current_agent"},
+    _, send, _, _, speech = setup_router(lambda *_: {"kind": "control", "control_action": "current_agent", "confidence": .99},
                                          options={"voice_id": "chosen-routing-voice"})
     assert send().action == "control"
     assert speech[0][0][1] == "chosen-routing-voice"

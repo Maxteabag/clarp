@@ -5,10 +5,43 @@ from typing import Any, Callable
 import re
 
 from . import db
+from . import lifecycle as lk
+from .lifecycle import Edge, Lifecycle, WaitForever
 
 
 ACTIVE = frozenset({"accepted", "queued"})
 TERMINAL = frozenset({"completed", "failed", "cancelled"})
+
+# One delegated request (docs/architecture/lifecycles.md). This module is the
+# only writer of oracle_delegations.status; create() inserts the row as
+# accepted. Every transition stamps updated_at. Stop also cancels a delegation
+# that had already failed, the one correction between final states.
+DELEGATION = Lifecycle(
+    name="oracle_delegation", owner="lib/oracle_delegations.py",
+    table="oracle_delegations", key="delegation_id", state_column="status",
+    entered_column="updated_at",
+    initial="accepted", final=TERMINAL,
+    edges=(
+        Edge("dispatch_accepted", ACTIVE, "accepted"),
+        Edge("dispatch_queued", ACTIVE, "queued"),
+        Edge("start", frozenset({"queued"}), "accepted"),
+        Edge("complete", ACTIVE, "completed"),
+        Edge("fail", ACTIVE, "failed"),
+        Edge("cancel", ACTIVE, "cancelled"),
+        Edge("cancel_failed", frozenset({"failed"}), "cancelled", correction=True),
+    ),
+    waits={
+        "accepted": WaitForever("its turn's completion, failure or Stop ends it;"
+                                " reconcile_orphans fails one whose owning process was lost"),
+        "queued": WaitForever("queue dispatch starts it, or Stop cancels it"),
+    },
+)
+
+
+def _cas(events, where: str, params=(), *, values=None, con=None) -> int:
+    """Every status write: one compare-and-set whose sources come from DELEGATION."""
+    return lk.compare_and_set_where(con or db.conn(), DELEGATION, events, where=where,
+                                    params=params, now=db.now_ms(), values=values)
 
 
 class DelegationCollision(ValueError):
@@ -191,13 +224,8 @@ def mark_dispatched(delegation_id: str, *, backend_session_id: str,
             # exclusive with queue claim/start. Claimed or started is active.
             if row is not None and row["status"] == "queued":
                 status = "queued"
-        database.execute(
-            """UPDATE oracle_delegations
-                  SET backend_session_id = ?, status = ?, updated_at = ?
-                WHERE delegation_id = ? AND status IN ('accepted', 'queued')""",
-            (backend_session_id or "", status, db.now_ms(),
-             delegation_id.strip()),
-        )
+        _cas(f"dispatch_{status}", "delegation_id = ?", (delegation_id.strip(),),
+             values={"backend_session_id": backend_session_id or ""}, con=database)
         database.execute("COMMIT")
     except BaseException:
         if database.in_transaction:
@@ -208,12 +236,7 @@ def mark_dispatched(delegation_id: str, *, backend_session_id: str,
 
 def mark_started_for_trace(trace_id: str) -> bool:
     """A durable queued turn became the active backend turn."""
-    return db.conn().execute(
-        """UPDATE oracle_delegations
-              SET status = 'accepted', updated_at = ?
-            WHERE trace_id = ? AND status = 'queued'""",
-        (db.now_ms(), str(trace_id or "").strip()),
-    ).rowcount > 0
+    return _cas("start", "trace_id = ?", (str(trace_id or "").strip(),)) > 0
 
 
 def complete_for_trace(*, trace_id: str, message_id: str, text: str) -> bool:
@@ -221,34 +244,22 @@ def complete_for_trace(*, trace_id: str, message_id: str, text: str) -> bool:
     clean = str(text or "").strip()
     if not trace_id or not message_id or not clean:
         return False
-    changed = db.conn().execute(
-        """UPDATE oracle_delegations
-              SET status = 'completed', result_message_id = ?,
-                  result_text = ?, error = '', updated_at = ?
-            WHERE (trace_id = ? OR completion_trace_id = ?) AND status IN ('accepted', 'queued')""",
-        (message_id, clean, db.now_ms(), trace_id.strip(), trace_id.strip()),
-    ).rowcount
+    changed = _cas("complete", "trace_id = ? OR completion_trace_id = ?",
+                   (trace_id.strip(), trace_id.strip()),
+                   values={"result_message_id": message_id, "result_text": clean, "error": ""})
     return changed > 0
 
 
 def fail(delegation_id: str, reason: str) -> dict | None:
-    db.conn().execute(
-        """UPDATE oracle_delegations
-              SET status = 'failed', error = ?, updated_at = ?
-            WHERE delegation_id = ? AND status IN ('accepted', 'queued')""",
-        ((reason or "Agent turn failed")[:500], db.now_ms(),
-         delegation_id.strip()),
-    )
+    _cas("fail", "delegation_id = ?", (delegation_id.strip(),),
+         values={"error": (reason or "Agent turn failed")[:500]})
     return get(delegation_id)
 
 
 def fail_for_trace(trace_id: str, reason: str) -> bool:
-    return db.conn().execute(
-        """UPDATE oracle_delegations
-              SET status = 'failed', error = ?, updated_at = ?
-            WHERE (trace_id = ? OR completion_trace_id = ?) AND status IN ('accepted', 'queued')""",
-        ((reason or "Agent turn failed")[:500], db.now_ms(), trace_id.strip(), trace_id.strip()),
-    ).rowcount > 0
+    return _cas("fail", "trace_id = ? OR completion_trace_id = ?",
+                (trace_id.strip(), trace_id.strip()),
+                values={"error": (reason or "Agent turn failed")[:500]}) > 0
 
 
 def reconcile_orphans(*, is_live) -> int:
@@ -349,14 +360,9 @@ def cancel_for_session(
             placeholders = ",".join("?" for _ in ids)
             database.execute("BEGIN IMMEDIATE")
             try:
-                database.execute(
-                    f"""UPDATE oracle_delegations
-                           SET status = 'cancelled', updated_at = ?
-                         WHERE delegation_id IN ({placeholders})
-                           AND owner_principal = ?
-                           AND status IN ('accepted', 'queued', 'failed')""",
-                    (db.now_ms(), *ids, owner_principal),
-                )
+                _cas(("cancel", "cancel_failed"),
+                     f"delegation_id IN ({placeholders}) AND owner_principal = ?",
+                     (*ids, owner_principal), con=database)
                 database.execute("COMMIT")
             except BaseException:
                 if database.in_transaction:
@@ -384,6 +390,10 @@ def undelivered(
         """SELECT * FROM oracle_delegations
             WHERE delivered_at IS NULL
               AND owner_principal = ?
+              -- An Agent Live ask (agent_live_tools) is relayed only into its own call; only that exact id
+              -- shape with its request text is held back, so no Oracle call's own result is ever hidden.
+              AND NOT (delegation_id GLOB 'sandra-' || replace(hex(zeroblob(24)), '00', '[0-9a-f]')
+                       AND request_text LIKE 'Spørsmål fra %Live-samtale%')
               AND status IN ('completed', 'failed', 'cancelled')
             ORDER BY updated_at, delegation_id
             LIMIT ?""",

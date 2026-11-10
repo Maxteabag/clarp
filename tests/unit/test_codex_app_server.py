@@ -8,6 +8,8 @@ import threading
 import time
 from pathlib import Path
 
+import pytest
+
 from lib import agents as agents_db
 from lib import codex_app_server
 from lib.backend.codex import TurnState as _TurnState
@@ -124,7 +126,9 @@ def test_client_factory_attaches_stream_before_initialization(monkeypatch):
             created.append(self)
 
     monkeypatch.setattr(codex_app_server, "_Client", FakeClient)
-    codex_app_server._CLIENTS.clear()
+    # Its own registry, restored after the test: a FakeClient left in the shared one
+    # (it has no `active`) broke later tests' active_handles() in the same worker.
+    monkeypatch.setattr(codex_app_server, "_CLIENTS", {})
     client = codex_app_server._client("agent-1", "codex", stream=stream)
     assert created == [client]
     assert client.stream is stream
@@ -158,9 +162,11 @@ def test_recycle_clients_closes_stdio_and_drops_writer_slots():
     first = object.__new__(codex_app_server._Client)
     first.active = None
     first.proc = _FakeProc()
+    first._lock = threading.Lock()      # as _Client.__init__ sets it
     second = object.__new__(codex_app_server._Client)
     second.active = None
     second.proc = _FakeProc()
+    second._lock = threading.Lock()
     codex_app_server._CLIENTS.clear()
     codex_app_server._CLIENTS["a"] = first
     codex_app_server._CLIENTS["b"] = second
@@ -175,6 +181,7 @@ def test_recycle_clients_closes_a_shared_client_once():
     only.active = None
     only.proc = _FakeProc()
     only._actives = {}
+    only._lock = threading.Lock()       # as _Client.__init__ sets it
     codex_app_server._CLIENTS.clear()
     codex_app_server._CLIENTS[codex_app_server._SHARED_KEY] = only
     codex_app_server._CLIENTS["stale-agent"] = only
@@ -385,12 +392,18 @@ def test_credentials_change_and_recycle_preserve_active_turn(tmp_path, monkeypat
     client = handle.client
     auth.write_text('new')
     assert codex_app_server.recycle_clients() == 0
-    assert codex_app_server._client(agent, 'busy') is client
-    assert client.proc.poll() is None
-    handle.wait(8)
+    # BACKENDS-06b: the next turn gets a new generation on the new
+    # credentials; the busy turn keeps its process until it ends.
     fresh = codex_app_server._client(agent, 'busy')
     assert fresh is not client
-    assert client.proc.poll() is not None
+    assert client.proc.poll() is None
+    handle.wait(8)
+    for _ in range(200):
+        if client.proc.poll() is not None:
+            break
+        threading.Event().wait(0.05)
+    assert client.proc.poll() is not None, 'the drained generation did not exit'
+    assert codex_app_server._client(agent, 'busy') is fresh
     codex_app_server.recycle_clients()
 
 
@@ -438,3 +451,281 @@ def test_stale_explicit_turn_event_cannot_replace_current_turn_output():
     client._notification('turn/completed',{'threadId':'primary-thread','turn':{'id':'old-turn','status':'completed'}})
     assert client.active is active and not active.handle._done.is_set()
     assert active.state.last_agent_message==''
+
+
+class _LinesProc(_FakeProc):
+    """A live app-server whose stdout yields the given lines, then ends."""
+
+    def __init__(self, lines):
+        super().__init__()
+        self.stdout = iter(lines)
+        self.stdin = None
+
+
+def _reader_client(lines, agent_id="agent-reader"):
+    client = object.__new__(codex_app_server._Client)
+    client.agent_id = agent_id
+    client.active = None
+    client._actives = {}
+    client._lock = threading.Lock()
+    client._write_lock = threading.Lock()
+    client._pending = {}
+    client.proc = _LinesProc(lines)
+    return client
+
+
+def test_one_failing_notification_does_not_end_the_shared_reader(monkeypatch):
+    # A database-locked error while handling one notification, or a JSON line
+    # that is not an object, must not fail the other requests on the process.
+    done = threading.Event()
+    box = {}
+    client = _reader_client([
+        json.dumps({"method": "item/agentMessage/delta", "params": {"delta": "x"}}) + "\n",
+        "5\n",
+        json.dumps({"id": 7, "result": {"ok": True}}) + "\n",
+    ])
+    client._pending[7] = (done, box, None)
+
+    def locked(_method, _params):
+        raise RuntimeError("database is locked")
+
+    monkeypatch.setattr(client, "_notification", locked)
+    client._read()
+
+    assert done.is_set()
+    assert box.get("result") == {"ok": True}
+    assert "error" not in box
+
+
+def test_a_live_app_server_whose_reader_ended_is_replaced(monkeypatch):
+    def broken_stdout():
+        yield json.dumps({"method": "noop", "params": {}}) + "\n"
+        raise ValueError("stdout decode failed")
+
+    client = _reader_client([])
+    client.proc.stdout = broken_stdout()
+    client.auth_fingerprint = codex_app_server._auth_fingerprint()
+    client.refresh_requested = False
+    monkeypatch.setattr(client, "_notification", lambda *_a: None)
+    client._read()
+    assert client.proc.poll() is None, "the process itself is still running"
+
+    created = []
+
+    class FakeClient:
+        def __init__(self, agent_id, session, stream=None):
+            self.proc = _FakeProc()
+            created.append(self)
+
+    monkeypatch.setattr(codex_app_server, "_Client", FakeClient)
+    codex_app_server._CLIENTS.clear()
+    codex_app_server._CLIENTS[codex_app_server._SHARED_KEY] = client
+    try:
+        fresh = codex_app_server._client("agent-reader", "reader")
+        assert created == [fresh]
+        assert fresh is not client
+        assert client.proc.signals, "the orphaned process is stopped"
+    finally:
+        codex_app_server._CLIENTS.clear()
+
+
+def _client_with_turn(agent_id="agent-turn"):
+    from unittest.mock import Mock
+
+    client = _reader_client([], agent_id=agent_id)
+    handle = codex_app_server.AppTurnHandle(client, agent_id)
+    active = codex_app_server._ActiveTurn(
+        turn_id="turn-1", thread_id="thread-1", agent_id=agent_id,
+        session="turn", trace_id="trace-1",
+        state=_TurnState(live_backend_session_id="thread-1"), handle=handle,
+        on_result=Mock(), on_error=Mock(), stream=None,
+        enqueue=lambda **_kwargs: 0)
+    client.active = active
+    client._actives = {agent_id: active}
+    return client, active
+
+
+def test_a_failed_final_flush_still_settles_the_turn(monkeypatch):
+    # The final live-text flush hits a locked database: the turn must still
+    # end with its outcome while the shared reader keeps running.
+    from unittest.mock import Mock
+
+    client, active = _client_with_turn()
+    monkeypatch.setattr(client, "_callback", lambda callback, value: callback(value))
+    monkeypatch.setattr(by_id("codex"), "update_live_text",
+                        Mock(side_effect=RuntimeError("database is locked")))
+    seen = []
+
+    def lines():
+        yield json.dumps({"method": "turn/completed", "params": {
+            "threadId": "thread-1",
+            "turn": {"id": "turn-1", "status": "completed"}}}) + "\n"
+        # Checked before EOF, whose _fail_all would hide a stranded turn.
+        seen.append((active.handle.is_alive(), active.on_result.call_count))
+        yield ""
+
+    client.proc.stdout = lines()
+    client._read()
+
+    assert seen == [(False, 1)]
+    active.on_error.assert_not_called()
+
+
+def test_retiring_a_dead_reader_client_sends_no_request(monkeypatch):
+    # Nothing reads the old process, so any request would wait out its
+    # timeout while the pool lock is held.
+    client, active = _client_with_turn("agent-retire")
+    client.reader_dead = True
+    client.auth_fingerprint = codex_app_server._auth_fingerprint()
+    client.refresh_requested = False
+    client.proc.stdin = None
+    requests = []
+    monkeypatch.setattr(client, "request",
+                        lambda method, *_a, **_k: requests.append(method) or {})
+    monkeypatch.setattr(client, "_callback", lambda callback, value: callback(value))
+
+    class FakeClient:
+        def __init__(self, agent_id, session, stream=None):
+            self.proc = _FakeProc()
+
+    monkeypatch.setattr(codex_app_server, "_Client", FakeClient)
+    codex_app_server._CLIENTS.clear()
+    codex_app_server._CLIENTS[codex_app_server._SHARED_KEY] = client
+    try:
+        fresh = codex_app_server._client("agent-retire", "retire")
+        assert isinstance(fresh, FakeClient)
+        assert requests == []
+        assert client.proc.signals, "the old process is stopped"
+        assert not active.handle.is_alive()
+        active.on_error.assert_called_once()
+    finally:
+        codex_app_server._CLIENTS.clear()
+
+
+def test_a_client_is_not_reused_while_its_reader_is_cleaning_up(monkeypatch):
+    # Admissions overlap the ended reader's cleanup: the pool must already
+    # treat the client as dead, and a request on it must fail at once
+    # instead of waiting out its timeout under the pool lock.
+    client, active = _client_with_turn("agent-cleanup")
+    client.proc.stdin = None
+    client.auth_fingerprint = codex_app_server._auth_fingerprint()
+    client.refresh_requested = False
+    client._next_id = 1
+    monkeypatch.setattr(client, "_callback", lambda callback, value: callback(value))
+    monkeypatch.setattr(client, "_send", lambda _message: None)
+    entered, release = threading.Event(), threading.Event()
+
+    class SlowWaiter(dict):
+        def __setitem__(self, key, value):
+            if key == "error":  # _fail_all has taken its pending snapshot
+                entered.set()
+                release.wait(3)
+            super().__setitem__(key, value)
+
+    client._pending[0] = (threading.Event(), SlowWaiter(), None)
+
+    class FakeClient:
+        def __init__(self, agent_id, session, stream=None):
+            self.proc = _FakeProc()
+
+    monkeypatch.setattr(codex_app_server, "_Client", FakeClient)
+    codex_app_server._CLIENTS.clear()
+    codex_app_server._CLIENTS[codex_app_server._SHARED_KEY] = client
+    reader = threading.Thread(target=client._read)
+    reader.start()
+    try:
+        assert entered.wait(2)
+        started = time.monotonic()
+        try:
+            client.request("thread/resume", {"threadId": "thread-1"}, timeout=2)
+        except TimeoutError:
+            pytest.fail("request on a client nobody reads waited out its timeout")
+        except RuntimeError:
+            pass
+        assert time.monotonic() - started < 1
+        fresh = codex_app_server._client("agent-cleanup", "cleanup")
+        assert isinstance(fresh, FakeClient)
+    finally:
+        release.set()
+        reader.join(3)
+        codex_app_server._CLIENTS.clear()
+    assert not reader.is_alive()
+    assert active.on_error.call_count == 1, "one terminal outcome per turn"
+
+
+def test_the_shared_app_server_speaks_for_no_agent(tmp_path, monkeypatch):
+    """BACKENDS-N1: one app-server process serves every Codex agent, so its
+    environment must not name the agent that happened to start it. Tools in
+    any Codex agent's shell that trust CLAUDE_PWA_SESSION would act as that
+    agent; without it they refuse instead."""
+    _install_fake_codex(tmp_path, monkeypatch)
+    monkeypatch.setenv("CLAUDE_PWA_SESSION", "the-host-itself")
+    seen = []
+    real_popen = codex_app_server.subprocess.Popen
+
+    def recording_popen(*args, **kwargs):
+        seen.append(dict(kwargs.get("env") or {}))
+        return real_popen(*args, **kwargs)
+
+    monkeypatch.setattr(codex_app_server.subprocess, "Popen", recording_popen)
+    try:
+        codex_app_server._client("agent-one", "first-agent")
+    finally:
+        codex_app_server.recycle_clients()
+    assert seen and all("CLAUDE_PWA_SESSION" not in env for env in seen)
+    assert all("CLARP_PROVIDER_TURN" not in env for env in seen)
+
+
+def test_each_codex_thread_carries_its_own_agent_session(tmp_path, monkeypatch):
+    """BACKENDS-N1: the shared app-server has no agent identity; each thread
+    gets its own agent's session for its shell through the thread's config
+    (shell_environment_policy.set), when it starts and when it resumes."""
+    _install_fake_codex(tmp_path, monkeypatch)
+    sent = []
+    real_request = codex_app_server._Client.request
+
+    def recording(self, method, params, timeout=30, **kwargs):
+        result = real_request(self, method, params, timeout=timeout, **kwargs)
+        sent.append((method, dict(params), result))
+        return result
+
+    monkeypatch.setattr(codex_app_server._Client, "request", recording)
+    agent_ids = {session: agents_db.create_agent(
+        persona=session.title(), voice_id="v", cwd=str(tmp_path), session=session,
+        backend="codex") for session in ("one", "two")}
+    threads = {}
+    try:
+        for session, agent_id in agent_ids.items():
+            handle = _spawn_fake_turn(tmp_path, agent_id=agent_id, session=session, text=session)
+            assert handle.wait(timeout=8) == 0
+            threads[session] = sent[-1][1].get("threadId") or [
+                result.get("thread", {}).get("id") for method, _p, result in sent
+                if method == "thread/start"][-1]
+        for suffix in (" again", " once more"):
+            for session, agent_id in agent_ids.items():
+                handle = _spawn_fake_turn(tmp_path, agent_id=agent_id, session=session,
+                                          text=session + suffix,
+                                          backend_session_id=threads[session],
+                                          is_new_session=False)
+                assert handle.wait(timeout=8) == 0
+    finally:
+        codex_app_server.recycle_clients()
+
+    def identity(params):
+        return (params.get("config", {}).get("shell_environment_policy", {})
+                .get("set", {}).get("CLAUDE_PWA_SESSION"))
+
+    assert [(method, identity(params)) for method, params, _r in sent
+            if method in ("thread/start", "thread/resume")] == [
+        ("thread/start", "one"), ("thread/start", "two"),
+        ("thread/resume", "one"), ("thread/resume", "two"),
+        ("thread/resume", "one"), ("thread/resume", "two")]
+    resumes = [(params, result) for method, params, result in sent
+               if method == "thread/resume"]
+    assert len(resumes) == 4
+    assert all(params.get("excludeTurns") is True for params, _result in resumes)
+    # This real fake-server transport returns only the thread ID: the reader,
+    # binding and next-turn/callback path need no hydrated history.
+    assert all("turns" not in result["thread"] for _params, result in resumes)
+    assert all("excludeTurns" not in params for method, params, _result in sent
+               if method == "thread/start")

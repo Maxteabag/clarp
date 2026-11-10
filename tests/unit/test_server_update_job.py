@@ -9,6 +9,7 @@ import time
 
 from lib import agents, background_jobs
 from lib.background_job_watcher import BackgroundJobWatcher
+from tests.patching import patch_shared
 
 
 _SCRIPT = pathlib.Path(__file__).resolve().parents[2] / "scripts/server_update_job.py"
@@ -58,7 +59,7 @@ class RunningProcess(CompletingProcess):
 
 def _identity(monkeypatch):
     monkeypatch.setattr(worker.os, "getpid", lambda: 4242)
-    monkeypatch.setattr(
+    patch_shared(monkeypatch,
         background_jobs, "process_start_token",
         lambda pid: "boot:worker" if pid == 4242 else "")
 
@@ -257,7 +258,7 @@ def test_update_worker_failure_is_terminal(monkeypatch):
 def test_missing_worker_identity_fails_queued_generation(monkeypatch):
     job = _queued_job()
     monkeypatch.setattr(worker.os, "getpid", lambda: 4242)
-    monkeypatch.setattr(background_jobs, "process_start_token", lambda _pid: "")
+    patch_shared(monkeypatch, background_jobs, "process_start_token", lambda _pid: "")
 
     result = worker.supervise_update(
         handle=background_jobs.job_handle(job), command=["clarp-admin", "update"])

@@ -175,8 +175,15 @@ def other_enabled_configs(agent_id: str, c=None) -> list:
     return list(_c(c).execute("SELECT j.* FROM janitor_configs j JOIN agents a ON a.agent_id=j.agent_id WHERE j.enabled=1 AND j.agent_id!=? AND a.deleted_at IS NULL AND a.archived_at IS NULL", (agent_id,)))
 
 
-def janitor_agent_ids(c=None) -> list[str]:
-    return [r[0] for r in _c(c).execute("SELECT a.agent_id FROM agents a JOIN janitor_configs j ON j.agent_id=a.agent_id WHERE a.is_janitor=1 AND a.deleted_at IS NULL AND a.archived_at IS NULL ORDER BY a.persona")]
+def janitor_agent_ids(c=None, *, template_id: str | None = None, enabled_only: bool = False) -> list[str]:
+    where = ""
+    params: list = []
+    if template_id is not None:
+        where += " AND j.template_id=?"
+        params.append(template_id)
+    if enabled_only:
+        where += " AND j.enabled=1"
+    return [r[0] for r in _c(c).execute("SELECT a.agent_id FROM agents a JOIN janitor_configs j ON j.agent_id=a.agent_id WHERE a.is_janitor=1 AND a.deleted_at IS NULL AND a.archived_at IS NULL" + where + " ORDER BY a.persona", params)]
 
 
 def admission_fingerprint(agent_id: str, c=None):
@@ -382,6 +389,24 @@ def finish_claim(c, run_id: str, now: int) -> None:
 def demand_result_json(run_id: str, c=None) -> str | None:
     row = _c(c).execute("SELECT result_json FROM janitor_demand_results WHERE run_id=?", (run_id,)).fetchone()
     return row[0] if row else None
+
+
+def prune_completed_runs(c, *, run_glob: str, finished_before: int, limit: int) -> int:
+    """Delete at most `limit` completed runs whose id matches `run_glob` and
+    that finished before `finished_before`, with their demand rows. A run
+    with effects or label ownership is kept. Returns how many went (VP-04)."""
+    ids = [r[0] for r in c.execute(
+        """SELECT run_id FROM janitor_runs r
+            WHERE run_id GLOB ? AND status = 'completed' AND finished_at < ?
+              AND NOT EXISTS (SELECT 1 FROM janitor_effects e WHERE e.run_id = r.run_id)
+              AND NOT EXISTS (SELECT 1 FROM janitor_label_ownership o WHERE o.run_id = r.run_id)
+            ORDER BY finished_at LIMIT ?""", (run_glob, finished_before, limit))]
+    if not ids:
+        return 0
+    marks = ",".join("?" * len(ids))
+    c.execute(f"DELETE FROM janitor_demand_results WHERE run_id IN ({marks})", ids)
+    c.execute(f"DELETE FROM janitor_demand_claims WHERE run_id IN ({marks})", ids)
+    return int(c.execute(f"DELETE FROM janitor_runs WHERE run_id IN ({marks})", ids).rowcount or 0)
 
 
 def insert_demand_result(c, run_id: str, result, now: int, *, ignore_existing: bool = False) -> None:

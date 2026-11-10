@@ -1,4 +1,4 @@
-import { Button } from "std-widgets.slint";
+import { Button, TextEdit } from "std-widgets.slint";
 import { Field, Editor } from "fields.slint";
 import { Palette, Focus, FocusRing, Look, ChromeText } from "theme.slint";
 
@@ -146,8 +146,16 @@ export component KeymapEditor inherits Modal {
     }
 }
 
+// A Host this desktop has connected to: what its row shows and where it is.
+export struct SavedHostRow {
+    url: string,
+    name: string,
+    current: bool,
+}
+
 // ConnectionPage.qml: the Host's address and a token, or a one-time pairing
-// code; the device token then stays in the keyring.
+// code; the device token then stays in the keyring. The Hosts connected to
+// before are listed above, each one click from being the Host again.
 export component ConnectionPage inherits Modal {
     in property <string> base-url;
     in property <string> state;
@@ -155,10 +163,13 @@ export component ConnectionPage inherits Modal {
     in property <bool> connecting;
     in property <bool> can-cancel;
     in property <bool> stored;
+    in property <[SavedHostRow]> hosts;
     callback connect(string, string);
     callback pair(string, string);
     callback forget();
     callback cancel();
+    // Leaves a saved Host out of the list.
+    callback remove(string);
     public function open() {
         server.text = root.base-url;
         token.text = "";
@@ -166,7 +177,7 @@ export component ConnectionPage inherits Modal {
         server.focus();
     }
     card-width: 520px;
-    card-height: 470px;
+    card-height: 470px + (root.hosts.length > 0 ? 28px + root.hosts.length * 48px : 0px);
     dismissed => { if (root.can-cancel) { root.cancel(); } }
     VerticalLayout {
         padding: 28px;
@@ -177,6 +188,34 @@ export component ConnectionPage inherits Modal {
             color: Palette.muted;
             font-size: 12 * Look.unit;
             wrap: word-wrap;
+        }
+        if root.hosts.length > 0: Text { text: "Saved Hosts"; color: Palette.muted; font-size: 11 * Look.unit; }
+        // At most six (the app sends no more); Ctrl+K finds every saved Host.
+        for host in root.hosts: HorizontalLayout {
+            height: 40px;
+            spacing: 8px;
+            VerticalLayout {
+                horizontal-stretch: 1;
+                alignment: center;
+                Text {
+                    text: (host.current ? "● " : "") + host.name;
+                    color: host.current ? Palette.success : Palette.text;
+                    font-size: 12 * Look.unit;
+                    overflow: elide;
+                    accessible-label: host.current ? "Connected Host " + host.name : "Saved Host " + host.name;
+                }
+                Text { text: host.url; color: Palette.muted; font-size: 10 * Look.unit; overflow: elide; }
+            }
+            if !host.current: Button {
+                text: "Connect";
+                enabled: !root.connecting;
+                clicked => { root.connect(host.url, ""); }
+            }
+            Button {
+                text: "Remove";
+                enabled: !host.current;
+                clicked => { root.remove(host.url); }
+            }
         }
         server := Field { placeholder-text: "http://127.0.0.1:7682"; accessible-label: "Server"; }
         token := Field {
@@ -226,6 +265,86 @@ export component ConnectionPage inherits Modal {
                 enabled: !root.connecting;
                 clicked => { root.connect(server.text, token.text); }
             }
+        }
+    }
+}
+
+// A message (or the whole chat) as plain text to select from: Slint's rich
+// text cannot be selected, so this shows the same words without styling.
+// Drag or Shift+arrows select, Ctrl+A selects all, Ctrl+C copies the
+// selection; Escape or a click outside closes it.
+export component SelectTextPage inherits Modal {
+    in property <string> title;
+    in property <string> body;
+    // What starts selected, its start in view.
+    in property <int> from;
+    in property <int> to;
+    callback copy-all();
+    callback close();
+    public function open() {
+        view.focus();
+        root.placing = true;
+    }
+    // Once the page is laid out (it has just become visible): the anchor at
+    // the end, so the caret, which the view keeps in sight, is the start.
+    property <bool> placing;
+    Timer {
+        interval: 16ms;
+        running: root.placing;
+        triggered => {
+            root.placing = false;
+            view.set-selection-offsets(root.to, root.from);
+        }
+    }
+    card-width: 860px;
+    card-height: 2000px;
+    dismissed => { root.close(); }
+    VerticalLayout {
+        padding: 20px;
+        spacing: 10px;
+        HorizontalLayout {
+            spacing: 8px;
+            Text {
+                text: root.title;
+                color: Palette.text;
+                font-size: 15 * Look.unit;
+                font-weight: 600;
+                overflow: elide;
+                horizontal-stretch: 1;
+                vertical-alignment: center;
+            }
+            copy-button := Rectangle {
+                width: 28px;
+                height: 28px;
+                border-radius: 4px;
+                background: copy-touch.has-hover ? Palette.hover : transparent;
+                accessible-role: button;
+                accessible-label: "Copy all";
+                Image { source: @image-url("icons/copy.svg"); width: 16px; height: 16px; colorize: Palette.muted; }
+                copy-touch := TouchArea { clicked => { root.copy-all(); } }
+            }
+            close-button := Rectangle {
+                width: 28px;
+                height: 28px;
+                border-radius: 4px;
+                background: close-touch.has-hover ? Palette.hover : transparent;
+                accessible-role: button;
+                accessible-label: "Close";
+                Image { source: @image-url("icons/close.svg"); width: 16px; height: 16px; colorize: Palette.muted; }
+                close-touch := TouchArea { clicked => { root.close(); } }
+            }
+        }
+        Text {
+            text: "Drag or Shift+arrows to select · Ctrl+A all · Ctrl+C copy · Esc close";
+            color: Palette.muted;
+            font-size: 11 * Look.unit;
+        }
+        view := TextEdit {
+            text: root.body;
+            read-only: true;
+            wrap: word-wrap;
+            vertical-stretch: 1;
+            accessible-label: "Selectable text";
         }
     }
 }

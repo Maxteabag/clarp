@@ -6,6 +6,8 @@ it distinctly instead of as a plain user bubble.
 """
 from __future__ import annotations
 
+from tests.patching import patch_shared
+
 from lib import agents as agents_db
 from lib import dreaming, heartbeat, message_store, team_leader
 
@@ -201,7 +203,7 @@ def test_a_retried_prompt_shows_once_and_its_answer_keeps_the_sender(tmp_path, m
         persona="Lena", voice_id="V", cwd=str(tmp_path), session="lena")
     start = 1_790_000_000_000
     clock = {"ms": start}
-    monkeypatch.setattr(message_writes, "now_ms", lambda: clock["ms"])
+    patch_shared(monkeypatch, message_writes, "now_ms", lambda: clock["ms"])
 
     def at(seconds):
         return message_writes._iso_from_ms(start + int(seconds * 1000))

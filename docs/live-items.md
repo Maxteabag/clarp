@@ -429,19 +429,33 @@ Each push: `apns-push-type: liveactivity`, topic `<bundle>.push-type.liveactivit
 {"aps": {"timestamp": 1759480000, "event": "update", "stale-date": 1759480900,
          "content-state": {
            "working": 2,            // agents thinking, responding, in a tool, compacting or limited
-           "needs_you": 4,          // equals the apps' Updates badge, plus waiting agents with nothing filed
+           "needs_you": 4,          // top-level agents with a badge item or a wait, once each,
+                                    // plus badge items that name no agent on the chip
            "decisions": 3,          // the badge part: unarchived pending decisions and questions,
                                     // blocking attention artifacts, and Janitor failures
            "lead": ROW | null,      // the working agent whose turn started last
-           "agents": [ROW, …],      // at most 5: needing you first, then newest work
+           "agents": [ROW, …],      // at most 5 top-level agents: needing you first, then newest work
            "updated_at_ms": 1759480000123}}}
 // ROW = {"agent_id", "session", "persona", "state", "headline", "tool", "started_at_ms", "turn_started_ms"}
 ```
 
-- `needs_you` counts what the Updates badge counts (unarchived pending decisions
-  and questions, artifacts whose attention bucket is `blocking`, Janitor
-  failure items) plus agents in `waiting` that have none of those filed, so
-  an agent is never counted twice.
+- Only top-level agents count or show, by the app's chip and chat-list rule:
+  a helper (`role: "helper"` with a `parent_agent_id`, naming its parent by
+  agent id, else session) rolls up, recursively, into its top-level agent and
+  never has a row, a face or a count of its own. A top-level agent with a
+  working helper counts as working; when it is idle itself its row takes the
+  newest working helper's state and start with `headline` `1 sub-agent
+  working` / `N sub-agents working` and `tool` null. A helper whose parent is
+  archived, deleted or a Janitor is top-level itself, and so is everyone in a
+  parent cycle, so no work is hidden. Archived agents and Janitors never show.
+- `needs_you` counts each top-level agent once when it, or any helper under
+  it, has an Updates badge item (unarchived pending decisions and questions,
+  artifacts whose attention bucket is `blocking`) or is `waiting`; badge items
+  that name no agent on the chip (Janitor failure items, items from archived
+  agents) count one each. Such an agent's row is `state: "waiting"`, `headline`
+  `Waiting for you`, no tool and no start. `decisions` stays the raw badge count.
+  The app computes the same content locally, so the chip does not change when
+  the app wakes.
 - `persona` is the agent's display name, by the same rule as the app:
   `clarp-memory-expert` and `CLARP-MEMORY-EXPERT` read `Clarp Memory Expert`;
   `ECIT Rachel` stays as it is.

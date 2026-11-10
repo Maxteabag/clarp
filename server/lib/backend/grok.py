@@ -12,14 +12,16 @@ from typing import Any, Callable, Optional
 
 from .. import agents as agents_db
 from .. import grok_transcript
-from .. import tts_queue
+from ..tts_queue_records import enqueue as enqueue_tts
 from ..log import log, log_exception
 from ..proc_util import stderr_text
 from ..process_registry import TurnHandle
 from ..turn_lifecycle import TurnEvent
 from ..voice_preamble import apply_voice_preamble
-from .base import BackendBrand, CompactionStrategy
-from .stream_json import StreamJsonBackend, iter_json_dicts
+from ..backend_catalogue import GROK
+from .base import CatalogueDefault, BackendBrand, CompactionStrategy
+from .stream_json import StreamJsonBackend, iter_json_dicts, stop_after_drain_failure
+from .long_prompt import PromptFile, fits_argv, removing
 
 
 @dataclass
@@ -122,22 +124,22 @@ def _usage_from(ev: dict) -> tuple[int, int]:
 class GrokBackend(StreamJsonBackend):
     """Runs ``grok -p --output-format streaming-json`` once per turn."""
     # --- catalogue data ---------------------------------------------------
-    id = 'grok'
-    label = 'Grok'
-    required_binary = 'grok'
-    badge = 'BackendGrok'
-    detail = 'Runs on Grok Build.'
-    symbol = 'x.circle'
-    brand = BackendBrand('#1a1a1a', '#0a0a0a', '#e8e8e8', '#222222')
-    efforts = ('low', 'medium', 'high')
-    runner = 'grok'
-    config_model_field = 'grok_model'
-    config_effort_field = 'grok_effort'
-    model_family = 'grok'
-    fallback_models = (
-        ('grok-4.6', 'Grok 4.6'),
-        ('grok-4.5', 'Grok 4.5'),
-    )
+    _catalogue_definition = GROK
+    id = CatalogueDefault('id')
+    label = CatalogueDefault('label')
+    required_binary = CatalogueDefault('required_binary')
+    badge = CatalogueDefault('badge')
+    detail = CatalogueDefault('detail')
+    symbol = CatalogueDefault('symbol')
+    brand = CatalogueDefault('brand')
+    efforts = CatalogueDefault('efforts')
+    runner = CatalogueDefault('runner')
+    config_model_field = CatalogueDefault('config_model_field')
+    config_effort_field = CatalogueDefault('config_effort_field')
+    model_family = CatalogueDefault('model_family')
+    # ``grok login --device-auth`` / ``grok logout`` (backend_auth).
+    login_kind = CatalogueDefault('login_kind')
+    fallback_models = CatalogueDefault('fallback_models')
 
 
     transcript = grok_transcript
@@ -199,7 +201,7 @@ class GrokBackend(StreamJsonBackend):
         cmd = self.build_cmd(
             backend_session_id, is_new_session=is_new_session,
             model=model, effort=effort)
-        cmd += ["-p", prompt]
+        prompt_file = None
         flag = "resume" if not is_new_session else "new"
         log("grokSpawn", f"cwd={cwd} {flag}={backend_session_id or '∅'} "
                          f"text_len={len(text)} trace={trace_id or '∅'} "
@@ -207,20 +209,32 @@ class GrokBackend(StreamJsonBackend):
         runtime_agent_id = "" if isolated else agent_id
         from .. import provider_background_jobs as provider_jobs
         turn_token, identity = provider_jobs.identity_env(runtime_agent_id)
-        proc, handle = self.launch(cmd, cwd=cwd, session=session, env_extra=identity)
-        provider_jobs.record_identity(turn_token, agent_id=runtime_agent_id,
-                                      provider=self.id, pid=proc.pid)
-        self.register_handle(runtime_agent_id, handle)
-        self.start_drain(
-            handle, self._drain_stdout,
-            proc=proc, agent_id=runtime_agent_id, session=session,
-            trace_id=trace_id, handle=handle,
-            backend_session_id=backend_session_id,
-            minted=bool(minted),
-            on_session_init=on_session_init, on_result=on_result,
-            on_error=on_error, stream=stream,
-            enqueue=enqueue or tts_queue.enqueue,
-        )
+        try:
+            if fits_argv(prompt):
+                cmd += ["-p", prompt]
+            else:
+                # Past one argv string (BACKENDS-08); removed when the turn ends.
+                prompt_file = PromptFile(prompt)
+                cmd += ["--prompt-file", prompt_file.path]
+            proc, handle = self.launch(cmd, cwd=cwd, session=session, env_extra=identity)
+            provider_jobs.record_identity(turn_token, agent_id=runtime_agent_id,
+                                          provider=self.id, pid=proc.pid)
+            self.register_handle(runtime_agent_id, handle)
+            self.start_drain(
+                handle, removing(self._drain_stdout, prompt_file),
+                proc=proc, agent_id=runtime_agent_id, session=session,
+                trace_id=trace_id, handle=handle,
+                backend_session_id=backend_session_id,
+                minted=bool(minted),
+                on_session_init=on_session_init, on_result=on_result,
+                on_error=on_error, stream=stream,
+                enqueue=enqueue or enqueue_tts,
+            )
+        except BaseException:
+            # Until the drain owns it, nothing else removes the prompt file.
+            if prompt_file is not None:
+                prompt_file.remove()
+            raise
         return handle
 
     def _drain_stdout(
@@ -229,6 +243,7 @@ class GrokBackend(StreamJsonBackend):
         on_session_init, on_result, on_error, stream, enqueue,
     ) -> None:
         st = _TurnState(session_id=backend_session_id)
+        reported = False        # a terminal outcome reached on_result/on_error
         try:
             if minted:
                 self._bind(st, backend_session_id, on_session_init=on_session_init,
@@ -260,6 +275,7 @@ class GrokBackend(StreamJsonBackend):
                 log("grokExitErr", f"rc={rc} trace={trace_id or '∅'} "
                                    f"stderr={(err or '')[:500]!r}")
                 if on_error is not None:
+                    reported = True
                     on_error(err)
             elif on_result is not None and not st.failed_error:
                 if not st.saw_session and backend_session_id:
@@ -270,11 +286,14 @@ class GrokBackend(StreamJsonBackend):
                 self._broadcast(stream, agent_id, session)
                 usage = ({"input_tokens": st.tokens_in, "output_tokens": st.tokens_out}
                          if (st.tokens_in or st.tokens_out) else {})
+                reported = True
                 on_result({"last_agent_message": st.last_agent_message or st.turn_text,
                            "usage": usage})
         except Exception as error:  # noqa: BLE001
             log_exception("grokDrainFail", error, detail=trace_id)
-            if on_error is not None and not st.failed_error:
+            # Nothing reads this CLI any more: stop it, and end the turn once.
+            stop_after_drain_failure(proc, handle)
+            if on_error is not None and not st.failed_error and not reported:
                 try:
                     on_error(str(error)[:300])
                 except Exception:  # noqa: BLE001

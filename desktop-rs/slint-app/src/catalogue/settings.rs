@@ -11,10 +11,11 @@ use serde_json::Value;
 use super::{Choice, Setting, e, keyed, shown};
 use crate::{App, AppWindow};
 
-const ACTIVITY: [(&str, &str); 3] = [
+const ACTIVITY: [(&str, &str); 4] = [
     ("Grouped", "Tool calls fold into one row per turn."),
     ("Always visible", "Every tool call shows as its own row."),
     ("Group old", "Recent tool calls show; older ones fold."),
+    ("Hidden", "Tool calls do not show in the chat."),
 ];
 /// The double-press windows offered, in milliseconds.
 const DOUBLE_PRESS: [u64; 8] = [150, 200, 250, 300, 400, 500, 700, 1000];
@@ -82,12 +83,12 @@ fn chats() -> Vec<Setting> {
         ),
         Setting::choice(
             keyed(
-                e("activity", "Tool activity", "chats", "How an agent's tool calls show in the chat: grouped, always visible or old ones grouped.", &["tool calls", "tools", "collapse", "expand", "grouping", "group tools", "activity"]),
+                e("activity", "Tool activity", "chats", "How an agent's tool calls show in the chat: grouped, always visible, old ones grouped, or hidden.", &["tool calls", "tools", "collapse", "expand", "grouping", "group tools", "activity", "hide tools"]),
                 &["tools"],
             ),
             "CHATS",
             |_| ACTIVITY.iter().enumerate().map(|(i, (label, about))| Choice::new(i.to_string(), *label).about(*about)).collect(),
-            |app| app.engine.borrow().activity_mode().clamp(0, 2).to_string(),
+            |app| app.engine.borrow().activity_mode().clamp(0, clarp_core::presentation::HIDDEN).to_string(),
             |app, _, value| {
                 if let Ok(mode) = value.parse() {
                     app.engine.borrow_mut().set_activity_mode(mode);

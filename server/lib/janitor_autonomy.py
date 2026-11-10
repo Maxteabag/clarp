@@ -6,15 +6,10 @@ No model can change accounts, approve decisions, or dispatch outside its snapsho
 from __future__ import annotations
 import hashlib,json,threading,time,subprocess,shutil,os
 from . import agents,db,janitors,janitor_builtins,settings_store,backends,janitor_hotseat
-from . import janitor_store
+from . import janitor_store,hotseat_status
 from .protocol import AgentState
 
-SCHEMA='''CREATE TABLE IF NOT EXISTS janitor_continuity (
- target_id TEXT PRIMARY KEY, snapshot TEXT NOT NULL, run_id TEXT NOT NULL,
- decision_json TEXT NOT NULL, due_at INTEGER NOT NULL, status TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS janitor_quota_receipts (
- receipt_id TEXT PRIMARY KEY, run_id TEXT NOT NULL, payload_json TEXT NOT NULL,
- delivery_json TEXT, created_at INTEGER NOT NULL);'''
+from .persistence.schema_parts.janitor_autonomy import SCHEMA
 
 _SCHEMA_LOCK=threading.Lock()
 _SCHEMA_READY_FOR=None  # db.DB_PATH the schema was last applied to
@@ -93,6 +88,13 @@ def lane_record(lane,owner,base_seconds,activity,summary,now):
     settings_store.set_text(ADAPTIVE_PREFIX+lane,json.dumps(state,sort_keys=True))
     return interval
 
+def _hotseat_receipt(site,record):
+    """Status receipts never break or alter the switcher; a failure is reported by site and class
+    only, through hotseat_status.diagnose, which never raises (a broken log sink included)."""
+    try:record()
+    except Exception as exc:
+        hotseat_status.diagnose('hotseatStatusReceiptFailed',f'site={site} error={type(exc).__name__}')
+
 def lanes(config):
     """(lane, base seconds, legacy last-check key) for each schedule lane of an autonomy Janitor."""
     options=config['options'];role=config['template_id']
@@ -143,10 +145,34 @@ def validate_decision(value):
     if value['action']=='wake' and not value.get('message','').strip():raise ValueError('Wake needs message')
     return value
 
+def _hotseat_quota_fingerprint(c=None):
+    """Lightweight candidate SET + all configuration fingerprints; no full views."""
+    ids=sorted(janitor_store.janitor_agent_ids(c,template_id=janitor_hotseat.ROLE,enabled_only=True))
+    frame=tuple((aid,janitor_store.admission_fingerprint(aid,c)) for aid in ids)
+    return frame if all(fingerprint is not None for _,fingerprint in frame) else None
+
+def _automatic_hotseat_quota_snapshot(provider):
+    """Resolve outside the writer, then require the complete capture to be stable."""
+    if provider not in janitor_hotseat.PROVIDERS:return None
+    try:
+        # resolve() builds full views/cadence. Like begin_run(), never do that
+        # under BEGIN IMMEDIATE: only cheap fingerprint checks belong there.
+        before=_hotseat_quota_fingerprint()
+        owner=janitor_builtins.resolve(janitor_hotseat.ROLE)
+        after=_hotseat_quota_fingerprint()
+        if before is None or before!=after or not owner or owner['options'].get('mode')!='automatic':return None
+        expected=(owner['revision'],owner['generation'],1,owner['backend'],owner['model'],owner['effort'],1)
+        return after if dict(after).get(owner['agent_id'])==expected else None
+    except Exception as exc:
+        # Uncertain ownership cannot silence the keeper; never log raw CLI/config data.
+        hotseat_status.diagnose('quotaThresholdOwnerUnavailable',f'provider={provider} error={type(exc).__name__}')
+        return None
+
 class AutonomyJanitors:
     def __init__(self,dispatch,notify,model_call=decision_model,usage_read=None,recover=None,hotseat_read=janitor_hotseat.read_accounts,hotseat_switch=janitor_hotseat.switch_account,label_judge=None):
         self.recover=recover;self.dispatch=dispatch;self.notify=notify;self.model_call=model_call;self.usage_read=usage_read;self.stop_event=threading.Event();self.thread=None
         self.hotseat_read=hotseat_read;self.hotseat_switch=hotseat_switch
+        self.auth_repair=janitor_hotseat.RepairWorker(self.stop_event)
         if label_judge is None:
             from .judgment_sites import audit_work_labels as label_judge
         self.label_judge=label_judge
@@ -243,12 +269,22 @@ class AutonomyJanitors:
                 if not janitor_builtins.is_current(run['run_id']):return
                 rid=digest([provider_id,account,window['window_id'],stamp,owner['generation']])
                 payload={'notification_id':rid,'session':owner['session'],'agent_id':owner['agent_id'],'persona':owner['name'],'preview':f"{provider_id}{' '+window['label'] if window.get('label') else ''}: {100-used:g}% quota remaining",'push':True,'reason':'quota_threshold','recovery_mode':owner['options']['recovery_mode'],'owner_generation':owner['generation']}
-                inserted=janitor_store.insert_quota_receipt(rid,run['run_id'],json.dumps(payload),now)
+                ownership=_automatic_hotseat_quota_snapshot(provider_id)
+                with settings_store.transaction():
+                    c=db.conn()
+                    # Config/candidate drift is unknown ownership, not a retry or
+                    # a second full resolver/model/cadence call under the writer.
+                    suppressed=ownership is not None and ownership==_hotseat_quota_fingerprint(c)
+                    inserted=janitor_store.insert_quota_receipt(rid,run['run_id'],json.dumps(payload),now,c=c)
+                    if inserted and suppressed:
+                        # Audit stays, but a new pending delivery is never externally visible.
+                        janitor_store.set_quota_receipt_delivery(rid,json.dumps({'cancelled':'Automatic Hotseat owns provider notifications'}),c=c)
                 if inserted:
                     if used >= 100 and owner['options']['recovery_mode']!='notify':
                         payload['recovery']=self.request_recovery(provider_id,owner,run['run_id'],rid)
                         recovery_states.append(provider_id+': '+payload['recovery'].get('status','unknown'))
-                    janitor_store.set_quota_receipt_payload(rid,json.dumps(payload));notifications+=1
+                    janitor_store.set_quota_receipt_payload(rid,json.dumps(payload))
+                    if not suppressed:notifications+=1
         self.deliver_notifications(owner)
         summary=f'Checked provider quota; {notifications} threshold notifications'
         activity='worked' if notifications or recovery_states else 'idle'
@@ -270,11 +306,53 @@ class AutonomyJanitors:
             run=janitor_builtins.begin_run(janitor_hotseat.ROLE,digest([owner['agent_id'],provider,now]),context={'summary':provider})
             if not run or not janitor_builtins.claim_run(run['run_id']):
                 lane_record(lane,owner,base,'failed','The check could not start',now);continue
-            try:accounts=self.hotseat_read(options['hotseat_command'],provider)
+            repair_owner=None;repair_payload=None;repair_started=None;repair_text=''
+            repair_inflight=frozenset(p.alias for p in self.auth_repair.profiles)
+            repair_policy=janitor_hotseat.PROVIDERS[provider].auth_repair
+            repair_enabled=repair_policy is not None and options.get('auto_repair_auth') is True
+            if repair_enabled:
+                from . import turn_queue
+                repair_owner={**owner,'_repair_stop_generation':turn_queue.user_stop_generation(owner['agent_id'])}
+            try:
+                if repair_enabled:
+                    accounts,repair_payload,repair_started=janitor_hotseat.read_repair_accounts(options['hotseat_command'])
+                else:accounts=self.hotseat_read(options['hotseat_command'],provider)
             except Exception as exc:
+                _hotseat_receipt('read_failure',lambda:hotseat_status.record_failure(provider,exc,now=now))
                 error=f'{provider}: Hotseat reading unavailable ({type(exc).__name__})'
                 janitor_builtins.complete_run(run['run_id'],'failed',error=error,activity='failed',summary=error)
                 lane_record(lane,owner,base,'failed',error,now);continue
+            if repair_enabled:
+                try:model=janitor_hotseat.repair_requested_model()
+                except Exception:
+                    janitor_hotseat._repair_diagnostic('requested_model_unavailable');model=''
+                try:
+                    accounts=janitor_hotseat.RepairLedger().candidates(accounts,repair_payload,owner=repair_owner,
+                        requested_model=model,read_origin=repair_started)
+                except Exception:
+                    # Unknown durable repair state cannot lend candidate credit.
+                    # Preserve the working active account and ordinary decide().
+                    janitor_hotseat._repair_diagnostic('candidate_state_unavailable')
+                    accounts=[dict(a) if a['active'] else {**a,'remaining':None,'secondary':None} for a in accounts]
+                    repair_text='Auth repair: state unavailable'
+                if not repair_text:
+                    try:repair_text=janitor_hotseat.repair_preview()
+                    except Exception:
+                        janitor_hotseat._repair_diagnostic('preview_unavailable')
+                        repair_text='Auth repair: status unavailable'
+            elif repair_policy is not None and options['mode']=='automatic':
+                # Lead-approved OFF exception: only read existing debt to
+                # withhold unverified aliases. No auth/extra CLI/verification,
+                # status mutation or promotion; manual switching is untouched.
+                accounts=janitor_hotseat.RepairLedger().quarantine(accounts)
+            if repair_policy is not None and options['mode']=='automatic':
+                # The maintained autonomy loop is serial, but its worker is
+                # not. Capture its owned offer BEFORE the read so completion
+                # during that read cannot lend pre-verification target credit.
+                withheld=repair_inflight | {p.alias for p in self.auth_repair.profiles}
+                if withheld:
+                    accounts=[dict(a) if a['active'] or a['alias'] not in withheld
+                              else {**a,'remaining':None,'secondary':None} for a in accounts]
             decision=janitor_hotseat.decide(accounts,janitor_hotseat.floor_for(options,provider))
             if not janitor_builtins.is_current(run['run_id']):return
             switched=None;outcome='completed';error=''
@@ -287,9 +365,11 @@ class AutonomyJanitors:
                     try:backends.by_id(provider).on_credential_change()
                     except Exception:pass
                 else:outcome='failed';error=error or f'{provider}: Hotseat did not confirm the switch'
+            _hotseat_receipt('action',lambda:hotseat_status.record_action(provider,decision,mode=options['mode'],switched=switched,now=now,floor_pct=janitor_hotseat.floor_for(options,provider),cadence_s=base,next_due_at=lane_next_run(lane,owner,base,key)))
             text=janitor_hotseat.preview(provider,decision,mode=options['mode'],switched=switched)
+            if repair_text:text=(text+'; ' if text else '')+repair_text
             # Advice and exhaustion repeat every interval; notify once per distinct situation.
-            marker=f'hotseat-switcher.{provider}.notified';situation=json.dumps([decision['action'],decision.get('active'),decision.get('target'),switched],sort_keys=True)
+            marker=f'hotseat-switcher.{provider}.notified';situation=json.dumps([decision['action'],decision.get('active'),decision.get('target'),switched]+([repair_text] if repair_text else []),sort_keys=True)
             # Worked: it switched, or found a situation that needs the owner (switch advice, exhaustion).
             worked=bool(switched) or decision['action']!='noop'
             if text and (decision['action']=='switch' and switched or settings_store.get_text(marker,default='')!=situation):
@@ -297,11 +377,15 @@ class AutonomyJanitors:
                 rid=digest([provider,situation,now,owner['generation']])
                 payload={'notification_id':rid,'session':owner['session'],'agent_id':owner['agent_id'],'persona':owner['name'],'preview':text,'push':True,'reason':'account_switch','owner_generation':owner['generation']}
                 janitor_store.insert_quota_receipt(rid,run['run_id'],json.dumps(payload),now)
-            elif decision['action']=='noop':settings_store.set_text(marker,'')
+            elif decision['action']=='noop' and not repair_text:settings_store.set_text(marker,'')
             summary=text or f"{provider}: {decision.get('active','?')} keeps {decision.get('remaining','?')}% of the {janitor_hotseat.WINDOW_LABEL[provider]} window"
             activity='failed' if outcome=='failed' else 'worked' if worked else 'idle'
             janitor_builtins.complete_run(run['run_id'],outcome,result={'summary':summary[:500],'status':decision['action'],'reason':decision.get('reason','')[:500]},error=error,activity=activity,summary=summary[:300])
             lane_record(lane,owner,base,activity,summary,now)
+            # No active ordinary demand run is retained across auth work. The
+            # next scheduled private read owns independent quota verification.
+            if repair_enabled and not self.stop_event.is_set():
+                self.auth_repair.offer(repair_owner,run['run_id'],repair_payload,read_origin=repair_started)
         self.deliver_notifications(owner)
 
     def label_audit_once(self):

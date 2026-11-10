@@ -40,7 +40,7 @@ fn row(value: Value) -> Message {
 }
 
 fn options(expanded: &[&str], host_now_ms: i64) -> Options {
-    Options { explanations: true, expanded: expanded.iter().map(|s| (*s).to_owned()).collect::<HashSet<_>>(), host_now_ms }
+    Options { explanations: true, expanded: expanded.iter().map(|s| (*s).to_owned()).collect::<HashSet<_>>(), host_now_ms, hide_activity: false }
 }
 
 fn titles(presented: &Presented) -> Vec<String> {
@@ -87,6 +87,19 @@ fn items_read_as_rows_in_ordinal_order() {
     let tool = &open.entries[3];
     assert_eq!(tool.lines.len(), 50, "expanded: the whole tail the Host keeps");
     assert_eq!(tool.more, "+762 earlier lines");
+}
+
+#[test]
+fn hidden_activity_keeps_only_live_messages() {
+    let view = turn_full(after(17));
+    let mut opts = options(&[], 1759480008200);
+    opts.hide_activity = true;
+
+    let presented = present(&view, &[], &opts);
+
+    assert_eq!(presented.entries.len(), 1);
+    assert_eq!(presented.entries[0].kind, Kind::Message);
+    assert_eq!(presented.entries[0].text, "Let me look at the parser and its tests.");
 }
 
 #[test]

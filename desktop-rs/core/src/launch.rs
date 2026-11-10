@@ -6,7 +6,7 @@
 /// starts must not inherit them.
 pub const RESTORE_VARIABLES: &[&str] = &["CLARP_RESTORE_DESKTOP", "CLARP_RESTORE_SESSION"];
 
-pub const BACKENDS: &[&str] = &["claude", "codex", "grok", "agy", "opencode", "deepseek"];
+pub const BACKENDS: &[&str] = &["claude", "codex", "grok", "agy", "opencode", "deepseek", "muse"];
 
 pub const HELP: &str = "Usage: clarp-desktop [options]
 Clarp desktop and agent launcher
@@ -18,7 +18,7 @@ Options:
   --contact                Start with an available contact, overriding Settings
   --new-agent              Start an agent; prompt for backend if omitted
   --no-new-agent           Open the desktop without starting an agent, overriding Settings
-  --backend <backend>      Start with claude, codex, grok, agy, opencode, or deepseek (implies --new-agent)
+  --backend <backend>      Start with claude, codex, grok, agy, opencode, deepseek, or muse (implies --new-agent)
   --cwd <directory>        Workspace directory; skip directory selection
   --model <model>          Use this backend model ID
   --effort <effort>        Use this model reasoning effort

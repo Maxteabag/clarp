@@ -6,21 +6,23 @@ import hashlib
 import json
 import re
 # Defined before `db`: db_schema imports SCHEMA while `db` is still loading.
-SCHEMA = '''CREATE TABLE IF NOT EXISTS form_submissions (
- submission_id TEXT PRIMARY KEY,
- artifact_id TEXT NOT NULL REFERENCES artifacts(artifact_id),
- version TEXT NOT NULL,
- session TEXT NOT NULL,
- answers_json TEXT NOT NULL,
- payload_hash TEXT NOT NULL,
- prompt TEXT NOT NULL,
- status TEXT NOT NULL DEFAULT 'pending',
- created_at INTEGER NOT NULL,
- delivered_at INTEGER,
- synthesize_audio INTEGER NOT NULL DEFAULT 0 CHECK (synthesize_audio IN (0,1))
-);
-CREATE INDEX IF NOT EXISTS idx_form_submission_pending ON form_submissions(status,created_at);'''
+from .persistence.schema_parts.html_forms import SCHEMA
 from . import db
+from . import lifecycle as lk
+from .lifecycle import Edge, Lifecycle, WaitForever
+
+# A submission's delivery to its agent (docs/architecture/lifecycles.md). This
+# module is the only writer of form_submissions.status. The insert in submit()
+# creates the row in the column default, pending.
+FORM_SUBMISSION = Lifecycle(
+    name="form_submission", owner="lib/html_forms.py",
+    table="form_submissions", key="submission_id", state_column="status",
+    entered_columns={"delivered": "delivered_at"},
+    initial="pending", final=frozenset({"delivered"}),
+    edges=(Edge("deliver", frozenset({"pending"}), "delivered"),),
+    waits={"pending": WaitForever(
+        "dispatch delivers it once its agent exists and is not archived")},
+)
 
 
 # A read-only form is an HTML report: the same sandboxed renderer, no answers.
@@ -185,8 +187,17 @@ def receipt(row) -> dict:
 
 
 def pending() -> list[dict]:
-    return [dict(r) for r in db.conn().execute("SELECT * FROM form_submissions WHERE status='pending' ORDER BY created_at LIMIT 100").fetchall()]
+    # Only for an agent that still exists: a deleted or archived agent's
+    # submission is not dispatched (and refused) every pass, and never holds
+    # back a live agent's (AUT-08). It stays pending, so an unarchived agent
+    # still gets it.
+    return [dict(r) for r in db.conn().execute(
+        "SELECT f.* FROM form_submissions f WHERE f.status='pending' AND EXISTS ("
+        "SELECT 1 FROM agents a WHERE a.session=f.session"
+        " AND a.deleted_at IS NULL AND a.archived_at IS NULL)"
+        " ORDER BY f.created_at LIMIT 100").fetchall()]
 
 
 def mark_delivered(submission_id: str) -> None:
-    db.conn().execute("UPDATE form_submissions SET status='delivered',delivered_at=? WHERE submission_id=? AND status='pending'", (db.now_ms(), submission_id))
+    lk.compare_and_set_where(db.conn(), FORM_SUBMISSION, "deliver", where="submission_id=?",
+                             params=(submission_id,), now=db.now_ms())

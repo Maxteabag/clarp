@@ -43,16 +43,18 @@ from typing import Any, Callable, Optional
 from .. import agents as agents_db
 from .. import config as _config
 from .. import events
-from .. import provider_capabilities
+from .claude_models import claude_model_pin
 from .. import turn_lifecycle
 from ..turn_lifecycle import TurnEvent
-from ..live_pacing import LivePacer
+from ..stream_pacing import LivePacer
+from ..claude_reply_evidence import ClaudeReplyEvidence, REPLY_CODEC
 from ..log import log, log_exception
 from ..proc_util import stderr_text
 from ..process_registry import TurnHandle
 from ..voice_preamble import persona_identity_instruction
-from .base import BackendBrand, Backend, CompactionStrategy, resolve
-from .stream_json import launch, start_drain
+from ..backend_catalogue import CLAUDE
+from .base import CatalogueDefault, BackendBrand, Backend, CompactionStrategy, resolve
+from .stream_json import launch, start_drain, stop_after_drain_failure
 
 
 def _projects_root(home: pathlib.Path | None) -> pathlib.Path | None:
@@ -259,7 +261,8 @@ def _settle_live_message(*, agent_id: str, backend_session_id: str, trace_id: st
 
 
 def _store_live_partial(*, agent_id: str, backend_session_id: str, trace_id: str,
-                        text: str, session: str, stream, item_key: str = "") -> None:
+                        text: str, session: str, stream, item_key: str = "",
+                        provider_genuine: bool = False) -> None:
     if not agent_id or not backend_session_id:
         return
     try:
@@ -269,6 +272,7 @@ def _store_live_partial(*, agent_id: str, backend_session_id: str, trace_id: str
             trace_id=trace_id,
             text=text,
             item_key=item_key,
+            **({"_provider_genuine": True} if provider_genuine else {}),
         )
         if not row or not row.get("changed"):
             return
@@ -294,45 +298,34 @@ class ClaudeBackend(Backend):
     by transcript file, pre-mints its session id and reports through the hook
     plugin."""
     # --- catalogue data ---------------------------------------------------
-    id = 'claude'
-    label = 'Claude'
-    required_binary = 'claude'
-    badge = 'BackendClaude'
-    detail = 'Runs on Claude Code.'
-    symbol = 'sparkles'
-    brand = BackendBrand('#e08b6a', '#c9603d', '#d97757', '#b85433')
-    supports_fork = True
-    supports_transcript_streaming = True
-    supports_mcp = True
-    supports_usage = True
-    login_kind = 'cli'
-    efforts = ('low', 'medium', 'high', 'xhigh', 'max')
-    effort_scope = 'model'
-    runner = 'clarp'
-    config_model_field = 'claude_model'
-    config_effort_field = 'claude_effort'
-    config_account_switch_field = 'claude_account_switch_command'
-    context_window = 1000000
+    _catalogue_definition = CLAUDE
+    id = CatalogueDefault('id')
+    label = CatalogueDefault('label')
+    required_binary = CatalogueDefault('required_binary')
+    badge = CatalogueDefault('badge')
+    detail = CatalogueDefault('detail')
+    symbol = CatalogueDefault('symbol')
+    brand = CatalogueDefault('brand')
+    supports_fork = CatalogueDefault('supports_fork')
+    supports_transcript_streaming = CatalogueDefault('supports_transcript_streaming')
+    supports_transcript_tail_apply = True
+    supports_mcp = CatalogueDefault('supports_mcp')
+    supports_usage = CatalogueDefault('supports_usage')
+    login_kind = CatalogueDefault('login_kind')
+    efforts = CatalogueDefault('efforts')
+    effort_scope = CatalogueDefault('effort_scope')
+    runner = CatalogueDefault('runner')
+    config_model_field = CatalogueDefault('config_model_field')
+    config_effort_field = CatalogueDefault('config_effort_field')
+    config_account_switch_field = CatalogueDefault('config_account_switch_field')
+    context_window = CatalogueDefault('context_window')
     # Host ``claude_cli`` values -> the executable each selects; the first
     # entry is the default an unknown value falls back to.
     executable_choices = (
         ('claude', ('claude', 'claude-code', 'claude_code', 'official')),
         ('clarp', ('clarp', 'clarp-cli', 'clarp_cli')),
     )
-    fallback_models = (
-        ('fable', 'Fable'),
-        ('opus', 'Opus'),
-        ('sonnet', 'Sonnet'),
-        ('haiku', 'Haiku'),
-        ('claude-fable-5-1', 'Claude Fable 5.1'),
-        ('claude-opus-5-5', 'Claude Opus 5.5'),
-        ('claude-opus-5', 'Claude Opus 5'),
-        ('claude-sonnet-5-5', 'Claude Sonnet 5.5'),
-        ('claude-sonnet-5', 'Claude Sonnet 5'),
-        ('claude-haiku-4-5', 'Claude Haiku 4.5'),
-        ('claude-opus-4-8', 'Claude Opus 4.8'),
-        ('claude-sonnet-4-6', 'Claude Sonnet 4.6'),
-    )
+    fallback_models = CatalogueDefault('fallback_models')
 
 
     # --- the runner -------------------------------------------------------
@@ -414,7 +407,7 @@ class ClaudeBackend(Backend):
                 if scoped:
                     cmd += ["--mcp-config", scoped]
         # Optional per-agent model / reasoning-effort pins. Empty → CLI default.
-        model = provider_capabilities.claude_model_pin(model)
+        model = claude_model_pin(model)
         if model:
             cmd += ["--model", model]
         if effort:
@@ -573,13 +566,17 @@ class ClaudeBackend(Backend):
         # marked final in place.
         message = {"key": "", "text": ""}
 
-        def new_pacer(key: str) -> LivePacer:
-            return LivePacer(lambda text: _store_live_partial(
+        evidence = ClaudeReplyEvidence()
+
+        def new_pacer(key: str):
+            provenance = {"genuine": False}
+            paced = LivePacer(lambda text: _store_live_partial(
                 agent_id=agent_id, backend_session_id=bound["backend_session_id"],
                 trace_id=trace_id, text=text, session=session, stream=stream,
-                item_key=key))
+                item_key=key, provider_genuine=provenance["genuine"]))
+            return paced, provenance
 
-        pacer = new_pacer("")
+        pacer, provenance = new_pacer("")
         from ..live_claude import ClaudeLiveItems
         from ..message_live import _live_message_id
         items = ClaudeLiveItems(
@@ -588,15 +585,10 @@ class ClaudeBackend(Backend):
                 agent_id, bound["backend_session_id"] or "", trace_id, key))
 
         def settle_message() -> None:
-            if message["text"]:
-                pacer.offer(message["text"], final=True)
-                _settle_live_message(
-                    agent_id=agent_id, backend_session_id=bound["backend_session_id"],
-                    trace_id=trace_id, item_key=message["key"], session=session,
-                    stream=stream)
-            pacer.cancel()
+            self._drain_settle(message, pacer, bound, agent_id, trace_id, session, stream)
         isolated_texts: list[str] = []
         live_backend_session_id = backend_session_id
+        reported = False        # a terminal outcome reached on_result/on_error
         try:
             if proc.stdout is None:
                 return
@@ -612,6 +604,8 @@ class ClaudeBackend(Backend):
                     continue
                 typ = ev.get("type")
                 sub = ev.get("subtype")
+                if evidence.suppress_event(ev):
+                    continue
                 items.on_event(ev)
                 if typ == "rate_limit_event":
                     info = ev.get("rate_limit_info")
@@ -627,19 +621,9 @@ class ClaudeBackend(Backend):
                         saw_init = True
                         live_backend_session_id = sid
                         bound["backend_session_id"] = sid
-                        log("clarpSessionInit", f"sid={sid} trace={trace_id or '∅'}")
-                        if on_session_init is not None:
-                            try:
-                                accepted = on_session_init(sid)
-                                if accepted is False:
-                                    if proc.poll() is None:
-                                        handle.terminate() if handle else proc.terminate()
-                                    if on_error is not None:
-                                        on_error("backend session binding rejected")
-                                    return
-                            except Exception as e:        # noqa: BLE001
-                                log_exception("clarpRunnerInitCbFail", e,
-                                              detail=trace_id or sid)
+                        if not self._drain_init(
+                                sid, trace_id, on_session_init, on_error, proc, handle):
+                            return
                 elif _is_assistant_event(ev):
                     current = _stream_phase(ev)
                     if current and current != phase and agent_id and not isolated:
@@ -650,38 +634,12 @@ class ClaudeBackend(Backend):
                     if message_id and message_id != message["key"]:
                         settle_message()
                         message["key"], message["text"] = message_id, ""
-                        pacer = new_pacer(message_id)
+                        pacer, provenance = new_pacer(message_id)
                     if not isolated and _is_message_stop(ev):
                         settle_message()
-                    text, is_delta = _assistant_event_text(ev)
-                    if text:
-                        if isolated and not is_delta:
-                            isolated_texts.append(text)
-                        elif isolated and is_delta:
-                            if isolated_texts:
-                                isolated_texts[-1] += text
-                            else:
-                                isolated_texts.append(text)
-                        if is_delta:
-                            live_text += text
-                        elif text.startswith(live_text):
-                            live_text = text
-                        elif live_text and not live_text.endswith(text):
-                            live_text += text
-                        else:
-                            live_text = text
-                        current_text = message["text"]
-                        if is_delta:
-                            current_text += text
-                        elif text.startswith(current_text):
-                            current_text = text
-                        elif current_text and not current_text.endswith(text):
-                            current_text += text
-                        else:
-                            current_text = text
-                        message["text"] = current_text
-                        if not isolated:
-                            pacer.offer(current_text)
+                    provenance["genuine"] |= evidence.current_is_genuine
+                    live_text = self._drain_text(
+                        ev, isolated, isolated_texts, live_text, message, pacer)
                 elif typ == "result":
                     # One process can run several CLI turns: resuming a
                     # session whose last process left background tasks
@@ -693,69 +651,168 @@ class ClaudeBackend(Backend):
                     saw_result = True
                     if not isolated:
                         settle_message()
-                    assistant_text = (
-                        "\n\n".join(t for t in isolated_texts if t.strip())
-                        if isolated else live_text
-                    )
-                    final_result = (
-                        {**ev, "_assistant_text": assistant_text}
-                        if assistant_text else ev)
+                    final_result = self._drain_result(ev, isolated, isolated_texts, live_text, evidence)
                     live_text = ""
                     isolated_texts = []
             rc = proc.wait()
             if final_result is not None and on_result is not None:
+                reported = True
                 try:
                     on_result(final_result)
                 except Exception as e:                    # noqa: BLE001
                     log_exception("clarpRunnerResultCbFail", e,
                                   detail=trace_id)
-            err = stderr_text(proc)
-            if rc != 0 and not saw_usage_limit:
-                log("clarpExitErr", f"rc={rc} trace={trace_id or '∅'} "
-                                    f"stderr={(err or '')[:500]!r}")
-                if on_error is not None:
-                    try:
-                        on_error(err or f"clarp exited rc={rc}")
-                    except Exception as e:                # noqa: BLE001
-                        log_exception("clarpRunnerErrCbFail", e, detail=trace_id)
-            elif not saw_result and not saw_usage_limit:
-                msg = err or (
-                    f"clarp exited rc={rc} without stream-json result or system.init"
-                )
-                log("clarpNoResult", f"trace={trace_id or '∅'} "
-                                      f"stderr={(err or '')[:500]!r}")
-                if on_error is not None:
-                    try:
-                        on_error(msg)
-                    except Exception as e:                # noqa: BLE001
-                        log_exception("clarpRunnerErrCbFail", e, detail=trace_id)
+            error = self._drain_exit_error(proc, rc, saw_usage_limit, saw_result, trace_id)
+            if error is not None and on_error is not None:
+                reported = True
+                try:
+                    on_error(error)
+                except Exception as e:                    # noqa: BLE001
+                    log_exception("clarpRunnerErrCbFail", e, detail=trace_id)
             if not saw_init:
                 log("clarpNoInitEvent",
                     f"trace={trace_id or '∅'} — turn ran but stream-json "
                     f"never delivered system.init; transcript_streamer may "
                     f"have missed the session binding")
         except Exception as e:                            # noqa: BLE001
-            log_exception("clarpRunnerDrainFail", e, detail=trace_id)
+            self._drain_failure(e, proc, handle, on_error, trace_id, reported)
         finally:
-            if not isolated and not saw_result and message["text"]:
-                pacer.offer(message["text"], final=True)
-            pacer.cancel()
-            if agent_id and handle is not None and not isolated:
-                self.unregister_handle(agent_id, handle)
-            # This process is gone, and its background Bash tasks with it.
-            # (stdout can close a moment before the exit; past that, the
-            # observer reaps the turn by its process identity.)
-            if turn_token:
-                try:
-                    proc.wait(timeout=5)
-                except Exception:                         # noqa: BLE001
-                    pass
-            if turn_token and proc.poll() is not None:
-                try:
-                    from .. import provider_background_jobs as provider_jobs
-                    provider_jobs.turn_exited(turn_token)
-                except Exception as e:                    # noqa: BLE001
-                    log_exception("providerTurnExitFail", e, detail=trace_id)
+            self._drain_cleanup(
+                proc, handle, pacer, message, isolated, saw_result,
+                agent_id, turn_token, trace_id)
+
+    def _drain_settle(self, message, pacer, bound, agent_id, trace_id, session, stream):
+        """Settle the current message with the pacer selected by the drain."""
+        if message["text"]:
+            pacer.offer(message["text"], final=True)
+            _settle_live_message(
+                agent_id=agent_id, backend_session_id=bound["backend_session_id"],
+                trace_id=trace_id, item_key=message["key"], session=session,
+                stream=stream)
+        pacer.cancel()
+
+    def _drain_result(self, ev, isolated, isolated_texts, live_text, evidence):
+        """Attach only this result's accumulated assistant text."""
+        assistant_text = (
+            "\n\n".join(t for t in isolated_texts if t.strip())
+            if isolated else live_text
+        )
+        final_result = (
+            {**ev, "_assistant_text": assistant_text}
+            if assistant_text else ev)
+        if (not assistant_text and not ev.get("last_agent_message")
+                and not ev.get("message")
+                and evidence.suppresses_result_text(ev.get("result"))):
+            # Preserve raw provider diagnostics but prevent the
+            # text extractor from falling back to this SDK text.
+            final_result = {**ev, "_assistant_text": None,
+                            "_clarp_suppressed_reply": True}
+        facts = evidence.finish_result()
+        if facts is not None:
+            final_result = {**final_result, "_clarp_reply_provider": REPLY_CODEC,
+                            "_clarp_reply_evidence": facts}
+        return final_result
+
+    def _drain_init(self, sid, trace_id, on_session_init, on_error, proc, handle):
+        """Report a session binding; False means the callback rejected it."""
+        log("clarpSessionInit", f"sid={sid} trace={trace_id or '∅'}")
+        if on_session_init is not None:
+            try:
+                accepted = on_session_init(sid)
+                if accepted is False:
+                    if proc.poll() is None:
+                        handle.terminate() if handle else proc.terminate()
+                    if on_error is not None:
+                        on_error("backend session binding rejected")
+                    return False
+            except Exception as e:        # noqa: BLE001
+                log_exception("clarpRunnerInitCbFail", e,
+                              detail=trace_id or sid)
+        return True
+
+    def _drain_text(self, ev, isolated, isolated_texts, live_text, message, pacer):
+        """Accumulate a provider text event and offer its current message to the pacer."""
+        text, is_delta = _assistant_event_text(ev)
+        if text:
+            if isolated and not is_delta:
+                isolated_texts.append(text)
+            elif isolated and is_delta:
+                if isolated_texts:
+                    isolated_texts[-1] += text
+                else:
+                    isolated_texts.append(text)
+            if is_delta:
+                live_text += text
+            elif text.startswith(live_text):
+                live_text = text
+            elif live_text and not live_text.endswith(text):
+                live_text += text
+            else:
+                live_text = text
+            current_text = message["text"]
+            if is_delta:
+                current_text += text
+            elif text.startswith(current_text):
+                current_text = text
+            elif current_text and not current_text.endswith(text):
+                current_text += text
+            else:
+                current_text = text
+            message["text"] = current_text
+            if not isolated:
+                pacer.offer(current_text)
+        return live_text
+
+    def _drain_exit_error(self, proc, rc, saw_usage_limit, saw_result, trace_id):
+        """Read and log the terminal error, before the caller invokes on_error."""
+        err = stderr_text(proc)
+        if rc != 0 and not saw_usage_limit:
+            log("clarpExitErr", f"rc={rc} trace={trace_id or '∅'} "
+                                f"stderr={(err or '')[:500]!r}")
+            return err or f"clarp exited rc={rc}"
+        elif not saw_result and not saw_usage_limit:
+            msg = err or (
+                f"clarp exited rc={rc} without stream-json result or system.init"
+            )
+            log("clarpNoResult", f"trace={trace_id or '∅'} "
+                                  f"stderr={(err or '')[:500]!r}")
+            return msg
+        return None
+
+    def _drain_failure(self, e, proc, handle, on_error, trace_id, reported):
+        """Stop a failed drain and report only if no terminal callback was reached."""
+        log_exception("clarpRunnerDrainFail", e, detail=trace_id)
+        # Nothing reads this CLI any more: stop it and end the turn once.
+        stop_after_drain_failure(proc, handle)
+        if not reported and on_error is not None:
+            try:
+                on_error(f"clarp drain failed: {str(e)[:300]}")
+            except Exception as cb:                   # noqa: BLE001
+                log_exception("clarpRunnerErrCbFail", cb, detail=trace_id)
+
+    def _drain_cleanup(self, proc, handle, pacer, message, isolated, saw_result,
+                       agent_id, turn_token, trace_id):
+        """Settle pacing and process ownership when the drain leaves its try block."""
+        if not isolated and not saw_result and message["text"]:
+            pacer.offer(message["text"], final=True)
+        pacer.cancel()
+        if agent_id and handle is not None and not isolated:
+            self.unregister_handle(agent_id, handle)
+        # This process is gone, and its background Bash tasks with it.
+        # (stdout can close a moment before the exit; past that, the
+        # observer reaps the turn by its process identity.)
+        if turn_token:
+            try:
+                proc.wait(timeout=5)
+            except Exception:                         # noqa: BLE001
+                pass
+        if turn_token and proc.poll() is not None:
+            try:
+                from .. import provider_background_jobs as provider_jobs
+                provider_jobs.turn_exited(turn_token)
+            except Exception as e:                    # noqa: BLE001
+                log_exception("providerTurnExitFail", e, detail=trace_id)
+
 
     # ---- orchestrator routing ----------------------------------------------
 

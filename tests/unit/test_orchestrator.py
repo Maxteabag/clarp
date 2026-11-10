@@ -650,7 +650,7 @@ def test_provider_options_list_every_routing_backend_plus_apis(monkeypatch):
                         lambda name: f"/bin/{name}" if name in {"claude", "grok"} else None)
     options = orchestrator.provider_options()
     ids = [row["id"] for row in options]
-    assert ids == ["claude", "codex", "agy", "grok", "opencode", "deepseek",
+    assert ids == ["claude", "codex", "agy", "grok", "opencode", "deepseek", "muse",
                    "typesafe", "openai"]
     # DeepSeek fronts the OpenCode binary, so it is installed exactly when OpenCode is.
     by_id_probe = {row["id"]: row for row in options}

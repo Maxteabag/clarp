@@ -1,0 +1,47 @@
+{
+  "case": "F15-sentinels",
+  "janitor_enabled": true,
+  "served_at": 1800000060000,
+  "note": "Every SENTINEL/leak-example/Qz9/'/home/sentinel' value in this input must be absent from the wire file. Masked aliases arrive already masked: an email-like alias becomes 'x…@y…'; path, URL, token-like or overlong (>32) aliases become 'account', numbered when they collide.",
+  "steps": [
+    {"op": "read", "provider": "claude", "received_at": 1800000000000, "payload": {
+      "generated_at": 1800000000.0, "sessions": 1, "error": null,
+      "preview": "Claude: switched to b. b has 90% of the 5-hour window left SENTINELPREVIEW",
+      "stderr": "warning: token sk-ant-oat01-Qz9Qz9Qz9Qz9Qz9Qz9Qz9Qz9Qz9Qz9 refreshed SENTINELSTDERR",
+      "accounts": [
+        {"alias": "sentinel.person@leak-example.test", "email": "sentinel.person@leak-example.test",
+         "org": "Sentinel Org SENTINELORG", "plan": "max", "plan_label": "sentinel.person@leak-example.test",
+         "rate_limit_tier": null, "is_active": true, "error": null, "signin_days_left": 30.0,
+         "token": "sk-ant-oat01-Qz9Qz9Qz9Qz9Qz9Qz9Qz9Qz9Qz9Qz9", "preview": "SENTINELPREVIEW row",
+         "usage": {"status": "allowed", "available": true, "limited": false, "severity": null,
+                   "used_5h": 0.25, "reset_5h": 1800010800.25, "used_7d": 0.5, "reset_7d": 1800500000.5,
+                   "scoped": [], "blocked_models": [], "extra_usage_enabled": false,
+                   "extra_usage_reason": "https://leak-example.test/billing?code=SENTINELCODE", "plan": "max"}},
+        {"alias": "/home/sentinel/.claude/profiles/work", "email": "work@leak-example.test", "org": null,
+         "plan": "sk-ant-oat01-Qz9Qz9Qz9Qz9Qz9Qz9Qz9Qz9Qz9Qz9", "plan_label": "https://leak-example.test/plan",
+         "rate_limit_tier": null, "is_active": false,
+         "error": "refresh failed: open /home/sentinel/.claude/.credentials.json: permission denied SENTINELERR",
+         "usage": null, "signin_days_left": null},
+        {"alias": "this-alias-is-far-too-long-to-show-on-a-phone-row", "email": "long@example.invalid", "org": null,
+         "plan": "max", "plan_label": "Max 5×", "rate_limit_tier": null, "is_active": false, "error": null,
+         "signin_days_left": 30.0,
+         "usage": {"status": "allowed", "available": true, "limited": false, "severity": null,
+                   "used_5h": 0.1, "reset_5h": 1800010800.25, "used_7d": 0.2, "reset_7d": 1800500000.5,
+                   "scoped": [], "blocked_models": [], "extra_usage_enabled": false,
+                   "extra_usage_reason": null, "plan": "max"}},
+        {"alias": "sk-ant-oat01-Qz9Qz9Qz9Qz9Qz9Qz9Qz9Qz9Qz9Qz9", "email": "tok@example.invalid", "org": null,
+         "plan": "pro", "plan_label": "Pro", "rate_limit_tier": null, "is_active": false, "error": null,
+         "signin_days_left": 30.0,
+         "usage": {"status": "allowed", "available": true, "limited": false, "severity": null,
+                   "used_5h": 0.5, "reset_5h": 1800010800.25, "used_7d": 0.5, "reset_7d": 1800500000.5,
+                   "scoped": [], "blocked_models": [], "extra_usage_enabled": false,
+                   "extra_usage_reason": null, "plan": "pro"}}
+      ]}},
+    {"op": "action", "provider": "claude",
+     "decision": {"action": "switch", "active": "sentinel.person@leak-example.test", "remaining": 75,
+                  "target": "/home/sentinel/.claude/profiles/work", "target_remaining": 90, "rung": 25,
+                  "reason": "SENTINELPREVIEW decision text"},
+     "mode": "notify", "switched": null, "now": 1800000001000, "floor_pct": 25, "cadence_s": 300,
+     "next_due_at": 1800000301000}
+  ]
+}

@@ -21,6 +21,7 @@ import pytest
 REPO = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "server"))
 from lib import config, custom_tts_adapters, google_tts, tts_mode, tts_providers, tts_worker  # noqa: E402
+from lib import tts_registry
 
 SPEC = importlib.util.spec_from_file_location("collision_admin", REPO / "bin/clarp-admin.py")
 admin = importlib.util.module_from_spec(SPEC)
@@ -419,7 +420,7 @@ def no_google(monkeypatch):
         return boom
     monkeypatch.setattr(google_tts, "credentials", forbid("google_tts.credentials"))
     monkeypatch.setattr(google_tts, "_urllib_transport", forbid("google transport"))
-    monkeypatch.setattr(tts_worker, "_google_voice", forbid("tts_worker._google_voice"))
+    monkeypatch.setattr(tts_registry, "_google_voice", forbid("tts_worker._google_voice"))
 
 
 def test_the_route_is_refused_before_any_voice_interpretation_without_a_fallback(root, monkeypatch, no_google):
@@ -441,7 +442,7 @@ def test_an_explicit_non_google_fallback_speaks_with_the_code_as_its_error(root,
         spoke.append(voice_id)
         pathlib.Path(out_path).write_bytes(b"ID3")
         return 3
-    monkeypatch.setattr(tts_worker, "cartesia_synthesize", cartesia)
+    monkeypatch.setattr(tts_registry, "cartesia_synthesize", cartesia)
     monkeypatch.setattr(tts_worker, "_emit", lambda *a, **k: events.append((a, k)))
     tts_worker._synthesize(cfg=cfg, row={"text": "hello", "voice_id": json.dumps({"google": CHIRP}),
                                          "session": "s"},
@@ -460,7 +461,7 @@ def test_a_google_fallback_is_refused(root, monkeypatch, tmp_path, no_google):
 
     def failing_cartesia(**kwargs):
         raise RuntimeError("cartesia down")
-    monkeypatch.setattr(tts_worker, "cartesia_synthesize", failing_cartesia)
+    monkeypatch.setattr(tts_registry, "cartesia_synthesize", failing_cartesia)
     with pytest.raises(google_tts.GoogleIdCollision) as refused:
         tts_worker._synthesize(cfg=cfg, row={"text": "hi", "voice_id": "v", "session": "s"},
                                agent={"persona": "Mike"}, out_path=tmp_path / "o.mp3", on_chunk=None,

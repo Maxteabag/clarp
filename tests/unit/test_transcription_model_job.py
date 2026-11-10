@@ -3,8 +3,9 @@ import pathlib
 import subprocess
 import sys
 
-from lib import agents, background_jobs, transcription_models
+from lib import agents, background_jobs, db, transcription_models
 from lib.background_job_watcher import BackgroundJobWatcher
+from tests.patching import patch_shared
 
 
 _SCRIPT = pathlib.Path(__file__).resolve().parents[2] / "scripts/transcription_model_job.py"
@@ -58,7 +59,7 @@ class RunningProcess(CompletingProcess):
 
 def _identity(monkeypatch):
     monkeypatch.setattr(worker.os, "getpid", lambda: 5252)
-    monkeypatch.setattr(
+    patch_shared(monkeypatch,
         background_jobs, "process_start_token",
         lambda pid: "boot:model-worker" if pid == 5252 else "")
 
@@ -122,7 +123,7 @@ def test_model_worker_failure_is_terminal(monkeypatch):
 def test_missing_model_worker_identity_fails_queued_generation(monkeypatch):
     job = _queued_job()
     monkeypatch.setattr(worker.os, "getpid", lambda: 5252)
-    monkeypatch.setattr(background_jobs, "process_start_token", lambda _pid: "")
+    patch_shared(monkeypatch, background_jobs, "process_start_token", lambda _pid: "")
 
     result = worker.supervise_install(
         handle=background_jobs.job_handle(job), model_id=MODEL_ID)
@@ -262,6 +263,40 @@ def test_cancellation_winning_at_process_exit_rolls_back_exact_generation(
     assert rollbacks == [(MODEL_ID, job["job_id"], job["generation"])]
     assert background_jobs.get(
         job["job_id"], reconcile=False)["status"] == "cancelled"
+
+
+def test_install_finishing_after_its_job_failed_rolls_back(monkeypatch):
+    # AUT-17: the reconciler failed the job (heartbeat expiry) while the
+    # install was still running. finish() changes nothing then, so the
+    # install must be rolled back instead of staying behind a failed job.
+    job = _queued_job()
+    _identity(monkeypatch)
+    rollbacks = []
+    monkeypatch.setattr(
+        transcription_models, "rollback_terminal_install",
+        lambda model_id, *, job_id, generation, statuses: rollbacks.append(
+            (model_id, job_id, generation, set(statuses))) or True)
+
+    class FailedOnExit(CompletingProcess):
+        def poll(self):
+            self.polls += 1
+            if self.polls == 1:
+                return None
+            db.conn().execute(
+                "UPDATE background_jobs SET status='failed', "
+                "terminal_reason='heartbeat_expired' WHERE job_id=?",
+                (job["job_id"],))
+            return 0
+
+    result = worker.supervise_install(
+        handle=background_jobs.job_handle(job), model_id=MODEL_ID,
+        popen=lambda *_args, **_kwargs: FailedOnExit(0),
+        monotonic=lambda: 0, sleep=lambda _seconds: None)
+
+    assert result == 130
+    assert rollbacks == [(MODEL_ID, job["job_id"], job["generation"], {"failed"})]
+    assert background_jobs.get(
+        job["job_id"], reconcile=False)["status"] == "failed"
 
 
 def test_old_cancelled_generation_cannot_remove_restarted_install(

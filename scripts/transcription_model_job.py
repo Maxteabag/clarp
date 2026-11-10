@@ -139,14 +139,26 @@ def supervise_install(
         sleep(GATE_INTERVAL_SEC)
 
     returncode = int(process.returncode or 0)
+    outcome = "succeeded" if returncode == 0 else "failed"
     terminal = background_jobs.finish(
-        job_id, generation=generation,
-        status="succeeded" if returncode == 0 else "failed",
+        job_id, generation=generation, status=outcome,
         reason="" if returncode == 0 else f"install_exit_{returncode}",
         worker_pid=worker_pid, worker_start_token=worker_token)
     if not terminal or terminal["status"] == "cancelled":
         _rollback_cancelled_install(
             model_id, job_id=job_id, generation=generation)
+        return 130
+    if terminal["status"] != outcome:
+        # finish() returns the row unchanged when the job had already ended:
+        # the reconciler failed it while the install ran. Do not leave an
+        # installed model behind a job that reads failed.
+        try:
+            transcription_models.rollback_terminal_install(
+                model_id, job_id=job_id, generation=generation,
+                statuses=frozenset({"failed"}))
+        except Exception as exc:  # noqa: BLE001 - report, the job already reads failed
+            print(f"transcription_model_job: rollback after failed job: {exc!r}",
+                  file=sys.stderr)
         return 130
     return returncode
 

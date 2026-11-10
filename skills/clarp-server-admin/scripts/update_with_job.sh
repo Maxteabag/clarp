@@ -28,12 +28,17 @@ set +e
 clarp-admin update --ref "$ref"
 result=$?
 set -e
+printf '%s\n' "$result" > "$state_dir/installer-exit"
 kill "$heartbeat_pid" 2>/dev/null || true
 wait "$heartbeat_pid" 2>/dev/null || true
-if [[ $result == 0 ]]; then
-    clarp-agent-bg "$session" job-finish "$handle"
-else
-    clarp-agent-bg "$session" job-fail "$handle" "Installer exited $result; inspect the private update log."
-fi
-printf '%s\n' "$result" > "$state_dir/installer-exit"
+# The restarted Host can hold the write lock for a few seconds while it
+# migrates; a failed tracking call must not hide the installer's result.
+for _ in 1 2 3 4 5 6; do
+    if [[ $result == 0 ]]; then
+        clarp-agent-bg "$session" job-finish "$handle" && break
+    else
+        clarp-agent-bg "$session" job-fail "$handle" "Installer exited $result; inspect the private update log." && break
+    fi
+    sleep 10
+done
 exit "$result"

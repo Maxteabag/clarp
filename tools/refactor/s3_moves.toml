@@ -1,0 +1,446 @@
+# S3 group moves (docs/architecture/route-registry.md, section 11).
+# Each [[group]] moves the listed Handler members out of server/server.py into
+# server/<module> as class <class>, applied by tools/refactor/s3_apply.py in this
+# order. A new or changed entry needs reviewer G3; re-applications need only the
+# automated gates.
+
+# Module-level helpers of server.py read by moved members; moved first, imported back.
+[helpers]
+names = [
+    "_runtime_paths",
+    "_truthy_header",
+    "_safe_upload_name",
+    "_raw_query_value",
+    "_PLAY_EVENTS",
+    "_clip_session_and_trace",
+]
+
+[[group]]
+name = "vocab"
+module = "lib/routes/vocab.py"
+class = "VocabRoutes"
+members = [
+    "_handle_vocab_assignments_get",
+    "_handle_vocab_assign_post",
+    "_handle_vocab_budgets_get",
+    "_handle_vocab_packs_delete",
+    "_handle_vocab_packs_get",
+    "_handle_vocab_packs_post",
+    "_handle_vocab_packs_update",
+    "_handle_vocab_preview_get",
+    "_handle_vocab_profile_get",
+    "_handle_vocab_profile_packs_post",
+    "_handle_vocab_profile_packs_remove",
+    "_handle_vocab_profiles_delete",
+    "_handle_vocab_profiles_get",
+    "_handle_vocab_profiles_post",
+    "_handle_vocab_profile_workspace",
+    "_handle_vocab_run_get",
+    "_handle_vocab_runs_get",
+    "_handle_vocab_terms_delete",
+    "_handle_vocab_terms_get",
+    "_handle_vocab_terms_post",
+    "_handle_vocab_terms_update",
+    "_handle_vocab_unassign_post",
+    "_vocab_body",
+]
+acknowledged_patches = [
+    {path = "tests/unit/test_startup_runtime_wait.py", name = "log_exception", reason = "patches server.log_exception to observe _recover_after_start, which stays in server.py; no vocab route is exercised", evidence = "4 Nov 00:28, on the applied tree 5d3eda9c (s3_merge of this recipe into integration 1d860f00), heavy-remote with a call tracer on lib/routes/vocab.py (tests/s3_ack_trace.py plugin, all threads): the whole file tests/unit/test_startup_runtime_wait.py made 0 calls into lib/routes/vocab.py (exit 0); control: tests/integration/test_vocab_http_characterization.py made 103 calls in 5 tests (exit 0)"},
+    {path = "tests/unit/test_server_helpers_characterization.py", name = "log_exception", reason = "patches server.log_exception to observe _spawn_voice_metrics, which stays in server.py; no vocab route is exercised", evidence = "4 Nov 01:20, on the applied tree 74636f53 (s3_merge of this recipe into integration c2075b06), heavy-remote with a call tracer on lib/routes/vocab.py (tests/s3_ack_trace.py plugin, all threads): the whole file tests/unit/test_server_helpers_characterization.py made 0 calls into lib/routes/vocab.py (exit 0); control in the same run: tests/integration/test_vocab_http_characterization.py made 116 calls in 8 tests"},
+]
+
+[[group]]
+name = "settings"
+module = "lib/routes/settings.py"
+class = "SettingsRoutes"
+members = [
+    "_connection_server_info",
+    "_handle_automation_settings_get",
+    "_handle_automation_settings_post",
+    "_handle_avatar_settings_get",
+    "_handle_avatar_settings_post",
+    "_handle_diagnostics_health",
+    "_handle_diagnostics_settings_get",
+    "_handle_diagnostics_settings_post",
+    "_handle_dirs",
+    "_handle_favorite_paths",
+    "_handle_herald_settings_get",
+    "_handle_herald_settings_post",
+    "_handle_judgments_decisions_get",
+    "_handle_judgments_settings_get",
+    "_handle_judgments_settings_post",
+    "_handle_launch_directories",
+    "_handle_past_sessions",
+    "_handle_personalities_settings_get",
+    "_handle_personalities_settings_post",
+    "_handle_relay_status",
+    "_handle_server_info",
+    "_handle_tool_explanation_settings_get",
+    "_handle_tool_explanation_settings_post",
+    "_handle_tool_explanations",
+    "_handle_tool_explanations_stats",
+]
+acknowledged_patches = [
+    {path = "tests/unit/test_startup_runtime_wait.py", name = "log_exception", reason = "patches server.log_exception to observe _recover_after_start, which stays in server.py; no settings route is exercised", evidence = "5 Nov 00:10, on the applied tree 1c77eedc (s3_merge of this recipe into integration 558f2e87 plus aa1e12a1, one commit per group), heavy-remote with a call tracer on lib/routes/settings.py (tests/s3_ack_trace.py plugin, all threads, setup included): the whole file tests/unit/test_startup_runtime_wait.py made 0 calls into lib/routes/settings.py, as did the other acknowledged files in the run; control in the same run (exit 0): tests/integration/test_send_select_log_http_characterization.py, test_settings_ops_http_characterization.py, test_settings_g0_http_characterization.py and test_voice_out_g0_http_characterization.py made 17 calls in 6 tests"},
+    {path = "tests/unit/test_server_helpers_characterization.py", name = "log_exception", reason = "patches server.log_exception to observe _spawn_voice_metrics, which stays in server.py; no settings route is exercised", evidence = "5 Nov 00:10, on the applied tree 1c77eedc (s3_merge of this recipe into integration 558f2e87 plus aa1e12a1, one commit per group), heavy-remote with a call tracer on lib/routes/settings.py (tests/s3_ack_trace.py plugin, all threads, setup included): the whole file tests/unit/test_server_helpers_characterization.py made 0 calls into lib/routes/settings.py, as did the other acknowledged files in the run; control in the same run (exit 0): tests/integration/test_send_select_log_http_characterization.py, test_settings_ops_http_characterization.py, test_settings_g0_http_characterization.py and test_voice_out_g0_http_characterization.py made 17 calls in 6 tests"},
+]
+
+[[group]]
+name = "providers"
+module = "lib/routes/providers.py"
+class = "ProviderRoutes"
+members = [
+    "_handle_application_activity",
+    "_handle_backend_auth",
+    "_handle_backend_auth_login",
+    "_handle_backend_auth_login_code",
+    "_handle_backend_auth_logout",
+    "_handle_desktop_presence",
+    "_handle_harness_provider_login",
+    "_handle_harness_provider_login_code",
+    "_handle_harness_provider_logout",
+    "_handle_harness_provider_models",
+    "_handle_harness_providers",
+    "_handle_managed_skills",
+    "_handle_managed_skills_update",
+    "_handle_paired_device_revoke",
+    "_handle_paired_devices",
+    "_handle_pairing_exchange",
+    "_handle_server_update",
+    "_handle_server_update_status",
+    "_handle_tts_providers_get",
+    "_handle_tts_providers_post",
+    "_harness_provider_call",
+]
+acknowledged_patches = [
+    {path = "tests/unit/test_startup_runtime_wait.py", name = "log_exception", reason = "patches server.log_exception to observe _recover_after_start, which stays in server.py; no provider route is exercised", evidence = "4 Nov 03:35, on the applied tree 2186b723 (s3_merge of this recipe into integration 32b11246, one commit per group), heavy-remote with a call tracer on lib/routes/providers.py (tests/s3_ack_trace.py plugin, all threads): the whole file tests/unit/test_startup_runtime_wait.py made 0 calls into lib/routes/providers.py, as did every other acknowledged file in the run; control in the same run (exit 0): tests/integration/test_settings_g0_http_characterization.py made 20 calls in 10 tests"},
+    {path = "tests/unit/test_server_helpers_characterization.py", name = "log_exception", reason = "patches server.log_exception to observe _spawn_voice_metrics, which stays in server.py; no provider route is exercised", evidence = "4 Nov 03:35, on the applied tree 2186b723 (s3_merge of this recipe into integration 32b11246, one commit per group), heavy-remote with a call tracer on lib/routes/providers.py (tests/s3_ack_trace.py plugin, all threads): the whole file tests/unit/test_server_helpers_characterization.py made 0 calls into lib/routes/providers.py, as did every other acknowledged file in the run; control in the same run (exit 0): tests/integration/test_settings_g0_http_characterization.py made 20 calls in 10 tests"},
+]
+
+[[group]]
+name = "ops"
+module = "lib/routes/ops.py"
+class = "OpsRoutes"
+members = [
+    "_handle_clog",
+    "_handle_crash",
+    "_handle_focus",
+    "_handle_get_location",
+    "_handle_register_device",
+    "_handle_remote_action",
+    "_handle_remote_action_get",
+    "_handle_request_calendar",
+    "_handle_request_location",
+    "_handle_set_location",
+]
+acknowledged_patches = [
+    {path = "tests/unit/test_startup_runtime_wait.py", name = "log_exception", reason = "patches server.log_exception to observe _recover_after_start, which stays in server.py; no ops route is exercised", evidence = "4 Nov 03:35, on the applied tree 2186b723 (s3_merge of this recipe into integration 32b11246, one commit per group), heavy-remote with a call tracer on lib/routes/ops.py (tests/s3_ack_trace.py plugin, all threads): the whole file tests/unit/test_startup_runtime_wait.py made 0 calls into lib/routes/ops.py, as did every other acknowledged file in the run; control in the same run (exit 0): tests/integration/test_ops_g0_http_characterization.py and test_clog_http_characterization.py made 13 calls in 12 tests"},
+    {path = "tests/unit/test_server_helpers_characterization.py", name = "log_exception", reason = "patches server.log_exception to observe _spawn_voice_metrics, which stays in server.py; no ops route is exercised", evidence = "4 Nov 03:35, on the applied tree 2186b723 (s3_merge of this recipe into integration 32b11246, one commit per group), heavy-remote with a call tracer on lib/routes/ops.py (tests/s3_ack_trace.py plugin, all threads): the whole file tests/unit/test_server_helpers_characterization.py made 0 calls into lib/routes/ops.py, as did every other acknowledged file in the run; control in the same run (exit 0): tests/integration/test_ops_g0_http_characterization.py and test_clog_http_characterization.py made 13 calls in 12 tests"},
+    {path = "tests/integration/test_media_range.py", name = "log", reason = "patches server.log to observe fileShortRead from the /media/ range stream, which stays in server.py; no ops route is exercised", evidence = "4 Nov 03:35, on the applied tree 2186b723 (s3_merge of this recipe into integration 32b11246, one commit per group), heavy-remote with a call tracer on lib/routes/ops.py (tests/s3_ack_trace.py plugin, all threads): the whole file tests/integration/test_media_range.py made 0 calls into lib/routes/ops.py, as did every other acknowledged file in the run; control in the same run (exit 0): tests/integration/test_ops_g0_http_characterization.py and test_clog_http_characterization.py made 13 calls in 12 tests"},
+    {path = "tests/unit/test_delivery_admission_v1.py", name = "log", reason = "patches server.log to observe the delivery observation bracket, which stays in server.py; no ops route is exercised", evidence = "4 Nov 03:35, on the applied tree 2186b723 (s3_merge of this recipe into integration 32b11246, one commit per group), heavy-remote with a call tracer on lib/routes/ops.py (tests/s3_ack_trace.py plugin, all threads): the whole file tests/unit/test_delivery_admission_v1.py made 0 calls into lib/routes/ops.py, as did every other acknowledged file in the run; control in the same run (exit 0): tests/integration/test_ops_g0_http_characterization.py and test_clog_http_characterization.py made 13 calls in 12 tests"},
+]
+
+[[group]]
+name = "artifacts"
+module = "lib/routes/artifacts.py"
+class = "ArtifactRoutes"
+members = [
+    "_broadcast_artifact",
+    "_handle_artifact_archive",
+    "_handle_artifact_create",
+    "_handle_artifact_discard",
+    "_handle_artifact_events_config",
+    "_handle_artifact_get",
+    "_handle_artifact_html",
+    "_handle_artifact_inbox_action",
+    "_handle_artifact_pin",
+    "_handle_artifact_submit",
+    "_handle_artifact_update",
+    "_handle_artifacts_list",
+    "_handle_attention",
+    "_handle_attention_inbox",
+    "_handle_decision_create",
+    "_handle_decision_dismiss",
+    "_handle_decision_resolve",
+    "_handle_decision_withdraw",
+    "_handle_pinned_artifacts",
+]
+
+[[group]]
+name = "media"
+module = "lib/routes/media.py"
+class = "MediaRoutes"
+members = [
+    "_handle_media_list",
+    "_handle_media_publish",
+    "_handle_upload",
+]
+acknowledged_patches = [
+    {path = "tests/unit/test_startup_runtime_wait.py", name = "log_exception", reason = "patches server.log_exception to observe _recover_after_start, which stays in server.py; no media route is exercised", evidence = "4 Nov 05:10, on the applied tree 92dbfb43 (s3_merge of this recipe into integration 8d85ab28, one commit per group), heavy-remote with a call tracer on lib/routes/media.py (tests/s3_ack_trace.py plugin, all threads): the whole file tests/unit/test_startup_runtime_wait.py made 0 calls into lib/routes/media.py, as did the other acknowledged file in the run; control in the same run (exit 0): tests/integration/test_artifacts_media_g0_http_characterization.py and test_upload_endpoint.py made 14 calls in 12 tests"},
+    {path = "tests/unit/test_server_helpers_characterization.py", name = "log_exception", reason = "patches server.log_exception to observe _spawn_voice_metrics, which stays in server.py; no media route is exercised", evidence = "4 Nov 05:10, on the applied tree 92dbfb43 (s3_merge of this recipe into integration 8d85ab28, one commit per group), heavy-remote with a call tracer on lib/routes/media.py (tests/s3_ack_trace.py plugin, all threads): the whole file tests/unit/test_server_helpers_characterization.py made 0 calls into lib/routes/media.py, as did the other acknowledged file in the run; control in the same run (exit 0): tests/integration/test_artifacts_media_g0_http_characterization.py and test_upload_endpoint.py made 14 calls in 12 tests"},
+]
+
+[[group]]
+name = "goals"
+module = "lib/routes/goals.py"
+class = "GoalRoutes"
+members = [
+    "_goal_action",
+    "_handle_agent_goal_clear",
+    "_handle_agent_goal_get",
+    "_handle_agent_goal_pause",
+    "_handle_agent_goal_resume",
+    "_handle_agent_goal_start",
+    "_handle_agent_helper_state",
+    "_handle_agent_helper_state_get",
+    "_handle_goal_delegation_enable",
+    "_handle_goal_delegation_stop",
+    "_handle_goal_delegations",
+    "_handle_goal_ledger",
+    "_handle_task_goal_document",
+    "_handle_task_plan",
+    "_handle_task_plan_action",
+    "_handle_task_plans",
+]
+acknowledged_patches = [
+    {path = "tests/unit/test_startup_runtime_wait.py", name = "log_exception", reason = "patches server.log_exception to observe _recover_after_start, which stays in server.py; no goals route is exercised", evidence = "4 Nov 06:40, on the applied tree cac5f461 (s3_merge of this recipe into integration 7f913cd7, one commit per group), heavy-remote with a call tracer on lib/routes/goals.py (tests/s3_ack_trace.py plugin, all threads): the whole file tests/unit/test_startup_runtime_wait.py made 0 calls into lib/routes/goals.py, as did every other acknowledged file in the run; control in the same run (exit 0): tests/integration/test_autonomy_http_characterization.py, test_autonomy_gaps_http_characterization.py and test_autonomy_g0_http_characterization.py made 53 calls in 13 tests"},
+    {path = "tests/unit/test_server_helpers_characterization.py", name = "log_exception", reason = "patches server.log_exception to observe _spawn_voice_metrics, which stays in server.py; no goals route is exercised", evidence = "4 Nov 06:40, on the applied tree cac5f461 (s3_merge of this recipe into integration 7f913cd7, one commit per group), heavy-remote with a call tracer on lib/routes/goals.py (tests/s3_ack_trace.py plugin, all threads): the whole file tests/unit/test_server_helpers_characterization.py made 0 calls into lib/routes/goals.py, as did every other acknowledged file in the run; control in the same run (exit 0): tests/integration/test_autonomy_http_characterization.py, test_autonomy_gaps_http_characterization.py and test_autonomy_g0_http_characterization.py made 53 calls in 13 tests"},
+    {path = "tests/integration/test_media_range.py", name = "log", reason = "patches server.log to observe fileShortRead from the /media/ range stream, which stays in server.py; no goals route is exercised", evidence = "4 Nov 06:40, on the applied tree cac5f461 (s3_merge of this recipe into integration 7f913cd7, one commit per group), heavy-remote with a call tracer on lib/routes/goals.py (tests/s3_ack_trace.py plugin, all threads): the whole file tests/integration/test_media_range.py made 0 calls into lib/routes/goals.py, as did every other acknowledged file in the run; control in the same run (exit 0): tests/integration/test_autonomy_http_characterization.py, test_autonomy_gaps_http_characterization.py and test_autonomy_g0_http_characterization.py made 53 calls in 13 tests"},
+    {path = "tests/unit/test_delivery_admission_v1.py", name = "log", reason = "patches server.log to observe the delivery observation bracket, which stays in server.py; no goals route is exercised", evidence = "4 Nov 06:40, on the applied tree cac5f461 (s3_merge of this recipe into integration 7f913cd7, one commit per group), heavy-remote with a call tracer on lib/routes/goals.py (tests/s3_ack_trace.py plugin, all threads): the whole file tests/unit/test_delivery_admission_v1.py made 0 calls into lib/routes/goals.py, as did every other acknowledged file in the run; control in the same run (exit 0): tests/integration/test_autonomy_http_characterization.py, test_autonomy_gaps_http_characterization.py and test_autonomy_g0_http_characterization.py made 53 calls in 13 tests"},
+]
+
+[[group]]
+name = "teams"
+module = "lib/routes/teams.py"
+class = "TeamRoutes"
+members = [
+    "_handle_team_add_member",
+    "_handle_team_create",
+    "_handle_team_delete",
+    "_handle_team_messages",
+    "_handle_team_nudging",
+    "_handle_team_remove_member",
+    "_handle_team_update",
+    "_handle_teams_list",
+]
+
+[[group]]
+name = "schedules"
+module = "lib/routes/schedules.py"
+class = "ScheduleRoutes"
+members = [
+    "_handle_agent_schedules_delete",
+    "_handle_agent_schedules_get",
+    "_handle_agent_schedules_post",
+    "_handle_agent_schedules_toggle",
+    "_handle_background_job_detail",
+    "_handle_background_jobs",
+    "_handle_schedule_delete",
+    "_handle_schedule_patch",
+]
+acknowledged_patches = [
+    {path = "tests/unit/test_startup_runtime_wait.py", name = "log_exception", reason = "patches server.log_exception to observe _recover_after_start, which stays in server.py; no schedules route is exercised", evidence = "4 Nov 06:40, on the applied tree cac5f461 (s3_merge of this recipe into integration 7f913cd7, one commit per group), heavy-remote with a call tracer on lib/routes/schedules.py (tests/s3_ack_trace.py plugin, all threads): the whole file tests/unit/test_startup_runtime_wait.py made 0 calls into lib/routes/schedules.py, as did every other acknowledged file in the run; control in the same run (exit 0): tests/integration/test_autonomy_http_characterization.py, test_autonomy_gaps_http_characterization.py and test_autonomy_g0_http_characterization.py made 20 calls in 2 tests"},
+    {path = "tests/unit/test_server_helpers_characterization.py", name = "log_exception", reason = "patches server.log_exception to observe _spawn_voice_metrics, which stays in server.py; no schedules route is exercised", evidence = "4 Nov 06:40, on the applied tree cac5f461 (s3_merge of this recipe into integration 7f913cd7, one commit per group), heavy-remote with a call tracer on lib/routes/schedules.py (tests/s3_ack_trace.py plugin, all threads): the whole file tests/unit/test_server_helpers_characterization.py made 0 calls into lib/routes/schedules.py, as did every other acknowledged file in the run; control in the same run (exit 0): tests/integration/test_autonomy_http_characterization.py, test_autonomy_gaps_http_characterization.py and test_autonomy_g0_http_characterization.py made 20 calls in 2 tests"},
+]
+
+[[group]]
+name = "heartbeat"
+module = "lib/routes/heartbeat.py"
+class = "HeartbeatRoutes"
+members = [
+    "_dreaming_backend_options",
+    "_handle_agent_dreaming",
+    "_handle_agent_heartbeat",
+    "_handle_agent_heartbeat_status",
+    "_handle_dreaming_run_post",
+    "_handle_dreaming_runs",
+    "_handle_dreaming_settings_get",
+    "_handle_dreaming_settings_put",
+    "_handle_heartbeat_settings_get",
+    "_handle_heartbeat_settings_post",
+]
+acknowledged_patches = [
+    {path = "tests/unit/test_startup_runtime_wait.py", name = "log_exception", reason = "patches server.log_exception to observe _recover_after_start, which stays in server.py; no heartbeat route is exercised", evidence = "4 Nov 06:40, on the applied tree cac5f461 (s3_merge of this recipe into integration 7f913cd7, one commit per group), heavy-remote with a call tracer on lib/routes/heartbeat.py (tests/s3_ack_trace.py plugin, all threads): the whole file tests/unit/test_startup_runtime_wait.py made 0 calls into lib/routes/heartbeat.py, as did every other acknowledged file in the run; control in the same run (exit 0): tests/integration/test_autonomy_http_characterization.py, test_autonomy_gaps_http_characterization.py and test_autonomy_g0_http_characterization.py made 15 calls in 5 tests"},
+    {path = "tests/unit/test_server_helpers_characterization.py", name = "log_exception", reason = "patches server.log_exception to observe _spawn_voice_metrics, which stays in server.py; no heartbeat route is exercised", evidence = "4 Nov 06:40, on the applied tree cac5f461 (s3_merge of this recipe into integration 7f913cd7, one commit per group), heavy-remote with a call tracer on lib/routes/heartbeat.py (tests/s3_ack_trace.py plugin, all threads): the whole file tests/unit/test_server_helpers_characterization.py made 0 calls into lib/routes/heartbeat.py, as did every other acknowledged file in the run; control in the same run (exit 0): tests/integration/test_autonomy_http_characterization.py, test_autonomy_gaps_http_characterization.py and test_autonomy_g0_http_characterization.py made 15 calls in 5 tests"},
+]
+
+[[group]]
+name = "agents"
+module = "lib/routes/agents.py"
+class = "AgentRoutes"
+members = [
+    "_handle_agent_archive",
+    "_handle_agent_assign",
+    "_handle_agent_avatar",
+    "_handle_agent_conversations",
+    "_handle_agent_file",
+    "_handle_agent_files",
+    "_handle_agent_fork",
+    "_handle_agent_llm",
+    "_handle_agent_mcp",
+    "_handle_agent_model_options",
+    "_handle_agent_rename",
+    "_handle_create_agent",
+    "_handle_delete_agent",
+    "_handle_prompt_history",
+    "_handle_snapshot",
+]
+acknowledged_patches = [
+    {path = "tests/integration/test_media_range.py", name = "log", reason = "patches server.log to observe fileShortRead from the /media/ range stream, which stays in server.py; no agents route is exercised", evidence = "4 Nov 08:05, on the applied tree 18dffdca (s3_merge of this recipe into integration f4501742, one commit per group), heavy-remote with a call tracer on lib/routes/agents.py (tests/s3_ack_trace.py plugin, all threads, setup included): its only calls into lib/routes/agents.py are _handle_snapshot, one per test, from the shared server fixture's readiness probe of /agents/snapshot; _handle_snapshot and every Handler method it reaches (_send, _drain_request_body) read neither log nor log_exception, so the patched server.log is never read through moved code; the patched test asserts only fileShortRead from the /media/ stream, which stays in server.py"},
+    {path = "tests/unit/test_delivery_admission_v1.py", name = "log", reason = "patches server.log to observe the delivery observation bracket, which stays in server.py; no agents route is exercised", evidence = "4 Nov 08:05, on the applied tree 18dffdca (s3_merge of this recipe into integration f4501742, one commit per group), heavy-remote with a call tracer on lib/routes/agents.py (tests/s3_ack_trace.py plugin, all threads, setup included): the whole file made 0 calls into lib/routes/agents.py; control in the same run (exit 0): tests/integration/test_agents_admin_http_characterization.py and test_agents_g0_http_characterization.py reached it"},
+]
+
+[[group]]
+name = "personas"
+module = "lib/routes/personas.py"
+class = "PersonaRoutes"
+members = [
+    "_handle_agent_portrait_content",
+    "_handle_agent_portrait_generation_start",
+    "_handle_agent_portrait_generation_status",
+    "_handle_agent_portraits_list",
+    "_handle_agent_portraits_update",
+    "_handle_create_persona",
+    "_handle_delete_persona",
+    "_handle_persona_avatar",
+    "_handle_update_persona",
+]
+
+[[group]]
+name = "calls"
+module = "lib/routes/calls.py"
+class = "CallRoutes"
+members = [
+    "_apply_group_call",
+    "_calls_by",
+    "_calls_principal",
+    "_calls_ring_run",
+    "_handle_calls_action",
+    "_handle_calls_add",
+    "_handle_calls_end",
+    "_handle_calls_get",
+    "_handle_calls_hold",
+    "_handle_calls_live",
+    "_handle_calls_remove",
+    "_handle_calls_resume",
+    "_handle_calls_ring",
+    "_handle_calls_ring_answer",
+    "_handle_calls_ring_cancel",
+    "_handle_calls_ring_decline",
+    "_handle_calls_ring_device",
+    "_handle_calls_ring_device_get",
+    "_handle_calls_ring_get",
+    "_handle_calls_ring_live_close",
+    "_handle_calls_ring_live_fallback",
+    "_handle_calls_ring_opening",
+    "_handle_calls_ring_settings_get",
+    "_handle_calls_ring_settings_post",
+    "_handle_calls_ring_voip_token",
+    "_handle_calls_start",
+    "_handle_calls_switch",
+    "_handle_calls_transfer",
+]
+
+acknowledged_patches = [
+    {path = "tests/unit/test_server_helpers_characterization.py", name = "log_exception", reason = "patches server.log_exception to assert voiceMetricsFail from retained facade _spawn_voice_metrics/work; this whole file has no moved CallRoutes member dependency on that patch", evidence = "7 Nov, actual main 69ad720e995e2d17de6fd2346c14429970e363fe; own pre-calls copy 85a3b6001d04b8890d0ffc2b54807bb7979b22f8 with only next calls group applied (28 member ASTs identical; generated calls.py SHA256 8cfedc7769ebfc10abde2dca1927a51df6c687ddf1594de06f182d5e684efbd2). B-criteria passive tracer SHA256 62a3fc77c82304f9a6d39805c0358be320fd430625ed52e26b054cb874e7bd8f covers every thread, collection/setup/call/teardown: whole target file exits 0 with 0 CallRoutes member calls; import/class namespace entries are separately recorded. Observed the real patched facade logger voiceMetricsFail and helper return before fixture teardown/tracer restoration, no active helper at either boundary. Same tracer real test_turn_caller_lookup_failure.py::test_calls_by_logs_and_falls_back_to_the_named_session exits 0, 1 moved _calls_by call and original event assertion intact; actual moved-logger patch passes, facade-only negative fails its event assertion. Each missing/wrong path/name ack and a genuine unacknowledged moved lookup patch still REFUSE. Full /var/tmp/rf-routes/s3-calls-69ad-proof-r2.full (.exit=0); structured receipt /home/peter/GIT/clarp-worktrees/rf-routes-merge21/s3-calls-proof-artifacts/receipt.json SHA256 1d5879a5164cdbeface454845fc38238486ed525e6d17b748ff0235e12a63299. Source-bound only; future whole-file calls dependencies invalidate this acknowledgement."},
+    {path = "tests/unit/test_startup_runtime_wait.py", name = "log_exception", reason = "patches server.log_exception to assert runtimeQueueRecoveryDeferred from retained facade _recover_after_start -> _recover_queued_after_start; this whole file has no moved CallRoutes member dependency on that patch", evidence = "7 Nov, actual main 69ad720e995e2d17de6fd2346c14429970e363fe; own pre-calls copy 85a3b6001d04b8890d0ffc2b54807bb7979b22f8 with only next calls group applied (28 member ASTs identical; generated calls.py SHA256 8cfedc7769ebfc10abde2dca1927a51df6c687ddf1594de06f182d5e684efbd2). B-criteria passive tracer SHA256 62a3fc77c82304f9a6d39805c0358be320fd430625ed52e26b054cb874e7bd8f covers every thread, collection/setup/call/teardown: whole target file exits 0 with 0 CallRoutes member calls; import/class namespace entries are separately recorded. Observed the real patched facade logger runtimeQueueRecoveryDeferred and helper return before fixture teardown/tracer restoration, no active helper at either boundary. Same tracer real test_turn_caller_lookup_failure.py::test_calls_by_logs_and_falls_back_to_the_named_session exits 0, 1 moved _calls_by call and original event assertion intact; actual moved-logger patch passes, facade-only negative fails its event assertion. Each missing/wrong path/name ack and a genuine unacknowledged moved lookup patch still REFUSE. Full /var/tmp/rf-routes/s3-calls-69ad-proof-r2.full (.exit=0); structured receipt /home/peter/GIT/clarp-worktrees/rf-routes-merge21/s3-calls-proof-artifacts/receipt.json SHA256 1d5879a5164cdbeface454845fc38238486ed525e6d17b748ff0235e12a63299. Source-bound only; future whole-file calls dependencies invalidate this acknowledgement."},
+]
+
+[[group]]
+name = "oracle"
+module = "lib/routes/oracle.py"
+class = "OracleRoutes"
+members = [
+    "_handle_oracle_call_close",
+    "_handle_oracle_call_create",
+    "_handle_oracle_call_status",
+    "_handle_oracle_connect",
+    "_handle_oracle_contact_get",
+    "_handle_oracle_contact_post",
+    "_handle_oracle_context_image",
+    "_handle_oracle_delegation_ack",
+    "_handle_oracle_delegation_cancel",
+    "_handle_oracle_delegation_create",
+    "_handle_oracle_delegations_get",
+    "_handle_oracle_handoff_ack",
+    "_handle_oracle_handoff_get",
+    "_handle_oracle_live_call_close",
+    "_handle_oracle_live_call_control",
+    "_handle_oracle_live_call_create",
+    "_handle_oracle_live_call_status",
+    "_handle_oracle_status",
+    "_handle_oracle_voice_provider_get",
+    "_handle_oracle_voice_provider_post",
+    "_oracle_auth_missing",
+    "_oracle_handoff_principal",
+]
+acknowledged_patches = [
+    {path = "tests/unit/test_startup_runtime_wait.py", name = "log_exception", reason = "patches server.log_exception to observe _recover_after_start, which stays in server.py; no oracle route is exercised", evidence = "4 Nov 10:05, on the applied tree d2ba0159 (s3_merge of this recipe into integration 8d614a18, one commit per group), heavy-remote with a call tracer on lib/routes/oracle.py (tests/s3_ack_trace.py plugin, all threads, setup included): the whole file tests/unit/test_startup_runtime_wait.py made 0 calls into lib/routes/oracle.py; control in the same run (exit 0): tests/integration/test_calls_oracle_http_characterization.py, test_calls_oracle_g0_http_characterization.py and test_media_oracle_calls_http_characterization.py made 222 calls in 32 tests"},
+    {path = "tests/unit/test_server_helpers_characterization.py", name = "log_exception", reason = "patches server.log_exception to observe _spawn_voice_metrics, which stays in server.py; no oracle route is exercised", evidence = "4 Nov 10:05, on the applied tree d2ba0159 (s3_merge of this recipe into integration 8d614a18, one commit per group), heavy-remote with a call tracer on lib/routes/oracle.py (tests/s3_ack_trace.py plugin, all threads, setup included): the whole file tests/unit/test_server_helpers_characterization.py made 0 calls into lib/routes/oracle.py; control in the same run (exit 0): tests/integration/test_calls_oracle_http_characterization.py, test_calls_oracle_g0_http_characterization.py and test_media_oracle_calls_http_characterization.py made 222 calls in 32 tests"},
+    {path = "tests/integration/test_media_range.py", name = "log", reason = "patches server.log to observe fileShortRead from the /media/ range stream, which stays in server.py; no oracle route is exercised", evidence = "4 Nov 10:05, on the applied tree d2ba0159 (s3_merge of this recipe into integration 8d614a18, one commit per group), heavy-remote with a call tracer on lib/routes/oracle.py (tests/s3_ack_trace.py plugin, all threads, setup included): its only calls into lib/routes/oracle.py are _oracle_auth_missing, one per test (41 tests), the /oracle path check the gate prelude runs on every request; it reads neither log nor log_exception, so the patched server.log is never read through moved code; the patched test asserts only fileShortRead from the /media/ stream, which stays in server.py; control in the same run (exit 0): tests/integration/test_calls_oracle_http_characterization.py, test_calls_oracle_g0_http_characterization.py and test_media_oracle_calls_http_characterization.py made 222 calls in 32 tests"},
+    {path = "tests/unit/test_delivery_admission_v1.py", name = "log", reason = "patches server.log to observe the delivery observation bracket, which stays in server.py; no oracle route is exercised", evidence = "4 Nov 10:05, on the applied tree d2ba0159 (s3_merge of this recipe into integration 8d614a18, one commit per group), heavy-remote with a call tracer on lib/routes/oracle.py (tests/s3_ack_trace.py plugin, all threads, setup included): the whole file tests/unit/test_delivery_admission_v1.py made 0 calls into lib/routes/oracle.py; control in the same run (exit 0): tests/integration/test_calls_oracle_http_characterization.py, test_calls_oracle_g0_http_characterization.py and test_media_oracle_calls_http_characterization.py made 222 calls in 32 tests"},
+]
+
+[[group]]
+name = "voice"
+module = "lib/routes/voice.py"
+class = "VoiceRoutes"
+members = [
+    "_handle_agent_mute",
+    "_handle_agent_voice",
+    "_handle_agent_voice_verbosity",
+    "_handle_cartesia_voice_preview",
+    "_handle_cartesia_voices",
+    "_handle_controller_narration",
+    "_handle_preview",
+    "_handle_voice_catalog",
+    "_handle_voice_humanness_get",
+    "_handle_voice_humanness_post",
+    "_handle_voice_preview",
+    "_handle_voices",
+]
+acknowledged_patches = [
+    {path = "tests/unit/test_startup_runtime_wait.py", name = "log_exception", reason = "patches server.log_exception to observe _recover_after_start, which stays in server.py; no voice route is exercised", evidence = "5 Nov 00:10, on the applied tree 1c77eedc (s3_merge of this recipe into integration 558f2e87 plus aa1e12a1, one commit per group), heavy-remote with a call tracer on lib/routes/voice.py (tests/s3_ack_trace.py plugin, all threads, setup included): the whole file tests/unit/test_startup_runtime_wait.py made 0 calls into lib/routes/voice.py, as did the other acknowledged files in the run; control in the same run (exit 0): tests/integration/test_send_select_log_http_characterization.py, test_settings_ops_http_characterization.py, test_settings_g0_http_characterization.py and test_voice_out_g0_http_characterization.py made 32 calls in 10 tests"},
+    {path = "tests/unit/test_server_helpers_characterization.py", name = "log_exception", reason = "patches server.log_exception to observe _spawn_voice_metrics, which stays in server.py; no voice route is exercised", evidence = "5 Nov 00:10, on the applied tree 1c77eedc (s3_merge of this recipe into integration 558f2e87 plus aa1e12a1, one commit per group), heavy-remote with a call tracer on lib/routes/voice.py (tests/s3_ack_trace.py plugin, all threads, setup included): the whole file tests/unit/test_server_helpers_characterization.py made 0 calls into lib/routes/voice.py, as did the other acknowledged files in the run; control in the same run (exit 0): tests/integration/test_send_select_log_http_characterization.py, test_settings_ops_http_characterization.py, test_settings_g0_http_characterization.py and test_voice_out_g0_http_characterization.py made 32 calls in 10 tests"},
+]
+
+[[group]]
+name = "voice_timeline"
+module = "lib/routes/voice_timeline.py"
+class = "VoiceTimelineRoutes"
+members = [
+    "_handle_clip_ack",
+    "_handle_message_clips",
+    "_handle_recoverable_clips",
+    "_handle_voice_events_get",
+    "_handle_voice_events_post",
+    "_handle_voice_utterances_get",
+    "_record_voice",
+    "_record_voice_corrupt",
+    "_voice_query_params",
+]
+acknowledged_patches = [
+    {path = "tests/unit/test_startup_runtime_wait.py", name = "log_exception", reason = "patches server.log_exception to observe _recover_after_start, which stays in server.py; no voice_timeline route is exercised", evidence = "4 Nov 10:35, on the applied tree 3006c04b (s3_merge of this recipe into integration 1991556e, one commit per group), heavy-remote with a call tracer on lib/routes/voice_timeline.py (tests/s3_ack_trace.py plugin, all threads, setup included): the whole file tests/unit/test_startup_runtime_wait.py made 0 calls into lib/routes/voice_timeline.py, as did the other acknowledged files in the run; control in the same run (exit 0): tests/integration/test_voice_out_g0_http_characterization.py, test_voice_agents_http_characterization.py and test_send_select_log_http_characterization.py made 12 calls in 2 tests"},
+    {path = "tests/unit/test_server_helpers_characterization.py", name = "log_exception", reason = "patches server.log_exception to observe _spawn_voice_metrics, which stays in server.py; no voice_timeline route is exercised", evidence = "4 Nov 10:35, on the applied tree 3006c04b (s3_merge of this recipe into integration 1991556e, one commit per group), heavy-remote with a call tracer on lib/routes/voice_timeline.py (tests/s3_ack_trace.py plugin, all threads, setup included): the whole file tests/unit/test_server_helpers_characterization.py made 0 calls into lib/routes/voice_timeline.py, as did the other acknowledged files in the run; control in the same run (exit 0): tests/integration/test_voice_out_g0_http_characterization.py, test_voice_agents_http_characterization.py and test_send_select_log_http_characterization.py made 12 calls in 2 tests"},
+]
+
+[[group]]
+name = "send"
+module = "lib/routes/send.py"
+class = "SendRoutes"
+members = [
+    "_apply_call_opening",
+    "_handle_compact",
+    "_handle_orchestrator_addressing",
+    "_handle_orchestrator_decisions",
+    "_handle_orchestrator_route_delegation",
+    "_handle_orchestrator_settings_get",
+    "_handle_orchestrator_settings_post",
+    "_handle_select",
+    "_handle_send",
+    "_send_request_error",
+]
+acknowledged_patches = [
+    {path = "tests/unit/test_startup_runtime_wait.py", name = "log_exception", reason = "patches server.log_exception to observe _recover_after_start, which stays in server.py; no send route is exercised", evidence = "5 Nov 00:10, on the applied tree 1c77eedc (s3_merge of this recipe into integration 558f2e87 plus aa1e12a1, one commit per group), heavy-remote with a call tracer on lib/routes/send.py (tests/s3_ack_trace.py plugin, all threads, setup included): the whole file tests/unit/test_startup_runtime_wait.py made 0 calls into lib/routes/send.py, as did the other acknowledged files in the run; control in the same run (exit 0): tests/integration/test_send_select_log_http_characterization.py, test_settings_ops_http_characterization.py, test_settings_g0_http_characterization.py and test_voice_out_g0_http_characterization.py made 70 calls in 10 tests"},
+    {path = "tests/unit/test_server_helpers_characterization.py", name = "log_exception", reason = "patches server.log_exception to observe _spawn_voice_metrics, which stays in server.py; no send route is exercised", evidence = "5 Nov 00:10, on the applied tree 1c77eedc (s3_merge of this recipe into integration 558f2e87 plus aa1e12a1, one commit per group), heavy-remote with a call tracer on lib/routes/send.py (tests/s3_ack_trace.py plugin, all threads, setup included): the whole file tests/unit/test_server_helpers_characterization.py made 0 calls into lib/routes/send.py, as did the other acknowledged files in the run; control in the same run (exit 0): tests/integration/test_send_select_log_http_characterization.py, test_settings_ops_http_characterization.py, test_settings_g0_http_characterization.py and test_voice_out_g0_http_characterization.py made 70 calls in 10 tests"},
+]

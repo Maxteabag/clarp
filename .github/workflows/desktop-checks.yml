@@ -42,7 +42,7 @@ env:
   DEFAULT_CHECKS: >-
     scrollbar transcript scroll scroll-jump row-overlap composer live a2a receipts
     artifacts artifact-open artifact-summary form-events artifact-keys link-hints keymap switcher panes sidebar banner
-    layout-warning updates settings themes fonts startup refocus avatars message-search mention customize chat-zoom
+    layout-warning updates settings themes fonts startup refocus avatars message-search select-text mention customize chat-zoom
     send desktop vim processes roster-stale stop-receipt pair narrow explorer
 
 jobs:
@@ -61,6 +61,92 @@ jobs:
         with:
           workspaces: desktop-rs
           shared-key: desktop-debug
+      - name: Retained reply ordering negative control
+        working-directory: desktop-rs
+        run: |
+          set -euo pipefail
+          # This contains the disappearance fix, before its ordering correction.
+          baseline=6a80900dd7c44972a393d285a47c4dbfb6ba7ad3
+          git fetch --no-tags --depth=1 origin "$baseline"
+          file=core/src/history_fold.rs
+          cp "$file" /tmp/history-fold-candidate.rs
+          trap 'cp /tmp/history-fold-candidate.rs "$file"' EXIT
+          git show "$baseline:desktop-rs/$file" > "$file"
+          set +e
+          cargo test --locked -p clarp-core --test history_fold retained_final_stays_between_prompts_sent_during_and_after_its_reply -- --exact > /tmp/reply-order-baseline.log 2>&1
+          rc=$?
+          set -e
+          cat /tmp/reply-order-baseline.log
+          test "$rc" -eq 101
+          grep -F 'the final must not move above the prompt sent during work' /tmp/reply-order-baseline.log
+          grep -F '0 passed; 1 failed;' /tmp/reply-order-baseline.log
+          cp /tmp/history-fold-candidate.rs "$file"
+          trap - EXIT
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: reply-order-negative-control
+          path: /tmp/reply-order-baseline.log
+      - name: Wheel settling counter negative control
+        working-directory: desktop-rs
+        run: |
+          set -euo pipefail
+          file=slint-app/src/scrollbar_checks.rs
+          cp "$file" /tmp/scrollbar-candidate.rs
+          trap 'cp /tmp/scrollbar-candidate.rs "$file"' EXIT
+          python3 - <<'PYCTRL'
+          from pathlib import Path
+          path = Path('slint-app/src/scrollbar_checks.rs')
+          source = path.read_text()
+          before = 'self.action_offset = Some(offset);\n        self.still = 0;'
+          assert source.count(before) == 1
+          path.write_text(source.replace(before, 'self.action_offset = Some(offset);'))
+          PYCTRL
+          set +e
+          cargo test --locked -p clarp-slint --bin clarp-slint driver::scrollbar_checks::settling_tests::delayed_wheel_gets_fresh_settling_and_only_the_real_endpoint_finishes -- --exact > /tmp/wheel-counter-baseline.log 2>&1
+          rc=$?
+          set -e
+          cat /tmp/wheel-counter-baseline.log
+          test "$rc" -eq 101
+          grep -F 'fresh wheel must receive its own settling polls' /tmp/wheel-counter-baseline.log
+          grep -F '0 passed; 1 failed;' /tmp/wheel-counter-baseline.log
+          cp /tmp/scrollbar-candidate.rs "$file"
+          trap - EXIT
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wheel-counter-negative-control
+          path: /tmp/wheel-counter-baseline.log
+      - name: Exhausted pass state negative control
+        working-directory: desktop-rs
+        run: |
+          set -euo pipefail
+          file=slint-app/src/scrollbar_checks.rs
+          cp "$file" /tmp/budget-pass-candidate.rs
+          trap 'cp /tmp/budget-pass-candidate.rs "$file"' EXIT
+          python3 - <<'PYCTRL'
+          from pathlib import Path
+          path = Path('slint-app/src/scrollbar_checks.rs')
+          source = path.read_text()
+          before = 'if last { Some(std::mem::take(self)) } else { None }'
+          assert source.count(before) == 1
+          path.write_text(source.replace(before, 'let _ = last; None'))
+          PYCTRL
+          set +e
+          cargo test --locked -p clarp-slint --bin clarp-slint driver::scrollbar_checks::settling_tests::exhausted_pass_fails_and_cannot_leak_into_the_next_direction -- --exact > /tmp/pass-budget-baseline.log 2>&1
+          rc=$?
+          set -e
+          cat /tmp/pass-budget-baseline.log
+          test "$rc" -eq 101
+          grep -F 'budget expiry must isolate the next direction' /tmp/pass-budget-baseline.log
+          grep -F '0 passed; 1 failed;' /tmp/pass-budget-baseline.log
+          cp /tmp/budget-pass-candidate.rs "$file"
+          trap - EXIT
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pass-budget-negative-control
+          path: /tmp/pass-budget-baseline.log
       - name: Unit and contract tests
         working-directory: desktop-rs
         # pipefail: without it the job takes tee's exit code and a failing
@@ -92,7 +178,14 @@ jobs:
           shared-key: desktop-debug
       - name: Build the app
         working-directory: desktop-rs
-        run: cargo build --locked -p clarp-slint
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/checks
+          git rev-parse HEAD 'HEAD^{tree}' > /tmp/checks/clean-source.txt
+          git diff --exit-code -- .
+          cargo build --locked -p clarp-slint
+          git diff --exit-code -- .
+          sha256sum target/debug/clarp-slint | tee /tmp/checks/clean-checks-binary.sha256
       - name: Headless checks
         working-directory: desktop-rs
         env:

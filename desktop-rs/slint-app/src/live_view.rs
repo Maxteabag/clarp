@@ -28,7 +28,12 @@ pub(crate) fn present(engine: &Engine, session: &str, rows: &[Message], expanded
         return None;
     }
     let view = engine.live_view(session)?;
-    let options = Options { explanations: explanations(engine, session), expanded: expanded.clone(), host_now_ms: view.host_now_ms(now_ms()) };
+    let options = Options {
+        explanations: explanations(engine, session),
+        expanded: expanded.clone(),
+        host_now_ms: view.host_now_ms(now_ms()),
+        hide_activity: engine.activity_mode() == clarp_core::presentation::HIDDEN,
+    };
     let mut presented = clarp_core::live_present::present(view, rows, &options);
     pace(&mut presented);
     Some(presented)
@@ -50,6 +55,7 @@ pub(crate) fn history(engine: &Engine, session: &str, rows: &[Message], expanded
         open_turn: live.map(|l| l.turn_id.clone()).unwrap_or_default(),
         held_rows: live.map(|l| l.own_rows.clone()).unwrap_or_default(),
         busy,
+        hide_activity: engine.activity_mode() == clarp_core::presentation::HIDDEN,
         explain: narrating.then_some(&explain as &dyn Fn(&clarp_core::json::Object) -> String),
     };
     clarp_core::history_fold::present(rows, view, &options)
@@ -139,6 +145,8 @@ pub(crate) fn row(entry: &Entry, blocks: Vec<crate::MessageBlock>) -> MessageRow
         pending: false,
         status_due: false,
         failed: false,
+        failure: SharedString::new(),
+        stopped: false,
         activity_label: SharedString::new(),
         group_id: SharedString::new(),
         expanded: false,

@@ -5,6 +5,7 @@ import pathlib
 import threading
 
 from lib import background_jobs, portrait_generation
+from tests.patching import patch_shared
 
 
 SCRIPT = pathlib.Path(__file__).resolve().parents[2] / "scripts/portrait_generation_job.py"
@@ -22,7 +23,7 @@ def _job():
 
 def test_worker_adopts_generation_and_finishes(monkeypatch):
     job = _job()
-    monkeypatch.setattr(
+    patch_shared(monkeypatch,
         background_jobs, "process_start_token", lambda _pid: "boot:worker")
     seen = []
     monkeypatch.setattr(
@@ -40,7 +41,7 @@ def test_worker_adopts_generation_and_finishes(monkeypatch):
 
 def test_worker_does_not_commit_after_cancellation(monkeypatch):
     job = _job()
-    monkeypatch.setattr(
+    patch_shared(monkeypatch,
         background_jobs, "process_start_token", lambda _pid: "boot:worker")
 
     def cancel(_session, **_kwargs):
@@ -59,7 +60,7 @@ def test_worker_does_not_commit_after_cancellation(monkeypatch):
 
 def test_missing_worker_identity_fails_queued_generation(monkeypatch):
     job = _job()
-    monkeypatch.setattr(
+    patch_shared(monkeypatch,
         background_jobs, "process_start_token", lambda _pid: "")
 
     result = worker.run(
@@ -74,7 +75,7 @@ def test_missing_worker_identity_fails_queued_generation(monkeypatch):
 
 def test_local_interruption_terminalizes_running_generation(monkeypatch):
     job = _job()
-    monkeypatch.setattr(
+    patch_shared(monkeypatch,
         background_jobs, "process_start_token", lambda _pid: "boot:worker")
     monkeypatch.setattr(
         portrait_generation, "generate_two",

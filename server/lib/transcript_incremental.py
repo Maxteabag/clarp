@@ -39,9 +39,12 @@ import json
 import os
 import pathlib
 import re
+import sys
 import threading
 import time
-from dataclasses import dataclass
+import types
+from dataclasses import dataclass, replace
+from contextvars import ContextVar
 from typing import Any, Callable
 
 SUPPORTED_BACKENDS = ("claude", "codex", "agy")
@@ -50,13 +53,18 @@ SUPPORTED_BACKENDS = ("claude", "codex", "agy")
 # changes the parser version, so every checkpoint taken by older code is
 # refused and the next import is a full one.
 _VERSION_SOURCES = {
-    "claude": ("claude_transcript.py",),
-    "codex": ("codex_transcript.py",),
-    "agy": ("agy_transcript.py", "codex_transcript.py", "opencode_transcript.py",
-            "claude_transcript.py", "backend/agy.py"),
+    "claude": ("claude_transcript.py", "claude_reply_evidence.py", "backend/claude.py"),
+    "codex": ("codex_transcript.py", "codex_tool_cells.py", "backend/codex.py"),
+    "agy": ("agy_transcript.py", "codex_transcript.py", "codex_tool_cells.py", "opencode_transcript.py",
+            "claude_transcript.py", "claude_reply_evidence.py", "backend/agy.py"),
 }
-_COMMON_SOURCES = ("transcript_incremental.py", "message_writes.py",
-                   "message_context.py", "message_turns.py", "voice_markup.py")
+_COMMON_SOURCES = ("transcript_incremental.py", "backend/base.py", "message_writes.py",
+                   "message_import_writer.py",
+                   "message_import_rows.py", "message_import_common.py",
+                   "message_context.py", "message_text.py", "message_turns.py", "voice_markup.py",
+                   # The store's ack-token decisions (AUT-07).
+                   "origins.py", "heartbeat.py", "dreaming.py", "team_leader.py",
+                   "team_store.py", "oracle_delegations.py")
 
 _HEAD_BYTES = 4096
 _WINDOW_BYTES = 64 * 1024
@@ -288,9 +296,9 @@ def _claude_reference(records, carry: dict) -> str:
                 defined.add(str(block["id"]))
             elif block.get("type") == "tool_result":
                 ref = str(block.get("tool_use_id") or block.get("toolUseId") or "")
-                if not ref and pending:
+                if not ref:
                     return "claude_unnamed_tool_result"
-                if ref and ref not in defined and (ref in pending or ref in subagents):
+                if ref not in defined:
                     return "claude_late_tool_result"
             elif block.get("type") == "text":
                 texts.append(str(block.get("text") or ""))
@@ -626,6 +634,155 @@ class ShadowBudget:
 
 BUDGET = ShadowBudget()
 
+_IMPORT_CACHE_EPOCH = ContextVar("transcript_import_cache_epoch", default=None)
+_IMPORT_LOG_METADATA = ContextVar("transcript_import_log_metadata", default=(None, None))
+
+
+def _call_in_cache_epoch(importer, epoch):
+    """Carry admission lifetime only, never a positive DB/file certificate."""
+    token = _IMPORT_CACHE_EPOCH.set(epoch)
+    try:
+        return importer()
+    finally:
+        _IMPORT_CACHE_EPOCH.reset(token)
+
+
+def _materialized_history(agent_id, session_id):
+    """Existing committed history permits negative admission, never freshness."""
+    from . import db
+    return db.conn().execute(
+        "SELECT 1 FROM messages WHERE agent_id=? AND backend_session_id=? AND seq>=0 LIMIT 1",
+        (agent_id, session_id)).fetchone() is not None
+
+
+class _FullImportGate:
+    """Bounded negative admission for materialized contexts, not freshness.
+
+    Active reservations are never evicted. Polls do not extend cooldowns;
+    old inactive epochs/expired windows are discarded on admission. No IO,
+    caller callbacks, sleeps or timers run under this lock.
+    """
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._slots = {}
+        self._weight = 0
+
+    def reserve(self, key, epoch):
+        charge = 512 + sys.getsizeof(key) + sum(sys.getsizeof(item) for item in key)
+        with self._lock:
+            now = time.monotonic()
+            for old_key, (_, active, until, weight, old_epoch) in list(self._slots.items()):
+                if not active and (old_epoch != epoch or until <= now):
+                    del self._slots[old_key]
+                    self._weight -= weight
+            previous = self._slots.get(key)
+            if previous is not None:
+                return None, "running" if previous[1] else "cooldown"
+            if len(self._slots) >= 256 or self._weight + charge > 2 * 1024 * 1024:
+                return None, "capacity"
+            ticket = object()
+            self._slots[key] = (ticket, True, 0.0, charge, epoch)
+            self._weight += charge
+            return ticket, ""
+
+    def finish(self, key, ticket, refused):
+        with self._lock:
+            current = self._slots.get(key)
+            if current is None or current[0] is not ticket:
+                return
+            if refused:
+                self._slots[key] = (ticket, False, time.monotonic() + 5.0, current[3], current[4])
+            else:
+                del self._slots[key]
+                self._weight -= current[3]
+
+
+_FULL_IMPORT_GATE = _FullImportGate()
+
+
+class _FullImportAttempt:
+    def __init__(self, enabled, backend, path, agent_id, session_id, before):
+        from . import db
+        epoch = _IMPORT_CACHE_EPOCH.get()
+        self.key = None
+        self.ticket = None
+        self.reason = ""
+        self.full_started = False
+        self.retained = False
+        self.metadata = (backend, before.size if before else None)
+        if enabled and epoch is not None and before is not None:
+            # Namespace/epoch isolates negative admission, not DB authority.
+            # Same-source aliases cannot create duplicate eligible full work.
+            self.key = (str(db.DB_PATH), epoch, backend, agent_id, session_id, str(path.resolve()),
+                        before.device, before.inode)
+            self.ticket, self.reason = _FULL_IMPORT_GATE.reserve(self.key, epoch)
+
+    def __enter__(self):
+        self.log_token = _IMPORT_LOG_METADATA.set(self.metadata)
+        return self
+
+    def __exit__(self, exc_type, _exc, _traceback):
+        try:
+            if self.ticket is not None:
+                _FULL_IMPORT_GATE.finish(self.key, self.ticket,
+                                         exc_type is None and self.full_started and not self.retained)
+        finally:
+            _IMPORT_LOG_METADATA.reset(self.log_token)
+
+
+def _completion_state(result) -> str:
+    """Private native result, interpreted only by an opted-in import adapter."""
+    if not isinstance(result, dict) or "_clarp_transcript_completion_v1" not in result:
+        return "completed-changed"  # existing strict importer / legacy test callers
+    state = result["_clarp_transcript_completion_v1"]
+    return state if state in ("completed-changed", "completed-unchanged", "deferred") else "deferred"
+
+
+class _CompletionImport:
+    """Completion transport; NOT an audit or native file/DB certificate.
+
+    The default remains strict legacy admission. The later audit implementation
+    must supply its real epoch/generation probe AND publication fence before
+    enabling warm hash reuse. This groundwork does not enable that optimization.
+    A native authority's fence must be reentrant and shared by all its debt /
+    generation mutations; importer IO is always outside that fence.
+    """
+    _clarp_transcript_completion_v1 = True
+
+    def __init__(self, callback, context, *, eligibility=None, fence=None, after_complete=None):
+        self._callback = callback
+        self._context = context
+        self._eligibility = eligibility
+        self._fence = fence
+        self._after_complete = after_complete
+
+    def _clarp_transcript_eligibility(self):
+        if self._eligibility is None:
+            return self._context, None, True  # legacy, not an audit generation
+        return self._eligibility()
+
+    def _clarp_transcript_fence(self):
+        from contextlib import nullcontext
+        return self._fence() if self._fence is not None else nullcontext()
+
+    def __call__(self):
+        context, generation, eligible = self._clarp_transcript_eligibility()
+        value = self._callback() if eligible else None
+        state = _completion_state(value) if eligible else "deferred"
+        return {"_clarp_transcript_completion_v1": (context, generation, state),
+                "_native_result": value}
+
+    def _clarp_transcript_completed(self, envelope):
+        if self._after_complete is not None:
+            self._after_complete(envelope["_native_result"])
+
+
+def _completion_import(callback, *, backend, path, agent_id, backend_session_id,
+                       after_complete=None):
+    from . import db
+    context = (str(db.DB_PATH), str(path), backend, agent_id, backend_session_id)
+    return _CompletionImport(callback, context, after_complete=after_complete)
+
 
 # ---- the import ------------------------------------------------------------
 
@@ -637,15 +794,469 @@ def _row_view(row: dict) -> tuple:
     return tuple(json.dumps(row.get(name), sort_keys=True, default=str) for name in _ROW_FIELDS)
 
 
+
+@dataclass
+class _TailState:
+    checkpoint: Checkpoint
+    raw_inputs: tuple
+    file_hash: str
+
+
+def _tail_weight(key, revision, state) -> int:
+    if state is None:
+        return 1
+    # Include payload strings and row/container overhead, not just entry count.
+    total = len(json.dumps(state.checkpoint.__dict__, default=str)) + 1024
+    for component in state.raw_inputs:
+        total += sys.getsizeof(component)
+        for row in component:
+            total += sys.getsizeof(row)
+            if not isinstance(row, str):
+                total += sum(sys.getsizeof(value) for value in row)
+    return total
+
+
+from .revisioned_cache import RevisionedCache
+
+
+@dataclass(frozen=True)
+class _TailReason:
+    code: str
+    token: int
+    weight: int = -1
+
+
+def _reason_weight(key, revision, value):
+    # Only keys/revisions and scalar codes, never checkpoint/row payloads.
+    return 512 + sys.getsizeof(key) + sys.getsizeof(revision) + sum(
+        sys.getsizeof(part) for part in key)
+
+
+_TAIL_REASONS = RevisionedCache("transcript-tail-reasons", max_entries=4096,
+                               max_weight=4 * 1024 * 1024, weight=_reason_weight)
+
+
+class _TailCache(RevisionedCache):
+    """Observe actual LRU transitions without changing their admission policy.
+
+    Lock order is frontier -> diagnostic history; diagnostics never take the
+    frontier lock in reverse. No logging/DB work occurs under either lock.
+    """
+    def __init__(self):
+        self._sequence = 0
+        self._resets = 0
+        self._last_charge = 0
+        self._diagnostic_loss = False
+        super().__init__("transcript-tail-state", max_entries=256,
+                         max_weight=32 * 1024 * 1024, weight=self._charge)
+
+    def _charge(self, key, revision, value):
+        self._last_charge = _tail_weight(key, revision, value)
+        return self._last_charge
+
+    def _store(self, key, revision, value):
+        # Hold only keys/revisions/charged sizes for the transition, not an
+        # extra reference to an evicted or overweight witness graph.
+        try:
+            before = {k: (entry[0], self._weights.get(k, 0), entry[1] is None)
+                      for k, entry in self._entries.items()}
+        except Exception:
+            before = {}
+            self._diagnostic_loss = True
+        super()._store(key, revision, value)
+        self._sequence += 1
+        for victim in before.keys() - self._entries.keys() - {key}:
+            old_revision, weight, was_empty = before[victim]
+            self._remember(victim, old_revision,
+                           _TailReason("evicted_empty" if was_empty else "evicted",
+                                       self._sequence, weight))
+        if key not in self._entries:
+            reason = "overweight" if self._last_charge > self.max_weight else "unknown"
+        else:
+            reason = "consumed" if value is None else "admitted"
+        self._remember(key, revision, _TailReason(reason, self._sequence, self._last_charge))
+
+    def _remember(self, key, revision, reason):
+        try:
+            _TAIL_REASONS.put(key, revision, reason)
+        except Exception:
+            # Diagnostics cannot refuse or certify the actual import/cache.
+            self._diagnostic_loss = True
+
+    def observe(self, key, revision):
+        with self._lock:
+            before = self._sequence
+        found, value = super().get(key, revision)  # exactly the existing get/LRU action
+        reason = None
+        if not found or value is None:
+            with self._lock:
+                resident = self._entries.get(key)
+                try:
+                    historical = _TAIL_REASONS.peek(key)
+                except Exception:
+                    historical = None
+                    self._diagnostic_loss = True
+                if self._sequence != before:
+                    reason = "unknown_concurrent"
+                elif self._diagnostic_loss:
+                    # Failed replacement can leave a formerly valid old token.
+                    # No history is authoritative until an explicit reset succeeds.
+                    reason = "unknown_metadata"
+                elif resident is not None and resident[0] != revision:
+                    reason = "revision"
+                elif historical is not None and historical[0] != revision:
+                    reason = "unknown_revision"
+                elif historical is not None:
+                    recorded = historical[1].code
+                    reason = recorded if recorded != "admitted" else "unknown_removal"
+                else:
+                    # No history is NOT proof this key never existed: history
+                    # is bounded and may have reset/overflowed independently.
+                    reason = "unknown_reset" if self._resets else "missing_unknown"
+        return found, value, reason
+
+    def consume(self, key, revision):
+        with self._lock:
+            self._store(key, revision, None)  # original pre-attempt invalidation
+            return self._sequence
+
+    def note_refusal(self, key, revision, token, code):
+        if token is None:
+            return
+        try:
+            with self._lock:
+                entry = self._entries.get(key)
+                recorded = _TAIL_REASONS.peek(key)
+                if (entry is not None and entry[0] == revision and entry[1] is None
+                        and recorded is not None and recorded[0] == revision
+                        and recorded[1].token == token):
+                    self._remember(key, revision, _TailReason(code, token))
+        except Exception:
+            self._diagnostic_loss = True
+
+    def reset(self):
+        with self._lock:
+            self._entries.clear()
+            self._weights.clear()
+            self._pins.clear()
+            self.weight = self.hits = self.misses = 0
+            self._sequence += 1
+            self._resets += 1
+            try:
+                _TAIL_REASONS.reset()
+                self._diagnostic_loss = False
+            except Exception:
+                self._diagnostic_loss = True
+
+
+_TAIL_STATES = _TailCache()
+
+
+def _tail_key(path, agent_id, backend_session_id):
+    from . import db
+    return (str(db.DB_PATH), agent_id, backend_session_id, str(path))
+
+
+def _prefix_has_effects(turns) -> bool:
+    """P1 leaves effect-bearing prefixes on the full recovery path.
+
+    Their effects may need retry even when their message row is unchanged.
+    They cannot be skipped merely because bytes or rows were checkpointed.
+    """
+    from . import dreaming, heartbeat, team_leader, team_store
+    for turn in turns:
+        # Discovery is external to the parent bytes: a missing child/meta
+        # directory at bootstrap does not make this prefix immutable.
+        if (any(cell.get("kind") == "subagents" for cell in turn.get("display_cells") or [])
+                or any(tool.get("name") in ("Agent", "Task") for tool in turn.get("tools") or [])):
+            return True
+        text = str(turn.get("text") or "")
+        if turn.get("role") == "user":
+            if (heartbeat.should_skip_heartbeat_prompt(text)
+                    or team_leader.should_skip_leader_tick_prompt(text)
+                    or dreaming.should_skip_dream_prompt(text)):
+                return True
+        elif turn.get("role") == "assistant":
+            if (team_store.extract_team_blocks(text)
+                    or heartbeat.HEARTBEAT_OK in text or team_leader.LEADER_NOOP in text
+                    or dreaming.process_assistant_text("", text, origin="dreaming", live=True)
+                    != (False, text)):
+                return True
+    return False
+
+
+
+def _tail_file_hashes(path, previous_size, current_size):
+    """One bounded-buffer read certifies ALL previously imported bytes.
+
+    Durable sampled hashes remain format-compatible shadow guards. Actual
+    tail writes additionally require this process-local full-prefix digest.
+    This read is outside SQLite transactions; its O(file bytes) cost is
+    separate from range parsing and exact DB-input validation.
+    """
+    digest = hashlib.blake2b(digest_size=16)
+    with open(path, "rb") as source:
+        def read_until(count):
+            while count > 0:
+                block = source.read(min(count, 1 << 20))
+                if not block:
+                    raise OSError("transcript shrank during prefix certification")
+                digest.update(block)
+                count -= len(block)
+        read_until(previous_size)
+        previous = digest.hexdigest()
+        read_until(current_size - previous_size)
+    return previous, digest.hexdigest()
+
+
+def _size_bucket(size):
+    if size is None:
+        return "unknown"
+    for limit, label in ((1, "lt1m"), (16, "lt16m"), (64, "lt64m"),
+                         (256, "lt256m"), (1024, "lt1024m")):
+        if size < limit * 1024 * 1024:
+            return label
+    return "ge1024m"
+
+
+def _tail_log(code, *, retention=False, reason=None, backend=None, size=None):
+    """Fixed codes and unit counts; no session, path, text or message IDs."""
+    from .log import log
+    detail = f"code={code} count=1"
+    if reason is not None:
+        detail += f" reason={reason}"
+    if not retention:
+        observed_backend, observed_size = _IMPORT_LOG_METADATA.get()
+        if backend is None:
+            backend = observed_backend
+            size = size if size is not None else observed_size
+        detail += f" backend={backend if backend in SUPPORTED_BACKENDS else 'other'}"
+        detail += f" size={_size_bucket(size)}"
+    log("transcriptTailRetention" if retention else "transcriptTailDecision", detail)
+
+
+def _refuse_tail(code, *, reason=None, backend=None, size=None):
+    _tail_log("full_" + code, reason=reason, backend=backend, size=size)
+    return None
+
+
+def _checkpoint_refused(status):
+    reasons = status.get("refused", ())
+    for code in reasons:
+        _tail_log("checkpoint_" + code, retention=True)
+    return bool(reasons)
+
+
+def _checkpoint_reason(status):
+    reasons = status.get("refused", ())
+    known = {"foreign_commit_yield", "connection_changed_yield",
+             "yield_without_release_sample", "data_version_read_failure"}
+    if len(reasons) == 1 and reasons[0] in known:
+        return "publication_" + reasons[0]
+    return "publication_refused_unknown"
+
+
+def _cache_committed_tail(key, revision, checkpoint, raw_inputs, file_hash, *, reason_token=None):
+    from . import db
+    if raw_inputs is None or file_hash is None:
+        _TAIL_STATES.note_refusal(key, revision, reason_token, "publication_not_written")
+        _tail_log("checkpoint_not_written", retention=True)
+        return
+    try:
+        current = identity(pathlib.Path(checkpoint.source_file))
+    except OSError:
+        _TAIL_STATES.note_refusal(key, revision, reason_token, "publication_file_unavailable")
+        _tail_log("file_unavailable_after_store", retention=True)
+        return
+    if current != Identity(checkpoint.device, checkpoint.inode, checkpoint.size, checkpoint.mtime_ns):
+        _TAIL_STATES.note_refusal(key, revision, reason_token, "publication_file_moved")
+        _tail_log("file_moved_before_publication", retention=True)
+        return
+    if load_checkpoint(db.conn(), checkpoint.agent_id, checkpoint.backend_session_id,
+                       checkpoint.source_file) != checkpoint:
+        _TAIL_STATES.note_refusal(key, revision, reason_token, "publication_superseded")
+        _tail_log("checkpoint_superseded", retention=True)
+        return
+    if raw_inputs[4]:
+        _TAIL_STATES.note_refusal(key, revision, reason_token, "oracle_history")
+        _tail_log("oracle_history", retention=True)
+        return
+    if any(row["origin"] not in ("user", "agent", None, "") for row in raw_inputs[1]):
+        _TAIL_STATES.note_refusal(key, revision, reason_token, "automation_provenance")
+        _tail_log("automation_provenance", retention=True)
+        return
+    state = _TailState(checkpoint, raw_inputs, file_hash)
+    _TAIL_STATES.put(key, revision, state)
+    found, retained = _TAIL_STATES.get(key, revision)
+    if not found or retained is not state:
+        _tail_log("frontier_not_retained", retention=True)
+
+
+def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, diagnostic=None):
+    from . import db, message_writes
+    key = _tail_key(path, agent_id, backend_session_id)
+    revision = parser_version(backend)
+    size = diagnostic.get("size") if diagnostic is not None else None
+
+    def refuse(code, *, reason=None):
+        return _refuse_tail(code, reason=reason, backend=backend, size=size)
+
+    found, state, reason = _TAIL_STATES.observe(key, revision)
+    # Invalidate before any attempt, including a failure after a partial batch
+    # or external effect. Only successful committed progress re-admits carry.
+    reason_token = _TAIL_STATES.consume(key, revision)
+    if diagnostic is not None:
+        diagnostic["token"] = reason_token
+    if not found or state is None:
+        return refuse("no_frontier", reason=reason)
+    cp = load_checkpoint(db.conn(), agent_id, backend_session_id, str(path))
+    if cp != state.checkpoint:
+        return refuse("checkpoint_changed")
+    before = identity(path)
+    if complete_size(path, before.size) != before.size:
+        return refuse("partial_record")
+    reason = decide(cp, backend, path, before, now_ms=db.now_ms(),
+                    audit_every=int(conf["audit_every"]), audit_seconds=float(conf["audit_seconds"]),
+                    max_tail_bytes=int(conf["max_tail_bytes"]))
+    if reason:
+        return refuse(reason)
+    previous_hash, current_hash = _tail_file_hashes(path, cp.complete_size, before.size)
+    if previous_hash != state.file_hash:
+        return refuse("prefix_content_changed")
+    turns = parse_range(backend, path, cp.boundary_offset, before.size)
+    parsed = time.perf_counter()
+    if identity(path) != before:
+        return refuse("file_moved_during_parse")
+    next_cp = replace(cp, size=before.size, mtime_ns=before.mtime_ns,
+                      complete_size=before.size, turn_count=cp.boundary_seq + len(turns),
+                      tail_hash=range_hash(path, cp.boundary_offset, before.size),
+                      imports_since_audit=cp.imports_since_audit + 1, updated_at=db.now_ms())
+    raw_inputs = None
+    checkpoint_status = {}
+
+    def publish(database, captured):
+        nonlocal raw_inputs
+        if identity(path) != before:
+            return
+        write_checkpoint(database, next_cp)
+        raw_inputs = message_writes._prepare_import_prelude(
+            database, agent_id, backend_session_id, [], raw_only=True)
+
+    try:
+        message_writes.store_transcript_tail(
+            agent_id=agent_id, backend_session_id=backend_session_id,
+            source_file=str(path), turns=turns, start_seq=cp.boundary_seq,
+            carry=cp.store_carry, expected_prelude=state.raw_inputs, on_stored=publish,
+            checkpoint_status=checkpoint_status)
+    except message_writes._TailInvalidated:
+        return refuse("carry_inputs_changed")
+    _tail_log("tail_applied", backend=backend, size=size)
+    if not _checkpoint_refused(checkpoint_status):
+        _cache_committed_tail(key, revision, next_cp, raw_inputs, current_hash,
+                              reason_token=reason_token)
+    else:
+        _TAIL_STATES.note_refusal(key, revision, reason_token, _checkpoint_reason(checkpoint_status))
+    return {"rows": next_cp.turn_count, "parse_s": parsed - started,
+            "store_s": time.perf_counter() - parsed, "shadow": "not_sampled_tail",
+            "apply_mode": "tail", "parsed_bytes": before.size - cp.boundary_offset}
+
+
+def _store_full_with_tail_checkpoint(backend, path, agent_id, backend_session_id,
+                                     turns, before, conf, *, reason_token=None):
+    from . import db, message_store, message_writes
+    key = _tail_key(path, agent_id, backend_session_id)
+    revision = parser_version(backend)
+    kwargs = {}
+    checkpoint = None
+    raw_inputs = None
+    current_hash = None
+    checkpoint_status = {}
+    refusal = "file_identity_unavailable"
+    refusal_logged = False
+    try:
+        if before is None:
+            pass
+        elif not turns:
+            refusal = "empty_transcript"
+        elif turns[0].get("role") != "user":
+            refusal = "assistant_prefix"
+        elif identity(path) != before:
+            refusal = "file_moved_before_bootstrap"
+        elif complete_size(path, before.size) != before.size:
+            refusal = "partial_record"
+        else:
+            boundary, why = choose_boundary(backend, path, turns, turn_digests(turns), before,
+                                            int(conf["max_tail_bytes"]))
+            if boundary is None:
+                refusal = "no_safe_boundary_" + why
+            elif _prefix_has_effects(turns[:boundary.seq]):
+                refusal = "effect_bearing_prefix"
+            else:
+                refusal = ""
+                _, current_hash = _tail_file_hashes(path, before.size, before.size)
+                captured = {}
+
+                def publish(database, carry):
+                    nonlocal checkpoint, raw_inputs
+                    if not carry or identity(path) != before:
+                        return
+                    now = db.now_ms()
+                    checkpoint = Checkpoint(
+                        agent_id, backend_session_id, str(path), backend, parser_version(backend),
+                        before.device, before.inode, before.size, before.mtime_ns,
+                        boundary.complete_size, boundary.offset, boundary.seq, len(turns),
+                        boundary.prefix_hash, boundary.tail_hash, boundary.prefix_turns_hash,
+                        boundary.parser_carry, dict(carry), 0, now, now)
+                    write_checkpoint(database, checkpoint)
+                    raw_inputs = message_writes._prepare_import_prelude(
+                        database, agent_id, backend_session_id, [], raw_only=True)
+
+                kwargs = {"capture_at": boundary.seq, "captured": captured, "on_stored": publish}
+    except OSError:
+        # Losing optimization input must not discard an already completed full parse.
+        _tail_log("bootstrap_file_io", retention=True)
+        refusal_logged = True
+        refusal = "bootstrap_file_io"
+        kwargs = {}
+    message_store.store_transcript_turns(
+        agent_id=agent_id, backend_session_id=backend_session_id,
+        source_file=str(path), turns=turns, checkpoint_status=checkpoint_status, **kwargs)
+    if _checkpoint_refused(checkpoint_status):
+        _TAIL_STATES.note_refusal(key, revision, reason_token, _checkpoint_reason(checkpoint_status))
+        return
+    if refusal:
+        reason = {"effect_bearing_prefix": "bootstrap_effect",
+                  "file_moved_before_bootstrap": "bootstrap_file_moved",
+                  "empty_transcript": "bootstrap_empty",
+                  "assistant_prefix": "bootstrap_assistant_prefix",
+                  "partial_record": "bootstrap_partial_record",
+                  "bootstrap_file_io": "bootstrap_io"}.get(refusal, "bootstrap_refused")
+        _TAIL_STATES.note_refusal(key, revision, reason_token, reason)
+        if not refusal_logged:
+            _tail_log(refusal, retention=True)
+    elif checkpoint is None:
+        _TAIL_STATES.note_refusal(key, revision, reason_token, "publication_not_written")
+        _tail_log("checkpoint_not_written", retention=True)
+    else:
+        _cache_committed_tail(key, revision, checkpoint, raw_inputs, current_hash,
+                              reason_token=reason_token)
+
+
 def import_transcript(*, backend: str, path: pathlib.Path, agent_id: str,
                       backend_session_id: str,
                       parse: Callable[[pathlib.Path], list[dict]] | None = None,
+                      _defer_full: bool = False,
                       ) -> dict[str, Any]:
     """Parse and store one transcript in full (authoritative), plus the
     shadow when the budget admits it. Returns the import's timings."""
     from . import backends, message_store
     started = time.perf_counter()
     path = pathlib.Path(path)
+    implementation = backends.get(backend)
+    native_parse = parse is None or (
+        isinstance(parse, types.MethodType) and implementation is not None
+        and parse.__self__ is implementation
+        and parse.__func__ is type(implementation).parse_transcript)
     parse = parse or (lambda p: backends.parse_turns(backend, p))
     skip = "unsupported_backend"
     if backend in SUPPORTED_BACKENDS:
@@ -654,16 +1265,75 @@ def import_transcript(*, backend: str, path: pathlib.Path, agent_id: str,
         except Exception as exc:  # noqa: BLE001 - a bad [transcript_shadow] must not stop imports
             from .log import log_exception
             log_exception("transcriptShadowSettingsFail", exc)
-            conf = {"enabled": False}
+            conf = dict(_DEFAULTS, enabled=False)
         skip = BUDGET.admit(conf)
     if skip:
-        turns = parse(path)
-        parsed = time.perf_counter()
-        message_store.store_transcript_turns(
-            agent_id=agent_id, backend_session_id=backend_session_id,
-            source_file=str(path), turns=turns)
-        return {"rows": len(turns), "parse_s": parsed - started,
-                "store_s": time.perf_counter() - parsed, "shadow": skip}
+        tail_enabled = (native_parse and backend in SUPPORTED_BACKENDS
+                        and implementation is not None
+                        and implementation.supports_transcript_tail_apply)
+        before = None
+        diagnostic = {}
+        if tail_enabled:
+            try:
+                before = identity(path)
+                diagnostic["size"] = before.size
+            except OSError as exc:
+                from .log import log_exception
+                log_exception("transcriptTailFileSkip", exc)
+                _tail_log("full_file_io", backend=backend)
+        gate_native = False
+        if _defer_full and tail_enabled:
+            method = implementation.parse_transcript
+            gate_native = (isinstance(method, types.MethodType)
+                           and method.__func__ is type(implementation).parse_transcript)
+        with _FullImportAttempt(gate_native, backend, path,
+                                agent_id, backend_session_id, before) as admission:
+            if admission.reason:
+                _tail_log("deferred_full_" + admission.reason, backend=backend,
+                          size=before.size if before else None)
+                return {"rows": 0, "parse_s": 0.0, "store_s": 0.0,
+                        "apply_mode": "deferred", "shadow": skip,
+                        "_clarp_transcript_completion_v1": "deferred"}
+            if tail_enabled and before is not None:
+                try:
+                    tail = _try_tail(backend, path, agent_id, backend_session_id, conf, started,
+                                     diagnostic=diagnostic)
+                except OSError as exc:
+                    from .log import log_exception
+                    log_exception("transcriptTailFileSkip", exc)
+                    _tail_log("full_file_io", backend=backend, size=before.size)
+                except Exception:
+                    _tail_log("tail_failed", backend=backend, size=before.size)
+                    raise
+                else:
+                    if tail is not None:
+                        return tail
+            if not tail_enabled:
+                if not native_parse:
+                    _tail_log("full_custom_parser", backend=backend)
+                elif implementation is None or backend not in SUPPORTED_BACKENDS:
+                    _tail_log("full_backend_unsupported", backend=backend)
+                else:
+                    _tail_log("full_backend_tail_disabled", backend=backend)
+            admission.full_started = True
+            turns = parse(path)
+            parsed = time.perf_counter()
+            if tail_enabled:
+                _store_full_with_tail_checkpoint(backend, path, agent_id, backend_session_id,
+                                                 turns, before, conf,
+                                                 reason_token=diagnostic.get("token"))
+                retained = _TAIL_STATES.peek(_tail_key(path, agent_id, backend_session_id))
+                admission.retained = (retained is not None
+                                      and retained[0] == parser_version(backend)
+                                      and retained[1] is not None)
+            else:
+                message_store.store_transcript_turns(
+                    agent_id=agent_id, backend_session_id=backend_session_id,
+                    source_file=str(path), turns=turns)
+            return {"rows": len(turns), "parse_s": parsed - started,
+                    "store_s": time.perf_counter() - parsed, "shadow": skip,
+                    "apply_mode": "full", "parsed_bytes": before.size if before else None}
+    _tail_log("full_shadow_admitted", backend=backend)
     shadow = _Shadow(backend, path, agent_id, backend_session_id, conf)
     try:
         try:
@@ -673,15 +1343,155 @@ def import_transcript(*, backend: str, path: pathlib.Path, agent_id: str,
         turns = parse(path)
         parsed = time.perf_counter()
         shadow.before_store(before, turns)
+        checkpoint_status = {}
         out = message_store.store_transcript_turns(
             agent_id=agent_id, backend_session_id=backend_session_id,
-            source_file=str(path), turns=turns, **shadow.store_kwargs())
+            source_file=str(path), turns=turns, checkpoint_status=checkpoint_status,
+            **shadow.store_kwargs())
+        _checkpoint_refused(checkpoint_status)
         stored = time.perf_counter()
         shadow.after_store(out)
         return {"rows": len(turns), "parse_s": parsed - started,
                 "store_s": stored - parsed, "shadow": shadow.verdict}
     finally:
         shadow.finish()
+
+
+# The columns a turn re-stamp may change (turn_json) and those it must not.
+_RESTAMP_COLUMNS = ("message_id, source_file, seq, role, timestamp, text, kind, tool_name,"
+                    " tools_json, display_cells_json, origin, sender_agent_id,"
+                    " prompt_admission_id, trace_id, phase, turn_json")
+
+
+def _restamp_view(row) -> tuple:
+    """(trace_id, turn_json, every other content column) of one message row."""
+    content = tuple(row[name] for name in row.keys()
+                    if name not in ("message_id", "turn_json", "revision"))
+    return row["trace_id"] or "", row["turn_json"], content
+
+
+def _summary_moved_off(changed: set[str], planned: set[str],
+                       before: dict[str, tuple], after: dict[str, tuple]) -> set[str]:
+    """Changed rows whose only change is a turn summary moving to a planned row.
+
+    The plan applies no writes, so when a tail row belongs to a turn that began
+    before the boundary, re-stamping that turn (stamp_turn) moves its summary
+    off a row the plan never saw change; the tail import does the same. Such a
+    row is explained only if its content is identical, it lost the summary,
+    and the summary of its turn now sits on a row the plan did change."""
+    holders: dict[str, set[str]] = {}
+    for message_id, (trace, turn_json, _) in after.items():
+        if trace and turn_json is not None:
+            holders.setdefault(trace, set()).add(message_id)
+    explained = set()
+    for message_id in changed:
+        old, new = before.get(message_id), after.get(message_id)
+        if old is None or new is None:
+            continue
+        trace = new[0]
+        if (trace and old[0] == trace and old[2] == new[2]
+                and old[1] is not None and new[1] is None
+                and holders.get(trace) and holders[trace] <= planned):
+            explained.add(message_id)
+    return explained
+
+
+def _summary_consistent(database, agent_id: str, trace_id: str) -> bool:
+    """Whether a turn's rows hold the summary stamp_turn decides for it: on a
+    settled turn exactly one row, its last, with that summary; on an
+    unsettled or unknown turn none. Rows are read across backend sessions."""
+    from . import message_writes
+    stamped = message_writes.turn_stamp(database, agent_id, trace_id)
+    if stamped is None:
+        return True
+    _, rows, summary = stamped
+    holders = [row for row in rows if row["turn_json"] is not None]
+    if summary is None:
+        return not holders
+    return [row["message_id"] for row in holders] == [rows[-1]["message_id"]] \
+        and holders[0]["turn_json"] == summary
+
+
+def _witness_state(database, agent_id: str, backend_session_id: str) -> dict[str, Any]:
+    """What other writers could change under an import: the heads of the
+    agent's other conversations and fingerprints of its turns and of this
+    conversation's agy authority rows."""
+    heads = database.execute(
+        """SELECT COALESCE(MAX(revision), 0), COALESCE(MAX(replace_revision), 0)
+             FROM conversation_heads WHERE agent_id = ? AND backend_session_id != ?""",
+        (agent_id, backend_session_id)).fetchone()
+    turns = hashlib.blake2b(digest_size=16)
+    for row in database.execute(
+            """SELECT turn_id, trace_id, started_at, settled_at, outcome FROM turns
+                WHERE agent_id = ? ORDER BY turn_id""", (agent_id,)):
+        turns.update(json.dumps(list(row), default=str).encode())
+    authority = hashlib.blake2b(digest_size=16)
+    for row in database.execute(
+            """SELECT trace_id, assistant_start_ordinal, assistant_end_ordinal,
+                      terminal_status, authoritative_message_id, updated_at
+                 FROM agy_turn_authority WHERE agent_id = ? AND backend_session_id = ?
+                ORDER BY trace_id""", (agent_id, backend_session_id)):
+        authority.update(json.dumps(list(row), default=str).encode())
+    return {"other_heads": [int(heads[0]), int(heads[1])],
+            "turns": turns.hexdigest(), "authority": authority.hexdigest()}
+
+
+def _witness(database, agent_id: str, backend_session_id: str, source_file: str,
+             floor: int, before: dict[str, Any] | None) -> dict[str, Any]:
+    """Whether anything besides this import wrote what it reads between the
+    plan's snapshot and the comparison. Diagnostic only: it never changes a
+    verdict; it lets a divergence be told from concurrency noise.
+
+    The import writes this conversation's transcript rows and, through
+    stamp_turn, every row (in any conversation) of the turns it may stamp: the
+    turns of the rows it changed and its newest turn, which it re-stamps on
+    every import. It also writes the tools of agy turns whose text the stream
+    owns onto their authoritative rows (_attach_authority_tools), so this
+    conversation's agy authority turns and rows count as its own too. Of the
+    agent's other rows changed since the floor (client,
+    live and final rows, and rows of other conversations), ``foreign_rows``
+    counts those outside those turns (another writer), ``ambiguous_rows``
+    those inside them (the stamp or another writer). Another conversation's
+    head moving counts only when rows the stamp may have written do not
+    account for it."""
+    after = _witness_state(database, agent_id, backend_session_id)
+    changed = database.execute(
+        """SELECT message_id, backend_session_id, source_file, trace_id FROM messages
+            WHERE agent_id = ? AND revision > ?""", (agent_id, floor)).fetchall()
+    own = [row for row in changed
+           if row["backend_session_id"] == backend_session_id
+           and row["source_file"] == source_file]
+    footprint = {row["trace_id"] for row in own if row["trace_id"]}
+    newest = database.execute(
+        """SELECT trace_id FROM messages
+            WHERE agent_id = ? AND backend_session_id = ? AND source_file = ?
+              AND trace_id IS NOT NULL ORDER BY seq DESC LIMIT 1""",
+        (agent_id, backend_session_id, source_file)).fetchone()
+    if newest is not None:
+        footprint.add(newest["trace_id"])
+    authority_ids: set[str] = set()
+    for row in database.execute(
+            """SELECT trace_id, authoritative_message_id FROM agy_turn_authority
+                WHERE agent_id = ? AND backend_session_id = ?""",
+            (agent_id, backend_session_id)):
+        footprint.add(row["trace_id"])
+        if row["authoritative_message_id"]:
+            authority_ids.add(row["authoritative_message_id"])
+    others = [row for row in changed if row not in own]
+    ambiguous = sum(1 for row in others
+                    if row["trace_id"] in footprint or row["message_id"] in authority_ids)
+    out = {"foreign_rows": len(others) - ambiguous, "ambiguous_rows": ambiguous}
+    if before is not None:
+        other_sessions = [row for row in others
+                          if row["backend_session_id"] != backend_session_id]
+        explained = bool(other_sessions) and all(
+            row["trace_id"] in footprint or row["message_id"] in authority_ids
+            for row in other_sessions)
+        out.update(other_heads_moved=after["other_heads"] != before["other_heads"]
+                   and not explained,
+                   turns_changed=after["turns"] != before["turns"],
+                   authority_changed=after["authority"] != before["authority"])
+    return out
 
 
 class _Shadow:
@@ -702,6 +1512,7 @@ class _Shadow:
         self.plan: dict[str, Any] | None = None
         self.old: Checkpoint | None = None
         self.ids_before: set[str] = set()
+        self.rows_before: dict[str, tuple] = {}
         self.out_seqs: list[int] = []
         self.failed = False
 
@@ -766,9 +1577,12 @@ class _Shadow:
             if prefix_turns_hash(digests, old.boundary_seq) != old.prefix_turns_hash:
                 mismatches.append("prefix_changed")
             self.mismatches = mismatches
-            self.ids_before = {row[0] for row in database.execute(
-                "SELECT message_id FROM messages WHERE agent_id=? AND backend_session_id=?",
+            self.rows_before = {row["message_id"]: _restamp_view(row) for row in database.execute(
+                f"SELECT {_RESTAMP_COLUMNS} FROM messages WHERE agent_id=? AND backend_session_id=?",
                 (self.agent_id, self.backend_session_id)).fetchall()}
+            self.ids_before = set(self.rows_before)
+            self.witness_before = _witness_state(database, self.agent_id,
+                                                 self.backend_session_id)
             self.plan = message_writes.plan_transcript_tail(
                 agent_id=self.agent_id, backend_session_id=self.backend_session_id,
                 source_file=str(self.path), turns=tail, start_seq=old.boundary_seq,
@@ -828,24 +1642,45 @@ class _Shadow:
             mismatches.append("prefix_rows_rewritten")
         database = db.conn()
         rows = database.execute(
-            """SELECT message_id, source_file, revision FROM messages
-                WHERE agent_id=? AND backend_session_id=?""",
+            f"SELECT {_RESTAMP_COLUMNS}, revision FROM messages"
+            " WHERE agent_id=? AND backend_session_id=?",
             (self.agent_id, self.backend_session_id)).fetchall()
         ids_after = {row["message_id"] for row in rows}
         transcript_changed = {row["message_id"] for row in rows
                               if row["source_file"] == str(self.path)
                               and int(row["revision"]) > floor}
-        planned_changed = {r["id"] for r in planned if int(r["revision"]) > floor}
-        if transcript_changed - planned_changed:
+        planned_changed = {r["id"] for r in planned if int(r["revision"]) > floor} \
+            | plan["updated"]
+        unexplained = transcript_changed - planned_changed
+        unexplained -= _summary_moved_off(
+            unexplained, planned_changed, getattr(self, "rows_before", {}),
+            {row["message_id"]: _restamp_view(row) for row in rows})
+        if unexplained:
             mismatches.append("changed_rows")
+        # The plan cannot predict turn summaries, so check them directly: every
+        # turn this import changed carries what stamp_turn gives it now.
+        # stamp_turn writes a turn's rows in every backend session, so the
+        # turns to check come from the agent's rows, not just this
+        # conversation's. The floor is a global clock value: any row of the
+        # agent above it changed since the plan's snapshot.
+        changed_traces = {row["trace_id"] for row in database.execute(
+            """SELECT DISTINCT trace_id FROM messages
+                WHERE agent_id = ? AND revision > ? AND trace_id IS NOT NULL""",
+            (self.agent_id, floor)).fetchall()}
+        if any(not _summary_consistent(database, self.agent_id, trace)
+               for trace in sorted(changed_traces)):
+            mismatches.append("summary")
         # A row the plan adopts (a streamed twin) keeps its id; the plan, which
         # never applies its writes, still sees it as live and deletes it.
         planned_deleted = (plan["deleted"] & self.ids_before) - {r["id"] for r in planned}
         if (self.ids_before - ids_after) != planned_deleted:
             mismatches.append("deleted_rows")
         self.detail["mismatches"] = mismatches
+        self.detail["witness"] = _witness(
+            database, self.agent_id, self.backend_session_id, str(self.path), floor,
+            getattr(self, "witness_before", None))
         if mismatches:
-            self.detail["examples"] = sorted(transcript_changed - planned_changed)[:5]
+            self.detail["examples"] = sorted(unexplained)[:5]
         self.verdict = "diverge:" + ",".join(mismatches) if mismatches else "match"
 
     def finish(self) -> None:

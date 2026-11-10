@@ -495,6 +495,7 @@ pub fn start_check(name: &str, out: String) {
         "connection" => connection_check(out),
         "lifecycle" => lifecycle_check(out),
         "narration" => narration_check(out),
+        "select-text" => select_text_check(out),
         "sidebar" => sidebar_check(out),
         // ---- updates and teams
         "updates" => updates_check(out),
@@ -1997,6 +1998,43 @@ fn connection_check(out: String) {
             check(true, "and shows it again");
             true
         })),
+        // Saved Hosts: the one that answered is kept and marked, another one
+        // is found in the switcher by name, and Remove leaves it out.
+        ("host saved", Box::new(|app, window, _| {
+            let current = clarp_core::settings::normalized_base_url(&base());
+            if !window.get_saved_hosts().iter().any(|r| r.url == current.as_str() && r.current) {
+                return false;
+            }
+            check(true, "the Host that answered is saved and marked as the one in use");
+            clarp_core::hosts::remember(app.engine.borrow_mut().settings_mut(), "http://127.0.0.1:9", "Elsewhere");
+            headless::press_with(&[Key::Control], "k");
+            headless::type_text("elsewhere");
+            true
+        })),
+        ("host in the switcher", Box::new(|_, window, elapsed| {
+            if !window.get_switcher_open() || window.get_switcher_query() != "elsewhere" || elapsed < Duration::from_millis(200) {
+                return false;
+            }
+            let rows: Vec<String> = window.get_switcher_rows().iter().map(|r| format!("{}|{}|{}", r.kind, r.label, r.detail)).collect();
+            check(rows.first().is_some_and(|r| r == "host|Switch to Elsewhere|http://127.0.0.1:9"), &format!("typing a saved Host's name finds it first: {rows:?}"));
+            headless::press(Key::Escape);
+            true
+        })),
+        ("host removed", Box::new(|app, window, _| {
+            if window.get_switcher_open() {
+                return false;
+            }
+            window.invoke_remove_saved_host("http://127.0.0.1:9".into());
+            check(!app.engine.borrow().saved_hosts().iter().any(|h| h.url == "http://127.0.0.1:9"), "Remove leaves the Host out of the saved list");
+            true
+        })),
+        ("host gone from the page", Box::new(|_, window, _| {
+            if window.get_saved_hosts().iter().any(|r| r.url == "http://127.0.0.1:9") {
+                return false;
+            }
+            check(true, "and out of the connection page's list");
+            true
+        })),
     ];
     run_stages(stages);
 }
@@ -2142,6 +2180,74 @@ fn narration_check(out: String) {
             window.invoke_copy_message(app_now().active_id(), "n2".into());
             let copied = std::env::var_os("CLARP_TEST_CLIPBOARD").and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
             check(copied == "Here they are.", &format!("the copy button copies the message: {copied:?}"));
+            true
+        })),
+    ];
+    run_stages(stages);
+}
+
+/// `--check select-text --out DIR`: a message's select icon opens it as
+/// plain text, Escape closes that, the command shows the whole chat under
+/// who wrote each message, and Copy all copies it.
+fn select_text_check(out: String) {
+    let turns = serde_json::json!({"session": "rachel", "turns": [
+        {"id": "s1", "role": "user", "text": "Show me the plan"},
+        {"id": "s2", "role": "assistant", "text": "Step one, then step two."},
+    ]});
+    let stages: Vec<Stage> = vec![
+        ("live", Box::new(move |app, _window, _| {
+            if app.engine.borrow().connection_state() != "live" {
+                return false;
+            }
+            check(control("/__control/turns", &turns).is_ok(), "the Host has a short chat");
+            true
+        })),
+        ("loaded", Box::new(|_, window, _| {
+            if !rows(window).iter().any(|r| r.id == "s2") {
+                return false;
+            }
+            window.invoke_select_message(app_now().active_id(), "s2".into());
+            true
+        })),
+        ("message", Box::new(move |_, window, elapsed| {
+            if window.get_overlay() != "select-text" || elapsed < Duration::from_millis(200) {
+                return false;
+            }
+            let body = window.get_select_body().to_string();
+            check(body.contains("Show me the plan") && body.contains("Step one, then step two."), &format!("a message's select icon opens the whole chat, so a selection can reach the others: {body:?}"));
+            let (from, to) = (window.get_select_from() as usize, window.get_select_to() as usize);
+            check(body.get(from..to) == Some("Step one, then step two."), &format!("with that message selected: {:?}", body.get(from..to)));
+            check(window.get_select_title().starts_with("Select text"), "under a Select text title");
+            shot(&out, "select-text-01");
+            headless::press(slint::platform::Key::Escape);
+            true
+        })),
+        ("closed", Box::new(|_, window, _| {
+            if !window.get_overlay().is_empty() {
+                return false;
+            }
+            check(true, "Escape closes it");
+            check(crate::commands::run(&app_now(), window, "select-text"), "the Select text command runs");
+            true
+        })),
+        ("whole chat", Box::new(|_, window, _| {
+            if window.get_overlay() != "select-text" {
+                return false;
+            }
+            let body = window.get_select_body().to_string();
+            check(body.contains("You:\nShow me the plan") && body.contains("Step one, then step two."), &format!("the whole chat, each message under who wrote it: {body:?}"));
+            check(window.get_select_from() as usize == body.len() && window.get_select_to() as usize == body.len(), "the caret at the latest, nothing selected");
+            window.invoke_select_copy_all();
+            let copied = std::env::var_os("CLARP_TEST_CLIPBOARD").and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
+            check(copied == body, &format!("Copy all copies all of it: {copied:?}"));
+            headless::press(slint::platform::Key::Escape);
+            true
+        })),
+        ("done", Box::new(|_, window, _| {
+            if !window.get_overlay().is_empty() {
+                return false;
+            }
+            check(true, "and Escape closes the whole-chat page too");
             true
         })),
     ];

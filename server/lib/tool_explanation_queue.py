@@ -184,6 +184,17 @@ def complete(owner, values, failure_ttl, *, guard=None):
         return True
 
 
+def fail_owned(owner, reason, failure_ttl):
+    """Fail every job this owner holds, as complete() fails one (RM-06)."""
+    now=cache.now_ms()
+    with transaction() as db:
+        keys=[row[0] for row in db.execute("SELECT cache_key FROM tool_explanation_jobs WHERE owner=? AND status='running'",(owner,))]
+        for key in keys:
+            db.execute("UPDATE tool_explanation_jobs SET status='failed',activity_json='',owner='',lease_until=0,failure_reason=?,available_at=? WHERE cache_key=?",(reason,now+int(failure_ttl*1000),key))
+            db.execute('DELETE FROM tool_explanation_demands WHERE cache_key=?',(key,))
+    return len(keys)
+
+
 def abandon(owner, *, delay=0):
     with transaction() as db:
         now=cache.now_ms()

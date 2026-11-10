@@ -16,6 +16,7 @@ from lib import agent_ring_live_socket as sock
 from tests.unit.test_agent_ring_live import PHONE, sander  # noqa: F401 - sander is a fixture
 from tests.unit.test_agent_ring_live_socket import (AUDIO, Handler, _join, _ready, _ring_of, _serve, _types, _wait,
                                                      call)  # noqa: F401 - call is a fixture
+from tests.unit.test_agent_ring_live_socket import _live_lifecycle  # noqa: F401 - autouse: no session outlives its test
 from tests.unit.test_agent_rings import env  # noqa: F401 - env is a fixture
 
 
@@ -173,6 +174,8 @@ def test_the_upstream_order_log_is_metadata_only_and_never_breaks_the_call(call,
     order = [d for n, d in seen if n == "agentLiveUpstreamOrder"]
     assert order and "session.output_audio.delta" in order[0] and "session.instructions.appended" in order[0]
     assert AUDIO not in order[0] and "OPENING" not in order[0]                       # no audio, no content
+    mine = [d for d in order if d.split(" ", 1)[0] == f"call={call.grant['call_id']}"]
+    assert len(mine) == 1 and order == mine        # only this call's own record: no other session logged here
 
 
 # ---- ROOT rev 2: the uncorrelated-ACK fallback, the send stages, a reentrant fast ACK, a send failure ----

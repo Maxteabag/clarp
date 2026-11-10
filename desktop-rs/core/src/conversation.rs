@@ -255,6 +255,9 @@ impl Conversation {
             self.prepend_rows(&turns);
         } else {
             self.merge_rows(&turns);
+            if kind == LoadKind::Tail {
+                self.adopt_tail_order(&turns);
+            }
         }
 
         if self.conversation_id != next_id {
@@ -326,14 +329,55 @@ impl Conversation {
     }
 
     pub fn mark_delivery_failed(&mut self, client_message_id: &str) {
+        self.mark_delivery_failed_because(client_message_id, "");
+    }
+
+    /// A failed send with the Host's reason, its first line, shown on the
+    /// bubble (empty: none, as for a lost connection).
+    /// A row the delivery timer already failed takes the Host's late reason;
+    /// a confirmed row is never failed again.
+    pub fn mark_delivery_failed_because(&mut self, client_message_id: &str, reason: &str) {
         let Some(row) = self.index_of(&format!("u-{client_message_id}")) else { return };
-        if !self.messages[row].pending {
+        let late_reason = self.messages[row].delivery_failed && !reason.trim().is_empty();
+        if !self.messages[row].pending && !late_reason {
             return;
         }
         let mut message = self.messages[row].clone();
         message.delivery_failed = true;
         message.pending = false;
+        message.delivery_error = reason.lines().next().unwrap_or_default().trim().to_owned();
         self.update(row, message, vec![Role::Pending, Role::DeliveryFailed]);
+    }
+
+    /// This client's /send was answered 2xx (CLIENT-SEND-500): the only thing
+    /// that makes its own row delivered. A sync carrying the row does not,
+    /// because the Host saves it before the turn starts.
+    pub fn confirm_delivery(&mut self, client_message_id: &str) {
+        let Some(row) = self.index_of(&format!("u-{client_message_id}")) else { return };
+        if !self.messages[row].pending && !self.messages[row].delivery_failed {
+            return;
+        }
+        let mut message = self.messages[row].clone();
+        message.pending = false;
+        message.delivery_failed = false;
+        message.delivery_error.clear();
+        self.update(row, message, vec![Role::Pending, Role::DeliveryFailed]);
+        self.emit(Signal::DeliveryConfirmed(client_message_id.to_owned()));
+    }
+
+    /// A failed row sent again under its own id, in place: the Host launches a
+    /// send it saved but never started exactly once, and answers a started one
+    /// without a second turn. Hands back (client id, text) to post.
+    pub fn resend_failed(&mut self, message_id: &str) -> Option<(String, String)> {
+        let row = self.index_of(message_id).filter(|&row| self.messages[row].delivery_failed)?;
+        let client_id = message_id.strip_prefix("u-")?.to_owned();
+        let mut message = self.messages[row].clone();
+        message.delivery_failed = false;
+        message.delivery_error.clear();
+        message.pending = true;
+        let text = message.text.clone();
+        self.update(row, message, vec![Role::Pending, Role::DeliveryFailed]);
+        Some((client_id, text))
     }
 
     /// Remove a failed optimistic row and hand back its text for a resend.
@@ -498,19 +542,29 @@ impl Conversation {
     // ---- merging ---------------------------------------------------------
 
     fn replace_rows(&mut self, mut rows: Vec<Message>) {
-        // Unconfirmed sends survive an authoritative replacement, in the
-        // order they were sent, unless the new rows already carry them.
-        let mut optimistic: Vec<Message> = self.messages.iter().filter(|m| m.pending).cloned().collect();
-        let mut confirmed = Vec::new();
-        for message in &rows {
-            optimistic.retain(|pending| pending.id != message.id);
-            if let Some(client_id) = message.id.strip_prefix("u-") {
-                confirmed.push(client_id.to_owned());
+        // This client's unconfirmed sends survive an authoritative
+        // replacement, in the order they were sent. A new row with the same
+        // id as an unconfirmed or failed send takes its place but keeps its
+        // pending/failed flags: only the /send answer confirms it
+        // (CLIENT-SEND-500).
+        let mut optimistic: Vec<Message> =
+            self.messages.iter().filter(|m| m.pending || m.delivery_failed).cloned().collect();
+        for message in rows.iter_mut() {
+            // F4: a reload that omits a send's receipt (unknown) keeps its last state.
+            if message.send_state.is_empty()
+                && let Some(row) = self.index_of(&message.id) {
+                    message.send_state = self.messages[row].send_state.clone();
+                }
+            if let Some(at) = optimistic.iter().position(|local| local.id == message.id) {
+                let local = optimistic.remove(at);
+                message.pending = local.pending;
+                message.delivery_failed = local.delivery_failed;
+                message.delivery_error = local.delivery_error;
             }
         }
-        for client_id in confirmed {
-            self.emit(Signal::DeliveryConfirmed(client_id));
-        }
+        // A failed send the new rows do not carry goes with the replaced
+        // chat, as before; an unconfirmed one stays at the end.
+        optimistic.retain(|local| local.pending);
         rows.extend(optimistic);
         self.reset(rows);
         self.emit(Signal::CountChanged);
@@ -529,14 +583,18 @@ impl Conversation {
                 if previous.revision > incoming.revision && incoming.revision != 0 {
                     continue;
                 }
-                let confirmed = previous.pending;
+                // This client's own send keeps its pending/failed flags: a sync
+                // updates the content, the /send answer confirms it.
+                let mut incoming = incoming;
+                incoming.pending = previous.pending;
+                incoming.delivery_failed = previous.delivery_failed || incoming.delivery_failed;
+                incoming.delivery_error = previous.delivery_error.clone();
+                // F4: a read that omits the receipt (unknown) keeps the last state.
+                if incoming.send_state.is_empty() {
+                    incoming.send_state = previous.send_state.clone();
+                }
                 let roles = changed_roles(previous, &incoming);
-                let id = incoming.id.clone();
                 self.update(existing, incoming, roles);
-                if confirmed
-                    && let Some(client_id) = id.strip_prefix("u-") {
-                        self.emit(Signal::DeliveryConfirmed(client_id.to_owned()));
-                    }
                 continue;
             }
             let at = self.insertion_row(&incoming);
@@ -573,7 +631,15 @@ impl Conversation {
             if candidate.kind == "live" && written_after(incoming, candidate) {
                 continue;
             }
-            if candidate.pending || candidate.delivery_failed || candidate.kind == "live" {
+            // A send that never filed stays where it was written: a row the
+            // Host wrote after it goes below it. (It used to pull every later
+            // Host row above it, under every message sent after it.)
+            if candidate.delivery_failed && written_after(incoming, candidate) {
+                continue;
+            }
+            // An unconfirmed send the Host already carries (it has a
+            // revision) is a Host row here: its answer goes below it.
+            if (candidate.pending && candidate.revision == 0) || candidate.delivery_failed || candidate.kind == "live" {
                 return row;
             }
             if incoming.revision > 0 && candidate.revision > incoming.revision {
@@ -581,6 +647,47 @@ impl Conversation {
             }
         }
         self.messages.len()
+    }
+
+    /// A tail load of the same chat is the Host's order for its newest rows.
+    /// Rows that drifted from it (a cached chat restored out of order) go
+    /// back: the tail's rows take the Host's order in the places they hold,
+    /// and the chat's other durable rows with a time (older history, failed
+    /// sends) go by their time among them. A row without a time, and local
+    /// rows still on their way (unconfirmed sends, streaming and activity
+    /// rows), keep their place. Nothing is reset when nothing moves.
+    fn adopt_tail_order(&mut self, turns: &[Value]) {
+        let ms = |m: &Message| crate::time_format::epoch_ms(&m.timestamp);
+        let transient = |m: &Message| m.pending || m.activity || m.kind == "live";
+        let tail: Vec<&str> = turns.iter().filter_map(|t| t.get("id").and_then(Value::as_str)).filter(|id| !id.is_empty()).collect();
+        if tail.is_empty() {
+            return;
+        }
+        let in_tail: std::collections::HashSet<&str> = tail.iter().copied().collect();
+        // The tail's rows in the Host's order, in the slots they hold.
+        let mut host = tail.iter().filter_map(|id| self.index_of(id).map(|i| self.messages[i].clone()));
+        let mut ordered: Vec<Message> = self
+            .messages
+            .iter()
+            .map(|m| if in_tail.contains(m.id.as_str()) { host.next().unwrap_or_else(|| m.clone()) } else { m.clone() })
+            .collect();
+        // The other durable rows with a time go by their time.
+        let movable = |m: &Message| !in_tail.contains(m.id.as_str()) && !transient(m) && ms(m).is_some();
+        let moving: Vec<Message> = ordered.iter().filter(|m| movable(m)).cloned().collect();
+        ordered.retain(|m| !movable(m));
+        for message in moving {
+            let at = ms(&message);
+            let place = ordered
+                .iter()
+                .position(|r| !transient(r) && ms(r).is_some_and(|t| Some(t) > at))
+                .unwrap_or_else(|| ordered.iter().rposition(|r| !transient(r)).map_or(0, |i| i + 1));
+            ordered.insert(place, message);
+        }
+        if ordered.iter().map(|m| m.id.as_str()).eq(self.messages.iter().map(|m| m.id.as_str())) {
+            return;
+        }
+        self.reset(ordered);
+        self.emit(Signal::CountChanged);
     }
 
     fn prepend_rows(&mut self, rows: &[Value]) {
@@ -672,7 +779,9 @@ fn changed_roles(previous: &Message, incoming: &Message) -> Vec<Role> {
     check(previous.reply_to_session != incoming.reply_to_session, Role::ReplyToSession);
     check(previous.delivery != incoming.delivery, Role::Delivery);
     check(previous.pending != incoming.pending, Role::Pending);
-    check(previous.delivery_failed != incoming.delivery_failed, Role::DeliveryFailed);
+    check(previous.delivery_failed != incoming.delivery_failed
+        || previous.delivery_error != incoming.delivery_error
+        || previous.send_state != incoming.send_state, Role::DeliveryFailed);
     check(previous.activity != incoming.activity, Role::Activity);
     check(previous.tools != incoming.tools, Role::Tools);
     check(previous.display_cells != incoming.display_cells, Role::DisplayCells);

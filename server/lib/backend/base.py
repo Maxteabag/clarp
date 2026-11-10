@@ -66,95 +66,84 @@ def resolve(module: str, attr: str) -> Any:
     return getattr(_mod(module), attr)
 
 
-@dataclass(frozen=True)
-class BackendBrand:
-    """Chooser colours as ``#rrggbb`` strings.
-
-    Served on the catalogue so a client never has to ship a palette per CLI:
-    a new backend picks its own field and tint and every app renders it.
-    """
-    field_top: str
-    field_bottom: str
-    tint_dark: str
-    tint_light: str
-
-    def as_dict(self) -> dict[str, str]:
-        return {
-            "field_top": self.field_top,
-            "field_bottom": self.field_bottom,
-            "tint_dark": self.tint_dark,
-            "tint_light": self.tint_light,
-        }
+from ..backend_catalogue import (
+    BackendBrand, DEFAULT_BRAND, DEFAULT_SYMBOL, LOGIN_KINDS, EFFORT_UIS,
+    EFFORT_SCOPES, DEFAULT_DEFINITION,
+)
 
 
-# Neutral treatment for a backend that declares no brand of its own.
-DEFAULT_BRAND = BackendBrand("#2a3142", "#151820", "#a8b4c8", "#4a5568")
-DEFAULT_SYMBOL = "cpu"
+class CatalogueDefault:
+    """A declared default with normal instance/class override precedence."""
 
-# How a client obtains credentials for the CLI. "none" hides the sign-in row.
-LOGIN_KINDS = ("none", "device_code", "cli", "api_key")
-# How a client offers the effort control. "folded_into_model" means the model
-# id already encodes the effort (AGY), so the picker is replaced by a note.
-EFFORT_UIS = ("picker", "hidden", "folded_into_model")
-# Where effort evidence lives: per model ("model"), one list for the whole
-# provider ("provider"), or a provider flag whose compatibility with a chosen
-# model is unknown ("provider_flag").
-EFFORT_SCOPES = ("model", "provider", "provider_flag")
+    def __init__(self, name: str):
+        self.name = name
+
+    def __get__(self, instance, owner):
+        return getattr(owner._catalogue_definition, self.name)
 
 
 class Backend:
     """One coding CLI the host can run as an agent backend."""
 
+    _catalogue_definition = DEFAULT_DEFINITION
+
     # --- catalogue data: every subclass overrides what differs -------------
-    id: str = ""
-    label: str = ""
-    required_binary: str = ""
-    supports_fork: bool = False
-    supports_steer: bool = False
-    supports_transcript_streaming: bool = False
-    supports_routing: bool = True
-    efforts: tuple[str, ...] = ()
-    aliases: tuple[str, ...] = ()
-    badge: str = ""
+    id: str = CatalogueDefault('id')
+    label: str = CatalogueDefault('label')
+    required_binary: str = CatalogueDefault('required_binary')
+    supports_fork: bool = CatalogueDefault('supports_fork')
+    supports_steer: bool = CatalogueDefault('supports_steer')
+    supports_transcript_streaming: bool = CatalogueDefault('supports_transcript_streaming')
+    supports_transcript_tail_apply: bool = False
+    supports_routing: bool = CatalogueDefault('supports_routing')
+    efforts: tuple[str, ...] = CatalogueDefault('efforts')
+    aliases: tuple[str, ...] = CatalogueDefault('aliases')
+    badge: str = CatalogueDefault('badge')
     # Presentation the chooser needs; nothing here requires a client build.
-    detail: str = ""
-    symbol: str = DEFAULT_SYMBOL
-    brand: BackendBrand = DEFAULT_BRAND
-    hidden: bool = False
+    detail: str = CatalogueDefault('detail')
+    symbol: str = CatalogueDefault('symbol')
+    brand: BackendBrand = CatalogueDefault('brand')
+    hidden: bool = CatalogueDefault('hidden')
     # Capability flags advertised on the catalogue. Compact, routing and auth
     # are derived from behaviour rather than declared twice.
-    supports_mcp: bool = False
-    supports_usage: bool = False
-    login_kind: str = "none"
-    effort_ui: str = "picker"
-    effort_help: str = ""
-    effort_scope: str = "provider"
+    supports_mcp: bool = CatalogueDefault('supports_mcp')
+    supports_usage: bool = CatalogueDefault('supports_usage')
+    login_kind: str = CatalogueDefault('login_kind')
+    effort_ui: str = CatalogueDefault('effort_ui')
+    effort_help: str = CatalogueDefault('effort_help')
+    effort_scope: str = CatalogueDefault('effort_scope')
     # The runner's short name: prefix of its log events and drain threads,
     # the ``dispatch`` tag on its state rows and the key of its process
     # registry. DeepSeek runs through OpenCode's.
-    runner: str = ""
-    config_model_field: str = ""
-    config_effort_field: str = ""
+    runner: str = CatalogueDefault('runner')
+    config_model_field: str = CatalogueDefault('config_model_field')
+    config_effort_field: str = CatalogueDefault('config_effort_field')
     # Config field naming the account switch command of this CLI's pool
     # (``account_pool()``); "" when the CLI has no account switching.
-    config_account_switch_field: str = ""
-    fallback_models: tuple[tuple[str, str], ...] = ()
-    resumable: bool = True
+    config_account_switch_field: str = CatalogueDefault('config_account_switch_field')
+    fallback_models: tuple[tuple[str, str], ...] = CatalogueDefault('fallback_models')
+    resumable: bool = CatalogueDefault('resumable')
     # The runner continues a conversation the CLI no longer has in a new one
     # that opens with Clarp's record of it (agy prunes old conversations), so
     # a missing transcript at boot keeps the binding instead of starting fresh.
-    continues_lost_conversations: bool = False
+    continues_lost_conversations: bool = CatalogueDefault('continues_lost_conversations')
     # Context gauge: the window (tokens) the CLI's transcript fills, or None
     # when the CLI auto-compacts and shows no gauge.
-    context_window: int | None = None
+    context_window: int | None = CatalogueDefault('context_window')
     # API-key providers whose model catalogue this CLI fronts ("openai").
-    api_providers: tuple[str, ...] = ()
+    api_providers: tuple[str, ...] = CatalogueDefault('api_providers')
     # The Janitor tool explainer can run natively through this CLI.
-    native_tool_explainer: bool = False
+    native_tool_explainer: bool = CatalogueDefault('native_tool_explainer')
     # Model a new Janitor gets when none is chosen; empty means CLI default.
-    janitor_default_model: str = ""
+    janitor_default_model: str = CatalogueDefault('janitor_default_model')
     # Model family the CLI stands for when the Agent pins no model (avatars).
-    model_family: str = ""
+    model_family: str = CatalogueDefault('model_family')
+    # The CLI serves models from many providers, each with its own sign-in
+    # (``harness_providers``), and names them ``provider/model``.
+    model_providers: bool = CatalogueDefault('model_providers')
+    # Text a model id must contain to be offered on this card; "" keeps all.
+    # A card that is one model family on a many-provider CLI (DeepSeek).
+    model_id_filter: str = CatalogueDefault('model_id_filter')
 
     def __init__(self) -> None:
         if self.login_kind not in LOGIN_KINDS:
@@ -228,6 +217,11 @@ class Backend:
         keywords its runner accepts and drops the rest before ``start_turn``.
         """
         return self.start_turn(**spec)
+
+    def prompt_limit_bytes(self) -> int | None:
+        """The largest user message this backend's CLI can take, when it has
+        no way past one argv string (BACKENDS-08); None means no limit."""
+        return None
 
     def start_turn(self, **kwargs: Any):
         """The runner body: spawn the CLI for one turn with explicit keywords."""
@@ -356,6 +350,21 @@ class Backend:
         """Try to recover a usage-limit failure in-process; True when the
         turn may be retried without switching accounts. Most CLIs cannot.
         """
+        return False
+
+    def start_pending(self, agent_id: str) -> bool:
+        """The agent's turn is registered but its start is not confirmed yet;
+        a follow-up waits instead of preempting it (TP-N3). Most never."""
+        return False
+
+    def turn_holders(self, agent_id: str) -> list:
+        """Processes outside any turn that still hold the agent's native
+        session; its next turn waits for them (BACKENDS-07b). Most have none."""
+        return []
+
+    def credential_switch_pending(self, message) -> bool:
+        """The failure came from a process still on credentials older than the
+        ones now selected; the switch waits for it (BACKENDS-06 (c))."""
         return False
 
     def account_pool(self) -> str:

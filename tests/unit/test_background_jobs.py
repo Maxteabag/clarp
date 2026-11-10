@@ -7,6 +7,7 @@ import sys
 import time
 
 from lib import agents, background_jobs, db
+from tests.patching import patch_shared
 
 
 def test_macos_process_identity_and_liveness(monkeypatch):
@@ -15,7 +16,7 @@ def test_macos_process_identity_and_liveness(monkeypatch):
     raw_argv = ((len(argv)).to_bytes(4, byteorder=sys.byteorder, signed=True)
                 + b"/usr/bin/python\0\0"
                 + b"\0".join(item.encode() for item in argv) + b"\0")
-    monkeypatch.setattr(background_jobs, "_macos_procargs", lambda _pid: raw_argv)
+    patch_shared(monkeypatch, background_jobs, "_macos_procargs", lambda _pid: raw_argv)
 
     def output(command, **_kwargs):
         if command[:3] == ["/usr/sbin/sysctl", "-n", "kern.boottime"]:
@@ -421,7 +422,7 @@ def test_succeeded_job_can_start_a_new_observed_run():
 
 
 def test_superseded_worker_cannot_finish_new_generation(monkeypatch):
-    monkeypatch.setattr(background_jobs, "worker_is_alive", lambda _pid, _token: True)
+    patch_shared(monkeypatch, background_jobs, "worker_is_alive", lambda _pid, _token: True)
     _agent()
     old = background_jobs.upsert(
         session="nadia-test", job_id="watch", kind="email", title="Watch",

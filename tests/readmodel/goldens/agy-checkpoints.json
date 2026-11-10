@@ -1,0 +1,131 @@
+{
+ "backend": "agy",
+ "steps": [
+  {
+   "checkpoint": {
+    "backend": "agy",
+    "boundary_offset": 651,
+    "boundary_seq": 3,
+    "complete_size": 1321,
+    "imports_since_audit": 0,
+    "parser_carry_json": "{\"boundary_step\":4,\"running_tools\":0}",
+    "prefix_hash": "8b6c2557d377abeb0662f24a7ac78c32",
+    "prefix_turns_hash": "3f58d5ec933d57d18a1bc864335d4901",
+    "size": 1321,
+    "store_carry_json": "{\"consumed_client_ids\":[\"u-c0\"],\"current_origin\":\"user\",\"current_sender_agent_id\":\"\",\"current_heartbeat_key\":\"\",\"assistant_ordinal\":2,\"authority_tools\":{},\"closed_authority\":[],\"unanswered_key\":\"\",\"current_request_trace\":\"\",\"adopted_final_ids\":[],\"newest_trace\":\"\"}",
+    "tail_hash": "8b6466d2745489b2e1562321c72e3e8b",
+    "turn_count": 6
+   },
+   "import": "ok",
+   "step": "grow"
+  },
+  {
+   "checkpoint": {
+    "backend": "agy",
+    "boundary_offset": 651,
+    "boundary_seq": 3,
+    "complete_size": 1321,
+    "imports_since_audit": 0,
+    "parser_carry_json": "{\"boundary_step\":4,\"running_tools\":0}",
+    "prefix_hash": "8b6c2557d377abeb0662f24a7ac78c32",
+    "prefix_turns_hash": "3f58d5ec933d57d18a1bc864335d4901",
+    "size": 1715,
+    "store_carry_json": "{\"consumed_client_ids\":[\"u-c0\"],\"current_origin\":\"user\",\"current_sender_agent_id\":\"\",\"current_heartbeat_key\":\"\",\"assistant_ordinal\":2,\"authority_tools\":{},\"closed_authority\":[],\"unanswered_key\":\"\",\"current_request_trace\":\"\",\"adopted_final_ids\":[],\"newest_trace\":\"\"}",
+    "tail_hash": "8b6466d2745489b2e1562321c72e3e8b",
+    "turn_count": 6
+   },
+   "import": "ok",
+   "step": "partial"
+  },
+  {
+   "checkpoint": {
+    "backend": "agy",
+    "boundary_offset": 2608,
+    "boundary_seq": 9,
+    "complete_size": 3263,
+    "imports_since_audit": 0,
+    "parser_carry_json": "{\"boundary_step\":12,\"running_tools\":0}",
+    "prefix_hash": "4f30e5d07d7f917a360c81a32527466f",
+    "prefix_turns_hash": "4a18159c8731b6fed195235a276e6838",
+    "size": 3263,
+    "store_carry_json": "{\"consumed_client_ids\":[\"u-c0\",\"u-c1\"],\"current_origin\":\"heartbeat\",\"current_sender_agent_id\":\"\",\"current_heartbeat_key\":\"msg-f44cac0ef7a7b0887e86\",\"assistant_ordinal\":6,\"authority_tools\":{\"tr-1\":[\"final-1\",[{\"name\":\"Bash\",\"summary\":\"list files\",\"action\":\"running command\",\"file_path\":\"\",\"status\":\"ok\",\"id\":\"step-6\",\"command\":\"ls /redacted/1\",\"description\":\"\",\"input\":{\"command\":\"ls /redacted/1\",\"description\":\"\"},\"exit_code\":null,\"result\":\"a\\nb\"}],[{\"id\":\"agy-think-5\",\"kind\":\"reasoning\",\"title\":\"Reasoned\",\"summary\":\"\",\"status\":\"ok\",\"lines\":[{\"label\":\"\",\"text\":\"Plan the listing.\",\"kind\":\"status\"}]},{\"id\":\"step-6\",\"kind\":\"exploration\",\"title\":\"Explored\",\"summary\":\"\",\"status\":\"ok\",\"lines\":[{\"label\":\"List\",\"text\":\"/redacted/1\",\"kind\":\"detail\"}]}]]},\"closed_authority\":[\"tr-1\"],\"unanswered_key\":\"\",\"current_request_trace\":\"\",\"adopted_final_ids\":[],\"newest_trace\":\"tr-1\"}",
+    "tail_hash": "4128bae45a842794eb394c5e274533aa",
+    "turn_count": 12
+   },
+   "import": "ok",
+   "step": "complete"
+  },
+  {
+   "checkpoint": {
+    "backend": "agy",
+    "boundary_offset": 3263,
+    "boundary_seq": 12,
+    "complete_size": 3937,
+    "imports_since_audit": 0,
+    "parser_carry_json": "{\"boundary_step\":16,\"running_tools\":0}",
+    "prefix_hash": "022dfd80eed5a985c5d3c19aa6ac4290",
+    "prefix_turns_hash": "6215ad9b1ac274fb2a8e45edf14ead73",
+    "size": 3937,
+    "store_carry_json": "{\"consumed_client_ids\":[\"u-c0\",\"u-c1\",\"u-c3\"],\"current_origin\":\"agent\",\"current_sender_agent_id\":\"agent-sender\",\"current_heartbeat_key\":\"\",\"assistant_ordinal\":8,\"authority_tools\":{\"tr-1\":[\"final-1\",[{\"name\":\"Bash\",\"summary\":\"list files\",\"action\":\"running command\",\"file_path\":\"\",\"status\":\"ok\",\"id\":\"step-6\",\"command\":\"ls /redacted/1\",\"description\":\"\",\"input\":{\"command\":\"ls /redacted/1\",\"description\":\"\"},\"exit_code\":null,\"result\":\"a\\nb\"}],[{\"id\":\"agy-think-5\",\"kind\":\"reasoning\",\"title\":\"Reasoned\",\"summary\":\"\",\"status\":\"ok\",\"lines\":[{\"label\":\"\",\"text\":\"Plan the listing.\",\"kind\":\"status\"}]},{\"id\":\"step-6\",\"kind\":\"exploration\",\"title\":\"Explored\",\"summary\":\"\",\"status\":\"ok\",\"lines\":[{\"label\":\"List\",\"text\":\"/redacted/1\",\"kind\":\"detail\"}]}]]},\"closed_authority\":[\"tr-1\"],\"unanswered_key\":\"\",\"current_request_trace\":\"tr-3\",\"adopted_final_ids\":[],\"newest_trace\":\"tr-3\"}",
+    "tail_hash": "b83b02c3bb83d060b14f6aeeeb4a3b70",
+    "turn_count": 15
+   },
+   "import": "ok",
+   "step": "append"
+  },
+  {
+   "checkpoint": {
+    "backend": "agy",
+    "boundary_offset": 3263,
+    "boundary_seq": 12,
+    "complete_size": 3937,
+    "imports_since_audit": 0,
+    "parser_carry_json": "{\"boundary_step\":16,\"running_tools\":0}",
+    "prefix_hash": "022dfd80eed5a985c5d3c19aa6ac4290",
+    "prefix_turns_hash": "6215ad9b1ac274fb2a8e45edf14ead73",
+    "size": 3937,
+    "store_carry_json": "{\"consumed_client_ids\":[\"u-c0\",\"u-c1\",\"u-c3\"],\"current_origin\":\"agent\",\"current_sender_agent_id\":\"agent-sender\",\"current_heartbeat_key\":\"\",\"assistant_ordinal\":8,\"authority_tools\":{\"tr-1\":[\"final-1\",[{\"name\":\"Bash\",\"summary\":\"list files\",\"action\":\"running command\",\"file_path\":\"\",\"status\":\"ok\",\"id\":\"step-6\",\"command\":\"ls /redacted/1\",\"description\":\"\",\"input\":{\"command\":\"ls /redacted/1\",\"description\":\"\"},\"exit_code\":null,\"result\":\"a\\nb\"}],[{\"id\":\"agy-think-5\",\"kind\":\"reasoning\",\"title\":\"Reasoned\",\"summary\":\"\",\"status\":\"ok\",\"lines\":[{\"label\":\"\",\"text\":\"Plan the listing.\",\"kind\":\"status\"}]},{\"id\":\"step-6\",\"kind\":\"exploration\",\"title\":\"Explored\",\"summary\":\"\",\"status\":\"ok\",\"lines\":[{\"label\":\"List\",\"text\":\"/redacted/1\",\"kind\":\"detail\"}]}]]},\"closed_authority\":[\"tr-1\"],\"unanswered_key\":\"\",\"current_request_trace\":\"tr-3\",\"adopted_final_ids\":[],\"newest_trace\":\"tr-3\"}",
+    "tail_hash": "b83b02c3bb83d060b14f6aeeeb4a3b70",
+    "turn_count": 15
+   },
+   "import": "ok",
+   "step": "truncate"
+  },
+  {
+   "checkpoint": {
+    "backend": "agy",
+    "boundary_offset": 3263,
+    "boundary_seq": 12,
+    "complete_size": 3937,
+    "imports_since_audit": 0,
+    "parser_carry_json": "{\"boundary_step\":16,\"running_tools\":0}",
+    "prefix_hash": "022dfd80eed5a985c5d3c19aa6ac4290",
+    "prefix_turns_hash": "6215ad9b1ac274fb2a8e45edf14ead73",
+    "size": 3937,
+    "store_carry_json": "{\"consumed_client_ids\":[\"u-c0\",\"u-c1\",\"u-c3\"],\"current_origin\":\"agent\",\"current_sender_agent_id\":\"agent-sender\",\"current_heartbeat_key\":\"\",\"assistant_ordinal\":8,\"authority_tools\":{\"tr-1\":[\"final-1\",[{\"name\":\"Bash\",\"summary\":\"list files\",\"action\":\"running command\",\"file_path\":\"\",\"status\":\"ok\",\"id\":\"step-6\",\"command\":\"ls /redacted/1\",\"description\":\"\",\"input\":{\"command\":\"ls /redacted/1\",\"description\":\"\"},\"exit_code\":null,\"result\":\"a\\nb\"}],[{\"id\":\"agy-think-5\",\"kind\":\"reasoning\",\"title\":\"Reasoned\",\"summary\":\"\",\"status\":\"ok\",\"lines\":[{\"label\":\"\",\"text\":\"Plan the listing.\",\"kind\":\"status\"}]},{\"id\":\"step-6\",\"kind\":\"exploration\",\"title\":\"Explored\",\"summary\":\"\",\"status\":\"ok\",\"lines\":[{\"label\":\"List\",\"text\":\"/redacted/1\",\"kind\":\"detail\"}]}]]},\"closed_authority\":[\"tr-1\"],\"unanswered_key\":\"\",\"current_request_trace\":\"tr-3\",\"adopted_final_ids\":[],\"newest_trace\":\"tr-3\"}",
+    "tail_hash": "b83b02c3bb83d060b14f6aeeeb4a3b70",
+    "turn_count": 15
+   },
+   "import": "ok",
+   "step": "regrow"
+  },
+  {
+   "checkpoint": {
+    "backend": "agy",
+    "boundary_offset": 3022,
+    "boundary_seq": 11,
+    "complete_size": 3696,
+    "imports_since_audit": 0,
+    "parser_carry_json": "{\"boundary_step\":16,\"running_tools\":0}",
+    "prefix_hash": "adc30a591fc38e9a2032614e59a9eb24",
+    "prefix_turns_hash": "5da56feedb53461a85fe589f9cca5097",
+    "size": 3696,
+    "store_carry_json": "{\"consumed_client_ids\":[\"u-c0\",\"u-c1\",\"u-c3\"],\"current_origin\":\"agent\",\"current_sender_agent_id\":\"agent-sender\",\"current_heartbeat_key\":\"\",\"assistant_ordinal\":7,\"authority_tools\":{\"tr-1\":[\"final-1\",[],[]]},\"closed_authority\":[\"tr-1\"],\"unanswered_key\":\"\",\"current_request_trace\":\"tr-3\",\"adopted_final_ids\":[\"live-3\"],\"newest_trace\":\"tr-3\"}",
+    "tail_hash": "b83b02c3bb83d060b14f6aeeeb4a3b70",
+    "turn_count": 14
+   },
+   "import": "ok",
+   "step": "rotate"
+  }
+ ]
+}

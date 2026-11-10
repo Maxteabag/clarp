@@ -260,7 +260,8 @@ class Harness:
 
         # Patch the worker's import of synthesize_streaming so PWA-mode
         # rows hit our fake instead of opening a real WS to ElevenLabs.
-        _tw.synthesize_streaming = _fake_synthesize_streaming
+        from lib import tts_registry
+        tts_registry.synthesize_streaming = _fake_synthesize_streaming
 
         self.agent_id = agents_db.create_agent(
             persona="Mike", voice_id="V_MIKE",

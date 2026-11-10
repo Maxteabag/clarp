@@ -7,7 +7,7 @@ fn agent(backend: &str, conversation: &str) -> Agent {
 
 #[test]
 fn each_backend_resumes_its_native_conversation() {
-    for (backend, program, flag) in [("claude", "claude", "--resume"), ("codex", "codex", "resume"), ("agy", "agy", "--conversation"), ("grok", "grok", "--resume")] {
+    for (backend, program, flag) in [("claude", "claude", "--resume"), ("codex", "codex", "resume"), ("agy", "agy", "--conversation"), ("grok", "grok", "--resume"), ("muse", "muse", "resume")] {
         let (found, arguments) = native_terminal_launch(&agent(backend, "native-session;literal")).unwrap();
         assert_eq!((found.as_str(), arguments), (program, vec![flag.to_owned(), "native-session;literal".to_owned()]));
     }

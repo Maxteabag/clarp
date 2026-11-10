@@ -1,0 +1,161 @@
+"""Structure of lib.routes.registry (refactor slice S3).
+
+Handler.do_<METHOD> runs its gate prelude and then registry.dispatch, so the
+dispatch golden (test_route_goldens.py) is the parity check for every method,
+path and principal. These tests keep the registry itself honest: no dead
+route, unique names, server.py's dispatch only through the registry.
+"""
+from __future__ import annotations
+
+import json
+
+import pytest
+
+from tests.integration import route_probe
+from tests.integration.test_route_goldens import DISPATCH_GOLDEN, server_module  # noqa: F401 - fixture
+from tests.integration.test_server_di import (  # noqa: F401 - fixtures
+    _model_catalog_never_probes_installed_clis, fake_ctx)
+
+
+def _selected_routes(server_module, monkeypatch, tmp_path, routes):
+    """Which (method, route name) actually served a golden key: dispatch runs
+    for real (as the local administrator, through the probe that stubs every
+    handler) with each adapter wrapped to record when it answered, that is
+    returned anything but NOT_HANDLED or reached a handler."""
+    from lib.routes import registry
+    selected = set()
+
+    def witness(route):
+        def adapter(handler, path):
+            try:
+                result = route.adapter(handler, path)
+            except route_probe.Resolved:
+                selected.add((route.method, route.name))
+                raise
+            if result is not registry.NOT_HANDLED:
+                selected.add((route.method, route.name))
+            return result
+        return registry.Route(route.method, route.name, route.match, adapter)
+
+    monkeypatch.setattr(registry, "ROUTES", {
+        method: tuple(witness(route) for route in table) for method, table in routes.items()})
+    (tmp_path / "static").mkdir(exist_ok=True)
+    (tmp_path / "audio").mkdir(exist_ok=True)
+    route_probe.patch_lib_targets(monkeypatch)
+    probe = route_probe.make_probe_class(server_module.Handler)
+    admin = route_probe.principals("unused", "unused")["admin"]
+    for key in json.loads(DISPATCH_GOLDEN.read_text())["routes"]:
+        method, path = key.split(" ", 1)
+        route_probe.resolve(probe, tmp_path, method, path, *admin)
+    return selected
+
+
+def _declared(routes):
+    return {(method, route.name) for method, table in routes.items() for route in table}
+
+
+def test_every_route_serves_some_golden_key(server_module, monkeypatch, tmp_path):
+    from lib.routes import registry
+    routes = dict(registry.ROUTES)
+    assert _declared(routes) - _selected_routes(server_module, monkeypatch, tmp_path, routes) == set()
+
+
+def test_dead_route_check_catches_a_route_shadowed_by_the_exact_table(
+        server_module, monkeypatch, tmp_path):
+    """Negative control (review B): a route appended after the exact table for a
+    path the table already serves is never selected and must be reported."""
+    from lib.routes import registry
+    shadowed = registry.Route("GET", "shadowed-status", lambda path: path == "/status",
+                              lambda handler, path: handler._handle_status())
+    routes = {**registry.ROUTES, "GET": registry.ROUTES["GET"] + (shadowed,)}
+    unused = _declared(routes) - _selected_routes(server_module, monkeypatch, tmp_path, routes)
+    assert unused == {("GET", "shadowed-status")}
+
+
+@pytest.mark.parametrize("method", route_probe.METHODS)
+def test_route_names_are_unique_per_method(method):
+    from lib.routes import registry
+    names = [route.name for route in registry.ROUTES[method]]
+    assert len(names) == len(set(names))
+
+
+@pytest.mark.parametrize("method", route_probe.METHODS)
+def test_handler_dispatches_only_through_the_registry(server_module, method):
+    """After the gate prelude each do_<METHOD> hands the bare path to the
+    registry; no route is matched in server.py itself."""
+    import inspect
+    source = inspect.getsource(getattr(server_module.Handler, "do_" + method))
+    assert source.rstrip().endswith(f'return route_registry.dispatch(self, "{method}", path)')
+    # HTTP-02's limited-device guard is part of do_PATCH's gate prelude (it
+    # answers 403 only for the route, so unmatched PATCHes keep their 404).
+    gate = 'if path.startswith("/schedules/") and self._device_forbidden(path, "PATCH"):'
+    if method == "PATCH":
+        assert source.count(gate) <= 1   # 0 until main's HTTP-02 reaches integration
+        source = source.replace(gate, "")
+    assert "startswith" not in source and "_dispatch_exact" not in source
+
+
+SERVER_PY = route_probe.SERVER_DIR / "server.py"
+ROUTES_DIR = route_probe.SERVER_DIR / "lib" / "routes"
+
+
+@pytest.mark.parametrize("alias", ["claude_pwa_server", "clarp_route_probe_server", "server"])
+def test_boot_config_is_the_modules_own_import_time_config(alias, fake_ctx, monkeypatch):
+    """Composition-root state reaches handler code through the server object:
+    every ContextHTTPServer (build_server's, a directly built one, the LAN
+    listener's subclass) carries exactly its module's _CFG, never a reload."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(alias, SERVER_PY)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    # config.load caches, so a reload would return the same object; make any
+    # load after import a fresh one, so only the import-time object passes.
+    import copy
+    from lib import config
+    real_load = config.load
+
+    def fresh_load(*args, **kwargs):
+        return copy.copy(real_load(*args, **kwargs))
+    monkeypatch.setattr(config, "load", fresh_load)
+    monkeypatch.setattr(module, "load_config", fresh_load)
+    direct = module.ContextHTTPServer(("127.0.0.1", 0), module.Handler, fake_ctx)
+    subclass = type("LanServer", (type(direct),), {})(("127.0.0.1", 0), module.Handler, fake_ctx)
+    built = module.build_server(fake_ctx, 0, bind_addr="127.0.0.1")
+    try:
+        for server in (direct, subclass, built):
+            assert server.boot_config is module._CFG
+    finally:
+        for server in (direct, subclass, built):
+            server.server_close()
+
+
+def _imports(path):
+    import ast
+    tree = ast.parse(path.read_text())
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            yield from (alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            base = node.module or ""
+            yield base
+            yield from (f"{base}.{alias.name}" if base else alias.name for alias in node.names)
+
+
+def test_lib_routes_never_imports_the_composition_root():
+    for path in sorted(ROUTES_DIR.glob("*.py")):
+        names = set(_imports(path))
+        assert not names & {"server", "__main__"}, path.name
+        assert not any(name.startswith(("server.", "__main__.")) for name in names), path.name
+
+
+def test_only_server_py_imports_lib_routes():
+    lib = route_probe.SERVER_DIR / "lib"
+    offenders = []
+    for path in sorted(lib.rglob("*.py")):
+        if ROUTES_DIR in path.parents:
+            continue
+        names = set(_imports(path))
+        if any(name == "routes" or name.startswith(("lib.routes", ".routes", "routes."))
+               for name in names):
+            offenders.append(str(path.relative_to(lib)))
+    assert offenders == []

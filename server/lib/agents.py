@@ -14,7 +14,7 @@ from contextlib import contextmanager
 from typing import Any
 
 from . import origins, turn_lifecycle
-from . import voice_verbosity as voice_verbosity_lib
+from .voice_levels import clamp as _clamp_voice_verbosity
 from .policies import helper_state as helper_policy
 from .db import conn, now_ms
 from .protocol import AgentBackend, AgentState, ClipStatus, TurnSource
@@ -456,7 +456,7 @@ def update_agent(agent_id: str, *, persona: str | None = None,
         values.append(personality)
     if voice_verbosity is not None:
         fields.append("voice_verbosity = ?")
-        values.append(voice_verbosity_lib.clamp(voice_verbosity))
+        values.append(_clamp_voice_verbosity(voice_verbosity))
     if avatar_path is not None:
         fields.append("avatar_path = ?")
         values.append(avatar_path)
@@ -524,6 +524,17 @@ def end_current_runtime(agent_id: str) -> None:
         UPDATE runtimes SET ended_at = ?
          WHERE agent_id = ? AND ended_at IS NULL
     """, (now_ms(), agent_id))
+
+
+def end_runtime_bound_to(agent_id: str, backend_session_id: str) -> bool:
+    """End the agent's live runtime only while it is still bound to
+    ``backend_session_id``: a repair decided about that binding must not
+    close one a newer send made since (TP-05b). True when a row ended."""
+    cur = conn().execute("""
+        UPDATE runtimes SET ended_at = ?
+         WHERE agent_id = ? AND ended_at IS NULL AND backend_session_id = ?
+    """, (now_ms(), agent_id, backend_session_id))
+    return cur.rowcount > 0
 
 
 class SessionAlreadyBound(Exception):
@@ -706,15 +717,27 @@ def dashboard_states() -> dict[str, dict[str, Any]]:
 
 
 def dashboard_runtimes() -> dict[str, dict[str, Any]]:
+    # Most agents have one live runtime. Materialize that roster once instead
+    # of rescanning its unindexed agent_id for every agent. Multiple live rows
+    # keep the exact old scalar lookup (including its unspecified tie choice).
+    # One statement retains one SQLite read snapshot and caller transaction.
     rows = conn().execute("""
+        WITH live_runtime AS MATERIALIZED (
+            SELECT agent_id, MAX(backend_session_id) AS backend_session_id,
+                   COUNT(*) AS candidates
+              FROM runtimes WHERE ended_at IS NULL GROUP BY agent_id
+        )
         SELECT a.agent_id,
-               (SELECT backend_session_id FROM runtimes r
-                 WHERE r.agent_id = a.agent_id AND ended_at IS NULL
-                 ORDER BY started_at DESC LIMIT 1) AS backend_session_id,
+               CASE WHEN lr.candidates > 1 THEN
+                   (SELECT backend_session_id FROM runtimes r
+                     WHERE r.agent_id = a.agent_id AND ended_at IS NULL
+                     ORDER BY started_at DESC LIMIT 1)
+                   ELSE lr.backend_session_id END AS backend_session_id,
                (SELECT started_at FROM turns t
                  WHERE t.agent_id = a.agent_id AND ended_at IS NULL
                  ORDER BY started_at DESC LIMIT 1) AS open_turn_started_at
-          FROM agents a WHERE a.deleted_at IS NULL
+          FROM agents a LEFT JOIN live_runtime lr ON lr.agent_id = a.agent_id
+         WHERE a.deleted_at IS NULL
     """).fetchall()
     return {row['agent_id']: dict(row) for row in rows}
 
@@ -802,17 +825,28 @@ def open_turn(*, agent_id: str, source: str, trace_id: str,
         synthesize_audio=synthesize_audio)
 
 
-def record_unlaunched_trace(agent_id: str, trace_id: str) -> None:
-    """Historical failure receipt, ordered before any newer turn's state."""
-    turn_lifecycle.record_unlaunched(agent_id, trace_id)
+def record_unlaunched_trace(agent_id: str, trace_id: str, *, turn_id: int | None = None) -> None:
+    """Historical failure receipt, scoped to the positively known attempt."""
+    turn_lifecycle.record_unlaunched(agent_id, trace_id, turn_id=turn_id)
 
 
-def trace_launch_status(agent_id: str, trace_id: str) -> str:
+def trace_launch_status(agent_id: str, trace_id: str, *,
+                        client_msg_id: str | None = None, origin: str | None = None,
+                        sender_agent_id: str | None = None) -> str:
     """Only an explicit pre-launch failure permits replay of a saved message.
 
     Missing state is ambiguous (e.g. a post-launch write failed), not evidence
-    that a backend never received work.
+    that a backend never received work. A Stop-fenced launch receipt is never
+    retryable. With no state, a launch receipt still ``pending`` (written with
+    the admission, moved on before any backend handoff) is that evidence; the
+    optional client id / principal must match it.
     """
+    from . import launch_receipts
+    receipt = launch_receipts.status(
+        agent_id, trace_id, client_msg_id=client_msg_id, origin=origin,
+        sender_agent_id=sender_agent_id)
+    if receipt == "fenced":
+        return "fenced"
     row = conn().execute(
         """SELECT detail FROM state_log
             WHERE agent_id = ? AND json_extract(detail, '$.trace_id') = ?
@@ -820,9 +854,71 @@ def trace_launch_status(agent_id: str, trace_id: str) -> str:
         (agent_id, trace_id),
     ).fetchone()
     if row is None:
-        return "unknown"
+        attempt = _receipt_attempt_status(agent_id, trace_id)
+        if attempt is not None:
+            return attempt  # pruned state cannot turn a completed attempt back into pending
+        return "retryable" if receipt == "retryable" else "unknown"
     detail = json.loads(row["detail"] or "{}")
-    return "retryable" if detail.get("dispatch_not_started") else "observed"
+    # Administrative transfer is queue-owned, never direct-resend authority.
+    if detail.get("reason") == "update_handoff":
+        return "observed"
+    if detail.get("dispatch_not_started"):
+        attempt = _receipt_attempt_status(agent_id, trace_id)
+        if attempt is None:
+            # A matching PENDING receipt independently proves a pre-open failure.
+            return "retryable" if receipt == "retryable" else "unknown"
+        return attempt
+    return "observed"
+
+
+def _receipt_attempt_status(agent_id: str, trace_id: str) -> str | None:
+    """Durable per-attempt evidence, shared by global retry and queue recovery.
+
+    Completed/interrupted outcomes prove execution. A FAILED negative needs
+    its producer's exact attempt key. The post-spawn state signature is
+    attributable only when this trace has exactly one durable attempt;
+    multiple unbound observations remain protected, never guessed current.
+    """
+    database = conn()
+    turn = database.execute(
+        """SELECT turn_id,ended_at,settled_at,outcome FROM turns
+            WHERE agent_id=? AND trace_id=? ORDER BY turn_id DESC LIMIT 1""",
+        (agent_id, trace_id)).fetchone()
+    if turn is None:
+        return None
+    terminal = turn["ended_at"] is not None or turn["settled_at"] is not None
+    if terminal and turn["outcome"] in ("completed", "interrupted"):
+        return "observed"
+    if database.execute(
+            """SELECT 1 FROM turns WHERE agent_id=? AND trace_id=?
+                 AND (settled_at IS NOT NULL OR ended_at IS NOT NULL)
+                 AND outcome IN ('completed','interrupted') LIMIT 1""",
+            (agent_id, trace_id)).fetchone():
+        return "unknown"  # an older execution is not proof about the new payload
+    unique = database.execute(
+        "SELECT 1 FROM turns WHERE agent_id=? AND trace_id=? AND turn_id<>? LIMIT 1",
+        (agent_id, trace_id, turn["turn_id"])).fetchone() is None
+    execution_state = database.execute(
+        """SELECT 1 FROM state_log WHERE agent_id=?
+             AND json_extract(detail,'$.trace_id')=? AND kind='thinking'
+             AND json_extract(detail,'$.source')='pwa'
+             AND json_type(detail,'$.dispatch')='text'
+             AND length(json_extract(detail,'$.dispatch'))>0 LIMIT 1""",
+        (agent_id, trace_id)).fetchone() is not None
+    executed = unique and execution_state
+    negative = database.execute(
+        """SELECT 1 FROM state_log WHERE agent_id=? AND kind='interrupted'
+             AND json_extract(detail,'$.trace_id')=?
+             AND json_type(detail,'$.dispatch_not_started')='true'
+             AND json_extract(detail,'$.dispatch_not_started')=1
+             AND COALESCE(json_extract(detail,'$.reason'),'')<>'update_handoff'
+             AND json_type(detail,'$.dispatch_not_started_turn_id')='integer'
+             AND json_extract(detail,'$.dispatch_not_started_turn_id') BETWEEN 1 AND 9223372036854775807
+             AND json_extract(detail,'$.dispatch_not_started_turn_id')=? LIMIT 1""",
+        (agent_id, trace_id, turn["turn_id"])).fetchone() is not None
+    if negative and turn["settled_at"] is not None and turn["outcome"] == "failed":
+        return "unknown" if execution_state else "retryable"
+    return "observed" if executed else "unknown"
 
 
 def close_turn(turn_id: int) -> None:
@@ -834,7 +930,7 @@ def record_clip(*, agent_id: str, path: str, voice_id: str | None = None,
                 turn_id: int | None = None,
                 producer_status: str | None = None,
                 status: str = ClipStatus.SYNTHESIZED) -> int | None:
-    from .clip_store import record_clip as _record_clip
+    from .clip_records import record_clip as _record_clip
     return _record_clip(
         agent_id=agent_id, path=path, voice_id=voice_id, trace_id=trace_id,
         byte_count=byte_count, turn_id=turn_id, producer_status=producer_status,
@@ -979,17 +1075,23 @@ def enable_latest_turn_audio(agent_id: str) -> None:
 # ---- canonical wire events --------------------------------------------
 
 def record_sse_event(event: dict[str, Any]) -> int:
-    from .sse_store import record_sse_event as _record
+    from .persistence.sse_events import record_sse_event as _record
     return _record(event)
 
 
 def events_after(event_id: int, limit: int = 500) -> list[dict[str, Any]]:
-    from .sse_store import events_after as _events_after
+    from .persistence.sse_events import events_after as _events_after
     return _events_after(event_id, limit)
 
 
+def events_after_scanned(event_id: int, limit: int = 500, *,
+                         internal: bool = False) -> tuple[list[dict[str, Any]], int]:
+    from .persistence.sse_events import events_after_scanned as _events_after_scanned
+    return _events_after_scanned(event_id, limit, internal=internal)
+
+
 def recent_events(window_ms: int, limit: int = 500) -> list[dict[str, Any]]:
-    from .sse_store import recent_events as _recent_events
+    from .persistence.sse_events import recent_events as _recent_events
     return _recent_events(window_ms, limit)
 
 
@@ -1023,6 +1125,7 @@ def record_user_message(*, agent_id: str, backend_session_id: str,
 
 def upsert_live_assistant_message(*, agent_id: str, backend_session_id: str,
                                   trace_id: str = "", text: str, item_key: str = "",
+                                  _provider_genuine: bool = False,
                                   ) -> dict[str, Any] | None:
     from .message_store import upsert_live_assistant_message as _upsert
     return _upsert(
@@ -1031,6 +1134,7 @@ def upsert_live_assistant_message(*, agent_id: str, backend_session_id: str,
         trace_id=trace_id,
         text=text,
         item_key=item_key,
+        **({"_provider_genuine": True} if _provider_genuine else {}),
     )
 
 

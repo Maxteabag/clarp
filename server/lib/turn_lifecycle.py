@@ -35,6 +35,7 @@ from __future__ import annotations
 import collections
 import contextlib
 import json
+import sqlite3
 import threading
 from dataclasses import dataclass, field
 from typing import Any, Iterable
@@ -42,7 +43,7 @@ from typing import Any, Iterable
 from . import db
 from .db import conn, now_ms
 from .timing import SQLITE_CRITICAL_BUSY_TIMEOUT_MS
-from .log import log
+from .log import log, log_exception
 from .protocol import AgentState, TurnSource
 
 # An agent with no state_log row yet.
@@ -57,6 +58,23 @@ TERMINAL: frozenset[str] = frozenset({
     AgentState.STOPPED,
 })
 ALL: frozenset[str] = frozenset(AgentState.valid()) | {NONE}
+# A state row written after a terminal write's fence that is not that turn's
+# own activity: another trace, no trace, or any terminal kind (a Stop or end
+# written by someone else, whatever trace it names). Binds (trace, trace).
+_FOREIGN_ROW_SQL = (
+    "(? = '' OR COALESCE(json_extract(detail, '$.trace_id'), '') <> ?"
+    " OR kind IN (" + ", ".join(f"'{kind}'" for kind in sorted(TERMINAL)) + "))")
+# A terminal row of trace (?) committed after a baseline state_id (?): one
+# naming the trace, or an untraced Stop that settled that trace's turn.
+# Binds (agent_id, baseline, trace, trace) (TP-N2).
+_TERMINAL_AFTER_SQL = (
+    "SELECT 1 FROM state_log s WHERE s.agent_id = ? AND s.state_id > ?"
+    " AND s.kind IN (" + ", ".join(f"'{kind}'" for kind in sorted(TERMINAL)) + ")"
+    " AND (COALESCE(json_extract(s.detail, '$.trace_id'), '') = ?"
+    "      OR (COALESCE(json_extract(s.detail, '$.trace_id'), '') = ''"
+    "          AND EXISTS (SELECT 1 FROM turns u WHERE u.agent_id = s.agent_id"
+    "                       AND u.trace_id = ? AND u.settled_at = s.ts)))"
+    " LIMIT 1")
 # Any agent that has at least one row.
 STARTED: frozenset[str] = ALL - {NONE}
 # States in which in-turn activity (tools, compaction) is legitimate. IDLE is
@@ -93,6 +111,9 @@ class TurnEvent:
     STOP_REQUESTED = "stop_requested"            # user stop / janitor cancel
     RESTART_INTERRUPTED = "restart_interrupted"  # boot recovery
     UNLAUNCHED = "unlaunched"                    # back-dated launch receipt
+    # A listen-first call opening on a never-run agent that ended unknown (never confirmed)
+    # before any process ran: the agent is still SPAWNED, which no ordinary turn end leaves.
+    CALL_OPENING_UNCONFIRMED = "call_opening_unconfirmed"
     RECONCILE_REPAIR = "reconcile_repair"        # busy with nothing running
     BACKGROUND_EXPIRED = "background_expired"    # stale-work: declared work long over
     # The release drain handed a turn no process ran for back to the queue
@@ -140,6 +161,8 @@ TRANSITIONS: dict[str, tuple[str, frozenset[str]]] = {
     TurnEvent.STOP_REQUESTED: (AgentState.INTERRUPTED, STARTED),
     TurnEvent.RESTART_INTERRUPTED: (AgentState.INTERRUPTED, BUSY),
     TurnEvent.UNLAUNCHED: (AgentState.INTERRUPTED, ALL),
+    # Only from SPAWNED: a newer turn, a Stop or a successor has already moved the agent on.
+    TurnEvent.CALL_OPENING_UNCONFIRMED: (AgentState.INTERRUPTED, frozenset({AgentState.SPAWNED})),
     TurnEvent.RECONCILE_REPAIR: (AgentState.IDLE, BUSY),
     TurnEvent.BACKGROUND_EXPIRED: (AgentState.IDLE, frozenset({AgentState.BACKGROUND})),
     TurnEvent.UPDATE_HANDOFF: (AgentState.IDLE, BUSY),
@@ -155,7 +178,7 @@ _ORIGIN_CARRY_WINDOW_MS = 120_000
 
 
 def _record_outcome(agent_id: str, event: str, kind: str, detail: dict[str, Any] | None,
-                ts: int) -> str | None:
+                ts: int, *, unlaunched_turn_id: int | None = None) -> str | None:
     """Record how the agent's current turn ended; the first terminal change
     wins. Returns the settled trace id (then its rows are re-stamped)."""
     from .message_turns import outcome_for
@@ -165,7 +188,16 @@ def _record_outcome(agent_id: str, event: str, kind: str, detail: dict[str, Any]
     database = conn()
     trace = str((detail or {}).get("trace_id") or "")
     row = None
-    if trace:
+    if unlaunched_turn_id is not None:
+        if event != TurnEvent.UNLAUNCHED or unlaunched_turn_id <= 0:
+            return None
+        row = database.execute(
+            """SELECT turn_id,trace_id FROM turns WHERE turn_id=? AND agent_id=?
+                 AND trace_id=? AND settled_at IS NULL""",
+            (unlaunched_turn_id, agent_id, trace)).fetchone()
+        if row is None:
+            return None
+    elif trace:
         row = database.execute(
             """SELECT turn_id, trace_id FROM turns WHERE agent_id = ? AND trace_id = ?
                   AND settled_at IS NULL ORDER BY started_at DESC LIMIT 1""",
@@ -173,7 +205,7 @@ def _record_outcome(agent_id: str, event: str, kind: str, detail: dict[str, Any]
     if row is None:
         row = database.execute(
             """SELECT turn_id, trace_id FROM turns WHERE agent_id = ? AND started_at <= ?
-                ORDER BY started_at DESC LIMIT 1""", (agent_id, ts)).fetchone()
+                ORDER BY started_at DESC, turn_id DESC LIMIT 1""", (agent_id, ts)).fetchone()
         if row is None or database.execute(
                 "SELECT settled_at FROM turns WHERE turn_id = ?",
                 (row["turn_id"],)).fetchone()["settled_at"] is not None:
@@ -183,22 +215,64 @@ def _record_outcome(agent_id: str, event: str, kind: str, detail: dict[str, Any]
     return str(row["trace_id"] or "")
 
 
+def _unlaunched_write_detail(database, agent_id: str, event: str, detail):
+    """Bind opt-in UNLAUNCHED to its original attempt under the existing writer.
+
+    Zero is an INTERNAL request for an unknown attempt, never a stored key.
+    A generic transition without this request retains its existing behaviour.
+    """
+    key = "dispatch_not_started_turn_id"
+    if event != TurnEvent.UNLAUNCHED or not isinstance(detail, dict) or key not in detail:
+        return detail, None
+    stored = dict(detail)
+    requested = stored.pop(key)
+    if type(requested) is not int or not 1 <= requested <= 9223372036854775807:
+        return stored, 0
+    trace = str(detail.get("trace_id") or "")
+    own = database.execute(
+        """SELECT 1 FROM turns WHERE turn_id=? AND agent_id=? AND trace_id=?
+             AND settled_at IS NULL AND NOT EXISTS (
+                 SELECT 1 FROM turns newer WHERE newer.agent_id=? AND newer.trace_id=?
+                   AND newer.turn_id>?)""",
+        (requested, agent_id, trace, agent_id, trace, requested)).fetchone()
+    if own is None:
+        return stored, 0
+    stored[key] = requested
+    return stored, requested
+
+
 def _settle_turn(agent_id: str, event: str, target: str,
-                 detail: dict[str, Any] | None, stamp: int) -> None:
+                 detail: dict[str, Any] | None, stamp: int, *,
+                 unlaunched_turn_id: int | None = None) -> None:
     """A terminal change records the turn's outcome and re-stamps its /log
-    rows (lib.message_turns); bookkeeping never fails a transition."""
+    rows (lib.message_turns); bookkeeping never fails a transition. Used
+    inside a caller's transaction; a transition of its own writes the outcome
+    with its row (``_write_terminal``)."""
     if target not in TERMINAL:
         return
     try:
-        trace = _record_outcome(agent_id, event, target, detail, stamp)
-        if trace:
-            from . import message_writes, turn_queue
-            from .message_turns import outcome_for
-            message_writes.restamp_turn(agent_id, trace)
-            turn_queue.settle_receipt(agent_id, trace,
-                                      outcome_for(event, target) or "")
+        trace = _record_outcome(agent_id, event, target, detail, stamp,
+                                unlaunched_turn_id=unlaunched_turn_id)
     except Exception as exc:  # noqa: BLE001
-        log("turnSettleFail", f"agent={agent_id} event={event} error={exc}")
+        if unlaunched_turn_id is not None:
+            raise  # the opt-in proof and its settlement must not partially commit
+        log_exception("turnSettleFail", exc, detail=f"agent={agent_id} event={event}")
+        return
+    _after_settle(agent_id, event, target, trace)
+
+
+def _after_settle(agent_id: str, event: str, target: str, trace: str | None) -> None:
+    """The settled turn's derived rows: its /log stamps and queue receipt. A
+    failure here is logged with its traceback and repaired by the next import."""
+    if not trace:
+        return
+    try:
+        from . import message_writes, turn_queue
+        from .message_turns import outcome_for
+        message_writes.restamp_turn(agent_id, trace)
+        turn_queue.settle_receipt(agent_id, trace, outcome_for(event, target) or "")
+    except Exception as exc:  # noqa: BLE001
+        log_exception("turnSettleFail", exc, detail=f"agent={agent_id} event={event}")
 
 
 class IllegalTransition(Exception):
@@ -213,6 +287,24 @@ class IllegalTransition(Exception):
         super().__init__(
             f"illegal transition agent={agent_id} event={event} "
             f"{from_state or 'none'} -> {to_state}")
+
+
+class TransitionNotWritten(IllegalTransition):
+    """A conditional transition its write-time conditions refused: nothing was written, settled
+    or observed. ``reason`` names the condition."""
+
+    def __init__(self, agent_id: str, event: str, reason: str):
+        super().__init__(agent_id, event, "", "")
+        self.reason = reason
+        self.args = (f"transition not written agent={agent_id} event={event}: {reason}",)
+
+
+# A hook prompt admission (PROMPT_ADMITTED from the Claude Code UserPromptSubmit hook or the agy
+# hook) as a state row: THINKING with a "source" and no "dispatch". A source-shape heuristic, not
+# an event identity (state_log keeps no event name). It also matches the slot repair's audit note
+# on a thinking agent, a false positive that refuses only an end whose slot was already released.
+PROMPT_ADMISSION_SQL = ("kind = 'thinking' AND json_extract(detail, '$.source') IS NOT NULL"
+                        " AND json_extract(detail, '$.dispatch') IS NULL")
 
 
 
@@ -277,13 +369,56 @@ class TurnStateMachine:
     def transition(self, agent_id: str, event: str,
                    detail: dict[str, Any] | None = None, *,
                    kind: str | None = None, force: bool = False,
-                   ts: int | None = None) -> Transition:
+                   ts: int | None = None, expect_trace: str | None = None,
+                   anchor: int | None = None, s_open: int | None = None,
+                   begun_at: int | None = None,
+                   _expected_busy_state: tuple[int, str] | None = None) -> Transition:
         """Apply ``event`` to ``agent_id`` and write its ``state_log`` row.
 
         ``kind`` is only read for :attr:`TurnEvent.RECORDED`, the compatibility
         event whose target the caller names. ``force`` skips the legality
         check (repairs); ``ts`` back-dates the row (historical receipts).
+        ``expect_trace`` selects the conditional write (``anchor``, ``s_open``):
+        see :meth:`_conditional_transition`. ``begun_at`` is the caller's
+        causal baseline (a state_generation read when it decided to write);
+        a traced non-terminal write is refused if its trace ended after it.
         """
+        if _expected_busy_state is not None:
+            if (type(_expected_busy_state) is not tuple or len(_expected_busy_state) != 2
+                    or type(_expected_busy_state[0]) is not int
+                    or not 1 <= _expected_busy_state[0] <= 9223372036854775807
+                    or type(_expected_busy_state[1]) is not str
+                    or _expected_busy_state[1] not in BUSY
+                    or event != TurnEvent.RECONCILE_REPAIR or force is not True
+                    or any(value is not None for value in
+                           (kind, ts, expect_trace, anchor, s_open, begun_at))):
+                raise ValueError("expected busy state requires a top-level forced reconcile repair")
+            if conn().in_transaction:
+                raise ValueError("expected busy state cannot use a caller transaction")
+        if expect_trace is not None:
+            return self._conditional_transition(agent_id, event, detail, expect_trace=expect_trace,
+                                                anchor=anchor, s_open=s_open)
+        fence = None
+        trace = str((detail or {}).get("trace_id") or "")
+        late_fence = None
+        if (trace and not force and ts is None and not conn().in_transaction
+                and not self._may_end_turn(event, kind)):
+            # A non-terminal row of this trace must never commit after the
+            # trace's terminal row (TP-N2): the baseline is read here, before
+            # this write waits for anything, and checked in its transaction.
+            late_fence = int(conn().execute(
+                "SELECT COALESCE(MAX(state_id), 0) FROM state_log WHERE agent_id = ?",
+                (agent_id,)).fetchone()[0])
+            if begun_at is not None:
+                late_fence = min(late_fence, int(begun_at))
+        if self._may_end_turn(event, kind) and not conn().in_transaction:
+            # A terminal write's causal baseline, read before anything else of
+            # this write (its state, stamp, runtime): a row after it is newer
+            # than this write began (TP-N1b). One index seek; not
+            # state_generation(), which marks the call-open path.
+            fence = int(conn().execute(
+                "SELECT COALESCE(MAX(state_id), 0) FROM state_log WHERE agent_id = ?",
+                (agent_id,)).fetchone()[0])
         from_state = self.current_kind(agent_id)
         if event == TurnEvent.RECORDED:
             if kind is None or not AgentState.is_valid(kind):
@@ -299,6 +434,13 @@ class TurnStateMachine:
         if not force and not self.is_legal(from_state, event):
             self._refuse(agent_id, event, from_state, target)
             raise IllegalTransition(agent_id, event, from_state, target)
+        if (event == TurnEvent.SPAWN_STARTED and not force and ts is None and trace
+                and not conn().in_transaction):
+            # A turn writes 'thinking' twice: the dispatcher's spawn and the
+            # provider's own turn start. A Stop between them ended the turn;
+            # the late write must not make the agent busy for good (TP-N1).
+            return self._start_unless_stopped(agent_id, event, target, detail, trace,
+                                              late_fence=late_fence)
         stamp = now_ms() if ts is None else int(ts)
         if event == TurnEvent.TEXT_STREAMED and self._same_phase(agent_id, target, detail):
             # A backend reports every delta; the state only changes when the
@@ -313,12 +455,43 @@ class TurnStateMachine:
         # A phase delta is noise if lost; a lifecycle receipt is not.
         with (contextlib.nullcontext() if event == TurnEvent.TEXT_STREAMED
               else _critical_write()):
-            cursor = conn().execute(
-                """INSERT INTO state_log (agent_id, runtime_id, ts, kind, detail)
-                   VALUES (?, ?, ?, ?, ?)""",
-                (agent_id, runtime_id, stamp, target,
-                 json.dumps(detail) if detail else None))
-            _settle_turn(agent_id, event, target, detail, stamp)
+            if target in TERMINAL and not conn().in_transaction:
+                # Atomic, so a lock error leaves nothing behind: retry the whole
+                # write (bounded, db.retry_locked) rather than strand the agent busy.
+                # The baseline read at the top of transition(): a retry writes only
+                # if every row since is this turn's own, so a Stop or successor that
+                # commits while the write prepares, waits, fails or rolls back wins.
+                if fence is None:
+                    fence = int(conn().execute(
+                        "SELECT COALESCE(MAX(state_id), 0) FROM state_log WHERE agent_id = ?",
+                        (agent_id,)).fetchone()[0])
+                attempts: list[int] = []
+
+                def write():
+                    attempts.append(1)
+                    return self._write_terminal(
+                        agent_id, event, target, detail, runtime_id, stamp,
+                        recheck=fence if len(attempts) > 1 else None, force=force,
+                        own_since=fence if ts is None else None,
+                        **({"_expected_busy_state": _expected_busy_state}
+                           if _expected_busy_state is not None else {}))
+                cursor, trace, stamp = db.retry_locked(write)
+                _after_settle(agent_id, event, target, trace)
+            elif late_fence is not None and target not in TERMINAL:
+                cursor = self._write_unless_ended(agent_id, event, target, detail, runtime_id,
+                                                  stamp, trace, late_fence)
+                if cursor is None:
+                    return Transition(agent_id=agent_id, event=event, from_state=from_state,
+                                      to_state=target, ts=stamp, detail=detail, forced=force)
+            else:
+                stored_detail, unlaunched_target = _unlaunched_write_detail(conn(), agent_id, event, detail)
+                cursor = conn().execute(
+                    """INSERT INTO state_log (agent_id, runtime_id, ts, kind, detail)
+                       VALUES (?, ?, ?, ?, ?)""",
+                    (agent_id, runtime_id, stamp, target,
+                     json.dumps(stored_detail) if stored_detail else None))
+                _settle_turn(agent_id, event, target, stored_detail, stamp,
+                             unlaunched_turn_id=unlaunched_target)
         from . import live_hub
         live_hub.observe_transition(agent_id, event, target,
                                     {**(detail or {}), "_state_id": int(cursor.lastrowid or 0)})
@@ -326,6 +499,269 @@ class TurnStateMachine:
             agent_id=agent_id, event=event, from_state=from_state,
             to_state=target, ts=stamp, detail=detail, forced=force,
             state_id=int(cursor.lastrowid or 0))
+
+    def _write_unless_ended(self, agent_id: str, event: str, target: str,
+                            detail: dict[str, Any] | None, runtime_id, stamp: int,
+                            trace: str, late_fence: int):
+        """A non-terminal row of ``trace`` in ONE write transaction that
+        refuses it if the trace's terminal row committed after
+        ``late_fence`` (TP-N2): its turn ended while this write waited, so
+        writing it would show the agent busy after the turn. Dropped, not
+        raised: backend reader threads write these. None when dropped."""
+        database = conn()
+        database.execute("BEGIN IMMEDIATE")
+        try:
+            if database.execute(_TERMINAL_AFTER_SQL,
+                                (agent_id, late_fence, trace, trace)).fetchone() is not None:
+                database.execute("COMMIT")
+                log("stateAfterTerminalDropped", f"agent={agent_id} event={event} trace={trace}")
+                return None
+            cursor = database.execute(
+                """INSERT INTO state_log (agent_id, runtime_id, ts, kind, detail)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (agent_id, runtime_id, stamp, target, json.dumps(detail) if detail else None))
+            _settle_turn(agent_id, event, target, detail, stamp)
+            if not database.in_transaction:
+                # An inner error rolled it back and _settle_turn swallowed it.
+                log("stateWriteLost", f"agent={agent_id} event={event} trace={trace}")
+                return None
+            database.execute("COMMIT")
+            return cursor
+        except BaseException:
+            if database.in_transaction:
+                database.execute("ROLLBACK")
+            raise
+
+    def _write_terminal(self, agent_id: str, event: str, target: str,
+                        detail: dict[str, Any] | None, runtime_id, stamp: int, *,
+                        recheck: int | None = None, force: bool = False,
+                        own_since: int | None = None,
+                        _expected_busy_state: tuple[int, str] | None = None):
+        """A terminal row and its turn's settlement in one write transaction:
+        the settlement attributes a Stop to its turn (the start guard reads it),
+        so a row without it would be a Stop of unknown turn (TP-N1b). A failure
+        rolls both back and is raised. A retry (``recheck``: the state generation
+        before the first attempt) first checks, under the lock, that the event is
+        still legal and that every row written since is this turn's own: a Stop,
+        a successor or any untraced row written meanwhile wins."""
+        database = conn()
+        database.execute("BEGIN IMMEDIATE")
+        try:
+            if _expected_busy_state is not None:
+                latest = database.execute(
+                    """SELECT state_id,kind FROM state_log WHERE agent_id = ?
+                       ORDER BY ts DESC,state_id DESC LIMIT 1""", (agent_id,)).fetchone()
+                if (latest is None or latest["kind"] not in BUSY
+                        or (latest["state_id"], latest["kind"]) != _expected_busy_state):
+                    raise TransitionNotWritten(agent_id, event, "reconcile_busy_superseded")
+            if recheck is not None:
+                self._recheck_terminal(agent_id, event, detail, since=recheck, force=force)
+            if own_since is not None:
+                # Under the writer lock: the row sorts after its OWN turn's rows
+                # written since the write began (activity that committed while it
+                # waited), and a retry is stamped when it lands; a historical ts
+                # (own_since None) is kept as given.
+                # Only when every row since is this turn's own: once another
+                # actor wrote in between, the row keeps the stamp it was given.
+                trace = str((detail or {}).get("trace_id") or "")
+                rows = database.execute(
+                    f"""SELECT MAX(ts) AS newest, MAX({_FOREIGN_ROW_SQL}) AS foreign_row
+                          FROM state_log WHERE agent_id = ? AND state_id > ?""",
+                    (trace, trace, agent_id, own_since)).fetchone()
+                if not rows["foreign_row"]:
+                    stamp = max(stamp, int(rows["newest"] or 0),
+                                now_ms() if recheck is not None else 0)
+            stored_detail, unlaunched_target = _unlaunched_write_detail(database, agent_id, event, detail)
+            cursor = database.execute(
+                """INSERT INTO state_log (agent_id, runtime_id, ts, kind, detail)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (agent_id, runtime_id, stamp, target,
+                 json.dumps(stored_detail) if stored_detail else None))
+            trace = _record_outcome(agent_id, event, target, stored_detail, stamp,
+                                    unlaunched_turn_id=unlaunched_target)
+            database.execute("COMMIT")
+        except BaseException:
+            if database.in_transaction:
+                database.execute("ROLLBACK")
+            raise
+        return cursor, trace, stamp
+
+    def _may_end_turn(self, event: str, kind: str | None) -> bool:
+        if event == TurnEvent.RECORDED:
+            return kind in TERMINAL
+        if event == TurnEvent.AUDIT_NOTED:
+            return True
+        return (self.table.get(event) or (None,))[0] in TERMINAL
+
+    def _recheck_terminal(self, agent_id: str, event: str, detail: dict[str, Any] | None,
+                          *, since: int, force: bool) -> None:
+        from_state = self.current_kind(agent_id)
+        if not force and not self.is_legal(from_state, event):
+            raise TransitionNotWritten(agent_id, event, "terminal_superseded")
+        trace = str((detail or {}).get("trace_id") or "")
+        # Since the first attempt, a row that is not explicitly this turn's
+        # (another trace, or none) means someone else acted: it wins.
+        foreign = conn().execute(
+            f"""SELECT 1 FROM state_log
+                 WHERE agent_id = ? AND state_id > ? AND {_FOREIGN_ROW_SQL}
+                 LIMIT 1""",
+            (agent_id, since, trace, trace)).fetchone()
+        if foreign is not None:
+            raise TransitionNotWritten(agent_id, event, "terminal_superseded")
+
+    def _conditional_transition(self, agent_id: str, event: str,
+                                detail: dict[str, Any] | None, *, expect_trace: str,
+                                anchor: int | None, s_open: int | None) -> Transition:
+        """Write ``event`` only if nothing newer touched the agent (the call-open end).
+
+        Inside ONE ``BEGIN IMMEDIATE``, before the INSERT: the agent's newest state row is still
+        ``anchor`` (read before the caller's ownership check), its live trace is ``expect_trace``,
+        that trace's turn is unsettled, no hook prompt admission landed after ``s_open`` (the
+        generation read before the trace was set), and the edge is legal. Refused before any
+        statement inside a caller's transaction. Observed only after COMMIT. The state row is
+        atomic with these conditions; the turn's settlement is not (``_settle_turn`` swallows its
+        own failures).
+        """
+        database = conn()
+        if database.in_transaction:      # an attribute of this thread's open connection: no SQL
+            raise TransitionNotWritten(agent_id, event, "in_transaction")
+        target = self.table[event][0]
+        with _critical_write():
+            try:
+                database.execute("BEGIN IMMEDIATE")
+            except sqlite3.OperationalError as exc:
+                if db.is_locked_error(exc):
+                    raise TransitionNotWritten(agent_id, event, "write_busy") from exc
+                raise
+            try:
+                newest = database.execute(
+                    "SELECT MAX(state_id) AS g FROM state_log WHERE agent_id = ?",
+                    (agent_id,)).fetchone()["g"]
+                live = database.execute("SELECT trace_id FROM traces WHERE agent_id = ?",
+                                        (agent_id,)).fetchone()
+                open_turn = database.execute(
+                    """SELECT 1 FROM turns WHERE agent_id = ? AND trace_id = ?
+                          AND settled_at IS NULL LIMIT 1""", (agent_id, expect_trace)).fetchone()
+                admitted = s_open is not None and database.execute(
+                    f"""SELECT 1 FROM state_log WHERE agent_id = ? AND state_id > ?
+                           AND {PROMPT_ADMISSION_SQL} LIMIT 1""", (agent_id, s_open)).fetchone()
+                if newest != anchor:
+                    raise TransitionNotWritten(agent_id, event, "g_anchor")
+                if live is None or live["trace_id"] != expect_trace:
+                    raise TransitionNotWritten(agent_id, event, "p1_trace")
+                if open_turn is None:
+                    raise TransitionNotWritten(agent_id, event, "p2_settled")
+                if s_open is None:
+                    raise TransitionNotWritten(agent_id, event, "p4_no_admission_mark")
+                if admitted:
+                    raise TransitionNotWritten(agent_id, event, "p4s_prompt_admitted")
+                from_state = self.current_kind(agent_id)
+                if not self.is_legal(from_state, event):
+                    self._refuse(agent_id, event, from_state, target)
+                    raise IllegalTransition(agent_id, event, from_state, target)
+                stamp = now_ms()
+                detail = _detail_with_origin(agent_id, target, detail, stamp)
+                from . import agents as agents_db
+                cursor = database.execute(
+                    """INSERT INTO state_log (agent_id, runtime_id, ts, kind, detail)
+                       VALUES (?, ?, ?, ?, ?)""",
+                    (agent_id, agents_db.current_runtime_id(agent_id), stamp, target,
+                     json.dumps(detail) if detail else None))
+                _settle_turn(agent_id, event, target, detail, stamp)
+                if not database.in_transaction:
+                    # An inner error rolled the transaction back and _settle_turn swallowed it.
+                    raise TransitionNotWritten(agent_id, event, "write_lost")
+                database.execute("COMMIT")
+            except BaseException:
+                if database.in_transaction:
+                    database.execute("ROLLBACK")
+                raise
+        from . import live_hub
+        live_hub.observe_transition(agent_id, event, target,
+                                    {**(detail or {}), "_state_id": int(cursor.lastrowid or 0)})
+        return Transition(
+            agent_id=agent_id, event=event, from_state=from_state, to_state=target,
+            ts=stamp, detail=detail, state_id=int(cursor.lastrowid or 0))
+
+    def _start_unless_stopped(self, agent_id: str, event: str, target: str,
+                              detail: dict[str, Any] | None, trace: str, *,
+                              late_fence: int | None = None) -> Transition:
+        """Write a turn's start unless that turn was stopped, in ONE write
+        transaction: a Stop cannot land between the check and the write.
+        Evidence is durable and per turn: an 'interrupted' or 'stopped' row
+        since the turn started (its turns row, else its first 'thinking' row).
+        A reconciler's 'idle' is an observation, not a Stop, so a running
+        turn's start still lands after one."""
+        database = conn()
+        with _critical_write():
+            database.execute("BEGIN IMMEDIATE")
+            try:
+                from_state = self.current_kind(agent_id)
+                if not self.is_legal(from_state, event):
+                    database.execute("COMMIT")
+                    self._refuse(agent_id, event, from_state, target)
+                    raise IllegalTransition(agent_id, event, from_state, target)
+                started = database.execute(
+                    """SELECT started_at FROM turns WHERE agent_id = ? AND trace_id = ?
+                        ORDER BY started_at DESC LIMIT 1""", (agent_id, trace)).fetchone()
+                since = started["started_at"] if started is not None else None
+                if since is None:
+                    first = database.execute(
+                        """SELECT MIN(ts) AS ts FROM state_log WHERE agent_id = ? AND kind = 'thinking'
+                              AND json_extract(detail, '$.trace_id') = ?""",
+                        (agent_id, trace)).fetchone()
+                    since = first["ts"] if first is not None else None
+                # A clock tie is no order. A Stop belongs to the trace it names, else
+                # to the turn it settled; one that settled another turn (and not this
+                # one) came before this turn and does not fence it. A Stop that
+                # settled nothing still fences.
+                stopped = since is not None and database.execute(
+                    """SELECT 1 FROM state_log s WHERE s.agent_id = ? AND s.ts >= ?
+                          AND s.kind IN ('interrupted', 'stopped')
+                          AND (COALESCE(json_extract(s.detail, '$.trace_id'), '') = ?
+                               OR (COALESCE(json_extract(s.detail, '$.trace_id'), '') = ''
+                                   AND (EXISTS (SELECT 1 FROM turns u
+                                                 WHERE u.agent_id = s.agent_id AND u.trace_id = ?
+                                                   AND u.settled_at = s.ts
+                                                   AND u.outcome = 'interrupted')
+                                        OR NOT EXISTS (SELECT 1 FROM turns u
+                                                 WHERE u.agent_id = s.agent_id
+                                                   AND u.trace_id IS NOT ?
+                                                   AND u.settled_at = s.ts
+                                                   AND u.outcome = 'interrupted'))))
+                        LIMIT 1""",
+                    (agent_id, since, trace, trace, trace)).fetchone() is not None
+                if stopped:
+                    # Nothing of ours was written; a Stop that landed meanwhile stays.
+                    database.execute("COMMIT")
+                    raise TransitionNotWritten(agent_id, event, "turn_stopped")
+                if late_fence is not None and database.execute(
+                        _TERMINAL_AFTER_SQL, (agent_id, late_fence, trace, trace)).fetchone():
+                    # The trace ended (done, failed, Stop) while this start
+                    # waited: it must not show the agent busy after (TP-N2).
+                    database.execute("COMMIT")
+                    log("stateAfterTerminalDropped", f"agent={agent_id} event={event} trace={trace}")
+                    raise TransitionNotWritten(agent_id, event, "turn_ended")
+                stamp = now_ms()
+                detail = _detail_with_origin(agent_id, target, detail, stamp)
+                from . import agents as agents_db
+                cursor = database.execute(
+                    """INSERT INTO state_log (agent_id, runtime_id, ts, kind, detail)
+                       VALUES (?, ?, ?, ?, ?)""",
+                    (agent_id, agents_db.current_runtime_id(agent_id), stamp, target,
+                     json.dumps(detail) if detail else None))
+                _settle_turn(agent_id, event, target, detail, stamp)
+                database.execute("COMMIT")
+            except BaseException:
+                if database.in_transaction:
+                    database.execute("ROLLBACK")
+                raise
+        from . import live_hub
+        live_hub.observe_transition(agent_id, event, target,
+                                    {**(detail or {}), "_state_id": int(cursor.lastrowid or 0)})
+        return Transition(
+            agent_id=agent_id, event=event, from_state=from_state, to_state=target,
+            ts=stamp, detail=detail, state_id=int(cursor.lastrowid or 0))
 
     def record(self, agent_id: str, kind: str,
                detail: dict[str, Any] | None = None) -> Transition:
@@ -441,7 +877,7 @@ class TurnStateMachine:
                 ORDER BY t.turn_id""").fetchall()
         return [dict(row) for row in rows]
 
-    def record_unlaunched(self, agent_id: str, trace_id: str) -> Transition:
+    def record_unlaunched(self, agent_id: str, trace_id: str, *, turn_id: int | None = None) -> Transition:
         """Historical failure receipt, ordered before any newer turn's state.
 
         Recording a late launch failure at wall-clock now could replace the
@@ -455,6 +891,7 @@ class TurnStateMachine:
         return self.transition(
             agent_id, TurnEvent.UNLAUNCHED,
             {"trace_id": trace_id, "dispatch_not_started": True,
+             "dispatch_not_started_turn_id": turn_id if turn_id is not None else 0,
              "message": "Message saved; backend did not start. Retry is safe."},
             force=True, ts=ts)
 
@@ -513,9 +950,15 @@ MACHINE = TurnStateMachine()
 
 def transition(agent_id: str, event: str, detail: dict[str, Any] | None = None,
                *, kind: str | None = None, force: bool = False,
-               ts: int | None = None) -> Transition:
+               ts: int | None = None, expect_trace: str | None = None,
+               anchor: int | None = None, s_open: int | None = None,
+               begun_at: int | None = None,
+               _expected_busy_state: tuple[int, str] | None = None) -> Transition:
     return MACHINE.transition(agent_id, event, detail, kind=kind, force=force,
-                              ts=ts)
+                              ts=ts, expect_trace=expect_trace, anchor=anchor,
+                              s_open=s_open, begun_at=begun_at,
+                              **({"_expected_busy_state": _expected_busy_state}
+                                 if _expected_busy_state is not None else {}))
 
 
 def try_transition(agent_id: str, event: str,
@@ -529,6 +972,19 @@ def try_transition(agent_id: str, event: str,
         return transition(agent_id, event, detail, force=force)
     except IllegalTransition:
         return None
+
+
+def causal_baseline(agent_id: str) -> int:
+    """The agent's newest state row id, as a write's causal baseline (TP-N2).
+    Not state_generation(), which marks the call-open path."""
+    return int(conn().execute("SELECT COALESCE(MAX(state_id), 0) FROM state_log WHERE agent_id = ?",
+                              (agent_id,)).fetchone()[0])
+
+
+def state_generation(agent_id: str) -> int | None:
+    """The agent's newest state row id (idx_state_log_agent_state: one seek)."""
+    return conn().execute("SELECT MAX(state_id) AS g FROM state_log WHERE agent_id = ?",
+                          (agent_id,)).fetchone()["g"]
 
 
 def record(agent_id: str, kind: str,
@@ -568,8 +1024,8 @@ def enable_latest_turn_audio(agent_id: str) -> None:
     MACHINE.enable_latest_turn_audio(agent_id)
 
 
-def record_unlaunched(agent_id: str, trace_id: str) -> Transition:
-    return MACHINE.record_unlaunched(agent_id, trace_id)
+def record_unlaunched(agent_id: str, trace_id: str, *, turn_id: int | None = None) -> Transition:
+    return MACHINE.record_unlaunched(agent_id, trace_id, turn_id=turn_id)
 
 
 def illegal_counts() -> dict[tuple[str, str], int]:

@@ -14,7 +14,11 @@ from lib.turn_lifecycle import TurnEvent
 
 
 def _iso(ms: int) -> str:
-    return dt.datetime.fromtimestamp(ms / 1000, dt.timezone.utc).isoformat().replace("+00:00", "Z")
+    # Milliseconds always, as real transcripts write them: a bare isoformat() drops
+    # the fraction on a whole second, and "...07Z" then sorts after "...07.495Z" in
+    # /log's text order (a turn started at ...995 ms; CI flake, 2nd occurrence).
+    return (dt.datetime.fromtimestamp(ms / 1000, dt.timezone.utc)
+            .isoformat(timespec="milliseconds").replace("+00:00", "Z"))
 
 
 def _agent(session="nia", backend="claude"):

@@ -1,0 +1,8 @@
+{
+ "backend": "codex",
+ "cuts": 92,
+ "decisions": {
+  "incremental": 86,
+  "no_checkpoint": 6
+ }
+}

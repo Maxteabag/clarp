@@ -31,6 +31,8 @@ pub struct Options<'a> {
     pub held_rows: HashSet<String>,
     /// The agent works: the chat's last turn may not be over.
     pub busy: bool,
+    /// The reader opted out of activity: leave rows for presentation to hide.
+    pub hide_activity: bool,
     /// A cached explanation of a `/log` tool call (never asks for one).
     pub explain: Option<&'a dyn Fn(&Object) -> String>,
 }
@@ -73,7 +75,8 @@ pub struct Folded {
 /// keeps its worked time, reasoning and keys; otherwise from `/log`.
 pub fn present(rows: &[Message], live: Option<&LiveView>, options: &Options) -> Folded {
     let mut folded = Folded::default();
-    if !options.summaries {
+    if !options.summaries || options.hide_activity {
+        retain_unfiled_messages(rows, live, options, &mut folded);
         return folded;
     }
     let prompts: Vec<usize> = (0..rows.len()).filter(|&i| rows[i].role == "user").collect();
@@ -104,7 +107,63 @@ pub fn present(rows: &[Message], live: Option<&LiveView>, options: &Options) -> 
             folded.folds.push(fold);
         }
     }
+    retain_unfiled_messages(rows, live, options, &mut folded);
     folded
+}
+
+/// A new live turn can arrive before the previous reply's /log delta. Keep
+/// its already displayed completed messages until their exact durable ids
+/// arrive; no transcript row is created or changed by this projection.
+fn retain_unfiled_messages(rows: &[Message], live: Option<&LiveView>, options: &Options, folded: &mut Folded) {
+    let Some(live) = live else { return };
+    let known: HashSet<&str> = rows.iter().filter(|row| row.kind != "live" && !row.pending)
+        .map(|row| row.id.as_str()).collect();
+    let live_options = live_present::Options { explanations: options.explanations, expanded: options.expanded.clone(), host_now_ms: 0, hide_activity: options.hide_activity };
+    for (turn, items) in live.retired_turns() {
+        let trace = turn.get("turn_id").and_then(Value::as_str).unwrap_or_default();
+        // A matching prompt admits this retained turn into this transcript.
+        // A reset/new conversation must not revive a previous chat's reply.
+        if trace.is_empty() || !rows.iter().any(|row| row.role == "user" && row.trace_id == trace) {
+            continue;
+        }
+        let pieces: Vec<Piece> = items.iter().filter(|item| {
+            let id = item.get("row_id").and_then(Value::as_str).unwrap_or_default();
+            item.get("kind").and_then(Value::as_str) == Some("message")
+                && item.get("status").and_then(Value::as_str) == Some("completed")
+                && item.get("phase").and_then(Value::as_str) == Some("final")
+                && !id.is_empty() && !known.contains(id)
+                && item.get("text").and_then(Value::as_str).is_some_and(|text| !text.trim().is_empty())
+        }).map(|item| {
+            // An older /log page may still carry the unfinished prefix under
+            // this same id. The completed item owns that slot until finality
+            // arrives, so hide the prefix rather than drawing a second reply.
+            if let Some(id) = item.get("row_id").and_then(Value::as_str)
+                && rows.iter().any(|row| row.id == id && row.kind == "live") {
+                folded.hidden_rows.insert(id.to_owned());
+            }
+            Piece::Entry(live_present::item_entry(item, &live_options))
+        }).collect();
+        if pieces.is_empty() {
+            continue;
+        }
+        // A final can begin after another prompt was sent while this turn
+        // was working. Anchor the reply by its own time, not the turn
+        // start, so retaining it does not move it above that prompt.
+        let started = pieces.iter().filter_map(|piece| match piece {
+            Piece::Entry(entry) => entry.started_at_ms,
+            Piece::Row(_) => None,
+        }).min().or_else(|| turn.get("started_at_ms").and_then(Value::as_i64));
+        let next = rows.iter().find(|row| row.role == "user" && row.trace_id != trace
+            && started.is_some_and(|start| ms(row).is_some_and(|time| time > start)));
+        folded.folds.push(Fold {
+            key: format!("live:handoff:{trace}"),
+            // A final answer follows the turn's work, directly before its
+            // next prompt; anchoring after the old prompt would move it up.
+            prompt: None,
+            next: next.map(|row| row.id.clone()),
+            pieces,
+        });
+    }
 }
 
 fn text<'a>(value: &'a Value, key: &str) -> &'a str {
@@ -243,7 +302,7 @@ fn turn(
     let mut rows_of: HashMap<String, Entry> = HashMap::new();
     let mut emitted = HashSet::new();
     let mut unexplained: Vec<(String, Object)> = Vec::new();
-    let live_options = live_present::Options { explanations: options.explanations, expanded: options.expanded.clone(), host_now_ms: 0 };
+    let live_options = live_present::Options { explanations: options.explanations, expanded: options.expanded.clone(), host_now_ms: 0, hide_activity: options.hide_activity };
     let mut message = |items: &mut Vec<Object>, row: &Message, phase: &str| {
         let item = json!({"id": format!("log:{}", row.id), "kind": "message", "status": "completed", "phase": phase, "text": row.display_text, "row_id": row.id});
         let item = item.as_object().cloned().unwrap_or_default();

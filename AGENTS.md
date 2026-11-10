@@ -4,6 +4,22 @@ This repository is the Clarp server, PWA, and Tauri desktop shell.
 The iOS app is a separate private repo (`clarp-ios`). Do not document
 or duplicate iOS build/signing steps here.
 
+## Refactor program (from 3 Nov 2026)
+
+A refactor program of the server is running. Its brief is `REFACTOR.md`; this
+section applies until that file is removed.
+
+- **Do not deploy, update or restart the Clarp Host yourself** (`make deploy`,
+  `install.sh`, `make deploy-static`, `clarp-admin update`, restarting the
+  `clarp*` units). Keep pushing to main as described below; the program's release
+  owner ships main in the 12:00 and 18:00 windows (Europe/Oslo). If a change must
+  go live sooner, ask the release owner (session in `REFACTOR.md` section 6).
+  Peter can still deploy himself.
+- **Do not edit files listed under "Claims" in `REFACTOR.md`.** Ask the lead
+  (`hobbles-18b0`).
+- Agents in the program follow `REFACTOR.md`, which overrides "Push to main" for
+  them: they commit on their own branch and the merge captain lands it.
+
 ## Agent instruction files
 
 `AGENTS.md` is the only real file. `CLAUDE.md` and `GEMINI.md` are symlinks to
@@ -50,10 +66,17 @@ exists nowhere else.
 
 ## A test run is green only when you read its result
 
-`make test` / `pytest` is the gate before pushing. When you run it in the
-background through a wrapper such as `pytest > log; echo "exit=$?" >> log`,
-the wrapper exits 0 whether or not the suite failed, so a harness "completed
-(exit code 0)" notification says nothing about the tests. Read the recorded
+The gate before pushing is `make test-critical` (serial, about a minute; the
+list is `tests/critical.txt`) plus the test files for the code you changed.
+Do not run the full suite (`make test`) locally: forty agents doing so overload
+the owner's laptops. The full suite never runs automatically, on GitHub or anywhere:
+only the critical gate does. Start the full suite by hand on GitHub ("Run workflow"
+on Tests) when a change is broad enough to want it.
+
+When you run a test command in the background through a wrapper such as
+`pytest > log; echo "exit=$?" >> log`, the wrapper exits 0 whether or not the
+suite failed, so a harness "completed (exit code 0)" notification says nothing
+about the tests. Read the recorded
 `exit=` line and grep the log for `^FAILED`, or run the suite in the
 foreground. Two commits were pushed and deployed from a false green this way.
 

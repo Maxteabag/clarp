@@ -376,13 +376,14 @@ def test_decision_log_does_not_claim_failed_broadcast_was_emitted(monkeypatch):
     assert result.broadcast is False
     assert result.herald_emitted is False
     assert hm.held_clips("rachel") == ["/audio/r1.mp3"]
-    assert "rachel" not in hm.pending_heralds()
+    # The fallback flush failed too: a spoken grant can still release it (RTO-11).
+    assert "rachel" in hm.pending_heralds()
     assert any("action=hold" in line
                and "reason=herald_broadcast_failed" in line
                for line in decisions)
 
 
-def test_failed_herald_is_retryable_and_only_success_becomes_pending():
+def test_a_failed_herald_plays_the_reply_and_the_next_reply_heralds_again():
     stream = SelectiveFailStream()
     tts = FakeTTS()
     agents = {
@@ -395,18 +396,20 @@ def test_failed_herald_is_retryable_and_only_success_becomes_pending():
 
     first = hm.ingest_clip("rachel", url="/audio/r1.mp3", ts=1)
     assert first.herald_emitted is False
+    assert first.broadcast is True              # herald.disabled behaviour (RTO-11)
     assert "rachel" not in hm.pending_heralds()
-    assert hm.held_clips("rachel") == ["/audio/r1.mp3"]
+    assert hm.held_clips("rachel") == []
+    assert "/audio/r1.mp3" in stream.audio_urls
 
     stream.fail_urls.clear()
     second = hm.ingest_clip("rachel", url="/audio/r2.mp3", ts=2)
     assert second.herald_emitted is True
     assert "rachel" in hm.pending_heralds()
-    assert hm.held_clips("rachel") == ["/audio/r1.mp3", "/audio/r2.mp3"]
+    assert hm.held_clips("rachel") == ["/audio/r2.mp3"]
     assert len(tts.calls) == 2
 
 
-def test_failed_herald_keeps_permission_gate_against_short_bypass():
+def test_a_failed_herald_leaves_no_permission_gate_behind():
     stream = SelectiveFailStream()
     tts = FakeTTS()
     agents = {
@@ -422,15 +425,11 @@ def test_failed_herald_keeps_permission_gate_against_short_bypass():
     short = hm.ingest_clip(
         "rachel", url="/audio/short.mp3", ts=2, meta={"text_len": 20})
 
-    assert short.broadcast is False
+    # The long reply played when its herald failed (RTO-11); the short one
+    # then takes the short-reply bypass, in order, with nothing held.
+    assert short.broadcast is True
     assert "rachel" not in hm.pending_heralds()
-    assert hm.held_clips("rachel") == [
-        "/audio/long.mp3", "/audio/short.mp3"]
-    assert "/audio/long.mp3" not in stream.audio_urls
-    assert "/audio/short.mp3" not in stream.audio_urls
-
-    stream.fail_urls.clear()
-    hm.set_focus("rachel")
+    assert hm.held_clips("rachel") == []
     delivered = [url for url in stream.audio_urls
                  if url in {"/audio/long.mp3", "/audio/short.mp3"}]
     assert delivered == ["/audio/long.mp3", "/audio/short.mp3"]
@@ -443,7 +442,10 @@ def test_focus_change_during_first_herald_cannot_miss_buffer_flush():
     class BlockingTTS(FakeTTS):
         def synthesize(self, text, voice_id, session=None):
             synth_started.set()
-            assert allow_synth.wait(timeout=1)
+            # Held for longer than the focus deadline below, so a focus
+            # change that waits for synthesis fails instead of slipping
+            # through once synthesis gives up.
+            assert allow_synth.wait(timeout=60)
             return super().synthesize(text, voice_id, session)
 
     stream = FakeStream()
@@ -470,12 +472,14 @@ def test_focus_change_during_first_herald_cannot_miss_buffer_flush():
 
     focus = threading.Thread(target=change_focus)
     ingest.start()
-    assert synth_started.wait(timeout=1)
-    focus.start()
-    focus.join(timeout=0.5)
-    assert not focus.is_alive(), "focus must not wait for provider TTS"
-    allow_synth.set()
-    ingest.join(timeout=1)
+    try:
+        assert synth_started.wait(timeout=15)
+        focus.start()
+        focus.join(timeout=15)
+        assert not focus.is_alive(), "focus must not wait for provider TTS"
+    finally:
+        allow_synth.set()
+    ingest.join(timeout=15)
 
     assert not ingest.is_alive()
     assert hm.held_clips("rachel") == []
@@ -561,7 +565,7 @@ def test_failed_direct_broadcast_retries_in_order_with_metadata():
     assert not any(event.get("herald") for event in delivered)
 
 
-def test_synthesis_failure_has_distinct_retryable_reason(monkeypatch):
+def test_synthesis_failure_has_a_distinct_reason_and_plays_the_reply(monkeypatch):
     decisions: list[str] = []
     monkeypatch.setattr(
         herald_module, "log",
@@ -584,8 +588,10 @@ def test_synthesis_failure_has_distinct_retryable_reason(monkeypatch):
     result = hm.ingest_clip("rachel", url="/audio/r1.mp3", ts=1)
 
     assert result.herald_emitted is False
+    assert result.broadcast is True             # herald.disabled behaviour (RTO-11)
     assert "rachel" not in hm.pending_heralds()
-    assert hm.held_clips("rachel") == ["/audio/r1.mp3"]
+    assert hm.held_clips("rachel") == []
+    assert stream.audio_urls == ["/audio/r1.mp3"]
     assert any("reason=synthesis_failed" in line for line in decisions)
 
 
@@ -865,3 +871,81 @@ def test_flushed_held_clips_are_flagged_herald():
                if e.get("type") == "audio" and e["url"] == "/audio/b1.mp3"]
     assert len(flushed) == 1
     assert flushed[0].get("herald") is True
+
+
+# ---- RTO-11: a failed herald falls back to herald.disabled behaviour ----
+
+def test_a_failed_herald_plays_the_held_reply_in_normal_clip_order():
+    """Clips held while the herald was being synthesized play in their own
+    order, after what was already playing, and without the herald priority
+    flag, so they never talk over clips already queued."""
+    stream = FakeStream()
+    agents = {
+        "claude": {"name": "Mike", "voice_id": "V_MIKE"},
+        "rachel": {"name": "Rachel", "voice_id": "V_RACHEL"},
+    }
+    holder = {}
+
+    class SlowFailingTTS:
+        def synthesize_herald(self, *_args, **_kwargs):
+            # Two more replies arrive while the announcement is being made:
+            # Mike's (focused) plays at once, Rachel's waits behind r1.
+            holder["hm"].ingest_clip("claude", url="/audio/m1.mp3", ts=2)
+            holder["hm"].ingest_clip("rachel", url="/audio/r2.mp3", ts=3)
+            raise RuntimeError("synthesis unavailable")
+
+    hm = holder["hm"] = HeraldManager(stream=stream, tts=SlowFailingTTS(),
+                                      agents=lambda: agents)
+    hm.set_focus("claude")
+    hm.ingest_clip("claude", url="/audio/m0.mp3", ts=0)
+
+    result = hm.ingest_clip("rachel", url="/audio/r1.mp3", ts=1)
+
+    assert result.broadcast is True and result.herald_emitted is False
+    assert stream.audio_urls == ["/audio/m0.mp3", "/audio/m1.mp3",
+                                 "/audio/r1.mp3", "/audio/r2.mp3"]
+    fallback = [e for e in stream.events if e.get("url") in {"/audio/r1.mp3", "/audio/r2.mp3"}]
+    assert all("herald" not in e for e in fallback), "the fallback took the herald priority"
+    assert hm.held_clips("rachel") == [] and "rachel" not in hm.pending_heralds()
+
+
+def test_a_failed_herald_whose_fallback_also_fails_can_still_be_granted():
+    stream = SelectiveFailStream()
+    tts = FakeTTS()
+    agents = {
+        "claude": {"name": "Mike", "voice_id": "V_MIKE"},
+        "rachel": {"name": "Rachel", "voice_id": "V_RACHEL"},
+    }
+    hm = HeraldManager(stream=stream, tts=tts, agents=lambda: agents)
+    hm.set_focus("claude")
+    stream.fail_urls.update({"/audio/herald-1__rachel.mp3", "/audio/r1.mp3"})
+
+    result = hm.ingest_clip("rachel", url="/audio/r1.mp3", ts=1)
+
+    assert result.broadcast is False and result.herald_emitted is False
+    assert hm.held_clips("rachel") == ["/audio/r1.mp3"]
+    assert "rachel" in hm.pending_heralds()
+    stream.fail_urls.clear()
+    granted = hm.on_user_text("Sure, Rachel, what is it?")
+    assert "rachel" in granted.granted
+    assert stream.audio_urls[-1] == "/audio/r1.mp3"
+    assert hm.held_clips("rachel") == []
+
+
+def test_a_failed_herald_broadcast_plays_the_reply_too():
+    stream = SelectiveFailStream()
+    tts = FakeTTS()
+    agents = {
+        "claude": {"name": "Mike", "voice_id": "V_MIKE"},
+        "rachel": {"name": "Rachel", "voice_id": "V_RACHEL"},
+    }
+    hm = HeraldManager(stream=stream, tts=tts, agents=lambda: agents)
+    hm.set_focus("claude")
+    stream.fail_urls.add("/audio/herald-1__rachel.mp3")
+
+    result = hm.ingest_clip("rachel", url="/audio/r1.mp3", ts=1)
+
+    assert result.broadcast is True
+    assert stream.audio_urls == ["/audio/r1.mp3"]
+    assert hm.held_clips("rachel") == []
+

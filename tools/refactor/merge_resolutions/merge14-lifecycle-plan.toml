@@ -1,0 +1,9 @@
+# Merge 14: queue design deltas from main and integration queue-reorder notes.
+# Content owner rf-contractc-be17; A3 SOURCE YES 1e632b4a844cd08911496392518782006c98cffb.
+# Payload SHA256 1699a56fa2393bfda22251bf5ccfd8ef8bb080e2ef6b257529266e29d4b79ed7.
+# Payload git blob ae6976e0c2683e9d7947023062a1e15f16a6d395; content is copied byte-for-byte.
+path = "docs/architecture/lifecycle-conversion-plan.md"
+resolved = "merge14-lifecycle-plan.md.resolved"
+base_blob = "c5fbac4f3687660bc940c3437f2709618f52cdd5"
+main_blob = "98a31e8f4e7feaf2729a6202f2479e77468d90e9"
+integration_blob = "85b97a40eaea53c666cc9ede405b2bddb8bb2d44"

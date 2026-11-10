@@ -7,6 +7,8 @@ no Whisper model — just the handler logic exercised end-to-end.
 
 This is the payoff for the AddScoped-style DI refactor.
 """
+import contextlib
+import faulthandler
 import json
 import os
 import pathlib
@@ -70,10 +72,13 @@ def fake_ctx(tmp_path):
     audio.mkdir()
     agents_path = tmp_path / "agents.json"  # legacy field on ctx; unused by DB
     from lib.agents import create_agent
-    create_agent(persona="Mike",   voice_id="V_MIKE",
-                 cwd=str(tmp_path), session="claude")
-    create_agent(persona="Rachel", voice_id="V_RACHEL",
-                 cwd=str(tmp_path), session="rachel")
+    from lib.turn_dispatch import clear_for_agent
+    agent_ids = [
+        create_agent(persona="Mike",   voice_id="V_MIKE",
+                     cwd=str(tmp_path), session="claude"),
+        create_agent(persona="Rachel", voice_id="V_RACHEL",
+                     cwd=str(tmp_path), session="rachel"),
+    ]
     ctx = ServerContext(
         root=tmp_path,
         static=static,                       # reuse real static so /sw.js works
@@ -85,7 +90,12 @@ def fake_ctx(tmp_path):
         stt=StubSTT(text="hello there", ends_terminal=True),
         roster_names=("Mike", "Rachel"),
     )
-    return ctx
+    yield ctx
+    # The turn slots are process-wide, but these agents live only as long as
+    # this test's database: a turn a test started and never finished must not
+    # show up as active work in the next test.
+    for agent_id in agent_ids:
+        clear_for_agent(agent_id)
 
 
 @pytest.fixture
@@ -120,17 +130,43 @@ def _running_context_server(fake_ctx):
     srv.server_close()
 
 
+# How long a test client waits for the in-process Host. Requests here answer in
+# milliseconds alone, but under a loaded parallel run a /log page took over 2 s of
+# real work (G1 flakes: bootstrap pages under gate exhaustion, 3 and 5 Nov; the
+# signed notification avatar, 4 Nov). A hung handler still fails, just later.
+CLIENT_TIMEOUT_S = 10
+
 def _get(url, **kw):
     req = urllib.request.Request(url, **kw)
-    with urllib.request.urlopen(req, timeout=2) as r:
+    with urllib.request.urlopen(req, timeout=CLIENT_TIMEOUT_S) as r:
         return r.status, r.read()
+
+
+FRAMES_MARKER = "CLARP-DIAG client timeout: every thread's frames follow"
+
+
+@contextlib.contextmanager
+def _frames_on_client_timeout():
+    """On a client TimeoutError, print one fixed marker and every thread's
+    frames of this process (file, line, function; no values) to stderr, then
+    re-raise the same exception. The dump can never replace it: any error
+    while dumping is dropped."""
+    try:
+        yield
+    except TimeoutError:
+        try:
+            print(FRAMES_MARKER, file=sys.stderr, flush=True)
+            faulthandler.dump_traceback(file=sys.stderr, all_threads=True)
+        except Exception:  # noqa: BLE001 - the timeout is the failure, not the dump
+            pass
+        raise
 
 
 def _post(url, body: dict):
     req = urllib.request.Request(
         url, data=json.dumps(body).encode(),
         headers={"Content-Type": "application/json"}, method="POST")
-    with urllib.request.urlopen(req, timeout=2) as r:
+    with urllib.request.urlopen(req, timeout=CLIENT_TIMEOUT_S) as r:
         return r.status, r.read()
 
 
@@ -138,7 +174,7 @@ def _post_with_headers(url, body: dict, headers: dict):
     req = urllib.request.Request(
         url, data=json.dumps(body).encode(),
         headers={"Content-Type": "application/json", **headers}, method="POST")
-    with urllib.request.urlopen(req, timeout=2) as r:
+    with urllib.request.urlopen(req, timeout=CLIENT_TIMEOUT_S) as r:
         return r.status, r.read()
 
 
@@ -227,7 +263,8 @@ def test_status_reports_external_runtime_health(fake_ctx):
 def test_http_server_can_be_replaced_while_runtime_keeps_active_turn(
     fake_ctx, tmp_path,
 ):
-    from lib.runtime_bridge import RuntimeClient, RuntimeRPCServer
+    from lib.runtime_bridge import RuntimeClient
+    from lib.runtime_rpc_server import RuntimeRPCServer
     from lib.turn_dispatch import DispatchResult
 
     active = {}
@@ -304,7 +341,8 @@ def test_runtime_owned_turn_completes_after_http_server_is_gone(
     fake_ctx, tmp_path,
 ):
     from lib import agents as agents_db
-    from lib.runtime_bridge import RuntimeClient, RuntimeRPCServer
+    from lib.runtime_bridge import RuntimeClient
+    from lib.runtime_rpc_server import RuntimeRPCServer
     from lib.runtime_events import RuntimeEventStream
     from lib.turn_dispatch import TurnDispatchService, clear_for_agent
 
@@ -448,7 +486,7 @@ def _delete_status(url, body: bytes | None = None):
     req = urllib.request.Request(url, data=body, method="DELETE",
                                  headers={"Content-Type": "application/json"} if body else {})
     try:
-        with urllib.request.urlopen(req, timeout=2) as r:
+        with urllib.request.urlopen(req, timeout=CLIENT_TIMEOUT_S) as r:
             return r.status, json.loads(r.read())
     except urllib.error.HTTPError as e:
         return e.code, json.loads(e.read())
@@ -570,20 +608,20 @@ def _put(url, body: dict):
     req = urllib.request.Request(
         url, data=json.dumps(body).encode(),
         headers={"Content-Type": "application/json"}, method="PUT")
-    with urllib.request.urlopen(req, timeout=2) as r:
+    with urllib.request.urlopen(req, timeout=CLIENT_TIMEOUT_S) as r:
         return r.status, r.read()
 
 
 def _delete(url):
     req = urllib.request.Request(url, method="DELETE")
-    with urllib.request.urlopen(req, timeout=2) as r:
+    with urllib.request.urlopen(req, timeout=CLIENT_TIMEOUT_S) as r:
         return r.status, r.read()
 
 
 def _post_raw(url, body: bytes, headers: dict):
     req = urllib.request.Request(
         url, data=body, headers=headers, method="POST")
-    with urllib.request.urlopen(req, timeout=2) as r:
+    with urllib.request.urlopen(req, timeout=CLIENT_TIMEOUT_S) as r:
         return r.status, r.read()
 
 
@@ -604,7 +642,7 @@ def _post_truncated_raw(url: str, body: bytes, advertised_length: int,
         + "\r\n"
     ).encode()
     with socket.create_connection(
-        (parsed.hostname, parsed.port), timeout=2,
+        (parsed.hostname, parsed.port), timeout=CLIENT_TIMEOUT_S,
     ) as client:
         client.sendall(head + body)
         client.shutdown(socket.SHUT_WR)
@@ -660,11 +698,11 @@ def test_host_file_browsing_requires_full_device_scope(
         f"{base}{endpoint}?{urlencode(query)}", headers=headers)
     if scope == "limited":
         with pytest.raises(urllib.error.HTTPError) as error:
-            urllib.request.urlopen(request, timeout=2)
+            urllib.request.urlopen(request, timeout=CLIENT_TIMEOUT_S)
         assert error.value.code == 403
         assert b"host secret" not in error.value.read()
     else:
-        with urllib.request.urlopen(request, timeout=2) as response:
+        with urllib.request.urlopen(request, timeout=CLIENT_TIMEOUT_S) as response:
             payload = json.load(response)
         if endpoint == "/agent-file":
             assert payload["content"] == "host secret"
@@ -720,7 +758,7 @@ def test_one_time_pairing_issues_revocable_device_credential(fake_ctx):
                      "Authorization": f"Bearer {token}"},
             method="POST")
         with pytest.raises(urllib.error.HTTPError) as limited:
-            urllib.request.urlopen(request, timeout=2)
+            urllib.request.urlopen(request, timeout=CLIENT_TIMEOUT_S)
         assert limited.value.code == 403
 
         admin_headers = {"Authorization": "Bearer administrator-token"}
@@ -1050,13 +1088,16 @@ def test_prompt_history_preserves_routed_voice_admission(
 def test_get_diagnostics_health_returns_subsystem_state(running_server):
     from lib import health
     health.reset_for_tests()
-    health.mark_success("tts_worker", now=123.0)
+    # A subsystem only this test writes: the running server's real workers (the TTS
+    # worker among them) mark their own health meanwhile, and one overwrote a
+    # 'tts_worker' value set here (G1 flake, 3 occurrences).
+    health.mark_success("diagnostics-test-subsystem", now=123.0)
     base, _ctx, _srv = running_server
 
     status, body = _get(base + "/diagnostics/health")
 
     assert status == 200
-    assert json.loads(body)["subsystems"]["tts_worker"]["last_success_at"] == 123.0
+    assert json.loads(body)["subsystems"]["diagnostics-test-subsystem"]["last_success_at"] == 123.0
 
 
 def test_diagnostics_settings_are_computer_owned_and_validated(running_server):
@@ -1143,6 +1184,7 @@ def test_get_backend_usage_reports_claude_from_turn_accounting(
     a statusline never renders under `-p`, which is how every turn is spawned.
     """
     from lib import backend_usage, turn_usage
+    from tests.patching import patch_shared
 
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / "missing-codex"))
 
@@ -1151,7 +1193,7 @@ def test_get_backend_usage_reports_claude_from_turn_accounting(
 
     for name in ("fetch_claude_usage", "fetch_codex_usage",
                  "fetch_codex_usage_app_server"):
-        monkeypatch.setattr(backend_usage, name, offline)
+        patch_shared(monkeypatch, backend_usage, name, offline)
     turn_usage.record(backend="claude", agent_id="a1", detail={
         "tokens_in": 1200, "tokens_out": 340, "cost_usd": 0.042,
         "duration_ms": 5100, "trace_id": "t-1",
@@ -1620,7 +1662,7 @@ def test_location_rejects_out_of_range_coordinates(running_server):
         method="POST",
     )
     with pytest.raises(urllib.error.HTTPError) as exc:
-        urllib.request.urlopen(req, timeout=2)
+        urllib.request.urlopen(req, timeout=CLIENT_TIMEOUT_S)
     assert exc.value.code == 400
 
 
@@ -1636,7 +1678,7 @@ def test_auth_accepts_cookie_for_headerless_transports(fake_ctx):
             base + "/agents/snapshot",
             headers={"Cookie": "claude_pwa_token=secret-token"},
         )
-        with urllib.request.urlopen(req, timeout=2) as r:
+        with urllib.request.urlopen(req, timeout=CLIENT_TIMEOUT_S) as r:
             assert r.status == 200
     finally:
         srv.shutdown()
@@ -1651,7 +1693,7 @@ def test_large_json_responses_are_gzipped_when_requested(running_server):
         base + "/agents/snapshot",
         headers={"Accept-Encoding": "gzip"},
     )
-    with urllib.request.urlopen(req, timeout=2) as response:
+    with urllib.request.urlopen(req, timeout=CLIENT_TIMEOUT_S) as response:
         encoded = response.read()
         assert response.headers["Content-Encoding"] == "gzip"
     assert json.loads(gzip.decompress(encoded))["agents"]
@@ -2373,7 +2415,7 @@ def test_post_transcribe_uses_stub_stt(running_server):
         base + "/transcribe",
         data=b"\x00" * 100,
         headers={"Content-Type": "audio/webm"}, method="POST")
-    with urllib.request.urlopen(req, timeout=2) as r:
+    with urllib.request.urlopen(req, timeout=CLIENT_TIMEOUT_S) as r:
         body = json.loads(r.read())
     # Response now also carries a per-turn trace_id; check fixed fields only.
     assert body["text"] == "hello there"
@@ -2491,8 +2533,22 @@ def test_concurrent_transcription_retry_coalesces_inflight_work(running_server):
     assert sorted(body["cached"] for body in bodies) == [False, True]
     assert len({body["trace_id"] for body in bodies}) == 1
     assert len(ctx.stt.calls) == 1
+    _assert_job_lock_released("durable-recording-inflight")
+
+
+def _assert_job_lock_released(job_id, timeout=2.0):
+    """The server writes the HTTP response inside transcription_results.serialize() and
+    drops the job's lock entry in its finally, so a client can read the response a moment
+    before that cleanup runs. Wait (bounded, monotonic) for the entry to go; a leaked entry
+    never goes, so the final assertion still fails."""
     from lib import transcription_results
-    assert "durable-recording-inflight" not in transcription_results._locks
+    deadline = time.monotonic() + timeout
+    while job_id in transcription_results._locks:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        time.sleep(min(0.01, remaining))
+    assert job_id not in transcription_results._locks
 
 
 def test_post_transcribe_rejects_job_id_reused_for_different_audio(running_server):
@@ -2533,7 +2589,7 @@ def test_new_transcription_prunes_abandoned_results_after_retention(running_serv
 
 def test_transcription_capabilities_advertise_server_default(running_server):
     base, _ctx, _srv = running_server
-    with urllib.request.urlopen(base + "/transcription-capabilities", timeout=2) as response:
+    with urllib.request.urlopen(base + "/transcription-capabilities", timeout=CLIENT_TIMEOUT_S) as response:
         body = json.loads(response.read())
     assert body["available"] is True
     assert body["default_model"] == "server-default"
@@ -2547,9 +2603,9 @@ def test_disabled_transcription_keeps_server_health_ready(running_server, monkey
     monkeypatch.setattr(transcription_models, "catalog_status", lambda: [])
     monkeypatch.setattr(stt_module, "installed_transcription_models", lambda: [])
     ctx.replace_service("stt", DisabledSTT())
-    with urllib.request.urlopen(base + "/diagnostics/health", timeout=2) as response:
+    with urllib.request.urlopen(base + "/diagnostics/health", timeout=CLIENT_TIMEOUT_S) as response:
         health_body = json.loads(response.read())
-    with urllib.request.urlopen(base + "/transcription-capabilities", timeout=2) as response:
+    with urllib.request.urlopen(base + "/transcription-capabilities", timeout=CLIENT_TIMEOUT_S) as response:
         capability_body = json.loads(response.read())
     assert health_body["ready"] is True
     assert health_body["checks"]["stt_ready"] is True
@@ -3221,6 +3277,36 @@ def test_stop_records_its_actor_and_reason_and_still_pauses(running_server):
     assert turn_queue.get("queue-held") is not None
 
 
+def test_a_stop_whose_record_cannot_be_written_fails_visibly_and_releases_its_barrier(
+        running_server, monkeypatch):
+    """TP-N1b review: a Stop whose terminal write still fails after its bounded
+    retries is not reported as done. The barrier is released all the same, and
+    the user's next Stop records it."""
+    import sqlite3
+    from lib import agents as agents_db, turn_dispatch, turn_lifecycle
+    from lib.turn_lifecycle import TurnEvent
+    base, _ctx, _srv = running_server
+    agent = agents_db.get_by_session("claude")
+    turn_lifecycle.open_turn(agent_id=agent["agent_id"], source="pwa", trace_id="t-stop-lock")
+    turn_lifecycle.transition(agent["agent_id"], TurnEvent.SPAWN_STARTED,
+                              {"source": "pwa", "dispatch": "claude", "trace_id": "t-stop-lock"})
+
+    def locked(*_args, **_kwargs):
+        raise sqlite3.OperationalError("database is locked")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(turn_lifecycle, "_record_outcome", locked)
+        status, body = _post_status(base + "/stop", {"session": "claude"})
+
+    assert status == 503, body
+    assert turn_dispatch._SLOTS.get(agent["agent_id"]) != turn_dispatch._STOPPING_SENTINEL, (
+        "the Stop barrier was left held")
+    assert agents_db.latest_state(agent["agent_id"])["kind"] == "thinking"
+    status, _body = _post(base + "/stop", {"session": "claude"})
+    assert status == 200
+    assert agents_db.latest_state(agent["agent_id"])["kind"] == "interrupted"
+
+
 def test_stop_actor_comes_from_the_turn_identity_not_the_claim(running_server):
     import os
     from lib import agents as agents_db, provider_background_jobs as turns
@@ -3287,6 +3373,28 @@ def test_stop_leaves_effects_unknown_when_bookkeeping_fails(running_server, monk
     assert "goals_paused" not in json.loads(raw)
 
 
+def test_stop_is_recorded_and_broadcast_when_pausing_goals_fails(running_server, monkeypatch):
+    # A goal pause conflict must not skip the stop transition or its events.
+    from lib import agents as agents_db, db, task_plans
+    base, _ctx, _srv = running_server
+    agent_id = agents_db.get_by_session("claude")["agent_id"]
+
+    def fail(*_args, **_kw):
+        raise ValueError("plan changed; reload before editing")
+
+    monkeypatch.setattr(task_plans, "pause_recovery_for_agent", fail)
+    status, _raw = _post(base + "/stop", {"session": "claude"})
+
+    assert status == 200
+    row = db.conn().execute(
+        "SELECT kind FROM state_log WHERE agent_id = ? ORDER BY state_id DESC LIMIT 1",
+        (agent_id,)).fetchone()
+    assert row["kind"] == "interrupted"
+    types = [json.loads(r["payload"])["type"] for r in db.conn().execute(
+        "SELECT payload FROM sse_events WHERE agent_id = ? ORDER BY event_id", (agent_id,))]
+    assert "agent-state" in types and "queue-updated" in types
+
+
 def test_snapshot_after_stop_carries_its_provenance(running_server):
     # Wire proof for clients that reconnect: the snapshot row (not only the
     # replayed agent-state detail) says who stopped the agent and why.
@@ -3311,17 +3419,29 @@ def test_immediate_stop_event_and_the_durable_state_agree_on_ts_and_provenance(r
     # provenance. The Stop's own agent-state must carry the persisted row's
     # ts and detail, exactly as the watcher replays it and the snapshot shows.
     from lib import agents as agents_db, db
-    from lib.state_watcher import StateLogWatcher
-    base, ctx, _srv = running_server
+    base, ctx, srv = running_server
     agent_id = agents_db.get_by_session("claude")["agent_id"]
+    # The Host's own watcher must be watching before the Stop: it starts from the
+    # newest state row it finds, so one started after the Stop never replays it
+    # (review flake-stop-c0549fb0). The agents' rows make that tail non-zero.
+    watcher = srv.workers.get("state-log-watcher")
+    tail = db.conn().execute("SELECT COALESCE(MAX(state_id), 0) AS m FROM state_log").fetchone()["m"]
+    assert tail > 0, "no state row to tell the watcher's start by"
+    deadline = time.monotonic() + 15
+    while watcher._last_id < tail and time.monotonic() < deadline:
+        time.sleep(0.02)
+    assert watcher._last_id >= tail, "the Host's state watcher never started watching"
     _post(base + "/stop", {"session": "claude", "actor": "agent:theo-97e5",
                            "reason": "busy with no process"})
     row = db.conn().execute(
         "SELECT state_id, ts FROM state_log WHERE agent_id = ? AND kind = 'interrupted'"
         " ORDER BY state_id DESC LIMIT 1", (agent_id,)).fetchone()
-    watcher = StateLogWatcher(ctx.stream)
-    watcher._last_id = int(row["state_id"]) - 1
-    watcher._poll_once()
+    # The Host's own watcher replays the row (a second, simulated watcher raced it
+    # under load and made three: G1 flake). Wait until it has gone past the row.
+    deadline = time.monotonic() + 15
+    while watcher._last_id < int(row["state_id"]) and time.monotonic() < deadline:
+        time.sleep(0.02)
+    assert watcher._last_id >= int(row["state_id"]), "the Host's state watcher never replayed the Stop"
 
     payloads = [json.loads(r["payload"]) for r in db.conn().execute(
         "SELECT payload FROM sse_events WHERE agent_id = ? AND type IN"
@@ -3545,7 +3665,7 @@ def test_404_for_unknown_path(running_server):
     base, _ctx, _srv = running_server
     req = urllib.request.Request(base + "/nope")
     with pytest.raises(urllib.error.HTTPError) as excinfo:
-        urllib.request.urlopen(req, timeout=2).read()
+        urllib.request.urlopen(req, timeout=CLIENT_TIMEOUT_S).read()
     assert excinfo.value.code == 404
 
 
@@ -3625,8 +3745,17 @@ def test_agent_assignment_endpoint_keeps_existing_session(running_server):
 def test_anonymous_creation_returns_its_agent_without_a_fleet_query(running_server, monkeypatch):
     base, _ctx, _srv = running_server
     from lib import agents as agents_db
-    monkeypatch.setattr(agents_db, "dashboard_states", lambda: pytest.fail("creation must not build the fleet"))
+    # Only the request path is in question. The Host's own background sweep (stale_work)
+    # may build the fleet meanwhile; a plain AssertionError there is caught and logged by
+    # its loop, where pytest.fail (a BaseException) killed the thread and warned in G1.
+    callers = []
+
+    def no_fleet():
+        callers.append(threading.current_thread().name)
+        raise AssertionError("creation must not build the fleet")
+    monkeypatch.setattr(agents_db, "dashboard_states", no_fleet)
     status, body = _post(base + "/agents", {"anonymous": True, "backend": "codex", "cwd": "/tmp"})
+    assert not [name for name in callers if "process_request" in name], "creation built the fleet"
     response = json.loads(body)
     assert status == 200
     assert response["agent"]["session"] == response["session"]
@@ -3841,11 +3970,11 @@ def test_device_http_auth_survives_database_write_contention(
     writer = sqlite3.connect(str(db.DB_PATH), isolation_level=None)
     try:
         writer.execute("BEGIN IMMEDIATE")
-        with urllib.request.urlopen(request(device["token"]), timeout=2) as response:
+        with urllib.request.urlopen(request(device["token"]), timeout=CLIENT_TIMEOUT_S) as response:
             assert response.status == 200
             assert isinstance(json.load(response), dict)
         with pytest.raises(urllib.error.HTTPError) as error:
-            urllib.request.urlopen(request("cld_" + "invalid" * 8), timeout=2)
+            urllib.request.urlopen(request("cld_" + "invalid" * 8), timeout=CLIENT_TIMEOUT_S)
         assert error.value.code == 401
         assert db.conn().execute(
             "SELECT last_seen_at FROM paired_devices WHERE device_id = ?",
@@ -3856,7 +3985,7 @@ def test_device_http_auth_survives_database_write_contention(
 
     assert device_pairing.revoke(device["device_id"])
     with pytest.raises(urllib.error.HTTPError) as error:
-        urllib.request.urlopen(request(device["token"]), timeout=2)
+        urllib.request.urlopen(request(device["token"]), timeout=CLIENT_TIMEOUT_S)
     assert error.value.code == 401
 
 
@@ -3875,6 +4004,8 @@ def test_controller_narration_speaks_once_per_text_and_caches(running_server, mo
         out_path.write_bytes(b"ID3narration")
 
     monkeypatch.setattr(cartesia_tts, "synthesize", fake_synthesize)
+    from lib import tts_registry
+    monkeypatch.setattr(tts_registry, "cartesia_synthesize", fake_synthesize)
     real_load = app_config.load
 
     def loaded():
@@ -4369,6 +4500,32 @@ def _post_status(url, body):
         return error.code, error.read()
 
 
+def test_a_voice_change_writes_only_that_agent(running_server, monkeypatch):
+    """TP-03: the voice handler loaded the whole roster and wrote it all back.
+    An agent created between its read and its write was deleted again."""
+    from lib import agents as agents_db
+    base, _ctx, _srv = running_server
+    # Patch load_agents in the globals the voice handler actually reads: server.py
+    # on main, its route mixin once S3 moves the handler (refactor/integration).
+    handler_globals = server_module.Handler._handle_agent_voice.__globals__
+    real_load = handler_globals["load_agents"]
+    created = []
+
+    def stale_roster(path):
+        roster = real_load(path)
+        if not created:
+            created.append(agents_db.create_agent(
+                persona="Latecomer", voice_id="late-voice", cwd=str(pathlib.Path.home()),
+                session="latecomer"))
+        return roster
+
+    monkeypatch.setitem(handler_globals, "load_agents", stale_roster)
+    status, body = _post_status(base + "/agent-voice", {"session": "claude", "voice_id": "fresh-voice"})
+    assert status == 200, body
+    assert agents_db.get_by_session("latecomer") is not None
+    assert agents_db.get_by_session("claude")["voice_id"] == "fresh-voice"
+
+
 def test_choosing_a_google_voice_accepts_only_the_allowlist_and_keeps_other_providers(
         running_server):
     base, _ctx, _srv = running_server
@@ -4414,10 +4571,9 @@ def test_a_google_preview_speaks_the_requested_voice_and_fails_with_fixed_status
     assert asked == [GOOGLE_AOEDE, "nb-NO-Chirp3-HD-Charon"]
 
 
-def test_a_google_voice_preview_is_the_requested_voice_only_even_with_a_fallback(
+def test_a_google_voice_preview_uses_configured_fallback_after_provider_failure(
         running_server, monkeypatch, tmp_path):
-    """GET /voice-preview and POST /preview agree: the requested google voice or a truthful
-    failure, never the configured fallback provider."""
+    """VP-10: an ordinary Google failure uses the configured fallback at the HTTP surface."""
     from lib import config, google_tts
     base, _ctx, _srv = running_server
     _google_configured(monkeypatch, tmp_path)
@@ -4436,8 +4592,654 @@ def test_a_google_voice_preview_is_the_requested_voice_only_even_with_a_fallback
         raise google_tts.GoogleTTSError("google_http_error", "HTTP 503")
     monkeypatch.setattr(google_tts, "synthesize", google)
     from lib import eleven_ws
-    monkeypatch.setattr(eleven_ws, "synthesize_streaming", lambda **kw: others.append(kw) or 0)
-    with pytest.raises(urllib.error.HTTPError) as failed:
-        _get(base + f"/voice-preview?provider=google&id={GOOGLE_AOEDE}")
-    assert failed.value.code == 502
-    assert asked == [GOOGLE_AOEDE] and others == []
+    def fallback(**kw):
+        others.append(kw)
+        kw["out_path"].write_bytes(b"ID3configured-fallback")
+        return len(b"ID3configured-fallback")
+    monkeypatch.setattr(eleven_ws, "synthesize_streaming", fallback)
+    from lib import tts_registry
+    monkeypatch.setattr(tts_registry, "synthesize_streaming", fallback)
+    status, audio = _get(base + f"/voice-preview?provider=google&id={GOOGLE_AOEDE}")
+    assert status == 200 and audio == b"ID3configured-fallback"
+    assert asked == [GOOGLE_AOEDE] and len(others) == 1
+
+
+def test_send_refused_by_a_launch_receipt_keeps_the_legacy_503_body(running_server, monkeypatch):
+    # Old clients retry a 503 and show it as unconfirmed; a 409 would end their
+    # retries, and a 200 would claim the message was sent. A handoff refused by
+    # a Stop-fenced or superseded receipt, and a same-id retry after Stop,
+    # answer exactly what they already understand.
+    from lib import launch_receipts, turn_dispatch, turn_queue
+    base, _ctx, _srv = running_server
+    real = launch_receipts.mark_attempted
+
+    def refused(trace_id, **kwargs):
+        raise launch_receipts.HandoffRefused("fenced")
+    monkeypatch.setattr(launch_receipts, "mark_attempted", refused)
+    body = {"text": "hello", "session": "rachel", "client_msg_id": "u-http-compat",
+            "force_session": True}
+    status, raw = _post_status(base + "/send", body)
+    assert (status, raw.decode()) == (503, turn_dispatch.UNCONFIRMED_DELIVERY)
+    from lib import message_store
+    trace = message_store.client_message_trace("u-http-compat")
+    assert launch_receipts.get(trace)["state"] == "pending", "refused before any handoff"
+
+    monkeypatch.setattr(launch_receipts, "mark_attempted", real)
+    from lib import agents as agents_db
+    agent_id = agents_db.get_by_session("rachel")["agent_id"]
+    turn_queue.set_paused(agent_id, True, user_stop=True)   # the user's Stop after admission
+    count_turns = lambda: agents_db.conn().execute(
+        "SELECT COUNT(*) AS n FROM turns WHERE agent_id = ? AND trace_id = ?",
+        (agent_id, trace)).fetchone()["n"]
+    turns_before = count_turns()        # the refused first attempt's own (closed) turn
+    handoffs = []
+    monkeypatch.setattr(launch_receipts, "mark_attempted",
+                        lambda *a, **k: handoffs.append(a) or real(*a, **k))
+    status, raw = _post_status(base + "/send", body)
+    assert (status, raw.decode()) == (503, turn_dispatch.UNCONFIRMED_DELIVERY)
+    # The durable contract after the retry: the row is unchanged (same canonical
+    # trace, still exactly one user row), no turn opened, no handoff attempted,
+    # and the receipt stays pending behind the user's Stop, i.e. not eligible.
+    assert message_store.client_message_trace("u-http-compat") == trace
+    rows = agents_db.conn().execute(
+        "SELECT COUNT(*) AS n FROM messages WHERE role = 'user' AND message_id = ?",
+        ("u-http-compat",)).fetchone()["n"]
+    assert rows == 1
+    assert count_turns() == turns_before, "the retry opened no turn"
+    assert handoffs == [], "no provider handoff was attempted"
+    assert launch_receipts.get(trace)["state"] == "pending"
+    assert launch_receipts.status(agent_id, trace) == "fenced", "eligibility stays blocked"
+
+
+def _seed_pending_user_receipt(agent_id: str, trace: str, client_id: str) -> None:
+    from lib import launch_receipts, turn_queue
+    launch_receipts.record_pending(
+        agent_id=agent_id, trace_id=trace, client_msg_id=client_id, origin="user",
+        user_stop_generation=turn_queue.user_stop_generation(agent_id))
+
+
+def test_a_verified_agent_stop_stops_work_but_keeps_the_users_pending_send(running_server):
+    # Another agent's Stop (proven by the Host-issued turn identity) pauses and
+    # interrupts as any Stop does, but does not withdraw the user's admitted,
+    # never-launched send: after the user resumes, its retry stays eligible.
+    import os
+    from lib import agents as agents_db, launch_receipts, turn_dispatch, turn_queue
+    from lib import provider_background_jobs as turns
+    base, ctx, _srv = running_server
+    mike = agents_db.get_by_session("claude")["agent_id"]
+    _seed_pending_user_receipt(mike, "t-agent-stop", "u-agent-stop")
+    user_gen = turn_queue.user_stop_generation(mike)
+    theo = agents_db.create_agent(persona="Theo", voice_id="v", cwd=str(ctx.root), session="theo-a1")
+    token = turns.new_turn_token()
+    turns.turn_started(token, agent_id=theo, provider="claude", pid=os.getpid())
+    try:
+        status, body = _post_with_headers(base + "/stop", {"session": "claude"},
+                                          {"X-Clarp-Turn": token})
+        assert status == 200
+        reply = json.loads(body)
+        assert (reply["stop_actor"], reply["stop_actor_verified"]) == ("agent:theo-a1", True)
+        assert turn_queue.is_paused(mike), "it is still a Stop: the queue is paused"
+        assert launch_receipts.get("t-agent-stop")["state"] == "pending"
+        assert turn_queue.user_stop_generation(mike) == user_gen
+        turn_queue.set_paused(mike, False)                      # the user resumes
+        assert launch_receipts.status(mike, "t-agent-stop", client_msg_id="u-agent-stop",
+                                      origin="user", sender_agent_id="") == "retryable"
+    finally:
+        turn_dispatch.reset_for_tests()
+
+
+def test_a_claimed_agent_actor_and_a_user_stop_both_withdraw_the_pending_send(running_server):
+    # Only the authenticated turn identity can make a Stop an agent's: a claimed
+    # 'actor' string is the user's Stop and fences, as a plain Stop does.
+    from lib import agents as agents_db, launch_receipts, turn_dispatch, turn_queue
+    base, _ctx, _srv = running_server
+    mike = agents_db.get_by_session("claude")["agent_id"]
+    try:
+        _seed_pending_user_receipt(mike, "t-claimed", "u-claimed")
+        status, body = _post(base + "/stop", {"session": "claude", "actor": "agent:theo-a1"})
+        assert status == 200 and json.loads(body)["stop_actor_verified"] is False
+        assert launch_receipts.status(mike, "t-claimed") == "fenced"
+        turn_queue.set_paused(mike, False)
+        _seed_pending_user_receipt(mike, "t-user", "u-user")
+        status, _body = _post(base + "/stop", {"session": "claude"})
+        assert status == 200
+        assert launch_receipts.status(mike, "t-user") == "fenced"
+    finally:
+        turn_dispatch.reset_for_tests()
+
+
+# --- F4 delivery state over HTTP (joint packet 9a96df74; feature not yet advertised) ---------
+
+_RUNTIME_A2 = {"pid": 4242, "start_ticks": 777, "boot_id": "0b8a1f9e-2c3d-4e5f-8a9b-0c1d2e3f4a5b",
+               "cgroup": "/user.slice/user-1000.slice/user@1000.service/app.slice/clarp-runtime.service",
+               "invocation": "3932aee90792440bae6f9c8c5a14c973"}
+
+
+class _FakeManager:
+    """F4 B for the HTTP tests: a fake `systemctl show` (no process) naming _RUNTIME_A2's
+    pid as the unit's main, a fake /proc and boot id, and a clock that only moves when a
+    probe runs (0.5 s: one token of the 2/s gate back per bracket, well inside the 2.0 s
+    enrichment deadline) and not at all while a test freezes it."""
+
+    def __init__(self, monkeypatch, *, main=4242):
+        from lib import db, runtime_attestation
+        self.main, self.calls, self.in_tx, self.t, self.frozen = main, 0, [], 1000.0, False
+        self.timeouts = []
+        a2 = _RUNTIME_A2
+
+        def probe(timeout=None):
+            self.calls += 1
+            self.timeouts.append(timeout)
+            self.in_tx.append(db.conn().in_transaction)
+            if not self.frozen:
+                self.t += 0.5
+            return 0, (f"MainPID={self.main}\nInvocationID={a2['invocation']}\n"
+                       f"ControlGroup={a2['cgroup']}\nActiveState=active\n").encode(), "", None, True
+
+        def clock():
+            return self.t
+        monkeypatch.setattr(runtime_attestation, "run_probe", probe)
+        monkeypatch.setattr(runtime_attestation, "CLOCK", clock)
+        monkeypatch.setattr(runtime_attestation, "BOOT_READER", lambda: a2["boot_id"])
+        monkeypatch.setattr(runtime_attestation, "PROC_READER",
+                            lambda pid: a2["start_ticks"] if pid == a2["pid"] else None)
+
+
+def _advertise_delivery(monkeypatch):
+    from lib import server_identity
+    monkeypatch.setattr(server_identity, "feature_advertised",
+                        lambda name: name == server_identity.SEND_DELIVERY_STATE)
+    return _FakeManager(monkeypatch)
+
+
+def _fake_spawn(monkeypatch):
+    from lib import backends
+    spawned = []
+    monkeypatch.setattr(backends, "spawn_turn", lambda _backend, **kw: spawned.append(kw))
+    return spawned
+
+
+def test_delivery_fields_stay_off_until_the_feature_is_advertised(running_server, monkeypatch):
+    from lib import server_identity
+    monkeypatch.setattr(server_identity, "feature_advertised", lambda name: False)
+    base, _ctx, _srv = running_server
+    _fake_spawn(monkeypatch)
+    status, raw = _post_status(base + "/send", {"text": "hi", "session": "rachel",
+                                                "client_msg_id": "u-off", "force_session": True})
+    assert status == 200 and "delivery" not in json.loads(raw)
+    status, raw = _get(base + "/log?session=rachel&delivery_since=0")
+    body = json.loads(raw)
+    assert not any(key.startswith("delivery") for key in body)
+    assert all("delivery" not in turn for turn in body.get("turns") or [])
+
+
+def test_an_advertised_send_200_carries_no_delivery_and_log_heals(
+        running_server, monkeypatch):
+    base, _ctx, _srv = running_server
+    _advertise_delivery(monkeypatch)
+    assert _fake_spawn(monkeypatch) == []
+    status, raw = _post_status(base + "/send", {"text": "hi", "session": "rachel",
+                                                "client_msg_id": "u-on", "force_session": True})
+    body = json.loads(raw)
+    assert status == 200 and "delivery" not in body, "F2: a /send 200 never carries delivery"
+    status, raw = _get(base + "/log?session=rachel&delivery_since=0")
+    feed = json.loads(raw)
+    assert feed["delivery_bootstrap"] is True and feed["delivery_more"] is False
+    assert [u["message_id"] for u in feed["delivery_updates"]] == ["u-on"]
+    scope = feed["delivery_scope"]
+    assert set(scope) == {"server_id", "agent_id", "runtime_release", "runtime_instance"}
+    assert scope["runtime_release"] == "in-process", "this Host owns turns itself"
+    cursor, epoch = feed["delivery_cursor"], feed["delivery_stop_generation"]
+    status, raw = _get(base + f"/log?session=rachel&delivery_since={cursor}"
+                              f"&delivery_stop_generation={epoch}"
+                              f"&delivery_runtime_release={scope['runtime_release']}"
+                              f"&delivery_runtime_instance={scope['runtime_instance']}"
+                              f"&after_revision={feed['latest_revision']}")
+    healed = json.loads(raw)
+    assert (healed["delivery_updates"], healed["delivery_cursor_expired"]) == ([], False)
+    status, raw = _get(base + f"/log?session=rachel&delivery_since={cursor}")
+    assert json.loads(raw)["delivery_cursor_expired"] is True, "a cursor without its epoch resets"
+    status, raw = _post_status(base + "/send", {"text": "hi", "session": "rachel",
+                                                "client_msg_id": "u-on", "force_session": True})
+    assert status == 200 and "delivery" not in json.loads(raw)
+
+
+def test_advertised_delivery_never_changes_any_503(running_server, monkeypatch):
+    from lib import launch_receipts, runtime_bridge, turn_dispatch
+    base, _ctx, _srv = running_server
+    _advertise_delivery(monkeypatch)
+    monkeypatch.setattr(launch_receipts, "mark_attempted",
+                        lambda *a, **k: (_ for _ in ()).throw(launch_receipts.HandoffRefused("fenced")))
+    status, raw = _post_status(base + "/send", {"text": "x", "session": "rachel",
+                                                "client_msg_id": "u-503", "force_session": True})
+    assert (status, raw.decode()) == (503, turn_dispatch.UNCONFIRMED_DELIVERY)
+    monkeypatch.undo()
+    _advertise_delivery(monkeypatch)
+
+    class _Down:
+        def dispatch_command(self, command):
+            raise runtime_bridge.RuntimeUnavailable("agent runtime unavailable: timed out")
+    _ctx.replace_service("runtime_client", _Down())
+    status, raw = _post_status(base + "/send", {"text": "y", "session": "rachel",
+                                                "client_msg_id": "u-rpc", "force_session": True})
+    assert (status, raw.decode()) == (503, "agent runtime unavailable: timed out")
+
+
+def test_bad_delivery_parameters_are_refused(running_server, monkeypatch):
+    base, _ctx, _srv = running_server
+    _advertise_delivery(monkeypatch)
+    for query in ("delivery_since=-1", "delivery_since=x", "delivery_stop_generation=x",
+                  "delivery_until=-2", "delivery_since=%C2%B2",          # "²": not ASCII
+                  "delivery_stop_generation=%D9%A3", "delivery_until=%EF%BC%91"):
+        with pytest.raises(urllib.error.HTTPError) as refused:
+            _get(base + "/log?session=rachel&" + query)
+        assert refused.value.code == 400
+
+
+def test_a_delivery_read_writes_nothing_inside_its_read_snapshot(running_server, monkeypatch):
+    # server_id() mints and stores the Host id on first use; that write must
+    # happen before the read snapshot, never inside it.
+    from contextlib import contextmanager
+    from lib import server_identity, settings_store
+    base, _ctx, _srv = running_server
+    _advertise_delivery(monkeypatch)
+    real_get = server_identity.get_text
+    monkeypatch.setattr(server_identity, "get_text",       # a Host whose id is not minted yet
+                        lambda key, **kw: "" if key == server_identity._ID_KEY else real_get(key, **kw))
+    inside = {"depth": 0, "writes": []}
+    real_snapshot, real_set_text = settings_store.read_snapshot, settings_store.set_text
+
+    @contextmanager
+    def watched():
+        inside["depth"] += 1                       # snapshots nest (annotate_rows, delivery_page)
+        try:
+            with real_snapshot():
+                yield
+        finally:
+            inside["depth"] -= 1
+
+    def guarded(key, value, **kw):
+        if inside["depth"]:
+            inside["writes"].append(key)
+        return real_set_text(key, value, **kw)
+    monkeypatch.setattr(settings_store, "read_snapshot", watched)
+    monkeypatch.setattr(settings_store, "set_text", guarded)
+    monkeypatch.setattr(server_identity, "set_text", guarded)   # its own import binding
+    status, raw = _get(base + "/log?session=rachel&delivery_since=0")
+    body = json.loads(raw)
+    assert status == 200 and body["delivery_scope"]["server_id"]
+    assert inside["writes"] == [], inside["writes"]
+    assert real_get(server_identity._ID_KEY) == body["delivery_scope"]["server_id"]
+
+
+# --- F4 enforcement over HTTP with an external runtime (R3 61c4caac) ---------------------------
+
+class _FakeRuntime:
+    """A runtime client whose status the test switches between observations."""
+
+    def __init__(self, *observations):
+        self.queue = list(observations)
+        self.calls = 0
+        self.result = None
+
+    def status(self):
+        self.calls += 1
+        value = self.queue[0] if len(self.queue) == 1 else self.queue.pop(0)
+        if isinstance(value, Exception):
+            raise value
+        return value
+
+    def status_within(self, total_s):
+        self.caps = getattr(self, "caps", []) + [total_s]
+        return self.status()
+
+    def ping(self):
+        return True
+
+    def recover_queued(self):
+        return 0
+
+    def dispatch_command(self, command):
+        if isinstance(self.result, Exception):
+            raise self.result
+        return self.result
+
+
+def _runtime_status(instance="i1", release="r-A", *, capable=True, draining=False, attestation=None):
+    caps = {"janitor_runs": True}
+    if capable:
+        caps["send_delivery_state"] = True
+    return {"protocol_version": 1, "capabilities": caps, "draining": draining,
+            "release_id": release, "instance": instance,
+            "attestation": dict(_RUNTIME_A2 if attestation is None else attestation)}
+
+
+def _log(base, query):
+    status, raw = _get(base + "/log?session=rachel&" + query)
+    assert status == 200
+    return json.loads(raw)
+
+
+def _seed_receipt():
+    from lib import agents as agents_db, launch_receipts
+    agent = agents_db.get_by_session("rachel")["agent_id"]
+    launch_receipts.record_pending(agent_id=agent, trace_id="t-seed", client_msg_id="u-seed",
+                                   origin="user")
+
+
+def _no_delivery(body):
+    return (not any(key.startswith("delivery") for key in body)
+            and all("delivery" not in turn for turn in body.get("turns") or []))
+
+
+def test_a_runtime_switch_a_old_b_same_release_a_resets_the_cursor(running_server, monkeypatch):
+    base, ctx, _srv = running_server
+    _advertise_delivery(monkeypatch)
+    _seed_receipt()
+    runtime = _FakeRuntime(_runtime_status("i1"))
+    ctx.replace_service("runtime_client", runtime)
+    first = _log(base, "delivery_since=0")
+    scope, cursor, g = first["delivery_scope"], first["delivery_cursor"], first["delivery_stop_generation"]
+    assert (scope["runtime_release"], scope["runtime_instance"]) == ("r-A", "i1")
+    carry = (f"delivery_since={cursor}&delivery_stop_generation={g}"
+             f"&delivery_runtime_release=r-A&delivery_runtime_instance=i1")
+    assert _log(base, carry)["delivery_cursor_expired"] is False
+    runtime.queue = [_runtime_status("iB", "r-old", capable=False)]      # old runtime B
+    assert _no_delivery(_log(base, carry)), "a pre-F4 runtime: everything omitted"
+    runtime.queue = [_runtime_status("i2")]                               # A again, new process
+    again = _log(base, carry)
+    assert again["delivery_cursor_expired"] is True and again["delivery_updates"] == []
+    assert again["delivery_scope"]["runtime_instance"] == "i2"
+    boot = _log(base, "delivery_since=0")
+    assert boot["delivery_scope"]["runtime_instance"] == "i2" and not boot["delivery_cursor_expired"]
+
+
+def test_a_same_release_restart_alone_resets_the_cursor(running_server, monkeypatch):
+    base, ctx, _srv = running_server
+    _advertise_delivery(monkeypatch)
+    _seed_receipt()
+    runtime = _FakeRuntime(_runtime_status("i1"))
+    ctx.replace_service("runtime_client", runtime)
+    first = _log(base, "delivery_since=0")
+    runtime.queue = [_runtime_status("i9")]
+    stale = _log(base, f"delivery_since={first['delivery_cursor']}"
+                       f"&delivery_stop_generation={first['delivery_stop_generation']}"
+                       f"&delivery_runtime_release=r-A&delivery_runtime_instance=i1")
+    assert stale["delivery_cursor_expired"] is True
+
+
+@pytest.mark.parametrize("observations", [
+    [RuntimeError("runtime down")],
+    [_runtime_status(draining=True)],
+    [_runtime_status(capable=False)],
+    [dict(_runtime_status(), instance="")],
+    [dict(_runtime_status(), capabilities=["send_delivery_state"])],
+    [_runtime_status("i1"), _runtime_status("i2")],                 # switched inside the bracket
+    [_runtime_status("i1"), RuntimeError("gone after the snapshot")],
+], ids=["unavailable", "draining", "pre-f4", "no-instance", "malformed", "mismatch", "o2-failed"])
+def test_unusable_or_mismatched_observations_omit_every_delivery_field(
+        running_server, monkeypatch, observations):
+    base, ctx, _srv = running_server
+    _advertise_delivery(monkeypatch)
+    _seed_receipt()
+    ctx.replace_service("runtime_client", _FakeRuntime(*observations))
+    assert _no_delivery(_log(base, "delivery_since=0"))
+
+
+def test_a_send_200_never_carries_delivery_whatever_the_runtime_identity(running_server, monkeypatch):
+    from lib.turn_dispatch import DispatchResult
+    base, ctx, _srv = running_server
+    _advertise_delivery(monkeypatch)
+    runtime = _FakeRuntime(_runtime_status())
+    ctx.replace_service("runtime_client", runtime)
+    shown = {"state": "handed_over", "rev": 2, "seq": 3,
+             "for": {"client_msg_id": "u-s1", "trace_id": "t"}}
+    body = {"text": "hi", "session": "rachel", "client_msg_id": "u-s1", "force_session": True}
+    for identity, expected in ((None, False), (_runtime_status(draining=True), False),
+                               (_runtime_status(capable=False), False), (_runtime_status(), False)):
+        runtime.result = DispatchResult(session="rachel", backend="claude", delivery=shown,
+                                        delivery_runtime=identity)
+        status, raw = _post_status(base + "/send", body)
+        assert status == 200 and ("delivery" in json.loads(raw)) is expected, identity
+
+
+def test_an_external_runtime_503_body_is_unchanged(running_server, monkeypatch):
+    from lib import turn_dispatch
+    base, ctx, _srv = running_server
+    _advertise_delivery(monkeypatch)
+    runtime = _FakeRuntime(_runtime_status())
+    runtime.result = turn_dispatch.DispatchError(503, turn_dispatch.UNCONFIRMED_DELIVERY)
+    ctx.replace_service("runtime_client", runtime)
+    status, raw = _post_status(base + "/send", {"text": "x", "session": "rachel",
+                                                "client_msg_id": "u-503x", "force_session": True})
+    assert (status, raw.decode()) == (503, turn_dispatch.UNCONFIRMED_DELIVERY)
+
+
+# --- F4 delivery admission, first source child (ROOT 1710a835, design 67922402) ---------------
+
+def test_a_log_bracket_is_o1_then_b_then_the_snapshot_then_a_fresh_o2(running_server, monkeypatch):
+    from contextlib import contextmanager
+    from lib import db, runtime_attestation, settings_store
+    base, ctx, _srv = running_server
+    manager = _advertise_delivery(monkeypatch)
+    _seed_receipt()
+    ctx.replace_service("runtime_client", _FakeRuntime(_runtime_status()))
+    order, proc_in_tx = [], []
+    real_observation, real_probe = server_module.Handler._delivery_observation, runtime_attestation.run_probe
+    real_snapshot, real_proc = settings_store.read_snapshot, runtime_attestation.PROC_READER
+
+    def observation(self, *, fresh, timeout):
+        order.append("O2" if fresh else "O1")
+        return real_observation(self, fresh=fresh, timeout=timeout)
+
+    def probe(timeout=None):
+        order.append("B")
+        return real_probe(timeout)
+
+    def proc(pid):
+        proc_in_tx.append(db.conn().in_transaction)
+        return real_proc(pid)
+
+    @contextmanager
+    def snapshot():
+        order.append("S")
+        with real_snapshot():
+            yield
+    monkeypatch.setattr(server_module.Handler, "_delivery_observation", observation)
+    monkeypatch.setattr(runtime_attestation, "run_probe", probe)
+    monkeypatch.setattr(runtime_attestation, "PROC_READER", proc)
+    monkeypatch.setattr(settings_store, "read_snapshot", snapshot)
+    body = _log(base, "delivery_since=0")
+    assert body["delivery_scope"]["runtime_instance"] == "i1"
+    bracket = order[order.index("O1"):]
+    assert bracket[:3] == ["O1", "B", "S"] and bracket[-1] == "O2" and set(bracket[2:-1]) == {"S"}, order
+    assert manager.calls == 1 and manager.in_tx == [False] and proc_in_tx == [False]
+    _log(base, "delivery_since=0")
+    assert manager.calls == 2, "every bracket reads the manager afresh: one probe per /log response"
+
+
+@pytest.mark.parametrize("second", [
+    dict(_runtime_status(), attestation=dict(_RUNTIME_A2, start_ticks=778)),
+    dict(_runtime_status(), attestation=None),
+], ids=["switched", "missing"])
+def test_an_attestation_that_changes_or_vanishes_by_o2_omits(running_server, monkeypatch, second):
+    from lib import runtime_attestation
+    base, ctx, _srv = running_server
+    manager = _advertise_delivery(monkeypatch)
+    _seed_receipt()
+    ctx.replace_service("runtime_client", _FakeRuntime(_runtime_status(), second))
+    assert _no_delivery(_log(base, "delivery_since=0"))
+    assert manager.calls == 1
+    assert runtime_attestation.status_block()["omitted"]["o2_mismatch"] == 1
+
+
+def test_an_unbound_or_unattested_runtime_omits(running_server, monkeypatch):
+    from lib import runtime_attestation
+    base, ctx, _srv = running_server
+    manager = _advertise_delivery(monkeypatch)
+    _seed_receipt()
+    manager.main = 5151                                  # the manager names another main process
+    ctx.replace_service("runtime_client", _FakeRuntime(_runtime_status()))
+    assert _no_delivery(_log(base, "delivery_since=0")) and manager.calls == 1
+    ctx.replace_service("runtime_client", _FakeRuntime(dict(_runtime_status(), attestation=None)))
+    assert _no_delivery(_log(base, "delivery_since=0")) and manager.calls == 1, "no A2: no probe"
+    omitted = runtime_attestation.status_block()["omitted"]
+    assert (omitted["mainpid_mismatch"], omitted["no_attestation"]) == (1, 1)
+
+
+def test_a_send_never_probes_the_manager_or_carries_delivery(running_server, monkeypatch):
+    from lib import runtime_attestation
+    from lib.turn_dispatch import DispatchResult
+    base, ctx, _srv = running_server
+    manager = _advertise_delivery(monkeypatch)
+    runtime = _FakeRuntime(_runtime_status())
+    runtime.result = DispatchResult(session="rachel", backend="claude")
+    ctx.replace_service("runtime_client", runtime)
+    status, raw = _post_status(base + "/send", {"text": "hi", "session": "rachel",
+                                                "client_msg_id": "u-noprobe", "force_session": True})
+    assert status == 200 and "delivery" not in json.loads(raw)
+    assert manager.calls == 0 and runtime_attestation.status_block()["probes"]["started"] == 0
+
+
+def test_more_than_ten_bootstrap_pages_under_gate_exhaustion_stay_incomplete_and_resume(
+        running_server, monkeypatch):
+    from lib import agents as agents_db, launch_receipts, runtime_attestation, settings_store, turn_queue
+    base, ctx, _srv = running_server
+    manager = _advertise_delivery(monkeypatch)
+
+    def log(query):
+        # This test timed out waiting for a /log response twice in CI; a
+        # recurrence names the frame each thread is in.
+        with _frames_on_client_timeout():
+            return _log(base, query)
+    agent = agents_db.get_by_session("rachel")["agent_id"]
+    total = 11 * launch_receipts.PAGE_CAP
+    with settings_store.transaction():
+        for i in range(total):
+            launch_receipts.record_pending(agent_id=agent, trace_id=f"t-b{i}", client_msg_id=f"u-b{i}",
+                                           origin="user",
+                                           user_stop_generation=turn_queue.user_stop_generation(agent))
+    ctx.replace_service("runtime_client", _FakeRuntime(_runtime_status()))
+    manager.frozen = True                                # no refill: the burst of 2, then exhaustion
+    first = log("delivery_since=0")
+    until, g = first["delivery_until"], first["delivery_stop_generation"]
+
+    def carry(cursor):
+        return (f"delivery_bootstrap=1&delivery_since={cursor}&delivery_until={until}"
+                f"&delivery_stop_generation={g}&delivery_runtime_release=r-A&delivery_runtime_instance=i1")
+    served, cursor, omitted = [first], first["delivery_cursor"], 0
+    for _ in range(12):
+        body = log(carry(cursor))
+        if _no_delivery(body):                           # no cursor, no partial page: keep the last one
+            omitted += 1
+            continue
+        assert body["delivery_cursor"] > cursor
+        served.append(body)
+        cursor = body["delivery_cursor"]
+    assert (len(served), omitted) == (2, 11) and all(page["delivery_more"] for page in served), \
+        "exhaustion leaves the pass incomplete, never complete or false"
+    assert manager.calls == 2 and runtime_attestation.status_block()["omitted"]["gate_rate"] == 11
+    manager.frozen = False
+    manager.t += 1.0                                     # one second later: the gate has refilled
+    for _ in range(20):                                  # bounded: the pass must finish well within this
+        body = log(carry(cursor))
+        assert not _no_delivery(body) and not body["delivery_cursor_expired"]
+        assert body["delivery_cursor"] >= cursor
+        served.append(body)
+        cursor = body["delivery_cursor"]
+        if not body["delivery_more"]:
+            break
+    assert not served[-1]["delivery_more"] and len(served) > 10
+    ids = [u["message_id"] for page in served for u in page["delivery_updates"]]
+    assert len(ids) == len(set(ids)) == total
+    assert manager.calls == len(served), "one probe per served page, none for the omitted ones"
+
+
+def test_status_reports_delivery_admission_health_without_probing(running_server, monkeypatch):
+    base, _ctx, _srv = running_server
+    manager = _advertise_delivery(monkeypatch)
+    status, raw = _get(base + "/status")
+    block = json.loads(raw)["delivery_admission"]
+    assert status == 200 and manager.calls == 0
+    assert set(block) == {"scope", "reset_on", "gate", "probes", "omitted", "unexpected_by_type", "budget",
+                          "reconcile"}
+    assert len(json.dumps(block, separators=(",", ":"))) <= 8192
+
+
+def test_an_enrichment_failure_omits_delivery_but_keeps_the_log_and_its_errors(running_server, monkeypatch):
+    from lib import launch_receipts, runtime_attestation
+    base, ctx, _srv = running_server
+    _advertise_delivery(monkeypatch)
+    _seed_receipt()
+    ctx.replace_service("runtime_client", _FakeRuntime(_runtime_status()))
+
+    def boom(*a, **k):
+        raise RuntimeError("enrichment broke")
+    monkeypatch.setattr(launch_receipts, "annotate_rows", boom)
+    status, raw = _get(base + "/log?session=rachel&delivery_since=0")
+    body = json.loads(raw)
+    assert status == 200 and isinstance(body, dict) and _no_delivery(body)
+    assert runtime_attestation.status_block()["unexpected_by_type"] == {"RuntimeError": 1}
+    with pytest.raises(urllib.error.HTTPError) as refused:
+        _get(base + "/log?session=rachel&delivery_since=x")
+    assert refused.value.code == 400, "the parameter 400 is not an enrichment failure"
+
+
+# --- ROOT 8efe6041: no early-disconnect peek; real sockets in the handler's real timeout mode -----
+
+def _raw_get(base, path):
+    """A REAL client socket (no stub of the handler path): one HTTP/1.1 GET, the connection then
+    left open and idle, with the test's UNCHANGED 2 s timeout on every read."""
+    parts = urlsplit(base)
+    sock = socket.create_connection((parts.hostname, parts.port), timeout=2)
+    sock.sendall(f"GET {path} HTTP/1.1\r\nHost: {parts.hostname}\r\n\r\n".encode())
+    return sock
+
+
+def test_a_connected_idle_client_gets_its_enriched_log_within_the_unchanged_timeout(running_server, monkeypatch):
+    import re
+    base, ctx, _srv = running_server
+    manager = _advertise_delivery(monkeypatch)
+    _seed_receipt()
+    ctx.replace_service("runtime_client", _FakeRuntime(_runtime_status()))
+    assert server_module.Handler.timeout == 120, "the request socket keeps its 120 s timeout mode"
+    started = time.monotonic()
+    sock = _raw_get(base, "/log?session=rachel&delivery_since=0")
+    try:
+        data = b""
+        while b"\r\n\r\n" not in data:
+            chunk = sock.recv(65536)             # socket.timeout after 2 s if the handler blocks
+            assert chunk, "server closed before answering"
+            data += chunk
+        head, _, rest = data.partition(b"\r\n\r\n")
+        length = int(re.search(rb"(?i)\r\ncontent-length: *(\d+)", head).group(1))
+        while len(rest) < length:
+            chunk = sock.recv(65536)
+            assert chunk, "server closed mid-body"
+            rest += chunk
+    finally:
+        sock.close()
+    assert head.startswith(b"HTTP/1.1 200") and time.monotonic() - started < 2.0
+    body = json.loads(rest[:length])
+    assert body["delivery_scope"]["runtime_instance"] == "i1" and manager.calls == 1
+
+
+def test_a_client_that_left_gets_no_state_or_retry_and_leaks_no_permit(running_server, monkeypatch):
+    from lib import launch_receipts, runtime_attestation
+    base, ctx, _srv = running_server
+    manager = _advertise_delivery(monkeypatch)
+    _seed_receipt()
+    ctx.replace_service("runtime_client", _FakeRuntime(_runtime_status()))
+    before = launch_receipts.get("t-seed")
+    sock = _raw_get(base, "/log?session=rachel&delivery_since=0")
+    sock.close()                                 # gone before the server answers
+    deadline = time.monotonic() + 2.0
+    while time.monotonic() < deadline and (manager.calls < 1
+                                           or runtime_attestation.status_block()["gate"]["inflight_now"]):
+        time.sleep(0.01)
+    assert manager.calls == 1, "the departed request's bounded work ran once (no cancel is claimed)"
+    assert runtime_attestation.status_block()["gate"]["inflight_now"] == 0, "no leaked permit"
+    assert launch_receipts.get("t-seed") == before, "a read grants no state"
+    follow = _log(base, "delivery_since=0")
+    assert follow["delivery_scope"]["runtime_instance"] == "i1"
+    assert manager.calls == 2, "nothing retried the departed request; the next one is served"

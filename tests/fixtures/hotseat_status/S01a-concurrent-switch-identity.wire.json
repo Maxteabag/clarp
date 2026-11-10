@@ -1,0 +1,31 @@
+{
+  "schema": "clarp.hotseat-status/1",
+  "served_at": 1800000002000,
+  "source": {"cli_version": null, "cost_note": "Numbers come from the Hotseat switcher's own scheduled reads, which may probe or refresh provider quota; opening this view adds no read."},
+  "switcher": {"kind": "deterministic", "model": null, "enabled": true, "lanes": [
+    {"provider": "claude", "mode": "automatic", "floor_pct": 25, "cadence_s": 300, "last_run_at": 1800000001000,
+     "next_due_at": 1800000301000}]},
+  "actions": [
+    {"provider": "claude", "kind": "switched", "at": 1800000001000, "reason_code": "below_floor", "from_alias": "a",
+     "to_alias": "b"}],
+  "providers": [
+    {"provider": "claude", "inventory": "ok", "observed_at": 1800000000000, "stale": false, "partial": false,
+     "read_state": "ok", "error_code": null, "cadence_s": 300, "accounts": [
+      {"alias": "a", "label": "Max 5×", "plan": "Max", "active_default": true, "state": "ok",
+       "error_code": null, "last_good_observed_at": 1800000000000, "windows": [
+        {"kind": "5h", "label": "5-hour", "used_ratio": 0.9, "remaining_ratio": 0.1, "resets_at": 1800010800250,
+         "observed_at": 1800000000000, "stale": false, "source": "hotseat-cli"},
+        {"kind": "7d", "label": "7-day", "used_ratio": 0.5, "remaining_ratio": 0.5, "resets_at": 1800500000500,
+         "observed_at": 1800000000000, "stale": false, "source": "hotseat-cli"}]},
+      {"alias": "b", "label": "Max 5×", "plan": "Max", "active_default": false, "state": "ok",
+       "error_code": null, "last_good_observed_at": 1800000000000, "windows": [
+        {"kind": "5h", "label": "5-hour", "used_ratio": 0.1, "remaining_ratio": 0.9, "resets_at": 1800010800250,
+         "observed_at": 1800000000000, "stale": false, "source": "hotseat-cli"},
+        {"kind": "7d", "label": "7-day", "used_ratio": 0.2, "remaining_ratio": 0.8, "resets_at": 1800500000500,
+         "observed_at": 1800000000000, "stale": false, "source": "hotseat-cli"}]}]},
+    {"provider": "codex", "inventory": "unavailable", "observed_at": null, "stale": true, "partial": false,
+     "read_state": "never", "error_code": null, "cadence_s": null, "accounts": []},
+    {"provider": "muse", "inventory": "unavailable", "observed_at": null, "stale": true, "partial": false,
+     "read_state": "never", "error_code": null, "cadence_s": null, "accounts": []}
+  ]
+}

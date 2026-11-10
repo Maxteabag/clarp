@@ -390,3 +390,204 @@ def test_a_non_object_json_line_does_not_discard_the_next_line(tmp_path):
         f.write(json.dumps(_assistant_text("after the list")) + "\n")
     w.tick()
     assert received == ["after the list"]
+
+
+def test_watcher_suppresses_synthetic_voice_text_but_advances_to_genuine_record(tmp_path):
+    from lib.transcript_watcher import TranscriptWatcher
+    path = tmp_path / 'synthetic.jsonl'
+    path.touch()
+    received = []
+    watcher = TranscriptWatcher(path, on_text=received.append)
+    synthetic = _assistant_text('<speak>SDK synthetic content</speak>')
+    synthetic['message']['model'] = '<synthetic>'
+    real = _assistant_text('<speak>Genuine spoken output</speak>')
+    real['message']['model'] = 'claude-genuine'
+    _append(path, synthetic, real)
+    watcher.tick()
+    watcher.tick()
+    assert received == ['<speak>Genuine spoken output</speak>']
+    assert watcher.byte_offset == path.stat().st_size
+
+
+def test_concurrent_ticks_deliver_each_line_once_and_in_order(tmp_path, monkeypatch):
+    import threading
+    from lib.transcript_watcher import TranscriptWatcher
+
+    path = tmp_path / 'concurrent.jsonl'
+    _append(path, _assistant_text('first'), _assistant_text('second'))
+    first_read, second_attempt, second_read = (threading.Event() for _ in range(3))
+    seen, errors = [], []
+    real_open = pathlib.Path.open
+
+    class ReadWindow:
+        def __init__(self, stream):
+            self.stream = stream
+        def __enter__(self):
+            self.stream.__enter__()
+            return self
+        def __exit__(self, *args):
+            return self.stream.__exit__(*args)
+        def seek(self, *args):
+            return self.stream.seek(*args)
+        def read(self, *args):
+            if threading.current_thread().name == 'first-tick':
+                first_read.set()
+                assert second_attempt.wait(5)
+                # Without serialization both readers have already selected
+                # byte offset zero. With it the second read cannot enter yet.
+                second_read.wait(1)
+            else:
+                second_read.set()
+            return self.stream.read(*args)
+
+    def open_window(selected, mode='r', *args, **kwargs):
+        stream = real_open(selected, mode, *args, **kwargs)
+        return ReadWindow(stream) if selected == path and mode == 'rb' else stream
+
+    monkeypatch.setattr(pathlib.Path, 'open', open_window)
+    watcher = TranscriptWatcher(path, on_text=seen.append)
+
+    def tick(second=False):
+        if second:
+            second_attempt.set()
+        try:
+            watcher.tick()
+        except BaseException as exc:
+            errors.append(exc)
+
+    first = threading.Thread(target=tick, name='first-tick')
+    second = threading.Thread(target=lambda: tick(True), name='second-tick')
+    first.start()
+    try:
+        assert first_read.wait(5)
+        second.start()
+    finally:
+        second_attempt.set()
+        first.join(5)
+        if second.ident is not None:
+            second.join(5)
+    assert not first.is_alive() and not second.is_alive()
+    assert not errors
+    assert seen == ['first', 'second']
+
+
+def test_slow_watcher_callback_does_not_block_another_watcher(tmp_path):
+    import threading
+    from lib.transcript_watcher import TranscriptWatcher
+
+    a, b = tmp_path / 'a.jsonl', tmp_path / 'b.jsonl'
+    _append(a, _assistant_text('alpha'))
+    _append(b, _assistant_text('beta'))
+    entered, release, b_done = (threading.Event() for _ in range(3))
+    seen, errors = [], []
+
+    def slow(text):
+        entered.set()
+        assert release.wait(10)
+        seen.append(text)
+
+    def run(watcher, done=None):
+        try:
+            watcher.tick()
+        except BaseException as exc:
+            errors.append(exc)
+        finally:
+            if done:
+                done.set()
+
+    first = threading.Thread(target=run, args=(TranscriptWatcher(a, on_text=slow),))
+    second = threading.Thread(target=run, args=(TranscriptWatcher(b, on_text=seen.append), b_done))
+    first.start()
+    try:
+        assert entered.wait(5)
+        second.start()
+        assert b_done.wait(2), 'watcher B progresses while watcher A holds its callback'
+        assert seen == ['beta']
+    finally:
+        release.set()
+        first.join(5)
+        if second.ident is not None:
+            second.join(5)
+    assert not first.is_alive() and not second.is_alive()
+    assert not errors
+    assert seen == ['beta', 'alpha']
+
+
+def test_reentrant_tick_from_callback_does_not_deadlock_or_duplicate(tmp_path):
+    import threading
+    from lib.transcript_watcher import TranscriptWatcher
+
+    path = tmp_path / 'reentrant.jsonl'
+    _append(path, _assistant_text('first'), _assistant_text('second'))
+    seen, inner, errors = [], [], []
+
+    def callback(text):
+        seen.append(text)
+        inner.append(watcher.tick())
+
+    watcher = TranscriptWatcher(path, on_text=callback)
+    def tick():
+        try:
+            watcher.tick()
+        except BaseException as exc:
+            errors.append(exc)
+    worker = threading.Thread(target=tick, daemon=True)
+    worker.start()
+    worker.join(5)
+    assert not worker.is_alive(), 'same-thread callback re-entry must not deadlock'
+    assert not errors
+    assert seen == ['first', 'second'] and inner == [0, 0]
+
+
+def test_idle_retry_cannot_rewind_a_newer_catchup_cursor(tmp_path,monkeypatch):
+    import sqlite3
+    import threading
+    from lib import db
+    from lib.transcript_watcher import TranscriptWatcher
+    path=tmp_path/'transcript.jsonl'
+    def line(text):return json.dumps({'type':'assistant','message':{'content':[{'type':'text','text':text}]}})+'\n'
+    path.write_text(line('first'))
+    real_conn=db.conn;fail_first=[True]
+    old_ready=threading.Event();release_old=threading.Event();new_done=threading.Event();errors=[];seen=[]
+    class Gate:
+        def __init__(self,con):self.con=con
+        def __getattr__(self,name):return getattr(self.con,name)
+        def execute(self,sql,parameters=()):
+            if 'INSERT INTO cursor_positions' in ' '.join(str(sql).split()):
+                if fail_first[0]:
+                    fail_first[0]=False
+                    raise sqlite3.OperationalError('synthetic database is locked')
+                if threading.current_thread().name=='review-idle-retry':
+                    old_ready.set()
+                    assert release_old.wait(5)
+            return self.con.execute(sql,parameters)
+    monkeypatch.setattr(db,'conn',lambda:Gate(real_conn()))
+    watcher=TranscriptWatcher(path,on_text=seen.append,backend_session_id='review-session',persist_offset=True)
+    assert watcher.tick()==1 and watcher.save_pending
+    with path.open('a') as stream:stream.write(line('second'))
+    def run(method,done=None):
+        try:method()
+        except BaseException as exc:errors.append(type(exc).__name__)
+        finally:
+            if done:done.set()
+    retry=threading.Thread(target=lambda:run(watcher.retry_save),name='review-idle-retry')
+    tick=threading.Thread(target=lambda:run(watcher.tick,new_done),name='review-bind-catchup')
+    retry.start()
+    try:
+        assert old_ready.wait(5)
+        # Decide before starting the tick: a repaired retry may own the same
+        # lock, in which case release its DB gate before waiting for the tick.
+        lock=getattr(watcher,'_tick_lock',None)
+        free=lock is None or lock.acquire(blocking=False)
+        if free and lock is not None:lock.release()
+        tick.start()
+        if free:assert new_done.wait(5)
+    finally:
+        release_old.set()
+        retry.join(5)
+        if tick.ident is not None:tick.join(5)
+    assert not retry.is_alive() and not tick.is_alive() and errors==[]
+    assert seen==['first','second']
+    stored=real_conn().execute('SELECT position FROM cursor_positions WHERE backend_session_id=?',('review-session',)).fetchone()[0]
+    assert stored==watcher.byte_offset==path.stat().st_size, 'an older idle retry must not overwrite the cursor saved before catchup delivery'
+    assert not watcher.save_pending

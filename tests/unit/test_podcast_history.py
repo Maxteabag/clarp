@@ -279,3 +279,20 @@ print(json.dumps(podcast_history.get(sys.argv[1])))
     assert value["source"]["title"] == "Original plan"
     assert value["context"]["paused_seconds"] == 5
     assert value["status"] == "interrupted" and value["closed_at"] is None
+
+
+def test_status_follows_the_declared_lifecycle(saved):
+    ident, *_ = saved
+    status = lambda: db.conn().execute(
+        "SELECT status FROM podcast_conversations WHERE conversation_id=?", (ident,)).fetchone()[0]
+    assert status() == "connecting"
+    history.record(ident, {"type": "session.started"})
+    history.record(ident, {"type": "session.started"})
+    assert status() == "active"
+    history.finish(ident, "failed")
+    history.finish(ident, "closed")
+    # A late start cannot reopen a closed conversation.
+    history.record(ident, {"type": "session.started"})
+    assert status() == "failed"
+    with pytest.raises(ValueError):
+        history.finish(ident, "active")
