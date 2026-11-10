@@ -1728,8 +1728,22 @@ def test_import_only_unbound_ack_keeps_ledger_until_existing_run_exit(monkeypatc
     else:
         agents_db.update_agent(aid, dreaming_enabled=False)
     scheduler = dreaming.DreamingScheduler(send_dream=lambda *_: pytest.fail("expired/disabled run dispatched"))
-    assert scheduler._advance_run(dreaming.get_run(run["run_id"])) == 0
-    ended = dreaming.get_run(run["run_id"])
-    assert ended["status"] == "abandoned" and ended["finished_at"] == clock[0]
-    assert ended["last_error"] == (dreaming._DEADLINE_REASON if exit_reason == "deadline"
-                                  else "dreaming disabled while in flight")
+    try:
+        assert scheduler._advance_run(dreaming.get_run(run["run_id"])) == 0
+        ended = dreaming.get_run(run["run_id"])
+        assert ended["status"] == "abandoned" and ended["finished_at"] == clock[0]
+        assert ended["last_error"] == (dreaming._DEADLINE_REASON if exit_reason == "deadline"
+                                      else "dreaming disabled while in flight")
+    finally:
+        scheduler.stop()
+
+
+@pytest.mark.parametrize("origin, live", [("dreaming", True), ("user", False), ("heartbeat", False)])
+def test_ack_live_or_foreign_origin_never_uses_a_body_run_id(origin, live):
+    aid = _agent("ack-origin-flags")
+    run = _ack_run_for(aid, "2026-06-24")
+    before = dreaming.get_run(run["run_id"])
+    text = f"DREAMING_OK run_id={run['run_id']}"
+    decision = dreaming.process_assistant_text(aid, text, origin=origin, live=live)
+    assert dreaming.get_run(run["run_id"]) == before
+    assert decision == ((True, "") if origin == "dreaming" else (False, text))
