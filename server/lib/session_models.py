@@ -13,7 +13,7 @@ from functools import lru_cache
 from pathlib import Path
 
 
-@lru_cache(maxsize=512)
+@lru_cache(maxsize=8192)
 def _transcript(backend: str, session: str, epoch: int):
     """The transcript the backend reads the model from, cached a minute."""
     del epoch
@@ -21,7 +21,7 @@ def _transcript(backend: str, session: str, epoch: int):
     return by_id(backend).model_transcript(session)
 
 
-@lru_cache(maxsize=512)
+@lru_cache(maxsize=8192)
 def _read_model(path: str, stamp: int, size: int) -> str:
     del stamp
     with open(path, "rb") as stream:
@@ -51,7 +51,7 @@ def indexed_model(home, session: str) -> str:
     return _indexed_model(str(home), session, int(time.monotonic() // 5))
 
 
-@lru_cache(maxsize=512)
+@lru_cache(maxsize=8192)
 def _indexed_model(home: str, session: str, epoch: int) -> str:
     del epoch
     try:
