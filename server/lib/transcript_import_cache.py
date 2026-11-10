@@ -1210,7 +1210,13 @@ def _drain_background():
                         _owner_admissions.end(ticket)
                         _cond.notify_all()
     finally:
-        db.close_local()
+        try:
+            db.close_local()
+        finally:
+            with _guard:
+                if _worker is threading.current_thread():
+                    _worker = None
+                _cond.notify_all()
 
 
 def wait_for_background(timeout: float = 5) -> bool:
