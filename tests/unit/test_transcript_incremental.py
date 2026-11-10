@@ -723,3 +723,40 @@ def test_the_carried_store_state_reproduces_the_full_import_at_every_split(tmp_p
             assert snapshot() == expected, f"seen {seen}, resumed at {k}"
             checked += 1
     assert checked > 20
+
+
+def _turn(role, text="", *, cells=None, tools=None):
+    return {"role": role, "text": text, "tools": tools or [],
+            **({"display_cells": cells} if cells else {})}
+
+
+_FOUND_CHILD = {"kind": "subagents", "id": "c0", "ephemeral": True,
+                "status": "ok", "transcript_path": "/p/s/subagents/agent-a0.jsonl"}
+
+
+@pytest.mark.parametrize("prefix,expected", [
+    ([_turn("user", "hi"), _turn("assistant", "hello")], ""),
+    # No replay needed once their row is stored.
+    ([_turn("user", HEARTBEAT_PROMPT), _turn("assistant", "HEARTBEAT_OK")], "closed"),
+    ([_turn("user", "hi"), _turn("assistant", "LEADER_NOOP")], "closed"),
+    # A replayed dream ack acts on whichever run is active now.
+    ([_turn("user", "Deep Dreaming contract: night"), _turn("assistant", "plain")], "open"),
+    ([_turn("user", "hi"), _turn("assistant", "DREAMING_OK")], "open"),
+    ([_turn("user", HEARTBEAT_PROMPT), _turn("assistant", "HEARTBEAT_OK"),
+      _turn("user", "Deep Dreaming contract: night"), _turn("assistant", "DREAMING_OK")], "open"),
+    # Can still change: child transcripts found outside the parent, whether or
+    # not one was found yet, and team capture against the agent's current teams.
+    ([_turn("user", "hi"), _turn("assistant", "x", cells=[_FOUND_CHILD])], "open"),
+    ([_turn("user", "hi"), _turn("assistant", "x", cells=[dict(_FOUND_CHILD, transcript_path="")])],
+     "open"),
+    ([_turn("user", "hi"), _turn("assistant", "x", cells=[dict(_FOUND_CHILD, ephemeral=False)])],
+     "open"),
+    ([_turn("user", "hi"), _turn("assistant", "x", tools=[{"name": "Task"}])], "open"),
+    ([_turn("user", "hi"), _turn("assistant", "<team>ship it</team>")], "open"),
+    ([_turn("user", HEARTBEAT_PROMPT), _turn("assistant", "HEARTBEAT_OK"),
+      _turn("assistant", "<team>go</team>")], "open"),
+    ([_turn("user", HEARTBEAT_PROMPT), _turn("assistant", "HEARTBEAT_OK"),
+      _turn("assistant", "x", cells=[_FOUND_CHILD])], "open"),
+])
+def test_prefix_effects_keep_only_open_effects_on_the_full_path(prefix, expected):
+    assert inc._prefix_effects(prefix) == expected
