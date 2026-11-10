@@ -1,0 +1,296 @@
+"""10 Nov 2026: every 15 seconds and for each janitor, janitor_attention._episode read and
+sorted every run of the agent (58,687 rows, about 345 MB per query) to find the newest one.
+idx_janitor_runs_newest lets the same statements stop at the first match."""
+from __future__ import annotations
+
+import json
+import random
+
+import pytest
+
+from lib import agents, backends, db, db_migrations, db_schema, janitors, janitor_attention as attention
+
+INDEX = "idx_janitor_runs_newest"
+INDEX_SQL = "CREATE INDEX idx_janitor_runs_newest ON janitor_runs(agent_id, generation, status, finished_at)"
+# The statements as they were before the index existed (main b3430b11..5ce2ce9d).
+OLD_NEWEST_VALID = """SELECT r.rowid AS sequence,r.*,d.result_json FROM janitor_runs r
+        LEFT JOIN janitor_demand_results d ON d.run_id=r.run_id
+        WHERE r.agent_id=? AND r.generation=? AND r.status='completed'
+          AND ((r.outcome IN ('changed','same_task')
+          AND EXISTS (SELECT 1 FROM janitor_effects e WHERE e.run_id=r.run_id
+                      AND e.outcome IN ('changed','same_task')))
+            OR (r.outcome='completed' AND r.finished_at IS NOT NULL
+                AND (d.result_json IS NOT NULL OR ?='scheduled-prompt')))
+        ORDER BY r.finished_at DESC,r.rowid DESC"""
+OLD_LATEST = """SELECT rowid AS sequence,* FROM janitor_runs
+        WHERE agent_id=? AND generation=? AND status IN ('completed','failed','cancelled')
+        ORDER BY finished_at DESC,rowid DESC LIMIT 1"""
+TEMPLATES = ("scheduled-prompt", "tool-explainer", "task-labels")
+
+
+@pytest.fixture
+def janitor(monkeypatch):
+    """One janitor (and a second agent its reviews can target), for rows written by hand."""
+    monkeypatch.setattr(backends, "active_handles", lambda *a: [])
+    sam = agents.create_agent(persona="Sam", voice_id="", cwd="/tmp", session="sam", backend="codex")
+    hugo = agents.create_agent(persona="Hugo", voice_id="", cwd="/tmp", session="hugo", backend="codex")
+    config = janitors.create("sam", attachments=[{"trigger_id": "agent-work-completed"}])
+    return {"agent_id": sam, "target": hugo, "attachment_id": config["attachments"][0]["attachment_id"]}
+
+
+def _add(janitor, name, *, generation=1, status="completed", outcome="completed", finished_at=1000,
+         template="tool-explainer", effect=None, result=None) -> None:
+    con = db.conn()
+    con.execute(
+        """INSERT INTO janitor_runs (run_id,agent_id,session,attachment_id,generation,trace_id,status,outcome,
+               candidates_json,configuration_json,created_at,started_at,finished_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (name, janitor["agent_id"], "sam", janitor["attachment_id"], generation, "trace-" + name, status, outcome,
+         "[]", json.dumps({"executor": "ephemeral", "template_id": template}), 1, 1, finished_at))
+    if effect:
+        con.execute(
+            """INSERT INTO janitor_effects (run_id,target_agent_id,target_session,observed_state_id,outcome,
+                   before_label,after_label,created_at) VALUES (?,?,?,?,?,?,?,?)""",
+            (name, janitor["target"], "hugo", 1, effect, "", "", 1))
+    if result is not None:
+        con.execute("INSERT INTO janitor_demand_results (run_id,result_json,created_at) VALUES (?,?,?)",
+                    (name, json.dumps(result), 1))
+
+
+def _config(janitor, generation=1, template="scheduled-prompt") -> dict:
+    return {"agent_id": janitor["agent_id"], "generation": generation, "template_id": template,
+            "persona": "Sam", "session": "sam"}
+
+
+def _statements(config) -> list[str]:
+    """The SQL _episode runs, with its values filled in."""
+    seen: list[str] = []
+    con = db.conn()
+    con.set_trace_callback(seen.append)
+    try:
+        attention._episode(config)
+    finally:
+        con.set_trace_callback(None)
+    return [sql for sql in seen if "janitor_runs" in sql]
+
+
+_plans = iter(range(1_000_000))
+
+
+def _plan(sql: str) -> str:
+    # A text of its own every time: sqlite3 caches statements by text, and a cached EXPLAIN is
+    # not prepared again after DROP INDEX, so it would answer with the plan from before.
+    return " | ".join(row[3] for row in db.conn().execute(f"EXPLAIN QUERY PLAN {sql} -- {next(_plans)}"))
+
+
+def _steps(config) -> int:
+    """Virtual-machine steps one _episode call takes: what it costs, without a clock."""
+    count = [0]
+
+    def tick():
+        count[0] += 1
+        return 0
+
+    con = db.conn()
+    con.set_progress_handler(tick, 1)
+    try:
+        attention._episode(config)
+    finally:
+        con.set_progress_handler(None, 1)
+    return count[0]
+
+
+def _drop_index() -> None:
+    db.conn().execute(f"DROP INDEX {INDEX}")
+
+
+def _fill(janitor, runs: int, *, generation=1, newest_invalid=0) -> None:
+    for n in range(runs):
+        _add(janitor, f"g{generation}-ok-{n}", generation=generation, finished_at=1000 + n)
+    for n in range(newest_invalid):                       # newer, completed, but not a success
+        _add(janitor, f"g{generation}-skip-{n}", generation=generation, outcome="skipped",
+             finished_at=1000 + runs + n)
+
+
+# --- the plan --------------------------------------------------------------------
+
+def test_a_new_database_has_the_index():
+    row = db.conn().execute("SELECT sql FROM sqlite_master WHERE type='index' AND name=?", (INDEX,)).fetchone()
+    assert " ".join(row[0].split()) == INDEX_SQL
+    assert db.conn().execute("PRAGMA user_version").fetchone()[0] == db_schema._SCHEMA_VERSION >= 122
+
+
+def test_the_newest_valid_run_is_read_from_the_index_without_a_sort(janitor):
+    _fill(janitor, 50, newest_invalid=3)
+    newest_valid, latest = _statements(_config(janitor))[:2]
+
+    plan = _plan(newest_valid)
+    assert f"SEARCH r USING INDEX {INDEX} (agent_id=? AND generation=? AND status=?)" in plan
+    assert "TEMP B-TREE" not in plan, plan                # the index order is the ORDER BY read backwards
+    assert f"USING INDEX {INDEX} (agent_id=? AND generation=? AND status=?)" in _plan(latest)
+
+    # Control: without the index this is the plan that was measured on the Host.
+    _drop_index()
+    plan = _plan(newest_valid)
+    assert "USING INDEX idx_janitor_runs_agent (agent_id=?)" in plan and "USE TEMP B-TREE FOR ORDER BY" in plan
+
+
+def test_the_statements_are_the_ones_from_before_the_index(janitor):
+    """The fix is the index alone: an older runtime runs exactly these on the new database."""
+    _fill(janitor, 5)
+    statements = _statements(_config(janitor))
+
+    def filled(sql: str, values: tuple) -> str:
+        for value in values:
+            sql = sql.replace("?", f"'{value}'" if isinstance(value, str) else str(value), 1)
+        return " ".join(sql.split())
+
+    identity = (janitor["agent_id"], 1)
+    assert " ".join(statements[0].split()) == filled(OLD_NEWEST_VALID, (*identity, "scheduled-prompt"))
+    assert " ".join(statements[1].split()) == filled(OLD_LATEST, identity)
+
+
+# --- it stops early ----------------------------------------------------------------
+
+@pytest.mark.parametrize("newest_invalid", [0, 7], ids=["newest-is-valid", "seven-newer-invalid"])
+def test_the_work_does_not_grow_with_the_number_of_runs(janitor, newest_invalid):
+    _fill(janitor, 40, generation=1, newest_invalid=newest_invalid)
+    _fill(janitor, 4000, generation=2, newest_invalid=newest_invalid)
+    small, large = _steps(_config(janitor, 1)), _steps(_config(janitor, 2))
+    assert large <= small + 20, (small, large)            # a hundred times the runs, the same work
+
+    _drop_index()
+    without = _steps(_config(janitor, 2))
+    assert without > 50 * large, (large, without)          # the control: every run read and sorted
+
+
+def test_a_janitor_that_only_fails_is_not_read_run_by_run(janitor):
+    for n in range(3000):
+        _add(janitor, f"fail-{n}", status="failed", outcome="failed", finished_at=1000 + n)
+    statements = _statements(_config(janitor))
+    assert len(statements) == 4                           # the failed branch: newest not failed, and the count
+    for sql in statements:
+        assert INDEX in _plan(sql), _plan(sql)
+    reference, latest, count = attention._episode(_config(janitor))
+    assert (reference.rsplit(":", 1)[-1], latest["run_id"], count) == ("initial", "fail-2999", 3000)
+
+
+# --- the same answers --------------------------------------------------------------
+
+def _mixed_history(janitor) -> None:
+    """Several generations; valid and invalid newest runs; ties and missing finish times."""
+    rng = random.Random(20261110)
+    shapes = [("completed", "completed"), ("completed", "completed"), ("completed", "changed"),
+              ("completed", "same_task"), ("completed", "skipped"), ("completed", "error"),
+              ("failed", "failed"), ("cancelled", "cancelled")]
+    for n in range(360):
+        status, outcome = rng.choice(shapes)
+        _add(janitor, f"run-{n}", generation=rng.choice([1, 2, 2, 3]), status=status, outcome=outcome,
+             finished_at=rng.choice([None, 5000, *range(1000, 1040)]),       # many ties, some unfinished
+             template=rng.choice(["tool-explainer", "label-auditor"]),
+             effect=rng.choice([None, outcome if outcome in ("changed", "same_task") else None, "insufficient_context"]),
+             result=rng.choice([None, {"summary": "done"}, {"summary": " "}, {"status": "ok"}]))
+    for n in range(12):                                   # generation 4 never succeeded
+        _add(janitor, f"only-fail-{n}", generation=4, status="failed", outcome="failed", finished_at=2000 + n)
+    _add(janitor, "active", generation=2, status="running", outcome="", finished_at=None)
+
+
+def _answers(janitor) -> dict:
+    con = db.conn()
+    out: dict = {}
+    for generation in (1, 2, 3, 4, 5):
+        for template in TEMPLATES:
+            reference, latest, count = attention._episode(_config(janitor, generation, template))
+            identity = (janitor["agent_id"], generation)
+            out[generation, template] = (
+                reference, latest and (latest["run_id"], latest["sequence"]), count,
+                # Every candidate, in order: the caller takes the first that passes its own check.
+                [row["run_id"] for row in con.execute(OLD_NEWEST_VALID, (*identity, template))],
+                [row["run_id"] for row in con.execute(OLD_LATEST, identity)])
+    return out
+
+
+def test_the_answers_are_the_same_with_and_without_the_index(janitor):
+    _mixed_history(janitor)
+    with_index = _answers(janitor)
+    _drop_index()
+    without_index = _answers(janitor)
+    assert with_index == without_index
+    # The fixture reaches the cases that matter.
+    boundaries = {key: value[0].rsplit(":", 1)[-1] for key, value in with_index.items()}
+    assert boundaries[4, "scheduled-prompt"] == boundaries[5, "task-labels"] == "initial"
+    assert len({boundaries[2, template] for template in TEMPLATES}) > 1, "the templates disagree on the newest valid run"
+    assert any(value[1] for value in with_index.values()), "some generation ends in a failure"
+    assert max(len(value[3]) for value in with_index.values()) > 20
+
+
+def test_equal_finish_times_fall_back_to_the_newest_row(janitor):
+    for name in ("first", "second", "third"):
+        _add(janitor, name, finished_at=7000)
+    assert attention._episode(_config(janitor))[0].endswith(":third")
+    _drop_index()
+    assert attention._episode(_config(janitor))[0].endswith(":third")
+
+
+# --- upgrading ----------------------------------------------------------------------
+
+def _as_v121(con) -> None:
+    con.execute(f"DROP INDEX {INDEX}")
+    con.execute("PRAGMA user_version = 121")
+
+
+def _index_rows(con) -> list[str]:
+    return [" ".join(row[0].split()) for row in con.execute(
+        "SELECT sql FROM sqlite_master WHERE type='index' AND tbl_name='janitor_runs' AND name=?", (INDEX,))]
+
+
+def test_upgrading_a_database_that_has_runs_builds_the_index_once(janitor):
+    _mixed_history(janitor)
+    con = db.conn()
+    rows = con.execute("SELECT count(*), sum(rowid), group_concat(DISTINCT status) FROM janitor_runs").fetchone()
+    expected = _answers(janitor)
+    _as_v121(con)
+    assert _index_rows(con) == []
+
+    db_migrations._migrate(con)
+
+    assert con.execute("PRAGMA user_version").fetchone()[0] == db_schema._SCHEMA_VERSION
+    assert _index_rows(con) == [INDEX_SQL]
+    assert tuple(con.execute(
+        "SELECT count(*), sum(rowid), group_concat(DISTINCT status) FROM janitor_runs").fetchone()) == tuple(rows)
+    assert con.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    assert _answers(janitor) == expected                  # and the index it built answers the same
+
+    # Idempotent: the step again, and the whole upgrade again from the old version stamp.
+    db_migrations._migrate_to_v122(con)
+    con.execute("PRAGMA user_version = 121")
+    db_migrations._migrate(con)
+    assert len(_index_rows(con)) == 1
+    assert con.execute("PRAGMA user_version").fetchone()[0] == db_schema._SCHEMA_VERSION
+
+
+def test_an_older_runtime_leaves_the_index_alone_and_keeps_working(janitor, monkeypatch):
+    """Rollback: code that knows only version 121 opens the upgraded database."""
+    _mixed_history(janitor)
+    expected = _answers(janitor)
+    con = db.conn()
+    monkeypatch.setattr(db_schema, "_SCHEMA_VERSION", 121)
+
+    db_migrations._migrate(con)                            # the database is newer: nothing to do
+
+    assert con.execute("PRAGMA user_version").fetchone()[0] == 122
+    assert len(_index_rows(con)) == 1
+    assert _answers(janitor) == expected
+    # It writes runs as before; the index it does not know about follows along.
+    _add(janitor, "after-rollback", generation=2, finished_at=9000)
+    assert attention._episode(_config(janitor, 2))[0].endswith(":after-rollback")
+    con.execute("UPDATE janitor_runs SET status='failed', outcome='failed' WHERE run_id='after-rollback'")
+    assert attention._episode(_config(janitor, 2))[1]["run_id"] == "after-rollback"
+    assert con.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+
+
+def test_the_statements_still_work_on_a_database_without_the_index(janitor):
+    """No statement names the index, so a database that lacks it is only slower."""
+    _fill(janitor, 30, newest_invalid=2)
+    _drop_index()
+    assert attention._episode(_config(janitor))[0].endswith(":g1-ok-29")
