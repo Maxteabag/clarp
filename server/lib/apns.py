@@ -615,8 +615,16 @@ class _DirectTransport:
 
 
 class _RelayUnavailable(Exception):
-    """Audio Central could not take the push at all (down, not deployed, or
-    not configured for push) — as opposed to Apple rejecting one token."""
+    """Relay outage with conservative, per-call push uncertainty.
+
+    False is used only before a push could be accepted: registration, cached
+    unavailability, client construction/closed-before-wire, or an unconfigured
+    endpoint's definitive 404/405. Unknown send outcomes default to True.
+    """
+
+    def __init__(self, message="", *, push_uncertain: bool = True):
+        super().__init__(message)
+        self.push_uncertain = push_uncertain
 
 
 # Tokens already bound to this Computer at Audio Central in this process,
@@ -673,7 +681,7 @@ class _RelayTransport:
         # One outage per batch: later tokens fail (or fall back) immediately
         # instead of each waiting out the timeout.
         if self._down:
-            raise _RelayUnavailable(self._down)
+            raise _RelayUnavailable(self._down, push_uncertain=False)
         try:
             return self._checked(method, path, body)
         except _RelayUnavailable as e:
@@ -682,12 +690,21 @@ class _RelayTransport:
 
     def _checked(self, method: str, path: str, body: dict):
         try:
-            resp = _relay_client().request(
+            client = _relay_client()
+        except Exception as e:  # noqa: BLE001 - no request has been attempted
+            raise _RelayUnavailable(type(e).__name__, push_uncertain=False) from e
+        try:
+            resp = client.request(
                 method, f"{self._base}{path}", headers=self._headers, json=body)
-        except Exception as e:  # noqa: BLE001 - network failure
-            raise _RelayUnavailable(f"{type(e).__name__}") from e
+        except Exception as e:  # noqa: BLE001 - request outcome may be unknown
+            closed_before_wire = (isinstance(e, RuntimeError)
+                                  and "client has been closed" in str(e))
+            raise _RelayUnavailable(type(e).__name__, push_uncertain=(
+                path == "/v1/push/send" and not closed_before_wire)) from e
         if resp.status_code in (404, 405) or resp.status_code >= 500:
-            raise _RelayUnavailable(f"{path} HTTP {resp.status_code}")
+            raise _RelayUnavailable(
+                f"{path} HTTP {resp.status_code}",
+                push_uncertain=(path == "/v1/push/send" and resp.status_code >= 500))
         return resp
 
     def _register(self, token: str, environment: str) -> bool:
@@ -782,6 +799,10 @@ class _AutoTransport:
         try:
             return self._active.send(token, environment, payload, **kwargs)
         except _RelayUnavailable as e:
+            if kwargs.get("push_type") == "liveactivity" and e.push_uncertain:
+                # An uncertain relay outcome cannot authorize a second
+                # potentially accepted send under the same LA reservation.
+                raise
             if self._active.name != "relay" or not self._cfg.apns_direct_ready():
                 raise
             log("apnsRelayFallback", f"reason={e} using=direct")
@@ -817,7 +838,7 @@ class _GrantTransport:
     def send(self, grant: str, payload: dict, *, push_type: str = "alert",
              priority: str = "10", collapse_id: str | None = None) -> tuple[int, str, str]:
         if self._down:
-            raise _RelayUnavailable(self._down)
+            raise _RelayUnavailable(self._down, push_uncertain=False)
         notification = {
             "pushType": push_type,
             "priority": priority,
@@ -826,16 +847,23 @@ class _GrantTransport:
             "payload": payload,
         }
         try:
-            resp = _relay_client().request(
+            client = _relay_client()
+        except Exception as e:  # noqa: BLE001 - no request has been attempted
+            self._down = type(e).__name__
+            raise _RelayUnavailable(self._down, push_uncertain=False) from e
+        try:
+            resp = client.request(
                 "POST", f"{self._base}/v1/push/send",
                 headers={"authorization": f"Bearer {grant}"},
                 json={"notifications": [notification]})
         except Exception as e:  # noqa: BLE001 - network failure
             self._down = type(e).__name__
-            raise _RelayUnavailable(self._down) from e
+            closed_before_wire = (isinstance(e, RuntimeError)
+                                  and "client has been closed" in str(e))
+            raise _RelayUnavailable(self._down, push_uncertain=not closed_before_wire) from e
         if resp.status_code in (404, 405) or resp.status_code >= 500:
             self._down = f"grant send HTTP {resp.status_code}"
-            raise _RelayUnavailable(self._down)
+            raise _RelayUnavailable(self._down, push_uncertain=resp.status_code >= 500)
         if resp.status_code == 401:
             # The phone revoked this server's grant: stop pushing to it.
             return 410, "GrantRevoked", ""
@@ -885,6 +913,8 @@ class _Router:
                 if self._base is None:
                     return result
             except _RelayUnavailable as e:
+                if kwargs.get("push_type") == "liveactivity" and e.push_uncertain:
+                    raise
                 if self._cfg.apns_mode != "auto" or not self._cfg.apns_direct_ready():
                     raise
                 if self._direct_fallback is None:
@@ -1316,6 +1346,79 @@ def on_decision_created(artifact: dict) -> None:
     ).start()
 
 
+# One internal, expand-compatible key. Old binaries ignore it; restoring an
+# older database or running an old writer is outside the shared-cap guarantee.
+_LA_DAY_KEY = "apns.live_activity_day_budget.v1"
+_LA_DAY_LIMIT = 300
+_LA_MAX_WALL = 253402300799.0  # Last UTC second in year 9999.
+
+
+def _la_valid_wall(value) -> bool:
+    return (type(value) in (int, float) and math.isfinite(value)
+            and 0 <= value <= _LA_MAX_WALL)
+
+
+def _la_validate_day(raw: str, now: float) -> dict:
+    if len(raw) > 1024:
+        raise ValueError("la_day_state_size")
+    state = json.loads(raw)
+    fields = {"version", "day", "count", "paused_until", "last_wall"}
+    if not isinstance(state, dict) or set(state) != fields:
+        raise ValueError("la_day_state_shape")
+    if (type(state["version"]) is not int or state["version"] != 1
+            or type(state["day"]) is not int or state["day"] < 0
+            or type(state["count"]) is not int or not 0 <= state["count"] <= _LA_DAY_LIMIT
+            or not _la_valid_wall(state["last_wall"])
+            or not _la_valid_wall(state["paused_until"])
+            or state["day"] != int(state["last_wall"] // 86400)
+            or state["last_wall"] > now
+            or (state["paused_until"] and state["paused_until"] < state["day"] * 86400)):
+        raise ValueError("la_day_state_invalid")
+    return state
+
+
+def _la_day_update(*, reserve: bool, pause_until: float = 0.0) -> tuple[bool, float]:
+    """Commit one reservation or pause, never holding the writer over network.
+
+    The 20ms scope caps SQLite busy waits, not filesystem/COMMIT wall time.
+    Unknown commits deliberately lose credit; no network is authorized on error.
+    """
+    from . import db, settings_store
+    if not _la_valid_wall(pause_until):
+        raise ValueError("la_day_clock_invalid")
+    connection = db.conn()
+    if connection.in_transaction:
+        raise ValueError("la_day_borrowed_transaction")
+    allowed = False
+    with db.busy_timeout_at_most(20):
+        with settings_store.transaction():
+            # UTC may change while BEGIN IMMEDIATE waits for another writer.
+            # Snapshot only after acquisition, then use this one value throughout.
+            now = time.time()
+            if not _la_valid_wall(now):
+                raise ValueError("la_day_clock_invalid")
+            raw = settings_store.get(_LA_DAY_KEY)
+            day = int(now // 86400)
+            state = ({"version": 1, "day": day, "count": 0,
+                      "paused_until": 0.0, "last_wall": now}
+                     if raw is None else _la_validate_day(raw, now))
+            if state["day"] < day:
+                state["day"], state["count"] = day, 0
+                if state["paused_until"] <= now:
+                    state["paused_until"] = 0.0
+            state["last_wall"] = now
+            state["paused_until"] = max(state["paused_until"], pause_until)
+            if reserve and state["paused_until"] <= now and state["count"] < _LA_DAY_LIMIT:
+                state["count"] += 1
+                allowed = True
+            wait = max(0.0, state["paused_until"] - now)
+            if reserve and state["count"] >= _LA_DAY_LIMIT and not allowed:
+                wait = max(wait, (day + 1) * 86400 - now)
+            settings_store.set_text(_LA_DAY_KEY, json.dumps(state, allow_nan=False, sort_keys=True),
+                                    updated_at=int(now * 1000))
+    return allowed, wait
+
+
 class _LiveActivityGate:
     """Live Activity's share of the relay budget (APNS-N1).
 
@@ -1339,6 +1442,7 @@ class _LiveActivityGate:
         self._level: tuple[float, float] | None = None
         self._pending: dict[str, tuple[dict, dict, str]] = {}
         self._paused_until = 0.0
+        self._pause_to_persist = 0.0
         self.floor = 0.0
         self._timer = None
 
@@ -1354,13 +1458,50 @@ class _LiveActivityGate:
         # than an hour conservatively means day exhaustion. Never shorten the
         # advertised wait, even if it extends beyond the next UTC reset.
         wait = retry_after if math.isfinite(retry_after) and retry_after > 0 else 0.0
+        wall = time.time()
         if day_window:
-            wait = max(wait, 86400 - time.time() % 86400)
+            wait = max(wait, 86400 - wall % 86400)
         with self._lock:
             self.floor = (self.FLOOR_MIN_SEC if not self.floor
                           else min(self.floor * 2, self.FLOOR_MAX_SEC))
             self._paused_until = max(self._paused_until,
                                      self._clock() + max(wait, self.floor))
+            if day_window:
+                self._pause_to_persist = max(self._pause_to_persist, wall + wait)
+        if day_window:
+            self._persist_pause()
+
+    def _persist_pause(self) -> None:
+        # Alert observers never acquire the LA send lock, nor keep the gate
+        # lock while waiting for SQLite. A failed write informs THIS process
+        # only; it is not a durable cross-process pause acknowledgement.
+        with self._lock:
+            pending = self._pause_to_persist
+        try:
+            _la_day_update(reserve=False, pause_until=pending)
+        except Exception as exc:  # noqa: BLE001 - alert result is independent of optional state
+            log("apnsLiveActivityBudgetUnavailable", f"phase=pause code={type(exc).__name__}")
+            return
+        with self._lock:
+            if self._pause_to_persist <= pending:
+                self._pause_to_persist = 0.0
+
+    def reserve(self) -> bool:
+        with self._lock:
+            pending = self._pause_to_persist
+        try:
+            allowed, wait = _la_day_update(reserve=True, pause_until=pending)
+        except Exception as exc:  # noqa: BLE001 - no confirmed commit means no LA network
+            log("apnsLiveActivityBudgetUnavailable", f"phase=reserve code={type(exc).__name__}")
+            allowed, wait = False, 60.0
+        else:
+            with self._lock:
+                if self._pause_to_persist <= pending:
+                    self._pause_to_persist = 0.0
+        if not allowed:
+            with self._lock:
+                self._paused_until = max(self._paused_until, self._clock() + max(wait, 1.0))
+        return allowed
 
     def delivered(self) -> None:
         with self._lock:
@@ -1488,6 +1629,9 @@ def _flush_live_activity_locked() -> dict:
         for index, (row, payload, priority) in enumerate(ready):
             if _LA_GATE.paused():
                 # A 429 in this batch paused Live Activity: the rest wait it out.
+                held.extend(ready[index:])
+                break
+            if not _LA_GATE.reserve():
                 held.extend(ready[index:])
                 break
             token = row["token"]
