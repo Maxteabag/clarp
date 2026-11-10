@@ -17,7 +17,7 @@ from .session_models import agent_model
 from . import personas as persona_store
 from .avatar_urls import (versioned_avatar_url, janitor_avatar_url,
                           static_persona_avatar_url)
-from .log import log_exception
+from .log import log, log_exception
 from .activity import state_activity_event
 from .claude_transcript import context_tokens_from_jsonl, find_latest_jsonl
 from .protocol import AgentBackend, AgentState
@@ -144,6 +144,15 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
     running_children = tree.running_children
     helper_sessions = tree.helper_sessions
     helper_activity = tree.helper_activity
+    reconcile_available = True
+    if backends._RUNTIME_CLIENT is not None:
+        try:
+            backends.runtime_status()
+        except Exception as exc:  # noqa: BLE001 - scoped status already logs once
+            reconcile_available = False
+            reconcile.forget_observations(a["agent_id"] for a in agent_rows)
+            log("snapshotReconcileSkipped",
+                f"count={len(agent_rows)} error_type={type(exc).__name__}")
     for a in agent_rows:
         agent_id = a["agent_id"]
         backend = a.get("backend") or AgentBackend.CLAUDE
@@ -153,19 +162,20 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
         state = states.get(agent_id, {})
         rt = runtimes.get(agent_id, {})
         bsid = rt.get('backend_session_id') or ''
-        try:
-            repaired = reconcile.reconcile_agent(
-                agent_id, backend, observed_state=state, bound_session=bsid)
-            if 'state' in repaired:
-                # Repairs are rare writes. Re-read their clocks so this very
-                # response still reflects recovery, including unread timing.
-                state = agents_db.latest_state(agent_id) or {}
-                state['turn_started_at'] = agents_db.turn_started_at(agent_id)
-                state['last_turn_end'] = agents_db.last_turn_end(agent_id)
-            if 'ghost_session' in repaired:
-                bsid = ''
-        except Exception as e:  # noqa: BLE001
-            log_exception("snapshotReconcileFail", e, detail=agent_id)
+        if reconcile_available:
+            try:
+                repaired = reconcile.reconcile_agent(
+                    agent_id, backend, observed_state=state, bound_session=bsid)
+                if 'state' in repaired:
+                    # Repairs are rare writes. Re-read their clocks so this very
+                    # response still reflects recovery, including unread timing.
+                    state = agents_db.latest_state(agent_id) or {}
+                    state['turn_started_at'] = agents_db.turn_started_at(agent_id)
+                    state['last_turn_end'] = agents_db.last_turn_end(agent_id)
+                if 'ghost_session' in repaired:
+                    bsid = ''
+            except Exception as e:  # noqa: BLE001
+                log_exception("snapshotReconcileFail", e, detail=agent_id)
         active = bool(backends.active_handles(backend, agent_id))
         latest_state = state.get("kind")
         if active and latest_state not in {"thinking", "tool", "compacting", "background"}:
