@@ -51,6 +51,15 @@ must also start like an event log or a hook log. Anything else is left alone
 and reported as `eventLogPruneFail` or `hookLogPruneFail`, as is a log that
 cannot be inspected.
 
+A rollup is only as exact as the detail it was made from. When the budget
+removes an hour's detail, the hour keeps the rollup it had. A row that then
+arrives late for that hour (an emit that was queued inside a transaction
+which ended after the hour turned, or one carrying an older timestamp) is
+not added to it: a rollup row is replaced only by one made from at least as
+many detail rows. That is a declared loss, not exact accounting. When the
+current hour alone is over the budget its oldest rows are deleted before it
+is ever rolled up, and its rollup counts only the rows that were left.
+
 The telemetry budget is best-effort reclamation and says nothing about the
 size of the file on disk. It counts pages in use: a delete frees pages for
 reuse but the file keeps them, so a file that was large stays large; the WAL
