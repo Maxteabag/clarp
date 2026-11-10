@@ -60,7 +60,6 @@ UNCONVERTED: dict[tuple[str, str], str] = {
     ("janitor_continuity", "status"): _LATER,
     ("messages", "phase"): _LATER,
     ("oracle_admissions", "status"): _LATER,
-    ("oracle_delegations", "status"): _LATER,
     ("orchestrator_pending_utterances", "status"): _LATER,
     ("provider_limit_episodes", "status"): _LATER,
     ("tool_explanation_jobs", "status"): _LATER,
@@ -68,7 +67,7 @@ UNCONVERTED: dict[tuple[str, str], str] = {
     ("user_value_facts", "status"): _LATER,
 }
 # Lower this when a column converts; never raise it.
-UNCONVERTED_CEILING = 32
+UNCONVERTED_CEILING = 31
 
 
 def status_columns() -> set[tuple[str, str]]:
