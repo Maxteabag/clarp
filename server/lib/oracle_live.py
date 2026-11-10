@@ -53,6 +53,10 @@ _JOURNAL_FIELDS = ("delta", "start_ms", "end_ms", "delegation", "delegation_id",
                    "usage", "error", "message", "reason", "event_id", "client_event_id", "session_id", "progress_interval_seconds")
 
 
+def wall_ms():
+    return int(time.time() * 1000)
+
+
 def claim_connection(principal, timeout=3.0):
     """Claim voice ownership for a device; returns the claim token or None.
 
@@ -464,7 +468,8 @@ class Conversation:
                     self.last_input = self.clock()
                     if event.get("submit") is True:
                         self.fragments.append({"role": "user", "text": event["text"], "end_ms": 0,
-                                               "provider_session": self.provider_session, "source": "typed"})
+                                               "provider_session": self.provider_session, "source": "typed",
+                                               "at": wall_ms()})
                         self.last_transcript = self.clock()
                     self.checkpoint()
             items = self.memory.contexts()
@@ -547,7 +552,7 @@ class Conversation:
                 else:
                     self.fragments.append({"role": role, "text": text,
                         "parts": [part], "provider_session": self.provider_session,
-                        "end_ms": event.get("end_ms", 0)})
+                        "end_ms": event.get("end_ms", 0), "at": wall_ms()})
                 self.fragments = self.fragments[-60:]
                 self.checkpoint()
             self.downstream(event)
