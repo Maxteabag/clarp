@@ -8,6 +8,7 @@ phases; the native binding and this journal's bound phase commit together.
 from __future__ import annotations
 
 import json
+import re
 
 from . import agents, db, settings_store
 
@@ -30,6 +31,12 @@ def _identity(value):
     return value
 
 
+def _operation(value):
+    if not isinstance(value, str) or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", value) is None:
+        raise RotationConflict("invalid durable rotation operation ID")
+    return value
+
+
 def key(agent_id):
     return _PREFIX + _identity(agent_id)
 
@@ -39,7 +46,8 @@ def _validate(record, agent_id):
         raise RotationConflict("invalid rotation record")
     if type(record.get("version")) is not int or record["version"] != 1:
         raise RotationConflict("unsupported rotation record")
-    for name in ("agent_id", "operation_id", "old_thread_id"):
+    _operation(record.get("operation_id"))
+    for name in ("agent_id", "old_thread_id"):
         _identity(record.get(name))
     if record["agent_id"] != agent_id or record.get("phase") not in _PHASES:
         raise RotationConflict("rotation record identity or phase mismatch")
@@ -95,7 +103,7 @@ def _current(record):
 
 def reserve(agent_id, expected_old_thread_id, operation_id):
     _identity(expected_old_thread_id)
-    _identity(operation_id)
+    _operation(operation_id)
     with settings_store.transaction():
         current = get(agent_id)
         if current is not None:
