@@ -380,6 +380,9 @@ def test_effect_bearing_prefix_uses_full_replay_to_recover_team_fanout(tmp_path,
             report = actual.tick(1)
             harness.assert_product_equal(reference, candidate)
             assert report["apply_mode"] == "full"
+            decision = [e for e in report["tail_events"] if e["event"] == "transcriptTailDecision"]
+            assert decision == [{"event": "transcriptTailDecision", "code": "full_no_frontier",
+                                 "count": 1, "reason": "bootstrap_effect"}]
             with sqlite3.connect(candidate) as connection:
                 assert connection.execute("SELECT count(*) FROM team_messages").fetchone()[0] == 1
                 assert connection.execute("SELECT count(*) FROM team_inbox").fetchone()[0] == 1
@@ -681,6 +684,10 @@ def test_dirty_full_bootstrap_refuses_checkpoint_then_recovers_to_tail(tmp_path,
                 report = actual.tick(tick)
                 harness.assert_product_equal(reference, candidate)
                 assert report["apply_mode"] == ("full" if tick == 1 else "tail")
+                if tick == 1:
+                    decision = [e for e in report["tail_events"] if e["event"] == "transcriptTailDecision"]
+                    assert decision == [{"event": "transcriptTailDecision", "code": "full_no_frontier",
+                                         "count": 1, "reason": "publication_foreign_commit_yield"}]
 
 
 @pytest.mark.parametrize("backend", harness.BACKENDS)
@@ -719,3 +726,94 @@ def test_dirty_window_and_partial_fanout_failure_keep_recovery_full(tmp_path, ba
             full.tick(3)
             assert actual.tick(3)["apply_mode"] == "tail"
             harness.assert_product_equal(reference, candidate)
+
+
+@pytest.mark.parametrize("backend", harness.BACKENDS)
+@pytest.mark.parametrize("cause", ["initial", "evicted", "overweight", "consumed", "revision", "reset", "removed", "history_lost", "metadata_failure"])
+def test_no_frontier_reason_reports_only_proven_cache_history(tmp_path, backend, cause, monkeypatch):
+    """Operational codes explain actual misses without changing native products."""
+    from lib import transcript_incremental as inc
+
+    reference, candidate = _clones(tmp_path, backend)
+    transcript = tmp_path / "private-source-canary.jsonl"
+    transcript.write_bytes(b"".join(harness.append_bytes(backend, i) for i in range(3)))
+    harness.run_lane(reference, transcript, backend, "reference", tick=0)
+    inc._TAIL_STATES.reset()
+    first = harness.run_lane(candidate, transcript, backend, "candidate", tick=0)
+    assert first["apply_mode"] == "full"
+    first_decision = [e for e in first["tail_events"] if e["event"] == "transcriptTailDecision"]
+    assert first_decision == [{"event": "transcriptTailDecision", "code": "full_no_frontier",
+                               "count": 1, "reason": "unknown_reset"}]
+    key = inc._tail_key(transcript, corpus.AGENT, corpus.SESSION)
+    revision = inc.parser_version(backend)
+    found, state = inc._TAIL_STATES.get(key, revision)
+    assert found and state is not None, "fixture must really retain a native frontier"
+    expected = None
+    if cause == "evicted":
+        monkeypatch.setattr(inc._TAIL_STATES, "max_entries", 1)
+        inc._TAIL_STATES.put(("other-private-source", "other-agent", "other-session"), revision, None)
+        expected = "evicted"
+    elif cause == "overweight":
+        monkeypatch.setattr(inc._TAIL_STATES, "max_weight", 1)
+        inc._TAIL_STATES.put(key, revision, state)
+        expected = "overweight"
+    elif cause == "consumed":
+        inc._TAIL_STATES.consume(key, revision)
+        expected = "consumed"
+    elif cause == "revision":
+        inc._TAIL_STATES.put(key, "older-parser-revision", state)
+        expected = "revision"
+    elif cause == "reset":
+        inc._TAIL_STATES.reset()
+        expected = "unknown_reset"
+    elif cause == "removed":
+        inc._TAIL_STATES.pop(key)
+        expected = "unknown_removal"
+    elif cause == "metadata_failure":
+        # Retain a genuinely observed OLD overweight reason when the next
+        # consumption's metadata replacement fails, while native cache work succeeds.
+        cap = inc._TAIL_STATES.max_weight
+        monkeypatch.setattr(inc._TAIL_STATES, "max_weight", 1)
+        inc._TAIL_STATES.put(key, revision, state)
+        monkeypatch.setattr(inc._TAIL_STATES, "max_weight", cap)
+        old = inc._TAIL_REASONS.peek(key)
+        assert old is not None and old[1].code == "overweight"
+        put = inc._TAIL_REASONS.put
+        failed = False
+
+        def fail_selected_replacement(actual_key, actual_revision, value, **kwargs):
+            nonlocal failed
+            if actual_key == key and not failed:
+                failed = True
+                raise MemoryError("synthetic metadata replacement failure")
+            return put(actual_key, actual_revision, value, **kwargs)
+
+        monkeypatch.setattr(inc._TAIL_REASONS, "put", fail_selected_replacement)
+        inc._TAIL_STATES.consume(key, revision)
+        assert failed and inc._TAIL_REASONS.peek(key) == old
+        expected = "unknown_metadata"
+    elif cause == "history_lost":
+        inc._TAIL_STATES.pop(key)
+        inc._TAIL_REASONS.reset()
+        expected = "unknown_reset"  # absent bounded history never invents eviction
+    with transcript.open("ab") as output:
+        output.write(harness.append_bytes(backend, 3))
+    report = harness.run_lane(candidate, transcript, backend, "candidate", tick=1)
+    decision = [e for e in report["tail_events"] if e["event"] == "transcriptTailDecision"]
+    if expected is None:
+        assert report["apply_mode"] == "tail"
+        assert decision == [{"event": "transcriptTailDecision", "code": "tail_applied", "count": 1}]
+    else:
+        assert report["apply_mode"] == "full"
+        assert decision == [{"event": "transcriptTailDecision", "code": "full_no_frontier",
+                             "count": 1, "reason": expected}]
+    harness.run_lane(reference, transcript, backend, "reference", tick=1)
+    harness.assert_product_equal(reference, candidate)
+    if cause == "metadata_failure":
+        inc._TAIL_STATES.reset()  # successful explicit reset retires poisoned history
+        reset = harness.run_lane(candidate, transcript, backend, "candidate", tick=2)
+        observed = [e for e in reset["tail_events"] if e["event"] == "transcriptTailDecision"]
+        assert observed == [{"event": "transcriptTailDecision", "code": "full_no_frontier",
+                             "count": 1, "reason": "unknown_reset"}]
+        harness.run_lane(reference, transcript, backend, "reference", tick=2)
+        harness.assert_product_equal(reference, candidate)
