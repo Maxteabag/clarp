@@ -1404,3 +1404,37 @@ def test_missing_checkpoint_rebuild_in_fresh_process_bounds_source_reads(tmp_pat
         assert connection.execute("SELECT count(*) FROM transcript_import_progress_v1 WHERE agent_id=? "
                                   "AND backend_session_id=? AND source_file=?",
                                   (corpus.AGENT, corpus.SESSION, str(transcript))).fetchone()[0] == 1
+
+
+@pytest.mark.parametrize("reader", ["range", "text", "fd", "pread"])
+def test_source_read_observer_counts_actual_delivered_bytes(tmp_path, reader):
+    """Independent count oracle: never supply a positive importer receipt."""
+    import os
+    from lib import transcript_incremental as inc
+
+    source = tmp_path / "counted.jsonl"
+    data = b'{"synthetic":"count me"}\n' * 5
+    source.write_bytes(data)
+    metrics = {}
+    fd = None
+    try:
+        if reader in ("fd", "pread"):
+            fd = os.open(source, os.O_RDONLY)
+        with harness.observe_source_reads(source, metrics):
+            if reader == "range":
+                # Real source open/readinto beneath the text wrapper, exactly
+                # the native parser interface used by current frozen prefixes.
+                with inc._RangePath(source, start=0, end=len(data)).open(encoding="utf-8") as stream:
+                    observed = stream.read().encode()
+            elif reader == "text":
+                with source.open(encoding="utf-8") as stream:
+                    observed = b"".join(line.encode() for line in stream)
+            elif reader == "fd":
+                observed = os.read(fd, len(data))
+            else:
+                observed = os.pread(fd, len(data), 0)
+        assert observed == data
+        assert metrics["source_read_bytes"] == len(data)
+    finally:
+        if fd is not None:
+            os.close(fd)
