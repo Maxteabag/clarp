@@ -23,6 +23,19 @@ from .persistence.schema_parts.goal_ledger import SCHEMA
 
 # Imported after SCHEMA: db_schema reads SCHEMA while db is still loading.
 from . import db  # noqa: E402
+from . import lifecycle as lk  # noqa: E402
+from .lifecycle import Edge, Lifecycle, WaitForever  # noqa: E402
+
+# A bookkeeping delegation (docs/architecture/lifecycles.md). This module is the
+# only writer of goal_delegations.status; delegate() inserts the row as active.
+DELEGATION = Lifecycle(
+    name="goal_delegation", owner="lib/goal_ledger.py",
+    table="goal_delegations", key="delegation_id", state_column="status",
+    entered_columns={"stopped": "stopped_at"},
+    initial="active", final=frozenset({"stopped"}),
+    edges=(Edge("stop", frozenset({"active"}), "stopped"),),
+    waits={"active": WaitForever("its owner stops it, or either agent is archived or deleted")},
+)
 
 ACTOR_KINDS = ("owner", "user", "delegate", "system", "peer", "legacy", "unattributed")
 SUBGOAL_STATUSES = ("proposed", "active", "blocked", "done", "retired", "unknown")
@@ -509,19 +522,17 @@ def enable(principal: dict, delegate: dict, reason: str, *, baseline_messages: i
 
 def stop(delegation_id: str, reason: str) -> dict:
     reason = _clean_text(reason, "reason", required=True, limit=500)
-    db.conn().execute(
-        "UPDATE goal_delegations SET status='stopped', stopped_at=?, stopped_reason=? "
-        "WHERE delegation_id=? AND status='active'", (db.now_ms(), reason, delegation_id))
+    lk.compare_and_set_where(db.conn(), DELEGATION, "stop", where="delegation_id=?",
+                             params=(delegation_id,), now=db.now_ms(),
+                             values={"stopped_reason": reason})
     return delegation(delegation_id)
 
 
 def stop_for_agent(agent_id: str, reason: str) -> int:
     """An agent that is deleted or archived ends every delegation it is part of."""
-    cursor = db.conn().execute(
-        "UPDATE goal_delegations SET status='stopped', stopped_at=?, stopped_reason=? "
-        "WHERE status='active' AND (principal_agent_id=? OR delegate_agent_id=?)",
-        (db.now_ms(), reason[:500], agent_id, agent_id))
-    return int(cursor.rowcount or 0)
+    return lk.compare_and_set_where(
+        db.conn(), DELEGATION, "stop", where="principal_agent_id=? OR delegate_agent_id=?",
+        params=(agent_id, agent_id), now=db.now_ms(), values={"stopped_reason": reason[:500]})
 
 
 _LIVE = "deleted_at IS NULL AND archived_at IS NULL"

@@ -592,3 +592,14 @@ def test_a_goal_status_change_after_a_subgoal_retires_records_the_goals_own_prio
         goals.mutate(plan_id, revision=plan["revision"], action="pause", data={"reason": "User paused"})
     pause = _events(plan_id)[-1]
     assert (pause["kind"], pause["prior"]["status"], pause["new"]["status"]) == ("pause", "active", "paused")
+
+
+def test_a_stopped_delegation_keeps_its_first_stop(pilot, monkeypatch):
+    d = pilot["delegation"]
+    monkeypatch.setattr(db, "now_ms", lambda: 1000)
+    assert ledger.stop(d, "First")["status"] == "stopped"
+    monkeypatch.setattr(db, "now_ms", lambda: 2000)
+    again = ledger.stop(d, "Second")
+    assert (again["status"], again["stopped_at"], again["stopped_reason"]) == ("stopped", 1000, "First")
+    assert ledger.stop_for_agent(pilot["pip"]["agent_id"], "Deleted") == 0
+    assert ledger.DELEGATION.decide("active", "stop") == "stopped"
