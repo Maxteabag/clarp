@@ -5,11 +5,12 @@ does not ask gets what it always got."""
 from __future__ import annotations
 
 import json
+import types
 
 import pytest
 
 from lib import agents as agents_db
-from lib import backends, db, message_previews, reconcile, snapshot
+from lib import backends, db, message_previews, reconcile, snapshot, turn_dispatch
 
 FULL_KEYS = {"agents", "focus", "roster", "personas", "model_avatars", "available_mcp_servers",
              "tool_explanations"}
@@ -163,6 +164,72 @@ def test_archiving_and_restoring_between_pages_neither_repeats_nor_hides_an_agen
     assert snapshot.build_archived_agents(None, limit=1)["agents"][0]["agent_id"] == fleet["solo"]
 
 
+def test_a_later_page_shows_the_held_listing_not_the_archive_as_it_is_now(fleet, monkeypatch):
+    """Third review round of PR 254. The route's pages after the first are cut from the listing
+    the Host holds, with no build, so they are as old as that listing: an agent restored between
+    two pages is still returned, and one restored and archived again is still at its old place.
+    A first page, anyone's, or the five minutes bring a current listing."""
+    clock = [1000.0]
+    monkeypatch.setattr(snapshot, "time", types.SimpleNamespace(monotonic=lambda: clock[0]))
+    builds: list[int] = []
+    build = snapshot.build_archived_listing
+    monkeypatch.setattr(snapshot, "build_archived_listing", lambda ctx: builds.append(1) or build(ctx))
+    shared = snapshot.SharedSnapshot()
+
+    def page(cursor: str) -> dict:
+        limit, position = snapshot.parse_archived_query("3", cursor)
+        return shared.archived_page(None, limit=limit, position=position)
+
+    def rest(cursor: str | None) -> list[dict]:
+        rows: list[dict] = []
+        while cursor is not None:
+            answer = page(cursor)
+            rows += answer["agents"]
+            cursor = answer["next_cursor"]
+        return rows
+
+    first = page("")
+    assert [row["agent_id"] for row in first["agents"]] == _archived_ids(fleet)[:3]
+    # Between the pages: one agent of the second page is restored, one of the third is restored
+    # and archived again just now, and an agent that was in use is archived.
+    con = db.conn()
+    con.execute("UPDATE agents SET archived_at=NULL WHERE agent_id=?", (fleet["old3"],))
+    con.execute("UPDATE agents SET archived_at=9500 WHERE agent_id=?", (fleet["old1"],))
+    con.execute("UPDATE agents SET archived_at=9000 WHERE agent_id=?", (fleet["solo"],))
+    clock[0] += 60                                                      # a minute later
+
+    second = page(first["next_cursor"])
+    later = second["agents"] + rest(second["next_cursor"])
+    assert builds == [1] and second["total"] == 8                       # no build: the listing of the first page
+    assert [row["agent_id"] for row in later] == _archived_ids(fleet)[3:]   # the restored one too
+    stale = _by_id(later)
+    assert stale[fleet["old3"]]["archived_at"] == 1003                  # as it was when the listing was built
+    assert stale[fleet["old1"]]["archived_at"] == 1001                  # at its old place, with its old time
+    assert fleet["solo"] not in stale
+    seen = [row["agent_id"] for row in first["agents"] + later]
+    assert len(seen) == len(set(seen))                                  # nothing twice
+
+    # A first page is the archive as it is now.
+    clock[0] += 1
+    again = page("")
+    current = again["agents"] + rest(again["next_cursor"])
+    assert builds == [1, 1] and again["total"] == 8                     # one restored, one newly archived
+    assert [row["agent_id"] for row in current] == [
+        fleet["old1"], fleet["solo"], fleet["retired"],
+        *(fleet[f"old{n}"] for n in (6, 5, 4, 2, 0))]
+    assert _by_id(current)[fleet["old1"]]["archived_at"] == 9500 and fleet["old3"] not in _by_id(current)
+
+    # So are the five minutes: until then a restored agent is still returned, after them a
+    # later page is cut from a new listing, from the same place.
+    con.execute("UPDATE agents SET archived_at=NULL WHERE agent_id=?", (fleet["old4"],))
+    clock[0] += snapshot.ARCHIVED_LISTING_TTL_S - 1
+    assert fleet["old4"] in _by_id(rest(again["next_cursor"])) and builds == [1, 1]
+    clock[0] += 2
+    expired = rest(again["next_cursor"])
+    assert builds == [1, 1, 1]
+    assert [row["agent_id"] for row in expired] == [fleet[f"old{n}"] for n in (6, 5, 2, 0)]
+
+
 def test_agents_archived_in_the_same_millisecond_page_in_a_fixed_order():
     ids = sorted((_agent(f"twin-{n}", archived_at=5000) for n in range(5)), reverse=True)
     listed = [row["agent_id"] for page in _pages(limit=2) for row in page["agents"]]
@@ -191,11 +258,14 @@ def test_a_limit_outside_one_to_the_maximum_is_refused_not_clamped(fleet, limit)
 
 def test_the_query_is_parsed_strictly():
     parse = snapshot.parse_archived_query
-    assert parse("", "") == (50, None, "")                  # no value: the default page from the start
+    assert parse("", "") == (50, None)                      # no value: the default page from the start
     assert parse("1", "")[0] == 1 and parse("7", "")[0] == 7 and parse("200", "")[0] == 200
-    for bad in ("0", "201", "1000", "-1", "+5", " 5 ", "5 ", "1_0", "\u0665", "\uff15", "5.0", "0x5", "five"):
+    assert parse("10", "")[0] == 10 and parse("100", "")[0] == 100       # a zero that is not leading
+    for bad in ("0", "201", "1000", "-1", "+5", " 5 ", "5 ", "1_0", "\u0665", "\uff15", "5.0", "0x5", "five",
+                "007", "07", "00", "010", "0200"):         # a number is written one way: no leading zero
         with pytest.raises(ValueError):
             parse(bad, "")
+    assert parse("5", _cursor(1003, "an-agent")) == (5, (1003, "an-agent"))
     with pytest.raises(ValueError):
         parse("5", "nonsense")
 
@@ -207,8 +277,8 @@ def _cursor(*parts) -> str:
 
 @pytest.mark.parametrize("cursor", [
     "nonsense", "e30=", "x" * 600,
-    _cursor(1, "a"),                    # the first shape of this cursor, without a listing token
-    _cursor("x", "y", ""), _cursor(True, "x", ""), _cursor(1, 2, ""), _cursor(1, "a", 3), _cursor(1, "a", "", "extra"),
+    _cursor(1, "a", "0123456789abcdef"),   # the shape that named a listing (PR 252); no client ever held one
+    _cursor("x", "y"), _cursor(True, "x"), _cursor(1, 2), _cursor(1), _cursor(1.5, "a"),
 ])
 def test_a_cursor_this_host_did_not_issue_is_refused(fleet, cursor):
     with pytest.raises(ValueError):
@@ -217,13 +287,18 @@ def test_a_cursor_this_host_did_not_issue_is_refused(fleet, cursor):
         snapshot.parse_archived_query("", cursor)
 
 
-def test_a_cursor_from_a_listing_that_is_gone_continues_from_its_agent(fleet):
-    """A Host restart, or a walk slower than the listing is held: the token names nothing."""
+def test_a_cursor_continues_from_its_agent_in_a_listing_that_never_issued_it(fleet):
+    """A Host restart, a walk slower than the listing is held, or another client's listing: a
+    cursor names an agent's place in the order, so any listing can continue from it."""
     position = (1003, fleet["old3"])
-    page = snapshot.build_archived_agents(None, limit=10, cursor=_cursor(*position, "a-listing-long-gone"))
+    page = snapshot.build_archived_agents(None, limit=10, cursor=_cursor(*position))
     assert [row["agent_id"] for row in page["agents"]] == [fleet["old2"], fleet["old1"], fleet["old0"]]
-    shared = snapshot.SharedSnapshot().archived_page(None, limit=10, position=position, token="a-listing-long-gone")
+    shared = snapshot.SharedSnapshot().archived_page(None, limit=10, position=position)
     assert [row["agent_id"] for row in shared["agents"]] == [row["agent_id"] for row in page["agents"]]
+    # The agent the cursor names need not be archived any more.
+    db.conn().execute("UPDATE agents SET archived_at=NULL WHERE agent_id=?", (fleet["old3"],))
+    again = snapshot.build_archived_agents(None, limit=10, cursor=_cursor(*position))
+    assert [row["agent_id"] for row in again["agents"]] == [row["agent_id"] for row in page["agents"]]
 
 
 def test_an_archive_time_that_is_not_a_number_does_not_break_the_listing(fleet):
@@ -287,6 +362,90 @@ def test_an_archived_agent_that_looks_active_is_reconciled_but_not_built(fleet, 
     after = len(_statements(lean_build))
     assert 0 < after - before <= 3 * 40, (before, after)
     assert len(lean_build()["agents"]) == 3
+
+
+def _reconciled_by_a_lean_build(monkeypatch) -> list[str]:
+    reconciled: list[str] = []
+    real = reconcile.reconcile_agent
+
+    def record(agent_id, *args, **kwargs):
+        reconciled.append(agent_id)
+        return real(agent_id, *args, **kwargs)
+
+    monkeypatch.setattr(reconcile, "reconcile_agent", record)
+    snapshot.build_agent_snapshot(None, include_archived=False)
+    return reconciled
+
+
+def test_a_leaked_slot_of_an_idle_archived_agent_is_freed_where_this_process_owns_its_turns(fleet, monkeypatch):
+    """Round two of the review of PR 252, item 5. No external runtime: the slot table is this
+    process's. An archived agent whose turn ended without giving its slot back is idle by its
+    state and has no process, so nothing but the slot says it needs a look."""
+    leaked = fleet["old2"]
+    slots = turn_dispatch._SLOTS
+    with slots.lock:
+        slots.inflight[leaked] = "dead-trace"
+    try:
+        assert turn_dispatch.agents_in_flight() == {leaked}
+        reconciled = _reconciled_by_a_lean_build(monkeypatch)
+        assert slots.inflight.get(leaked) is None          # freed, as the full snapshot would have
+        archived = set(_archived_ids(fleet))
+        assert [agent_id for agent_id in reconciled if agent_id in archived] == [leaked]   # the idle seven: not touched
+    finally:
+        with slots.lock:
+            slots.inflight.pop(leaked, None)
+
+
+class _Runtime:
+    """An external runtime that answers its status and nothing else."""
+
+    def __init__(self, **status):
+        self.sample = {"active": {}, "spawning": [], "terminals": [], "admitting": [], "queued": {},
+                       "compactions": [], "live_activities": {}, **status}
+        self.asked_to_release: list[str] = []
+
+    def status(self, **_kw):
+        return self.sample
+
+    def status_within(self, total_s):
+        return self.sample
+
+    def release_leaked_slots(self, agent_id):
+        self.asked_to_release.append(agent_id)
+        return {}
+
+
+def test_work_the_runtime_holds_queued_for_an_idle_archived_agent_makes_it_look_active(fleet, monkeypatch):
+    """Work queued behind no owner never starts by itself; the reconcile asks the runtime to
+    look. Idle state, no handle: only the runtime's queue says so."""
+    monkeypatch.undo()                                     # the real handles: read from the runtime's status
+    orphan = fleet["old5"]
+    runtime = _Runtime(queued={orphan: 1})
+    backends.configure_runtime_client(runtime)
+    turn_dispatch.configure_runtime_client(runtime)
+    try:
+        reconciled = _reconciled_by_a_lean_build(monkeypatch)
+    finally:
+        backends.configure_runtime_client(None)
+        turn_dispatch.configure_runtime_client(None)
+    archived = set(_archived_ids(fleet))
+    assert [agent_id for agent_id in reconciled if agent_id in archived] == [orphan]
+    assert runtime.asked_to_release == [orphan]            # and the reconcile acted on it
+
+
+def test_a_slot_the_runtime_holds_for_an_idle_archived_agent_makes_it_look_active(fleet, monkeypatch):
+    monkeypatch.undo()
+    held = fleet["old1"]
+    runtime = _Runtime(active={held: "a-trace"})
+    backends.configure_runtime_client(runtime)
+    turn_dispatch.configure_runtime_client(runtime)
+    try:
+        reconciled = _reconciled_by_a_lean_build(monkeypatch)
+    finally:
+        backends.configure_runtime_client(None)
+        turn_dispatch.configure_runtime_client(None)
+    archived = set(_archived_ids(fleet))
+    assert [agent_id for agent_id in reconciled if agent_id in archived] == [held]
 
 
 def test_with_the_runtime_unreachable_nothing_is_reconciled_blind(fleet, monkeypatch):

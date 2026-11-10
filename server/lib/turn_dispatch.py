@@ -58,6 +58,14 @@ def _send_admitting(agent_id: str) -> bool:
     return _SLOTS.is_admitting(agent_id)
 
 
+def agents_in_flight() -> set[str]:
+    """Agents whose slot in this process's dispatcher carries a turn's trace
+    (not a terminal, not a pending Stop). Whether that turn is still alive is
+    not known here: a leaked slot is in this set too. Empty in a process
+    that hands its turns to an external runtime."""
+    return set(_SLOTS.snapshot()["active"])
+
+
 def free_stale_slot(agent_id: str) -> str | None:
     """INV3 (lib.reconcile): free an in-flight slot that has no live turn and
     nothing queued behind it. Returns the dead trace id, or None if nothing

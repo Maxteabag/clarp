@@ -702,6 +702,7 @@ def test_archived_agents_refuses_a_bad_query(running_server):
     for query in (
         "?cursor=nonsense", "?cursor=e30=", "?limit=many", "?limit=1.5", "?limit=0", "?limit=201", "?limit=-1",
         "?limit=1_0", "?limit=%205", "?limit=5%20", "?limit=%D9%A5",      # underscore, spaces, an Arabic digit
+        "?limit=007", "?limit=050",                                       # a leading zero
     ):
         with pytest.raises(urllib.error.HTTPError) as error:
             _get(base + "/agents/archived" + query)
