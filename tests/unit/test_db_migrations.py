@@ -648,6 +648,10 @@ def test_explicit_owner_preserves_historical_schema_results(tmp_path, shape):
     expected = reference.execute(
         "SELECT type, name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' "
         "ORDER BY type, name").fetchall()
+    expected_agents = [tuple(row) for row in reference.execute(
+        "SELECT agent_id, mcp_servers, avatar_path FROM agents ORDER BY agent_id")]
+    expected_settings = [tuple(row) for row in reference.execute(
+        "SELECT key, value FROM settings ORDER BY key")]
     reference.close()
     before = path.read_bytes() if shape == "current" else None
     outcome = _explicit_owner_process(path)
@@ -659,6 +663,10 @@ def test_explicit_owner_preserves_historical_schema_results(tmp_path, shape):
         assert observed.execute(
             "SELECT type, name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' "
             "ORDER BY type, name").fetchall() == expected
+        assert [tuple(row) for row in observed.execute(
+            "SELECT agent_id, mcp_servers, avatar_path FROM agents ORDER BY agent_id")] == expected_agents
+        assert [tuple(row) for row in observed.execute(
+            "SELECT key, value FROM settings ORDER BY key")] == expected_settings
         assert observed.execute("PRAGMA journal_mode").fetchone()[0] == (
             "delete" if shape == "current" else "wal")
     if before is not None:
