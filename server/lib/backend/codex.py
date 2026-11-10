@@ -47,7 +47,7 @@ from typing import Any, Callable, Optional
 from .. import agents as agents_db
 from .. import codex_transcript
 from .. import tool_explanation_commands
-from .. import tts_queue
+from ..tts_queue_records import enqueue as enqueue_tts
 from ..log import log, log_exception
 from ..proc_util import stderr_text
 from ..process_registry import TurnHandle
@@ -340,7 +340,7 @@ class CodexBackend(StreamJsonBackend):
             backend_session_id=backend_session_id,
             on_session_init=on_session_init, on_result=on_result,
             on_error=on_error, stream=stream,
-            enqueue=enqueue or tts_queue.enqueue,
+            enqueue=enqueue or enqueue_tts,
         )
         return handle
 

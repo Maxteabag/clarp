@@ -221,7 +221,7 @@ def test_backends_refuse_goals_outside_codex(tmp_path):
 
 
 def test_runtime_bridge_goal_method_maps_errors(tmp_path, monkeypatch):
-    from lib import runtime_bridge
+    from lib import runtime_rpc_server
 
     class _Ctx:
         stream = _Stream()
@@ -229,7 +229,7 @@ def test_runtime_bridge_goal_method_maps_errors(tmp_path, monkeypatch):
     class _Service:
         ctx = _Ctx()
 
-    server = object.__new__(runtime_bridge.RuntimeRPCServer)
+    server = object.__new__(runtime_rpc_server.RuntimeRPCServer)
     server.dispatch_service = _Service()
     missing = server._dispatch_request("goal", {"agent_id": "nope", "action": "start"})
     assert missing["status"] == 404

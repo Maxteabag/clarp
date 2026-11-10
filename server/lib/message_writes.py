@@ -21,7 +21,7 @@ from .clock import iso_from_ms as _iso_from_ms, now_ms
 from .db import conn, note_import_holds_lock
 from . import dreaming, heartbeat, origins, team_leader, team_store
 from .voice_markup import strip_hidden_blocks
-from .message_context import CALL_OPENING_OPEN, _strip_voice_markup, strip_injected_context
+from .message_text import CALL_OPENING_OPEN, _strip_voice_markup, strip_injected_context
 from .message_import_common import (  # noqa: F401 - facade compatibility
     _message_id,
     _client_message_id,

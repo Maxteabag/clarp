@@ -9,7 +9,7 @@ import time
 
 from lib import server_identity
 from lib.live_hub import LiveFanout, LiveHub, LiveRelay
-from lib.runtime_bridge import RuntimeRPCServer
+from lib.runtime_rpc_server import RuntimeRPCServer
 
 LIVE_FEATURES = {"live_items", "live_activity_push"}
 

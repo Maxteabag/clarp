@@ -75,7 +75,7 @@ BASELINE: dict[str, int] = {
     'lib/provider_capabilities.py': 4,
     'lib/reconcile.py': 1,
     'lib/relay_connector.py': 2,
-    'lib/runtime_bridge.py': 2,
+    'lib/runtime_rpc_server.py': 2,
     'lib/server_identity.py': 2,
     'lib/snapshot.py': 1,
     'lib/state_watcher.py': 1,
