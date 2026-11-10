@@ -1356,3 +1356,51 @@ def test_staged_rollout_replacement_after_real_checkpoint_reparses_all_products(
                         assert not worker.is_alive()
             finally:
                 db.close_local()
+
+
+@pytest.mark.parametrize("backend", harness.BACKENDS)
+def test_missing_checkpoint_rebuild_in_fresh_process_bounds_source_reads(tmp_path, backend):
+    """Stored history must not trigger an unbounded restart/full replay burst.
+
+    FIRST source-read-budget control only, not aggregate DB/IO or complete ROOT
+    evidence. Baseline must reach the byte assertion, not an absent ROOT API.
+    """
+    reference, candidate = _clones(tmp_path, backend)
+    transcript = tmp_path / "bounded-rebuild.jsonl"
+    transcript.write_bytes(b"".join(harness.append_bytes(backend, i, size=4096) for i in range(2048)))
+    assert transcript.stat().st_size == 8 * 1024 * 1024
+    with harness.PersistentLane(candidate, transcript, backend, "candidate") as original:
+        first = original.tick(0)
+    assert "failure_code" not in first and first["apply_mode"] == "full"
+    # Genuine CP from the actual native full import, not a supplied certificate.
+    harness.assert_checkpoint_parse_equal(candidate, transcript, backend)
+    before = harness.database_view(candidate)
+    before.pop("transcript_import_progress_v1", None)  # registered progress metadata, checked below
+    with sqlite3.connect(candidate) as connection:
+        removed = connection.execute("DELETE FROM transcript_import_checkpoints WHERE agent_id=? "
+                                     "AND backend_session_id=? AND source_file=?",
+                                     (corpus.AGENT, corpus.SESSION, str(transcript)))
+        assert removed.rowcount == 1
+    # A genuinely new interpreter loses ALL process carry/hash computation
+    # state; resetting only one cache would not prove restart recovery.
+    with harness.PersistentLane(candidate, transcript, backend, "candidate") as restarted:
+        result = restarted.tick(1, faults={"source_read_counter": True})
+    assert "failure_code" not in result, "counter/setup/SQL failure is not semantic budget RED"
+    assert result["process_id"] != first["process_id"]
+    assert result["source_read_bytes"] <= 4 * 1024 * 1024, (
+        "a missing durable frontier reread the large source instead of bounded recovery")
+    # All assertions below are UNREACHED on the expected baseline byte RED.
+    assert result.get("_clarp_transcript_completion_v1") == "deferred"
+    assert result["apply_mode"] == "deferred"
+    after = harness.database_view(candidate)
+    after.pop("transcript_import_progress_v1", None)
+    assert after == before, "partial rebuild changed the committed historical snapshot"
+    with sqlite3.connect(candidate) as connection:
+        assert connection.execute("SELECT count(*) FROM transcript_import_checkpoints WHERE agent_id=? "
+                                  "AND backend_session_id=? AND source_file=?",
+                                  (corpus.AGENT, corpus.SESSION, str(transcript))).fetchone()[0] == 0
+        # Relation name/key/container are the registered contract, not a new
+        # guessed continuation grammar or an authority supplied by this test.
+        assert connection.execute("SELECT count(*) FROM transcript_import_progress_v1 WHERE agent_id=? "
+                                  "AND backend_session_id=? AND source_file=?",
+                                  (corpus.AGENT, corpus.SESSION, str(transcript))).fetchone()[0] == 1
