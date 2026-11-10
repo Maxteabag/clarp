@@ -80,7 +80,9 @@ def _isolated_fault_state():
 @pytest.fixture
 def sinks(monkeypatch):
     stderr, structured, raw, clock = io.StringIO(), [], [], [100.0]
-    monkeypatch.setattr(logging.sys, 'stderr', stderr)
+    # Pytest replaces process sys.stderr between fixture setup and the call.
+    # Keep this helper's sink private without competing with phase capture.
+    monkeypatch.setattr(logging, 'sys', SimpleNamespace(stderr=stderr))
     monkeypatch.setattr(logging.time, 'monotonic', lambda: clock[0])
     monkeypatch.setattr(eventlog, 'emit', lambda *args, **kwargs: structured.append((args, kwargs)))
     monkeypatch.setattr(os, 'write', lambda fd, data: raw.append((fd, data)) or len(data))
@@ -133,12 +135,18 @@ def test_selected_sink_matrix(sinks, monkeypatch, stderr_bad, structured_bad, ra
 def test_stderr_only_mode_never_imports_eventlog(sinks, monkeypatch):
     import builtins
     original = builtins.__import__
+    imports = []
     def guarded(name, *args, **kwargs):
         if 'eventlog' in name or 'eventlog' in (kwargs.get('fromlist') or (args[2] if len(args) > 2 else ()) or ()):
+            imports.append(name)
             raise AssertionError('structured=False imported eventlog')
         return original(name, *args, **kwargs)
-    monkeypatch.setattr(builtins, '__import__', guarded)
-    assert logging.log_fault('stderrOnlyFault', PoisonError(SECRET), structured=False) == 'attempted'
+    # Restore even on assertion failure, before independent fixture teardown.
+    with monkeypatch.context() as scoped:
+        scoped.setattr(builtins, '__import__', guarded)
+        assert logging.log_fault('stderrOnlyFault', PoisonError(SECRET), structured=False) == 'attempted'
+    # Sink failures are contained by the helper: observe attempted imports too.
+    assert imports == []
     assert sinks.structured == []
     assert 'stderrOnlyFault' in sinks.stderr.getvalue()
 
