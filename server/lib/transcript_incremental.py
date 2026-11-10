@@ -54,9 +54,9 @@ SUPPORTED_BACKENDS = ("claude", "codex", "agy")
 # refused and the next import is a full one.
 _VERSION_SOURCES = {
     "claude": ("claude_transcript.py", "claude_reply_evidence.py", "backend/claude.py"),
-    "codex": ("codex_transcript.py", "codex_tool_cells.py", "backend/codex.py"),
+    "codex": ("codex_transcript.py", "codex_tool_cells.py", "backend/codex.py", "native_rotation_context.py"),
     "agy": ("agy_transcript.py", "codex_transcript.py", "codex_tool_cells.py", "opencode_transcript.py",
-            "claude_transcript.py", "claude_reply_evidence.py", "backend/agy.py"),
+            "claude_transcript.py", "claude_reply_evidence.py", "backend/agy.py", "native_rotation_context.py"),
 }
 _COMMON_SOURCES = ("transcript_incremental.py", "backend/base.py", "message_writes.py",
                    "message_import_writer.py",
