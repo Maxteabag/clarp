@@ -101,3 +101,11 @@ def test_malformed_or_replaced_runtime_cannot_be_treated_as_no_rotation(tmp_path
         journal.blocked(agent)
     with pytest.raises(journal.RotationConflict):
         journal.reserve(agent, "old", "operation-b")
+
+
+@pytest.mark.parametrize("operation_id", ["", "ü", "x" * 129, "bad\nintent", "bad/intent"])
+def test_operation_id_is_bounded_ascii_and_cannot_open_an_alias_intent(tmp_path, operation_id):
+    agent = _agent(tmp_path)
+    with pytest.raises(journal.RotationConflict):
+        journal.reserve(agent, "old", operation_id)
+    assert journal.get(agent) is None
