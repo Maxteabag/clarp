@@ -5,7 +5,9 @@
 > a record and nothing in it is an instruction any more. The "Claims" table
 > below is historical: no file is claimed, and there is no lead to ask before
 > editing one. Final hand-off:
-> `laptopstudio:/var/tmp/clarp-refactor-program/FINAL-HANDOFF.md`.
+> `FINAL-HANDOFF.md` in
+> `laptopstudio:~/clarp-refactor-program-records/`, with the decision log,
+> registers and reviews beside it.
 
 Read this whole file before you start. It is the single source of truth for every
 agent in the program. The lead is **Hobbles** (Clarp session `hobbles-18b0`); the

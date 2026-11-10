@@ -10,7 +10,8 @@ The server refactor program that began on 3 Nov 2026 was retired on 10 Nov 2026
 by the owner's decision. No file is claimed and there is no lead to ask: the
 rules below are the only ones. `REFACTOR.md` stays in the tree as the program's
 record, and its final hand-off is
-`laptopstudio:/var/tmp/clarp-refactor-program/FINAL-HANDOFF.md`.
+`FINAL-HANDOFF.md` in `laptopstudio:~/clarp-refactor-program-records/`,
+with the decision log, registers and reviews beside it.
 
 ## Deploying
 

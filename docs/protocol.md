@@ -220,15 +220,20 @@ whichever client's first page built it. So the Host builds once per first
 page, not once per page, however many clients page at the same time.
 
 A cursor names a place in the order (the last agent of the page before), not
-an offset and not a listing. A walk therefore goes on correctly when the
-held listing has been replaced by another client's first page, when it has
-expired (the Host builds a new one for that page) and after a Host restart.
-What a walk returns:
+an offset and not a listing. A walk therefore goes on from the same place
+when the held listing has been replaced by another client's first page, when
+it has expired (the Host builds a new one for that page) and after a Host
+restart. What a walk returns:
 
-- An agent that stays archived for the whole walk is returned exactly once.
-- An agent archived, or restored and archived again, after the walk began is
-  newer than the walk's position and is not returned in that walk.
-- An agent restored before the walk reaches it is not returned.
+- A later page shows the listing the Host holds when the page is asked, and
+  that listing can be up to five minutes old. Its rows are as they were when
+  it was built: an agent restored since then is still returned, with the
+  `archived_at` it had; an agent archived since then is not in it; an agent
+  restored and archived again is still at its old place with its old
+  `archived_at`. Only a first page, any client's, or the five minutes bring
+  a current listing.
+- No agent is returned twice.
+- An agent that is archived for the whole walk is not missed.
 - `total` is the number of agents in the listing that answered the page, so
   it can differ from one page to the next.
 
@@ -243,8 +248,10 @@ page when the user opens the archive, not on connect and not on a timer.
 A `limit` that is not 1 to 200 written that way (`0`, `201`, `007`, `+5`,
 `5.0`), or a cursor the Host did not issue, is
 `400 {"error": "invalid archived agents query"}`; an empty value counts as
-absent. A Host without the feature answers 404; read the archived rows from
-the full snapshot there.
+absent. A cursor is good for the Host build that issued it: after a Host
+update it can be refused, so on a 400 start again without a cursor. A Host
+without the feature answers 404; read the archived rows from the full
+snapshot there.
 
 ### 2. Load a chat: `GET /log`
 
