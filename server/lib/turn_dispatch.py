@@ -189,7 +189,8 @@ class TurnDispatchService(AdmissionMixin, LauncherMixin, HandoffMixin, ClaimMixi
 
     def _claim_or_queue(self, spec: _TurnSpec, *, queue_if_busy: bool,
                         park_id: str, queue_user: list,
-                        preempt: list | None = None) -> tuple[bool, bool]:
+                        preempt: list | None = None,
+                        wait_for_start: bool = False) -> tuple[bool, bool]:
         """The decision half of _enqueue_if_busy; the caller holds _TURN_LOCK.
         Returns (parked behind Stop, send waits)."""
         agent_id = spec.agent_id
@@ -217,12 +218,16 @@ class TurnDispatchService(AdmissionMixin, LauncherMixin, HandoffMixin, ClaimMixi
         current = _SLOTS.get(agent_id)
         if agent_id in _INFLIGHT:
             if _slot_is_spawning(agent_id):
+                parked = False
+                if wait_for_start and park_id and not spec.queue_id:
+                    spec = replace(spec, park_id=park_id)
+                    parked = True
                 depth = _SLOTS.enqueue(agent_id, spec)
                 defer_on(_TURN_LOCK, lambda: log(
                     "turnQueued",
                     f"agent={agent_id} depth={depth} trace={spec.trace_id or '∅'} "
                     f"— behind a spawning slot ({current or '∅'})"))
-                return False, True
+                return parked, True
             # Self-heal a leaked slot: if the in-flight turn has no live
             # process (it died without firing its terminal callback — e.g.
             # killed mid-flight by a restart), the slot is stale. Free it
@@ -245,9 +250,10 @@ class TurnDispatchService(AdmissionMixin, LauncherMixin, HandoffMixin, ClaimMixi
                 # turn finishes; nothing is dropped.
                 _SLOTS.claim(agent_id, spec.trace_id)
                 return False, False
-            if queue_if_busy or current.startswith(_PROCESS_OWNER_PREFIX):
+            if queue_if_busy or wait_for_start or current.startswith(_PROCESS_OWNER_PREFIX):
                 parked = False
-                if not spec.queue_id and current.startswith(_PROCESS_OWNER_PREFIX):
+                if not spec.queue_id and (current.startswith(_PROCESS_OWNER_PREFIX)
+                                          or wait_for_start):
                     if not park_id:
                         raise DispatchError(503, "could not durably queue message")
                     spec = replace(spec, park_id=park_id)
@@ -609,12 +615,14 @@ def clear_for_agent(
     a SIGTERM'd turn may die without firing its terminal callback, so the slot
     would otherwise leak until the next send self-heals it. Returns the number of
     queued turns dropped."""
+    handed_over = ""
     with _TURN_LOCK:
         # Stop must be atomic with _finish_turn(), or the interrupted callback
         # could drain the next item in between. The Stop barrier installed
         # here is what _finish_turn checks (its handover expects its own
         # trace), so the durable pause flag is written as soon as the lock is
         # released, before this function returns.
+        handed_over = str(_SLOTS.get(agent_id) or "")
         dropped = _SLOTS.clear(agent_id, stopping=pause_queue)
         if pause_queue:
             # A Stop pauses through here; ``user_stop`` is False only when a
@@ -625,6 +633,12 @@ def clear_for_agent(
                 # an automatic resend under the same id must not start it afterwards.
                 _TURN_LOCK.defer(lambda: _fence_launch_receipts(agent_id))
     if preserve_queue:
+        if pause_queue:
+            # A follow-up that waited for the agent's own pending start was
+            # answered queued:true: Stop pauses it like any queued message
+            # instead of dropping it with the memory queue (TP-N3).
+            dropped = max(0, dropped - turn_queue.keep_start_parked(
+                agent_id, skip_trace=handed_over))
         turn_queue.discard_parked(agent_id)
     durable_dropped = 0 if preserve_queue else turn_queue.remove_for_agent(agent_id)
     return max(dropped, durable_dropped)

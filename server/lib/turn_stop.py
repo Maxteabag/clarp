@@ -139,6 +139,10 @@ def begin_stop(agent_id: str, *, user_stop: bool = False) -> tuple[dict, int, bo
 def restore_stop_state(agent_id: str, snapshot: dict) -> None:
     """Roll back every process-local Stop mutation after interrupt failure."""
     _SLOTS.restore_stop(agent_id, snapshot)
+    # The follow-ups clear_for_agent kept as queued rows are in memory again.
+    turn_queue.repark(agent_id, [
+        spec.park_id for spec in snapshot.get("queued") or ()
+        if str(getattr(spec, "park_id", "") or "").startswith("start-park-")])
 
 
 def prepare_queued_for_finish(

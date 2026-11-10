@@ -352,6 +352,11 @@ class Backend:
         """
         return False
 
+    def start_pending(self, agent_id: str) -> bool:
+        """The agent's turn is registered but its start is not confirmed yet;
+        a follow-up waits instead of preempting it (TP-N3). Most never."""
+        return False
+
     def turn_holders(self, agent_id: str) -> list:
         """Processes outside any turn that still hold the agent's native
         session; its next turn waits for them (BACKENDS-07b). Most have none."""

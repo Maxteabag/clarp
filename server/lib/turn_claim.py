@@ -77,7 +77,8 @@ class ClaimMixin:
             turn_queue.release_claim(queue_id)
             raise
 
-    def _enqueue_if_busy(self, spec: _TurnSpec, *, queue_if_busy: bool = False) -> bool:
+    def _enqueue_if_busy(self, spec: _TurnSpec, *, queue_if_busy: bool = False,
+                         wait_for_start: bool = False) -> bool:
         """Decide how to handle a new send for this agent:
         - Stop barrier up → park behind it, return True;
         - terminal attached → queue behind it, return True (caller doesn't spawn);
@@ -107,6 +108,12 @@ class ClaimMixin:
             # It will wait behind a turn process: durably, like the send
             # that preempted that process (TP-01).
             park_id = _park(spec, prefix="preempt-park")
+        elif wait_for_start and not spec.queue_id:
+            # It waits for the agent's own pending start: durable before it
+            # is acknowledged; unparked once it launches (TP-N3).
+            park_id = _park(spec, prefix="start-park")
+            if not park_id:
+                raise DispatchError(503, "could not durably queue message")
         parked = False
         preempt: list = []
         queue_user: list = []
@@ -114,7 +121,7 @@ class ClaimMixin:
             with _TURN_LOCK:
                 parked, decision = self._claim_or_queue(
                     spec, queue_if_busy=queue_if_busy, park_id=park_id,
-                    preempt=preempt, queue_user=queue_user)
+                    preempt=preempt, queue_user=queue_user, wait_for_start=wait_for_start)
         finally:
             if park_id and not parked:
                 turn_queue.unpark(park_id)
@@ -273,3 +280,13 @@ class ClaimMixin:
             return bool(self.backends.active_handles(backend, agent_id))
         except Exception:  # noqa: BLE001
             return True  # can't tell → assume live (don't double-spawn)
+
+
+    def _start_pending(self, spec: _TurnSpec) -> bool:
+        pending = getattr(self.backends, "start_pending", None)
+        if pending is None or _is_call_opening(spec):
+            return False
+        try:
+            return bool(pending(spec.backend, spec.agent_id))
+        except Exception:  # noqa: BLE001 - unknown: the existing path decides
+            return False

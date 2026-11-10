@@ -298,6 +298,11 @@ def external_live_work(backend: str, agent_id: str) -> bool:
     return by_id(normalize(backend)).external_live_work(agent_id)
 
 
+def start_pending(backend: str, agent_id: str) -> bool:
+    """See Backend.start_pending; held in this process, so never via the runtime."""
+    return by_id(normalize(backend)).start_pending(agent_id)
+
+
 def turn_holders(backend: str, agent_id: str) -> list:
     """See Backend.turn_holders; held in this process, so never via the runtime."""
     return by_id(normalize(backend)).turn_holders(agent_id)
