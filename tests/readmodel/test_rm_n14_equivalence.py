@@ -1412,7 +1412,7 @@ def test_missing_checkpoint_rebuild_in_fresh_process_bounds_source_reads(tmp_pat
         db.close_local()
 
 
-@pytest.mark.parametrize("reader", ["range", "text", "fd", "pread"])
+@pytest.mark.parametrize("reader", ["range", "text", "fd", "pread", "symlink", "hardlink"])
 def test_source_read_observer_counts_actual_delivered_bytes(tmp_path, reader):
     """Independent count oracle: never supply a positive importer receipt."""
     import os
@@ -1423,6 +1423,11 @@ def test_source_read_observer_counts_actual_delivered_bytes(tmp_path, reader):
     source.write_bytes(data)
     metrics = {}
     fd = None
+    alias = tmp_path / "source-alias.jsonl"
+    if reader == "symlink":
+        alias.symlink_to(source)
+    elif reader == "hardlink":
+        os.link(source, alias)
     try:
         if reader in ("fd", "pread"):
             fd = os.open(source, os.O_RDONLY)
@@ -1437,6 +1442,12 @@ def test_source_read_observer_counts_actual_delivered_bytes(tmp_path, reader):
                     observed = b"".join(line.encode() for line in stream)
             elif reader == "fd":
                 observed = os.read(fd, len(data))
+            elif reader == "symlink":
+                with open(alias, "rb") as stream:
+                    observed = stream.read()
+            elif reader == "hardlink":
+                with alias.open("rb") as stream:
+                    observed = stream.read()
             else:
                 observed = os.pread(fd, len(data), 0)
         assert observed == data
