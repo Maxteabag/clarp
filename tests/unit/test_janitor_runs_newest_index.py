@@ -135,6 +135,57 @@ def test_the_newest_valid_run_is_read_from_the_index_without_a_sort(janitor):
     assert "USING INDEX idx_janitor_runs_agent (agent_id=?)" in plan and "USE TEMP B-TREE FOR ORDER BY" in plan
 
 
+def _has_statistics() -> bool:
+    return bool(db.conn().execute(
+        "SELECT count(*) FROM sqlite_master WHERE name LIKE 'sqlite_stat%'").fetchone()[0])
+
+
+def _newest_valid_plan(janitor) -> str:
+    return _plan(_statements(_config(janitor))[0])
+
+
+def test_the_plan_holds_without_statistics_in_either_index_creation_order(janitor):
+    """The Host's database has no sqlite_stat1, so the planner has only the schema to go by,
+    and then the order the indexes were created in can decide between them."""
+    no_sort = f"SEARCH r USING INDEX {INDEX} (agent_id=? AND generation=? AND status=?)"
+    con = db.conn()
+    assert not _has_statistics()
+
+    # A fresh database, before it holds a single run: the index sits between the table's others.
+    plan = _newest_valid_plan(janitor)
+    assert no_sort in plan and "TEMP B-TREE" not in plan, plan
+    _fill(janitor, 60, newest_invalid=3)
+    plan = _newest_valid_plan(janitor)
+    assert no_sort in plan and "TEMP B-TREE" not in plan, plan
+
+    # An upgraded database: the step creates it after every other index.
+    _as_v121(con)
+    db_migrations._migrate(con)
+    plan = _newest_valid_plan(janitor)
+    assert no_sort in plan and "TEMP B-TREE" not in plan, plan
+    assert not _has_statistics()
+
+    # And with statistics, should a Host ever run ANALYZE.
+    con.execute("ANALYZE")
+    assert _has_statistics()
+    plan = _newest_valid_plan(janitor)
+    assert no_sort in plan and "TEMP B-TREE" not in plan, plan
+
+
+def test_the_index_is_ascending_because_the_row_id_must_run_the_same_way(janitor):
+    """ORDER BY finished_at DESC, rowid DESC. The row id is the index's last key and always
+    ascending, so only an ascending finished_at read backwards gives both terms; with
+    finished_at DESC the row ids of equal finish times come out ascending and need a sort."""
+    _fill(janitor, 60)
+    con = db.conn()
+    con.execute(f"DROP INDEX {INDEX}")
+    con.execute(f"CREATE INDEX {INDEX} ON janitor_runs(agent_id, generation, status, finished_at DESC)")
+    assert "USE TEMP B-TREE FOR LAST TERM OF ORDER BY" in _newest_valid_plan(janitor)
+    con.execute(f"DROP INDEX {INDEX}")
+    con.execute(INDEX_SQL)
+    assert "TEMP B-TREE" not in _newest_valid_plan(janitor)
+
+
 def test_the_statements_are_the_ones_from_before_the_index(janitor):
     """The fix is the index alone: an older runtime runs exactly these on the new database."""
     _fill(janitor, 5)
@@ -162,6 +213,22 @@ def test_the_work_does_not_grow_with_the_number_of_runs(janitor, newest_invalid)
     _drop_index()
     without = _steps(_config(janitor, 2))
     assert without > 50 * large, (large, without)          # the control: every run read and sorted
+
+
+def test_with_no_valid_success_every_completed_run_is_still_walked(janitor):
+    """No bound is promised here. The statement has no LIMIT: the caller takes the first run
+    that is a success, and a janitor whose completed runs never are one (a demand worker with
+    no accepted receipt) makes it walk them all, on every tick, as before the index. The
+    index only spares it the sort and the runs of other generations and statuses."""
+    _fill(janitor, 40, generation=1)                      # completed, outcome 'completed', no receipt
+    _fill(janitor, 4000, generation=2)
+    demand = "tool-explainer"                             # not a scheduled prompt: a receipt is required
+    assert attention._episode(_config(janitor, 2, demand))[0].endswith(":initial")
+    small, large = _steps(_config(janitor, 1, demand)), _steps(_config(janitor, 2, demand))
+    assert large > 50 * small, (small, large)             # it grows with the runs: the whole walk
+
+    _drop_index()
+    assert _steps(_config(janitor, 2, demand)) > large    # though it was more work still without it
 
 
 def test_a_janitor_that_only_fails_is_not_read_run_by_run(janitor):
