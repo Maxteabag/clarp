@@ -62,7 +62,7 @@ def test_unlimited_remains_unlimited_without_losing_usage():
     assert result["tokenBudget"] is None and result["tokensUsed"] == 410
 
 
-@pytest.mark.parametrize("damage", ["agent", "thread", "epoch", "reset", "bool", "missing"])
+@pytest.mark.parametrize("damage", ["agent", "thread", "epoch", "reset", "bool", "missing", "timefloat"])
 def test_unprovable_or_reset_native_accounting_is_protected(damage):
     offset = accounting.bind_transfer(accounting.plan_transfer("agent", "old", _goal()), "new", _new())
     observed = _new(tokensUsed=30, timeUsedSeconds=4)
@@ -78,6 +78,8 @@ def test_unprovable_or_reset_native_accounting_is_protected(damage):
         observed["tokensUsed"] = 0
     elif damage == "bool":
         observed["tokensUsed"] = True
+    elif damage == "timefloat":
+        observed["timeUsedSeconds"] = 0.5
     elif damage == "missing":
         del observed["timeUsedSeconds"]
     with pytest.raises(accounting.AccountingUnavailable):
