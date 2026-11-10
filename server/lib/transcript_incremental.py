@@ -976,33 +976,54 @@ def _tail_key(path, agent_id, backend_session_id):
     return (str(db.DB_PATH), agent_id, backend_session_id, str(path))
 
 
-def _prefix_has_effects(turns) -> bool:
-    """P1 leaves effect-bearing prefixes on the full recovery path.
+def _prefix_effects(turns) -> str:
+    """How the effects of the turns before a boundary stand: '' (none),
+    'closed' (a full replay would repeat none of them) or 'open'.
 
-    Their effects may need retry even when their message row is unchanged.
-    They cannot be skipped merely because bytes or rows were checkpointed.
+    P1 kept every effect-bearing prefix on the full recovery path. Two kinds
+    need no replay once their row is stored:
+
+    - heartbeat and leader-tick prompts only set the store's carried origin
+      and heartbeat key, which the checkpoint carries;
+    - HEARTBEAT_OK is accounted only when its row changes, under a key
+      claimed once in ``heartbeat_accounting``; a tail certifies the prefix
+      bytes and every message row unchanged, so a replay would account
+      nothing. LEADER_NOOP only logs.
+
+    Still open, so still full. Their effects may need retry, or differ on
+    replay, even when their message row is unchanged; they cannot be skipped
+    merely because bytes or rows were checkpointed:
+
+    - a sub-agent cell or Agent/Task tool. Discovery is external to the
+      parent bytes: a missing child/meta directory at bootstrap does not make
+      this prefix immutable, and nothing records which children a stored
+      cell was built from;
+    - a <team> block: team capture depends on the agent's current teams, which
+      can change after the turn is old;
+    - a dream prompt or dream output: a replayed DREAMING_OK marks whichever
+      run is active now, so skipping it would change what a full import does.
     """
     from . import dreaming, heartbeat, team_leader, team_store
+    found = ""
     for turn in turns:
-        # Discovery is external to the parent bytes: a missing child/meta
-        # directory at bootstrap does not make this prefix immutable.
         if (any(cell.get("kind") == "subagents" for cell in turn.get("display_cells") or [])
                 or any(tool.get("name") in ("Agent", "Task") for tool in turn.get("tools") or [])):
-            return True
+            return "open"
         text = str(turn.get("text") or "")
         if turn.get("role") == "user":
+            if dreaming.should_skip_dream_prompt(text):
+                return "open"
             if (heartbeat.should_skip_heartbeat_prompt(text)
-                    or team_leader.should_skip_leader_tick_prompt(text)
-                    or dreaming.should_skip_dream_prompt(text)):
-                return True
+                    or team_leader.should_skip_leader_tick_prompt(text)):
+                found = "closed"
         elif turn.get("role") == "assistant":
             if (team_store.extract_team_blocks(text)
-                    or heartbeat.HEARTBEAT_OK in text or team_leader.LEADER_NOOP in text
                     or dreaming.process_assistant_text("", text, origin="dreaming", live=True)
                     != (False, text)):
-                return True
-    return False
-
+                return "open"
+            if heartbeat.HEARTBEAT_OK in text or team_leader.LEADER_NOOP in text:
+                found = "closed"
+    return found
 
 
 def _tail_file_hashes(path, previous_size, current_size):
@@ -1218,6 +1239,7 @@ def _store_full_with_tail_checkpoint(backend, path, agent_id, backend_session_id
     refusal = "file_identity_unavailable"
     refusal_logged = False
     source_invalidated = False
+    effects = ""
     try:
         observed = identity(path) if before is not None else None
         growing_prefix = (parsed_evidence is not None and before is not None
@@ -1242,7 +1264,7 @@ def _store_full_with_tail_checkpoint(backend, path, agent_id, backend_session_id
                                             int(conf["max_tail_bytes"]))
             if boundary is None:
                 refusal = "no_safe_boundary_" + why
-            elif _prefix_has_effects(turns[:boundary.seq]):
+            elif (effects := _prefix_effects(turns[:boundary.seq])) == "open":
                 refusal = "effect_bearing_prefix"
             else:
                 _, current_hash = _tail_file_hashes(path, before.size, before.size)
@@ -1347,6 +1369,9 @@ def _store_full_with_tail_checkpoint(backend, path, agent_id, backend_session_id
         _TAIL_STATES.note_refusal(key, revision, reason_token, "publication_not_written")
         _tail_log("checkpoint_not_written", retention=True)
     else:
+        if effects == "closed":
+            # Counted apart: before this narrowing it was bootstrap_effect.
+            _tail_log("checkpoint_closed_effects", retention=True)
         _cache_committed_tail(key, revision, checkpoint, raw_inputs, current_hash,
                               reason_token=reason_token)
     return source_invalidated
