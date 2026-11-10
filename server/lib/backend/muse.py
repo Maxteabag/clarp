@@ -23,7 +23,7 @@ from typing import Any, Callable, Optional
 from .. import agents as agents_db
 from .. import muse_transcript
 from ..tts_queue_records import enqueue as enqueue_tts
-from ..log import log, log_exception
+from ..log import log, log_exception, log_fault
 from ..proc_util import stderr_text
 from ..process_registry import TurnHandle
 from ..turn_lifecycle import TurnEvent
@@ -376,8 +376,8 @@ class MuseBackend(StreamJsonBackend):
             if on_error is not None and not st.failed_error and not reported:
                 try:
                     on_error(str(error)[:300])
-                except Exception:  # noqa: BLE001
-                    pass
+                except Exception as exc:  # noqa: BLE001
+                    log_fault("museErrorCallbackFailed", exc)
         finally:
             self.cancel_live_text(st)
             if agent_id:

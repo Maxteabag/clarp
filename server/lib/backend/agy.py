@@ -19,7 +19,7 @@ from .. import agy_transcript
 from .. import provider_capabilities
 from .. import server_identity
 from ..tts_queue_records import enqueue as enqueue_tts
-from ..log import log, log_exception
+from ..log import log, log_exception, log_fault
 from ..proc_util import stderr_text
 from ..process_registry import TurnHandle
 from ..turn_lifecycle import TurnEvent
@@ -840,8 +840,8 @@ class AgyBackend(StreamJsonBackend):
                 except Exception:  # noqa: BLE001
                     try:
                         handle.kill()
-                    except Exception:  # noqa: BLE001
-                        pass
+                    except Exception as exc:  # noqa: BLE001
+                        log_fault("agyForceKillFailed", exc)
             if st.terminal == "result":
                 st.terminal = "error"
                 st.pending_result = None

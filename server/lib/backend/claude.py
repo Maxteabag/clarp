@@ -48,7 +48,7 @@ from .. import turn_lifecycle
 from ..turn_lifecycle import TurnEvent
 from ..stream_pacing import LivePacer
 from ..claude_reply_evidence import ClaudeReplyEvidence, REPLY_CODEC
-from ..log import log, log_exception
+from ..log import log, log_exception, log_fault
 from ..proc_util import stderr_text
 from ..process_registry import TurnHandle
 from ..voice_preamble import persona_identity_instruction
@@ -804,8 +804,8 @@ class ClaudeBackend(Backend):
         if turn_token:
             try:
                 proc.wait(timeout=5)
-            except Exception:                         # noqa: BLE001
-                pass
+            except Exception as exc:                  # noqa: BLE001
+                log_fault("claudeExitWaitFailed", exc)
         if turn_token and proc.poll() is not None:
             try:
                 from .. import provider_background_jobs as provider_jobs
