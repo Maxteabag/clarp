@@ -317,3 +317,75 @@ synthetic branches:
    literal SQL: confirm they leave S1. If wanted later, they are a behaviour
    slice proven by the start-version matrix test, the schema goldens and the
    rehearsal, with the lead's explicit classification.
+
+
+<!-- Reviewed layering carry map4; source 3900bb7dc72b4eba83f19ee356bf60437d6cfa7e -->
+
+## Wave 2: lead-signed map corrections (937)
+
+These are the four existing-module corrections signed by Hobbles for assignment 937, paired with removal of their eight baseline edges in this commit. No other existing module is reclassified.
+
+- `conversation`: core → features because it is the HTTP-called application importer/query service; no library importer acquires a new upward edge.
+- `voice_markup`: features → core because its shared text normalization imports only `re`, independently of synthesis and delivery.
+- `diagnostics_settings`: features → core because cross-cutting logging capture settings depend only on standard library code and core `settings_store`.
+- `voice`: features → core because it is a pure JSON codec/constants module for `voice_id`, independently of voice providers and playback.
+
+The seven named exceptions and two aliases are unchanged. A3 source approval and captain remote architecture/gate receipts remain required before landing.
+
+
+<!-- Reviewed layering carry P5; source a0abd073f174a890148ac25933247d839e2d3328 -->
+- `workspace_paths` is a new core primitive owning call-time native/container path confinement and recovery. Feature `launch_paths` preserves exact function exports; lifecycle and the generated Stop helper import the canonical owner through named recipe repoints. Environment/path semantics and Stop ownership remain unchanged.
+
+The first eleven repaired upward edges are removed from the ratchet; this section does not authorize reclassifying any existing module or expanding named exceptions.
+
+
+<!-- Reviewed layering carry P7; source cd51365f4f41818624bb26e6c8cb4bc246b250fb -->
+- `runtime_rpc_server` owns the application runtime server and socket handler in the feature layer. Core `runtime_bridge` retains its canonical protocol/client; the runtime entry point constructs the same server from the new owner. Both class bodies and all Stop/admission/drain/cleanup order remain unchanged; there is no reverse core export.
+
+The first seventeen repaired upward edges are removed from the ratchet; this section does not authorize reclassifying any existing module or expanding named exceptions.
+
+
+<!-- Reviewed layering carry P10; source dd2e8d7a1677e848242aa861a9174a3046220d27 -->
+- Core backend leaves `agy_layout` and `claude_models` own the unchanged call-time AGY brain path value and Claude model-pin normalization. Feature transcript/capability modules re-export the canonical functions; hooks and launch import those functions directly without loading feature services. Environment/path/argv semantics remain unchanged.
+
+The first twenty-three repaired upward edges are removed from the ratchet; this section does not authorize reclassifying any existing module or expanding named exceptions.
+
+
+<!-- Reviewed layering carry P12; source eb91af95cb052f0bb69036a972c76a600dc8cf62 -->
+- `message_text` is a new core owner for unchanged injected-context delimiters and pure message normalization. Feature `message_context` retains automation display policy and re-exports canonical text objects; handwritten import/live/restore consumers use the lower owner. The checkpoint source closure includes the new implementation leaf, preserving existing parser-version invalidation policy.
+
+The first twenty-seven repaired upward edges are removed from the ratchet; this section does not authorize reclassifying any existing module or expanding named exceptions.
+
+
+<!-- Reviewed layering carry map_agent; source d0f694ca556f747263519fdd8d768e852e3afbf9 -->
+
+Additional explicit lead S1 signature (937): `agent_lifecycle` is classified core → features because it orchestrates application create/relaunch/fork/delete, persona/model/contact selection, roster persistence and announcements; all seven current incoming importers are application/HTTP, with no core/persistence importer.
+
+
+<!-- Reviewed layering carry P13; source d73e9074fdf6ff4cfed3aa70ed38d34d23c526c9 -->
+- `tool_output` is a new core owner for unchanged pure diff statistics and bounded output-tail helpers. Feature `live_tools` preserves exact helper exports and retains classification policy; OpenCode imports the lower helpers directly, with payload and slicing semantics unchanged.
+
+The first twenty-eight repaired upward edges are removed from the ratchet; this section does not authorize reclassifying any existing module or expanding named exceptions.
+
+
+<!-- Reviewed layering carry P14; source 5a79f5e528c6428cc55aa0692ff380c716b094d6 -->
+- `persistence.sse_events` owns unchanged durable SSE persistence below the core agents wrappers; `clip_records` is a new core owner for unchanged clip records using canonical protocol enums. Legacy feature modules directly export the canonical functions; transaction, callback and replay semantics remain unchanged.
+
+The first thirty repaired upward edges are removed from the ratchet; this section does not authorize reclassifying any existing module or expanding named exceptions.
+
+
+<!-- Reviewed layering carry P15; source af4e15bbd5e6b5c5b6c3d2b975676ad190537538 -->
+- `voice_levels` is a new core owner for unchanged narration level constants and coercion. Feature `voice_verbosity` retains spoken prompt and catalogue policy while exporting the canonical values and function; agent metadata normalization imports the lower callable directly.
+
+The first thirty-one repaired upward edges are removed from the ratchet; this section does not authorize reclassifying any existing module or expanding named exceptions.
+
+
+<!-- Reviewed layering carry P16; source 1c1af8e14e21894b828a66cadd848f2431564400 -->
+- `tts_queue_records` is a new core owner for unchanged durable TTS queue records and statuses. Feature `tts_queue` exports the canonical objects; five provider runners bind its enqueue function directly, while worker, streamer and dispatcher facade lookups retain their original ownership.
+
+The first thirty-six repaired upward edges are removed from the ratchet; this section does not authorize reclassifying any existing module or expanding named exceptions.
+
+
+<!-- Reviewed layering carry map_janitor; source 454cf0af7777fb53931cbc923e3dd02c0bdd9990 -->
+
+Additional explicit lead S1 signature (937): `janitor_store` is classified features → persistence because it owns Janitor table storage, transactions and JSON codecs, imports only standard library code and persistence `db`, and leaves application policy in its callers.

@@ -259,7 +259,7 @@ def test_a_stop_that_fails_on_a_locked_database_does_not_strand_later_sends(
     Nothing released the barrier, the pause was never written, and every later
     send waited behind it; Resume found nothing paused and did nothing."""
     import sqlite3
-    from lib.runtime_bridge import RuntimeRPCServer
+    from lib.runtime_rpc_server import RuntimeRPCServer
 
     world = World(tmp_path)
     runtime = RuntimeRPCServer(tmp_path / "runtime.sock",
@@ -295,7 +295,7 @@ def test_a_failed_stop_hands_work_admitted_meanwhile_to_the_free_slot(tmp_path, 
     Stop held its barrier must start once the barrier is rolled back, not
     wait in memory for an unrelated send."""
     import sqlite3
-    from lib.runtime_bridge import RuntimeRPCServer
+    from lib.runtime_rpc_server import RuntimeRPCServer
 
     world = World(tmp_path)
     turn_queue.enqueue(queue_id="q-recovered", agent_id=world.agent, session="mike",

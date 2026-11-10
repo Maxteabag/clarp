@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from lib import db, runtime_bridge as bridge, telemetry
+from lib import runtime_rpc_server as rpc_server
 
 
 def closed(con):
@@ -29,7 +30,7 @@ def open_stores():
 @pytest.fixture
 def rpc(tmp_path, monkeypatch):
     servers = []
-    original_finish = bridge._RuntimeRequestHandler.finish
+    original_finish = rpc_server._RuntimeRequestHandler.finish
     finished = queue.Queue()
     def observe_finish(handler):
         handles = (getattr(db._LOCAL, 'conn', None), getattr(telemetry._LOCAL, 'conn', None))
@@ -37,10 +38,10 @@ def rpc(tmp_path, monkeypatch):
             original_finish(handler)
         finally:
             finished.put(handles)
-    monkeypatch.setattr(bridge._RuntimeRequestHandler, 'finish', observe_finish)
+    monkeypatch.setattr(rpc_server._RuntimeRequestHandler, 'finish', observe_finish)
     def create(work):
         path = tmp_path / f'rpc-{len(servers)}.sock'
-        server = bridge.RuntimeRPCServer(path, dispatch_service=SimpleNamespace())
+        server = rpc_server.RuntimeRPCServer(path, dispatch_service=SimpleNamespace())
         server.dispatch_request = work
         server.handle_error = lambda *_: None  # test-owned deliberate transport errors
         thread = threading.Thread(target=server.serve_forever)
@@ -112,7 +113,7 @@ def test_handler_finish_closes_both_and_preserves_transaction_outcome(rpc, monke
             raise RuntimeError('synthetic failure')
         return {'ok': True, 'result': {'counter': 7}}
     if outcome == 'flush-fail':
-        setup = bridge._RuntimeRequestHandler.setup
+        setup = rpc_server._RuntimeRequestHandler.setup
         class FlushFailure:
             def __init__(self, wrapped):
                 self.wrapped = wrapped
@@ -123,11 +124,11 @@ def test_handler_finish_closes_both_and_preserves_transaction_outcome(rpc, monke
         def setup_with_failed_flush(handler):
             setup(handler)
             handler.wfile = FlushFailure(handler.wfile)
-        monkeypatch.setattr(bridge._RuntimeRequestHandler, 'setup', setup_with_failed_flush)
+        monkeypatch.setattr(rpc_server._RuntimeRequestHandler, 'setup', setup_with_failed_flush)
     if outcome == 'write-fail':
         def fail(*_):
             raise BrokenPipeError('synthetic disconnect')
-        monkeypatch.setattr(bridge._RuntimeRequestHandler, '_write', fail)
+        monkeypatch.setattr(rpc_server._RuntimeRequestHandler, '_write', fail)
     path, _, finished = rpc(work)
     response = request(path)
     handles = finished.get(timeout=5)

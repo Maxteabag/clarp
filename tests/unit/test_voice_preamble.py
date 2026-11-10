@@ -115,6 +115,15 @@ def test_narration_clause_follows_agent_level(tmp_path):
     # Narration is spoken-only: a text turn never carries it.
     assert vp.app_turn_instructions(voice=False, session="iris-1") == vp._APP_TURN_GUIDANCE + identity
 
+    agents.update_agent(agent_id, voice_verbosity=99)
+    stored = agents.get_by_agent_id(agent_id)["voice_verbosity"]
+    assert type(stored) is int and stored == 3
+    body = vp.app_turn_instructions(voice=True, session="iris-1")
+    assert body.endswith("\n\n" + voice_verbosity.narration_clause(3))
+    agents.update_agent(agent_id, voice_verbosity=None)
+    assert agents.get_by_agent_id(agent_id)["voice_verbosity"] == 3
+    assert vp.app_turn_instructions(voice=True, session="iris-1") == body
+
 
 def test_narration_clause_missing_session_is_quiet():
     assert vp._narration_clause("") == ""

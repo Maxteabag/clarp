@@ -14,7 +14,8 @@ import pytest
 from lib import agents as agents_db
 from lib import backends, live_hub, turn_lifecycle
 from lib.live_hub import LiveFanout, LiveHub
-from lib.runtime_bridge import RuntimeClient, RuntimeRPCServer
+from lib.runtime_bridge import RuntimeClient
+from lib.runtime_rpc_server import RuntimeRPCServer
 from lib.turn_lifecycle import TurnEvent
 
 

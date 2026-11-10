@@ -49,3 +49,18 @@ names = [
     "_recovery_parked", "snapshot_stop_state", "begin_stop", "restore_stop_state",
     "prepare_queued_for_finish",
 ]
+
+# Wave 2 strict layering 937: import-only workspace primitive repair.
+[[repoint]]
+name = "937-workspace-paths-turn-stop"
+file = "lib/turn_stop.py"
+from_module = ".launch_paths"
+to_module = ".workspace_paths"
+names = ["existing_workspace_path"]
+
+[[repoint]]
+name = "937-workspace-paths-agent-lifecycle"
+file = "lib/agent_lifecycle.py"
+from_module = ".launch_paths"
+to_module = ".workspace_paths"
+names = ["recover_user_path", "validate_workspace_path", "workspace_root"]
