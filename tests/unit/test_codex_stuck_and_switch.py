@@ -9,6 +9,8 @@ turn runs on it; until then the stopped agent's next turn is refused with a
 visible reason, since its thread is still held by the stuck process."""
 from __future__ import annotations
 
+from tests.codex_request import result_reply
+
 import threading
 from unittest.mock import Mock
 
@@ -26,7 +28,7 @@ def _client(fingerprint=b"old"):
     client.proc.poll.return_value = None
     client.auth_fingerprint = fingerprint
     client.refresh_requested = False
-    client.request = lambda method, params, timeout=30: {}
+    client.request = result_reply(lambda method, params, timeout=30: {})
     return client
 
 

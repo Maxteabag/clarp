@@ -17,12 +17,12 @@ def test_a_user_pause_while_the_moves_pause_is_outstanding_stays_paused(fake, tm
     waiting, release = threading.Event(), threading.Event()
     held, errors = [], []
     pause_answered, user_entered, user_done = threading.Event(), threading.Event(), threading.Event()
-    def request(method, params, timeout=30):
+    def request(method, params, timeout=30, **kwargs):
         if method == 'thread/goal/set' and params.get('status') == 'paused' and not held:
             held.append(True)
             waiting.set()
             assert release.wait(5)
-        result = original(method, params, timeout=timeout)
+        result = original(method, params, timeout=timeout, **kwargs)
         if method == 'thread/goal/set' and params.get('status') == 'paused':
             pause_answered.set()
         return result
@@ -70,11 +70,11 @@ def test_a_failed_restore_can_be_recovered_on_the_next_pass(fake, tmp_path, monk
     cas._move_put(thread, {'agent_id': agent, 'thread': thread, 'phase': 'moving',
                           'generation': 'old', 'updated_at': goal['updatedAt']})
     original, refused = client.request, []
-    def request(method, params, timeout=30):
+    def request(method, params, timeout=30, **kwargs):
         if method == 'thread/goal/set' and params.get('status') == 'active' and not refused:
             refused.append(True)
             raise RuntimeError('synthetic pre-handoff restore failure')
-        return original(method, params, timeout=timeout)
+        return original(method, params, timeout=timeout, **kwargs)
     monkeypatch.setattr(client, 'request', request)
     cas.recover_goal_moves()
     assert refused, 'control: the first activation was actually refused'
@@ -144,8 +144,8 @@ def test_a_goal_admitted_after_the_last_drain_snapshot_is_not_killed(fake, tmp_p
         assert begin.wait(5)
         return real_goal(*args, **kwargs)
     monkeypatch.setattr(client, 'goal', after_pool_lookup)
-    def request(method, params, timeout=30):
-        result = real_request(method, params, timeout=timeout)
+    def request(method, params, timeout=30, **kwargs):
+        result = real_request(method, params, timeout=timeout, **kwargs)
         if method == 'thread/goal/set' and params.get('status') == 'active':
             assert _wait(lambda: len(_goal_turns(fake, thread)) == before + 1)
             native_running.set()
@@ -232,8 +232,8 @@ def test_a_current_client_goal_admitted_after_the_quiet_snapshot_is_not_killed(f
         assert begin.wait(5)
         return real_goal(*args, **kwargs)
     monkeypatch.setattr(client, 'goal', after_pool_lookup)
-    def request(method, params, timeout=30):
-        result = real_request(method, params, timeout=timeout)
+    def request(method, params, timeout=30, **kwargs):
+        result = real_request(method, params, timeout=timeout, **kwargs)
         if method == 'thread/goal/set' and params.get('status') == 'active':
             assert _wait(lambda: len(_goal_turns(fake, thread)) == before + 1)
             native_running.set()

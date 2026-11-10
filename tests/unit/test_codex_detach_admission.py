@@ -7,6 +7,8 @@ thread) is not adopted again as a goal continuation.
 Lead: a send to the stopped agent waits behind the stuck process instead of
 failing, so the user's text is never lost; it runs once the process is gone.
 The first two scenarios are reviewer A's probes (WIP 3697662b)."""
+
+from tests.codex_request import result_reply
 import threading
 
 from lib import agents, codex_app_server as cas, turn_lifecycle as tl
@@ -21,6 +23,7 @@ def test_quiet_recycle_cannot_kill_a_newly_admitted_turn(tmp_path, monkeypatch):
     monkeypatch.setattr(cas, '_auth_fingerprint', lambda: b'old')
     requests = []
 
+    @result_reply
     def reply(method, params, timeout=30):
         requests.append(method)
         return {'thread': {'id': 'fresh-thread'}} if method.startswith('thread/') else {'turn': {'id': 'fresh-turn'}}

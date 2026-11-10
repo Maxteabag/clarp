@@ -1,5 +1,7 @@
 # Reviewer A's probe on a70a5aa2 (WIP 8dedc6af), kept unchanged as the round-5 regression.
 """An old goal snapshot must not erase protection for a newer activation."""
+
+from tests.codex_request import result_reply
 from lib import agent_goals, agents, codex_app_server as cas
 from tests.unit.test_codex_recycle_boundaries import _codex_agent
 from tests.unit.test_codex_stuck_and_switch import _client
@@ -17,6 +19,7 @@ def test_older_paused_notification_cannot_clear_an_inflight_resume(tmp_path, mon
         goal=agent_goals.from_codex({'objective': 'synthetic', 'status': 'paused'}))
     requested = []
 
+    @result_reply
     def reply(method, params, timeout=30):
         assert method == 'thread/goal/set' and params['status'] == 'active'
         requested.append(True)
@@ -47,6 +50,7 @@ def test_an_activation_whose_request_failed_keeps_the_process(tmp_path, monkeypa
     agent_goals.upsert(other, session='lost-reply', backend='codex',
         goal=agent_goals.from_codex({'objective': 'synthetic', 'status': 'paused'}))
 
+    @result_reply
     def reply(method, params, timeout=30):
         raise TimeoutError('codex app-server did not answer')
 

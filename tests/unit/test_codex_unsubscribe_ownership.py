@@ -1,5 +1,7 @@
 # Reviewer A's probe on 7d9f4367 (WIP 00e897e8), unchanged, as the stage-2 round-7 regression.
 """notSubscribed is not end evidence for a loaded thread's writer lock."""
+
+from tests.codex_request import result_reply
 import threading
 import pytest
 from lib import codex_app_server as cas
@@ -18,6 +20,7 @@ def test_a_not_subscribed_reply_does_not_release_a_live_writer(fake, tmp_path, m
     (fake / 'auth.json').write_text('account-two')
     original_request, original_shutdown = client.request, client.shutdown
     unsubscribes = []
+    @result_reply
     def request(method, params, timeout=30):
         result = original_request(method, params, timeout=timeout)
         if method == 'thread/unsubscribe':

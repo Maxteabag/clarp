@@ -1,5 +1,7 @@
 # Reviewer A's probes on 1d99a224 (WIP b28e0404), kept unchanged as the round-7 regression (lead's coarse rule).
 """Lead's coarse stage-1 rule: hold nonterminal goals and outstanding goal answers."""
+
+from tests.codex_request import result_reply
 import pytest
 
 from lib import agent_goals, agents, codex_app_server as cas
@@ -32,6 +34,7 @@ def test_an_outstanding_goal_read_keeps_even_a_user_paused_process(tmp_path, mon
     client, agent = _loaded_goal(tmp_path, monkeypatch, agent_goals.ACTIVE)
     requests = []
 
+    @result_reply
     def paused_reply(method, params, timeout=30):
         requests.append(method)
         if method == 'thread/goal/get':
@@ -53,7 +56,7 @@ def test_an_outstanding_goal_read_keeps_even_a_user_paused_process(tmp_path, mon
 
 def test_an_explicitly_user_paused_goal_can_release_the_process(tmp_path, monkeypatch):
     client, agent = _loaded_goal(tmp_path, monkeypatch, agent_goals.ACTIVE)
-    client.request = lambda *_a, **_k: {'goal': {'objective': 'synthetic', 'status': 'paused'}}
+    client.request = result_reply(lambda *_a, **_k: {'goal': {'objective': 'synthetic', 'status': 'paused'}})
     client.goal(agent, 'pause')
     client.recycle_if_quiet()
     assert client.proc.kill.called
@@ -65,6 +68,7 @@ def test_an_outstanding_stop_pause_holds_the_process(tmp_path, monkeypatch):
     client, agent = _loaded_goal(tmp_path, monkeypatch, agent_goals.PAUSED)
     seen = []
 
+    @result_reply
     def reply(method, params, timeout=30):
         client.recycle_if_quiet()
         seen.append(client.proc.kill.called)

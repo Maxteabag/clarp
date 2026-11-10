@@ -484,7 +484,7 @@ def test_one_failing_notification_does_not_end_the_shared_reader(monkeypatch):
         "5\n",
         json.dumps({"id": 7, "result": {"ok": True}}) + "\n",
     ])
-    client._pending[7] = (done, box)
+    client._pending[7] = (done, box, None)
 
     def locked(_method, _params):
         raise RuntimeError("database is locked")
@@ -622,7 +622,7 @@ def test_a_client_is_not_reused_while_its_reader_is_cleaning_up(monkeypatch):
                 release.wait(3)
             super().__setitem__(key, value)
 
-    client._pending[0] = (threading.Event(), SlowWaiter())
+    client._pending[0] = (threading.Event(), SlowWaiter(), None)
 
     class FakeClient:
         def __init__(self, agent_id, session, stream=None):
@@ -684,8 +684,8 @@ def test_each_codex_thread_carries_its_own_agent_session(tmp_path, monkeypatch):
     sent = []
     real_request = codex_app_server._Client.request
 
-    def recording(self, method, params, timeout=30):
-        result = real_request(self, method, params, timeout=timeout)
+    def recording(self, method, params, timeout=30, **kwargs):
+        result = real_request(self, method, params, timeout=timeout, **kwargs)
         sent.append((method, dict(params), result))
         return result
 
