@@ -240,8 +240,8 @@ class GeminiUpstream:
         if ws is not None:
             try:
                 ws.close()
-            except Exception as exc:
-                log_fault("oracleGeminiSocketCloseFail", exc)
+            except Exception:
+                pass
 
     def finish(self, reason):
         self.events.append({"type": "session.closed", "reason": reason, "usage": self.usage()})
