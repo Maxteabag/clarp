@@ -117,3 +117,12 @@ constants disagree. The iOS repository keeps the mirror table in its own
   app's `current`. Fix: update the app from TestFlight or the App Store.
 - Host event log `clientContractOutdated`: an app below `MIN_IOS_CONTRACT`
   connected; the record names the build.
+
+## Internal storage formats
+
+These entries record persisted internal formats separately from the Host/client
+protocol numbers above. Design-bound does not mean implemented or rollback-tested.
+
+| Storage format | Schema version | Previous-release behavior | Status and limits |
+|---|---|---|---|
+| `transcript_import_progress_v1`, JSON version 1 | 122 provisional, upgrade floor 61 unchanged | Additive relation only; existing checkpoint columns unchanged. The 9e695b4e runtime accepts versions at least 121 and ignores this relation; actual previous-release startup and business writes on the SAME upgraded disposable DB must still be proven. No destructive downgrade. | [Progress storage contract](design/transcript-import-progress-v1.md). Design-bound; migration/writer and rollback proof pending. Rows are progress only, never certified/fresh; bounded payload and exact-generation retirement. Optional certified checkpoint JSON must preserve legacy carry, and old writer/shadow erasure invalidates it. No HOST/minimum-client/feature bump. |
