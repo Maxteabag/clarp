@@ -213,7 +213,8 @@ def _binding_matches(owner, binding, path, importer):
     if token is None or len(token[0]) != 5:
         return False
     namespace, source, backend, agent, native = token[0]
-    return (namespace == binding.database_path and backend == binding.backend
+    from . import db
+    return (str(db.DB_PATH) == namespace == binding.database_path and backend == binding.backend
             and agent == owner and native == binding.backend_session_id
             and source == str(path)
             and (binding.source_file is None or source == binding.source_file))

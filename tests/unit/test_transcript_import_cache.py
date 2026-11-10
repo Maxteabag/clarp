@@ -1461,7 +1461,7 @@ def test_owner_lease_drains_real_import_and_observers_before_cutover(tmp_path, e
             direct.join(2)
             assert not direct.is_alive()
         assert cache.wait_for_background(2)
-        assert not errors and calls == ["old"]
+        assert not errors and calls == ([] if entry == "descriptor" else ["old"])
         assert cache.wait_owner_lease(lease, time.monotonic() + 1) is lease
         assert cache.acquire_owner_lease("lease-owner", _lease_binding(path, "old-native"),
                                         time.monotonic(), operation_id="drain-1") is lease
