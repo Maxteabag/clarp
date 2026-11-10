@@ -56,13 +56,15 @@ def _by_id(rows: list[dict]) -> dict[str, dict]:
 
 
 def _pages(limit: int) -> list[dict]:
+    """Every page of one walk. Bounded: a cursor that is ignored must fail, not spin."""
     pages, cursor = [], ""
-    while True:
+    for _ in range(50):
         page = snapshot.build_archived_agents(None, limit=limit, cursor=cursor)
         pages.append(page)
         cursor = page["next_cursor"]
         if cursor is None:
             return pages
+    raise AssertionError("the walk did not end: the cursor does not advance")
 
 
 # --- a client that does not ask ------------------------------------------------------
@@ -167,16 +169,72 @@ def test_agents_archived_in_the_same_millisecond_page_in_a_fixed_order():
     assert listed == ids
 
 
-@pytest.mark.parametrize("limit, expected", [(0, 1), (-5, 1), (1, 1), (200, 8), (10_000, 8)])
-def test_the_page_size_is_held_between_one_and_the_maximum(fleet, limit, expected):
-    assert len(snapshot.build_archived_agents(None, limit=limit)["agents"]) == expected
-    assert snapshot.ARCHIVED_PAGE_MAX == 200 and snapshot.ARCHIVED_PAGE_DEFAULT == 50
+def test_a_page_holds_at_most_the_maximum():
+    for n in range(snapshot.ARCHIVED_PAGE_MAX + 5):
+        _agent(f"many-{n:03d}", archived_at=1000 + n)
+    assert (snapshot.ARCHIVED_PAGE_MAX, snapshot.ARCHIVED_PAGE_DEFAULT) == (200, 50)
+    first = snapshot.build_archived_agents(None, limit=200)
+    assert len(first["agents"]) == 200 and first["total"] == 205 and first["next_cursor"]
+    rest = snapshot.build_archived_agents(None, limit=200, cursor=first["next_cursor"])
+    assert len(rest["agents"]) == 5 and rest["next_cursor"] is None
+    assert len(snapshot.build_archived_agents(None)["agents"]) == 50          # the default page
+    assert len(snapshot.build_archived_agents(None, limit=1)["agents"]) == 1
 
 
-@pytest.mark.parametrize("cursor", ["nonsense", "e30=", "WzEsMl0=", "WyJ4IiwieSJd", "W3RydWUsIngiXQ==", "x" * 600])
+@pytest.mark.parametrize("limit", [0, -5, 201, 10_000, True, 1.5, "5"])
+def test_a_limit_outside_one_to_the_maximum_is_refused_not_clamped(fleet, limit):
+    with pytest.raises(ValueError):
+        snapshot.build_archived_agents(None, limit=limit)
+    with pytest.raises(ValueError):
+        snapshot.SharedSnapshot().archived_page(None, limit=limit)
+
+
+def test_the_query_is_parsed_strictly():
+    parse = snapshot.parse_archived_query
+    assert parse("", "") == (50, None, "")                  # no value: the default page from the start
+    assert parse("1", "")[0] == 1 and parse("7", "")[0] == 7 and parse("200", "")[0] == 200
+    for bad in ("0", "201", "1000", "-1", "+5", " 5 ", "5 ", "1_0", "\u0665", "\uff15", "5.0", "0x5", "five"):
+        with pytest.raises(ValueError):
+            parse(bad, "")
+    with pytest.raises(ValueError):
+        parse("5", "nonsense")
+
+
+def _cursor(*parts) -> str:
+    import base64
+    return base64.urlsafe_b64encode(json.dumps(list(parts)).encode()).decode()
+
+
+@pytest.mark.parametrize("cursor", [
+    "nonsense", "e30=", "x" * 600,
+    _cursor(1, "a"),                    # the first shape of this cursor, without a listing token
+    _cursor("x", "y", ""), _cursor(True, "x", ""), _cursor(1, 2, ""), _cursor(1, "a", 3), _cursor(1, "a", "", "extra"),
+])
 def test_a_cursor_this_host_did_not_issue_is_refused(fleet, cursor):
     with pytest.raises(ValueError):
         snapshot.build_archived_agents(None, cursor=cursor)
+    with pytest.raises(ValueError):
+        snapshot.parse_archived_query("", cursor)
+
+
+def test_a_cursor_from_a_listing_that_is_gone_continues_from_its_agent(fleet):
+    """A Host restart, or a walk slower than the listing is held: the token names nothing."""
+    position = (1003, fleet["old3"])
+    page = snapshot.build_archived_agents(None, limit=10, cursor=_cursor(*position, "a-listing-long-gone"))
+    assert [row["agent_id"] for row in page["agents"]] == [fleet["old2"], fleet["old1"], fleet["old0"]]
+    shared = snapshot.SharedSnapshot().archived_page(None, limit=10, position=position, token="a-listing-long-gone")
+    assert [row["agent_id"] for row in shared["agents"]] == [row["agent_id"] for row in page["agents"]]
+
+
+def test_an_archive_time_that_is_not_a_number_does_not_break_the_listing(fleet):
+    """The snapshot answers such a row as it is; the listing must not turn it into an error."""
+    db.conn().execute("UPDATE agents SET archived_at='yesterday' WHERE agent_id=?", (fleet["old4"],))
+    full = _by_id(snapshot.build_agent_snapshot(None)["agents"])
+    assert full[fleet["old4"]]["archived_at"] == "yesterday"
+    listed = [row for page in _pages(limit=3) for row in page["agents"]]
+    assert len(listed) == 8 and listed[-1]["agent_id"] == fleet["old4"]        # still archived; it sorts last
+    assert json.dumps(listed[-1]) == json.dumps(full[fleet["old4"]])
+    assert fleet["old4"] not in _by_id(snapshot.build_agent_snapshot(None, include_archived=False)["agents"])
 
 
 # --- the Host does not pay for what it leaves out -----------------------------------------------
@@ -193,27 +251,22 @@ def _statements(build) -> list[str]:
     return seen
 
 
-def _busy_archived(count: int) -> None:
-    """Archived agents whose last recorded state is a busy one: each costs the full snapshot
-    its own statements (the open-turn lookup of the status line, the stuck-busy check)."""
+def _more_archived(count: int, *, state: str, prefix: str) -> None:
     for n in range(count):
-        _agent(f"stuck-{n}", archived_at=3000 + n, state="thinking")
+        _agent(f"{prefix}-{n}", archived_at=3000 + n, state=state)
 
 
-def test_archived_agents_cost_the_lean_snapshot_no_statement_of_their_own(fleet):
-    lean_before = len(_statements(lambda: snapshot.build_agent_snapshot(None, include_archived=False)))
-    full_before = len(_statements(lambda: snapshot.build_agent_snapshot(None)))
-
-    _busy_archived(40)
-
-    lean_after = len(_statements(lambda: snapshot.build_agent_snapshot(None, include_archived=False)))
-    full_after = len(_statements(lambda: snapshot.build_agent_snapshot(None)))
+def test_idle_archived_agents_cost_the_lean_snapshot_no_statement_of_their_own(fleet):
+    lean = lambda: snapshot.build_agent_snapshot(None, include_archived=False)
+    before = len(_statements(lean))
+    _more_archived(40, state="done", prefix="idle")
+    after = len(_statements(lean))
     # Forty more archived agents: nothing. (A couple of fleet-wide reads are cached by time.)
-    assert abs(lean_after - lean_before) <= 3, (lean_before, lean_after)
-    assert full_after >= full_before + 40, (full_before, full_after)  # the full snapshot pays per agent
+    assert abs(after - before) <= 3, (before, after)
+    assert len(lean()["agents"]) == 3 and lean()["archived_count"] == 48
 
 
-def test_only_the_agents_asked_for_are_reconciled(fleet, monkeypatch):
+def test_each_build_reconciles_the_agents_it_builds(fleet, monkeypatch):
     reconciled: list[str] = []
     real = reconcile.reconcile_agent
 
@@ -222,26 +275,18 @@ def test_only_the_agents_asked_for_are_reconciled(fleet, monkeypatch):
         return real(agent_id, *args, **kwargs)
 
     monkeypatch.setattr(reconcile, "reconcile_agent", record)
-    archived = set(_archived_ids(fleet))
+    archived = _archived_ids(fleet)
 
     snapshot.build_agent_snapshot(None, include_archived=False)
-    assert set(reconciled) == set(fleet.values()) - archived and len(reconciled) == 3
+    assert set(reconciled) == set(fleet.values()) - set(archived) and len(reconciled) == 3
 
     reconciled.clear()
     snapshot.build_archived_agents(None, limit=3)
-    assert reconciled == _archived_ids(fleet)[:3]          # the page, nothing else
+    assert reconciled == archived                         # the whole listing, once, whatever the page size
 
     reconciled.clear()
     snapshot.build_agent_snapshot(None)
     assert set(reconciled) == set(fleet.values())          # the default: every agent, as before
-
-
-def test_a_page_of_archived_agents_costs_the_same_however_many_there_are(fleet):
-    small = len(_statements(lambda: snapshot.build_archived_agents(None, limit=5)))
-    _busy_archived(40)
-    large = len(_statements(lambda: snapshot.build_archived_agents(None, limit=5)))
-    # The five newest are now busy ones, each with its own statements; the other 43 cost nothing.
-    assert large <= small + 5 * 4, (small, large)
 
 
 # --- message previews: three statements each when the cache cannot answer ------------------------
@@ -285,7 +330,7 @@ def test_a_cold_preview_cache_costs_the_lean_snapshot_nothing_for_archived_agent
     _cold_previews()
     computed.clear()
     page = snapshot.build_archived_agents(None, limit=3)
-    assert sorted(computed) == sorted(_archived_ids(fleet)[:3])   # the page's three, nothing else
+    assert sorted(computed) == sorted(archived)            # the archived listing: the archived agents, no others
     assert all(row["last_message"] == "You: hello" for row in page["agents"])
 
     _cold_previews()

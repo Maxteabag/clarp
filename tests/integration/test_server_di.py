@@ -9,6 +9,7 @@ This is the payoff for the AddScoped-style DI refactor.
 """
 import contextlib
 import faulthandler
+import http.client
 import json
 import os
 import pathlib
@@ -696,15 +697,63 @@ def test_snapshot_leaves_archived_agents_out_only_when_asked(running_server):
     assert page["agents"][0] == next(a for a in full["agents"] if a["session"] == "rachel")
 
 
-@pytest.mark.parametrize("query", ["?cursor=nonsense", "?limit=many", "?limit=1.5", "?cursor=e30="])
-def test_archived_agents_refuses_a_bad_query(running_server, query):
+def test_archived_agents_refuses_a_bad_query(running_server):
     base, _ctx, _srv = running_server
-    with pytest.raises(urllib.error.HTTPError) as error:
-        _get(base + "/agents/archived" + query)
-    assert error.value.code == 400
-    assert json.loads(error.value.read()) == {"error": "invalid archived agents query"}
+    for query in (
+        "?cursor=nonsense", "?cursor=e30=", "?limit=many", "?limit=1.5", "?limit=0", "?limit=201", "?limit=-1",
+        "?limit=1_0", "?limit=%205", "?limit=5%20", "?limit=%D9%A5",      # underscore, spaces, an Arabic digit
+    ):
+        with pytest.raises(urllib.error.HTTPError) as error:
+            _get(base + "/agents/archived" + query)
+        assert error.value.code == 400, query
+        assert json.loads(error.value.read()) == {"error": "invalid archived agents query"}, query
     # An empty value is no value: the default page.
     assert _get(base + "/agents/archived?limit=&cursor=")[0] == 200
+    assert _get(base + "/agents/archived?limit=200")[0] == 200
+
+
+def test_a_host_fault_on_archived_agents_is_not_answered_as_a_bad_query(running_server, monkeypatch, capfd):
+    """The query was fine; the Host failed. That is answered and logged the way the
+    snapshot route's faults are, never as 400 'invalid archived agents query'."""
+    from lib import scheduler
+
+    base, _ctx, _srv = running_server
+    assert _get(base + "/agents/archived")[0] == 200
+
+    def fail():
+        raise ValueError("synthetic Host fault")
+
+    outcomes = {}
+    with monkeypatch.context() as m:
+        m.setattr(scheduler, "list_schedules", fail)
+        capfd.readouterr()
+        for path in ("/agents/snapshot", "/agents/archived"):
+            try:
+                outcomes[path] = _get(base + path)[0]
+            except urllib.error.HTTPError as error:
+                outcomes[path] = error.code
+            except (OSError, http.client.HTTPException) as error:
+                outcomes[path] = type(error).__name__
+        logged = capfd.readouterr().err
+    assert outcomes["/agents/archived"] != 400
+    assert outcomes["/agents/archived"] == outcomes["/agents/snapshot"]       # the same answer as the snapshot's
+    assert logged.count("ValueError: synthetic Host fault") == 2             # and both are in the journal
+    # The Host is fine afterwards.
+    assert _get(base + "/agents/archived")[0] == 200
+
+
+def test_archived_agents_lists_a_row_whose_archive_time_is_not_a_number(running_server):
+    from lib import agents as agents_db, db
+
+    base, _ctx, _srv = running_server
+    rachel = agents_db.get_by_session("rachel")["agent_id"]
+    db.conn().execute("UPDATE agents SET archived_at='yesterday' WHERE agent_id=?", (rachel,))
+    status, body = _get(base + "/agents/snapshot")
+    assert status == 200
+    status, body = _get(base + "/agents/archived")
+    assert status == 200
+    page = json.loads(body)
+    assert [a["session"] for a in page["agents"]] == ["rachel"] and page["agents"][0]["archived_at"] == "yesterday"
 
 
 @pytest.mark.parametrize("endpoint", ["/agent-file", "/agent-files"])
