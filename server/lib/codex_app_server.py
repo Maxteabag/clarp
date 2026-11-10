@@ -340,17 +340,31 @@ class _Client:
                     continue
                 active.handle._done.set()
             if active.on_error:
-                self._callback(active.on_error, message)
+                self._callback(active.on_error, message, agent_id=active.agent_id)
 
-    def _callback(self, callback: Callable, value: Any) -> None:
-        """Never block the protocol reader in dispatch/queue lifecycle code."""
+    def _callback(self, callback: Callable, value: Any, *, agent_id: str = "") -> None:
+        """Never block the reader; retain the actual writer through cleanup."""
+        from . import db, native_rotation_admission as rotation_admission
+
+        token = rotation_admission.begin_completion(agent_id) if agent_id else None
+
         def run() -> None:
             try:
                 callback(value)
-            except Exception as exc:  # noqa: BLE001
-                log_exception("codexAppServerCallbackFail", exc,
-                              detail=self.agent_id)
-        threading.Thread(target=run, daemon=True).start()
+            except Exception as exc:  # noqa: BLE001 - keep callback failure visible
+                log_exception("codexAppServerCallbackFail", exc, detail=agent_id or self.agent_id)
+            finally:
+                try:
+                    db.close_local()
+                finally:
+                    if token is not None:
+                        rotation_admission.finish_selected(agent_id, token)
+        try:
+            threading.Thread(target=run, daemon=True, name="codex-callback").start()
+        except BaseException:
+            if token is not None:
+                rotation_admission.publication_unknown(agent_id, token)
+            raise
 
     def _pick_active(self, params: dict) -> _ActiveTurn | None:
         thread_id = str(params.get("threadId") or "")
@@ -496,53 +510,55 @@ class _Client:
                     stream=active.stream, item_key=item_key or None)
             return
         if method == "turn/completed":
-            turn = params.get("turn") or {}
-            status = str(turn.get("status") or "completed")
-            error = turn.get("error") or {}
-            try:
-                _backend().update_live_text(
-                    active.state, agent_id=active.agent_id,
-                    session=active.session, trace_id=active.trace_id,
-                    stream=active.stream, force=True)
-            except Exception as exc:  # noqa: BLE001 - the turn must still end
-                log_exception("codexAppServerFlushFail", exc,
-                              detail=active.agent_id)
-            with self._claims_lock:   # only this claim: a successor may own the slot
-                if getattr(self, "_actives", {}).get(active.agent_id) is active:
-                    self._actives.pop(active.agent_id, None)
-                if self.active is active:
-                    self.active = None
-            active.handle._done.set()
-            if getattr(self, "detached_agents", None):
-                # Not on the reader: a send may hold the pool lock while it
-                # waits for this reader to deliver its turn/start reply.
-                threading.Thread(target=self.recycle_if_quiet, daemon=True,
-                                 name="codex-recycle").start()
-            if getattr(self, "draining", False):
-                _drain_later(self)
-            if status == "failed":
-                message = str(error.get("message") or "codex turn failed")
-                if active.on_error:
-                    self._callback(active.on_error, CodexTurnFailure(
-                        message, self, active.produced_output))
-            elif status == "interrupted":
-                if not getattr(active.handle, "stop_requested", False):
-                    # No Stop asked for it. A move must never cause this
-                    # (pausing an active goal leaves its turn running); the
-                    # post-release check counts these lines (BACKENDS-06b).
-                    log("codexTurnInterruptedUnasked",
-                        f"agent={active.agent_id} thread={str(active.thread_id)[:8]} "
-                        f"moving={bool(getattr(self, 'draining', False))} "
-                        f"goal_paused_for_move={_move_get(active.thread_id) is not None}")
-                if active.on_error:
-                    self._callback(active.on_error, "codex turn interrupted")
-            elif active.on_result:
-                self._callback(active.on_result, {
-                    "usage": {"input_tokens": active.state.tokens_in,
-                              "output_tokens": active.state.tokens_out},
-                    "last_agent_message": active.state.last_agent_message,
-                })
-            _backend().broadcast_transcript(active.stream, active.agent_id, active.session)
+            from . import native_rotation_admission as rotation_admission
+            with rotation_admission.completing(active.agent_id):
+                turn = params.get("turn") or {}
+                status = str(turn.get("status") or "completed")
+                error = turn.get("error") or {}
+                try:
+                    _backend().update_live_text(
+                        active.state, agent_id=active.agent_id,
+                        session=active.session, trace_id=active.trace_id,
+                        stream=active.stream, force=True)
+                except Exception as exc:  # noqa: BLE001 - the turn must still end
+                    log_exception("codexAppServerFlushFail", exc,
+                                  detail=active.agent_id)
+                with self._claims_lock:   # only this claim: a successor may own the slot
+                    if getattr(self, "_actives", {}).get(active.agent_id) is active:
+                        self._actives.pop(active.agent_id, None)
+                    if self.active is active:
+                        self.active = None
+                active.handle._done.set()
+                if getattr(self, "detached_agents", None):
+                    # Not on the reader: a send may hold the pool lock while it
+                    # waits for this reader to deliver its turn/start reply.
+                    threading.Thread(target=self.recycle_if_quiet, daemon=True,
+                                     name="codex-recycle").start()
+                if getattr(self, "draining", False):
+                    _drain_later(self)
+                if status == "failed":
+                    message = str(error.get("message") or "codex turn failed")
+                    if active.on_error:
+                        self._callback(active.on_error, CodexTurnFailure(
+                            message, self, active.produced_output), agent_id=active.agent_id)
+                elif status == "interrupted":
+                    if not getattr(active.handle, "stop_requested", False):
+                        # No Stop asked for it. A move must never cause this
+                        # (pausing an active goal leaves its turn running); the
+                        # post-release check counts these lines (BACKENDS-06b).
+                        log("codexTurnInterruptedUnasked",
+                            f"agent={active.agent_id} thread={str(active.thread_id)[:8]} "
+                            f"moving={bool(getattr(self, 'draining', False))} "
+                            f"goal_paused_for_move={_move_get(active.thread_id) is not None}")
+                    if active.on_error:
+                        self._callback(active.on_error, "codex turn interrupted", agent_id=active.agent_id)
+                elif active.on_result:
+                    self._callback(active.on_result, {
+                        "usage": {"input_tokens": active.state.tokens_in,
+                                  "output_tokens": active.state.tokens_out},
+                        "last_agent_message": active.state.last_agent_message,
+                    }, agent_id=active.agent_id)
+                _backend().broadcast_transcript(active.stream, active.agent_id, active.session)
 
     def _mirror_goal(self, thread_id: str, goal: dict | None) -> None:
         """Keep Clarp's goal table and clients in step with the app-server."""

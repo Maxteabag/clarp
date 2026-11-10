@@ -215,3 +215,38 @@ def defer_selected(agent_id, head, token, callback):
                     if owner is not None and token in owner.selected:
                         owner.failed_selected.add(token)
         raise
+
+
+def begin_completion(agent_id):
+    """An already-owned native turn may finish after admission was closed."""
+    with _TURN_LOCK:
+        owner = _cell(agent_id)
+        if len(owner.selected) >= _MAX_OWNERS:
+            raise journal.RotationConflict("native completion capacity exhausted")
+        token = object()
+        owner.selected.add(token)
+        return token
+
+
+@contextmanager
+def completing(agent_id):
+    token = begin_completion(agent_id)
+    try:
+        yield
+    finally:
+        finish_selected(agent_id, token)
+
+
+def publication_unknown(agent_id, token):
+    with _TURN_LOCK:
+        owner = _owners.get(agent_id)
+        if owner is not None and token in owner.selected:
+            owner.failed_selected.add(token)
+
+
+def drained(agent_id, operation_id):
+    with _TURN_LOCK:
+        owner = _owners.get(agent_id)
+        if owner is None or owner.operation != operation_id:
+            raise journal.RotationConflict("rotation admission owner disappeared")
+        return owner.admissions == 0 and not owner.selected
