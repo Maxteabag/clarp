@@ -57,6 +57,17 @@ def test_no_roster_section_uses_full_builtin(tmp_path):
     assert set(loaded.roster) == set(config.DEFAULT_ROSTER)
 
 
+def test_missing_claude_effort_defaults_high_but_explicit_empty_is_kept(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text("[agents]\n")
+    config.reset_cache()
+    assert config.load(path).claude_effort == "high"
+
+    path.write_text('[agents]\nclaude_effort = ""\n')
+    config.reset_cache()
+    assert config.load(path).claude_effort == ""
+
+
 def test_claude_cli_provider_defaults_to_official(tmp_path):
     path = tmp_path / "config.toml"
     path.write_text("[agents]\n")
