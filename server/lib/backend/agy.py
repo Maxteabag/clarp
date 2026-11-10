@@ -19,7 +19,7 @@ from .. import agy_transcript
 from .. import provider_capabilities
 from .. import server_identity
 from ..tts_queue_records import enqueue as enqueue_tts
-from ..log import log, log_exception
+from ..log import log, log_exception, log_fault
 from ..proc_util import stderr_text
 from ..process_registry import TurnHandle
 from ..turn_lifecycle import TurnEvent
@@ -840,8 +840,8 @@ class AgyBackend(StreamJsonBackend):
                 except Exception:  # noqa: BLE001
                     try:
                         handle.kill()
-                    except Exception:  # noqa: BLE001
-                        pass
+                    except Exception as exc:  # noqa: BLE001
+                        log_fault("agyForceKillFailed", exc)
             if st.terminal == "result":
                 st.terminal = "error"
                 st.pending_result = None
@@ -1052,7 +1052,7 @@ class AgyBackend(StreamJsonBackend):
 
         One item per turn, like the one /log row it becomes: the final commit
         writes the reply under the same row id."""
-        from .. import live_hub
+        from .. import live_core as live_hub
         from ..message_live import _live_message_id
         hub = live_hub.current()
         if hub is None or not agent_id or not st.conversation_id:
