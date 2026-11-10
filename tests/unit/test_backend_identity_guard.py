@@ -55,7 +55,7 @@ BASELINE: dict[tuple[str, str], int] = {
     ('lib/janitor_hotseat.py', 'collection'): 1,
     ('lib/janitor_hotseat.py', 'dict_key'): 1,
     ('lib/janitors.py', 'collection'): 3,
-    ('lib/live_hub.py', 'dict_key'): 1,
+    ('lib/live_core.py', 'dict_key'): 1,
     ('lib/managed_skills.py', 'collection'): 4,
     ('lib/managed_skills.py', 'dict_key'): 1,
     ('lib/model_avatars.py', 'collection'): 3,
