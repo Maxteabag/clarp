@@ -369,3 +369,135 @@ def test_compaction_still_reports_a_missing_agy(tmp_path, monkeypatch):
     monkeypatch.setattr(compaction.shutil, "which",
                         lambda name: None if name == "agy" else f"/usr/bin/{name}")
     assert compaction.compact_session("marcus") == {"ok": False, "error": "agy not on PATH"}
+
+
+# WAVE2-EXCEPTS-CLASS: the managed-turn probe must retain its refusal and
+# retry boundaries while making a failed SQL probe observable. These cases
+# require the reviewed shared log_fault foundation to be composed first.
+_PROBE_SECRET = 'SYNTHETIC_AGY_PROBE_SECRET_937'
+
+
+class ProbeFault(RuntimeError):
+    def __str__(self):
+        raise AssertionError('probe exception message must not be formatted')
+
+    def __repr__(self):
+        raise AssertionError('probe exception repr must not be formatted')
+
+
+@pytest.fixture
+def managed_probe(monkeypatch):
+    import io
+    from lib import eventlog, log as log_module
+    from lib.backend import agy_hooks
+    stderr, reports, raw, queries, sleeps = io.StringIO(), [], [], [], []
+    clock = [100.0]
+    rows = []
+    fault_at = [None]
+
+    def fetchone():
+        if fault_at[0] == 'fetch':
+            raise ProbeFault(_PROBE_SECRET)
+        return rows.pop(0)
+
+    def execute(sql, params):
+        queries.append((sql, params))
+        if fault_at[0] == 'execute':
+            raise ProbeFault(_PROBE_SECRET)
+        return SimpleNamespace(fetchone=fetchone)
+
+    # Replace this module's dependency reference, not global agents/DB state.
+    monkeypatch.setattr(agy_hooks, 'agents', SimpleNamespace(conn=lambda: SimpleNamespace(execute=execute)))
+    monkeypatch.setattr(agy_hooks, 'time', SimpleNamespace(sleep=sleeps.append))
+    monkeypatch.setattr(log_module, 'time', SimpleNamespace(monotonic=lambda: clock[0],
+                                                         strftime=log_module.time.strftime))
+    monkeypatch.setattr(log_module.sys, 'stderr', stderr)
+    monkeypatch.setattr(eventlog, 'emit', lambda *a, **kw: reports.append((a, kw)))
+    monkeypatch.setattr(os, 'write', lambda fd, data: raw.append((fd, data)) or len(data))
+    log_module._FAULT_LOG_THROTTLE.clear()
+    log_module._FAULT_LOG_COUNTS.clear()
+    yield SimpleNamespace(probe=agy_hooks._started_by_clarp_for, rows=rows, fault_at=fault_at,
+                          stderr=stderr, reports=reports, raw=raw, queries=queries,
+                          sleeps=sleeps, clock=clock, log_module=log_module)
+    log_module._FAULT_LOG_THROTTLE.clear()
+    log_module._FAULT_LOG_COUNTS.clear()
+
+
+@pytest.mark.parametrize('fault_at', ['execute', 'fetch'])
+def test_managed_probe_query_error_reports_safely_without_retry_or_sleep(managed_probe, fault_at):
+    p = managed_probe
+    p.fault_at[0] = fault_at
+    assert p.probe('fixture-agent', 'fixture-token') is False
+    assert len(p.queries) == 1 and p.sleeps == []
+    assert len(p.reports) == 1
+    args, report = p.reports[0]
+    assert args == ('server', 'agyHookTurnProbeFailed')
+    assert report['detail'] == {'error_type': 'ProbeFault', 'suppressed': 0}
+    evidence = p.stderr.getvalue() + json.dumps(p.reports) + repr(p.raw)
+    assert _PROBE_SECRET not in evidence and 'fixture-token' not in evidence and 'fixture-agent' not in evidence
+    assert 'agyHookTurnProbeFailed' in p.stderr.getvalue()
+
+
+@pytest.mark.parametrize('rows,expected,queries,sleeps', [
+    ([('fixture-agent', None)], True, 1, []),
+    ([('other-agent', None)], False, 1, []),
+    ([('fixture-agent', 123)], False, 1, []),
+    ([None, None], False, 2, [.3]),
+    ([None, ('fixture-agent', None)], True, 2, [.3]),
+])
+def test_managed_probe_success_and_missing_row_keep_original_attempts(managed_probe, rows, expected, queries, sleeps):
+    p = managed_probe
+    p.rows.extend(rows)
+    assert p.probe('fixture-agent', 'fixture-token') is expected
+    assert len(p.queries) == queries and p.sleeps == sleeps
+    assert p.reports == [] and p.stderr.getvalue() == '' and p.raw == []
+
+
+def test_managed_probe_empty_token_does_no_work(managed_probe):
+    p = managed_probe
+    assert p.probe('fixture-agent', '') is False
+    assert p.queries == p.sleeps == p.reports == p.raw == []
+    assert p.stderr.getvalue() == ''
+
+
+def test_managed_probe_post_fetch_comparison_error_still_raises(managed_probe):
+    class MalformedRow:
+        def __getitem__(self, index):
+            raise ValueError('synthetic row comparison failure')
+    p = managed_probe
+    p.rows.append(MalformedRow())
+    with pytest.raises(ValueError, match='synthetic row comparison failure'):
+        p.probe('fixture-agent', 'fixture-token')
+    assert len(p.queries) == 1 and p.sleeps == []
+    assert p.reports == [] and p.stderr.getvalue() == ''
+
+
+def test_managed_probe_diagnostic_throttle_never_caches_probe_failure(managed_probe):
+    p = managed_probe
+    p.fault_at[0] = 'execute'
+    for _ in range(3):
+        assert p.probe('fixture-agent', 'fixture-token') is False
+    assert len(p.queries) == 3 and p.sleeps == [] and len(p.reports) == 1
+    p.clock[0] += 60
+    assert p.probe('fixture-agent', 'fixture-token') is False
+    assert len(p.queries) == 4 and len(p.reports) == 2
+    assert p.reports[-1][1]['detail']['suppressed'] == 2
+
+
+def test_managed_probe_all_fault_sinks_failing_keeps_original_false(managed_probe, monkeypatch):
+    p = managed_probe
+    p.fault_at[0] = 'execute'
+    class BrokenStream:
+        def write(self, data):
+            raise OSError(_PROBE_SECRET)
+        def flush(self):
+            raise OSError(_PROBE_SECRET)
+    def fail(*args, **kwargs):
+        raise OSError(_PROBE_SECRET)
+    from lib import eventlog
+    monkeypatch.setattr(p.log_module.sys, 'stderr', BrokenStream())
+    monkeypatch.setattr(eventlog, 'emit', fail)
+    monkeypatch.setattr(os, 'write', fail)
+    assert p.probe('fixture-agent', 'fixture-token') is False
+    assert len(p.queries) == 1 and p.sleeps == []
+    assert p.log_module._FAULT_LOG_COUNTS['dropped'] == 1
