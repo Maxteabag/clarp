@@ -221,14 +221,13 @@ class PoolOwner:
             with self.lock:
                 actors = list(self.actors)
             for actor in actors:
-                if getattr(actor, "_owner_start_attempted", False):
-                    remaining = deadline - _real_monotonic()
-                    if remaining <= 0:
-                        break
-                    # start() and join() are serialized: a late start cannot
-                    # fall between an unstarted snapshot and final CLOSED.
-                    if actor.ident is not None:
-                        actor.join(remaining)
+                remaining = deadline - _real_monotonic()
+                if remaining <= 0:
+                    break
+                # Never join a never-started object. Late ordinary starts
+                # and the final CLOSED transition share the support lock.
+                if actor.ident is not None:
+                    actor.join(remaining)
             with self.lock:
                 alive = [actor for actor in self.actors if actor.is_alive()]
                 if not alive and not self.bodies:
