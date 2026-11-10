@@ -1662,7 +1662,7 @@ def test_owner_lease_covers_real_connection_close_on_every_worker_exit(tmp_path,
     path.write_text("{}\n")
     marker_entered, marker_release = threading.Event(), threading.Event()
     close_entered, close_release = threading.Event(), threading.Event()
-    actual, failures, calls = [], [], []
+    actual, failures, calls, workers = [], [], [], []
     close_error = sqlite3.OperationalError("selected real connection close failed")
     lease = None
     hook = threading.excepthook
@@ -1696,6 +1696,7 @@ def test_owner_lease_covers_real_connection_close_on_every_worker_exit(tmp_path,
         @property
         def _clarp_transcript_completion_v1(self):
             if threading.current_thread().name == "transcript-import" and not actual:
+                workers.append(threading.current_thread())
                 connection = db.conn()  # actual owned SQLite connection, not a close receipt
                 actual.append(connection)
                 db._LOCAL.conn = OwnedConnection(connection)
@@ -1728,6 +1729,9 @@ def test_owner_lease_covers_real_connection_close_on_every_worker_exit(tmp_path,
             cache.wait_owner_lease(lease, time.monotonic())
         close_release.set()
         assert cache.wait_for_background(3)
+        assert len(workers) == 1
+        workers[0].join(3)
+        assert not workers[0].is_alive(), "actual worker/hook did not finish"
         if preflight == "close_failure":
             assert failures == [close_error]
             assert actual[0].execute("SELECT 1").fetchone()[0] == 1
@@ -1750,11 +1754,15 @@ def test_owner_lease_covers_real_connection_close_on_every_worker_exit(tmp_path,
             assert cache.wait_for_background(3)
         finally:
             try:
-                # Independent real close before clearing ONLY this test's
-                # fail-closed poison for teardown; no positive drain oracle
-                # above is produced by this fixture cleanup.
-                for connection in actual:
-                    connection.close()
+                try:
+                    for worker in workers:
+                        worker.join(3)
+                        assert not worker.is_alive(), "real worker still owns cleanup"
+                finally:
+                    # Independent real close, even if join/assertion failed;
+                    # never the positive drain oracle above.
+                    for connection in actual:
+                        connection.close()
                 if lease is not None:
                     with cache._guard:
                         cache._owner_admissions.states["lease-owner"].cleanup_uncertain = False
