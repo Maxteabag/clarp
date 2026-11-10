@@ -38,8 +38,8 @@ def _witness(value):
 
 
 def _read(path, max_bytes):
-    # A bad materialized-path answer must not block on FIFO open, follow a
-    # redirected symlink, or reach a device before its type can be checked.
+    # A bad materialized-path answer must not block on FIFO open or follow a
+    # redirected final symlink. Check regular-file type before any data read.
     fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NONBLOCK | os.O_NOFOLLOW)
     try:
         before = os.fstat(fd)

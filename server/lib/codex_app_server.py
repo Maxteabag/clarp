@@ -925,6 +925,11 @@ class _Client:
         return agent_goals.public(agent_goals.get(agent_id))
 
     def _goal_request(self, agent: dict, action: str, thread_id: str, objective: str) -> dict:
+        from . import native_rotation_goals
+        if action in ("start", "resume"):
+            native_rotation_goals.require_activation(
+                agent["agent_id"], thread_id, getattr(self, "rotation_incarnation", None))
+
         def mirror(result):
             goal = result.get("goal") if isinstance(result, dict) else None
             if action == "start":
@@ -935,7 +940,11 @@ class _Client:
         if action == "get":
             result = self.request("thread/goal/get", {"threadId": thread_id}, on_result=mirror)
         else:
-            self._ensure_loaded(agent, thread_id)
+            # A carried/protected goal can be cleared through Codex's
+            # materialized-thread API without resuming its autonomous work.
+            # Keep the existing load behavior for ordinary, uncarried goals.
+            if action != "clear" or native_rotation_goals.get(agent["agent_id"]) is None:
+                self._ensure_loaded(agent, thread_id)
             if action == "clear":
                 self.request("thread/goal/clear", {"threadId": thread_id},
                              on_result=lambda _result: self._mirror_goal(thread_id, None, user_action="clear"))
@@ -1044,6 +1053,9 @@ class _Client:
     def _ensure_loaded(self, agent: dict, thread_id: str) -> None:
         """A goal call needs the thread open in this process; a live turn or an
         earlier resume already did that."""
+        from . import native_rotation_goals
+        native_rotation_goals.require_epoch(
+            agent["agent_id"], thread_id, getattr(self, "rotation_incarnation", None))
         if thread_id in self._loaded_threads:
             return
         for active in list(getattr(self, "_actives", {}).values()):
@@ -1090,6 +1102,13 @@ class _Client:
             on_claimed()
         launched = False
         try:
+            # The pool claim was released by on_claimed above; never acquire
+            # a SQLite connection while retaining that pool lock. A new
+            # transport cannot silently resume an uncertified carried epoch.
+            if owner:
+                from . import native_rotation_goals
+                native_rotation_goals.require_epoch(
+                    owner, backend_session_id, getattr(self, "rotation_incarnation", None))
             if getattr(handle, "stop_requested", False):
                 raise _StoppedBeforeLaunch()
             if backend_session_id and not is_new_session:
