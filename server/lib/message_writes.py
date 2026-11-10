@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 from .clock import iso_from_ms as _iso_from_ms, now_ms
 from .db import conn, note_import_holds_lock
@@ -583,31 +583,54 @@ def store_transcript_turns(*, agent_id: str, backend_session_id: str,
                            on_stored=None,
                            out_seqs: list[int] | None = None,
                            checkpoint_status: dict | None = None,
+                           recertify_checkpoint: Callable[[], bool] | None = None,
                            ) -> list[dict[str, Any]]:
-    """Import a whole parsed transcript (the authoritative full import).
+    """Full materialization; only opted native checkpoints may recertify.
 
-    ``capture_at``/``captured``/``on_stored`` serve the incremental-import
-    shadow (lib.transcript_incremental): the import's carried state as it
-    reaches turn ``capture_at`` is copied into ``captured``, and
-    ``on_stored(database, captured)`` writes the checkpoint inside the
-    import's last transaction, after every row, and ``out_seqs`` receives
-    the transcript turn of each returned row. A checkpoint that fails to
-    write is logged and dropped; it never fails the import.
+    Recertification never rewrites products or replays effects. Its callback
+    validates source bytes outside the writer after the products commit.
+    All ordinary/legacy/shadow callers retain the original single-pass path.
     """
-    # Pure text normalization can dominate a large transcript import; do it
-    # before taking SQLite's single writer lock, once per assistant message.
     visible_replies = _visible_replies(turns)
     database = _facade().conn()
-    # Pure transcript work runs once, never while holding the writer. The
-    # database-dependent prelude belongs to the probe's single read snapshot.
     phases = _row_phases(turns)
+    binding = (_checkpoint_db_binding(database)
+               if recertify_checkpoint is not None and on_stored is not None else None)
+    checkpoint_published = checkpoint_failed = False
+    if recertify_checkpoint is not None and on_stored is not None:
+        original_publish = on_stored
+
+        def watched_publish(current_database, carry):
+            nonlocal checkpoint_published, checkpoint_failed
+            try:
+                result = original_publish(current_database, carry)
+            except BaseException:
+                checkpoint_failed = True
+                raise
+            checkpoint_published = result is True
+            return result
+
+        on_stored = watched_publish
+
+    def recover(previous_writer=None):
+        if (recertify_checkpoint is None or on_stored is None
+                or checkpoint_published or checkpoint_failed
+                or (previous_writer is not None
+                    and not previous_writer._publication_refusals <= {"foreign_commit_yield"})):
+            return
+        if _recertify_full_checkpoint(
+                database, binding, agent_id=agent_id, backend_session_id=backend_session_id,
+                source_file=source_file, turns=turns, capture_at=capture_at, on_stored=on_stored,
+                prepare=recertify_checkpoint, phases=phases, visible_replies=visible_replies):
+            if checkpoint_status is not None:
+                checkpoint_status.pop("refused", None)
+
     writer = _ImportWriter(database, locked=False)
     try:
         prelude = _prepare_import_prelude(
             writer, agent_id, backend_session_id, turns, phases=phases)
         out = _store_transcript_turns_txn(
-            writer, agent_id=agent_id,
-            backend_session_id=backend_session_id,
+            writer, agent_id=agent_id, backend_session_id=backend_session_id,
             source_file=source_file, turns=turns,
             capture_at=capture_at, captured=captured, out_seqs=out_seqs,
             visible_replies=visible_replies, prelude=prelude.for_pass())
@@ -615,36 +638,142 @@ def store_transcript_turns(*, agent_id: str, backend_session_id: str,
             _write_checkpoint(writer, database, on_stored, captured)
         if database.in_transaction:
             database.execute("COMMIT")
+        recover()
         return out
     except _WriteNeeded:
         if database.in_transaction:
             database.execute("ROLLBACK")
+    except _CheckpointCleanupUncertain:
+        raise  # never turn cleanup uncertainty into a whole-import SQL retry
     except Exception:
         if database.in_transaction:
             database.execute("ROLLBACK")
         raise
-    # Copy consumable lists before admission. Re-read only the prelude's raw
-    # database inputs under BEGIN IMMEDIATE. Unrelated commits do not matter;
-    # changed inputs rebuild just their component, without a second probe or
-    # a new failure path. Row decisions remain protected, as before RM-N10.
     prepared = prelude.for_pass()
     writer = _ImportWriter(database, locked=True)
     try:
         prepared = _revalidate_import_prelude(writer, agent_id, backend_session_id, prepared)
         out = _store_transcript_turns_txn(
-            writer, agent_id=agent_id,
-            backend_session_id=backend_session_id,
+            writer, agent_id=agent_id, backend_session_id=backend_session_id,
             source_file=source_file, turns=turns,
             capture_at=capture_at, captured=captured, out_seqs=out_seqs,
             visible_replies=visible_replies, prelude=prepared)
         if on_stored is not None and writer.checkpoint_allowed(checkpoint_status):
             _write_checkpoint(writer, database, on_stored, captured)
         writer.finish()
+        recover(writer)
         return out
+    except _CheckpointCleanupUncertain:
+        raise  # never turn cleanup uncertainty into a whole-import SQL retry
     except Exception:
         if database.in_transaction:
             database.execute("ROLLBACK")
         raise
+
+
+class _CheckpointCleanupUncertain(RuntimeError):
+    """Non-retryable cleanup uncertainty, with both original errors retained."""
+    def __init__(self, primary, cleanup):
+        super().__init__("checkpoint recertification cleanup uncertain")
+        self.primary_error = primary
+        self.cleanup_error = cleanup
+
+
+def _checkpoint_db_binding(database):
+    """Physical/connection continuity for this import, not a durable DB epoch."""
+    import pathlib
+    try:
+        if _facade().conn() is not database:
+            return None
+        rows = database.execute("PRAGMA database_list").fetchall()
+        name = next((row[2] for row in rows if row[1] == "main"), "")
+        if not name:
+            return None
+        path = pathlib.Path(name).resolve()
+        stat = path.stat()
+        return (str(path), stat.st_dev, stat.st_ino)
+    except Exception as exc:  # noqa: BLE001 - only checkpoint admission is refused
+        from .log import log_exception
+        log_exception("transcriptCheckpointBindingSkip", exc)
+        return None
+
+
+def _recertify_full_checkpoint(database, binding, *, agent_id, backend_session_id,
+                               source_file, turns, capture_at, on_stored,
+                               prepare, phases, visible_replies):
+    """Fresh read-only carry, then exact five-input check in a new writer.
+
+    Previous products are already committed. Never run a second row-writing
+    pass here, and never certify the old carry from a final raw reread.
+    """
+    if (binding is None or database.in_transaction
+            or _checkpoint_db_binding(database) != binding):
+        return False
+    fresh = {}
+    primary = None
+    probe = _ImportWriter(database, locked=False)
+    try:
+        prelude = _prepare_import_prelude(
+            probe, agent_id, backend_session_id, turns,
+            phases=phases, guard_carry=True)
+        _store_transcript_turns_txn(
+            probe, agent_id=agent_id, backend_session_id=backend_session_id,
+            source_file=source_file, turns=turns,
+            capture_at=capture_at, captured=fresh,
+            visible_replies=visible_replies, prelude=prelude.for_pass())
+        expected = prelude.raw_carry_inputs()
+        if not fresh or _checkpoint_db_binding(database) != binding:
+            return False
+        database.execute("COMMIT")  # end read snapshot BEFORE writer admission
+        if not prepare():  # source hashing/IO occurs OUTSIDE the writer
+            return False
+        writer = _ImportWriter(database, locked=True)
+        writer.execute("SELECT 1")
+        if _checkpoint_db_binding(database) != binding:
+            return False
+        current = _prepare_import_prelude(
+            writer, agent_id, backend_session_id, [], raw_only=True)
+        if current != expected:
+            return False
+        published = False
+
+        def publish(current_database, carried):
+            nonlocal published
+            published = on_stored(current_database, carried) is True
+
+        _write_checkpoint(writer, database, publish, fresh)
+        writer.finish()
+        return published
+    except _WriteNeeded as exc:
+        primary = exc
+        return False  # no locked retry/effects/changed products in recertification
+    except Exception as exc:  # noqa: BLE001 - already committed products stand
+        primary = exc
+        try:
+            from .log import log_exception
+            log_exception("transcriptCheckpointRecertifySkip", exc)
+        except BaseException as diagnostic:
+            primary = diagnostic  # this operation's escaping diagnostic, not caller state
+            raise
+        return False
+    except BaseException as exc:
+        primary = exc
+        raise
+    finally:
+        try:
+            if database.in_transaction:
+                database.execute("ROLLBACK")
+            if database.in_transaction:
+                raise RuntimeError("recertification rollback did not end its transaction")
+        except BaseException as cleanup:
+            # Never demote a pending non-Exception control into an ordinary
+            # catchable error. Preserve its exact object and the other error.
+            if primary is not None and not isinstance(primary, Exception):
+                raise primary from cleanup
+            if not isinstance(cleanup, Exception):
+                raise cleanup from primary
+            # SQLITE_BUSY must not authorize replay of committed products.
+            raise _CheckpointCleanupUncertain(primary, cleanup) from cleanup
 
 
 def _visible_replies(turns: list[dict[str, Any]]) -> list[str]:
