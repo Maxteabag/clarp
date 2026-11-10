@@ -27,6 +27,7 @@ from collections import Counter
 from typing import Any
 
 from .activity import summarize_tool_activity
+from . import native_rotation_context
 from .log import log_exception
 from .text_util import truncate
 from .voice_markup import strip_hidden_blocks
@@ -493,6 +494,9 @@ def parse_turns(path: pathlib.Path) -> list[dict]:
     Raises OSError if the file can't be read."""
     turns: list[dict] = []
     structured_items: Counter[tuple[str, str]] = Counter()
+    native_thread_id = ""
+    metadata_conflict = False
+    rotation_prefix = True
     with path.open(encoding="utf-8") as f:
         for line in f:
             line = line.strip()
@@ -510,6 +514,24 @@ def parse_turns(path: pathlib.Path) -> list[dict]:
             if not isinstance(payload, dict):
                 payload = {}
             inner = payload.get("type") or ev.get("type") or ""
+            if ev.get("type") == "session_meta":
+                supplied = payload.get("id")
+                if not isinstance(supplied, str) or not supplied:
+                    metadata_conflict = True
+                elif native_thread_id and native_thread_id != supplied:
+                    metadata_conflict = True
+                else:
+                    native_thread_id = supplied
+            if inner in ("task_started", "turn_started"):
+                rotation_prefix = False
+            if rotation_prefix and native_thread_id and not metadata_conflict:
+                # History-only injection precedes the first actual user turn.
+                # Tail ranges begin at task_started; missing session metadata
+                # is never replaced by a filename/prefix or inferred UUID.
+                item = payload.get("item") or ev.get("item")
+                candidate = item if isinstance(item, dict) else payload
+                if native_rotation_context.is_context_item(candidate, native_thread_id):
+                    continue
 
             if inner == "message":
                 role = str(payload.get("role") or "")
