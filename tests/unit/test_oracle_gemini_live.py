@@ -18,6 +18,7 @@ import pytest
 from lib import (agents, oracle_calls_stable, oracle_delegations, oracle_gemini_live, oracle_live_stable,
                  oracle_memory, oracle_voice_provider)
 from lib.oracle_live_usage import LiveUsage
+from tests.oracle_faults import SECRET, fault_sinks
 
 
 from websocket import WebSocketTimeoutException as Timeout
@@ -313,3 +314,97 @@ def test_closing_while_the_reader_waits_still_delivers_session_closed(monkeypatc
     upstream = oracle_gemini_live.GeminiUpstream("k", model="m", voice="v")
     assert json.loads(upstream.recv())["type"] == "session.closed"
     assert upstream.recv() == ""
+
+
+def _upstream_without_provider(monkeypatch):
+    socket = FakeGemini()
+    monkeypatch.setattr(oracle_gemini_live, '_connect', lambda key: socket)
+    upstream = oracle_gemini_live.GeminiUpstream('fixture-key', model='fixture-model', voice='fixture', clock=lambda: 0)
+    return upstream, socket
+
+
+@pytest.mark.parametrize("sink_failed", [False, True])
+def test_gemini_detached_close_fault_retains_closed_state(monkeypatch, fault_sinks, sink_failed):
+    upstream, socket = _upstream_without_provider(monkeypatch)
+    closes = []
+    fault_sinks.failed = sink_failed
+    fault_sinks.lock = upstream.lock
+
+    def close():
+        closes.append(1)
+        raise OSError(SECRET)
+    socket.close = close
+    assert upstream.close() is None
+    assert upstream.closed and upstream.ws is None
+    assert upstream.close() is None
+    assert closes == [1]
+    fault_sinks.assert_fault('oracleGeminiSocketCloseFail')
+
+
+@pytest.mark.parametrize("failure_at", [None, 'connect', 'send', 'recv'])
+@pytest.mark.parametrize("sink_failed", [False, True])
+def test_gemini_resume_reports_close_fault_after_unlock_on_every_exit(
+        monkeypatch, fault_sinks, failure_at, sink_failed):
+    upstream, old = _upstream_without_provider(monkeypatch)
+    upstream.handle = 'fixture-handle'
+    upstream.setup = {'model': 'fixture-model'}
+    upstream.speaking = upstream.muted = True
+    effects = []
+    original = RuntimeError('synthetic reconnect failure')
+    fault_sinks.failed = sink_failed
+    fault_sinks.lock = upstream.lock
+
+    def close():
+        effects.append('old.close')
+        raise OSError(SECRET)
+
+    def connect(key):
+        assert key == 'fixture-key'
+        effects.append('connect')
+        if failure_at == 'connect':
+            raise original
+        return successor
+
+    def send(raw):
+        effects.append(('send', json.loads(raw)))
+        if failure_at == 'send':
+            raise original
+
+    def recv():
+        effects.append('recv')
+        if failure_at == 'recv':
+            raise original
+        return '{"setupComplete": {}}'
+    successor = SimpleNamespace(send=send, recv=recv)
+    old.close = close
+    monkeypatch.setattr(oracle_gemini_live, '_connect', connect)
+    if failure_at:
+        with pytest.raises(RuntimeError) as raised:
+            upstream.resume('fixture-reason')
+        assert raised.value is original
+        assert upstream.ws is None and upstream.reconnects == 0
+        assert upstream.speaking and upstream.muted
+        assert list(upstream.events) == []
+    else:
+        assert upstream.resume('fixture-reason') is True
+        assert upstream.ws is successor and upstream.reconnects == 1
+        assert not upstream.speaking and not upstream.muted
+        assert list(upstream.events) == [{'type': 'oracle_v2.provider_observation', 'source': {
+            'type': 'gemini.resumed', 'reason': 'fixture-reason', 'reconnects': 1}}]
+    expected = ['old.close', 'connect', ('send', {'setup': {
+        'model': 'fixture-model', 'sessionResumption': {'handle': 'fixture-handle'}}}), 'recv']
+    assert effects == expected[:{'connect': 2, 'send': 3}.get(failure_at, 4)]
+    assert upstream.reconnect_at is None
+    fault_sinks.assert_fault('oracleGeminiResumeCloseFail')
+
+
+@pytest.mark.parametrize("field,value", [('closed', True), ('handle', None), ('setup', None)])
+def test_gemini_resume_ineligible_is_false_without_provider_or_fault(monkeypatch, fault_sinks, field, value):
+    upstream, old = _upstream_without_provider(monkeypatch)
+    upstream.handle, upstream.setup = 'fixture-handle', {'model': 'fixture-model'}
+    setattr(upstream, field, value)
+    calls = []
+    monkeypatch.setattr(oracle_gemini_live, '_connect', lambda key: calls.append(key))
+    assert upstream.resume('fixture-reason') is False
+    assert upstream.ws is old
+    assert calls == [] and fault_sinks.structured == [] and fault_sinks.writes == []
