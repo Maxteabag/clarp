@@ -1,20 +1,17 @@
 name: Tests
 
-# A pull request and a push to main run the critical gate (tests/critical.txt), which
-# answers in a few minutes; a dispatch, the nightly schedule and a calling workflow
-# (Docker, also on every push to main) run the full suite.
+# Only the critical gate (tests/critical.txt, a few minutes) ever runs by itself: on a
+# pull request, and when the Docker workflow calls this one (every push to main). The
+# full suite never starts automatically (owner's rule: no 15-minute runs, no nightly);
+# someone starts it by hand with "Run workflow" when they want it.
 on:
   pull_request:
-  push:
-    branches: [main]
   workflow_dispatch:
-  schedule:
-    - cron: "23 2 * * *"
   workflow_call:
     inputs:
       suite:
         type: string
-        default: full
+        default: critical
 
 permissions:
   contents: read
@@ -24,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      SUITE: ${{ ((github.event_name == 'pull_request' || github.event_name == 'push') && inputs.suite != 'full') && 'critical' || 'full' }}
+      SUITE: ${{ (github.event_name == 'workflow_dispatch' || inputs.suite == 'full') && 'full' || 'critical' }}
     steps:
       - uses: actions/checkout@v4
         with:
