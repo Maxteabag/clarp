@@ -139,7 +139,7 @@ def advance(agent_id, operation_id, expected_phase, next_phase, *, new_thread_id
                        "revision": current["revision"] + 1})
 
 
-def bind(agent_id, operation_id):
+def bind(agent_id, operation_id, *, goal_transfer=None, new_goal=None, incarnation=None):
     with settings_store.transaction():
         current = get(agent_id)
         if current and current["operation_id"] == operation_id and current["phase"] == "bound":
@@ -147,4 +147,15 @@ def bind(agent_id, operation_id):
             return current
         current = _owned(agent_id, operation_id, "plans_carried")
         agents.bind_backend_session(agent_id, current["new_thread_id"])
+        if goal_transfer is not None:
+            from . import agent_goals, native_rotation_goals
+            if goal_transfer.get("old_thread_id") != current["old_thread_id"]:
+                raise RotationConflict("carried goal source mismatch")
+            logical = native_rotation_goals.install(
+                agent_id, operation_id, current["new_thread_id"], goal_transfer, new_goal, incarnation)
+            agent = agents.get_by_agent_id(agent_id)
+            agent_goals.upsert(agent_id, session=agent["session"], backend="codex",
+                               goal=agent_goals.from_codex(logical))
+        elif new_goal is not None or incarnation is not None:
+            raise RotationConflict("native goal response has no carried plan")
         return _write({**current, "phase": "bound", "revision": current["revision"] + 1})
