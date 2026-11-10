@@ -34,6 +34,8 @@ import threading
 import time
 import uuid
 
+from .log import log_fault
+
 URL = ("wss://generativelanguage.googleapis.com/ws/"
        "google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent")
 INPUT_MIME = "audio/pcm;rate=24000"
@@ -238,8 +240,8 @@ class GeminiUpstream:
         if ws is not None:
             try:
                 ws.close()
-            except Exception:
-                pass
+            except Exception as exc:
+                log_fault("oracleGeminiSocketCloseFail", exc)
 
     def finish(self, reason):
         self.events.append({"type": "session.closed", "reason": reason, "usage": self.usage()})
@@ -283,33 +285,41 @@ class GeminiUpstream:
 
     def resume(self, reason):
         """Reconnect with the latest resumption handle; False when there is none."""
-        with self.lock:
-            self.reconnect_at = None
-            if self.closed or not self.handle or self.setup is None:
-                return False
-            old, self.ws = self.ws, None
-            try:
-                if old is not None:
-                    old.close()
-            except Exception:
-                pass
-            ws = _connect(self.api_key)
-            ws.send(json.dumps({"setup": {**self.setup, "sessionResumption": {"handle": self.handle}}}))
-            deadline = self.clock() + SETUP_TIMEOUT_SECONDS
-            while True:
+        close_fault = None
+        try:
+            with self.lock:
+                self.reconnect_at = None
+                if self.closed or not self.handle or self.setup is None:
+                    return False
+                old, self.ws = self.ws, None
                 try:
-                    raw = ws.recv()
-                except self.timeout_exc:
-                    if self.clock() >= deadline:
-                        raise GeminiUnavailable("Gemini Live did not resume the session")
-                    continue
-                if not raw:
-                    raise GeminiUnavailable("Gemini Live closed while resuming")
-                if "setupComplete" in json.loads(raw):
-                    break
-            self.ws = ws
-            self.reconnects += 1
-            self.speaking = self.muted = False
+                    if old is not None:
+                        old.close()
+                except Exception as exc:
+                    close_fault = exc
+                ws = _connect(self.api_key)
+                ws.send(json.dumps({"setup": {**self.setup, "sessionResumption": {"handle": self.handle}}}))
+                deadline = self.clock() + SETUP_TIMEOUT_SECONDS
+                while True:
+                    try:
+                        raw = ws.recv()
+                    except self.timeout_exc:
+                        if self.clock() >= deadline:
+                            raise GeminiUnavailable("Gemini Live did not resume the session")
+                        continue
+                    if not raw:
+                        raise GeminiUnavailable("Gemini Live closed while resuming")
+                    if "setupComplete" in json.loads(raw):
+                        break
+                self.ws = ws
+                self.reconnects += 1
+                self.speaking = self.muted = False
+        finally:
+            try:
+                if close_fault is not None:
+                    log_fault("oracleGeminiResumeCloseFail", close_fault)
+            finally:
+                close_fault = None
         self.events.append({"type": "oracle_v2.provider_observation",
                             "source": {"type": "gemini.resumed", "reason": reason, "reconnects": self.reconnects}})
         return True

@@ -11,6 +11,7 @@ import uuid
 from urllib.parse import urlparse
 
 from . import agents, config, message_store, oracle_delegations
+from .log import log_fault
 from .oracle_diagnostics import OracleJournal
 from .oracle_webrtc import ConversationController
 
@@ -313,7 +314,8 @@ class Sideband:
         self.controller.close()
         self.pool.shutdown(wait=False, cancel_futures=True)
         try: self.socket.close()
-        except Exception: pass
+        except Exception as exc:
+            log_fault("oracleStableSocketCloseFail", exc)
         if self.journal: self.journal.close()
 
 
