@@ -133,7 +133,6 @@ NAMED_EXCEPTIONS = {
 }
 
 UPWARD_BASELINE = frozenset({
-    'lib.agent_lifecycle -> lib.mcp_selection',
     'lib.agents -> lib.artifacts',
     'lib.agents -> lib.goal_ledger',
     'lib.agents -> lib.janitors',
