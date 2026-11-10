@@ -97,22 +97,35 @@ def test_lock_report_identifies_owner_without_bound_values(tmp_path, capsys):
 
 def test_identical_lock_reports_are_rate_limited(tmp_path, capsys):
     path = tmp_path / "rate-limited.sqlite"
-    owner = _tracked_connection(path)
-    waiter = _tracked_connection(path)
-    owner.execute("CREATE TABLE values_table (value TEXT)")
-    owner.execute("BEGIN IMMEDIATE")
+    owner = waiter = None
+    try:
+        owner = _tracked_connection(path)
+        waiter = _tracked_connection(path)
+        owner.execute("CREATE TABLE values_table (value TEXT)")
+        owner.execute("BEGIN IMMEDIATE")
 
-    for _ in range(2):
-        with pytest.raises(sqlite3.OperationalError, match="database is locked"):
-            waiter.execute("INSERT INTO values_table VALUES (?)", ("hidden",))
+        for _ in range(2):
+            with pytest.raises(sqlite3.OperationalError, match="database is locked"):
+                waiter.execute("INSERT INTO values_table VALUES (?)", ("hidden",))
 
-    stderr = capsys.readouterr().err
-    assert stderr.count("sqlite_lock_wait") == 1
-    assert stderr.count("sqlite_lock_owner") == 1
-
-    owner.rollback()
-    owner.close()
-    waiter.close()
+        stderr = capsys.readouterr().err
+        lines = stderr.splitlines()
+        waits = [line for line in lines if line.startswith("sqlite_lock_wait ")]
+        owners = [line for line in lines if line.startswith(
+            f"sqlite_lock_owner connection={id(owner)} ")]
+        assert len(waits) == 1
+        assert "sql='INSERT INTO values_table VALUES (?)' " in waits[0]
+        assert len(owners) == 1
+        assert "begin_sql='BEGIN IMMEDIATE' " in owners[0]
+        assert "last_sql='BEGIN IMMEDIATE' " in owners[0]
+        assert "hidden" not in stderr
+    finally:
+        try:
+            if owner is not None:
+                owner.close()
+        finally:
+            if waiter is not None:
+                waiter.close()
 
 
 def test_retry_locked_succeeds_after_a_busy_error():
