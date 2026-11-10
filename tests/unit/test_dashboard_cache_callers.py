@@ -99,3 +99,60 @@ def test_real_caller_finishes_reads_before_dashboard_projection(monkeypatch,call
     finally:
         for cursor in held:
             cursor.close()
+
+
+def _write_during_the_fill(monkeypatch, agent_id):
+    """One unrelated committed write, from another connection, in the middle of a batch."""
+    original, fired = message_previews._agent_preview, []
+    def compute(current, *args):
+        value = original(current, *args)
+        if current == agent_id and not fired:
+            fired.append(True)
+            foreign = sqlite3.connect(str(db.DB_PATH))
+            try:
+                foreign.execute("UPDATE agents SET custom_status='busy' WHERE agent_id=?", (agent_id,))
+                foreign.commit()
+            finally:
+                foreign.close()
+        return value
+    monkeypatch.setattr(message_previews, '_agent_preview', compute)
+    return fired
+
+
+def _computed(monkeypatch):
+    calls, original = [], message_previews._agent_preview
+    def compute(agent_id, *args):
+        calls.append(agent_id)
+        return original(agent_id, *args)
+    monkeypatch.setattr(message_previews, '_agent_preview', compute)
+    return calls
+
+
+def test_the_warm_up_leaves_a_warm_cache_on_a_database_that_is_being_written(monkeypatch):
+    """After a restart the warm-up runs the projection once so the first
+    client finds it cached. On a busy Host a write always landed during it,
+    the fill was discarded, and the first agent lists paid for every agent."""
+    ids = seed(30)
+    monkeypatch.setattr(cache_warmup, '_steps', lambda: (
+        ('dashboard-previews', lambda: message_previews.dashboard_messages()),))
+    fired = _write_during_the_fill(monkeypatch, ids[10])
+    cache_warmup.CacheWarmupWorker(delay_sec=0)._run()     # synchronous real orchestration
+    assert fired
+
+    calls = _computed(monkeypatch)
+    result = snapshot.build_agent_snapshot(None)
+    assert calls == []                                     # the first agent list computes no preview
+    assert {row['agent_id']: row['last_message'] for row in result['agents']} == {
+        agent_id: 'You: synthetic' for agent_id in ids}
+
+
+def test_a_snapshot_written_into_while_cold_leaves_the_next_one_warm(monkeypatch):
+    ids = seed(30)
+    fired = _write_during_the_fill(monkeypatch, ids[3])
+    first = snapshot.build_agent_snapshot(None)            # cold, with a write in the middle
+    assert fired
+
+    calls = _computed(monkeypatch)
+    second = snapshot.build_agent_snapshot(None)
+    assert calls == []
+    assert [row['last_message'] for row in second['agents']] == [row['last_message'] for row in first['agents']]
