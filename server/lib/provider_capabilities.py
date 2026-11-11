@@ -662,6 +662,30 @@ def _opencode_models_listing(
                         remembered_at or observed_at, "stale")
 
 
+def observed_model_ids(provider_id: str) -> frozenset[str] | None:
+    """The model ids the provider's own CLI listed when the Host last looked,
+    or None when it has no such list (never looked, the probe failed and the
+    bundled fallback stands in, or the list was empty).
+
+    Reads the cached catalogue only and never probes, like the agy check: a
+    launch must not wait on discovery. The Host fills the cache at boot
+    (cache_warmup) and whenever a client opens a model picker. Ids the
+    catalogue appends from the bundled list are part of it."""
+    try:
+        with _cache_condition:
+            cached = copy.deepcopy(_cache[1]) if _cache is not None else None
+        provider = (cached or {}).get("providers", {}).get(provider_id, {})
+        source = provider.get("source") if isinstance(provider, dict) else None
+        if not isinstance(source, dict) or source.get("kind") != "cli_probe":
+            return None
+        ids = frozenset(
+            item["id"] for item in provider.get("models") or []
+            if isinstance(item, dict) and isinstance(item.get("id"), str) and item["id"])
+        return ids or None
+    except Exception:  # noqa: BLE001 - no observation is not a refusal
+        return None
+
+
 def is_agy_model_id(value: Any) -> bool:
     """True only for the strict slug grammar observed from ``agy models``."""
     return isinstance(value, str) and bool(_AGY_MODEL_ID.fullmatch(value.strip()))

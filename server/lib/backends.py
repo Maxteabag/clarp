@@ -268,6 +268,18 @@ def is_valid_model(backend: str, model: str | None) -> bool:
     return by_id(backend).is_valid_model(model)
 
 
+def known_models(backend: str) -> list[str]:
+    """See Backend.known_models: what an invalid model id may be chosen from."""
+    return by_id(backend).known_models()
+
+
+def unknown_model_detail(backend: str, model: str) -> str:
+    """What a refusal of ``model`` adds: the ids the backend offers, or ""
+    when it has no list."""
+    known = known_models(backend)
+    return f"{backend} has no model '{model}'; it offers " + ", ".join(known) if known else ""
+
+
 
 
 
