@@ -574,6 +574,97 @@ def test_a_liveness_check_that_cannot_answer_leaves_the_row(tmp_path):
         live_trace=lambda *_: False)] == [request]
 
 
+# --- properties of dead_rows and the boundary (the review's surviving mutants) ---
+
+
+def _handed_over(agent_id, request, start):
+    first = _turn(agent_id, request, start + 1, ended=start + 400_000)
+    _state(agent_id, "idle", start + 400_000, {
+        "reason": "update_handoff", "trace_id": request, "dispatch_not_started": True,
+        "dispatch_not_started_through_turn_id": first, "origin": "automation"})
+    return first
+
+
+def _queued_wake_row(tmp_path):
+    service, backends, agent_id, plan, request, text = _admitted_wake(tmp_path)
+    turn_queue.enqueue(
+        queue_id=request, agent_id=agent_id, session="mike", text=text,
+        trace_id=request, client_msg_id=request, synthesize_audio=False,
+        origin="automation", sender_agent_id="")
+    return agent_id, request, db.now_ms() - STALE_AGE_MS
+
+
+def _never_dead(request):
+    assert turn_queue.dead_rows(live_trace=_td.owns_inflight_trace) == []
+    task_goal_recovery._retire_dead_wakes(db.now_ms())
+    assert turn_queue.status(request) == "queued"
+
+
+def test_a_wake_an_update_handed_over_and_recovery_will_relaunch_is_not_dead(tmp_path):
+    agent_id, request, start = _queued_wake_row(tmp_path)
+    _handed_over(agent_id, request, start)
+    assert turn_queue._launch_status(turn_queue.get(request)) == "handoff"
+    assert [row["queue_id"] for row in turn_queue.pending_for_dispatch()] == [request]
+    _never_dead(request)
+
+
+def test_a_wake_with_proof_that_it_never_launched_is_not_dead(tmp_path):
+    agent_id, request, start = _queued_wake_row(tmp_path)
+    turn = _turn(agent_id, request, start + 1, settled=start + 5000, outcome="failed")
+    _state(agent_id, "interrupted", start + 5000, {
+        "trace_id": request, "dispatch_not_started": True,
+        "dispatch_not_started_turn_id": turn, "message": "Message saved; backend did not start."})
+    assert turn_queue._launch_status(turn_queue.get(request)) == "retryable"
+    _never_dead(request)
+
+
+def test_only_the_newest_turn_of_the_trace_decides(tmp_path):
+    """A wake parked again after an update handoff: its first turn is long
+    over, its newest is open and waiting for an account."""
+    agent_id, request, start = _queued_wake_row(tmp_path)
+    _handed_over(agent_id, request, start)
+    _turn(agent_id, request, start + 400_013)
+    _state(agent_id, "thinking", start + 400_014, {
+        "dispatch": "claude", "trace_id": request, "account_recovery": "waiting",
+        "message": WAITING})
+    _never_dead(request)
+
+
+def test_a_dead_row_of_another_agent_does_not_free_this_agents_queue(tmp_path):
+    service, backends, agent_id = _goal_owner(tmp_path)
+    backends.live = False
+    plan = _arm(_goal())
+    other = agents_db.create_agent(persona="Bella", voice_id="V", cwd=str(tmp_path),
+                                   session="bella", backend="claude")
+    then = db.now_ms() - HOUR_MS
+    turn_queue.enqueue(queue_id="dead-1", agent_id=other, session="bella", text="x",
+                       trace_id="dead-trace", client_msg_id="dead-1", synthesize_audio=False,
+                       origin="agent", sender_agent_id="someone")
+    _turn(other, "dead-trace", then, settled=then + 1000, outcome="failed")
+    turn_queue.enqueue(queue_id="live-1", agent_id=agent_id, session="mike", text="y",
+                       trace_id="live-trace", client_msg_id="live-1", synthesize_audio=False,
+                       origin="agent", sender_agent_id="someone")
+    assert [row["queue_id"] for row in turn_queue.dead_rows()] == ["dead-1"]
+
+    assert task_goal_recovery.tick(lambda *_: pytest.fail("woke"), now=db.now_ms()) == 0
+
+    assert _continuation(plan)["observed_state"] == "working"
+
+
+def test_only_the_wakes_own_park_marker_is_exempt(tmp_path, monkeypatch):
+    host = _exhausted_pool(tmp_path, monkeypatch)
+    plan, request = _parked_wake(host)
+    row = db.conn().execute(
+        "SELECT * FROM task_plans WHERE plan_id=?", (plan["plan_id"],)).fetchone()
+    goal = json.loads(row["goal_json"])
+
+    assert task_goal_recovery.boundary(row, goal, check_live=False, wake_request=request) is None
+    assert task_goal_recovery.boundary(
+        row, goal, check_live=False, wake_request="task-goal-another-wake") == (
+            "capacity", WAITING)
+    assert task_goal_recovery.boundary(row, goal, check_live=False) == ("capacity", WAITING)
+
+
 # --- the recovery budget ------------------------------------------------------
 
 
@@ -751,3 +842,40 @@ def test_a_wake_that_completed_is_never_reported_though_its_row_was_retired(tmp_
     _tick(service, offset_ms=HOUR_MS)
 
     assert _history(plan, "wake_undelivered") == [] and _history(plan, "wake_failed") == []
+
+
+# --- the queue event reaches the apps ---------------------------------------------
+
+
+def test_the_scheduler_runner_passes_retired_rows_to_its_callback(tmp_path):
+    from lib import scheduler
+    service, backends, agent_id, plan, request, text = _admitted_wake(tmp_path)
+    _stale_row(agent_id, request, text, handoff=False)
+    retired = []
+    runner = scheduler.AgentScheduleRunner(
+        dispatch_turn=lambda *_: None, dispatch_goal=lambda *_: SimpleNamespace(queued=False),
+        goal_wake_retired=retired.append)
+
+    runner.tick()
+
+    assert [(row["queue_id"], row["agent_id"]) for row in retired] == [(request, agent_id)]
+
+
+def test_the_adapter_tells_the_apps_that_the_row_left_the_queue(tmp_path):
+    from lib.dispatch_adapters import DispatchAdapters
+    service, backends, agent_id, plan, request, text = _admitted_wake(tmp_path)
+    _stale_row(agent_id, request, text, handoff=False)
+    row = turn_queue.get(request)
+    assert turn_queue.cancel(request)
+    sent = []
+    adapters = DispatchAdapters(
+        SimpleNamespace(runtime_client=None, stream=SimpleNamespace(broadcast=sent.append)),
+        lambda _ctx: pytest.fail("no dispatch"), new_trace_id=lambda: "unused")
+
+    adapters.goal_wake_retired(row)
+
+    assert len(sent) == 1
+    event = sent[0]
+    assert (event["type"], event["session"], event["agent_id"], event["client_msg_id"],
+            event["queue_depth"], event["queue_started"]) == (
+                "queue-updated", "mike", agent_id, request, 0, False)
