@@ -170,3 +170,189 @@ def test_real_sqlite_contention_is_unknown_then_recovers(monkeypatch, capsys):
     assert agent_bg.main(["bg", "probe", "job-active", handle]) == 0
     background_jobs.cancel("locked-job")
     assert agent_bg.main(["bg", "probe", "job-active", handle]) == 1
+
+
+def _state_row_count(agent_id: str) -> int:
+    from lib import db
+    return int(
+        db.conn()
+        .execute("SELECT COUNT(*) AS n FROM state_log WHERE agent_id = ?", (agent_id,))
+        .fetchone()["n"]
+    )
+
+
+def test_background_off_preserves_a_new_interactive_turn():
+    from lib import db, turn_lifecycle
+    from lib.protocol import AgentState
+    from lib.turn_lifecycle import TurnEvent
+
+    turn_lifecycle.reset_for_tests()
+    agent_id = agents.create_agent(
+        persona="Nadia", voice_id="voice", cwd="/tmp", session="nadia-bg")
+    assert agent_bg.main(["agent_bg.py", "nadia-bg", "on", "Watching CI"]) == 0
+    assert turn_lifecycle.current_kind(agent_id) == AgentState.BACKGROUND
+    assert agents.get_by_agent_id(agent_id)["custom_status"] == "Watching CI"
+
+    turn_lifecycle.transition(agent_id, TurnEvent.PROMPT_ADMITTED, {"source": "pwa"})
+    rows_before = _state_row_count(agent_id)
+
+    assert agent_bg.main(["agent_bg.py", "nadia-bg", "off"]) == 0
+    assert turn_lifecycle.current_kind(agent_id) == AgentState.THINKING
+    assert agents.get_by_agent_id(agent_id)["custom_status"] == ""
+    assert _state_row_count(agent_id) == rows_before
+    assert not db.conn().in_transaction
+    assert turn_lifecycle.illegal_counts() == {}
+
+
+def test_background_off_targets_its_agents_latest_state():
+    from lib import turn_lifecycle
+    from lib.protocol import AgentState
+    from lib.turn_lifecycle import TurnEvent
+
+    target_id = agents.create_agent(
+        persona="Target", voice_id="voice", cwd="/tmp", session="target-bg")
+    other_id = agents.create_agent(
+        persona="Other", voice_id="voice", cwd="/tmp", session="other-bg")
+    assert agent_bg.main(["agent_bg.py", "target-bg", "on", "Waiting"]) == 0
+    turn_lifecycle.transition(other_id, TurnEvent.PROMPT_ADMITTED, {"source": "pwa"})
+    other_rows_before = _state_row_count(other_id)
+
+    assert agent_bg.main(["agent_bg.py", "target-bg", "off"]) == 0
+    assert turn_lifecycle.current_kind(target_id) == AgentState.IDLE
+    assert agents.get_by_agent_id(target_id)["custom_status"] == ""
+    assert turn_lifecycle.current_kind(other_id) == AgentState.THINKING
+    assert _state_row_count(other_id) == other_rows_before
+
+
+def test_background_off_after_done_broadcasts_status_clear_without_state_row_or_notification(
+    monkeypatch,
+):
+    from lib import apns, turn_lifecycle, user_notifications
+    from lib.protocol import AgentState, SSEType
+    from lib.state_watcher import StateLogWatcher
+    from lib.turn_lifecycle import TurnEvent
+
+    classified: list[str] = []
+    monkeypatch.setattr(
+        user_notifications,
+        "classify_completed_turn",
+        lambda **kw: classified.append(kw["agent_id"]) or {"notify": False},
+    )
+    monkeypatch.setattr(apns, "on_user_notification", lambda _n: None)
+
+    agent_id = agents.create_agent(
+        persona="Done", voice_id="voice", cwd="/tmp", session="done-bg")
+    assert agent_bg.main(["agent_bg.py", "done-bg", "on", "Building"]) == 0
+    turn_lifecycle.transition(agent_id, TurnEvent.PROMPT_ADMITTED, {"source": "pwa"})
+    turn_lifecycle.transition(
+        agent_id, TurnEvent.PROCESS_EXITED_OK, {"backend_session_id": "bs-1"})
+
+    class _Stream:
+        def __init__(self):
+            self.events = []
+
+        def broadcast(self, event):
+            self.events.append(event)
+
+    stream = _Stream()
+    watcher = StateLogWatcher(stream)
+    watcher.prime()
+    rows_before = _state_row_count(agent_id)
+
+    try:
+        assert agent_bg.main(["agent_bg.py", "done-bg", "off"]) == 0
+        watcher._poll_once()
+        assert watcher.wait_for_notifications(2)
+    finally:
+        watcher.stop()
+
+    assert _state_row_count(agent_id) == rows_before
+    assert len(stream.events) == 1
+    assert stream.events[0]["type"] == SSEType.AGENT_STATE
+    assert stream.events[0]["agent_id"] == agent_id
+    assert stream.events[0]["kind"] == AgentState.DONE
+    assert stream.events[0]["status_text"] == ""
+    assert classified == []
+
+
+def test_background_on_without_initial_state_has_a_clean_error(capsys):
+    from lib import db, turn_lifecycle
+
+    turn_lifecycle.reset_for_tests()
+    agent_id = agents.create_agent(
+        persona="Unseeded", voice_id="voice", cwd="/tmp", session="unseeded-bg")
+    db.conn().execute("DELETE FROM state_log WHERE agent_id = ?", (agent_id,))
+    capsys.readouterr()
+
+    rc = agent_bg.main(["agent_bg.py", "unseeded-bg", "on", "Building"])
+    err = capsys.readouterr().err
+
+    assert rc == 1
+    assert "agent_bg:" in err
+    assert "Traceback" not in err
+    assert agents.get_by_agent_id(agent_id)["custom_status"] == ""
+    assert turn_lifecycle.current_kind(agent_id) == turn_lifecycle.NONE
+    assert turn_lifecycle.illegal_counts() == {}
+
+
+def test_background_finish_waits_for_writer_and_rechecks_agent_state():
+    import sqlite3
+    import threading
+    import time
+    from lib import db, turn_lifecycle
+    from lib.protocol import AgentState
+    from lib.turn_lifecycle import TurnEvent
+
+    agent_id = agents.create_agent(
+        persona="Race", voice_id="voice", cwd="/tmp", session="race-bg")
+    assert agent_bg.main(["agent_bg.py", "race-bg", "on", "Building"]) == 0
+    runtime_id = agents.current_runtime_id(agent_id)
+    rows_before = _state_row_count(agent_id)
+
+    writer = sqlite3.connect(str(db.DB_PATH), isolation_level=None)
+    writer.execute("BEGIN IMMEDIATE")
+    writer.execute(
+        """INSERT INTO state_log (agent_id, runtime_id, ts, kind, detail)
+           VALUES (?, ?, ?, ?, ?)""",
+        (agent_id, runtime_id, db.now_ms() + 1, AgentState.THINKING, '{"source":"pwa"}'),
+    )
+
+    started_begin = threading.Event()
+    outcomes: list[object] = []
+    errors: list[BaseException] = []
+
+    def finish_worker() -> None:
+        try:
+            con = db.conn()
+            con.set_trace_callback(
+                lambda sql: started_begin.set() if "BEGIN IMMEDIATE" in sql else None
+            )
+            try:
+                outcomes.append(
+                    turn_lifecycle.transition(agent_id, TurnEvent.BACKGROUND_FINISHED)
+                )
+            finally:
+                con.set_trace_callback(None)
+        except BaseException as exc:  # noqa: BLE001
+            errors.append(exc)
+        finally:
+            db.close_local()
+
+    worker = threading.Thread(target=finish_worker)
+    try:
+        worker.start()
+        assert started_begin.wait(5), "worker never issued BEGIN IMMEDIATE"
+        time.sleep(0.02)
+        assert worker.is_alive(), "worker did not block on writer lock"
+        writer.execute("COMMIT")
+        worker.join(timeout=5)
+        assert not worker.is_alive()
+    finally:
+        if writer.in_transaction:
+            writer.execute("ROLLBACK")
+        writer.close()
+
+    assert errors == []
+    assert outcomes == [None]
+    assert turn_lifecycle.current_kind(agent_id) == AgentState.THINKING
+    assert _state_row_count(agent_id) == rows_before + 1
