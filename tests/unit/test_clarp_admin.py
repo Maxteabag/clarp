@@ -873,6 +873,26 @@ def test_doctor_reports_push_off(tmp_path, monkeypatch, capsys):
     assert "OK    push: off" in output
 
 
+def test_doctor_reports_android_push_only_when_configured(tmp_path, monkeypatch, capsys):
+    runs = [tmp_path / name for name in ("none", "ok", "missing")]
+    for run in runs:
+        run.mkdir()
+    _, output = _doctor_push_output(runs[0], monkeypatch, capsys, '[apns]\nmode = "off"\n')
+    assert "Android push" not in output
+    account = tmp_path / "sa.json"
+    account.write_text('{"type": "service_account", "project_id": "clarp-test", '
+                       '"client_email": "push@clarp-test.iam.gserviceaccount.com", '
+                       '"private_key": "not read by doctor"}')
+    _, output = _doctor_push_output(runs[1], monkeypatch, capsys,
+                                    f'[fcm]\nservice_account = "{account}"\n')
+    assert ("OK    Android push: FCM direct (project clarp-test, "
+            "push@clarp-test.iam.gserviceaccount.com)") in output
+    assert "not read by doctor" not in output
+    code, output = _doctor_push_output(runs[2], monkeypatch, capsys,
+                                       f'[fcm]\nservice_account = "{tmp_path / "missing.json"}"\n')
+    assert code == 1 and "FAIL  Android push: service account file" in output
+
+
 def test_doctor_fails_when_relay_is_forced_over_plain_http(tmp_path, monkeypatch, capsys):
     code, output = _doctor_push_output(
         tmp_path, monkeypatch, capsys,
