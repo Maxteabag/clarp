@@ -28,7 +28,7 @@ def test_refined_prompts_match_user_selected_lab_and_keep_low(monkeypatch):
     def spawn(args, **kwargs):
         root=Path(kwargs['cwd'])
         captured.append(root.joinpath('instructions.txt').read_text())
-        assert args[args.index('--model')+1]=='gpt-5.3-codex-spark'
+        assert args[args.index('--model')+1]=='gpt-6-sol'
         assert 'model_reasoning_effort="low"' in args
         assert '--ignore-user-config' in args and '--ignore-rules' in args
         assert args[args.index('--sandbox')+1]=='read-only'

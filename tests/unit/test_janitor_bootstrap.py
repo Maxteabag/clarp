@@ -8,7 +8,7 @@ def test_fresh_host_has_visible_spark_workers_without_enabling_routing(tmp_path)
     initialize(cwd=str(tmp_path))
     router = janitor_builtins.get_builtin("message-delegator")
     explainer = janitor_builtins.get_builtin("tool-explainer")
-    assert router["model"] == explainer["model"] == "gpt-5.3-codex-spark"
+    assert router["model"] == explainer["model"] == "gpt-6-sol"
     assert router["enabled"] is False and explainer["enabled"] is True
 
 
