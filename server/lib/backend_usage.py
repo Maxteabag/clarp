@@ -48,16 +48,19 @@ from .backend_usage_store import (  # noqa: E402,F401  (split_apply: backend-usa
     _decode_raw, _quota_windows, _canonical_id, _identity_secret, _private_ref, _codex_identity,
     _computer_id, _provider_instance_id, _iso_to_ms, _window_id, _event_payload,
     _insert_limit_event, _open_episode, _invalidate_rotated_auth, _observe_auth_generation,
-    _retire_omitted_windows, _record_codex_five_hour, _record_codex_weekly, _response_row,
+    _retire_omitted_windows, _resolve_unknown_terminals, _latest_completed_turn_ms,
+    _codex_window_observed_ms, _record_codex_five_hour, _record_codex_weekly, _response_row,
     _OPEN_LIMITS_SQL, _expired_limits, _reconcile_expired_limits, _limit_projection,
     _window_by_duration,
 )
 
 from .backend_usage_claude import (  # noqa: E402,F401  (split_apply: backend-usage)
-    _claude_response_row, _claude_config_dir, _read_claude_auth, _claude_needs_refresh,
+    _claude_response_row, _claude_config_dir, _read_claude_auth,
+    _active_claude_auth_generation, _claude_needs_refresh,
 )
 def fetch_claude_usage(*, timeout: float = 8.0) -> dict[str, Any]:
     token, _expires, plan = _read_claude_auth()
+    auth_generation_id = _private_ref("claude-auth", token)
     request = urllib.request.Request(CLAUDE_USAGE_ENDPOINT, headers={
         "Authorization": f"Bearer {token}",
         "anthropic-beta": "oauth-2025-04-20",
@@ -91,7 +94,9 @@ def fetch_claude_usage(*, timeout: float = 8.0) -> dict[str, Any]:
     preferred = windows.get("five_hour") or windows.get("seven_day") or {}
     _upsert(CLAUDE, used_percentage=preferred.get("used_percentage"),
             resets_at=preferred.get("resets_at") or "",
-            source="anthropic-oauth-usage", raw={"windows": windows, "plan_type": plan})
+            source="anthropic-oauth-usage",
+            raw={"windows": windows, "plan_type": plan,
+                 "auth_generation_id": auth_generation_id})
     return {"windows": windows, "plan_type": plan}
 
 
@@ -114,6 +119,11 @@ def _structured_provider(provider_id: str, now_ms: int) -> dict[str, Any]:
         windows = _quota_windows(raw)
         if not row or not windows:
             return base
+        stored_claude_gen = raw.get("auth_generation_id")
+        if stored_claude_gen:
+            active_claude_gen = _active_claude_auth_generation()
+            if active_claude_gen is not None and stored_claude_gen != active_claude_gen:
+                return base
         freshness = _freshness(row, now_ms)
         observed_at = int(row.get("fetched_at") or 0)
         source = {
@@ -169,20 +179,24 @@ def _structured_provider(provider_id: str, now_ms: int) -> dict[str, Any]:
     if provider_id != CODEX:
         return base
     database = db.conn()
-    current_identity = database.execute(
-        """SELECT auth_generation_id FROM provider_usage_windows
-            WHERE provider_instance_id=?
-            ORDER BY observed_at DESC,rowid DESC LIMIT 1""",
-        (provider_instance_id,),).fetchone()
-    if not current_identity:
-        return base
+    active_codex = _active_codex_identity()
+    if active_codex is not None:
+        target_generation = active_codex[0]
+    else:
+        current_identity = database.execute(
+            """SELECT auth_generation_id FROM provider_usage_windows
+                WHERE provider_instance_id=?
+                ORDER BY observed_at DESC,rowid DESC LIMIT 1""",
+            (provider_instance_id,),).fetchone()
+        if not current_identity:
+            return base
+        target_generation = current_identity["auth_generation_id"]
     rows = database.execute(
         """SELECT * FROM provider_usage_windows
             WHERE provider_instance_id=? AND auth_generation_id=?
               AND window_kind IN ('five_hour','seven_day','unknown')
             ORDER BY observed_at DESC""",
-        (provider_instance_id,
-         current_identity["auth_generation_id"]),).fetchall()
+        (provider_instance_id, target_generation),).fetchall()
     latest: dict[str, dict[str, Any]] = {}
     for raw in rows:
         window = dict(raw)
@@ -317,6 +331,25 @@ def exhausted_backends(now_ms: int | None = None) -> dict[str, dict[str, Any]]:
         block = _fresh_codex_block(now) if provider_id == CODEX else None
         if not blocking and block is None:
             continue
+        done_ms = _latest_completed_turn_ms(provider_id, up_to_ms=now)
+        if done_ms is not None:
+            if provider_id == CODEX:
+                if blocking:
+                    obs_map = _codex_window_observed_ms(
+                        _provider_instance_id(CODEX),
+                        [str(w["window_id"]) for w in blocking if w.get("window_id")],
+                    )
+                    blocking = [
+                        w for w in blocking
+                        if obs_map.get(str(w.get("window_id") or ""), _iso_to_ms(w.get("observed_at")) or 0) >= done_ms
+                    ]
+                if block is not None and int((_row(CODEX) or {}).get("fetched_at") or 0) < done_ms:
+                    block = None
+            elif provider_id == CLAUDE:
+                if int((_row(CLAUDE) or {}).get("fetched_at") or 0) < done_ms:
+                    blocking = []
+        if not blocking and block is None:
+            continue
         if not blocking:
             out[provider_id] = {
                 "state": "exhausted", "provider_id": provider_id,
@@ -402,8 +435,9 @@ from .backend_usage_agy import (  # noqa: E402,F401  (split_apply: backend-usage
     _run_agy_usage, _agy_windows, _agy_needs_refresh,
 )
 from .backend_usage_codex import (  # noqa: E402,F401  (split_apply: backend-usage)
-    _codex_needs_refresh, _codex_home, _read_codex_auth, _read_codex_chatgpt_base_url,
-    _codex_usage_url, _codex_rpc, fetch_codex_usage_app_server, capture_codex_rate_limits,
+    _active_codex_identity, _codex_needs_refresh, _codex_home, _read_codex_auth,
+    _read_codex_chatgpt_base_url, _codex_usage_url, _codex_rpc,
+    fetch_codex_usage_app_server, capture_codex_rate_limits,
     _codex_block_from_payload, _fresh_codex_block, _codex_snapshot_from_payload,
     _select_rate_limit_payload, record_classified_usage_limit,
 )

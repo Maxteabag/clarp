@@ -514,6 +514,104 @@ def _retire_omitted_windows(
         raise
 
 
+def _resolve_unknown_terminals(
+    *, provider_instance_id: str, auth_generation_id: str, observed_at: int,
+) -> list[dict[str, Any]]:
+    """Close synthetic 'unknown' hard-limit episodes when an authoritative refresh
+    confirms the active account is allowed and all quota windows are below 100%."""
+    database = db.conn()
+    generations = (
+        (auth_generation_id, "auth-unknown")
+        if auth_generation_id != "auth-unknown"
+        else (auth_generation_id,)
+    )
+    placeholders = ",".join("?" for _ in generations)
+    pending = database.execute(
+        f"""SELECT window_id, auth_generation_id FROM provider_usage_windows
+             WHERE provider_instance_id=? AND window_kind='unknown'
+               AND auth_generation_id IN ({placeholders})""",
+        (provider_instance_id, *generations),
+    ).fetchall()
+    if not pending:
+        return []
+    database.execute("BEGIN IMMEDIATE")
+    try:
+        events: list[dict[str, Any]] = []
+        episodes = database.execute(
+            f"""SELECT e.* FROM provider_limit_episodes e
+                  JOIN provider_usage_windows w
+                    ON w.provider_instance_id=e.provider_instance_id
+                   AND w.auth_generation_id=e.auth_generation_id
+                   AND w.window_id=e.window_id
+                 WHERE e.provider_instance_id=? AND e.status='open'
+                   AND w.window_kind='unknown'
+                   AND e.auth_generation_id IN ({placeholders})""",
+            (provider_instance_id, *generations),
+        ).fetchall()
+        for raw in episodes:
+            episode = dict(raw)
+            event = _insert_limit_event(
+                database, episode=episode, kind="recovered",
+                threshold_id=None, used_percentage=None, resets_at=None,
+                observed_at=observed_at, freshness="fresh",
+                source_kind="provider_reported",
+            )
+            if event:
+                events.append(event)
+        database.execute(
+            f"""DELETE FROM provider_usage_windows
+                 WHERE provider_instance_id=? AND window_kind='unknown'
+                   AND auth_generation_id IN ({placeholders})""",
+            (provider_instance_id, *generations),
+        )
+        database.execute("COMMIT")
+        return events
+    except Exception:
+        database.execute("ROLLBACK")
+        raise
+
+
+def _latest_completed_turn_ms(
+    provider_id: str, *, up_to_ms: int | None = None,
+) -> int | None:
+    """Timestamp (ms) of the latest completed turn for `provider_id`, if any."""
+    if up_to_ms is None:
+        row = db.conn().execute(
+            """SELECT MAX(s.ts) AS latest_ts
+                 FROM state_log s
+                 JOIN agents a ON a.agent_id = s.agent_id
+                WHERE a.backend = ? AND s.kind = 'done'""",
+            (provider_id,),
+        ).fetchone()
+    else:
+        row = db.conn().execute(
+            """SELECT MAX(s.ts) AS latest_ts
+                 FROM state_log s
+                 JOIN agents a ON a.agent_id = s.agent_id
+                WHERE a.backend = ? AND s.kind = 'done' AND s.ts <= ?""",
+            (provider_id, int(up_to_ms)),
+        ).fetchone()
+    if not row or row["latest_ts"] is None:
+        return None
+    return int(row["latest_ts"])
+
+
+def _codex_window_observed_ms(
+    provider_instance_id: str, window_ids: list[str],
+) -> dict[str, int]:
+    if not window_ids:
+        return {}
+    placeholders = ",".join("?" for _ in window_ids)
+    rows = db.conn().execute(
+        f"""SELECT window_id, observed_at
+              FROM provider_usage_windows
+             WHERE provider_instance_id = ?
+               AND window_id IN ({placeholders})""",
+        (provider_instance_id, *window_ids),
+    ).fetchall()
+    return {str(r["window_id"]): int(r["observed_at"]) for r in rows}
+
+
 def _record_codex_five_hour(
     snapshot: dict[str, Any], *, auth_generation_id: str,
     account_scope_ref: str, source_detail: str,
