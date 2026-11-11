@@ -350,6 +350,18 @@ def list_active() -> list[dict]:
     return snapshot(include_terminal=False)["jobs"]
 
 
+def count_launches_since(kind: str, *, since_ms: int) -> int:
+    """Count queued launch admissions for ``kind`` at or after ``since_ms``."""
+    row = db.conn().execute(
+        """SELECT COUNT(*) AS n
+             FROM background_job_events e
+             JOIN background_jobs j ON j.job_id = e.job_id
+            WHERE j.kind = ? AND e.status = 'queued' AND e.observed_at >= ?""",
+        (kind, int(since_ms)),
+    ).fetchone()
+    return int(row["n"] if row else 0)
+
+
 def restart(
     *, session: str, job_id: str, kind: str, title: str, detail: str = "",
     metadata: dict[str, Any] | None = None, worker_pid: int | None = None,

@@ -14,6 +14,7 @@ import urllib.error
 import urllib.request
 from typing import Callable
 
+from . import agents as agents_db
 from . import background_jobs, config, db, personas, roster, server_identity
 from .log import log, log_exception
 
@@ -24,8 +25,12 @@ MAX_RESPONSE_BYTES = 32 * 1024 * 1024
 MAX_GENERATED_BYTES = 20 * 1024 * 1024
 AVATAR_MAX_BYTES = 512_000
 HEARTBEAT_TIMEOUT_MS = 5 * 60 * 1000
+DAILY_WINDOW_MS = 24 * 60 * 60 * 1000
+DEFAULT_DAILY_LIMIT = 20
+DEFAULT_MAX_ATTEMPTS = 3
+RETRY_BACKOFF_MS = (5 * 60 * 1000, 30 * 60 * 1000)
 WORKER_ENV_NAMES = (
-    "OPENAI_API_KEY", "CLAUDE_PWA_DB", "CLAUDE_PWA_CONFIG",
+    "CLAUDE_PWA_DB", "CLAUDE_PWA_CONFIG",
     "CLARP_MEDIA_DIR", "CLARP_CACHE_DIR", "CLARP_DATA_DIR",
     "CLARP_CONFIG_DIR", "CLARP_SHARE_DIR",
 )
@@ -132,7 +137,13 @@ def prompt_for_persona(name: str, *, tier: str = "", backend: str = "") -> str:
     return TIER_TEMPLATES[resolved_tier].format(name=name.strip(), detail=detail)
 
 
-def start_best_effort(persona_name: str, *, tier: str = "", backend: str = "") -> dict | None:
+def start_best_effort(
+    persona_name: str,
+    *,
+    tier: str = "",
+    backend: str = "",
+    now_ms: int | None = None,
+) -> dict | None:
     """Queue a detached background avatar generation job if OpenAI is configured.
 
     Never blocks session startup and never raises into the caller.
@@ -143,8 +154,16 @@ def start_best_effort(persona_name: str, *, tier: str = "", backend: str = "") -
             return None
         if row.get("avatar_path") or row.get("avatar_symbol"):
             return None
-        if not config.load().openai_key():
+        cfg = config.load()
+        if getattr(cfg, "contact_avatar_generation", True) is False:
             return None
+        daily_limit = int(getattr(cfg, "contact_avatar_daily_limit", DEFAULT_DAILY_LIMIT))
+        max_attempts = int(getattr(cfg, "contact_avatar_max_attempts", DEFAULT_MAX_ATTEMPTS))
+        if daily_limit <= 0 or max_attempts <= 0:
+            return None
+        if not cfg.openai_key():
+            return None
+        now = int(now_ms if now_ms is not None else db.now_ms())
         persona_id = str(row["persona_id"])
         resolved_tier = (
             (tier or "").strip().casefold()
@@ -155,12 +174,25 @@ def start_best_effort(persona_name: str, *, tier: str = "", backend: str = "") -
         existing = background_jobs.get(job_id)
         if existing and existing["status"] in background_jobs.ACTIVE_STATUSES:
             return existing
+        if existing and existing["status"] == "succeeded":
+            return None
         if existing and existing["status"] in background_jobs.TERMINAL_STATUSES:
+            attempts = int(existing.get("generation") or 1)
+            if attempts >= max_attempts:
+                return None
+            backoff = RETRY_BACKOFF_MS[min(max(0, attempts - 1), len(RETRY_BACKOFF_MS) - 1)]
+            ended_at = int(existing.get("terminal_at") or existing.get("updated_at") or 0)
+            if ended_at and now - ended_at < backoff:
+                return None
             pid = int(existing.get("worker_pid") or 0)
             token = str(existing.get("worker_start_token") or "")
             if pid and token and background_jobs.worker_is_alive(pid, token):
                 if not background_jobs.terminate_worker(pid, token):
                     return None
+        if background_jobs.count_launches_since(
+            "persona-avatar", since_ms=now - DAILY_WINDOW_MS
+        ) >= daily_limit:
+            return None
         computer_id = str(server_identity.get_server_info()["server_id"])
         job = background_jobs.upsert_computer(
             computer_id=computer_id,
@@ -232,9 +264,12 @@ def generate_for_persona(
     row = personas.get_by_id(persona_id)
     if not row:
         raise PersonaAvatarError("Contact no longer exists")
-    if row.get("avatar_path") or row.get("avatar_symbol"):
+    if row.get("builtin") or row.get("avatar_path") or row.get("avatar_symbol"):
         return row
-    api_key = config.load().openai_key()
+    cfg = config.load()
+    if getattr(cfg, "contact_avatar_generation", True) is False:
+        raise PersonaAvatarCancelled("Contact avatar generation is disabled")
+    api_key = cfg.openai_key()
     if not api_key:
         raise PersonaAvatarError("OpenAI API key is not configured")
     prompt = prompt_for_persona(row["name"], tier=tier)
@@ -252,7 +287,7 @@ def generate_for_persona(
     latest = personas.get_by_id(persona_id)
     if not latest:
         raise PersonaAvatarError("Contact was removed before avatar save")
-    if latest.get("avatar_path") or latest.get("avatar_symbol"):
+    if latest.get("builtin") or latest.get("avatar_path") or latest.get("avatar_symbol"):
         return latest
     encoded = base64.b64encode(jpeg_bytes).decode("ascii")
     updated = personas.update_avatar(
@@ -262,21 +297,7 @@ def generate_for_persona(
     )
     avatar_path = str(updated.get("avatar_path") or "")
     if avatar_path:
-        con = db.conn()
-        con.execute("BEGIN IMMEDIATE")
-        try:
-            con.execute(
-                """UPDATE agents
-                      SET avatar_path = ?
-                    WHERE persona = ? COLLATE NOCASE
-                      AND COALESCE(avatar_path, '') = ''
-                      AND COALESCE(avatar_symbol, '') = ''""",
-                (avatar_path, updated["name"]),
-            )
-            con.commit()
-        except Exception:
-            con.rollback()
-            raise
+        agents_db.sync_contact_avatar(updated["name"], avatar_path)
     return updated
 
 

@@ -531,6 +531,11 @@ class Config:
     job_heartbeat_grace_minutes: float = 15.0
     helper_idle_after_minutes: float = 30.0
     custom_status_ttl_hours: float = 2.0
+    # Paid Contact portrait generation ([contacts] or [openai]). On by default
+    # when an OpenAI key is configured, bounded per day and per Contact.
+    contact_avatar_generation: bool = True
+    contact_avatar_daily_limit: int = 20
+    contact_avatar_max_attempts: int = 3
     codex_model: str = ""
     codex_reasoning_effort: str = ""     # "" | "low" | "medium" | "high"
     agy_model: str = ""
@@ -821,6 +826,16 @@ def _non_negative_float(raw: Any, default: float) -> float:
     return value if value >= 0 else default
 
 
+def _non_negative_int(raw: Any, default: int) -> int:
+    if isinstance(raw, bool):
+        return default
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return default
+    return value if value >= 0 else default
+
+
 def load(path: pathlib.Path | None = None) -> Config:
     """Read TOML config; return a Config with defaults filled in. Cached.
 
@@ -911,6 +926,7 @@ def _parse_into_cache(path: pathlib.Path) -> Config:
     catalog = data.get("voice_catalog") or []
     audio   = data.get("audio", {}) or {}
     agents  = data.get("agents", {}) or {}
+    contacts = data.get("contacts") if isinstance(data.get("contacts"), dict) else {}
     mcp     = data.get("mcp", {}) or {}
     network = data.get("network", {}) or {}
     apns    = data.get("apns", {}) or {}
@@ -1054,6 +1070,38 @@ def _parse_into_cache(path: pathlib.Path) -> Config:
             agents.get("helper_idle_after_minutes"), 30.0),
         custom_status_ttl_hours=_non_negative_float(
             agents.get("custom_status_ttl_hours"), 2.0),
+        contact_avatar_generation=(
+            os.environ.get("CLARP_CONTACT_AVATAR_GENERATION", "").strip().lower()
+            not in ("0", "false", "no", "off")
+            if os.environ.get("CLARP_CONTACT_AVATAR_GENERATION") is not None
+            and os.environ.get("CLARP_CONTACT_AVATAR_GENERATION", "").strip() != ""
+            else bool(
+                contacts.get(
+                    "avatar_generation",
+                    openai.get("contact_avatar_generation", True),
+                )
+            )
+        ),
+        contact_avatar_daily_limit=_non_negative_int(
+            os.environ.get("CLARP_CONTACT_AVATAR_DAILY_LIMIT")
+            if os.environ.get("CLARP_CONTACT_AVATAR_DAILY_LIMIT") is not None
+            and os.environ.get("CLARP_CONTACT_AVATAR_DAILY_LIMIT", "").strip() != ""
+            else contacts.get(
+                "avatar_daily_limit",
+                openai.get("contact_avatar_daily_limit"),
+            ),
+            20,
+        ),
+        contact_avatar_max_attempts=_non_negative_int(
+            os.environ.get("CLARP_CONTACT_AVATAR_MAX_ATTEMPTS")
+            if os.environ.get("CLARP_CONTACT_AVATAR_MAX_ATTEMPTS") is not None
+            and os.environ.get("CLARP_CONTACT_AVATAR_MAX_ATTEMPTS", "").strip() != ""
+            else contacts.get(
+                "avatar_max_attempts",
+                openai.get("contact_avatar_max_attempts"),
+            ),
+            3,
+        ),
         codex_model     = str(agents.get("codex_model", "")),
         codex_reasoning_effort = str(agents.get("codex_reasoning_effort", "")),
         agy_model       = str(agents.get("agy_model", "")),
