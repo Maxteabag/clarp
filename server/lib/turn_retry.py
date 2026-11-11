@@ -174,7 +174,7 @@ class RetryMixin:
         human = error_classify.explain(message) or human
         limit_event = None
         if category == error_classify.USAGE_LIMIT and quota_confirmed is False:
-            human = "Codex could not complete this request. Try again"
+            human = error_classify.QUOTA_UNCONFIRMED_MESSAGE
         if switch_pending:
             human = (f"{human} — the account switch waits until no Codex agent is "
                      "busy; send again once they finish")

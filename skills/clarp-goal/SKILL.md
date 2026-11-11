@@ -111,9 +111,10 @@ hourly.
   model; pay, raise the limit or pick another model or account when credits,
   billing, a spending limit or a trial are the cause.
 - A wake that fails only because no account has usage left until its window
-  resets does not count. The reason reads "Wake not delivered: no account with
-  usage; next try HH:MM" (the Host's local time) and the Host keeps trying.
-- Whatever the reason, a goal none of whose wakes has started for 24 hours goes
+  resets does not count. The reason says "no account with usage", quotes the
+  provider's own words when the wake got far enough to hear them, and gives the
+  next try as HH:MM in the Host's local time; the Host keeps trying.
+- Whatever the reason, a goal none of whose wakes has started for 8 days goes
   to `attention`, and the reason names the last failure.
 
 ```sh

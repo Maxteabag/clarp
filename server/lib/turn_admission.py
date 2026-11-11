@@ -575,9 +575,19 @@ class AdmissionMixin:
         which recovery never relaunches, held every goal of the agent
         (review of 258, finding 1). Closing the row is no proof either way,
         so the launch stays unknown. A goal wake is the scheduler's to send
-        again: its row is retired here, as when its turn fails."""
+        again: its row is retired here, as when its turn fails.
+
+        Not while something of this agent runs, though. The backend can raise
+        after its process exists; that process may be this very launch, so the
+        turn stays open and the row stays, or the wake would be sent a second
+        time beside it. The process's own end, or the Host's pass once the
+        agent has moved on, settles them."""
+        if self._has_live_turn(spec):
+            log("unprovenLaunchLeftOpen",
+                f"agent={spec.agent_id} trace={spec.trace_id} — a process of this agent is live")
+            return
         try:
-            if type(turn_id) is int and turn_id > 0 and not self._has_live_turn(spec):
+            if type(turn_id) is int and turn_id > 0:
                 turn_lifecycle.close_turn(turn_id)
         except Exception as close_error:  # noqa: BLE001 - the Host's pass ends it later
             log_exception("spawnAbandonedCloseFail", close_error, detail=spec.session)
