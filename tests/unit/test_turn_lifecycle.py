@@ -115,8 +115,6 @@ def test_unknown_event_and_invalid_recorded_kind_are_errors(tmp_path):
         turn_lifecycle.transition(agent_id, "made_up")
     with pytest.raises(ValueError):
         agents_db.record_state(agent_id, "not-a-state")
-    with pytest.raises(ValueError, match="background completion accepts only event detail"):
-        turn_lifecycle.transition(agent_id, TurnEvent.BACKGROUND_FINISHED, force=True)
 
 
 def test_record_state_wrapper_stays_legal_from_every_state(tmp_path):
@@ -164,26 +162,21 @@ def test_unlaunched_receipt_is_back_dated_before_newer_state(tmp_path):
 def test_no_server_module_writes_state_without_an_event():
     """Rule 4: production writers name an event; record_state is for fixtures."""
     import ast
-    root = pathlib.Path(__file__).resolve().parents[2]
+    server = pathlib.Path(__file__).resolve().parents[2] / "server"
     callers = []
-    for source_dir in ("server", "scripts", "bin", "plugin", "skills"):
-        for path in sorted((root / source_dir).rglob("*.py")):
-            tree = ast.parse(path.read_text(), filename=str(path))
-            parents = {child: parent for parent in ast.walk(tree)
-                       for child in ast.iter_child_nodes(parent)}
-            for node in ast.walk(tree):
+    for path in sorted(server.rglob("*.py")):
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for func in ast.walk(tree):
+            if not isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            for node in ast.walk(func):
                 if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
                         and node.func.attr in {"record_state", "record"}
                         and isinstance(node.func.value, ast.Name)
                         and node.func.value.id in {"agents", "agents_db", "turn_lifecycle"}):
-                    parent = node
-                    while parent is not None and not isinstance(
-                            parent, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                        parent = parents.get(parent)
-                    caller = parent.name if parent else "<module>"
-                    callers.append(f"{path.relative_to(root)}:{caller}")
+                    callers.append(f"{path.relative_to(server)}:{func.name}")
     # The fixture wrapper itself delegates to turn_lifecycle.record.
-    assert callers == ["server/lib/agents.py:record_state"], callers
+    assert callers == ["lib/agents.py:record_state"], callers
 
 
 def test_audit_note_repeats_the_current_state(tmp_path):

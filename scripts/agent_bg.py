@@ -3,7 +3,7 @@
 
 Usage:
     agent_bg.py <session> on  [label]   # persist short label and mark BACKGROUND
-    agent_bg.py <session> off           # clear label; idle only if still background
+    agent_bg.py <session> off           # clear label and mark idle
     agent_bg.py <session> job-upsert <id> <kind> <title> [detail]
     agent_bg.py <session> job-restart <id> <kind> <title> [detail]
     agent_bg.py <session> job-start <handle>
@@ -16,12 +16,11 @@ Usage:
     agent_bg.py <session> job-progress <handle> <text>
     agent_bg.py <session> job-log <handle> </abs/path>
 
-Run on the server host; writes to Clarp's shared DB. State changes and status
-clears are broadcast by the server's state watcher. The label is durable agent
-metadata, so it keeps showing while the agent is idle/live and survives ordinary
-turn state changes. Keep labels to 2-3 words / under 20 chars, e.g. "Awaiting
-Domi" or "Building". Long labels are shortened at the source. Call `off` when
-the task finishes.
+Run on the server host; writes to the live claude-pwa DB so the running server
+broadcasts the state change. The label is durable agent metadata, so it keeps
+showing while the agent is idle/live and survives ordinary turn state changes.
+Keep labels to 2-3 words / under 20 chars, e.g. "Awaiting Domi" or "Building".
+Long labels are shortened at the source. Call `off` when the task finishes.
 """
 import os
 import sys
@@ -33,9 +32,8 @@ sys.path.insert(0, os.environ.get(
         "CLARP_SHARE_DIR", str(pathlib.Path.home() / ".local/share/clarp"))))
 
 from lib import agents               # noqa: E402
+from lib.protocol import AgentState  # noqa: E402
 from lib.status_labels import shorten_status_label  # noqa: E402
-from lib import turn_lifecycle      # noqa: E402
-from lib.turn_lifecycle import TurnEvent  # noqa: E402
 
 
 def job_handle(job: dict) -> str:
@@ -195,36 +193,9 @@ def main(argv: list[str]) -> int:
     if not a:
         print(f"agent_bg: no agent for session {session!r}", file=sys.stderr)
         return 1
-    if mode == "on" and turn_lifecycle.current_kind(a["agent_id"]) == "":
-        print("agent_bg: cannot mark background before its initial state is recorded",
-              file=sys.stderr)
-        return 1
-    had_status = bool(a.get("custom_status"))
+    kind = AgentState.BACKGROUND if mode == "on" else AgentState.IDLE
     agents.set_custom_status(a["agent_id"], label if mode == "on" else "")
-    if mode == "on":
-        try:
-            turn_lifecycle.transition(
-                a["agent_id"], TurnEvent.BACKGROUND_DECLARED,
-                {"label": label} if label else None,
-            )
-        except turn_lifecycle.IllegalTransition as exc:
-            if exc.from_state != "":
-                raise
-            agents.set_custom_status(a["agent_id"], "")
-            print("agent_bg: cannot mark background before its initial state is recorded",
-                  file=sys.stderr)
-            return 1
-    else:
-        completed = turn_lifecycle.transition(a["agent_id"], TurnEvent.BACKGROUND_FINISHED)
-        if completed is None and had_status:
-            try:
-                turn_lifecycle.transition(
-                    a["agent_id"], TurnEvent.AUDIT_NOTED,
-                    {"status_text_cleared": True},
-                )
-            except turn_lifecycle.IllegalTransition as exc:
-                if exc.from_state != "":
-                    raise
+    agents.record_state(a["agent_id"], kind, {"label": label} if label else None)
     if mode == "on":
         from lib import background_jobs
         worker_pid, worker_token = background_jobs.current_worker_identity()
