@@ -1517,7 +1517,13 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         self._send(200, json.dumps(hotseat_status.payload()).encode(), "application/json")
 
     def _hotseat_desk(self):
-        """The desk object build_server put on the context, or None after a 503."""
+        """The desk object build_server put on the context, or None once this
+        answered: 404 like any unknown route while the owner has the desk
+        turned off ([hotseat] desk = false), 503 on a Host without the object."""
+        from lib import server_identity
+        if not server_identity.hotseat_desk_enabled():
+            self._send(404, b"not found")
+            return None
         desk = getattr(self.ctx, "hotseat_desk", None)
         if desk is None:
             self._json_error(503, "hotseat desk unavailable")

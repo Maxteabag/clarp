@@ -407,6 +407,103 @@ def test_concurrent_refresh_is_single_flight(monkeypatch):
     assert d.payload(command="hotseat")["refreshing"] is False
 
 
+# --- account state: account limits and model limits are different facts -------
+
+def _claude_row(alias, *, five_hour, weekly, fable, limited=False, active=False, extra_usage=False):
+    """A Claude account as `tui --snapshot` and `list --json` report it, labels as Hotseat writes them."""
+    tui_row = {
+        "provider": "claude", "alias": alias, "display_alias": alias, "aliases": [alias], "active": active,
+        "saved": True, "can_switch": True, "can_launch": True, "limited": limited, "cached": False,
+        "windows": [{"label": "All models · 5-hour", "used": five_hour, "reset": FUTURE_S},
+                    {"label": "All models · weekly", "used": weekly, "reset": FUTURE_S},
+                    {"label": "Fable · weekly", "used": fable, "reset": FUTURE_S}],
+        "error": "", "checked_at": T0_MS / 1000, "no_reset_reason": "",
+    }
+    list_row = {
+        "alias": alias, "is_active": active, "error": None,
+        "usage": {"status": "allowed", "available": True, "limited": limited,
+                  "used_5h": five_hour, "reset_5h": FUTURE_S, "used_7d": weekly, "reset_7d": FUTURE_S,
+                  "scoped": [{"model": "Fable", "used": fable, "reset": FUTURE_S, "exhausted": fable >= 1.0}],
+                  "blocked_models": ["Fable"] if fable >= 1.0 else [],
+                  "extra_usage_enabled": extra_usage},
+    }
+    return tui_row, list_row
+
+
+def _codex_row(alias, windows, *, blocked=False, no_reset_reason=""):
+    tui_row = {"provider": "codex", "alias": alias, "active": False, "saved": True, "can_switch": True,
+               "limited": False, "windows": [{"label": label, "used": used, "reset": FUTURE_S}
+                                             for label, used in windows],
+               "error": "", "checked_at": T0_MS / 1000, "no_reset_reason": no_reset_reason}
+    list_row = {"provider": "codex", "alias": alias, "is_active": False,
+                "usage": {"usable": not blocked, "blocked": blocked, "error": None,
+                          "windows": [{"label": label, "used": used, "reset": FUTURE_S} for label, used in windows]}}
+    return tui_row, list_row
+
+
+def _desk_of(claude=(), codex=(), monkeypatch=None):
+    tui_p = {"sessions": 0, "errors": [], "accounts": [t for t, _ in (*claude, *codex)]}
+    list_p = {"accounts": [l for _, l in claude], "codex": {"quota_read": True, "accounts": [l for _, l in codex]}}
+    d = desk.HotseatDesk()
+    body = d.payload(refresh=True, command="hotseat", runner=_fake_runner_factory(tui_p, list_p, {"items": []}))
+    return d, {a["alias"]: a for a in body["accounts"]}
+
+
+def test_a_full_model_window_does_not_make_the_account_exhausted(monkeypatch):
+    monkeypatch.setattr(desk, "now_ms", lambda: T0_MS)
+    _d, accounts = _desk_of(claude=[
+        _claude_row("main", five_hour=0.42, weekly=0.30, fable=1.0, active=True),
+        _claude_row("spent", five_hour=1.0, weekly=0.30, fable=0.10, limited=True),
+        _claude_row("weekly-out", five_hour=0.05, weekly=1.0, fable=0.10),
+        _claude_row("overage", five_hour=1.0, weekly=0.30, fable=0.10, extra_usage=True),
+    ])
+
+    main = accounts["main"]
+    assert (main["state"], main["error_code"], main["limited"]) == ("ok", None, False)
+    windows = {w["kind"]: w for w in main["windows"]}
+    assert (windows["5h"]["remaining_ratio"], windows["7d"]["remaining_ratio"]) == (0.58, 0.7)
+    # The model limit stays in the payload as its own fact: which model, and until when.
+    assert windows["model:fable"]["label"] == "Fable · weekly" and windows["model:fable"]["short_label"] == "Fable"
+    assert (windows["model:fable"]["used_ratio"], windows["model:fable"]["remaining_ratio"]) == (1.0, 0.0)
+    assert windows["model:fable"]["resets_at"] == int(FUTURE_S * 1000)
+    assert main["blocked_models"] == ["Fable"]
+
+    assert (accounts["spent"]["state"], accounts["spent"]["error_code"]) == ("exhausted", "exhausted")
+    assert accounts["weekly-out"]["state"] == "exhausted", "an account window at its limit, without the flag"
+    assert accounts["overage"]["state"] == "ok", "a full 5-hour window Hotseat says extra usage covers"
+
+
+def test_codex_is_exhausted_by_its_own_windows_or_hotseats_block_not_by_a_model_limit(monkeypatch):
+    monkeypatch.setattr(desk, "now_ms", lambda: T0_MS)
+    _d, accounts = _desk_of(codex=[
+        _codex_row("month-out", [("codex primary weekly", 0.20), ("codex primary 30-day", 1.0)], blocked=True),
+        _codex_row("spark-out", [("codex primary weekly", 0.20), ("codex_spark primary weekly", 1.0)]),
+        _codex_row("no-flag", [("codex primary weekly", 1.0)]),
+    ])
+
+    assert accounts["month-out"]["state"] == "exhausted"
+    assert [w["kind"] for w in accounts["month-out"]["windows"]] == ["7d", "30d"]
+    assert (accounts["spark-out"]["state"], accounts["spark-out"]["limited"]) == ("ok", False)
+    spark = next(w for w in accounts["spark-out"]["windows"] if w["kind"] == "model:spark")
+    assert (spark["remaining_ratio"], spark["resets_at"]) == (0.0, int(FUTURE_S * 1000))
+    assert accounts["no-flag"]["state"] == "exhausted"
+
+
+def test_a_passed_account_reset_is_not_kept_exhausted_by_a_full_model_window(monkeypatch):
+    monkeypatch.setattr(desk, "now_ms", lambda: T0_MS)
+    tui_row, list_row = _claude_row("main", five_hour=1.0, weekly=0.30, fable=1.0, limited=True)
+    tui_row["windows"][0]["reset"] = SOON_RESET_S
+    d, accounts = _desk_of(claude=[(tui_row, list_row)])
+    assert accounts["main"]["state"] == "exhausted"
+
+    later = d.payload(served_at=int(SOON_RESET_S * 1000) + 10_000, command="hotseat")["accounts"][0]
+
+    assert (later["state"], later["limited"], later["error_code"]) == ("unknown", False, None)
+    windows = {w["kind"]: w for w in later["windows"]}
+    assert windows["5h"]["used_ratio"] is None and windows["5h"]["stale"] is True
+    assert windows["model:fable"]["used_ratio"] == 1.0, "the model limit is still there, as itself"
+
+
 # --- live reads: a minimum interval ------------------------------------------
 
 def test_a_live_read_inside_the_interval_serves_the_stored_snapshot(monkeypatch):
@@ -1060,6 +1157,76 @@ def test_the_handler_sends_the_prompt_through_the_dispatcher_as_automation(monke
 
     monkeypatch.setattr(host.TurnDispatchService, "submit", refuse)
     assert handler._hotseat_send_prompt("worker-1", "go on", "x") == {"ok": False, "error": "503: runtime unavailable"}
+
+
+# --- the off-switch ------------------------------------------------------------------
+
+def _desk_setting(monkeypatch, enabled: bool) -> None:
+    import dataclasses
+    from lib import config
+    current = config.load()
+    monkeypatch.setattr(config, "load", lambda *a, **k: dataclasses.replace(current, hotseat_desk_enabled=enabled))
+
+
+def test_the_desk_is_on_unless_the_config_turns_it_off(tmp_path):
+    from lib import config
+    path = tmp_path / "config.toml"
+    try:
+        for text, expected in (("", True), ("[hotseat]\ndesk = true\n", True), ("[hotseat]\ndesk = false\n", False),
+                               ('[hotseat]\ndesk = "no"\n', True), ("[hotseat]\n", True)):
+            path.write_text(text)
+            config.reset_cache()
+            assert config.load(path).hotseat_desk_enabled is expected, text
+    finally:
+        config.reset_cache()
+
+
+def test_turning_the_desk_off_in_the_file_takes_effect_on_a_running_host(tmp_path, monkeypatch):
+    from lib import config, server_identity
+    path = tmp_path / "config.toml"
+    path.write_text("[hotseat]\ndesk = true\n")
+    monkeypatch.setattr(config, "RELOAD_CHECK_INTERVAL_SEC", 0.0)
+    try:
+        config.reset_cache()
+        assert config.load(path).hotseat_desk_enabled is True
+        assert "hotseat_desk" in server_identity.capabilities()["features"]
+
+        path.write_text("# switched off by the owner\n[hotseat]\ndesk = false\n")
+
+        assert server_identity.hotseat_desk_enabled() is False, "no restart, no cache reset"
+        assert "hotseat_desk" not in server_identity.capabilities()["features"]
+    finally:
+        config.reset_cache()
+
+
+def test_a_host_with_the_desk_off_does_not_advertise_it(monkeypatch):
+    from lib import server_identity
+    desk_features = {"hotseat_desk", "hotseat_desk_actions"}
+    assert desk_features <= set(server_identity.capabilities()["features"])
+    assert desk_features <= set(server_identity.contract()["features"])
+
+    _desk_setting(monkeypatch, False)
+
+    assert not desk_features & set(server_identity.capabilities()["features"])
+    assert not desk_features & set(server_identity.contract()["features"])
+    assert "accounts_hotseat" in server_identity.capabilities()["features"], "the read-only view stays"
+    assert server_identity.contract()["host"] == server_identity.HOST_CONTRACT
+
+
+@pytest.mark.parametrize("name", ["_handle_hotseat_desk", "_handle_hotseat_switch", "_handle_hotseat_resume"])
+def test_the_three_routes_answer_like_unknown_routes_while_the_desk_is_off(monkeypatch, name):
+    _desk_setting(monkeypatch, False)
+
+    class NoDesk:
+        def __getattr__(self, attribute):
+            raise AssertionError(f"the desk must not be asked for {attribute} while it is off")
+
+    handler = _handler(SimpleNamespace(hotseat_desk=NoDesk()))
+    answers: list[tuple] = []
+    handler._send = lambda code, body=b"", *a, **k: answers.append((code, body))
+    handler._read_json = lambda: pytest.fail("the body is not read")
+    getattr(handler, name)()
+    assert answers == [(404, b"not found")]
 
 
 @pytest.mark.parametrize("method,name", [("GET", "_handle_hotseat_desk"), ("POST", "_handle_hotseat_switch"),

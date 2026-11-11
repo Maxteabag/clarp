@@ -390,6 +390,10 @@ class Config:
     # URL prefixes a controller `http_post` action may call besides loopback
     # ([controller_actions] allowed_urls; see lib.controller_actions).
     controller_action_urls: tuple[str, ...] = ()
+    # The Hotseat desk ([hotseat] desk): its features are advertised and
+    # /hotseat/desk, /hotseat/switch and /hotseat/resume are served. False
+    # takes all of it away; clients fall back to the read-only /hotseat/status.
+    hotseat_desk_enabled: bool = True
     eleven_api_key: str = ""             # if set, used for direct HTTP; else env var ELEVEN_API_KEY
     eleven_model: str = "eleven_flash_v2_5"
     eleven_speed: float = 1.2
@@ -912,6 +916,7 @@ def _parse_into_cache(path: pathlib.Path) -> Config:
     apns    = data.get("apns", {}) or {}
     audio_central = data.get("audio_central", {}) or {}
     controller_actions = data.get("controller_actions", {}) or {}
+    hotseat = data.get("hotseat", {}) or {}
     if (str(network.get("mode", "off")).strip().lower() != "off"
             or network.get("relay_enabled", False) or network.get("local_enabled", False)) and not str(server.get("auth_token", "")).strip():
         raise ConfigError("remote networking requires configured authentication")
@@ -956,6 +961,8 @@ def _parse_into_cache(path: pathlib.Path) -> Config:
         controller_action_urls = tuple(
             str(url).strip() for url in controller_actions.get("allowed_urls", []) or []
             if str(url).strip()),
+        # Only a literal `false` turns the desk off: a typo must not remove it.
+        hotseat_desk_enabled = hotseat.get("desk", True) is not False,
         default_session = str(server.get("default_session", "claude")),
         eleven_api_key  = str(eleven.get("api_key", "")),
         eleven_model    = str(eleven.get("model", "eleven_flash_v2_5")),

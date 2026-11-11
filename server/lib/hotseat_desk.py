@@ -126,41 +126,68 @@ def _int_ms(value) -> int | None:
     return val if val > 0 else None
 
 
+ACCOUNT_WINDOW_KINDS = frozenset({"5h", "7d", "30d"})
+_CLAUDE_FAMILIES = (("fable", "Fable"), ("opus", "Opus"), ("sonnet", "Sonnet"), ("haiku", "Haiku"))
+
+
 def _window_meta(provider: str, label: str) -> tuple[str, str]:
+    """(kind, short label) of a quota window from Hotseat's label.
+
+    An account window ("All models · 5-hour", "codex primary 30-day") gets one
+    of ACCOUNT_WINDOW_KINDS. A window of one model ("Fable · weekly", a Codex
+    limit not named after the provider) never does: it limits that model, not
+    the account, and the kind is what keeps the two facts apart downstream."""
     raw = str(label or "").strip()
     lower = raw.casefold()
+    words = lower.replace("·", " ").split()
+    five_hour = "5-hour" in lower or "5h" in lower
     if provider == "claude":
-        if "5-hour" in lower or "5h" in lower:
+        account = lower.startswith("all models") or "·" not in raw
+        if account and five_hour:
             return "5h", "5h"
         if lower.startswith("all models") and "weekly" in lower:
             return "7d", "Weekly"
-        for family, title in (("fable", "Fable"), ("opus", "Opus"), ("sonnet", "Sonnet"), ("haiku", "Haiku")):
+        for family, title in _CLAUDE_FAMILIES:
             if family in lower:
-                return f"model:{family}", title
+                return (f"model:{family}:5h", f"{title} 5h") if five_hour else (f"model:{family}", title)
         return f"window:{lower[:24]}", raw[:24] or "Window"
     if provider == "codex":
         if "spark" in lower:
-            if "5-hour" in lower or "5h" in lower:
+            if five_hour:
                 return "model:spark:5h", "Spark 5h"
             return "model:spark", "Spark wk"
-        if "5-hour" in lower or "5h" in lower:
-            return "5h", "5h"
-        if "30-day" in lower:
-            return "30d", "30-day"
-        if "weekly" in lower:
-            return "7d", "Weekly"
+        # Hotseat labels a Codex window "<limit> [tier] <span>"; the account's
+        # own limit carries the provider's name (hotseat_status._codex_kind).
+        if words and (words[0] == provider or len(words) == 1):
+            if five_hour:
+                return "5h", "5h"
+            if "30-day" in lower:
+                return "30d", "30-day"
+            if "weekly" in lower:
+                return "7d", "Weekly"
     return f"window:{lower[:24]}", raw[:24] or "Window"
 
 
-def _classify_account_state(*, error: str, error_code: str | None, limited: bool, windows: list[dict]) -> tuple[str, str | None]:
+def _account_limit_reached(windows: list[dict]) -> bool:
+    """Whether a window of the account itself is used up. Model windows do not count."""
+    return any(w.get("kind") in ACCOUNT_WINDOW_KINDS and (_num(w.get("used_ratio")) or 0) >= 1.0
+               for w in windows if isinstance(w, dict))
+
+
+def _classify_account_state(*, error: str, error_code: str | None, limited: bool, windows: list[dict],
+                            extra_usage: bool = False) -> tuple[str, str | None]:
+    """The state of the ACCOUNT. `exhausted` means the account cannot take a
+    turn: Hotseat says it is limited, or one of its own windows (5-hour, weekly,
+    30-day) is at its limit and no extra usage covers it. A model at its limit
+    is not that: the account still serves the other models, and the model's
+    window in `windows` (and `blocked_models`) says which one and until when.
+    The same rule `/hotseat/status` follows."""
     lower_err = error.casefold()
     if error_code == "auth_error" or ("token" in lower_err and ("expired" in lower_err or "revoked" in lower_err or "sign-in" in lower_err)):
         return "auth_error", "auth_error"
     if error:
         return "error", error_code or "provider_error"
-    if limited:
-        return "exhausted", "exhausted"
-    if any(w.get("used_ratio") is not None and w["used_ratio"] >= 1.0 for w in windows):
+    if limited or (not extra_usage and _account_limit_reached(windows)):
         return "exhausted", "exhausted"
     if any(w.get("used_ratio") is not None for w in windows):
         return "ok", None
@@ -281,6 +308,7 @@ def _build_desk_snapshot(
             error_code=error_code,
             limited=limited,
             windows=windows,
+            extra_usage=claude_usage.get("extra_usage_enabled") is True,
         )
 
         reset_credits = raw.get("reset_credits")
@@ -524,9 +552,7 @@ def _serve_accounts(raw_accounts: list[dict], *, served_at: int, snapshot_stale:
             w["resets_at"] = resets_at
             w["stale"] = stale
             out_windows.append(w)
-        if item.get("state") == "exhausted" and reset_passed and not any(
-            (w.get("used_ratio") or 0) >= 1.0 for w in out_windows if w.get("used_ratio") is not None
-        ):
+        if item.get("state") == "exhausted" and reset_passed and not _account_limit_reached(out_windows):
             item["state"] = "unknown"
             item["error_code"] = None
             item["limited"] = False
