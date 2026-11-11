@@ -6,7 +6,7 @@
   "license": "UNLICENSED",
   "dependencies": {
     "@anthropic-ai/claude-code": "2.1.321",
-    "@openai/codex": "0.159.2"
+    "@openai/codex": "0.167.1"
   },
   "engines": {
     "node": ">=22 <23"
