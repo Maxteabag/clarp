@@ -50,9 +50,12 @@ CARRIED_WORK_POLL_SECONDS = 1.0
 # The shortest real gap between a resume and the next limit that afternoon
 # was 145 s of work, which is a new park.
 RESUME_GRACE_SECONDS = 120.0
-# A turn parked because the account does not offer its model waits for this
-# many selector answers of "no saved account does" and then ends. A plan is
-# not a usage window: nothing resets, so it does not get the half hour.
+# A turn parked because the provider said its account does not offer its model
+# waits for this many selector answers that do not serve that model and then
+# ends, with the provider's sentence. A plan is not a usage window: nothing
+# resets, so it does not get the half hour. No other turn ends early: a model
+# missing from an answer is not served by the chosen account now (its weekly
+# quota is spent, its probe failed), which says nothing about the plan.
 PLAN_CHECKS = 3
 
 
@@ -92,9 +95,11 @@ def switch_account(command: tuple[str, ...], models: list[str]) -> bool | frozen
 
     Four answers, which the caller must keep apart:
       True       an account serves every requested model.
-      frozenset  an account is active that serves only these of the requested
-                 models (the selector's ``models`` list); no saved account
-                 serves the rest. Never empty.
+      frozenset  the account now active serves only these of the requested
+                 models (the selector's ``models`` list). It does not serve
+                 the rest now: that model's quota is spent there, its plan
+                 lacks it, or its probe failed. That says nothing about the
+                 other saved accounts. May be empty.
       False      the selector checked and none does - wait for a reset.
       None       no verdict: it timed out, exited non-zero, answered in a shape
                  we cannot read, or reported its own failure. That says
@@ -128,10 +133,7 @@ def switch_account(command: tuple[str, ...], models: list[str]) -> bool | frozen
         if not isinstance(served, list) or not all(isinstance(m, str) for m in served):
             return None
         covered = frozenset(served) & frozenset(models)
-        if covered >= frozenset(models):
-            return True
-        # "Available" for none of what was asked is no readable answer.
-        return covered or None
+        return True if covered >= frozenset(models) else covered
     # The selector reports its own crash as {"available": false, "error": ...}.
     # Only a bare false is evidence about quota.
     if available is False and not result.get("error"):
@@ -154,12 +156,15 @@ class Attempt:
     # The dispatcher's own record of the parked work (its spec and attempt
     # number), read only by the release drain's transfer (turn_dispatch).
     work: object = None
-    # Ends the turn visibly, saying that no saved account offers its model;
-    # without it such work is resumed to fail by itself, as it always was.
+    # Ends the turn visibly with the provider's sentence from its own plan
+    # failure. Called only for a turn parked for that failure (``plan``).
     fail: Callable[[], None] | None = None
-    # Parked because its own model is not offered by the account (a plan
-    # failure), and how often the selector has since answered that no saved
-    # account offers it. It ends after PLAN_CHECKS of those.
+    # Tells the turn's owner that it waits for an account that serves its
+    # model while the rest of the pool works on.
+    hold: Callable[[], None] | None = None
+    # Parked because the provider said the account does not offer its model
+    # (a plan failure), and how many selector answers since did not serve
+    # that model. It ends after PLAN_CHECKS of those.
     plan: bool = False
     unserved_checks: int = 0
 
@@ -193,6 +198,9 @@ class AccountFailover:
         # When each turn's park began. A park a recovery resumed and that the
         # turn fell back into within RESUME_GRACE_SECONDS is the same park.
         self.first_parked: dict[tuple[str, str], float] = {}
+        # The latest timer armed for work that stays parked while the pool
+        # works (see ``_begin``); an older one does nothing.
+        self.hold_timer = 0
 
     @staticmethod
     def _schedule(delay, callback):
@@ -212,10 +220,13 @@ class AccountFailover:
                                  if key[0] != attempt.agent_id or key[1] == attempt.trace_id}
             self.attempts[attempt.agent_id] = attempt
             self.awaiting.discard(attempt.agent_id)
-            if self.recovering and not self._park_over(attempt):
+            # Behind a recovery, or behind the work already parked for this
+            # model: run now, it would meet the same limit and stop the pool.
+            unserved = attempt.model in self._unserved_models()
+            if (self.recovering or unserved) and not self._park_over(attempt):
                 attempt.state["account_recovery"] = True
                 self._note_park(attempt)
-                attempt.pause()
+                (attempt.pause if self.recovering or attempt.hold is None else attempt.hold)()
                 attempt.spawned.set()
                 return True
             return False
@@ -237,6 +248,17 @@ class AccountFailover:
                         and attempt.state.get("account_recovery")
                         and (attempt.stopped or (
                             attempt.spawned.is_set() and attempt.handle is None)))
+
+    def _parked(self) -> list[Attempt]:
+        """Owned work that waits for an account. Called with the lock held."""
+        return [attempt for attempt in self.attempts.values()
+                if attempt.state.get("account_recovery") and attempt.owned()
+                and not self._expired(attempt)]
+
+    def _unserved_models(self) -> set[str]:
+        """While the pool works: the models the active account does not serve
+        now and work is parked for. Called with the lock held."""
+        return set() if self.recovering else {attempt.model for attempt in self._parked()}
 
     def _same_park(self, key: tuple[str, str]) -> bool:
         """A recovery resumed this turn so recently that it has not left its
@@ -301,6 +323,8 @@ class AccountFailover:
             self.parked_since = self.now()
             self.command = tuple(command)
             for attempt in self.attempts.values():
+                if attempt.state.get("account_recovery"):
+                    continue   # parked already; its clock runs from that park
                 if attempt.owned() and not self._park_over(attempt):
                     attempt.state["account_recovery"] = True
                     self._note_park(attempt)
@@ -356,6 +380,64 @@ class AccountFailover:
             finish_owned_group(handle)
         attempt.stopped = True
 
+    def _take_overdue(self, attempts: list[Attempt]) -> list[Attempt]:
+        """Take out the work whose own park is MAX_PARK_SECONDS old; it is
+        never parked again. Called with the lock held; ``_release`` follows."""
+        at = self.now()
+        overdue = [attempt for attempt in attempts if at - self.first_parked.get(
+            (attempt.agent_id, attempt.trace_id), at) >= MAX_PARK_SECONDS]
+        for attempt in overdue:
+            self.attempts.pop(attempt.agent_id, None)
+            self.park_expired.add((attempt.agent_id, attempt.trace_id))
+        return overdue
+
+    @staticmethod
+    def _release(overdue: list[Attempt]) -> None:
+        if not overdue:
+            return
+        log("claudeAccountParkExpired",
+            f"released={len(overdue)} whose own park is {MAX_PARK_SECONDS:.0f}s old; "
+            "the turns run and fail visibly instead")
+        for attempt in overdue:
+            if attempt.owned():
+                attempt.resume()
+
+    def _arm_hold(self) -> None:
+        """Look again in a recheck at the work that stays parked while the
+        pool works. Called with the lock held."""
+        self.hold_timer += 1
+        timer = self.hold_timer
+        self.schedule(RECHECK_SECONDS, lambda: self.recover_parked(timer))
+
+    def _begin(self, hold=None) -> bool:
+        """Whether this pass is a recovery pass. ``hold`` is the timer of a
+        pass armed for parked work; a recovery's own passes have none.
+
+        Outside a recovery, work can stay parked for a model the active
+        account does not serve now while the turns it does serve work. For
+        that work nothing is done to the others: no turn is stopped, and the
+        selector, which switches the machine's account while it probes, is
+        not run. Each such turn is released at its own cap. Only when no turn
+        of the pool is running does a recovery begin for what is parked."""
+        with self.lock:
+            if self.recovering:
+                return hold is None    # the recovery has its own passes
+            if hold is not None and hold != self.hold_timer:
+                return False
+            parked = self._parked()
+            overdue = self._take_overdue(parked)
+            parked = [attempt for attempt in parked if attempt not in overdue]
+            running = any(attempt.owned() and not attempt.state.get("account_recovery")
+                          for attempt in self.attempts.values())
+            begin = bool(parked) and not running
+            if begin:
+                self.recovering = True
+                self.parked_since = self.now()
+            elif parked:
+                self._arm_hold()
+        self._release(overdue)
+        return begin
+
     def recover(self):
         with self.lock:
             self.checking += 1
@@ -365,7 +447,20 @@ class AccountFailover:
             with self.lock:
                 self.checking -= 1
 
+    def recover_parked(self, timer: int) -> None:
+        """The timer armed for work that stays parked while the pool works."""
+        with self.lock:
+            self.checking += 1
+        try:
+            if self._begin(timer):
+                self._recover()
+        finally:
+            with self.lock:
+                self.checking -= 1
+
     def _recover(self):
+        if not self._begin():
+            return
         settings = FailoverSettings(recheck_seconds=RECHECK_SECONDS,
                                     max_park_seconds=MAX_PARK_SECONDS)
         try:
@@ -405,71 +500,73 @@ class AccountFailover:
             # however wrong, restart turns more often than the recheck.
             self.next_check = self.now() + settings.recheck_seconds
             pending = self._pending()
-            # Work no saved account serves ends now, with a sentence that says
-            # so. Resumed, it would fail again and start the next recovery;
-            # parked, it would hold the pool in recovery, which stops every
-            # turn again at the next check. After a partial answer that is
-            # every model the answer leaves out, at once: the pool's recovery
-            # is over. After a plain "no", the turns parked for their plan
-            # once they have heard it PLAN_CHECKS times (a usage window is
-            # waited out to the park cap).
             served = verdict if isinstance(verdict, frozenset) else None
-            if verdict is False:
+            # A turn parked for its plan has heard one more answer that does
+            # not serve its model. After PLAN_CHECKS of them it ends, with the
+            # provider's sentence. Nothing else ends here: a usage window is
+            # waited out to the park cap.
+            ended = []
+            if verdict is False or served is not None:
                 for attempt in pending:
-                    attempt.unserved_checks += bool(attempt.plan)
-            unserved = [attempt for attempt in pending if attempt.fail is not None and (
-                (served is not None and attempt.model not in served)
-                or (verdict is False and attempt.plan
-                    and attempt.unserved_checks >= PLAN_CHECKS))]
-            for attempt in unserved:
+                    if attempt.plan and (served is None or attempt.model not in served):
+                        attempt.unserved_checks += 1
+                        if attempt.fail is not None and attempt.unserved_checks >= PLAN_CHECKS:
+                            ended.append(attempt)
+            for attempt in ended:
                 self.attempts.pop(attempt.agent_id, None)
-            pending = [attempt for attempt in pending if attempt not in unserved]
+            pending = [attempt for attempt in pending if attempt not in ended]
+            # An answer for some of the models: the turns it covers are
+            # resumed, the others stay parked in their own park. The active
+            # account does not serve them now; nothing is known beyond that.
+            waiting = []
             if served is not None:
-                # What is left is covered, or cannot be ended (no ``fail``)
-                # and is resumed to fail by itself, as before.
-                verdict = True
+                covered = [attempt for attempt in pending if attempt.model in served]
+                if covered:
+                    waiting = [attempt for attempt in pending if attempt.model not in served]
+                    pending, verdict = covered, True
+                else:
+                    verdict = False     # it serves none of them now: keep asking
             # The cap is per turn, from its first park: a turn that fell back
-            # into its park is released when that park is MAX_PARK_SECONDS
-            # old, though this recovery began later.
-            overdue = []
-            if verdict is not True:
-                at = self.now()
-                overdue = [attempt for attempt in pending if at - self.first_parked.get(
-                    (attempt.agent_id, attempt.trace_id), at) >= MAX_PARK_SECONDS]
-                for attempt in overdue:
-                    self.attempts.pop(attempt.agent_id, None)
-                    self.park_expired.add((attempt.agent_id, attempt.trace_id))
-                pending = [attempt for attempt in pending if attempt not in overdue]
+            # into its park, or that waits while others work, is released when
+            # that park is MAX_PARK_SECONDS old, though this recovery began later.
+            overdue = self._take_overdue(waiting + (pending if verdict is not True else []))
+            pending = [attempt for attempt in pending if attempt not in overdue]
+            waiting = [attempt for attempt in waiting if attempt not in overdue]
             decision = self._decide(pending, verdict, settings)
             if isinstance(decision, Resume):
-                self.attempts.clear()
                 self.recovering = False
                 at = self.now()
+                # All of them out first: a resumed turn registers its new
+                # process, which must not find the others still parked.
+                for attempt in pending:
+                    self.attempts.pop(attempt.agent_id, None)
                 for attempt in pending:
                     if attempt.owned():
                         self.resumed_at[(attempt.agent_id, attempt.trace_id)] = at
                         attempt.resume()
+                if waiting:
+                    for attempt in waiting:
+                        if attempt.hold is not None and attempt.owned():
+                            attempt.hold()
+                    self._arm_hold()
             elif isinstance(decision, Release):
                 self.recovering = False
                 if decision.reason == PARK_EXPIRED:
                     self.park_expired.update(
                         (attempt.agent_id, attempt.trace_id) for attempt in pending)
                     self.attempts.clear()
-            for attempt in unserved:
+            for attempt in ended:
                 if attempt.owned():
                     attempt.fail()
-        if unserved:
-            log("claudeAccountUnserved",
-                f"ended={len(unserved)} models={sorted({a.model for a in unserved})}")
-        if overdue:
-            log("claudeAccountParkExpired",
-                f"released={len(overdue)} whose own park is {MAX_PARK_SECONDS:.0f}s old; "
-                "the turns run and fail visibly instead")
-            for attempt in overdue:
-                if attempt.owned():
-                    attempt.resume()
+        if ended:
+            log("claudeAccountPlanEnded",
+                f"ended={len(ended)} after {PLAN_CHECKS} answers without "
+                f"{sorted({attempt.model for attempt in ended})}")
+        self._release(overdue)
         if isinstance(decision, Resume):
-            log("claudeAccountRecovered", f"turns={len(pending)}")
+            log("claudeAccountRecovered", f"turns={len(pending)}" + (
+                f" parked={len(waiting)} for {sorted({attempt.model for attempt in waiting})}, "
+                "which the active account does not serve now" if waiting else ""))
             return
         if verdict is None:
             log("claudeAccountCheckInconclusive",
@@ -520,7 +617,7 @@ class AccountFailover:
             for attempt in attempts:
                 if not attempt.owned():
                     continue
-                if self.recovering:
+                if self.recovering or attempt.model in self._unserved_models():
                     self.attempts.setdefault(attempt.agent_id, attempt)
                     parked.append(attempt)
                 else:

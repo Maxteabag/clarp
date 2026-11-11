@@ -59,6 +59,9 @@ class RetryMixin:
                 switch_pending = bool(backend.credential_switch_pending(message))
             except Exception as exc:  # noqa: BLE001 - unknown: failover decides as before
                 log_exception("credentialSwitchCheckFail", exc, detail=spec.trace_id)
+        if category == error_classify.ACCOUNT_PLAN:
+            # What the provider said, for a turn that ends later out of its park.
+            state["plan_failure"] = message
         if (category in (error_classify.USAGE_LIMIT, error_classify.AUTH,
                          error_classify.ACCOUNT_PLAN)
                 and backend.account_pool()

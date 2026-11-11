@@ -139,16 +139,16 @@ class LauncherMixin:
                 self._mark_interrupted(resume_spec, error_classify.RUNNER_EXIT,
                                        str(exc), attempts=attempt)
 
-    def _end_unserved_by_any_account(self, spec: _TurnSpec, attempt: int) -> None:
-        """The selector looked at every saved account and none offers this
-        turn's model. The turn ends here, visibly, and says so. Resumed, it
-        would only fail again and start the next recovery, which stops every
-        other turn of the pool (2026-11-11)."""
+    def _end_parked_for_its_plan(self, spec: _TurnSpec, attempt: int, state: dict) -> None:
+        """The provider said the account does not offer this turn's model, and
+        the selector has since answered PLAN_CHECKS times without it. The turn
+        ends here as it would have at that failure: with the provider's own
+        sentence. Resumed, it would fail again and start the next recovery
+        (2026-11-11)."""
         if (_INFLIGHT.get(spec.agent_id) != spec.trace_id
                 or self._superseded(spec)):
             return
-        pool = backends.by_id(spec.backend).account_pool() or spec.backend
-        message = f"No saved {pool.capitalize()} account offers model {spec.model or 'default'}"
+        message = state.get("plan_failure")
         if _is_call_opening(spec):
             self._end_launched_opening(spec, error_classify.ACCOUNT_PLAN, message, attempt)
             return
@@ -188,15 +188,20 @@ class LauncherMixin:
                                    "account switch", attempt)
         return False
 
-    def _pause_for_account(self, spec: _TurnSpec) -> None:
+    def _pause_for_account(self, spec: _TurnSpec, *, unserved: bool = False) -> None:
+        """Show that the turn waits for an account. ``unserved``: the rest of
+        the pool works on; the active account does not serve this turn's
+        model now (its quota for that model is spent, or its probe failed)."""
+        message = (f"Waiting for a {spec.backend} account that serves "
+                   f"{spec.model or 'this model'}; the active one does not right now"
+                   if unserved else f"Waiting for a {spec.backend} account with available usage")
         with _TURN_LOCK:
             if _SLOTS.owns(spec.agent_id, spec.trace_id):
                 _SLOTS.touch_claim(spec.agent_id)
             defer_on(_TURN_LOCK, lambda: turn_lifecycle.try_transition(
                 spec.agent_id, TurnEvent.ACCOUNT_RECOVERY_WAIT,
                 {"dispatch": spec.backend, "trace_id": spec.trace_id,
-                 "account_recovery": "waiting",
-                 "message": f"Waiting for a {spec.backend} account with available usage"}))
+                 "account_recovery": "waiting", "message": message}))
 
     def _sticky_session(self) -> str:
         """Session of the currently-focused agent — the last one addressed by
