@@ -215,7 +215,12 @@ def _canonical_id(prefix: str, payload: dict[str, Any], *, size: int = 32) -> st
     return f"{prefix}{hashlib.sha256(encoded).hexdigest()[:size]}"
 
 
-def _identity_secret() -> bytes:
+def _identity_secret(*, create: bool = True) -> bytes | None:
+    existing = (settings_store.get(_IDENTITY_SECRET_KEY) or "").strip()
+    if existing:
+        return existing.encode()
+    if not create:
+        return None
     stored = settings_store.set_text_if_blank(
         _IDENTITY_SECRET_KEY, secrets.token_hex(32)).strip()
     if not stored:
@@ -223,9 +228,12 @@ def _identity_secret() -> bytes:
     return stored.encode()
 
 
-def _private_ref(kind: str, value: str) -> str:
+def _private_ref(kind: str, value: str, *, create: bool = True) -> str | None:
+    secret = _identity_secret(create=create)
+    if secret is None:
+        return None
     digest = hmac.new(
-        _identity_secret(), f"{kind}\0{value}".encode(), hashlib.sha256,
+        secret, f"{kind}\0{value}".encode(), hashlib.sha256,
     ).hexdigest()
     return f"{kind}-{digest[:24]}"
 
@@ -235,10 +243,15 @@ def _codex_identity(access_token: str, account_id: str) -> tuple[str, str]:
     # auth_observation_generation even for the same account. The provider gives
     # us no signed continuity evidence, so old episodes become unknown rather
     # than being silently carried across credentials.
-    return (
-        _private_ref("auth", f"{account_id}\0{access_token}"),
-        _private_ref("account", account_id),
-    )
+    secret = _identity_secret(create=True)
+    assert secret is not None
+    auth_digest = hmac.new(
+        secret, f"auth\0{account_id}\0{access_token}".encode(), hashlib.sha256,
+    ).hexdigest()
+    acct_digest = hmac.new(
+        secret, f"account\0{account_id}".encode(), hashlib.sha256,
+    ).hexdigest()
+    return f"auth-{auth_digest[:24]}", f"account-{acct_digest[:24]}"
 
 
 def _computer_id() -> str:
@@ -515,7 +528,8 @@ def _retire_omitted_windows(
 
 
 def _resolve_unknown_terminals(
-    *, provider_instance_id: str, auth_generation_id: str, observed_at: int,
+    *, provider_instance_id: str, auth_generation_id: str,
+    account_scope_ref: str | None = None, observed_at: int,
 ) -> list[dict[str, Any]]:
     """Close synthetic 'unknown' hard-limit episodes when an authoritative refresh
     confirms the active account is allowed and all quota windows are below 100%."""
@@ -526,17 +540,20 @@ def _resolve_unknown_terminals(
         else (auth_generation_id,)
     )
     placeholders = ",".join("?" for _ in generations)
+    scope_clause = "OR account_scope_ref=?" if account_scope_ref else ""
+    scope_params: tuple[Any, ...] = (account_scope_ref,) if account_scope_ref else ()
     pending = database.execute(
         f"""SELECT window_id, auth_generation_id FROM provider_usage_windows
              WHERE provider_instance_id=? AND window_kind='unknown'
-               AND auth_generation_id IN ({placeholders})""",
-        (provider_instance_id, *generations),
+               AND (auth_generation_id IN ({placeholders}) {scope_clause})""",
+        (provider_instance_id, *generations, *scope_params),
     ).fetchall()
     if not pending:
         return []
     database.execute("BEGIN IMMEDIATE")
     try:
         events: list[dict[str, Any]] = []
+        ep_scope_clause = "OR w.account_scope_ref=?" if account_scope_ref else ""
         episodes = database.execute(
             f"""SELECT e.* FROM provider_limit_episodes e
                   JOIN provider_usage_windows w
@@ -545,8 +562,8 @@ def _resolve_unknown_terminals(
                    AND w.window_id=e.window_id
                  WHERE e.provider_instance_id=? AND e.status='open'
                    AND w.window_kind='unknown'
-                   AND e.auth_generation_id IN ({placeholders})""",
-            (provider_instance_id, *generations),
+                   AND (e.auth_generation_id IN ({placeholders}) {ep_scope_clause})""",
+            (provider_instance_id, *generations, *scope_params),
         ).fetchall()
         for raw in episodes:
             episode = dict(raw)
@@ -561,8 +578,8 @@ def _resolve_unknown_terminals(
         database.execute(
             f"""DELETE FROM provider_usage_windows
                  WHERE provider_instance_id=? AND window_kind='unknown'
-                   AND auth_generation_id IN ({placeholders})""",
-            (provider_instance_id, *generations),
+                   AND (auth_generation_id IN ({placeholders}) {scope_clause})""",
+            (provider_instance_id, *generations, *scope_params),
         )
         database.execute("COMMIT")
         return events
@@ -572,24 +589,37 @@ def _resolve_unknown_terminals(
 
 
 def _latest_completed_turn_ms(
-    provider_id: str, *, up_to_ms: int | None = None,
+    provider_id: str, *, after_ms: int = 0, up_to_ms: int | None = None,
 ) -> int | None:
-    """Timestamp (ms) of the latest completed turn for `provider_id`, if any."""
+    """Timestamp (ms) of the latest completed turn for `provider_id` strictly
+    after `after_ms` (and at most `up_to_ms`), bounded by `idx_state_log_agent_ts`."""
+    lower = int(after_ms)
     if up_to_ms is None:
         row = db.conn().execute(
-            """SELECT MAX(s.ts) AS latest_ts
-                 FROM state_log s
-                 JOIN agents a ON a.agent_id = s.agent_id
-                WHERE a.backend = ? AND s.kind = 'done'""",
-            (provider_id,),
+            """SELECT MAX((
+                   SELECT s.ts FROM state_log s
+                    WHERE s.agent_id = a.agent_id
+                      AND s.ts > ?
+                      AND s.kind = 'done'
+                    ORDER BY s.ts DESC LIMIT 1
+               )) AS latest_ts
+                 FROM agents a
+                WHERE a.backend = ?""",
+            (lower, provider_id),
         ).fetchone()
     else:
         row = db.conn().execute(
-            """SELECT MAX(s.ts) AS latest_ts
-                 FROM state_log s
-                 JOIN agents a ON a.agent_id = s.agent_id
-                WHERE a.backend = ? AND s.kind = 'done' AND s.ts <= ?""",
-            (provider_id, int(up_to_ms)),
+            """SELECT MAX((
+                   SELECT s.ts FROM state_log s
+                    WHERE s.agent_id = a.agent_id
+                      AND s.ts > ?
+                      AND s.ts <= ?
+                      AND s.kind = 'done'
+                    ORDER BY s.ts DESC LIMIT 1
+               )) AS latest_ts
+                 FROM agents a
+                WHERE a.backend = ?""",
+            (lower, int(up_to_ms), provider_id),
         ).fetchone()
     if not row or row["latest_ts"] is None:
         return None

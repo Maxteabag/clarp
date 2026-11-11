@@ -3,6 +3,8 @@ backend_usage.py imports these names back. Generated: change the recipe, not thi
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import os
 import pathlib
@@ -14,14 +16,25 @@ from urllib.parse import urlsplit
 from . import db
 from .clock import now_ms as _now_ms
 from .log import log, log_exception
-from .backend_usage_store import CODEX, CODEX_FRESH_MS, CODEX_REFRESH_MS, CODEX_SOURCE_REF, _codex_identity, _decode_raw, _event_payload, _insert_limit_event, _invalidate_rotated_auth, _iso_from_epoch_seconds, _iso_to_ms, _latest_completed_turn_ms, _observe_auth_generation, _open_episode, _provider_instance_id, _quota_windows, _record_codex_five_hour, _record_codex_weekly, _resolve_unknown_terminals, _retire_omitted_windows, _row, _to_float, _upsert, _window_by_duration, _window_from_payload, _window_id
+from .backend_usage_store import CODEX, CODEX_FRESH_MS, CODEX_REFRESH_MS, CODEX_SOURCE_REF, _codex_identity, _decode_raw, _event_payload, _identity_secret, _insert_limit_event, _invalidate_rotated_auth, _iso_from_epoch_seconds, _iso_to_ms, _latest_completed_turn_ms, _observe_auth_generation, _open_episode, _provider_instance_id, _quota_windows, _record_codex_five_hour, _record_codex_weekly, _resolve_unknown_terminals, _retire_omitted_windows, _row, _to_float, _upsert, _window_by_duration, _window_from_payload, _window_id
 
 
-def _active_codex_identity() -> tuple[str, str] | None:
+def _active_codex_identity(*, create: bool = False) -> tuple[str, str] | None:
     try:
         token, account_id = _read_codex_auth()
+        if not create and getattr(_codex_identity, "__module__", "").startswith("lib.backend_usage"):
+            secret = _identity_secret(create=False)
+            if secret is None:
+                return None
+            auth_digest = hmac.new(
+                secret, f"auth\0{account_id}\0{token}".encode(), hashlib.sha256,
+            ).hexdigest()
+            acct_digest = hmac.new(
+                secret, f"account\0{account_id}".encode(), hashlib.sha256,
+            ).hexdigest()
+            return f"auth-{auth_digest[:24]}", f"account-{acct_digest[:24]}"
         return _codex_identity(token, account_id)
-    except Exception:  # noqa: BLE001
+    except (OSError, UnicodeDecodeError, ValueError, TypeError, KeyError, RuntimeError):
         return None
 
 
@@ -30,18 +43,30 @@ def _codex_needs_refresh() -> bool:
     if not row:
         return True
     raw = _decode_raw(row)
-    active = _active_codex_identity()
-    if active is not None and raw.get("auth_generation_id") != active[0]:
-        return True
+    active = _active_codex_identity(create=False)
+    if active is not None:
+        stored_acct = raw.get("account_scope_ref")
+        if stored_acct:
+            if stored_acct != active[1]:
+                return True
+        elif raw.get("auth_generation_id") != active[0]:
+            return True
     now = _now_ms()
-    auth_gen = active[0] if active is not None else raw.get("auth_generation_id")
-    if auth_gen:
+    if active is not None:
+        structured = db.conn().execute(
+            """SELECT observed_at, used_percentage FROM provider_usage_windows
+                WHERE provider_instance_id=?
+                  AND (account_scope_ref=? OR (account_scope_ref IS NULL AND auth_generation_id=?))
+                  AND window_kind IN ('five_hour','seven_day')
+                ORDER BY observed_at DESC LIMIT 1""",
+            (_provider_instance_id(CODEX), active[1], active[0]),).fetchone()
+    elif raw.get("auth_generation_id"):
         structured = db.conn().execute(
             """SELECT observed_at, used_percentage FROM provider_usage_windows
                 WHERE provider_instance_id=? AND auth_generation_id=?
                   AND window_kind IN ('five_hour','seven_day')
                 ORDER BY observed_at DESC LIMIT 1""",
-            (_provider_instance_id(CODEX), auth_gen),).fetchone()
+            (_provider_instance_id(CODEX), raw.get("auth_generation_id")),).fetchone()
     else:
         structured = db.conn().execute(
             """SELECT observed_at, used_percentage FROM provider_usage_windows
@@ -56,7 +81,7 @@ def _codex_needs_refresh() -> bool:
     if now - fetched_at > CODEX_REFRESH_MS:
         return True
     if raw.get("blocked") or (_to_float(row.get("used_percentage")) or 0.0) >= 100.0:
-        done_ms = _latest_completed_turn_ms(CODEX, up_to_ms=now)
+        done_ms = _latest_completed_turn_ms(CODEX, after_ms=fetched_at, up_to_ms=now)
         if done_ms is not None and done_ms > fetched_at:
             return True
     return False
@@ -228,6 +253,7 @@ def capture_codex_rate_limits(
         _resolve_unknown_terminals(
             provider_instance_id=_provider_instance_id(CODEX),
             auth_generation_id=auth_generation_id,
+            account_scope_ref=account_scope_ref,
             observed_at=_now_ms())
         if (authoritative_refresh and block is None and snapshot["windows"]
             and all((_to_float(w.get("used_percentage")) or 0.0) < 100.0
@@ -321,15 +347,21 @@ def _codex_block_from_payload(payload: Any) -> dict[str, Any] | None:
     }
 
 
-def _fresh_codex_block(now_ms: int) -> dict[str, Any] | None:
-    row = _row(CODEX)
+def _fresh_codex_block(now_ms: int, *, row: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    if row is None:
+        row = _row(CODEX)
     raw = _decode_raw(row)
     block = raw.get("blocked")
     if not row or not isinstance(block, dict):
         return None
-    active = _active_codex_identity()
-    if active is not None and raw.get("auth_generation_id") and raw.get("auth_generation_id") != active[0]:
-        return None
+    active = _active_codex_identity(create=False)
+    if active is not None:
+        stored_acct = raw.get("account_scope_ref")
+        if stored_acct:
+            if stored_acct != active[1]:
+                return None
+        elif raw.get("auth_generation_id") and raw.get("auth_generation_id") != active[0]:
+            return None
     if now_ms - int(row.get("fetched_at") or 0) > CODEX_FRESH_MS:
         return None
     reset_ms = _iso_to_ms(block.get("resets_at"))

@@ -109,7 +109,7 @@ class BackendDefinition:
 DEFAULT_DEFINITION = BackendDefinition()
 
 CLAUDE = BackendDefinition(
-    probe=ModelProbe("file", "parse_claude_models", "claude account model cache", source_kind="cli_cache", cache_path="claude_model_cache_path", append_fallback=True, fallback_efforts=True),
+    probe=ModelProbe("file", "parse_claude_models", "claude account model cache", source_kind="cli_cache", cache_path="claude_model_cache_path", auth_path="claude_model_cache_path", append_fallback=True, fallback_efforts=True),
     id='claude',
     label='Claude',
     required_binary='claude',
@@ -205,12 +205,12 @@ CODEX = BackendDefinition(
         'gpt-5.5': _CODEX_XHIGH_EFFORTS,
     }),
     fallback_model_defaults=MappingProxyType({
-        'gpt-6.1-sol': 'low',
-        'gpt-6-astra': 'low',
+        'gpt-6.1-sol': 'medium',
+        'gpt-6-astra': 'medium',
         'gpt-6.1-terra': 'low',
         'gpt-6-sol': 'medium',
         'gpt-6-luna': 'medium',
-        'gpt-5.6-sol': 'low',
+        'gpt-5.6-sol': 'medium',
         'gpt-5.6-terra': 'medium',
         'gpt-5.6-luna': 'medium',
         'gpt-5.5': 'medium',
