@@ -73,6 +73,14 @@ def has_cached_catalog() -> bool:
         return _cache is not None
 
 
+def cached_voice_ids() -> list[str]:
+    """Return cached English Cartesia voice IDs without performing network I/O."""
+    with _lock:
+        if not _cache:
+            return []
+        return [str(row.get("id") or "") for row in _cache[1] if row.get("id")]
+
+
 def catalog(agents_path, *, force: bool = False) -> dict:
     agents = load_agents(agents_path)
     cfg = config.load()

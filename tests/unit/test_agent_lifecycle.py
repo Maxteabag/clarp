@@ -417,7 +417,7 @@ def test_anonymous_launch_does_not_claim_a_contact_or_voice(tmp_path):
     assert agents_db.current_runtime_id(row["agent_id"])
 
 
-def test_auto_contact_selects_compatible_unoccupied_contact(tmp_path, monkeypatch):
+def test_auto_contact_selects_compatible_unoccupied_or_mints_when_pool_empty(tmp_path, monkeypatch):
     free = personas.create(name="Free Contact", voice_id="{}")
     occupied = personas.create(name="Occupied Contact", voice_id="{}")
     incompatible = {"name": "Wrong Backend", "voice_id": "{}", "tier": "claude"}
@@ -426,9 +426,21 @@ def test_auto_contact_selects_compatible_unoccupied_contact(tmp_path, monkeypatc
     service = AgentLifecycleService(_ctx(tmp_path))
     result = service.create({"auto_contact": True, "backend": "codex", "cwd": str(tmp_path), "synthesize_audio": False})
     assert result.persona == "Free Contact"
-    with pytest.raises(AgentLifecycleError) as error:
-        service.create({"auto_contact": True, "backend": "codex", "cwd": str(tmp_path), "synthesize_audio": False})
-    assert error.value.code == "contact_pool_empty"
+
+    # When the compatible pool is exhausted, auto_contact immediately mints a
+    # fresh durable Contact with a natural given name and Cartesia voice instead
+    # of hard-blocking session startup.
+    minted = service.create({"auto_contact": True, "backend": "codex", "cwd": str(tmp_path), "synthesize_audio": False})
+    assert minted.persona == "Soren"
+    stored = personas.get("Soren")
+    assert stored is not None
+    assert '"cartesia":' in stored["voice_id"]
+    assert stored["personality"].startswith("Personality:")
+
+    # Explicit mint_contact always mints a brand-new Contact in one step.
+    minted_two = service.create({"mint_contact": True, "backend": "codex", "cwd": str(tmp_path), "synthesize_audio": False})
+    assert minted_two.persona == "Zara"
+    assert personas.get("Zara") is not None
 
 
 def test_anonymous_launch_never_synthesizes_an_announcement(tmp_path):

@@ -17,7 +17,7 @@ class BackgroundJobWatcher:
     PROVIDER_INTERVAL_SEC = 5.0
 
     def __init__(self, stream):
-        self._statuses: dict[str, str] = {}
+        self._statuses: dict[str, tuple[int, str]] = {}
         self.stream = stream
         self._last_id = 0
         self._stale_work_due = 0.0
@@ -94,9 +94,17 @@ class BackgroundJobWatcher:
             # The agent row derives its background state from active jobs, so
             # a start or finish must reach the list without waiting for a poll.
             # Heartbeats also produce events; only a status change nudges.
-            # Computer-owned jobs (updates, model installs) belong to no agent row.
-            if job.get("agent_id") and self._statuses.get(job["job_id"]) != job["status"]:
-                self._statuses[job["job_id"]] = job["status"]
-                if job["status"] not in background_jobs.ACTIVE_STATUSES:
-                    self._statuses.pop(job["job_id"], None)
-                events.broadcast(self.stream, events.agent_roster("background-job"))
+            # Computer-owned jobs normally belong to no agent row, except
+            # persona-avatar jobs whose completion swaps in Contact + Agent
+            # portraits live.
+            state_key = (int(job.get("generation") or 1), str(job["status"]))
+            if self._statuses.get(job["job_id"]) != state_key:
+                self._statuses[job["job_id"]] = state_key
+                if len(self._statuses) > 1024:
+                    for stale_id in list(self._statuses)[:256]:
+                        if self._statuses[stale_id][1] not in background_jobs.ACTIVE_STATUSES:
+                            self._statuses.pop(stale_id, None)
+                if job.get("agent_id"):
+                    events.broadcast(self.stream, events.agent_roster("background-job"))
+                elif job.get("kind") == "persona-avatar" and job["status"] == "succeeded":
+                    events.broadcast(self.stream, events.agent_roster("persona-updated"))

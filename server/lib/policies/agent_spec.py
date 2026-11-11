@@ -45,6 +45,7 @@ class RosterView:
     existing_agent: Callable[[str], Mapping] = _no_row  # session -> agents row or {}
     session_exists: Callable[[str], bool] = lambda _session: False
     contact_pool: Callable[[str], Sequence[str]] = lambda _backend: ()
+    mint_contact: Callable[[str], str | None] = lambda _backend: None
     resume_owner: Callable[[str], Mapping | None] = lambda _sid: None
     resume_listed: Callable[[str, str, str], bool] = lambda _backend, _cwd, _sid: False
     existing_cwd: Callable[[object], str] = lambda raw: str(raw or "")
@@ -119,13 +120,26 @@ def _parse(data: dict, *, backends, roster: RosterView, personas,
         if not roster.resume_listed(backend, cwd, sid):
             return SpecError(404, "Session is no longer available in this directory")
 
-    if data.get("auto_contact") is True and not janitor:
+    if (data.get("mint_contact") is True or data.get("auto_contact") is True) and not janitor:
         if data.get("anonymous") or data.get("replace_sid"):
             return SpecError(400, "conflicting launch options")
-        choices = roster.contact_pool(backend)
-        if not choices:
-            return SpecError(409, "contact_pool_empty")
-        data["name"] = choices[0]
+        if data.get("mint_contact") is True and data.get("auto_contact") is True:
+            return SpecError(400, "conflicting launch options")
+        if data.get("mint_contact") is True:
+            minted = roster.mint_contact(backend)
+            if not minted:
+                return SpecError(409, "contact_pool_empty")
+            data["name"] = minted
+        else:
+            choices = roster.contact_pool(backend)
+            if choices:
+                data["name"] = choices[0]
+            else:
+                minted = roster.mint_contact(backend)
+                if not minted:
+                    return SpecError(409, "contact_pool_empty")
+                data["name"] = minted
+        data.pop("session", None)
 
     if data.get("anonymous") is True and not janitor:
         if data.get("replace_sid"):

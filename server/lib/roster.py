@@ -156,12 +156,77 @@ TIER_BACKENDS: dict[str, str] = {
     "janitors": "codex",
 }
 
+# Canonical backend -> preferred Contact tier when minting a fresh Contact.
+BACKEND_TIERS: dict[str, str] = {
+    "claude": "claude",
+    "codex": "codex",
+    "grok": "grok",
+    "agy": "gemini",
+    "gemini": "gemini",
+    "opencode": "codex",
+    "deepseek": "deepseek",
+}
+
+# Disjoint given-name pools for instant auto-created Contacts when a tier's
+# shipped pool is occupied (or when the owner explicitly asks for a new Contact).
+MINTED_CONTACT_NAMES: dict[str, tuple[str, ...]] = {
+    "claude": (
+        "Clara", "Ethan", "Maya", "Julian", "Nora", "Owen", "Hannah", "Liam",
+        "Sofia", "Eli", "Camila", "Lucas", "Elena", "Miles", "Chloe", "Gavin",
+        "Tessa", "Declan", "Audrey", "Jonah", "Ruby", "Isaac", "Sienna", "Graham",
+        "Helena", "Simon", "Alice", "Victor", "Lydia", "Arthur", "Maeve", "Colin",
+    ),
+    "codex": (
+        "Soren", "Zara", "Kieran", "Talia", "Dorian", "Anya", "Cyrus", "Maren",
+        "Bastian", "Petra", "Cassian", "Linnea", "Evander", "Astrid", "Lucian", "Isolde",
+        "Stellan", "Vera", "Alaric", "Sabine", "Theron", "Kestrel", "Gideon", "Yara",
+        "Corbin", "Elara", "Malik", "Rhea", "Torin", "Sable", "Dante", "Cleo",
+    ),
+    "grok": (
+        "Jett", "Sloane", "Knox", "Roxanne", "Zane", "Mavis", "Dash", "Veda",
+        "Nash", "Indie", "Ace", "Darcy", "Cruz", "Stevie", "Flint", "Ramona",
+        "Cole", "Juno", "Beck", "Maxine", "Ryder", "Zelda", "Brock", "Trixie",
+        "Slate", "Lola", "Vaughn", "Niko", "Gwyn", "Reid", "Bree", "Trent",
+    ),
+    "gemini": (
+        "Cosmo", "Sunny", "Clover", "Bowie", "Maple", "Kiko", "Winnie", "Otto",
+        "Poppy", "Milo", "Daisy", "Ollie", "Birdie", "Louie", "Clementine", "Toby",
+        "Penny", "Alfie", "Maisie", "Monty", "Goldie", "Hugo", "Bonnie", "Percy",
+        "Nellie", "Barnaby", "Millie", "Kip", "Peggy", "Remy", "Zelie", "Bixby",
+    ),
+    "deepseek": (
+        "Marina", "Caspian", "Cordelia", "Morgan", "Ondine", "Calder", "Nerissa", "Lachlan",
+        "Delphine", "Ross", "Thalassa", "Fisher", "Mira", "Harbor", "Selene", "Brooks",
+        "Sirena", "Cove", "Naia", "Reed", "Oceane", "Kaia", "Marlin", "Isla",
+        "Cliff", "Darya", "Brennan", "Meriel", "Sora", "Galen", "Niamh", "Kelvin",
+    ),
+}
+
+MINTED_CONTACT_TIERS: dict[str, str] = {
+    name.casefold(): tier
+    for tier, names in MINTED_CONTACT_NAMES.items()
+    for name in names
+}
+
+
+def backend_to_tier(backend: str) -> str:
+    """Return the Contact tier ('claude', 'codex', 'grok', 'gemini', 'deepseek') for a backend."""
+    norm = (backend or "").strip().lower()
+    return BACKEND_TIERS.get(norm, "claude")
+
 
 def tier_for_contact(name: str) -> str | None:
     """Return the tier ('claude', 'codex', 'grok', 'gemini', 'deepseek', 'janitor') for a contact name, or None."""
     if not name:
         return None
-    return CONTACT_TIERS.get(name.strip().casefold())
+    folded = name.strip().casefold()
+    direct = CONTACT_TIERS.get(folded) or MINTED_CONTACT_TIERS.get(folded)
+    if direct:
+        return direct
+    parts = folded.split()
+    if len(parts) == 2 and (len(parts[1]) == 1 or parts[1].isdigit()):
+        return MINTED_CONTACT_TIERS.get(parts[0])
+    return None
 
 
 def allowed_backend_for_contact(name: str, persona_tier: str = "") -> str | None:

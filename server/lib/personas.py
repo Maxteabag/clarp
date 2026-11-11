@@ -8,7 +8,7 @@ import secrets
 import sqlite3
 import threading
 
-from . import config, db
+from . import config, db, roster
 from .avatar_urls import versioned_avatar_url
 from .deployment import LAYOUT
 
@@ -68,7 +68,16 @@ def get(name: str) -> dict | None:
     return dict(row) if row else None
 
 
-def create(*, name: str, voice_id: str, avatar_symbol: str = "",
+def get_by_id(persona_id: str) -> dict | None:
+    ensure_builtins()
+    row = db.conn().execute(
+        "SELECT * FROM personas WHERE persona_id = ? AND deleted_at IS NULL",
+        ((persona_id or "").strip(),),
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def create(*, name: str, voice_id: str = "", avatar_symbol: str = "",
            personality: str = "", avatar_base64: str = "") -> dict:
     name = name.strip()
     if not name or len(name) > 60:
@@ -76,7 +85,8 @@ def create(*, name: str, voice_id: str, avatar_symbol: str = "",
     if get(name):
         raise ValueError(f"{name} already exists.")
     if not voice_id:
-        raise ValueError("Choose a voice.")
+        from . import contact_minting
+        voice_id = contact_minting.pick_available_voice()
     persona_id = "persona-" + secrets.token_hex(8)
     avatar_path = ""
     if avatar_base64:
@@ -162,7 +172,8 @@ def update(*, original_name: str, name: str, voice_id: str,
     if collision and collision["persona_id"] != current["persona_id"]:
         raise ValueError(f"{name} already exists.")
     if not voice_id:
-        raise ValueError("Choose a voice.")
+        from . import contact_minting
+        voice_id = str(current.get("voice_id") or "") or contact_minting.pick_available_voice()
     avatar_path = _store_avatar(current, avatar_base64)
     db.conn().execute(
         """UPDATE personas
@@ -203,5 +214,6 @@ def public(row: dict) -> dict:
         "avatar_url": versioned_avatar_url(
             "/persona-avatars", row["persona_id"], str(row.get("avatar_path") or "")),
         "personality": row.get("personality") or "",
+        "tier": roster.tier_for_contact(row["name"]) or "",
         "builtin": bool(row.get("builtin")),
     }
