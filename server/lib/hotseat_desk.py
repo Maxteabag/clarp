@@ -51,6 +51,10 @@ WORK_TIMEOUT_S = 20
 # (janitors.py, account-hotseat `interval_seconds` min): a client cannot make
 # the Host read the providers more often than its own switcher may.
 MIN_REFRESH_INTERVAL_MS = 60 * 1000
+# After a live read that FAILED the next one is allowed this soon: a client can
+# try a failed read again without waiting out the whole interval, and one in a
+# loop still cannot hammer a Hotseat that is down.
+FAILED_REFRESH_RETRY_MS = 10 * 1000
 # The app waits 45 s for a switch. Reading who is active plus the switch itself
 # can take longer than that (the CLI alone may use SWITCH_TIMEOUT), so the
 # request answers "still running" after this long and the desk tells the rest.
@@ -646,6 +650,28 @@ def _refusal(error: str, message: str, **fields) -> tuple[int, dict]:
     return 409, {"ok": False, "error": error, "message": message, **fields}
 
 
+def _failed_start(name: str, delivery: dict, *, already_sent: bool, saved: bool) -> tuple[int, dict]:
+    """The answer when the prompt did not start a turn, saying what state that
+    leaves: whether the prompt is in the agent's chat (`saved`) and what the
+    owner can do. The dispatcher keeps proof of a launch that never happened
+    only for a message the user typed, so a prompt it saved and could not
+    start is never started again from here: one stop gets one prompt."""
+    detail = str(delivery.get("error") or "")[:200]
+    if delivery.get("unconfirmed"):
+        return 409, {"ok": False, "error": "delivery_unconfirmed", "saved": True, "message": (
+            f"The prompt for this stop is saved in {name}'s chat, but {name} did not start and the Host "
+            f"cannot send it again. Open {name}'s chat and send a message to continue.")}
+    if not saved:
+        message = f"{name} was not started and nothing was saved. Try again."
+    elif already_sent:
+        message = (f"An earlier Continue for this stop is saved in {name}'s chat, and this request did not "
+                   f"get through. Look at {name}'s chat before trying again.")
+    else:
+        message = (f"{name} did not start. The prompt is saved in {name}'s chat but was not delivered. "
+                   f"Open {name}'s chat and send a message to continue.")
+    return 502, {"ok": False, "error": "prompt_failed", "detail": detail, "saved": saved, "message": message}
+
+
 def resume_message_id(agent_id: str, stopped_at: int) -> str:
     """The id of the one resume prompt a stop can get. Derived from the agent
     and the stop, so every request about that stop is the same send to the
@@ -684,11 +710,18 @@ class HotseatDesk:
 
     # --- reading ----------------------------------------------------------
 
+    def _next_allowed(self, observed: int) -> int:
+        """When the next live read may start. Call with self._lock held.
+        A read that worked moved the stored desk's time, and the full interval
+        counts from there, also across a restart. Any read, a failed one
+        included, holds the next one off for the short retry wait only."""
+        return max(self._last_read_at + FAILED_REFRESH_RETRY_MS if self._last_read_at else 0,
+                   observed + MIN_REFRESH_INTERVAL_MS if observed else 0)
+
     def _next_refresh_at(self, persisted: dict | None) -> int:
         observed = _int_ms((persisted or {}).get("observed_at")) or 0
         with self._lock:
-            last = self._last_read_at
-        return max(last, observed) + MIN_REFRESH_INTERVAL_MS
+            return self._next_allowed(observed)
 
     def _keep_switched_accounts(self, snapshot: dict, read_began: int, providers) -> None:
         """A read that began before a switch ended reports the account that was
@@ -719,7 +752,7 @@ class HotseatDesk:
                 waiting_for = self._inflight
                 if waiting_for is None:
                     now = now_ms()
-                    if not force and now < max(self._last_read_at, observed) + MIN_REFRESH_INTERVAL_MS:
+                    if not force and now < self._next_allowed(observed):
                         return "throttled"
                     done = self._inflight = threading.Event()
                     self._last_read_at = now
@@ -1080,9 +1113,9 @@ class HotseatDesk:
                     return _refusal("agent_busy", f"{name} is working now.")
             text = resume_prompt(row, observed_at=_int_ms(snapshot.get("observed_at")), now=now_ms())
             delivery = send_prompt(session, text, message_id)
+            saved = not delivery.get("ok") and message_store.has_client_message(message_id)
         if not delivery.get("ok"):
-            return 502, {"ok": False, "error": "prompt_failed", "detail": str(delivery.get("error") or "")[:200],
-                         "message": f"The prompt to {name} was not accepted. Nothing was started."}
+            return _failed_start(name, delivery, already_sent=already_sent, saved=saved)
 
         return 200, {
             "ok": True,
@@ -1091,5 +1124,8 @@ class HotseatDesk:
             "action": "continue",
             "continued": True,
             "already_sent": already_sent,
+            # The prompt waits in the agent's queue behind a turn that was
+            # running when it arrived; it runs when that turn ends.
+            "queued": bool(delivery.get("queued")),
             "stopped_at": stopped_at,
         }

@@ -723,10 +723,11 @@ def test_a_live_read_inside_the_interval_serves_the_stored_snapshot(monkeypatch)
     assert allowed["observed_at"] == clock["now"]
 
 
-def test_a_failed_live_read_also_starts_the_interval(monkeypatch):
+def test_a_failed_live_read_can_be_tried_again_soon(monkeypatch):
     clock = {"now": T0_MS}
     monkeypatch.setattr(desk, "now_ms", lambda: clock["now"])
     attempts: list[int] = []
+    good = _fake_runner_factory(*_sample_payloads())
 
     def broken(argv, **_kwargs):
         attempts.append(1)
@@ -735,11 +736,22 @@ def test_a_failed_live_read_also_starts_the_interval(monkeypatch):
     d = desk.HotseatDesk()
     failed = d.payload(refresh=True, command="hotseat", runner=broken)
     ran = len(attempts)
-    again = d.payload(refresh=True, command="hotseat", runner=broken)
+    assert failed["error"] == "cli_failed" and failed["refreshed"] is False
+    assert failed["next_refresh_at"] == T0_MS + desk.FAILED_REFRESH_RETRY_MS, (
+        "a failed read does not cost the client the whole interval")
+    assert 5_000 <= desk.FAILED_REFRESH_RETRY_MS < desk.MIN_REFRESH_INTERVAL_MS
 
-    assert failed["error"] == "cli_failed" and failed["refresh_throttled"] is False
-    assert again["refresh_throttled"] is True and len(attempts) == ran
-    assert again["next_refresh_at"] == T0_MS + desk.MIN_REFRESH_INTERVAL_MS
+    # Not at once: a client in a loop cannot hammer a broken Hotseat.
+    for moment in (T0_MS, T0_MS + desk.FAILED_REFRESH_RETRY_MS - 1):
+        clock["now"] = moment
+        at_once = d.payload(refresh=True, command="hotseat", runner=broken)
+        assert at_once["refresh_throttled"] is True and len(attempts) == ran, moment
+
+    clock["now"] = T0_MS + desk.FAILED_REFRESH_RETRY_MS
+    retried = d.payload(refresh=True, command="hotseat", runner=good)
+    assert (retried["refreshed"], retried["refresh_throttled"], retried["error"]) == (True, False, None)
+    assert retried["next_refresh_at"] == clock["now"] + desk.MIN_REFRESH_INTERVAL_MS, (
+        "a read that worked starts the full interval")
 
 
 def test_the_interval_survives_a_restart_of_the_host(monkeypatch):
@@ -1142,6 +1154,36 @@ def test_the_automatic_switch_holds_the_desks_lock_while_it_runs(switcher):
     assert _last_switch()["to"] == "b"
 
 
+def test_the_automatic_switch_stands_down_for_a_desk_switch_that_landed_during_its_own_read(switcher):
+    owner, _read, calls = switcher
+    d = desk.HotseatDesk()
+    switched: list[str] = []
+    sent: list[dict] = []
+    desk_record = json.dumps({"from": "a", "to": "c", "at": T0_MS})
+
+    def read(command, provider):
+        if provider == "claude":
+            # The owner's switch a -> c completes while Hotseat is still being read;
+            # the reading that comes back is from before it.
+            settings_store.set_text("hotseat-switcher.claude.last-switch", desk_record)
+            return [{"alias": "a", "active": True, "remaining": 10, "secondary": 100},
+                    {"alias": "b", "active": False, "remaining": 90, "secondary": 100}]
+        return [{"alias": "p", "active": True, "remaining": 50, "secondary": None}]
+
+    worker = janitor_autonomy.AutonomyJanitors(
+        lambda *_: True, lambda p: sent.append(p) or {"sent": 1}, hotseat_read=read,
+        hotseat_switch=lambda c, p, alias: switched.append(alias) or True, hotseat_switch_lock=d.switch_lock)
+
+    worker.hotseat_once()
+
+    assert switched == [], "the switcher did not act on a default that the owner had just changed"
+    assert settings_store.get("hotseat-switcher.claude.last-switch") == desk_record
+    assert sent == []
+    runs = [r for r in janitors.list_runs(owner["session"])
+            if (r["demand_result"] or {}).get("reason") == "superseded by another switch"]
+    assert len(runs) == 1 and runs[0]["outcome"] == "completed"
+
+
 def test_the_automatic_switch_waits_for_a_desk_switch_and_then_stands_down(switcher):
     owner, read, calls = switcher
     d = desk.HotseatDesk()
@@ -1235,7 +1277,8 @@ def test_continue_sends_one_prompt_under_the_id_of_the_stop(monkeypatch):
 
     stop_id = f"hotseat-resume-{agent_id}-{T0_MS - 120_000}"
     assert first == (200, {"ok": True, "id": "worker-1", "kind": "clarp", "action": "continue",
-                           "continued": True, "already_sent": False, "stopped_at": T0_MS - 120_000})
+                           "continued": True, "already_sent": False, "queued": False,
+                           "stopped_at": T0_MS - 120_000})
     assert second[0] == by_agent_id[0] == 200
     assert second[1]["already_sent"] is True and by_agent_id[1]["already_sent"] is True
     assert [(session, message_id) for session, _text, message_id in send.sent] == [("worker-1", stop_id)] * 3, (
@@ -1279,7 +1322,7 @@ def test_the_continue_prompt_says_only_what_the_host_knows(cause, warning, age_m
     assert not hasattr(desk, "RESUME_PROMPT")
 
 
-def test_a_prompt_the_dispatcher_refused_can_be_tried_again():
+def test_a_prompt_that_was_never_saved_can_be_tried_again():
     _worker()
     _stopped("worker-1")
     send = _Dispatcher()
@@ -1287,13 +1330,69 @@ def test_a_prompt_the_dispatcher_refused_can_be_tried_again():
     d = desk.HotseatDesk()
 
     status, body = d.resume_work("worker-1", send_prompt=send)
-    assert status == 502 and body["error"] == "prompt_failed" and body["message"]
+    assert (status, body["error"], body["saved"]) == (502, "prompt_failed", False)
+    assert body["message"] == "Worker was not started and nothing was saved. Try again."
     assert "could not durably queue" in body["detail"]
 
     send.ok = True
     status, body = d.resume_work("worker-1", send_prompt=send)
     assert status == 200 and body["already_sent"] is False and len(send.turns) == 1
     assert d.resume_work("worker-1", send_prompt=None)[0] == 503
+
+
+def test_the_answer_to_a_failed_start_says_what_is_saved_and_what_to_do():
+    agent_id = _worker()
+    _stopped("worker-1")
+    d = desk.HotseatDesk()
+    stop_id = f"hotseat-resume-{agent_id}-{T0_MS - 120_000}"
+    calls: list[str] = []
+
+    def saved_then_failed(session, text, client_msg_id):
+        """The dispatcher stored the prompt and the backend then failed to start."""
+        calls.append("start")
+        agents_db.record_user_message(
+            agent_id=agent_id, backend_session_id="bsid-1", text=text, client_msg_id=client_msg_id,
+            origin="automation", sender_agent_id=None, prompt_admission_id="", trace_id="t-1")
+        return {"ok": False, "error": "500: claude spawn failed"}
+
+    status, body = d.resume_work("worker-1", send_prompt=saved_then_failed)
+    assert (status, body["error"], body["saved"], body["detail"]) == (502, "prompt_failed", True, "500: claude spawn failed")
+    assert body["message"] == ("Worker did not start. The prompt is saved in Worker's chat but was not delivered. "
+                               "Open Worker's chat and send a message to continue.")
+
+    def unconfirmed(session, text, client_msg_id):
+        calls.append("repeat")
+        assert client_msg_id == stop_id, "the same send, so the dispatcher can still refuse or dedupe it"
+        return {"ok": False, "unconfirmed": True,
+                "error": "503: message is saved but delivery is unconfirmed; reconciliation required"}
+
+    status, body = d.resume_work("worker-1", send_prompt=unconfirmed)
+    assert (status, body) == (409, {
+        "ok": False, "error": "delivery_unconfirmed", "saved": True,
+        "message": ("The prompt for this stop is saved in Worker's chat, but Worker did not start and the Host "
+                    "cannot send it again. Open Worker's chat and send a message to continue.")})
+
+    def unreachable(session, text, client_msg_id):
+        return {"ok": False, "error": "503: runtime unavailable"}
+
+    status, body = d.resume_work("worker-1", send_prompt=unreachable)
+    assert (status, body["error"], body["saved"]) == (502, "prompt_failed", True)
+    assert body["message"] == ("An earlier Continue for this stop is saved in Worker's chat, and this request did not "
+                               "get through. Look at Worker's chat before trying again.")
+    assert calls == ["start", "repeat"]
+
+
+def test_continue_says_when_the_prompt_waits_behind_a_turn():
+    _worker()
+    _stopped("worker-1")
+    d = desk.HotseatDesk()
+
+    status, body = d.resume_work("worker-1", send_prompt=lambda *a: {"ok": True, "queued": True})
+    assert status == 200 and (body["continued"], body["already_sent"], body["queued"]) == (True, False, True)
+    _worker("worker-2")
+    _stopped("worker-2")
+    status, body = d.resume_work("worker-2", send_prompt=lambda *a: {"ok": True})
+    assert body["queued"] is False
 
 
 @pytest.mark.parametrize("readiness,sentence", [
@@ -1443,14 +1542,22 @@ def test_the_handler_sends_the_prompt_through_the_dispatcher_as_automation(monke
     command = commands[0]
     assert (command.text, command.forced_session, command.requested_session) == ("go on", "worker-1", "worker-1")
     assert (command.client_msg_id, command.origin) == ("hotseat-resume-a-1", "automation")
-    assert command.synthesize_audio is False and command.queue_if_busy is False
+    assert command.synthesize_audio is False
+    assert command.queue_if_busy is True, "a turn that started meanwhile is waited for, never preempted"
     assert command.prompt_admission is None and command.trace_id
 
     def refuse(self, command):
         raise host.DispatchError(503, "runtime unavailable")
 
     monkeypatch.setattr(host.TurnDispatchService, "submit", refuse)
-    assert handler._hotseat_send_prompt("worker-1", "go on", "x") == {"ok": False, "error": "503: runtime unavailable"}
+    assert handler._hotseat_send_prompt("worker-1", "go on", "x") == {
+        "ok": False, "error": "503: runtime unavailable", "unconfirmed": False}
+
+    def unconfirmed(self, command):
+        raise host.DispatchError(503, "message is saved but delivery is unconfirmed; reconciliation required")
+
+    monkeypatch.setattr(host.TurnDispatchService, "submit", unconfirmed)
+    assert handler._hotseat_send_prompt("worker-1", "go on", "x")["unconfirmed"] is True
 
 
 # --- the off-switch ------------------------------------------------------------------

@@ -1557,16 +1557,43 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         """The desk's resume prompt, dispatched in this process the way every
         scheduler dispatches: no call to this Host's own listener, no admin
         token, nothing admitted in the administrator's name. `client_msg_id`
-        is the stop's id, so the dispatcher starts at most one turn for it."""
+        is the stop's id, so the dispatcher starts at most one turn for it.
+
+        `queue_if_busy`: the desk checked that the agent is idle, but that
+        check cannot be atomic with the dispatch. A turn that started in
+        between is waited for; without this an automation send preempts it.
+        The answer says `queued` when the prompt waits behind such a turn."""
+        from lib import turn_queue
         from lib.dispatch_adapters import ORIGIN_AUTOMATION
+        from lib.turn_dispatch import UNCONFIRMED_DELIVERY
         try:
             result = TurnDispatchService(self.ctx).submit(DispatchCommand(
                 text=text, requested_session=session, forced_session=session,
                 trace_id=_trace.new_trace_id(), client_msg_id=client_msg_id,
-                synthesize_audio=False, origin=ORIGIN_AUTOMATION))
+                synthesize_audio=False, origin=ORIGIN_AUTOMATION, queue_if_busy=True))
         except DispatchError as exc:
-            return {"ok": False, "error": f"{exc.status}: {exc}"}
+            self._hotseat_withdraw_unstarted(session, client_msg_id)
+            return {"ok": False, "error": f"{exc.status}: {exc}",
+                    "unconfirmed": str(exc) == UNCONFIRMED_DELIVERY}
         return {"ok": True, "queued": bool(result.queued)}
+
+    def _hotseat_withdraw_unstarted(self, session: str, queue_id: str) -> None:
+        """A start that failed leaves the desk's prompt as a `queued` row of the
+        agent's queue. The dispatcher has no proof that it never reached a
+        backend, so nothing would ever run it: it would sit in the chat as a
+        waiting message that cannot be sent and hold the agent's automation
+        back. Take it out again. Only a row still `queued` is removed; one that
+        was claimed or started belongs to a turn."""
+        from lib import turn_queue
+        try:
+            if turn_queue.status(queue_id) != "queued" or not turn_queue.remove(queue_id):
+                return
+            agent = identity.lookup(session)
+            if agent:
+                self._broadcast_turn_queue(str(agent["agent_id"]), session)
+            log("hotseatDeskPromptWithdrawn", f"session={session}")
+        except Exception as exc:  # noqa: BLE001 - the failure itself is already being reported
+            log_exception("hotseatDeskWithdrawFail", exc, detail=session)
 
     def _hotseat_unpause_queue(self, agent_id: str, session: str) -> dict:
         """Lift a Stop's pause; whoever owns turns picks the waiting ones up."""
