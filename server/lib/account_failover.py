@@ -33,11 +33,18 @@ MAX_PARK_SECONDS = 1800.0
 # work it carried to be re-admitted before an empty pass may end it.
 CARRIED_WORK_WAIT_SECONDS = 120.0
 CARRIED_WORK_POLL_SECONDS = 1.0
-# A turn that fails with an account failure this soon after a recovery resumed
-# it gets no further recovery: the selector said an account serves it, and it
-# does not. Asking again is a loop (2026-11-11: 146 rounds in three and a half
-# hours, every running turn of the pool stopped and resumed in each). The
-# turn ends with the provider's own sentence instead.
+# A turn that fails on its account this soon after a recovery resumed it has
+# not left its park: what happens next continues it.
+# - A plan failure ends the turn with the provider's own sentence. The
+#   selector said an account offers the model, and it does not; asking again
+#   is a loop (2026-11-11: 146 rounds in three and a half hours, every running
+#   turn of the pool stopped and resumed in each).
+# - A usage limit or a failed sign-in goes back into the park. The selector
+#   can pick an account with a sliver left (2026-11-11 14:28 and 14:32 on
+#   laptopstudio: 20%, then 6%), and waiting does help: those turns resumed at
+#   15:01 and worked. But the park's clock is not started again, so the
+#   MAX_PARK_SECONDS cap counts from the turn's first park and stays the one
+#   place that gives up.
 RESUME_GRACE_SECONDS = 120.0
 # A turn parked because the account does not offer its model waits for this
 # many selector answers of "no saved account does" and then ends. A plan is
@@ -179,6 +186,9 @@ class AccountFailover:
         self.park_expired: set[tuple[str, str]] = set()
         # When a recovery last resumed each turn: (agent, trace) -> clock.
         self.resumed_at: dict[tuple[str, str], float] = {}
+        # When each turn's park began. A park a recovery resumed and that the
+        # turn fell back into within RESUME_GRACE_SECONDS is the same park.
+        self.first_parked: dict[tuple[str, str], float] = {}
 
     @staticmethod
     def _schedule(delay, callback):
@@ -194,10 +204,13 @@ class AccountFailover:
                                  if key[0] != attempt.agent_id or key[1] == attempt.trace_id}
             self.resumed_at = {key: at for key, at in self.resumed_at.items()
                                if key[0] != attempt.agent_id or key[1] == attempt.trace_id}
+            self.first_parked = {key: at for key, at in self.first_parked.items()
+                                 if key[0] != attempt.agent_id or key[1] == attempt.trace_id}
             self.attempts[attempt.agent_id] = attempt
             self.awaiting.discard(attempt.agent_id)
             if self.recovering and not self._expired(attempt):
                 attempt.state["account_recovery"] = True
+                self._note_park(attempt)
                 attempt.pause()
                 attempt.spawned.set()
                 return True
@@ -207,6 +220,7 @@ class AccountFailover:
         with self.lock:
             self.park_expired.discard((agent_id, trace_id))
             self.resumed_at.pop((agent_id, trace_id), None)
+            self.first_parked.pop((agent_id, trace_id), None)
             attempt = self.attempts.get(agent_id)
             if attempt and attempt.trace_id == trace_id:
                 self.attempts.pop(agent_id, None)
@@ -220,29 +234,45 @@ class AccountFailover:
                         and (attempt.stopped or (
                             attempt.spawned.is_set() and attempt.handle is None)))
 
-    def request(self, agent_id, trace_id, command, *, only_if_alone=False) -> bool:
+    def _same_park(self, key: tuple[str, str]) -> bool:
+        """A recovery resumed this turn so recently that it has not left its
+        park. Called with the lock held."""
+        resumed = self.resumed_at.get(key)
+        return resumed is not None and self.now() - resumed < RESUME_GRACE_SECONDS
+
+    def _note_park(self, attempt: Attempt) -> None:
+        """Start the turn's park clock, unless this is its park going on."""
+        key = (attempt.agent_id, attempt.trace_id)
+        if not (key in self.first_parked and self._same_park(key)):
+            self.first_parked[key] = self.now()
+
+    def request(self, agent_id, trace_id, command, *, plan=False) -> bool:
         """Start (or join) the pool's recovery for a turn that failed on its
         account; False when that turn has to fail visibly instead.
 
-        ``only_if_alone`` is for a plan failure ("this account does not offer
-        this model"): a fact about one turn's model, not about the account's
+        ``plan`` is for a plan failure ("this account does not offer this
+        model"): a fact about one turn's model, not about the account's
         quota. Recovery stops every running turn of the pool, because the
         selector switches the machine's account while it probes. That is
         right when the account is out for all of them and wrong when the
         others run fine, so such a failure starts a recovery only when no
-        other turn of the pool is running."""
+        other turn of the pool is running, and never again right after a
+        recovery resumed the turn (see RESUME_GRACE_SECONDS)."""
         with self.lock:
             trigger = self.attempts.get(agent_id)
             if not command or not trigger or trigger.trace_id != trace_id:
                 return False
-            if (agent_id, trace_id) in self.park_expired:
+            key = (agent_id, trace_id)
+            if key in self.park_expired:
                 return False   # its park already expired: fail visibly now
-            resumed = self.resumed_at.get((agent_id, trace_id))
-            if resumed is not None and self.now() - resumed < RESUME_GRACE_SECONDS:
-                return False   # a recovery just resumed it, and it failed again
+            if self._same_park(key):
+                if plan:
+                    return False   # resumed onto an account said to offer it; it does not
+                if self.now() - self.first_parked.get(key, self.now()) >= MAX_PARK_SECONDS:
+                    return False   # back in the same park, and that park's time is up
             if self.recovering:
                 return True
-            if only_if_alone:
+            if plan:
                 if any(other is not trigger and other.owned()
                        and not other.state.get("account_recovery")
                        for other in self.attempts.values()):
@@ -254,6 +284,7 @@ class AccountFailover:
             for attempt in self.attempts.values():
                 if attempt.owned() and not self._expired(attempt):
                     attempt.state["account_recovery"] = True
+                    self._note_park(attempt)
                     attempt.pause()
         self.schedule(0.0, self.recover)
         return True
@@ -374,6 +405,18 @@ class AccountFailover:
                 # What is left is covered, or cannot be ended (no ``fail``)
                 # and is resumed to fail by itself, as before.
                 verdict = True
+            # The cap is per turn, from its first park: a turn that fell back
+            # into its park is released when that park is MAX_PARK_SECONDS
+            # old, though this recovery began later.
+            overdue = []
+            if verdict is not True:
+                at = self.now()
+                overdue = [attempt for attempt in pending if at - self.first_parked.get(
+                    (attempt.agent_id, attempt.trace_id), at) >= MAX_PARK_SECONDS]
+                for attempt in overdue:
+                    self.attempts.pop(attempt.agent_id, None)
+                    self.park_expired.add((attempt.agent_id, attempt.trace_id))
+                pending = [attempt for attempt in pending if attempt not in overdue]
             decision = self._decide(pending, verdict, settings)
             if isinstance(decision, Resume):
                 self.attempts.clear()
@@ -395,6 +438,13 @@ class AccountFailover:
         if unserved:
             log("claudeAccountUnserved",
                 f"ended={len(unserved)} models={sorted({a.model for a in unserved})}")
+        if overdue:
+            log("claudeAccountParkExpired",
+                f"released={len(overdue)} whose own park is {MAX_PARK_SECONDS:.0f}s old; "
+                "the turns run and fail visibly instead")
+            for attempt in overdue:
+                if attempt.owned():
+                    attempt.resume()
         if isinstance(decision, Resume):
             log("claudeAccountRecovered", f"turns={len(pending)}")
             return

@@ -59,14 +59,25 @@ validates stdin without switching accounts or making provider requests.
   selector answers that no account serves the model, the turn stays paused for
   three such answers (`PLAN_CHECKS`, about two minutes) and then ends; a plan
   does not reset the way a usage window does.
-- A turn that fails with an account failure within two minutes of being
-  resumed by a recovery (`RESUME_GRACE_SECONDS`) gets no further recovery. It
-  ends with the provider's sentence. The selector said an account serves it
-  and it does not; asking again stopped and resumed every turn of the pool,
-  round after round (2026-11-11: 146 rounds in three and a half hours, started
-  by two helpers whose model id no account offered). So a turn receives the
-  recovery message at most once per recovery, and only after it has worked for
-  a while can the next one follow.
+- A turn that fails on its account within two minutes of being resumed by a
+  recovery (`RESUME_GRACE_SECONDS`) has not left its park; what happens next
+  depends on the failure.
+  - A plan failure ends the turn with the provider's sentence. The selector
+    said an account offers the model and it does not; asking again stopped and
+    resumed every turn of the pool, round after round (2026-11-11: 146 rounds
+    in three and a half hours, started by two helpers whose model id no account
+    offered).
+  - A usage limit or a failed sign-in goes back into the park, and nothing
+    ends early. A selector can pick an account with a sliver left, and
+    waiting does help (the same day, 14:28 to 15:01: resumed twice onto such
+    accounts, parked again each time, working once the windows reset). The
+    park's clock is not started again: the 30-minute cap counts from the
+    turn's first park and stays the one place that gives up for usage, per
+    turn. A turn that worked for more than two minutes after its resume has
+    left the park; its next limit begins a new one.
+- The recovery message is built from the original request each time, so a turn
+  resumed more than once receives the same message, never one wrapped inside
+  another.
 - One recovery coordinates all Claude turns owned by the runtime. New turns wait
   behind the recovery barrier; queued follow-ups retain their order. Other
   providers, completed agents, and idle agents receive no continuation.

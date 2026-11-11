@@ -39,10 +39,11 @@ GOOD = ["gpt-6.1-sol", "gpt-6-sol", "gpt-6.1-sol", "gpt-6-astra"]
 BAD = "gpt-6"
 
 # The selector's protocol: models on stdin, one JSON object on stdout. This one
-# serves every model but the ones named on its command line, and logs each call.
+# serves every model but the ones listed in a file the test rewrites, and logs
+# each call.
 SELECTOR = """
 import json, sys
-log, unserved = sys.argv[1], set(sys.argv[2:])
+log, unserved = sys.argv[1], set(open(sys.argv[2]).read().split())
 asked = json.load(sys.stdin)["models"]
 served = [m for m in asked if m not in unserved]
 with open(log, "a") as out:
@@ -69,7 +70,9 @@ class Fleet:
         self.log = tmp_path / "selector.log"
         script = tmp_path / "selector.py"
         script.write_text(SELECTOR)
-        command = (sys.executable, str(script), str(self.log), *unserved)
+        self.unserved_file = tmp_path / "selector.unserved"
+        self.no_account_offers(*unserved)
+        command = (sys.executable, str(script), str(self.log), str(self.unserved_file))
         field = f"{backend}_account_switch_command"
         cfg = replace(_td.config.load(), **{field: command})
         monkeypatch.setattr(_td.config, "load", lambda *args, **kwargs: cfg)
@@ -106,6 +109,13 @@ class Fleet:
         assert len(self.backends.spawned) == len(models)
         assert [_td._INFLIGHT.get(agent) for agent in self.agents] == [
             f"trace-{index}" for index in range(len(models))]
+
+    def no_account_offers(self, *models):
+        """What the selector finds from now on."""
+        self.unserved_file.write_text("\n".join(models))
+
+    def key(self, index):
+        return (self.agents[index], f"trace-{index}")
 
     def spawns(self, index):
         return [call for _, call in self.backends.spawned if call["trace_id"] == f"trace-{index}"]
@@ -251,20 +261,18 @@ def test_a_plan_failure_alone_moves_to_an_account_that_offers_the_model(
 
 
 @pytest.mark.parametrize("backend", BACKENDS)
-@pytest.mark.parametrize("failure,category", [
-    (NOT_OFFERED, "account_plan"), (USAGE_LIMIT, "usage_limit")])
-def test_a_turn_that_fails_again_right_after_its_recovery_ends_instead_of_restarting_it(
-        tmp_path, monkeypatch, backend, failure, category):
-    """The selector said an account serves the turn, the turn was resumed, and
-    it failed the same way within seconds. Asking again is the loop: the turn
-    ends with the provider's sentence, and the other turns are left alone."""
+def test_a_plan_failure_right_after_a_recovery_ends_the_turn(tmp_path, monkeypatch, backend):
+    """The selector said an account offers the model, the turn was resumed,
+    and the account does not offer it. Waiting never helps a plan failure and
+    asking again is the loop: the turn ends with the provider's sentence, and
+    the other turns are left alone."""
     fleet = Fleet(tmp_path, monkeypatch, backend, [*GOOD, "gpt-6-astra"], unserved=())
     fleet.spawns(0)[-1]["on_error"](USAGE_LIMIT)
     fleet.run_scheduled()
     assert [len(fleet.spawns(index)) for index in range(5)] == [2, 2, 2, 2, 2]
 
     fleet.clock[0] += 3
-    fleet.spawns(4)[-1]["on_error"](failure)
+    fleet.spawns(4)[-1]["on_error"](NOT_OFFERED)
     for _ in range(5):
         fleet.run_scheduled(advance=90)
 
@@ -272,7 +280,175 @@ def test_a_turn_that_fails_again_right_after_its_recovery_ends_instead_of_restar
     assert [len(fleet.spawns(index)) for index in range(5)] == [2, 2, 2, 2, 2]
     assert [fleet.recovery_messages(index) for index in range(5)] == [1, 1, 1, 1, 1]
     assert [fleet.state(index)["kind"] for index in range(4)] == [AgentState.THINKING] * 4
-    _visible_failure(fleet.state(4), category=category, says=failure[:40])
+    _visible_failure(fleet.state(4), category="account_plan", says=NOT_OFFERED[:40])
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_a_plan_failure_alone_right_after_its_recovery_ends_instead_of_looping(
+        tmp_path, monkeypatch, backend):
+    """The same with nothing else running, where a recovery would be allowed
+    to start: a selector that keeps saying an account offers the model must
+    not get to say it twice."""
+    fleet = Fleet(tmp_path, monkeypatch, backend, [BAD], unserved=())
+    fleet.spawns(0)[-1]["on_error"](NOT_OFFERED)
+    fleet.run_scheduled()
+    assert len(fleet.spawns(0)) == 2
+
+    for _ in range(5):
+        fleet.clock[0] += 3
+        fleet.spawns(0)[-1]["on_error"](NOT_OFFERED)
+        fleet.run_scheduled(advance=90)
+
+    assert len(fleet.selector_calls()) == 1 and len(fleet.spawns(0)) == 2
+    assert not fleet.coordinator.recovering
+    _visible_failure(fleet.state(0), category="account_plan", says=NOT_OFFERED[:40])
+
+
+AFTERNOON = ["fable", "fable", "sonnet"]
+
+
+def _into_the_same_park(fleet):
+    """laptopstudio, 11 Nov 14:28 to 14:35: the account runs out, the selector
+    picks one with a sliver left, the resumed turns meet the limit again 90
+    seconds later, and now no account has usage."""
+    start = fleet.clock[0]
+    fleet.spawns(0)[-1]["on_error"](USAGE_LIMIT)
+    fleet.run_scheduled()
+    assert [len(fleet.spawns(index)) for index in range(3)] == [2, 2, 2]
+    fleet.clock[0] += 90
+    fleet.no_account_offers("fable", "sonnet")
+    fleet.spawns(0)[-1]["on_error"](USAGE_LIMIT)
+    fleet.run_scheduled()
+    assert fleet.coordinator.recovering
+    # Parked again, not ended: and it is the same park, begun at the start.
+    assert [fleet.state(index)["detail"].get("account_recovery") for index in range(3)] == [
+        "waiting"] * 3
+    assert [fleet.coordinator.first_parked[fleet.key(index)] for index in range(3)] == [start] * 3
+    return start
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+@pytest.mark.parametrize("failure", [USAGE_LIMIT, "OAuth session expired; please run /login"],
+                         ids=["usage-limit", "sign-in"])
+def test_the_afternoon_park_resume_park_resume_ends_with_the_turns_working(
+        tmp_path, monkeypatch, backend, failure):
+    """A usage limit or a failed sign-in right after a resume is not the
+    evening's loop: waiting does help. The turns go back into their park and
+    work again when an account has usage."""
+    fleet = Fleet(tmp_path, monkeypatch, backend, AFTERNOON, unserved=())
+    start = fleet.clock[0]
+    fleet.spawns(0)[-1]["on_error"](USAGE_LIMIT)
+    fleet.run_scheduled()
+    fleet.clock[0] += 90
+    fleet.no_account_offers("fable", "sonnet")
+    fleet.spawns(0)[-1]["on_error"](failure)            # within two minutes of its resume
+    fleet.run_scheduled()
+    assert fleet.coordinator.first_parked[fleet.key(0)] == start
+
+    for _ in range(20):                                 # twenty minutes without an account
+        fleet.run_scheduled(advance=RECHECK_SECONDS + 1)
+        assert [fleet.state(index)["kind"] for index in range(3)] == [AgentState.THINKING] * 3
+    assert [len(fleet.spawns(index)) for index in range(3)] == [2, 2, 2]
+
+    fleet.no_account_offers()                           # the windows reset
+    fleet.run_scheduled(advance=RECHECK_SECONDS + 1)
+
+    assert not fleet.coordinator.recovering
+    assert [len(fleet.spawns(index)) for index in range(3)] == [3, 3, 3]
+    assert [fleet.state(index)["kind"] for index in range(3)] == [AgentState.THINKING] * 3
+    assert [fleet.state(index)["detail"].get("account_recovery") for index in range(3)] == [
+        None] * 3
+    for index in range(3):
+        fleet.spawns(index)[-1]["on_result"]({"duration_ms": 5})
+    assert [fleet.state(index)["kind"] for index in range(3)] == [AgentState.DONE] * 3
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_the_recovery_message_is_the_same_one_each_time_never_one_inside_another(
+        tmp_path, monkeypatch, backend):
+    fleet = Fleet(tmp_path, monkeypatch, backend, AFTERNOON, unserved=())
+    _into_the_same_park(fleet)
+    fleet.no_account_offers()
+    fleet.run_scheduled(advance=RECHECK_SECONDS + 1)
+
+    for index in range(3):
+        first, second, third = [call["text"] for call in fleet.spawns(index)]
+        assert "Clarp recovered from" not in first
+        assert second.count("Clarp recovered from") == 1
+        assert second.count("<clarp-account-recovery>") == 1
+        assert third == second, "the message grew or was wrapped again"
+        assert second.count(f"work of agent-{index}") == 1
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_the_park_cap_counts_from_the_turns_first_park_not_from_the_latest(
+        tmp_path, monkeypatch, backend):
+    """Half an hour without an account is where a usage wait gives up. A turn
+    that was resumed for 90 seconds in between does not get another half
+    hour: its park began at the first limit."""
+    fleet = Fleet(tmp_path, monkeypatch, backend, AFTERNOON, unserved=())
+    start = _into_the_same_park(fleet)
+
+    while fleet.clock[0] + RECHECK_SECONDS + 1 < start + MAX_PARK_SECONDS:
+        fleet.run_scheduled(advance=RECHECK_SECONDS + 1)
+    # Just short of thirty minutes from the first park: still waiting.
+    assert [len(fleet.spawns(index)) for index in range(3)] == [2, 2, 2]
+    assert fleet.coordinator.recovering
+
+    fleet.run_scheduled(advance=RECHECK_SECONDS + 1)
+    # Thirty minutes from the FIRST park, and a minute and a half before
+    # thirty from the second: released to run and fail visibly.
+    assert start + MAX_PARK_SECONDS <= fleet.clock[0] < start + 90 + MAX_PARK_SECONDS
+    assert [len(fleet.spawns(index)) for index in range(3)] == [3, 3, 3]
+    assert not fleet.coordinator.recovering
+    for index in range(3):
+        fleet.spawns(index)[-1]["on_error"](USAGE_LIMIT)
+    assert [fleet.state(index)["kind"] for index in range(3)] == [AgentState.INTERRUPTED] * 3
+    assert not fleet.coordinator.recovering and fleet.run_scheduled(advance=90) == 0
+
+
+def test_a_turn_that_arrives_during_a_recovery_starts_its_own_park_clock(tmp_path, monkeypatch):
+    fleet = Fleet(tmp_path, monkeypatch, "claude", ["sonnet"], unserved=("sonnet",))
+    fleet.spawns(0)[-1]["on_error"](USAGE_LIMIT)
+    fleet.run_scheduled()
+    assert fleet.coordinator.recovering
+
+    fleet.clock[0] += 300
+    late = agents_db.create_agent(persona="late", voice_id="V", cwd=str(tmp_path),
+                                  session="late", backend="claude", model="sonnet")
+    agents_db.start_runtime(late, "late")
+    fleet.service.dispatch(text="arrives during the wait", requested_session="late",
+                           forced_session="late", trace_id="trace-late", synthesize_audio=False)
+
+    # Parked before it ever spawned, and its half hour runs from now.
+    assert [call for _, call in fleet.backends.spawned if call["trace_id"] == "trace-late"] == []
+    assert agents_db.latest_state(late)["detail"]["account_recovery"] == "waiting"
+    assert fleet.coordinator.first_parked[(late, "trace-late")] == fleet.clock[0]
+    assert fleet.coordinator.first_parked[fleet.key(0)] == fleet.clock[0] - 300
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_an_available_answer_that_keeps_being_wrong_gives_up_at_the_same_cap(
+        tmp_path, monkeypatch, backend):
+    """The evening's shape with a usage limit instead of a plan: the selector
+    keeps saying an account has usage and the turn keeps meeting the limit
+    seconds after each resume. Nothing ends early, and it does not go on for
+    ever: thirty minutes after the turn's first park it fails visibly."""
+    fleet = Fleet(tmp_path, monkeypatch, backend, ["sonnet"], unserved=())
+    start = fleet.clock[0]
+
+    rounds = 0
+    while fleet.state(0)["kind"] != AgentState.INTERRUPTED:
+        fleet.spawns(0)[-1]["on_error"](USAGE_LIMIT)
+        fleet.run_scheduled()
+        fleet.clock[0] += 90
+        rounds += 1
+        assert rounds < 40, "it never gives up"
+
+    assert fleet.coordinator.first_parked == {} and not fleet.coordinator.recovering
+    assert start + MAX_PARK_SECONDS <= fleet.clock[0] <= start + MAX_PARK_SECONDS + 180
+    _visible_failure(fleet.state(0), category="usage_limit", says="usage limit")
+    assert fleet.run_scheduled(advance=90) == 0
 
 
 @pytest.mark.parametrize("backend", BACKENDS)
@@ -293,6 +469,8 @@ def test_a_turn_that_worked_after_its_recovery_may_be_recovered_again(
     assert len(fleet.selector_calls()) == 2
     assert len(fleet.spawns(0)) == 3
     assert fleet.state(0)["kind"] == AgentState.THINKING
+    # It had left its park: the second limit began a new one, with its own cap.
+    assert fleet.coordinator.first_parked[fleet.key(0)] == fleet.clock[0]
     # One message per recovery, never one wrapped inside the other.
     assert [call["text"].count("Clarp recovered from") for call in fleet.spawns(0)] == [0, 1, 1]
 

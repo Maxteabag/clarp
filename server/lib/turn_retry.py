@@ -67,7 +67,7 @@ class RetryMixin:
                     spec.agent_id, spec.trace_id, account_selector(spec.backend),
                     # A plan failure is about this turn's model: it must not
                     # stop the turns that run fine on other models.
-                    only_if_alone=category == error_classify.ACCOUNT_PLAN)):
+                    plan=category == error_classify.ACCOUNT_PLAN)):
             eventlog.emit("server", "claudeAccountRecovery", context=spec.context,
                           detail={"reason": category})
             return
