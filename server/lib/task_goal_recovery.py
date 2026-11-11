@@ -24,7 +24,10 @@ class WakeRejected(ValueError):
         super().__init__(reason)
 
 
-def boundary(plan, goal, *, check_live=True):
+def boundary(plan, goal, *, check_live=True, wake_request=""):
+    """Why the goal may not be woken now, or None. ``wake_request`` is the
+    wake being validated at its own spawn (validate_dispatch): the state that
+    wake wrote while it waited for an account is not a reason to refuse it."""
     from . import (
         artifacts,
         agent_goals,
@@ -60,7 +63,12 @@ def boundary(plan, goal, *, check_live=True):
     queue = turn_queue.state(agent["agent_id"])
     latest = agents.latest_state(agent["agent_id"]) or {}
     detail = latest.get("detail") or {}
-    if detail.get("account_recovery") == "waiting":
+    # A turn parked for an account holds every wake, except the parked wake
+    # itself when the park ends: refused here, it was settled as a runner
+    # that exited though no process ever ran (2026-11-10, seven agents).
+    if detail.get("account_recovery") == "waiting" and not (
+        wake_request and detail.get("trace_id") == wake_request
+    ):
         return "capacity", detail.get(
             "message"
         ) or "Waiting for available account capacity"
@@ -94,12 +102,17 @@ def boundary(plan, goal, *, check_live=True):
         )
     if check_live:
         live = turn_dispatch.live_work(agent["agent_id"], session=agent["session"])
+        queued = queue["count"]
+        if queued:
+            # A row nothing will run again is not work the owner still has:
+            # counted, it held every wake of the agent for as long as it sat.
+            queued -= len(turn_queue.dead_rows(agent["agent_id"]))
         if (
             reconcile.has_live_work(agent["agent_id"], agent.get("backend"))
             or live.compacting
             or live.terminal
             or live.queued
-            or queue["count"]
+            or queued > 0
         ):
             return "working", "Owner has live or queued work"
     return None
@@ -125,7 +138,7 @@ def validate_dispatch(agent, request_id, *, native_session_id=None):
         raise WakeRejected("revision", "goal wake revision was superseded", permanent=True)
     if native_session_id is not None and native_session_id != goal["native_session_id"]:
         raise WakeRejected("native", "goal wake native target changed before spawn", permanent=True)
-    gate = boundary(row, goal, check_live=False)
+    gate = boundary(row, goal, check_live=False, wake_request=request_id)
     if gate:
         raise WakeRejected(gate[0], gate[1], permanent=gate[0] in {"owner_changed", "owner_unavailable"})
 
@@ -200,9 +213,97 @@ def log_failure_throttled(event: str, key: tuple, exc: BaseException, now: int,
     _FAILURE_LOGGED[slot] = now
 
 
-def tick(dispatch, *, now=None, cursor=None):
+def _retire_dead_wakes(now, retired=None):
+    """Retire every goal wake row that nothing will run again.
+
+    A wake whose turn ended before its receipt started (parked for an
+    account, then refused or failed at the resume) stayed ``queued`` under
+    its launch-unproven evidence: never settled, never dispatched, and counted
+    as the owner's queued work by every autonomous wake. The wake is the
+    scheduler's own and is regenerated from the goal, so its row is cancelled
+    here, by rows and not by goals: one whose goal was since paused or
+    completed heals too. This pass is also what heals a Host that was updated
+    with such rows in place. ``retired(row)`` tells the apps."""
+    from . import turn_queue
+
+    for row in turn_queue.dead_rows(prefix=PREFIX):
+        queue_id = str(row["queue_id"])
+        try:
+            if not turn_queue.cancel(queue_id):
+                continue
+        except Exception as exc:  # noqa: BLE001 - one row never stops the pass
+            log_failure_throttled("goalQueueRetireFail", (queue_id,), exc, now, detail=queue_id)
+            continue
+        log("goalQueueRetired",
+            f"session={row['session']} queue={queue_id} reason=undeliverable")
+        if retired is not None:
+            try:
+                retired(row)
+            except Exception as exc:  # noqa: BLE001 - the row is retired either way
+                log_exception("goalQueueRetiredNotifyFail", exc, detail=queue_id)
+
+
+def _undelivered_wake(plan, state):
+    """How the accepted wake ended without running to its end, or None while
+    it waits, runs, completed, or was already noted. Read from the wake's own
+    turn and queue row, never from the agent's newest state: that may belong
+    to a later turn."""
+    from . import turn_queue
+
+    request = state.get("request_id") or ""
+    if (
+        state.get("state") not in {"admitted", "queued"}
+        or not request
+        or state.get("undelivered_request_id") == request
+    ):
+        return None
+    turn = (
+        db.conn()
+        .execute(
+            "SELECT settled_at,outcome FROM turns WHERE agent_id=? AND trace_id=? "
+            "ORDER BY turn_id DESC LIMIT 1",
+            (plan["agent_id"], request),
+        )
+        .fetchone()
+    )
+    failed = bool(
+        turn and turn["settled_at"] is not None and turn["outcome"] in {"failed", "interrupted"}
+    )
+    retired = turn_queue.status(request) == "cancelled"
+    if not failed and not retired:
+        return None
+    if failed:
+        # The terminal state written with that turn's settlement says why.
+        ended = (
+            db.conn()
+            .execute(
+                "SELECT detail FROM state_log WHERE agent_id=? AND ts=? AND kind='interrupted' "
+                "ORDER BY state_id DESC LIMIT 1",
+                (plan["agent_id"], turn["settled_at"]),
+            )
+            .fetchone()
+        )
+        try:
+            message = json.loads(ended["detail"] or "{}").get("message") if ended else ""
+        except ValueError:
+            message = ""
+        reason = str(message or "Its turn " + turn["outcome"])
+    else:
+        reason = "Its queued row was retired before it started"
+    return {
+        "request_id": request,
+        "outcome": turn["outcome"] if failed else "retired",
+        "reason": reason,
+    }
+
+
+def tick(dispatch, *, now=None, cursor=None, retired=None):
     now = db.now_ms() if now is None else now
     count = 0
+    try:
+        _retire_dead_wakes(now, retired)
+    except Exception as exc:  # noqa: BLE001 - the goals are still visited (AUT-09)
+        log_failure_throttled("goalQueueRetireFail", ("pass",), exc, now)
     after = cursor[0] if cursor else ""
     # Keyset batches visit every enrolled commitment, including when the first
     # batch is permanently waiting. A fixed oldest-100 slice would starve others.
@@ -321,6 +422,27 @@ def _claim(plan_id, now):
             )
         )
         changed = True
+    # The ledger and the apps are told once per wake that it did not run:
+    # until this, a goal whose wake failed read as active and admitted.
+    undelivered = _undelivered_wake(plan, state)
+    if undelivered:
+        state.update(
+            reason="Wake not delivered: "
+            + undelivered["reason"]
+            + f"; attempt {state.get('attempts', 0)} of {goal['recovery_limit']}, "
+            "the next follows its backoff",
+            undelivered_request_id=undelivered["request_id"],
+            undelivered_reason=undelivered["reason"],
+        )
+        goal["history"].append(
+            dict(
+                at=now,
+                kind="wake_undelivered",
+                revision=plan["revision"],
+                detail=undelivered,
+            )
+        )
+        changed = True
     gate = boundary(plan, goal, check_live=False) or live_gate
     if gate:
         execution, reason = gate
@@ -390,9 +512,15 @@ def _claim(plan_id, now):
             reason="External dependency deadline passed; inspect its actual outcome",
         )
     if state.get("attempts", 0) >= goal["recovery_limit"]:
+        last = (
+            f"; the last wake was not delivered ({state.get('undelivered_reason')})"
+            if state.get("request_id")
+            and state.get("undelivered_request_id") == state.get("request_id")
+            else ""
+        )
         state.update(
             state="attention",
-            reason="Recovery attempt limit reached; checkpoint or resume to continue",
+            reason=f"Recovery attempt limit reached{last}; checkpoint or resume to continue",
         )
         _commit(plan, text, stored, goal)
         return None

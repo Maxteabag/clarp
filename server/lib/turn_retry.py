@@ -6,7 +6,7 @@ from __future__ import annotations
 from dataclasses import replace
 from . import agents as agents_db
 from . import backends, error_classify, eventlog
-from . import turn_lifecycle
+from . import turn_lifecycle, turn_queue
 from . import events
 from .turn_lifecycle import TurnEvent
 from .log import log, log_exception
@@ -225,9 +225,33 @@ class RetryMixin:
         from . import oracle_delegations
         oracle_delegations.fail_for_trace(
             spec.trace_id, (message or human)[:500])
+        self._retire_unstarted_goal_wake(spec)
         # Terminal: a killed/interrupted turn still drains anything queued
         # behind it (e.g. an explicit stop, then your next message runs).
         self._finish_turn(spec)
+
+    def _retire_unstarted_goal_wake(self, spec: _TurnSpec) -> None:
+        """A goal wake whose turn failed before its queue receipt started.
+
+        A turn parked for an account before its spawn leaves the receipt
+        ``queued``. settle_receipt ends only a started one, and recovery never
+        relaunches a row whose launch is unproven, so the row stayed for good
+        and every autonomous wake read it as the owner's queued work
+        (2026-11-10: goals silent for up to 32 hours). The goal scheduler
+        regenerates its wake, so the row is retired like any wake that may no
+        longer run; a message's row is not touched here."""
+        from . import task_goal_recovery
+        try:
+            if (spec.queue_id
+                    and str(spec.client_msg_id or "").startswith(task_goal_recovery.PREFIX)
+                    and turn_queue.status(spec.queue_id) == "queued"):
+                self._retire_goal_queue(
+                    {"queue_id": spec.queue_id, "agent_id": spec.agent_id,
+                     "session": spec.session, "client_msg_id": spec.client_msg_id},
+                    task_goal_recovery.WakeRejected(
+                        "turn_failed", "goal wake turn failed before it started"))
+        except Exception as exc:  # noqa: BLE001 - the goal pass retires it later
+            log_exception("goalQueueRetireFail", exc, detail=spec.session)
 
     def _end_opening_state(self, spec: _TurnSpec, state_detail: dict) -> bool:
         """The visible end of a call opening, written only while nothing newer touched the

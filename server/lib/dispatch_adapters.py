@@ -128,6 +128,17 @@ class DispatchAdapters:
                               queue_if_busy=True,
                               allow_paused_queue=task_goal_recovery.allows_paused_queue(request_id))
 
+    def goal_wake_retired(self, row: dict) -> None:
+        """AgentScheduleRunner: the goal pass retired a wake row that could
+        never run. The apps listed it as a queued message; tell them it left."""
+        from . import turn_queue
+        state = turn_queue.state(row["agent_id"])
+        events.broadcast(self.ctx.stream, events.queue_updated(
+            session=row["session"], agent_id=row["agent_id"],
+            client_msg_id=row["client_msg_id"], queue_depth=state["count"],
+            queue_paused=state["paused"], queue_started=False,
+            queue_revision=state["revision"]))
+
     def scheduled_job(self, session: str, text: str) -> None:
         """AgentScheduleRunner: a due schedule for an agent that still exists."""
         if not agents_db.get_by_session(session):
