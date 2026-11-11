@@ -1,18 +1,10 @@
-"""Authenticated WebRTC call creation and server-owned Oracle sideband tools."""
+"""Shared Oracle session configuration, status/transcript readers, and AgentTools."""
 from __future__ import annotations
 
-import concurrent.futures
 import hashlib
-import json
-import queue
 import threading
-import time
-import uuid
-from urllib.parse import urlparse
 
-from . import agents, config, message_store, oracle_delegations
-from .oracle_diagnostics import OracleJournal
-from .oracle_webrtc import ConversationController
+from . import agents, message_store, oracle_delegations
 
 from .oracle_prompt import PROMPT  # noqa: E402  -- one prompt for every engine
 
@@ -38,12 +30,6 @@ def session_config(*, model, voice, fallback='', transcription=''):
     if transcription:
         value['audio']['input']['transcription'] = {'model': transcription}
     return value
-
-
-def validate_offer(sdp):
-    if not isinstance(sdp, str) or len(sdp) > 128000 or not sdp.startswith('v=0') or 'm=audio ' not in sdp:
-        raise ValueError('A bounded audio SDP offer is required')
-    return sdp
 
 
 def _age_text(timestamp: str) -> str:
@@ -218,173 +204,3 @@ class AgentTools:
             ids = tuple(self.delegations)
         # Query exact current IDs: historical rows cannot starve current results.
         return [r for ident in ids if (r := oracle_delegations.get(ident)) and r['status'] in oracle_delegations.TERMINAL]
-
-
-class Sideband:
-    def __init__(self, socket, tools, journal):
-        self.socket, self.tools, self.journal = socket, tools, journal
-        self.incoming = queue.Queue()
-        self.stopped = threading.Event()
-        self.seen = set()
-        self.pool = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix='oracle-tool')
-        self.controller = ConversationController(send=self.send,
-            acknowledge=lambda ident: oracle_delegations.acknowledge(ident, owner_principal=tools.principal))
-        tools.supersede = lambda session: self.incoming.put(('supersede', session))
-
-    def send(self, value):
-        if self.stopped.is_set(): return
-        raw = json.dumps(value, separators=(',', ':'))
-        if self.journal: self.journal.event('client', raw)
-        self.socket.send(raw)
-
-    def start(self):
-        threading.Thread(target=self.read, daemon=True, name='oracle-sideband-read').start()
-        threading.Thread(target=self.run, daemon=True, name='oracle-sideband-control').start()
-
-    def read(self):
-        try:
-            while not self.stopped.is_set():
-                raw = self.socket.recv()
-                if not raw: break
-                if self.journal: self.journal.event('server', raw)
-                from .oracle_realtime import incomplete_response_detail
-                detail = incomplete_response_detail(raw)
-                if detail:
-                    from .log import log
-                    log('oracleResponseIncomplete', detail)
-                self.incoming.put(('event', json.loads(raw)))
-        except Exception as exc:
-            if self.journal: self.journal.record('sideband.failed', {'error_type': type(exc).__name__})
-        finally:
-            self.incoming.put(('close', None))
-
-    def execute(self, event):
-        try:
-            arguments = json.loads(event.get('arguments') or '{}')
-            if not isinstance(arguments, dict): raise ValueError('Tool arguments must be an object')
-            output = self.tools.execute(event['name'], arguments, event['call_id'])
-        except Exception as exc:
-            output = {'error': str(exc)[:500]}
-        speak = event.get('name') not in (
-            'delegate_to_agent', 'investigate_with_oracle', 'cancel_agent')
-        if isinstance(output, dict) and (output.get('need_choice') or output.get('error')):
-            speak = True
-        self.incoming.put(('tool', (event['call_id'], json.dumps(output), speak)))
-
-    def run(self):
-        next_poll = 0
-        try:
-            while not self.stopped.is_set():
-                try: kind, value = self.incoming.get(timeout=.2)
-                except queue.Empty: kind, value = '', None
-                if kind == 'close': break
-                if kind == 'event':
-                    if value.get('type') == 'response.function_call_arguments.done':
-                        call = value.get('call_id')
-                        if call and call not in self.seen:
-                            self.seen.add(call)
-                            self.controller.tool_started()
-                            self.pool.submit(self.execute, value)
-                    self.controller.event(value)
-                elif kind == 'supersede':
-                    self.controller.drop_agent(value)
-                elif kind == 'tool':
-                    call_id, output, *rest = value
-                    speak = rest[0] if rest else True
-                    self.controller.tool_finished(call_id, output, speak=speak)
-                if time.monotonic() >= next_poll:
-                    next_poll = time.monotonic() + 1
-                    for row in self.tools.results():
-                        if row['status'] == 'cancelled':
-                            continue
-                        agent = agents.get_by_session(row['session'])
-                        text = row['result_text'] if row['status'] == 'completed' else row['error'] or f"Work {row['status']}"
-                        if self.journal and (row['result_message_id'] or row['delegation_id']) not in self.controller.results:
-                            self.journal.record('result.ready', {'delegation_id': row['delegation_id'], 'result_message_id': row['result_message_id']})
-                        self.controller.add_result(row['delegation_id'], row['result_message_id'] or row['delegation_id'],
-                                                   row['session'], text)
-                    self.controller.flush()
-        finally:
-            self.close()
-
-    def close(self):
-        if self.stopped.is_set(): return
-        self.stopped.set()
-        self.controller.close()
-        self.pool.shutdown(wait=False, cancel_futures=True)
-        try: self.socket.close()
-        except Exception: pass
-        if self.journal: self.journal.close()
-
-
-_CALLS = {}
-_LOCK = threading.Lock()
-
-
-def create_call(*, ctx, principal, attempt_id, sdp, fallback, stop):
-    import urllib.request
-    import websocket
-    validate_offer(sdp)
-    attempt_id = oracle_delegations.normalize_id(attempt_id)
-    tools = AgentTools(ctx, principal, fallback, stop)
-    if fallback: tools.resolve(fallback)
-    digest = hashlib.sha256(sdp.encode()).hexdigest()
-    with _LOCK:
-        previous = _CALLS.get(principal)
-        if previous and previous['attempt'] == attempt_id:
-            if previous['digest'] != digest: raise ValueError('Attempt reused with a different SDP')
-            if previous.get('response'): return previous['response']
-            raise ValueError('Previous call creation is pending or failed; start a new attempt')
-        if previous and previous.get('sideband'): previous['sideband'].close()
-        record = {'attempt': attempt_id, 'digest': digest}
-        _CALLS[principal] = record
-    cfg = config.load()
-    key = cfg.openai_key()
-    if not key: raise ValueError('Oracle requires an OpenAI key on this Host')
-    contract = session_config(model=cfg.openai_realtime_model, voice=cfg.openai_realtime_voice,
-        fallback=fallback, transcription=getattr(cfg, 'openai_realtime_transcription_model', '') if cfg.oracle_diagnostics else '')
-    boundary = 'oracle-' + uuid.uuid4().hex
-    body = b''
-    for name, value in [('sdp', sdp), ('session', json.dumps(contract))]:
-        body += (f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n').encode()
-    body += f'--{boundary}--\r\n'.encode()
-    request = urllib.request.Request('https://api.openai.com/v1/realtime/calls', data=body,
-        headers={'Authorization': 'Bearer ' + key, 'Content-Type': 'multipart/form-data; boundary=' + boundary})
-    with urllib.request.urlopen(request, timeout=25) as response:
-        answer = response.read(256000).decode()
-        call_id = urlparse(response.headers.get('Location', '')).path.rsplit('/', 1)[-1]
-    if not call_id.startswith('rtc_'): raise ValueError('Provider omitted Realtime call identity')
-    socket = websocket.create_connection('wss://api.openai.com/v1/realtime?call_id=' + call_id,
-        header=['Authorization: Bearer ' + key], timeout=15, enable_multithread=True)
-    socket.settimeout(None)
-    journal = OracleJournal() if cfg.oracle_diagnostics else None
-    if journal:
-        journal.record('session.open', {'transport': 'webrtc', 'call_id': call_id, 'attempt_id': attempt_id})
-        journal.event('client', json.dumps({'type': 'session.update', 'session': contract}))
-    sideband = Sideband(socket, tools, journal)
-    with _LOCK:
-        if _CALLS.get(principal) is not record:
-            sideband.close()
-            raise ValueError('Oracle connection superseded')
-        record['sideband'] = sideband
-        record['response'] = {'sdp': answer, 'call_id': call_id, 'attempt_id': attempt_id}
-    sideband.start()
-    return record['response']
-
-
-def close_call(principal, attempt_id):
-    with _LOCK:
-        record = _CALLS.get(principal)
-        if record and record['attempt'] == attempt_id:
-            _CALLS.pop(principal, None)
-            if record.get('sideband'): record['sideband'].close()
-
-
-def call_results(principal, attempt_id):
-    with _LOCK:
-        record = _CALLS.get(principal)
-        sideband = record.get('sideband') if record and record['attempt'] == attempt_id else None
-    if not sideband: return []
-    with sideband.tools.lock:
-        ids = tuple(sideband.tools.delegations)
-    return [row for ident in ids if (row := oracle_delegations.get(ident))]

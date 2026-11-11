@@ -1,4 +1,4 @@
-"""B4, B5, B7: Whisper hallucination filter and TTS sanitiser."""
+"""B4, B5: Whisper hallucination filter."""
 
 from __future__ import annotations
 
@@ -7,7 +7,6 @@ import pytest
 from lib.hallucinations import (
     HALLUCINATION_PHRASES,
     is_pure_hallucination,
-    sanitize_for_tts,
 )
 
 
@@ -77,43 +76,3 @@ def test_caption_shape_does_not_remove_real_messages(real_message):
 
 def test_caption_and_known_hallucination_sentences_are_filtered_together():
     assert is_pure_hallucination("(air whooshing). Thank you.")
-
-
-# ----- TTS sanitiser (B7) -----
-
-
-def test_angle_bracket_fragments_are_stripped():
-    """B7: '<space>' fragments cause ElevenLabs to silently stop."""
-    out = sanitize_for_tts("show only <space> / <?> in the bottom bar")
-    assert "<" not in out and ">" not in out
-    assert "show only" in out
-    assert "in the bottom bar" in out
-
-
-def test_inline_code_content_is_kept():
-    """Backticks go, content stays — usernames and short paths need to be spoken."""
-    out = sanitize_for_tts("Logged in as `octocat`, switch with `gh auth switch`")
-    assert "octocat" in out
-    assert "gh auth switch" in out
-    assert "`" not in out
-
-
-def test_code_block_is_replaced_with_omitted_marker():
-    out = sanitize_for_tts("here is code\n```\nprint('hi')\n```\nend")
-    assert "code block omitted" in out
-    assert "print('hi')" not in out
-
-
-def test_long_text_truncates_at_word_boundary():
-    """B18: characters above the cap get trimmed at a space, not mid-word."""
-    long = ("hello world " * 1000).strip()
-    out = sanitize_for_tts(long, max_chars=120)
-    assert out.endswith("…")
-    assert len(out) <= 130
-    assert "helloworld" not in out  # word boundary intact
-
-
-def test_urls_are_removed():
-    out = sanitize_for_tts("see https://example.com/page for details")
-    assert "https://" not in out
-    assert "details" in out

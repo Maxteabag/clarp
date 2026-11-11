@@ -137,7 +137,6 @@ ALLOWED: dict[tuple[str, str], str] = {
     ("lib/judgments.py", "_open_until"): THROTTLE,
     ("lib/model_avatars.py", "_versions"): CACHE,
     ("lib/oracle_calls.py", "_CALLS"): ORACLE,
-    ("lib/oracle_calls_stable.py", "_CALLS"): ORACLE,
     ("lib/oracle_gemini_live.py", "_failed_at"): THROTTLE,
     ("lib/oracle_live.py", "_CLOSING"): ORACLE,
     ("lib/oracle_live.py", "_STOP_HOOKS"): ORACLE,

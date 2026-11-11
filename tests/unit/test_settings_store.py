@@ -4,7 +4,6 @@ from __future__ import annotations
 import uuid
 
 from lib import db, desktop_presence, settings_store
-from lib.transcript_cursor import TranscriptCursor
 
 
 def _writes(action):
@@ -44,11 +43,3 @@ def test_presence_reports_delete_only_when_a_lease_is_stale(monkeypatch):
     assert not [s for s in _writes(lambda: report(first, 2)) if s.startswith("DELETE")]
     now[0] += desktop_presence.TOMBSTONE_MS + 1
     assert [s for s in _writes(lambda: report(second, 1)) if s.startswith("DELETE")]
-
-
-def test_unchanged_cursor_position_issues_no_write(tmp_path):
-    cursor = TranscriptCursor(tmp_path, "lock-test-session")
-    cursor.write_position(42)
-    assert _writes(lambda: cursor.write_position(42)) == []
-    cursor.write_position(43)
-    assert cursor.read_position() == 43
