@@ -26,9 +26,8 @@ _SERVER_DIR = pathlib.Path(__file__).resolve().parents[2] / "server"
 sys.path.insert(0, str(_SERVER_DIR))
 
 from lib import agents as agents_db                  # noqa: E402
-from lib import tts_queue                            # noqa: E402
+from lib import db, tts_queue                        # noqa: E402
 from lib.protocol import TurnSource                  # noqa: E402
-from lib.transcript_cursor import TranscriptCursor   # noqa: E402
 from lib.transcript_streamer import TranscriptStreamer  # noqa: E402
 
 
@@ -103,19 +102,13 @@ def test_streamer_advances_cursor_so_hook_sees_no_new_text(env, monkeypatch, bin
             f"got {len(streamer_rows)}"
         )
 
-        # NOW simulate the Stop hook's read pattern: open a fresh cursor
-        # for the same backend_session_id, call advance(). It should see no
-        # new texts because the streamer already advanced the position.
-        positions_dir = tmp_path / ".cache" / "clarp" / "positions"
-        positions_dir.mkdir(parents=True, exist_ok=True)
-        cursor = TranscriptCursor(positions_dir, backend_session_id)
-        with cursor.locked():
-            advance = cursor.advance(tx)
-        assert advance.texts == [], (
-            f"Stop hook would have double-spoken — its cursor.advance() "
-            f"returned {advance.texts!r} when the streamer had already "
-            f"consumed everything. Cursor position vs file size: "
-            f"{cursor.read_position()} vs {tx.stat().st_size}"
+        row = db.conn().execute(
+            "SELECT position FROM cursor_positions WHERE backend_session_id = ?",
+            (backend_session_id,),
+        ).fetchone()
+        assert row is not None and int(row["position"]) == tx.stat().st_size, (
+            f"streamer failed to advance persisted cursor to EOF: "
+            f"{None if row is None else row['position']} vs {tx.stat().st_size}"
         )
     finally:
         streamer.stop(timeout=2.0)
