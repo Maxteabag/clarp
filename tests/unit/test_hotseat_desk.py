@@ -852,8 +852,57 @@ def test_the_switchers_read_refreshes_the_stored_desk_without_a_live_read(monkey
     # Codex was not in this read: its row keeps its own age and says so, window by window.
     assert accounts["cx"]["checked_at"] == T0_MS
     assert [(w["observed_at"], w["stale"]) for w in accounts["cx"]["windows"]] == [(T0_MS, True)]
-    # The minimum interval for a client's live read counts from this read too.
-    assert body["next_refresh_at"] == body["observed_at"] + desk.MIN_REFRESH_INTERVAL_MS
+    # The full live read has its own clock: the switcher's read moved the desk's
+    # time, not the time of the last full read, and does not hold the next one off.
+    assert (body["live_read_at"], body["observed_at"]) == (T0_MS, T0_MS + 11 * MINUTE)
+    assert body["next_refresh_at"] == T0_MS + desk.MIN_REFRESH_INTERVAL_MS
+
+
+def test_a_full_live_read_is_allowed_right_after_the_switchers_read(monkeypatch):
+    clock = {"now": T0_MS}
+    monkeypatch.setattr(desk, "now_ms", lambda: clock["now"])
+    rows = [_claude_row("main", five_hour=0.20, weekly=0.30, fable=0.50, active=True)]
+    tui_p, list_p, _ = _lists(rows)
+    calls: list[list[str]] = []
+    runner = _fake_runner_factory(tui_p, list_p, {"items": [{"id": "t2", "provider": "codex"}]}, calls=calls)
+    d = desk.HotseatDesk()
+    first = d.payload(refresh=True, command="hotseat", runner=runner)
+    assert first["live_read_at"] == first["observed_at"] == T0_MS
+
+    # The switcher reads every minute, its shortest cadence. Each read moves the desk's time...
+    for minute in (1, 2, 3):
+        clock["now"] = T0_MS + minute * MINUTE
+        assert d.absorb_switcher_read("claude", list_p, started_at=clock["now"]) is True
+    clock["now"] += 1000
+    stored = d.payload(command="hotseat", runner=_no_cli)
+    assert (stored["observed_at"], stored["live_read_at"]) == (T0_MS + 3 * MINUTE, T0_MS), (
+        "what only a full read knows is as old as live_read_at says, whatever observed_at says")
+    assert stored["next_refresh_at"] <= stored["served_at"], "a full live read is allowed now"
+
+    # ...and none of them holds a client's full live read off.
+    ran = len(calls)
+    live = d.payload(refresh=True, command="hotseat", runner=runner)
+    assert len(calls) == ran + 3 and (live["refreshed"], live["refresh_throttled"]) == (True, False)
+    assert live["live_read_at"] == live["observed_at"] == clock["now"]
+    assert live["next_refresh_at"] == clock["now"] + desk.MIN_REFRESH_INTERVAL_MS
+
+    # Two full reads are still at least the interval apart, with or without the switcher between them.
+    clock["now"] += 30_000
+    assert d.absorb_switcher_read("claude", list_p, started_at=clock["now"]) is True
+    held = d.payload(refresh=True, command="hotseat", runner=runner)
+    assert held["refresh_throttled"] is True and len(calls) == ran + 3
+
+
+def test_a_desk_stored_before_the_live_clock_existed_allows_one_live_read(monkeypatch):
+    monkeypatch.setattr(desk, "now_ms", lambda: T0_MS)
+    settings_store.set_text(desk.SNAPSHOT_KEY, json.dumps(
+        {"v": 1, "observed_at": T0_MS - 1000, "accounts": [], "stopped_work": []}))
+    d = desk.HotseatDesk()
+    stored = d.payload(command="hotseat")
+    assert stored["live_read_at"] is None and stored["next_refresh_at"] <= T0_MS
+
+    live = d.payload(refresh=True, command="hotseat", runner=_fake_runner_factory(*_sample_payloads()))
+    assert live["refreshed"] is True and live["live_read_at"] == T0_MS
 
 
 def test_a_desk_refreshed_by_the_switcher_equals_one_read_live_at_the_same_moment(monkeypatch):

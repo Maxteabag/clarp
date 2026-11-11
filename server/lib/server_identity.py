@@ -41,7 +41,7 @@ CAPABILITIES_VERSION = 1
 # adds a row to docs/compatibility.md; tests/unit/test_client_contract.py
 # fails when the table and these constants disagree. Clients identify
 # themselves with the X-Clarp-Client header ("ios/2620 contract=1").
-HOST_CONTRACT = 88  # 87 minus the switcher refreshing the stored desk (reverted; parked for its own pull request).
+HOST_CONTRACT = 88  # 87 plus the review findings on the Hotseat desk (live_read_at, queued, saved; no new feature).
 MIN_IOS_CONTRACT = 1
 # F4 delivery state: read paths and committed-transition hints share the
 # advertised feature gate; an unavailable runtime still leaves delivery unknown.

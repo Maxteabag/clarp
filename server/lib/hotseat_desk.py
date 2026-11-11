@@ -593,6 +593,10 @@ def _read_live(cmd: str, runner, observed_at: int) -> dict:
     # the accounts lack sign-in clocks, blocked models and typed errors and
     # there is no stopped work; without `work` there is no recent work.
     snapshot["sources"] = sources
+    # When this full read was made. The desk's `observed_at` also moves with the
+    # switcher's scheduled read; this does not, so it is the age of what only a
+    # full read knows and the clock the next full read is held off by.
+    snapshot["live_read_at"] = observed_at
     return snapshot
 
 
@@ -734,18 +738,19 @@ class HotseatDesk:
 
     # --- reading ----------------------------------------------------------
 
-    def _next_allowed(self, observed: int) -> int:
-        """When the next live read may start. Call with self._lock held.
-        A read that worked moved the stored desk's time, and the full interval
-        counts from there, also across a restart. Any read, a failed one
-        included, holds the next one off for the short retry wait only."""
+    def _next_allowed(self, live_read_at: int) -> int:
+        """When the next full live read may start. Call with self._lock held.
+        The full interval counts from the last full read that worked (its time
+        is in the stored desk, so also across a restart). The switcher's
+        scheduled read is not a full read and holds nothing off. Any attempt,
+        a failed one included, holds the next off for the short retry wait."""
         return max(self._last_read_at + FAILED_REFRESH_RETRY_MS if self._last_read_at else 0,
-                   observed + MIN_REFRESH_INTERVAL_MS if observed else 0)
+                   live_read_at + MIN_REFRESH_INTERVAL_MS if live_read_at else 0)
 
     def _next_refresh_at(self, persisted: dict | None) -> int:
-        observed = _int_ms((persisted or {}).get("observed_at")) or 0
+        live_read_at = _int_ms((persisted or {}).get("live_read_at")) or 0
         with self._lock:
-            return self._next_allowed(observed)
+            return self._next_allowed(live_read_at)
 
     def _keep_switched_accounts(self, snapshot: dict, read_began: int, providers) -> None:
         """A read that began before a switch ended reports the account that was
@@ -771,12 +776,12 @@ class HotseatDesk:
         read that started before the switch and is not held back by the interval."""
         cmd = (command or hotseat_command()).strip()
         while True:
-            observed = _int_ms((_load_persisted() or {}).get("observed_at")) or 0
+            live_read_at = _int_ms((_load_persisted() or {}).get("live_read_at")) or 0
             with self._lock:
                 waiting_for = self._inflight
                 if waiting_for is None:
                     now = now_ms()
-                    if not force and now < self._next_allowed(observed):
+                    if not force and now < self._next_allowed(live_read_at):
                         return "throttled"
                     done = self._inflight = threading.Event()
                     self._last_read_at = now
@@ -940,6 +945,10 @@ class HotseatDesk:
             "schema": SCHEMA,
             "served_at": now,
             "observed_at": observed_at,
+            # When the last full live read was made; null when none is stored.
+            # `observed_at` can be newer (the switcher's scheduled read): what
+            # only a full read knows is as old as this says.
+            "live_read_at": _int_ms(persisted.get("live_read_at")) if persisted is not None else None,
             "stale": stale,
             "refreshing": refreshing,
             # Whether the live read THIS request asked for ran and succeeded;
