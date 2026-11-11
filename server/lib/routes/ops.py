@@ -174,7 +174,11 @@ class OpsRoutes:
          "base_url": "http://private-overlay-address:7682",
          "push_grant": "pg1.…"}. The optional push grant is issued by the
         phone through Audio Central and lets this Host push to it without an
-        APNs key or Audio Central account of its own."""
+        APNs key or Audio Central account of its own.
+
+        An Android phone registers its FCM registration token the same way,
+        with {"platform": "android", "provider": "fcm"} (provider defaults to
+        "fcm" for android, "apns" otherwise); see docs/push-android.md."""
         data = self._read_json()
         if data is None:
             return self._json_error(400, "bad json")
@@ -198,6 +202,7 @@ class OpsRoutes:
                 base_url=(data.get("base_url") or "").strip(),
                 push_grant=str(data.get("push_grant") or ""),
                 owner=owner,
+                provider=str(data.get("provider") or ""),
             )
         except apns.InvalidDeviceToken:
             return self._json(400, {"ok": False, "error": "device_token_invalid"})
