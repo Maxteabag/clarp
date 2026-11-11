@@ -144,21 +144,13 @@ def _quiet_period_sec() -> int:
 
 
 def _recent_real_activity_reason(agent_id: str, now: float) -> str:
-    quiet_period = _quiet_period_sec()
-    if quiet_period <= 0:
-        return ""
-    try:
-        from . import message_store
-        last_ms = message_store.last_real_message_activity(agent_id=agent_id)
-    except Exception as e:  # noqa: BLE001
-        log_exception("teamLeaderQuietActivityFail", e, detail=agent_id)
-        return "activity-unknown"
-    if not last_ms:
-        return ""
-    age = now - (last_ms / 1000.0)
-    if age < quiet_period:
-        return f"recent-activity:{max(0, int(age))}s"
-    return ""
+    from . import wake_admission
+    return wake_admission.recent_real_activity_reason(
+        agent_id,
+        now=now,
+        quiet_period_sec=_quiet_period_sec(),
+        failure_event="teamLeaderQuietActivityFail",
+    )
 
 
 class TeamLeaderScheduler:

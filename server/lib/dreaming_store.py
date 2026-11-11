@@ -656,20 +656,13 @@ def _normalize_altitude(raw: str) -> str:
 
 
 def _skip_busy_reason(agent: dict) -> str:
-    agent_id = agent["agent_id"]
-    session = agent.get("session") or ""
-    latest = agents_db.latest_state(agent_id) or {}
-    if latest.get("kind") == AgentState.COMPACTING:
-        return "compacting"
-    routine_busy = _routine_self_activity_busy(agent)
-    if agents_db.is_busy(agent_id) and not routine_busy:
-        return "busy"
-    if backends.active_handles(agent.get("backend"), agent_id) and not routine_busy:
-        return "active"
-    from . import turn_dispatch
-    if turn_dispatch.live_work(agent_id, session=session).compacting:
-        return "compacting"
-    return ""
+    from . import wake_admission
+    latest = agents_db.latest_state(agent["agent_id"]) or {}
+    return wake_admission.execution_busy_reason(
+        agent,
+        latest=latest,
+        ignore_busy_handles=_routine_self_activity_busy(agent),
+    )
 
 
 def _recover_stale_sent_round(run_id: str, *, now_ms: int | None = None) -> bool:

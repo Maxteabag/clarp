@@ -73,6 +73,7 @@ tests/unit/test_agent_bg.py::test_background_finish_waits_for_writer_and_recheck
 tests/unit/test_turn_queue.py
 tests/unit/test_turn_slots.py
 tests/unit/test_stop_holds_queue.py
+tests/unit/test_wake_admission.py
 tests/unit/test_queue_reaper.py
 tests/unit/test_restart_interrupted_turns.py
 tests/unit/test_send_service.py
