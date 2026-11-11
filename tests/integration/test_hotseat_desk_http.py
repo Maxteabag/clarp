@@ -49,6 +49,8 @@ def accounts(provider):
             for a in state["aliases"][provider]]
 if args == ["tui", "--snapshot"]:
     time.sleep(state.get("tui_sleep", 0))
+    if state.get("tui_fails"):
+        code = 1
     out = json.dumps({{"sessions": 1, "errors": [], "accounts": [
         {{"provider": p, "alias": a, "active": a == state["active"][p], "can_switch": True, "windows": []}}
         for p in ("claude", "codex") for a in state["aliases"][p]]}})
@@ -207,12 +209,12 @@ def _live_read(base, token):
 
 
 def _resume_prompts(session: str) -> list[dict]:
-    from lib import db, hotseat_desk
+    from lib import db
     agent_id = db.conn().execute(
         "SELECT agent_id FROM agents WHERE session = ?", (session,)).fetchone()["agent_id"]
     return [dict(row) for row in db.conn().execute(
-        "SELECT message_id, origin FROM messages WHERE agent_id = ? AND role = 'user' AND text = ?",
-        (agent_id, hotseat_desk.RESUME_PROMPT))]
+        "SELECT message_id, origin, text FROM messages WHERE agent_id = ? AND role = 'user'"
+        " AND message_id LIKE 'u-hotseat-resume-%'", (agent_id,))]
 
 
 # --- resume ---------------------------------------------------------------
@@ -229,9 +231,12 @@ def test_two_resumes_of_one_stop_start_exactly_one_turn(desk):
     assert first[0] == 200 and first[1]["ok"] is True and first[1]["continued"] is True
     assert first[1].get("already_sent") is False
     assert second[0] == 200 and second[1]["ok"] is True and second[1]["already_sent"] is True
-    assert [t["text"] for t in turns] == [hotseat_desk.RESUME_PROMPT]
     prompts = _resume_prompts("koko")
     assert len(prompts) == 1 and prompts[0]["origin"] == "automation"
+    assert [t["text"] for t in turns] == [prompts[0]["text"]]
+    # The prompt says what the Host knows, not that quota is back (issue 263, point 2).
+    assert prompts[0]["text"].startswith("Your work was interrupted by a usage limit.")
+    assert "quota again" not in prompts[0]["text"] and "Nothing was checked again just now" in prompts[0]["text"]
 
 
 def test_concurrent_resumes_of_one_stop_start_exactly_one_turn(desk):
@@ -481,7 +486,8 @@ def test_a_codex_switch_tells_the_backend_and_leaves_its_record_on_the_desk(desk
     assert hooks == ["codex"]
     assert "codex-account switch cx2" in fake.calls()
     assert _last_switch("codex")["from"] == "cx1" and _last_switch("codex")["to"] == "cx2"
-    record = next(s for s in body["desk"]["switches"] if s["provider"] == "codex")
+    assert "desk" not in body
+    record = next(s for s in _call(base, token, "GET", "/hotseat/desk")[1]["switches"] if s["provider"] == "codex")
     assert (record["state"], record["from"], record["alias"]) == ("switched", "cx1", "cx2")
     assert record["finished_at"] >= record["requested_at"]
     # The automatic switcher's own receipt and lane are its own: a manual switch
@@ -504,7 +510,8 @@ def test_a_failed_switch_says_so_and_writes_no_flip_back_record(desk, monkeypatc
     assert status == 409 and body["ok"] is False and body["error"] == "switch_failed"
     assert body["from"] == "ai13" and body["message"]
     assert hooks == [] and _last_switch("claude") is None
-    assert body["desk"]["switches"][0]["state"] == "failed"
+    assert "desk" not in body
+    assert _call(base, token, "GET", "/hotseat/desk")[1]["switches"][0]["state"] == "failed"
     assert fake.calls().count("switch ai12 --yes --json") == 1
 
 
@@ -522,27 +529,61 @@ def test_switch_refuses_when_hotseat_cannot_say_which_account_is_active(desk):
 
 def test_switch_answers_when_the_switch_is_done_and_the_desk_then_shows_the_truth(desk):
     base, token, fake, _turns, _ctx = desk
-    _live_read(base, token)
+    before = _live_read(base, token)
+    assert before["refreshed"] is True
     fake.set(tui_sleep=2.0)
     started = time.monotonic()
 
     status, body = _call(base, token, "POST", "/hotseat/switch", {"provider": "claude", "alias": "ai12"})
 
     assert time.monotonic() - started < 1.8, "the answer must not wait for the live read"
-    assert status == 200 and body["switched"] is True
-    active = [a["alias"] for a in body["desk"]["accounts"] if a["provider"] == "claude" and a["active"]]
-    assert active == ["ai12"], "the stored desk already names the new account"
-    assert body["desk"]["switches"][0]["state"] == "switched"
+    assert status == 200
+    assert body == {"ok": True, "switched": True, "from": "ai13", "provider": "claude", "alias": "ai12"}, (
+        "no desk in the answer: none has been read since the switch (issue 263, point 4)")
+    _, now = _call(base, token, "GET", "/hotseat/desk")
+    assert now["refreshed"] is False and now["observed_at"] == before["observed_at"]
+    assert [a["alias"] for a in now["accounts"] if a["provider"] == "claude" and a["active"]] == ["ai12"], (
+        "the stored desk already names the account Hotseat confirmed")
+    assert now["switches"][0]["state"] == "switched"
     deadline = time.monotonic() + 15
     while time.monotonic() < deadline:
         _, later = _call(base, token, "GET", "/hotseat/desk")
-        if not later["refreshing"] and later["observed_at"] != body["desk"]["observed_at"]:
+        if not later["refreshing"] and later["observed_at"] != before["observed_at"]:
             break
         time.sleep(0.1)
-    assert later["refreshing"] is False and later["observed_at"] != body["desk"]["observed_at"]
+    assert later["refreshing"] is False and later["observed_at"] != before["observed_at"]
     assert [a["alias"] for a in later["accounts"] if a["provider"] == "claude" and a["active"]] == ["ai12"]
     assert later["switches"] == [{**later["switches"][0], "provider": "claude", "alias": "ai12",
                                   "from": "ai13", "state": "switched"}]
+
+
+def test_no_switch_answer_carries_a_desk(desk):
+    base, token, fake, _turns, _ctx = desk
+    noop = _call(base, token, "POST", "/hotseat/switch", {"provider": "claude", "alias": "ai13"})
+    assert noop == (200, {"ok": True, "switched": False, "reason": "already_active", "from": "ai13",
+                          "provider": "claude", "alias": "ai13",
+                          "message": "ai13 is already the account in use."})
+    fake.set(list_fails=True)
+    unreadable = _call(base, token, "POST", "/hotseat/switch", {"provider": "claude", "alias": "ai12"})
+    assert unreadable[0] == 503 and set(unreadable[1]) == {"ok", "error", "provider", "alias", "message"}
+    fake.set(list_fails=False, switch_fails=True)
+    failed = _call(base, token, "POST", "/hotseat/switch", {"provider": "claude", "alias": "ai12"})
+    assert failed[0] == 409 and set(failed[1]) == {"ok", "error", "from", "provider", "alias", "message"}
+
+
+def test_the_desk_says_whether_the_live_read_it_was_asked_for_happened(desk):
+    base, token, fake, _turns, _ctx = desk
+    first = _live_read(base, token)
+    assert (first["refreshed"], first["refresh_throttled"]) == (True, False)
+    plain = _call(base, token, "GET", "/hotseat/desk")[1]
+    assert (plain["refreshed"], plain["refresh_throttled"]) == (False, False)
+    held = _call(base, token, "GET", "/hotseat/desk?refresh=1")[1]
+    assert (held["refreshed"], held["refresh_throttled"]) == (False, True)
+
+    fake.set(list_fails=False, tui_fails=True)
+    _ctx.hotseat_desk.refresh(force=True)
+    failed_state = _call(base, token, "GET", "/hotseat/desk")[1]
+    assert failed_state["error"] == "cli_failed" and failed_state["observed_at"] == first["observed_at"]
 
 
 def test_switch_never_passes_an_option_shaped_alias_to_hotseat(desk):

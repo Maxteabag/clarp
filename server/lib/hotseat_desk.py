@@ -57,11 +57,32 @@ MIN_REFRESH_INTERVAL_MS = 60 * 1000
 SWITCH_ANSWER_BUDGET_S = 30
 ACTIVE_READ_TIMEOUT_S = 45
 
-RESUME_PROMPT = (
-    "Continue the work that was interrupted by the usage limit. The account has "
-    "quota again. Re-check the results of the interrupted step before retrying it, "
-    "and do not repeat work that already completed."
-)
+_RESUME_OPENINGS = {
+    "usage_limit": "Your work was interrupted by a usage limit.",
+    "waiting_for_account": "Your work was parked, waiting for an account with quota.",
+}
+
+
+def resume_prompt(row: dict, *, observed_at: int | None, now: int) -> str:
+    """What a continued agent is told. Only what the Host knows: why Hotseat
+    listed the work as stopped, that Hotseat's last reading (of the stated age)
+    said it could continue, with Hotseat's own note when it had one, and that
+    nothing was checked again when this was sent. It does not say that quota
+    is back: the Host did not ask."""
+    opening = _RESUME_OPENINGS.get(row.get("cause"), "Your work stopped and has not continued since.")
+    minutes = None if observed_at is None else max(0, int(now) - int(observed_at)) // 60_000
+    age = ("of unknown age" if minutes is None else "less than a minute old" if minutes == 0
+           else "1 minute old" if minutes == 1 else f"{minutes} minutes old")
+    readiness = row.get("readiness") if isinstance(row.get("readiness"), dict) else {}
+    note = " ".join(str(readiness.get("warning") or "").split())[:200].rstrip(".")
+    reading = f"Hotseat's last reading, {age}, said this work could continue"
+    if note:
+        reading += f", with this note: {note}"
+    return (
+        f"{opening} You are asked from the Hotseat desk to continue it. {reading}. "
+        "Nothing was checked again just now, so if the limit still holds, stop and say so rather than retrying. "
+        "Re-check the results of the interrupted step before retrying it, and do not repeat work that already completed."
+    )
 
 _SAFE_ALIAS = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._@-]{0,127}\Z")
 _SAFE_SESSION_ID = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
@@ -663,29 +684,24 @@ def _raw_from_switcher_row(provider: str, stored: dict, row: dict, observed_at: 
     return raw
 
 
-def _switched_since(provider: str, since_ms: int) -> bool:
-    """Whether a switch of `provider` (the desk's or the switcher's) ended at or after `since_ms`."""
-    try:
-        record = json.loads(settings_store.get(f"hotseat-switcher.{provider}.last-switch") or "null")
-    except ValueError:
+def _set_active(snapshot: dict, provider: str, alias: str) -> bool:
+    """Name `alias` as the account in use among `provider`'s accounts of `snapshot`.
+    False, and nothing changed, when the snapshot does not list that alias."""
+    accounts = [acc for acc in snapshot.get("accounts") or []
+                if isinstance(acc, dict) and acc.get("provider") == provider]
+    if not any(alias == acc.get("alias") or alias in (acc.get("aliases") or []) for acc in accounts):
         return False
-    at = record.get("at") if isinstance(record, dict) else None
-    return isinstance(at, (int, float)) and not isinstance(at, bool) and int(at) >= int(since_ms)
+    for acc in accounts:
+        acc["active"] = alias == acc.get("alias") or alias in (acc.get("aliases") or [])
+    return True
 
 
 def _mark_active(provider: str, alias: str) -> None:
     """Hotseat confirmed the switch: the stored desk names the new account at
     once, before the live read that follows has finished (or if it fails)."""
     snapshot = _load_persisted()
-    if snapshot is None:
-        return
-    accounts = [acc for acc in snapshot.get("accounts") or []
-                if isinstance(acc, dict) and acc.get("provider") == provider]
-    if not any(alias == acc.get("alias") or alias in (acc.get("aliases") or []) for acc in accounts):
-        return
-    for acc in accounts:
-        acc["active"] = alias == acc.get("alias") or alias in (acc.get("aliases") or [])
-    settings_store.set_text(SNAPSHOT_KEY, json.dumps(snapshot, separators=(",", ":")))
+    if snapshot is not None and _set_active(snapshot, provider, alias):
+        settings_store.set_text(SNAPSHOT_KEY, json.dumps(snapshot, separators=(",", ":")))
 
 
 def _stored_switch(provider: str) -> dict | None:
@@ -725,6 +741,11 @@ class HotseatDesk:
         self._last_read_at = 0
         self._switch_locks = {provider: threading.Lock() for provider in janitor_hotseat.PROVIDERS}
         self._switches: dict[str, dict] = {}
+        # provider -> (when, alias) of the last switch this process saw end,
+        # the desk's or the automatic switcher's. A read that began before
+        # that moment knows the account in use less well than the switch does.
+        self._switched: dict[str, tuple[int, str]] = {}
+        self._last_read_ok = False
         self._resume_lock = threading.Lock()
         # Orders the read-change-write of the stored snapshot between a live
         # read, a switch marking the new account and the switcher's read.
@@ -743,12 +764,28 @@ class HotseatDesk:
             last = self._last_read_at
         return max(last, observed) + MIN_REFRESH_INTERVAL_MS
 
-    def refresh(self, *, command: str | None = None, runner=subprocess.run, force: bool = False) -> bool:
-        """One live read of Hotseat, single-flight. False when the read was not
+    def _keep_switched_accounts(self, snapshot: dict, read_began: int, providers) -> None:
+        """A read that began before a switch ended reports the account that was
+        in use before it. The switch knows better: keep the account it made the
+        default. A read that began after the switch is taken as it is."""
+        with self._lock:
+            switched = dict(self._switched)
+        for provider in providers:
+            at, alias = switched.get(provider, (0, ""))
+            if alias and at >= read_began:
+                _set_active(snapshot, provider, alias)
+
+    def _saw_switch(self, provider: str, alias: str) -> None:
+        with self._lock:
+            self._switched[provider] = (now_ms(), alias)
+
+    def refresh(self, *, command: str | None = None, runner=subprocess.run, force: bool = False) -> str:
+        """One live read of Hotseat, single-flight. Says how it went for the caller:
+        "ok" when a read ran (or one in flight was waited for) and succeeded,
+        "failed" when it did not succeed, and "throttled" when no read was
         allowed yet (inside MIN_REFRESH_INTERVAL_MS of the last one) and nothing
-        ran. A request that finds a read in flight waits for it and counts as
-        read. `force` is for the desk's own read after a switch: it never joins
-        a read that started before the switch and is not held back by the interval."""
+        ran. `force` is for the desk's own read after a switch: it never joins a
+        read that started before the switch and is not held back by the interval."""
         cmd = (command or hotseat_command()).strip()
         while True:
             observed = _int_ms((_load_persisted() or {}).get("observed_at")) or 0
@@ -757,18 +794,22 @@ class HotseatDesk:
                 if waiting_for is None:
                     now = now_ms()
                     if not force and now < max(self._last_read_at, observed) + MIN_REFRESH_INTERVAL_MS:
-                        return False
+                        return "throttled"
                     done = self._inflight = threading.Event()
                     self._last_read_at = now
                     break
             waiting_for.wait(timeout=TUI_TIMEOUT_S + 5)
             if not force:
-                return True
+                with self._lock:
+                    return "ok" if self._inflight is None and self._last_read_ok else "failed"
+        succeeded = False
         try:
             snapshot = _read_live(cmd, runner, now)
             with self._store_lock:
+                self._keep_switched_accounts(snapshot, now, janitor_hotseat.PROVIDERS)
                 settings_store.set_text(SNAPSHOT_KEY, json.dumps(snapshot, separators=(",", ":")))
                 settings_store.set_text(ERROR_KEY, "")
+            succeeded = True
         except Exception as exc:  # noqa: BLE001
             code = hotseat_status.error_code_for(exc)
             log("hotseatDeskRefreshFailed", f"code={code} error={type(exc).__name__}")
@@ -776,8 +817,9 @@ class HotseatDesk:
         finally:
             with self._lock:
                 self._inflight = None
+                self._last_read_ok = succeeded
             done.set()
-        return True
+        return "ok" if succeeded else "failed"
 
     def absorb_switcher_read(self, provider: str, payload, *, started_at: int | None = None) -> bool:
         """The Hotseat switcher just read `provider` on its own schedule
@@ -822,7 +864,6 @@ class HotseatDesk:
                 snapshot["clarp_agents"], stopped_raw = _clarp_block(payload)
                 snapshot["stopped_work"] = _stopped_rows(stopped_raw)
             clarp_agents = {**_no_clarp_agents(), **(snapshot.get("clarp_agents") or {})}
-            keep_active = _switched_since(provider, now if started_at is None else started_at)
             accounts = []
             for stored in snapshot.get("accounts") or []:
                 if not isinstance(stored, dict):
@@ -836,10 +877,9 @@ class HotseatDesk:
                         stored["would_use_sessions"] = int(clarp_agents["would_use_by_account"].get(alias, 0))
                     accounts.append(stored)
                     continue
-                if keep_active:
-                    raw["active"] = bool(stored.get("active"))
                 accounts.append(_account_row(raw, row, row, clarp_agents, observed_at=now) or stored)
             snapshot["accounts"] = accounts
+            self._keep_switched_accounts(snapshot, now if started_at is None else int(started_at), (provider,))
             if provider == "claude":
                 snapshot["observed_at"] = now
                 settings_store.set_text(ERROR_KEY, "")
@@ -850,6 +890,7 @@ class HotseatDesk:
         """The automatic switcher made `alias` the default: the stored desk
         names it at once, not at the switcher's next read. Never raises."""
         try:
+            self._saw_switch(provider, alias)
             with self._store_lock:
                 _mark_active(provider, alias)
         except Exception as exc:  # noqa: BLE001
@@ -868,7 +909,7 @@ class HotseatDesk:
         `refresh=True` runs a live read first when one is allowed, and says so
         in `refresh_throttled` when it was not."""
         cmd = (command or hotseat_command()).strip()
-        throttled = bool(refresh) and not self.refresh(command=cmd, runner=runner)
+        outcome = self.refresh(command=cmd, runner=runner) if refresh else None
 
         now = now_ms() if served_at is None else int(served_at)
         installed = cli_installed(cmd, which=which)
@@ -910,7 +951,10 @@ class HotseatDesk:
             "observed_at": observed_at,
             "stale": stale,
             "refreshing": refreshing,
-            "refresh_throttled": throttled,
+            # Whether the live read THIS request asked for ran and succeeded;
+            # otherwise the desk below is the stored one, of `observed_at`.
+            "refreshed": outcome == "ok",
+            "refresh_throttled": outcome == "throttled",
             "next_refresh_at": self._next_refresh_at(persisted),
             "installed": installed,
             "error": last_error,
@@ -1000,7 +1044,10 @@ class HotseatDesk:
                 "provider": prov, "alias": target,
                 "message": "The switch is still running. The desk shows how it ended.",
             }
-        return status, {**body, "desk": self.payload(command=cmd)}
+        # No desk in the answer: none has been read since the switch, and a
+        # desk from before it would say the opposite of `switched`. The client
+        # reads GET /hotseat/desk, whose `switches` and accounts tell the rest.
+        return status, body
 
     def _read_after_switch(self, prov: str, target: str, cmd: str, runner) -> None:
         """The live read that follows a switch. If it fails, a read that began
@@ -1053,6 +1100,7 @@ class HotseatDesk:
                         f"hotseat-switcher.{prov}.last-switch",
                         json.dumps({"from": active, "to": target, "at": stamp}),
                     )
+                    self._saw_switch(prov, target)
                     with self._store_lock:
                         _mark_active(prov, target)
                     state = "switched"
@@ -1144,7 +1192,8 @@ class HotseatDesk:
         if turn_queue.state(agent_id).get("paused"):
             return _refusal("queue_paused", f"{name}'s queue is paused. Unpause the queue so waiting work can run.")
 
-        row = next((item for item in (_load_persisted() or {}).get("stopped_work") or []
+        snapshot = _load_persisted() or {}
+        row = next((item for item in snapshot.get("stopped_work") or []
                     if isinstance(item, dict) and item.get("kind") == "clarp"
                     and item.get("id") in (session, agent_id)), None)
         stopped_at = _int_ms(row.get("stopped_at")) if row else None
@@ -1170,7 +1219,8 @@ class HotseatDesk:
                     return _refusal("not_stopped", f"{name} has finished a turn since it stopped. Refresh the desk.")
                 if agents_db.is_busy(agent_id):
                     return _refusal("agent_busy", f"{name} is working now.")
-            delivery = send_prompt(session, RESUME_PROMPT, message_id)
+            text = resume_prompt(row, observed_at=_int_ms(snapshot.get("observed_at")), now=now_ms())
+            delivery = send_prompt(session, text, message_id)
         if not delivery.get("ok"):
             return 502, {"ok": False, "error": "prompt_failed", "detail": str(delivery.get("error") or "")[:200],
                          "message": f"The prompt to {name} was not accepted. Nothing was started."}
