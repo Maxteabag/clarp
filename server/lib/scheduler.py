@@ -327,9 +327,11 @@ class AgentScheduleRunner:
         *,
         check_interval_sec: float = 15.0,
         dispatch_goal: Callable | None = None,
+        goal_wake_retired: Callable | None = None,
     ):
         self._goal_cursor = [""]
         self._dispatch_goal = dispatch_goal
+        self._goal_wake_retired = goal_wake_retired
         self._dispatch_turn = dispatch_turn
         self._check_interval = check_interval_sec
         self._stop_event = threading.Event()
@@ -362,7 +364,8 @@ class AgentScheduleRunner:
         if self._dispatch_goal:
             try:
                 dispatched_count = task_goal_recovery.tick(
-                    self._dispatch_goal, now=now, cursor=self._goal_cursor)
+                    self._dispatch_goal, now=now, cursor=self._goal_cursor,
+                    retired=self._goal_wake_retired)
             except Exception as exc:  # noqa: BLE001 - goals never stop the cron schedules (AUT-09)
                 task_goal_recovery.log_failure_throttled(
                     "agentScheduleGoalTickFail", ("goal-tick",), exc, now)

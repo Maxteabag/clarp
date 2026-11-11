@@ -16,7 +16,9 @@ readable, retain their recorded status, and are explicitly not enrolled in
 recovery. Ambiguous old completion is not upgraded into verified accomplishment.
 
 A checkpoint atomically persists progress, evidence, next work and an optional
-wake or external dependency. Continuation belongs to the goal and the bound
+wake or external dependency. A dependency the goal still waits for is replaced
+only explicitly: a checkpoint without a continuation keeps it, a timer over it
+is refused, and a replacement is recorded. Continuation belongs to the goal and the bound
 agent/native conversation. Revisions, generation fencing, dispatch idempotency
 and expiring claims prevent stale edits or duplicate work. Scheduling and
 admission are distinct from execution; failures and retries remain visible.
@@ -28,6 +30,10 @@ cancelled or superseded goals, pending approval, unavailable capacity, missing
 owners and changed native bindings must never launch work. Dependency deadlines
 produce an honest recovery checkpoint rather than an invented job success.
 Bounded retries eventually require attention. Explicit stop must suppress recovery.
+Only work that can still run suppresses a wake: a queued row whose turn is over
+and that nothing may launch again is not live work. The scheduler retires its
+own such wake rows on every pass and records an accepted wake that did not run
+as `wake_undelivered`, so a failed wake is retried and never silent.
 
 Native cards and detail show completed/working/remaining/blocked/deferred counts,
 current work or concrete wait, next wake, last checkpoint, evidence and revisions.
