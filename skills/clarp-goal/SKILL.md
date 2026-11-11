@@ -62,8 +62,12 @@ peer request or another dependency is pending):
   evidence and leaves the wake exactly as it is. This is the routine progress
   checkpoint; write it freely while a job runs.
 - A checkpoint with a timer continuation is refused, and the error names the
-  dependency (and job) it would have replaced. Nothing is saved; send it again
-  without `continuation`.
+  dependency (and job) it would have replaced. Nothing is saved, not the
+  progress, evidence or documents either; send it again without `continuation`.
+  This also happens when the job has already ended but the Host has not
+  recorded that yet because you were busy: the goal still reads `waiting`.
+  Omit `continuation` and its result still arrives as your next wake, or use
+  `"replace_dependency": true` if you have read the result yourself.
 - To be woken before the dependency ends, send the same dependency again (same
   `key`, same `job_handle`) with an earlier `due_at`. That wake tells you the job
   was still running and is no longer awaited: name it again in the checkpoint
@@ -72,10 +76,13 @@ peer request or another dependency is pending):
   timer with `"replace_dependency": true`. The ledger records
   `dependency_replaced` with the key and job that were dropped.
 - A `blocked` continuation holds the dependency: `resume` waits for it again
-  and delivers a result that arrived meanwhile.
+  and delivers a result that arrived meanwhile. While it is held, a checkpoint
+  without `continuation` leaves the goal blocked: nothing wakes you, not even
+  the job's end, until the goal is resumed.
 
 With no dependency pending, a checkpoint without `continuation` schedules a wake
-two minutes later, as before.
+two minutes later, as before. That includes a goal you blocked with a `blocked`
+continuation and no dependency: a bare checkpoint ends the blocker.
 
 Track detached workers (including systemd/nohup and watchers) with
 [clarp-background-jobs](../clarp-background-jobs/SKILL.md), so purpose, status,
