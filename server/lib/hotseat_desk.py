@@ -10,6 +10,11 @@ plus interactive operations:
   * `GET /hotseat/desk?refresh=1`: single-flight live `hotseat` CLI refresh.
   * `POST /hotseat/switch`: switch machine-wide default `claude` or `codex` seat.
   * `POST /hotseat/resume`: continue a stopped Clarp agent or unpause its queue.
+
+The job state of the desk (the one live read in flight and when it started, the
+switch lock of each provider, the latest switch asked for here) belongs to a
+`HotseatDesk` object that `build_server` builds and the handler reaches through
+the context. Everything that must survive a restart is in the settings store.
 """
 from __future__ import annotations
 
@@ -22,17 +27,35 @@ import subprocess
 import threading
 from typing import Callable
 
-from . import hotseat_status, identity, janitor_hotseat, janitor_store, settings_store, turn_queue
+from . import agents as agents_db
+from . import db
+from . import (hotseat_status, identity, janitor_hotseat, janitor_store, message_store,
+               settings_store, turn_queue)
 from .clock import now_ms
 from .log import log
 
 SCHEMA = "clarp.hotseat-desk/1"
 SNAPSHOT_KEY = "hotseat-desk.snapshot.v1"
 ERROR_KEY = "hotseat-desk.error.v1"
+# How the latest switch asked for on the desk ended, per provider. The status
+# route's action receipt is not used for it: its reason codes are a closed list
+# of the automatic switcher's own branches, and record_action also rewrites the
+# switcher's lane (mode, floor, cadence), neither of which fits a manual switch.
+SWITCH_KEY_PREFIX = "hotseat-desk.switch.v1."
+SWITCH_STATES = frozenset({"running", "switched", "already_active", "failed", "unavailable"})
 STALE_MS = 10 * 60 * 1000
 TUI_TIMEOUT_S = 45
 LIST_TIMEOUT_S = 45
 WORK_TIMEOUT_S = 20
+# The shortest interval the Hotseat switcher itself may be set to check at
+# (janitors.py, account-hotseat `interval_seconds` min): a client cannot make
+# the Host read the providers more often than its own switcher may.
+MIN_REFRESH_INTERVAL_MS = 60 * 1000
+# The app waits 45 s for a switch. Reading who is active plus the switch itself
+# can take longer than that (the CLI alone may use SWITCH_TIMEOUT), so the
+# request answers "still running" after this long and the desk tells the rest.
+SWITCH_ANSWER_BUDGET_S = 30
+ACTIVE_READ_TIMEOUT_S = 45
 
 RESUME_PROMPT = (
     "Continue the work that was interrupted by the usage limit. The account has "
@@ -43,8 +66,17 @@ RESUME_PROMPT = (
 _SAFE_ALIAS = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._@-]{0,127}\Z")
 _SAFE_SESSION_ID = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
 
-_STATE_LOCK = threading.Lock()
-_INFLIGHT: threading.Event | None = None
+# Who is active, asked of Hotseat itself. Codex without the quota probe: the
+# probe is the slow part and says nothing about which profile is in use.
+_ACTIVE_READS: dict[str, tuple[tuple[str, ...], Callable[[object], list[dict]]]] = {
+    "claude": (("list", "--json"), janitor_hotseat.parse_claude),
+    "codex": (("codex", "--no-quota", "--json"), janitor_hotseat.parse_codex),
+}
+
+
+def _no_clarp_agents() -> dict:
+    return {"total": 0, "live": 0, "claude_backed": 0,
+            "by_backend": {}, "live_by_account": {}, "would_use_by_account": {}}
 
 
 def hotseat_command() -> str:
@@ -381,63 +413,6 @@ def _build_desk_snapshot(
     }
 
 
-def refresh_desk(*, command: str | None = None, runner=subprocess.run) -> dict:
-    """Single-flight live read from Hotseat CLI; updates both desk and status stores."""
-    global _INFLIGHT
-    cmd = (command or hotseat_command()).strip()
-
-    with _STATE_LOCK:
-        if _INFLIGHT is not None:
-            wait_event = _INFLIGHT
-            leader = False
-        else:
-            wait_event = threading.Event()
-            _INFLIGHT = wait_event
-            leader = True
-
-    if not leader:
-        wait_event.wait(timeout=TUI_TIMEOUT_S + 5)
-        return payload(refresh=False, command=cmd)
-
-    try:
-        observed_at = now_ms()
-        with ThreadPoolExecutor(max_workers=3, thread_name_prefix="hotseat-desk") as pool:
-            fut_tui = pool.submit(_run_json, cmd, ["tui", "--snapshot"], TUI_TIMEOUT_S, runner=runner)
-            fut_list = pool.submit(_run_json, cmd, ["list", "--json"], LIST_TIMEOUT_S, runner=runner)
-            fut_work = pool.submit(_run_json, cmd, ["bridge", "work"], WORK_TIMEOUT_S, runner=runner)
-
-            tui_data = fut_tui.result()
-            try:
-                list_data = fut_list.result()
-            except Exception as exc:  # noqa: BLE001
-                log("hotseatDeskListPartial", f"error={type(exc).__name__}")
-                list_data = None
-            try:
-                work_data = fut_work.result()
-            except Exception as exc:  # noqa: BLE001
-                log("hotseatDeskWorkPartial", f"error={type(exc).__name__}")
-                work_data = None
-
-        if isinstance(list_data, dict):
-            hotseat_status.record_read("claude", list_data, observed_at=observed_at)
-            if isinstance(list_data.get("codex"), dict):
-                hotseat_status.record_read("codex", list_data["codex"], observed_at=observed_at)
-
-        snapshot = _build_desk_snapshot(tui_data, list_data, work_data, observed_at=observed_at)
-        settings_store.set_text(SNAPSHOT_KEY, json.dumps(snapshot, separators=(",", ":")))
-        settings_store.set_text(ERROR_KEY, "")
-    except Exception as exc:  # noqa: BLE001
-        code = hotseat_status.error_code_for(exc)
-        log("hotseatDeskRefreshFailed", f"code={code} error={type(exc).__name__}")
-        settings_store.set_text(ERROR_KEY, code)
-    finally:
-        with _STATE_LOCK:
-            _INFLIGHT = None
-            wait_event.set()
-
-    return payload(refresh=False, command=cmd)
-
-
 def _load_persisted() -> dict | None:
     raw = settings_store.get(SNAPSHOT_KEY)
     if not raw:
@@ -560,197 +535,477 @@ def _serve_accounts(raw_accounts: list[dict], *, served_at: int, snapshot_stale:
     return served
 
 
-def payload(
-    *,
-    refresh: bool = False,
-    served_at: int | None = None,
-    command: str | None = None,
-    which: Callable[[str], str | None] = shutil.which,
-    runner=subprocess.run,
-) -> dict:
-    """Serve the Hotseat desk payload. `refresh=False` never executes a subprocess."""
-    cmd = (command or hotseat_command()).strip()
-    if refresh:
-        return refresh_desk(command=cmd, runner=runner)
+def _read_live(cmd: str, runner, observed_at: int) -> dict:
+    """One live read of Hotseat: three CLI calls, merged into a desk snapshot.
+    Also hands the account list to the status store, as the switcher's read does."""
+    with ThreadPoolExecutor(max_workers=3, thread_name_prefix="hotseat-desk") as pool:
+        fut_tui = pool.submit(_run_json, cmd, ["tui", "--snapshot"], TUI_TIMEOUT_S, runner=runner)
+        fut_list = pool.submit(_run_json, cmd, ["list", "--json"], LIST_TIMEOUT_S, runner=runner)
+        fut_work = pool.submit(_run_json, cmd, ["bridge", "work"], WORK_TIMEOUT_S, runner=runner)
 
-    now = now_ms() if served_at is None else int(served_at)
-    installed = cli_installed(cmd, which=which)
-    status = hotseat_status.payload(served_at=now)
-    persisted = _load_persisted()
-    raw_err = str(settings_store.get(ERROR_KEY) or "").strip()
-    last_error = raw_err if raw_err in hotseat_status.ERROR_CODES else None
+        tui_data = fut_tui.result()
+        try:
+            list_data = fut_list.result()
+        except Exception as exc:  # noqa: BLE001
+            log("hotseatDeskListPartial", f"error={type(exc).__name__}")
+            list_data = None
+        try:
+            work_data = fut_work.result()
+        except Exception as exc:  # noqa: BLE001
+            log("hotseatDeskWorkPartial", f"error={type(exc).__name__}")
+            work_data = None
 
-    with _STATE_LOCK:
-        refreshing = _INFLIGHT is not None
-
-    if persisted is not None:
-        observed_at = _int_ms(persisted.get("observed_at"))
-        stale = observed_at is None or (now - observed_at > STALE_MS) or bool(last_error)
-        accounts = _serve_accounts(persisted.get("accounts") or [], served_at=now, snapshot_stale=stale)
-        sessions = int(persisted.get("sessions") or 0)
-        errors = list(persisted.get("errors") or [])
-        clarp_agents = dict(persisted.get("clarp_agents") or {
-            "total": 0, "live": 0, "claude_backed": 0,
-            "by_backend": {}, "live_by_account": {}, "would_use_by_account": {},
-        })
-        stopped_work = list(persisted.get("stopped_work") or [])
-        recent_work = list(persisted.get("recent_work") or [])
-    else:
-        accounts, observed_at = _fallback_accounts_from_status(status)
-        stale = True
-        sessions = 0
-        errors = []
-        clarp_agents = {
-            "total": 0, "live": 0, "claude_backed": 0,
-            "by_backend": {}, "live_by_account": {}, "would_use_by_account": {},
-        }
-        stopped_work = []
-        recent_work = []
-
-    switcher_block = dict(status.get("switcher") or {})
-    switcher_block["actions"] = list(status.get("actions") or [])
-
-    return {
-        "schema": SCHEMA,
-        "served_at": now,
-        "observed_at": observed_at,
-        "stale": stale,
-        "refreshing": refreshing,
-        "installed": installed,
-        "error": last_error,
-        "errors": errors,
-        "sessions": sessions,
-        "switcher": switcher_block,
-        "clarp_agents": clarp_agents,
-        "accounts": accounts,
-        "stopped_work": stopped_work,
-        "recent_work": recent_work,
-    }
+    if isinstance(list_data, dict):
+        hotseat_status.record_read("claude", list_data, observed_at=observed_at)
+        if isinstance(list_data.get("codex"), dict):
+            hotseat_status.record_read("codex", list_data["codex"], observed_at=observed_at)
+    return _build_desk_snapshot(tui_data, list_data, work_data, observed_at=observed_at)
 
 
-def switch_default(
-    provider: str,
-    alias: str,
-    *,
-    command: str | None = None,
-    switch_fn: Callable[[str, str, str], bool] = janitor_hotseat.switch_account,
-    runner=subprocess.run,
-) -> tuple[int, dict]:
-    """Switch the machine-wide default Claude or Codex account via Hotseat."""
-    prov = str(provider or "").strip().lower()
-    target = str(alias or "").strip()
-    if prov not in janitor_hotseat.PROVIDERS:
-        return 400, {"ok": False, "error": "invalid_provider"}
-    if not _SAFE_ALIAS.fullmatch(target):
-        return 400, {"ok": False, "error": "invalid_alias"}
+def read_active_alias(command: str, provider: str, *, runner=subprocess.run) -> str | None:
+    """The alias Hotseat reports as the machine-wide default of `provider`, or
+    None when it reports none. Raises when Hotseat cannot be read."""
+    args, parse = _ACTIVE_READS[provider]
+    payload = _run_json(command, list(args), ACTIVE_READ_TIMEOUT_S, runner=runner)
+    for account in parse(payload):
+        if account.get("active"):
+            return str(account["alias"])
+    return None
 
-    cmd = (command or hotseat_command()).strip()
-    persisted = _load_persisted()
-    previous_active = None
-    if persisted:
-        for acc in persisted.get("accounts") or []:
-            if isinstance(acc, dict) and acc.get("provider") == prov and acc.get("active"):
-                previous_active = str(acc.get("alias") or "") or None
-                break
 
+def _credentials_changed(provider: str) -> None:
+    """A runner that read credentials once must restart to see the new account;
+    the same call the automatic switcher makes after its switch."""
+    from . import backends
+    backends.by_id(provider).on_credential_change()
+
+
+def _mark_active(provider: str, alias: str) -> None:
+    """Hotseat confirmed the switch: the stored desk names the new account at
+    once, before the live read that follows has finished (or if it fails)."""
+    snapshot = _load_persisted()
+    if snapshot is None:
+        return
+    accounts = [acc for acc in snapshot.get("accounts") or []
+                if isinstance(acc, dict) and acc.get("provider") == provider]
+    if not any(alias == acc.get("alias") or alias in (acc.get("aliases") or []) for acc in accounts):
+        return
+    for acc in accounts:
+        acc["active"] = alias == acc.get("alias") or alias in (acc.get("aliases") or [])
+    settings_store.set_text(SNAPSHOT_KEY, json.dumps(snapshot, separators=(",", ":")))
+
+
+def _stored_switch(provider: str) -> dict | None:
+    raw = settings_store.get(SWITCH_KEY_PREFIX + provider)
     try:
-        switched = bool(switch_fn(cmd, prov, target))
-    except Exception as exc:  # noqa: BLE001
-        log("hotseatDeskSwitchError", f"provider={prov} error={type(exc).__name__}")
-        switched = False
-
-    if not switched:
-        return 409, {"ok": False, "error": "switch_failed", "provider": prov, "alias": target}
-
-    stamp = now_ms()
-    settings_store.set_text(
-        f"hotseat-switcher.{prov}.last-switch",
-        json.dumps({"from": previous_active, "to": target, "at": stamp}),
-    )
-    log("hotseatDeskSwitched", f"provider={prov} to={hotseat_status.display_alias(target)}")
-    desk = refresh_desk(command=cmd, runner=runner)
-    return 200, {"ok": True, "switched": True, "provider": prov, "alias": target, "desk": desk}
+        record = json.loads(raw) if raw else None
+    except ValueError:
+        return None
+    if not isinstance(record, dict) or record.get("state") not in SWITCH_STATES - {"running"}:
+        return None
+    return record
 
 
-def resume_work(
-    item_id: str,
-    *,
-    kind: str = "clarp",
-    backend: str = "",
-    action: str = "continue",
-    send_prompt: Callable[[str, str], dict] | None = None,
-    unpause_fn: Callable[[str, str], dict] | None = None,
-) -> tuple[int, dict]:
-    """Continue a stopped Clarp agent, unpause its queue, or return a native resume command."""
-    target_id = str(item_id or "").strip()
-    item_kind = str(kind or "clarp").strip().lower()
-    mode = str(action or "continue").strip().lower()
+def _refusal(error: str, message: str, **fields) -> tuple[int, dict]:
+    """409 with a code for the client's logic and a sentence it can show as is."""
+    return 409, {"ok": False, "error": error, "message": message, **fields}
 
-    if not _SAFE_SESSION_ID.fullmatch(target_id):
-        return 400, {"ok": False, "error": "invalid_id"}
-    if item_kind not in ("clarp", "native"):
-        return 400, {"ok": False, "error": "invalid_kind"}
-    if mode not in ("continue", "unpause"):
-        return 400, {"ok": False, "error": "invalid_action"}
 
-    if item_kind == "native":
-        prov = str(backend or "").strip().lower()
-        cmd = f"codex resume {target_id}" if prov == "codex" else f"claude --resume {target_id}"
-        return 200, {
-            "ok": True,
-            "id": target_id,
-            "kind": "native",
-            "action": "command",
-            "continued": False,
-            "resume_command": cmd,
+def resume_message_id(agent_id: str, stopped_at: int) -> str:
+    """The id of the one resume prompt a stop can get. Derived from the agent
+    and the stop, so every request about that stop is the same send to the
+    dispatcher, whose own retry protection then starts at most one turn."""
+    return f"hotseat-resume-{agent_id}-{int(stopped_at)}"
+
+
+class HotseatDesk:
+    """The desk of one Host process.
+
+    Holds what cannot outlive the process and must not be shared by accident:
+    the live read in flight, when the last one started, one switch lock per
+    provider (the automatic switcher takes the same lock for its own switch),
+    the latest switch asked for here and the lock that orders resumes."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._inflight: threading.Event | None = None
+        self._last_read_at = 0
+        self._switch_locks = {provider: threading.Lock() for provider in janitor_hotseat.PROVIDERS}
+        self._switches: dict[str, dict] = {}
+        self._resume_lock = threading.Lock()
+
+    def switch_lock(self, provider: str) -> threading.Lock:
+        """Held around every `hotseat switch` of `provider` and the write of its
+        flip-back record, whoever asks: this desk or the automatic switcher."""
+        return self._switch_locks[provider]
+
+    # --- reading ----------------------------------------------------------
+
+    def _next_refresh_at(self, persisted: dict | None) -> int:
+        observed = _int_ms((persisted or {}).get("observed_at")) or 0
+        with self._lock:
+            last = self._last_read_at
+        return max(last, observed) + MIN_REFRESH_INTERVAL_MS
+
+    def refresh(self, *, command: str | None = None, runner=subprocess.run, force: bool = False) -> bool:
+        """One live read of Hotseat, single-flight. False when the read was not
+        allowed yet (inside MIN_REFRESH_INTERVAL_MS of the last one) and nothing
+        ran. A request that finds a read in flight waits for it and counts as
+        read. `force` is for the desk's own read after a switch: it never joins
+        a read that started before the switch and is not held back by the interval."""
+        cmd = (command or hotseat_command()).strip()
+        while True:
+            observed = _int_ms((_load_persisted() or {}).get("observed_at")) or 0
+            with self._lock:
+                waiting_for = self._inflight
+                if waiting_for is None:
+                    now = now_ms()
+                    if not force and now < max(self._last_read_at, observed) + MIN_REFRESH_INTERVAL_MS:
+                        return False
+                    done = self._inflight = threading.Event()
+                    self._last_read_at = now
+                    break
+            waiting_for.wait(timeout=TUI_TIMEOUT_S + 5)
+            if not force:
+                return True
+        try:
+            snapshot = _read_live(cmd, runner, now)
+            settings_store.set_text(SNAPSHOT_KEY, json.dumps(snapshot, separators=(",", ":")))
+            settings_store.set_text(ERROR_KEY, "")
+        except Exception as exc:  # noqa: BLE001
+            code = hotseat_status.error_code_for(exc)
+            log("hotseatDeskRefreshFailed", f"code={code} error={type(exc).__name__}")
+            settings_store.set_text(ERROR_KEY, code)
+        finally:
+            with self._lock:
+                self._inflight = None
+            done.set()
+        return True
+
+    def payload(
+        self,
+        *,
+        refresh: bool = False,
+        served_at: int | None = None,
+        command: str | None = None,
+        which: Callable[[str], str | None] = shutil.which,
+        runner=subprocess.run,
+    ) -> dict:
+        """The desk as stored. `refresh=False` never executes a subprocess;
+        `refresh=True` runs a live read first when one is allowed, and says so
+        in `refresh_throttled` when it was not."""
+        cmd = (command or hotseat_command()).strip()
+        throttled = bool(refresh) and not self.refresh(command=cmd, runner=runner)
+
+        now = now_ms() if served_at is None else int(served_at)
+        installed = cli_installed(cmd, which=which)
+        status = hotseat_status.payload(served_at=now)
+        persisted = _load_persisted()
+        raw_err = str(settings_store.get(ERROR_KEY) or "").strip()
+        last_error = raw_err if raw_err in hotseat_status.ERROR_CODES else None
+
+        with self._lock:
+            refreshing = self._inflight is not None
+            running = {p: dict(record) for p, record in self._switches.items()}
+        switches = [record for p in janitor_hotseat.PROVIDERS
+                    if (record := running.get(p) or _stored_switch(p))]
+
+        if persisted is not None:
+            observed_at = _int_ms(persisted.get("observed_at"))
+            stale = observed_at is None or (now - observed_at > STALE_MS) or bool(last_error)
+            accounts = _serve_accounts(persisted.get("accounts") or [], served_at=now, snapshot_stale=stale)
+            sessions = int(persisted.get("sessions") or 0)
+            errors = list(persisted.get("errors") or [])
+            clarp_agents = dict(persisted.get("clarp_agents") or _no_clarp_agents())
+            stopped_work = list(persisted.get("stopped_work") or [])
+            recent_work = list(persisted.get("recent_work") or [])
+        else:
+            accounts, observed_at = _fallback_accounts_from_status(status)
+            stale = True
+            sessions = 0
+            errors = []
+            clarp_agents = _no_clarp_agents()
+            stopped_work = []
+            recent_work = []
+
+        switcher_block = dict(status.get("switcher") or {})
+        switcher_block["actions"] = list(status.get("actions") or [])
+
+        return {
+            "schema": SCHEMA,
+            "served_at": now,
+            "observed_at": observed_at,
+            "stale": stale,
+            "refreshing": refreshing,
+            "refresh_throttled": throttled,
+            "next_refresh_at": self._next_refresh_at(persisted),
+            "installed": installed,
+            "error": last_error,
+            "errors": errors,
+            "sessions": sessions,
+            "switcher": switcher_block,
+            "switches": switches,
+            "clarp_agents": clarp_agents,
+            "accounts": accounts,
+            "stopped_work": stopped_work,
+            "recent_work": recent_work,
         }
 
-    agent = identity.lookup(target_id)
-    if not agent or agent.get("deleted_at") or agent.get("archived_at"):
-        return 404, {"ok": False, "error": "agent_not_found"}
-    if agent.get("is_janitor") or janitor_store.has_config(agent["agent_id"]):
-        return 403, {"ok": False, "error": "janitor_inspection_only"}
+    # --- switching --------------------------------------------------------
 
-    session = str(agent["session"])
-    agent_id = str(agent["agent_id"])
-    queue_state = turn_queue.state(agent_id)
+    def _note_switch(self, provider: str, **fields) -> None:
+        """Update the record of the switch that holds `provider`'s lock."""
+        with self._lock:
+            self._switches[provider] = {**self._switches.get(provider, {}), **fields}
 
-    if mode == "unpause":
-        if unpause_fn is None:
-            turn_queue.set_paused(agent_id, False)
-            updated = turn_queue.state(agent_id)
-            result = {"paused": updated["paused"], "count": updated["count"]}
+    def _finish_switch(self, provider: str, state: str) -> None:
+        """The switch that holds the lock ended: its record becomes the stored
+        one, so the desk still shows it after a restart of the Host."""
+        with self._lock:
+            record = {**self._switches.pop(provider, {}), "state": state, "finished_at": now_ms()}
+        try:
+            settings_store.set_text(SWITCH_KEY_PREFIX + provider, json.dumps(record, separators=(",", ":")))
+        except Exception as exc:  # noqa: BLE001
+            log("hotseatDeskSwitchRecordFailed", f"provider={provider} error={type(exc).__name__}")
+
+    def switch_default(
+        self,
+        provider: str,
+        alias: str,
+        *,
+        command: str | None = None,
+        switch_fn: Callable[[str, str, str], bool] = janitor_hotseat.switch_account,
+        read_active: Callable[[str, str], str | None] | None = None,
+        credentials_changed: Callable[[str], None] = _credentials_changed,
+        runner=subprocess.run,
+        budget_s: float = SWITCH_ANSWER_BUDGET_S,
+        refresh_after: bool = True,
+    ) -> tuple[int, dict]:
+        """Make `alias` the machine-wide default of `provider` through Hotseat.
+
+        The work runs on its own thread and the request waits `budget_s` for it.
+        Inside the budget the answer is the outcome; past it the answer is 202
+        `pending` and the switch goes on: `switches` in the desk says how it
+        ended, and `accounts[].active` names the account once Hotseat confirmed.
+        The live read that follows a switch never holds the answer back."""
+        prov = str(provider or "").strip().lower()
+        target = str(alias or "").strip()
+        if prov not in janitor_hotseat.PROVIDERS:
+            return 400, {"ok": False, "error": "invalid_provider"}
+        if not _SAFE_ALIAS.fullmatch(target):
+            return 400, {"ok": False, "error": "invalid_alias"}
+
+        cmd = (command or hotseat_command()).strip()
+        if read_active is None:
+            def read_active(command: str, provider: str) -> str | None:
+                return read_active_alias(command, provider, runner=runner)
+        outcome: dict = {}
+        answered = threading.Event()
+
+        def work() -> None:
+            try:
+                try:
+                    outcome["answer"] = self._switch(prov, target, cmd, switch_fn, read_active, credentials_changed)
+                except Exception as exc:  # noqa: BLE001
+                    log("hotseatDeskSwitchError", f"provider={prov} error={type(exc).__name__}")
+                    outcome["answer"] = (500, {"ok": False, "error": "switch_error", "provider": prov, "alias": target})
+                finally:
+                    answered.set()
+                if refresh_after and outcome["answer"][1].get("switched"):
+                    self._read_after_switch(prov, target, cmd, runner)
+            except Exception as exc:  # noqa: BLE001
+                log("hotseatDeskAfterSwitchFailed", f"provider={prov} error={type(exc).__name__}")
+            finally:
+                db.close_local()  # a short-lived thread gives its connection back
+
+        threading.Thread(target=work, name=f"hotseat-desk-switch-{prov}", daemon=True).start()
+        if answered.wait(timeout=budget_s):
+            status, body = outcome["answer"]
         else:
-            result = unpause_fn(agent_id, session)
+            status, body = 202, {
+                "ok": True, "switched": False, "pending": True, "reason": "switch_in_progress",
+                "provider": prov, "alias": target,
+                "message": "The switch is still running. The desk shows how it ended.",
+            }
+        return status, {**body, "desk": self.payload(command=cmd)}
+
+    def _read_after_switch(self, prov: str, target: str, cmd: str, runner) -> None:
+        """The live read that follows a switch. If it fails, a read that began
+        before the switch may have been the last to write the stored desk; the
+        account Hotseat confirmed is then marked again, unless a later switch
+        of this provider has ended since."""
+        self.refresh(command=cmd, runner=runner, force=True)
+        if str(settings_store.get(ERROR_KEY) or "").strip():
+            latest = _stored_switch(prov) or {}
+            if latest.get("state") == "switched" and latest.get("alias") == target:
+                _mark_active(prov, target)
+
+    def _switch(self, prov: str, target: str, cmd: str, switch_fn, read_active, credentials_changed) -> tuple[int, dict]:
+        base = {"provider": prov, "alias": target}
+        requested_at = now_ms()
+        with self.switch_lock(prov):
+            # Only now, with every other switch of this provider finished, is
+            # "who is active" a fact this request can act on. The record below
+            # is the one of the switch that holds the lock, never of one waiting.
+            with self._lock:
+                self._switches[prov] = {**base, "state": "running", "from": None,
+                                        "requested_at": requested_at, "finished_at": None}
+            state = "failed"
+            try:
+                try:
+                    active = read_active(cmd, prov)
+                except Exception as exc:  # noqa: BLE001
+                    log("hotseatDeskActiveUnknown", f"provider={prov} error={type(exc).__name__}")
+                    state = "unavailable"
+                    return 503, {
+                        "ok": False, "error": "hotseat_unavailable", **base,
+                        "message": "Hotseat could not say which account is in use. Nothing was switched.",
+                    }
+                self._note_switch(prov, **{"from": active})
+                if active == target:
+                    state = "already_active"
+                    return 200, {
+                        "ok": True, "switched": False, "reason": "already_active", "from": active, **base,
+                        "message": f"{hotseat_status.display_alias(target)} is already the account in use.",
+                    }
+                try:
+                    switched = bool(switch_fn(cmd, prov, target))
+                except Exception as exc:  # noqa: BLE001
+                    log("hotseatDeskSwitchError", f"provider={prov} error={type(exc).__name__}")
+                    switched = False
+                stamp = now_ms()
+                if switched:
+                    settings_store.set_text(
+                        f"hotseat-switcher.{prov}.last-switch",
+                        json.dumps({"from": active, "to": target, "at": stamp}),
+                    )
+                    _mark_active(prov, target)
+                    state = "switched"
+            finally:
+                self._finish_switch(prov, state)
+        if not switched:
+            return 409, {
+                "ok": False, "error": "switch_failed", "from": active, **base,
+                "message": "Hotseat did not confirm the switch.",
+            }
+        log("hotseatDeskSwitched", f"provider={prov} to={hotseat_status.display_alias(target)}")
+        try:
+            credentials_changed(prov)
+        except Exception as exc:  # noqa: BLE001
+            log("hotseatDeskCredentialHookFailed", f"provider={prov} error={type(exc).__name__}")
+        return 200, {"ok": True, "switched": True, "from": active, **base}
+
+    # --- continuing stopped work -------------------------------------------
+
+    def resume_work(
+        self,
+        item_id: str,
+        *,
+        kind: str = "clarp",
+        backend: str = "",
+        action: str = "continue",
+        send_prompt: Callable[[str, str, str], dict] | None = None,
+        unpause_fn: Callable[[str, str], dict] | None = None,
+    ) -> tuple[int, dict]:
+        """Continue a stopped Clarp agent, unpause its queue, or return a native resume command.
+
+        Continuing is conditional: the agent must be in the desk's stopped-work
+        list with a readiness that says it can continue, must not have finished
+        a turn since that stop and must not be working now. It is idempotent
+        per stop: `send_prompt(session, text, client_msg_id)` gets the id of
+        that stop every time, so the dispatcher starts at most one turn."""
+        target_id = str(item_id or "").strip()
+        item_kind = str(kind or "clarp").strip().lower()
+        mode = str(action or "continue").strip().lower()
+
+        if not _SAFE_SESSION_ID.fullmatch(target_id):
+            return 400, {"ok": False, "error": "invalid_id"}
+        if item_kind not in ("clarp", "native"):
+            return 400, {"ok": False, "error": "invalid_kind"}
+        if mode not in ("continue", "unpause"):
+            return 400, {"ok": False, "error": "invalid_action"}
+
+        if item_kind == "native":
+            prov = str(backend or "").strip().lower()
+            cmd = f"codex resume {target_id}" if prov == "codex" else f"claude --resume {target_id}"
+            return 200, {
+                "ok": True,
+                "id": target_id,
+                "kind": "native",
+                "action": "command",
+                "continued": False,
+                "resume_command": cmd,
+            }
+
+        agent = identity.lookup(target_id)
+        if not agent or agent.get("deleted_at"):
+            return 404, {"ok": False, "error": "agent_not_found"}
+        session = str(agent["session"])
+        agent_id = str(agent["agent_id"])
+        name = str(agent.get("persona") or session)
+        if agent.get("archived_at"):
+            return _refusal("agent_archived", f"{name} is archived. Restore it before continuing its work.")
+        if agent.get("is_janitor") or janitor_store.has_config(agent_id):
+            return _refusal("janitor_inspection_only",
+                            f"{name} is a Janitor. Its runs are started by its own triggers, not from here.")
+
+        if mode == "unpause":
+            if unpause_fn is None:
+                turn_queue.set_paused(agent_id, False)
+                updated = turn_queue.state(agent_id)
+                result = {"paused": updated["paused"], "count": updated["count"]}
+            else:
+                result = unpause_fn(agent_id, session)
+            return 200, {
+                "ok": True,
+                "id": session,
+                "kind": "clarp",
+                "action": "unpause",
+                "continued": True,
+                "queue_paused": bool(result.get("paused", False)),
+                "queued_count": int(result.get("count", 0)),
+            }
+
+        if turn_queue.state(agent_id).get("paused"):
+            return _refusal("queue_paused", f"{name}'s queue is paused. Unpause the queue so waiting work can run.")
+
+        row = next((item for item in (_load_persisted() or {}).get("stopped_work") or []
+                    if isinstance(item, dict) and item.get("kind") == "clarp"
+                    and item.get("id") in (session, agent_id)), None)
+        stopped_at = _int_ms(row.get("stopped_at")) if row else None
+        if stopped_at is None:
+            return _refusal("not_stopped", f"{name} is not in the list of stopped work. Refresh the desk and look again.")
+        if send_prompt is None:
+            return 503, {"ok": False, "error": "dispatch_unavailable"}
+
+        message_id = resume_message_id(agent_id, stopped_at)
+        with self._resume_lock:
+            # A request about a stop that already got its prompt goes to the
+            # dispatcher again under the same id: it starts nothing, unless
+            # that first prompt was admitted and never launched.
+            already_sent = (message_store.has_client_message(message_id)
+                            or bool(turn_queue.status(message_id)))
+            if not already_sent:
+                readiness = row.get("readiness") if isinstance(row.get("readiness"), dict) else {}
+                if not readiness.get("ready"):
+                    reason = str(readiness.get("hard") or readiness.get("warning") or "").strip().rstrip(".")
+                    return _refusal("not_ready", f"{name} cannot continue yet: {reason}." if reason
+                                    else f"{name} cannot continue yet.")
+                if agents_db.completed_turn_since(agent_id, stopped_at):
+                    return _refusal("not_stopped", f"{name} has finished a turn since it stopped. Refresh the desk.")
+                if agents_db.is_busy(agent_id):
+                    return _refusal("agent_busy", f"{name} is working now.")
+            delivery = send_prompt(session, RESUME_PROMPT, message_id)
+        if not delivery.get("ok"):
+            return 502, {"ok": False, "error": "prompt_failed", "detail": str(delivery.get("error") or "")[:200],
+                         "message": f"The prompt to {name} was not accepted. Nothing was started."}
+
         return 200, {
             "ok": True,
             "id": session,
             "kind": "clarp",
-            "action": "unpause",
+            "action": "continue",
             "continued": True,
-            "queue_paused": bool(result.get("paused", False)),
-            "queued_count": int(result.get("count", 0)),
+            "already_sent": already_sent,
+            "stopped_at": stopped_at,
         }
-
-    if queue_state.get("paused"):
-        name = str(agent.get("persona") or session)
-        return 409, {
-            "ok": False,
-            "error": "queue_paused",
-            "message": f"{name}'s queue is paused. Unpause the queue so waiting work can run.",
-        }
-
-    if send_prompt is None:
-        return 503, {"ok": False, "error": "dispatch_unavailable"}
-
-    delivery = send_prompt(session, RESUME_PROMPT)
-    if not delivery.get("ok"):
-        return 502, {"ok": False, "error": "prompt_failed", "detail": str(delivery.get("error") or "")[:200]}
-
-    return 200, {
-        "ok": True,
-        "id": session,
-        "kind": "clarp",
-        "action": "continue",
-        "continued": True,
-    }

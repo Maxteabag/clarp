@@ -816,6 +816,13 @@ def last_turn_end(agent_id: str) -> int:
     return int(row["t"] or 0)
 
 
+def completed_turn_since(agent_id: str, since_ms: int) -> bool:
+    """Whether the agent completed a turn (a DONE row) after `since_ms`."""
+    return conn().execute(
+        "SELECT 1 FROM state_log WHERE agent_id = ? AND kind = ? AND ts > ? LIMIT 1",
+        (agent_id, AgentState.DONE, int(since_ms))).fetchone() is not None
+
+
 # ---- turns + clips -----------------------------------------------------
 
 def open_turn(*, agent_id: str, source: str, trace_id: str,
