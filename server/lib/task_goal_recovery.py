@@ -246,11 +246,24 @@ def _retire_dead_wakes(now, retired=None):
                 log_exception("goalQueueRetiredNotifyFail", exc, detail=queue_id)
 
 
-# Failures that say nothing about the goal: no account had usage left. They
-# do not use the goal's recovery limit; the wake is tried again on its backoff.
+# Failures that say nothing about the goal: no account had usage left until
+# its window resets. They do not use the goal's recovery limit; the wake is
+# tried again on its backoff. Only this one code, and only when the failure
+# is known to clear by waiting (see _limit_code): the error category
+# "usage_limit" also holds credits, billing, payment and the like.
 CAPACITY_CODES = frozenset({"usage_limit"})
-# Failures only a person can clear (sign in again, a plan without the model).
-PERSON_CODES = frozenset({"auth", "account_plan"})
+# Failures only a person can clear, and what that person has to do.
+PERSON_CODES = {
+    "auth": "a person has to sign in to the account again",
+    "account_plan": "a person has to switch to an account whose plan includes the model, "
+                    "or choose another model",
+    "billing": "a person has to pay or raise the limit, or pick another model or account",
+}
+# A goal none of whose wakes has started for this long goes to attention
+# whatever the reason: the net under the exemption above, should something
+# that never clears be read as lack of usage. A wake that was launched only
+# to be turned away for lack of usage has not started in this sense.
+WAKE_START_CEILING_MS = 24 * 3_600_000
 # The account park's own message as a failure text: a runtime from before the
 # fix refused a wake at the end of its park with it and called that a runner
 # exit. The wake waited for an account and never ran; that is capacity too.
@@ -321,6 +334,8 @@ def _undelivered_wake(plan, state):
         and _PARK_REFUSAL.fullmatch(str(detail.get("error") or ""))
     ):
         code = "usage_limit"
+    elif failed and code == "usage_limit":
+        code = _limit_code(plan, detail)
     if failed:
         reason = message or "Its turn " + turn["outcome"]
     else:
@@ -332,6 +347,43 @@ def _undelivered_wake(plan, state):
         "code": code or ("not_started" if not started else "failed"),
         "reason": reason,
     }
+
+
+def _limit_code(plan, detail):
+    """``usage_limit`` only for a failure that clears when a usage window
+    resets; ``billing`` for the rest of that error category, which a person
+    has to clear (credits, payment, a suspended account, a hard or monthly
+    limit, a trial, a model that refuses this client).
+
+    Two sources, the stricter wins. The failure's own text, split where the
+    category is defined (error_classify.usage_limit_resets). And the
+    provider's own statement where the Host records one (backend_usage:
+    ``credits_depleted``), which can say "credits" under an error text that
+    reads like an ordinary window."""
+    from . import backend_usage, backends, error_classify
+
+    text = " ".join(str(detail.get(key) or "") for key in ("error", "provider_message"))
+    if not error_classify.usage_limit_resets(text):
+        return "billing"
+    try:
+        agent = agents.get_by_agent_id(plan["agent_id"]) or {}
+        known = backend_usage.exhausted_backends().get(backends.normalize(agent.get("backend")))
+        if known and known.get("reason") == "credits_depleted":
+            return "billing"
+    except Exception as exc:  # noqa: BLE001 - the text has already answered
+        log_exception("goalWakeLimitKindFail", exc, detail=plan["plan_id"])
+    return "usage_limit"
+
+
+def _last_wake(state):
+    """The last wake that did not complete, in words."""
+    if state.get("undelivered_code") in CAPACITY_CODES:
+        how = "found no account with usage"
+    elif state.get("undelivered_started"):
+        how = "started and failed"
+    else:
+        how = "did not start"
+    return f"the last wake {how} ({state.get('undelivered_reason')})"
 
 
 def _next_try(state, now):
@@ -484,6 +536,12 @@ def _claim(plan_id, now):
                 + undelivered["reason"]
                 + f"; attempt {counted} of {goal['recovery_limit']}"
             )
+        if capacity or not undelivered["started"]:
+            # The clock of the 24-hour net starts with the first wake, since
+            # one last started, that got nowhere.
+            state.setdefault("unstarted_since", state.get("last_dispatch_at") or now)
+        else:
+            state.pop("unstarted_since", None)
         state.update(
             reason=f"{said}; next try {_next_try(state, now)}",
             undelivered_request_id=undelivered["request_id"],
@@ -581,25 +639,34 @@ def _claim(plan_id, now):
         state.get("request_id")
         and state.get("undelivered_request_id") == state.get("request_id")
     )
+    if not state.get("attempts"):
+        # A checkpoint or resume began anew.
+        state.pop("capacity_failures", None)
+        state.pop("unstarted_since", None)
+    elif state.get("state") in {"admitted", "queued"} and not spent:
+        state.pop("unstarted_since", None)  # the last wake ran: it started
+    stalled_since = state.get("unstarted_since")
+    if stalled_since and now - stalled_since >= WAKE_START_CEILING_MS:
+        state.update(
+            state="attention",
+            reason=f"No wake of this goal has started in {WAKE_START_CEILING_MS // 3_600_000} "
+            f"hours; {_last_wake(state)}; a person has to find out why, then resume the goal",
+        )
+        _commit(plan, text, stored, goal)
+        return None
     # Tries that failed for lack of usage are not the goal's failures.
     if state.get("attempts", 0) - state.get("capacity_failures", 0) >= goal["recovery_limit"]:
         last, then = "", "checkpoint or resume to continue"
         if spent:
-            how = "started and failed" if state.get("undelivered_started") else "did not start"
-            last = f"; the last wake {how} ({state.get('undelivered_reason')})"
+            last = "; " + _last_wake(state)
             if state.get("undelivered_code") in PERSON_CODES:
-                then = (
-                    "a person has to sign in to the account or change its plan, "
-                    "then resume the goal"
-                )
+                then = PERSON_CODES[state["undelivered_code"]] + ", then resume the goal"
         state.update(
             state="attention",
             reason=f"Recovery attempt limit reached{last}; {then}",
         )
         _commit(plan, text, stored, goal)
         return None
-    if not state.get("attempts"):
-        state.pop("capacity_failures", None)  # a checkpoint or resume began anew
     # Successful admission followed by an idle owner is an unfinished turn,
     # not a completed goal. A new generation gets one new receipt. So does a
     # retry whose receipt can never launch (its turn failed, its row was

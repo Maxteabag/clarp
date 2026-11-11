@@ -106,12 +106,15 @@ hourly.
   fail at once use it up in about an hour; then `continuation.state` is
   `attention`, names the last failure, and nothing more wakes you until you
   checkpoint or the goal is resumed. Nothing notifies the user of that state.
-- A sign-in failure counts too, because only a person can clear it; the
-  `attention` reason says that someone has to sign in.
-- A wake that fails only because no account has usage left does not count.
-  The reason reads "Wake not delivered: no account with usage; next try HH:MM"
-  (the Host's local time) and the Host keeps trying without reaching
-  `attention`.
+- Failures only a person can clear count too, and the `attention` reason says
+  what to do: sign in again; switch account or model when the plan lacks the
+  model; pay, raise the limit or pick another model or account when credits,
+  billing, a spending limit or a trial are the cause.
+- A wake that fails only because no account has usage left until its window
+  resets does not count. The reason reads "Wake not delivered: no account with
+  usage; next try HH:MM" (the Host's local time) and the Host keeps trying.
+- Whatever the reason, a goal none of whose wakes has started for 24 hours goes
+  to `attention`, and the reason names the last failure.
 
 ```sh
 clarp-goal checkpoint PLAN_ID REVISION \

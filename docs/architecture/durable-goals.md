@@ -49,11 +49,28 @@ is. Retries follow the backoff, which starts at the dispatch: 2, 4, 8, 16 and
   62. A try that first waits in the account park (up to 30 minutes) fails that
   much later, and its backoff has usually passed by then: five such tries go
   out at 0, 30, 60, 90 and 120 and reach `attention` at about minute 152.
-- A wake that fails only for lack of usage (`usage_limit`) does not count
-  against the limit. It keeps its growing backoff and is tried until usage
-  returns; the goal does not reach `attention` for it.
-- Sign-in and plan failures (`auth`, `account_plan`) count, because a person
-  has to act; the `attention` reason says so.
+- A wake that fails only because no account has usage left until its window
+  resets does not count against the limit. It keeps its growing backoff and is
+  tried until usage returns. The exemption is narrow on purpose. The error
+  category `usage_limit` also holds depleted credits, payment (402), a
+  suspended account, a monthly or hard billing limit, a trial quota and a model
+  that refuses this client; no reset clears those. The split is made where the
+  category is defined (`error_classify.usage_limit_resets`: a text that reads
+  as a spent window and as nothing else of the category), and the provider's
+  own statement overrides it where the Host records one (`backend_usage`:
+  `credits_depleted`). Everything not known to clear at a reset counts, as
+  `billing`.
+- Sign-in, plan and billing failures (`auth`, `account_plan`, `billing`) count,
+  because a person has to act; the `attention` reason says what: sign in, switch
+  account or model, pay or raise the limit.
+- The ceiling under the exemption: a goal none of whose wakes has started for 24
+  hours (`task_goal_recovery.WAKE_START_CEILING_MS`) goes to `attention`
+  whatever the reason, and the reason names the last failure. The clock starts
+  at the dispatch of the first wake that got nowhere since one last started; a
+  wake that was launched only to be turned away for lack of usage has not
+  started in this sense. A wake that runs, a checkpoint or a resume clears it.
+  It is checked when the next try is due, so with the hourly backoff it fires
+  within an hour after the 24th.
 
 What is still not announced:
 
