@@ -8,11 +8,12 @@ no API calls, no real subprocesses.
 The HTTP handler reads its dependencies via `self.server.ctx`, which is the
 standard Python pattern for sharing state without module-level globals.
 
-The context is frozen. Configuration changes by replacement (`with_`). Four
+The context is frozen. Configuration changes by replacement (`with_`). Five
 services are installed or swapped after construction - the STT (model
-switch), tool explanations and the herald (both built after the context), and
-the runtime client - and only through the locked `replace_service` path, so
-every holder of the context sees the same current service.
+switch), tool explanations and the herald (both built after the context), the
+runtime client, and the Hotseat desk (built by `build_server`) - and only
+through the locked `replace_service` path, so every holder of the context sees
+the same current service.
 """
 from __future__ import annotations
 
@@ -107,7 +108,7 @@ class RuntimeClientLike(Protocol):
 
 
 # Services installed or swapped after construction; see replace_service.
-REPLACEABLE_SERVICES = frozenset({"stt", "tool_explanations", "herald", "runtime_client"})
+REPLACEABLE_SERVICES = frozenset({"stt", "tool_explanations", "herald", "runtime_client", "hotseat_desk"})
 
 
 @dataclass(frozen=True)
@@ -155,6 +156,9 @@ class ServerContext:
     # Production passes it to build_server, which installs it before any
     # worker or handler runs. None = no arbitration.
     herald: HeraldLike | None = None
+    # lib.hotseat_desk.HotseatDesk: the desk's live-read, switch and resume
+    # bookkeeping of this process. build_server installs one; None = no desk.
+    hotseat_desk: Any | None = None
 
     _service_lock: threading.Lock = field(
         default_factory=threading.Lock, init=False, repr=False, compare=False)

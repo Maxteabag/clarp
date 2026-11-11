@@ -41,7 +41,7 @@ CAPABILITIES_VERSION = 1
 # adds a row to docs/compatibility.md; tests/unit/test_client_contract.py
 # fails when the table and these constants disagree. Clients identify
 # themselves with the X-Clarp-Client header ("ios/2620 contract=1").
-HOST_CONTRACT = 85  # 84 plus non-blocking Contact minting and async avatars (auto_contact_minting).
+HOST_CONTRACT = 86  # 85 plus guarded Hotseat desk actions (hotseat_desk_actions).
 MIN_IOS_CONTRACT = 1
 # F4 delivery state: read paths and committed-transition hints share the
 # advertised feature gate; an unavailable runtime still leaves delivery unknown.
@@ -51,6 +51,7 @@ FEATURES: tuple[str, ...] = (
     "decision_on_behalf",
     "accounts_hotseat",
     "hotseat_desk",
+    "hotseat_desk_actions",
     "auto_contact_minting",
     SEND_DELIVERY_STATE,
     "harness_model_providers",
@@ -201,6 +202,7 @@ FEATURE_CONTRACTS["push_grants"] = 39
 FEATURE_CONTRACTS["agent_fork"] = 41
 FEATURE_CONTRACTS["hotseat_desk"] = 84
 FEATURE_CONTRACTS["auto_contact_minting"] = 85
+FEATURE_CONTRACTS["hotseat_desk_actions"] = 86  # PROVISIONAL: next free above main's 85; PR 260 also wants a number
 
 
 # Features that exist only while live events actually flow: the hub runs in

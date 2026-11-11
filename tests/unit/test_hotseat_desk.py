@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import subprocess
 import threading
+from types import SimpleNamespace
 
 import pytest
 
@@ -11,7 +12,8 @@ import server as host
 from lib import agents as agents_db
 from lib import hotseat_desk as desk
 from lib import hotseat_status as status
-from lib import settings_store, turn_queue
+from lib import janitor_autonomy, janitor_builtins, janitors, settings_store, turn_queue
+from lib.protocol import AgentState
 
 T0_MS = 1_800_000_000_000
 FUTURE_S = T0_MS / 1000 + 4 * 3600
@@ -248,8 +250,11 @@ def test_refresh_merges_tui_list_and_work_and_syncs_hotseat_status(monkeypatch):
     tui_p, list_p, work_p = _sample_payloads()
     runner = _fake_runner_factory(tui_p, list_p, work_p, calls=calls)
 
-    result = desk.payload(refresh=True, command="hotseat", which=lambda _: "/usr/bin/hotseat", runner=runner)
+    d = desk.HotseatDesk()
+    result = d.payload(refresh=True, command="hotseat", which=lambda _: "/usr/bin/hotseat", runner=runner)
     assert result["schema"] == "clarp.hotseat-desk/1"
+    assert result["refresh_throttled"] is False
+    assert result["next_refresh_at"] == T0_MS + desk.MIN_REFRESH_INTERVAL_MS
     assert result["stale"] is False
     assert result["error"] is None
     assert result["sessions"] == 3
@@ -285,7 +290,7 @@ def test_refresh_merges_tui_list_and_work_and_syncs_hotseat_status(monkeypatch):
 
     # Cached read (`refresh=False`) must NOT run any subprocess.
     calls.clear()
-    cached = desk.payload(
+    cached = d.payload(
         refresh=False,
         served_at=T0_MS + 5_000,
         command="hotseat",
@@ -337,14 +342,15 @@ def test_expired_reset_window_turns_unknown_instead_of_exhausted(monkeypatch):
         ],
     }
     runner = _fake_runner_factory(tui_p, {"accounts": []}, {"items": []})
-    before = desk.payload(refresh=True, command="hotseat", which=lambda _: "/usr/bin/hotseat", runner=runner)
+    d = desk.HotseatDesk()
+    before = d.payload(refresh=True, command="hotseat", which=lambda _: "/usr/bin/hotseat", runner=runner)
     assert before["accounts"][0]["state"] == "exhausted"
     assert before["accounts"][0]["windows"][0]["remaining_ratio"] == 0.0
 
     # Serve after SOON_RESET_S has passed without a new refresh: ai1 becomes unknown (not 0%),
     # whereas no-credits-acct stays exhausted because no_reset_reason blocks reset recovery.
     after_ms = int(SOON_RESET_S * 1000) + 10_000
-    after = desk.payload(refresh=False, served_at=after_ms, command="hotseat", which=lambda _: "/usr/bin/hotseat")
+    after = d.payload(refresh=False, served_at=after_ms, command="hotseat", which=lambda _: "/usr/bin/hotseat")
     ai1 = next(a for a in after["accounts"] if a["alias"] == "ai1")
     assert ai1["state"] == "unknown"
     assert ai1["limited"] is False
@@ -378,12 +384,18 @@ def test_concurrent_refresh_is_single_flight(monkeypatch):
             return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(list_p), stderr="")
         return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(work_p), stderr="")
 
+    d = desk.HotseatDesk()
     results: list[dict] = []
-    t1 = threading.Thread(target=lambda: results.append(desk.refresh_desk(command="hotseat", runner=slow_runner)))
+
+    def read():
+        results.append(d.payload(refresh=True, command="hotseat", runner=slow_runner))
+
+    t1 = threading.Thread(target=read)
     t1.start()
     assert entered.wait(timeout=5)
+    assert d.payload(command="hotseat")["refreshing"] is True
 
-    t2 = threading.Thread(target=lambda: results.append(desk.refresh_desk(command="hotseat", runner=slow_runner)))
+    t2 = threading.Thread(target=read)
     t2.start()
     release.set()
     t1.join(timeout=5)
@@ -392,71 +404,672 @@ def test_concurrent_refresh_is_single_flight(monkeypatch):
     assert tui_calls == 1
     assert len(results) == 2
     assert all(len(r["accounts"]) == 3 for r in results)
+    assert d.payload(command="hotseat")["refreshing"] is False
 
 
-def test_switch_default_validates_inputs_updates_receipt_and_refreshes(monkeypatch):
+# --- live reads: a minimum interval ------------------------------------------
+
+def test_a_live_read_inside_the_interval_serves_the_stored_snapshot(monkeypatch):
+    clock = {"now": T0_MS}
+    monkeypatch.setattr(desk, "now_ms", lambda: clock["now"])
+    calls: list[list[str]] = []
+    runner = _fake_runner_factory(*_sample_payloads(), calls=calls)
+    d = desk.HotseatDesk()
+
+    first = d.payload(refresh=True, command="hotseat", runner=runner)
+    clock["now"] = T0_MS + desk.MIN_REFRESH_INTERVAL_MS - 1
+    held = d.payload(refresh=True, command="hotseat", runner=runner)
+
+    assert len(calls) == 3, "one live read is three CLI calls; the second request ran none"
+    assert first["refresh_throttled"] is False and held["refresh_throttled"] is True
+    assert held["observed_at"] == T0_MS and len(held["accounts"]) == 3
+    assert held["next_refresh_at"] == first["next_refresh_at"] == T0_MS + desk.MIN_REFRESH_INTERVAL_MS
+    assert d.payload(command="hotseat")["refresh_throttled"] is False, "only a request that asked is throttled"
+
+    clock["now"] = held["next_refresh_at"]
+    allowed = d.payload(refresh=True, command="hotseat", runner=runner)
+    assert len(calls) == 6 and allowed["refresh_throttled"] is False
+    assert allowed["observed_at"] == clock["now"]
+
+
+def test_a_failed_live_read_also_starts_the_interval(monkeypatch):
+    clock = {"now": T0_MS}
+    monkeypatch.setattr(desk, "now_ms", lambda: clock["now"])
+    attempts: list[int] = []
+
+    def broken(argv, **_kwargs):
+        attempts.append(1)
+        return subprocess.CompletedProcess(argv, 1, stdout="", stderr="boom")
+
+    d = desk.HotseatDesk()
+    failed = d.payload(refresh=True, command="hotseat", runner=broken)
+    ran = len(attempts)
+    again = d.payload(refresh=True, command="hotseat", runner=broken)
+
+    assert failed["error"] == "cli_failed" and failed["refresh_throttled"] is False
+    assert again["refresh_throttled"] is True and len(attempts) == ran
+    assert again["next_refresh_at"] == T0_MS + desk.MIN_REFRESH_INTERVAL_MS
+
+
+def test_the_interval_survives_a_restart_of_the_host(monkeypatch):
+    clock = {"now": T0_MS}
+    monkeypatch.setattr(desk, "now_ms", lambda: clock["now"])
+    calls: list[list[str]] = []
+    runner = _fake_runner_factory(*_sample_payloads(), calls=calls)
+    desk.HotseatDesk().payload(refresh=True, command="hotseat", runner=runner)
+
+    clock["now"] = T0_MS + 5_000
+    restarted = desk.HotseatDesk().payload(refresh=True, command="hotseat", runner=runner)
+
+    assert len(calls) == 3 and restarted["refresh_throttled"] is True
+    assert restarted["next_refresh_at"] == T0_MS + desk.MIN_REFRESH_INTERVAL_MS
+
+
+# --- switching -----------------------------------------------------------------
+
+class _Hotseat:
+    """Hotseat as the desk drives it: who is active, and a switch that changes it."""
+
+    def __init__(self, active: str = "ai13", *, confirm: bool = True):
+        self.active = {"claude": active, "codex": "codex-main"}
+        self.confirm = confirm
+        self.switches: list[tuple[str, str, str]] = []
+        self.reads: list[str] = []
+        self.hooks: list[str] = []
+        self.entered = threading.Event()
+        self.release = threading.Event()
+        self.release.set()
+
+    def read_active(self, command, provider):
+        self.reads.append(provider)
+        return self.active[provider]
+
+    def switch(self, command, provider, alias):
+        self.switches.append((command, provider, alias))
+        self.entered.set()
+        assert self.release.wait(timeout=5)
+        if self.confirm:
+            self.active[provider] = alias
+        return self.confirm
+
+    def switch_default(self, d, provider, alias, **kwargs):
+        return d.switch_default(
+            provider, alias, command="hotseat", switch_fn=self.switch, read_active=self.read_active,
+            credentials_changed=self.hooks.append, refresh_after=False, **kwargs)
+
+
+def _last_switch(provider: str = "claude"):
+    raw = settings_store.get(f"hotseat-switcher.{provider}.last-switch")
+    return json.loads(raw) if raw else None
+
+
+def test_switch_validates_before_it_asks_hotseat_anything(monkeypatch):
+    hotseat = _Hotseat()
+    d = desk.HotseatDesk()
+
+    assert hotseat.switch_default(d, "bogus", "ai12")[0] == 400
+    assert hotseat.switch_default(d, "muse", "ai12")[1]["error"] == "invalid_provider"
+    for alias in ("--help", "-x", "a b", "a;rm", "../bad", "", "x" * 200):
+        status, body = hotseat.switch_default(d, "claude", alias)
+        assert (status, body["error"]) == (400, "invalid_alias"), alias
+    assert hotseat.reads == [] and hotseat.switches == []
+
+
+def test_switch_records_the_true_origin_tells_the_backend_and_marks_the_stored_desk(monkeypatch):
+    monkeypatch.setattr(desk, "now_ms", lambda: T0_MS)
+    runner = _fake_runner_factory(*_sample_payloads())
+    d = desk.HotseatDesk()
+    d.payload(refresh=True, command="hotseat", runner=runner)
+    hotseat = _Hotseat("ai13")
+
+    status, body = hotseat.switch_default(d, "claude", "ai8")
+
+    assert status == 200
+    assert {k: body[k] for k in ("ok", "switched", "provider", "alias", "from")} == {
+        "ok": True, "switched": True, "provider": "claude", "alias": "ai8", "from": "ai13"}
+    assert hotseat.switches == [("hotseat", "claude", "ai8")] and hotseat.hooks == ["claude"]
+    assert _last_switch() == {"from": "ai13", "to": "ai8", "at": T0_MS}
+    active = {a["alias"]: a["active"] for a in body["desk"]["accounts"] if a["provider"] == "claude"}
+    assert active == {"ai13": False, "ai8": True}
+    assert body["desk"]["switches"] == [{
+        "provider": "claude", "alias": "ai8", "from": "ai13", "state": "switched",
+        "requested_at": T0_MS, "finished_at": T0_MS}]
+    assert desk.HotseatDesk().payload(command="hotseat")["switches"] == body["desk"]["switches"], (
+        "the record of how the switch ended outlives the process")
+
+
+def test_switch_to_the_active_alias_runs_nothing_and_keeps_the_flip_back_record():
+    record = json.dumps({"from": "ai12", "to": "ai13", "at": 1})
+    settings_store.set_text("hotseat-switcher.claude.last-switch", record)
+    hotseat = _Hotseat("ai13")
+    d = desk.HotseatDesk()
+
+    status, body = hotseat.switch_default(d, "claude", "ai13")
+
+    assert status == 200 and body["ok"] is True and body["switched"] is False
+    assert body["reason"] == "already_active" and body["from"] == "ai13" and body["message"]
+    assert hotseat.switches == [] and hotseat.hooks == []
+    assert settings_store.get("hotseat-switcher.claude.last-switch") == record
+    assert body["desk"]["switches"][0]["state"] == "already_active"
+
+
+def test_a_switch_hotseat_does_not_confirm_is_refused_without_a_record_or_a_hook():
+    hotseat = _Hotseat("ai13", confirm=False)
+    d = desk.HotseatDesk()
+
+    status, body = hotseat.switch_default(d, "claude", "ai12")
+
+    assert status == 409 and body["error"] == "switch_failed" and body["from"] == "ai13"
+    assert _last_switch() is None and hotseat.hooks == []
+    assert body["desk"]["switches"][0]["state"] == "failed"
+
+    def explode(*_a):
+        raise OSError("no hotseat")
+
+    status, body = d.switch_default("claude", "ai12", command="hotseat", switch_fn=explode,
+                                    read_active=hotseat.read_active, credentials_changed=hotseat.hooks.append,
+                                    refresh_after=False)
+    assert status == 409 and body["error"] == "switch_failed" and _last_switch() is None
+
+
+def test_switch_is_refused_when_the_active_account_cannot_be_read():
+    hotseat = _Hotseat()
+    d = desk.HotseatDesk()
+
+    def unreadable(command, provider):
+        raise RuntimeError("hotseat list failed")
+
+    status, body = d.switch_default("claude", "ai12", command="hotseat", switch_fn=hotseat.switch,
+                                    read_active=unreadable, refresh_after=False)
+
+    assert status == 503 and body["error"] == "hotseat_unavailable" and body["message"]
+    assert hotseat.switches == [] and _last_switch() is None
+    assert body["desk"]["switches"][0]["state"] == "unavailable"
+
+
+def test_the_active_alias_is_read_from_hotseat_not_from_the_stored_desk():
+    seen: list[list[str]] = []
+
+    def runner(argv, **_kwargs):
+        seen.append(list(argv[1:]))
+        if argv[1:] == ["list", "--json"]:
+            out = {"accounts": [{"alias": "a", "is_active": False}, {"alias": "b", "is_active": True}]}
+        else:
+            out = {"accounts": [{"alias": "p", "is_active": False}, {"alias": "q", "is_active": True},
+                                {"alias": "r", "is_active": False}]}
+        return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(out), stderr="")
+
+    assert desk.read_active_alias("hotseat", "claude", runner=runner) == "b"
+    assert desk.read_active_alias("hotseat", "codex", runner=runner) == "q"
+    assert seen == [["list", "--json"], ["codex", "--no-quota", "--json"]]
+    assert desk.read_active_alias(
+        "hotseat", "claude",
+        runner=lambda argv, **_k: subprocess.CompletedProcess(argv, 0, stdout='{"accounts": []}', stderr="")) is None
+    with pytest.raises(RuntimeError):
+        desk.read_active_alias(
+            "hotseat", "claude",
+            runner=lambda argv, **_k: subprocess.CompletedProcess(argv, 1, stdout="", stderr="nope"))
+
+
+def test_a_second_switch_waits_for_the_first_and_then_finds_nothing_to_do():
+    hotseat = _Hotseat("ai13")
+    hotseat.release.clear()
+    d = desk.HotseatDesk()
+    answers: list[tuple[int, dict]] = []
+    first = threading.Thread(target=lambda: answers.append(hotseat.switch_default(d, "claude", "ai12")))
+    first.start()
+    assert hotseat.entered.wait(timeout=5)
+    second = threading.Thread(target=lambda: answers.append(hotseat.switch_default(d, "claude", "ai12")))
+    second.start()
+    second.join(timeout=0.3)
+    assert second.is_alive() and hotseat.reads == ["claude"], "the second has not even read while the first runs"
+
+    hotseat.release.set()
+    first.join(timeout=5)
+    second.join(timeout=5)
+
+    assert len(hotseat.switches) == 1 and hotseat.reads == ["claude", "claude"]
+    assert sorted((status, body["switched"], body.get("reason")) for status, body in answers) == [
+        (200, False, "already_active"), (200, True, None)]
+    assert _last_switch()["from"] == "ai13" and _last_switch()["to"] == "ai12"
+
+
+def test_switches_of_different_providers_do_not_wait_for_each_other():
+    hotseat = _Hotseat("ai13")
+    hotseat.release.clear()
+    d = desk.HotseatDesk()
+    slow = threading.Thread(target=lambda: hotseat.switch_default(d, "claude", "ai12"))
+    slow.start()
+    assert hotseat.entered.wait(timeout=5)
+    assert d.switch_lock("claude").locked() and not d.switch_lock("codex").locked()
+    hotseat.release.set()
+    slow.join(timeout=5)
+    assert not d.switch_lock("claude").locked()
+
+
+def test_a_switch_that_outlasts_the_budget_answers_pending_and_the_desk_tells_the_rest(monkeypatch):
+    monkeypatch.setattr(desk, "now_ms", lambda: T0_MS)
+    hotseat = _Hotseat("ai13")
+    hotseat.release.clear()
+    d = desk.HotseatDesk()
+
+    status, body = hotseat.switch_default(d, "claude", "ai12", budget_s=0.05)
+
+    assert status == 202
+    assert {k: body[k] for k in ("ok", "switched", "pending", "reason", "provider", "alias")} == {
+        "ok": True, "switched": False, "pending": True, "reason": "switch_in_progress",
+        "provider": "claude", "alias": "ai12"}
+    assert body["message"]
+    assert body["desk"]["switches"] == [{"provider": "claude", "alias": "ai12", "from": "ai13",
+                                         "state": "running", "requested_at": T0_MS, "finished_at": None}]
+    assert _last_switch() is None
+
+    hotseat.release.set()
+    for _ in range(200):
+        later = d.payload(command="hotseat")["switches"]
+        if later and later[0]["state"] != "running" and hotseat.hooks:
+            break
+        threading.Event().wait(0.01)
+    assert later == [{"provider": "claude", "alias": "ai12", "from": "ai13", "state": "switched",
+                      "requested_at": T0_MS, "finished_at": T0_MS}]
+    assert _last_switch() == {"from": "ai13", "to": "ai12", "at": T0_MS} and hotseat.hooks == ["claude"]
+
+
+def test_the_live_read_after_a_switch_does_not_hold_the_answer_and_ignores_the_interval(monkeypatch):
     monkeypatch.setattr(desk, "now_ms", lambda: T0_MS)
     tui_p, list_p, work_p = _sample_payloads()
-    runner = _fake_runner_factory(tui_p, list_p, work_p)
-    desk.payload(refresh=True, command="hotseat", runner=runner)
+    reading = threading.Event()
+    release = threading.Event()
+    tui_calls: list[int] = []
 
-    assert desk.switch_default("bogus", "ai12")[0] == 400
-    assert desk.switch_default("claude", "../bad")[0] == 400
+    def runner(argv, **_kwargs):
+        args = list(argv[1:])
+        if args == ["tui", "--snapshot"]:
+            tui_calls.append(1)
+            if len(tui_calls) > 1:
+                reading.set()
+                assert release.wait(timeout=5)
+            out = tui_p
+        else:
+            out = list_p if args == ["list", "--json"] else work_p
+        return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(out), stderr="")
 
-    code_fail, body_fail = desk.switch_default(
-        "claude", "ai12", command="hotseat", switch_fn=lambda *_a: False, runner=runner
-    )
-    assert code_fail == 409 and body_fail["error"] == "switch_failed"
+    d = desk.HotseatDesk()
+    d.payload(refresh=True, command="hotseat", runner=runner)
+    hotseat = _Hotseat("ai13")
 
-    switched_calls: list[tuple[str, str, str]] = []
-    code_ok, body_ok = desk.switch_default(
-        "claude",
-        "ai12",
-        command="hotseat",
-        switch_fn=lambda cmd, prov, alias: switched_calls.append((cmd, prov, alias)) or True,
-        runner=runner,
-    )
-    assert code_ok == 200
-    assert body_ok["switched"] is True
-    assert switched_calls == [("hotseat", "claude", "ai12")]
-    receipt = json.loads(settings_store.get("hotseat-switcher.claude.last-switch"))
-    assert receipt == {"from": "ai13", "to": "ai12", "at": T0_MS}
+    status, body = d.switch_default("claude", "ai8", command="hotseat", switch_fn=hotseat.switch,
+                                    read_active=hotseat.read_active, credentials_changed=hotseat.hooks.append,
+                                    runner=runner)
+
+    assert status == 200 and body["switched"] is True, "answered while the live read is still held"
+    assert reading.wait(timeout=5), "a switch is followed by a live read although the interval has not passed"
+    assert d.payload(command="hotseat")["refreshing"] is True
+    release.set()
+    for _ in range(200):
+        if not d.payload(command="hotseat")["refreshing"]:
+            break
+        threading.Event().wait(0.01)
+    assert len(tui_calls) == 2 and d.payload(command="hotseat")["refreshing"] is False
 
 
-def test_resume_work_handles_continue_paused_refusal_unpause_and_native_commands():
-    # Native session returns CLI command without executing anything.
-    code_nat, body_nat = desk.resume_work("0195abcd", kind="native", backend="codex")
+def test_a_failed_live_read_after_a_switch_leaves_the_confirmed_account_marked(monkeypatch):
+    monkeypatch.setattr(desk, "now_ms", lambda: T0_MS)
+    tui_p, list_p, work_p = _sample_payloads()
+    reads: list[int] = []
+
+    def runner(argv, **_kwargs):
+        args = list(argv[1:])
+        if args == ["tui", "--snapshot"]:
+            reads.append(1)
+            if len(reads) > 1:
+                return subprocess.CompletedProcess(argv, 1, stdout="", stderr="provider down")
+            out = tui_p
+        else:
+            out = list_p if args == ["list", "--json"] else work_p
+        return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(out), stderr="")
+
+    d = desk.HotseatDesk()
+    d.payload(refresh=True, command="hotseat", runner=runner)
+    hotseat = _Hotseat("ai13")
+    status_code, _body = d.switch_default("claude", "ai8", command="hotseat", switch_fn=hotseat.switch,
+                                          read_active=hotseat.read_active,
+                                          credentials_changed=hotseat.hooks.append, runner=runner)
+    assert status_code == 200
+    for _ in range(300):
+        later = d.payload(command="hotseat")
+        if later["error"] and not later["refreshing"]:
+            break
+        threading.Event().wait(0.01)
+
+    assert later["error"] == "cli_failed" and len(reads) == 2
+    active = {a["alias"]: a["active"] for a in later["accounts"] if a["provider"] == "claude"}
+    assert active == {"ai13": False, "ai8": True}
+    assert later["switches"][0]["state"] == "switched"
+
+
+# --- the automatic switcher shares the lock ---------------------------------------
+
+@pytest.fixture
+def switcher(monkeypatch):
+    """An enabled automatic Hotseat switcher whose reading says: switch a -> b."""
+    monkeypatch.setattr(janitor_autonomy.backends, "active_handles", lambda *a: [])
+    janitor_builtins.ensure_builtins()
+    agents_db.create_agent(persona="Hotseat switcher", voice_id="v", cwd="/tmp", session="hotseat", backend="codex")
+    created = janitors.create("hotseat", template_id="account-hotseat")
+    owner = janitors.set_enabled("hotseat", created["revision"], True)
+    janitor_autonomy.setup()
+    calls: list[tuple] = []
+
+    def read(command, provider):
+        calls.append(("read", provider))
+        if provider == "claude":
+            return [{"alias": "a", "active": True, "remaining": 10, "secondary": 100},
+                    {"alias": "b", "active": False, "remaining": 90, "secondary": 100}]
+        return [{"alias": "p", "active": True, "remaining": 50, "secondary": None}]
+
+    return owner, read, calls
+
+
+def test_the_automatic_switch_holds_the_desks_lock_while_it_runs(switcher):
+    owner, read, calls = switcher
+    d = desk.HotseatDesk()
+    held: list[bool] = []
+
+    def switch(command, provider, alias):
+        held.append(d.switch_lock(provider).locked())
+        return True
+
+    worker = janitor_autonomy.AutonomyJanitors(lambda *_: True, lambda p: {"sent": 1}, hotseat_read=read,
+                                               hotseat_switch=switch, hotseat_switch_lock=d.switch_lock)
+    worker.hotseat_once()
+
+    assert held == [True] and not d.switch_lock("claude").locked()
+    assert _last_switch()["to"] == "b"
+
+
+def test_the_automatic_switch_waits_for_a_desk_switch_and_then_stands_down(switcher):
+    owner, read, calls = switcher
+    d = desk.HotseatDesk()
+    switched: list[str] = []
+    sent: list[dict] = []
+    worker = janitor_autonomy.AutonomyJanitors(
+        lambda *_: True, lambda p: sent.append(p) or {"sent": 1}, hotseat_read=read,
+        hotseat_switch=lambda c, p, alias: switched.append(alias) or True, hotseat_switch_lock=d.switch_lock)
+    d.switch_lock("claude").acquire()
+    try:
+        run = threading.Thread(target=worker.hotseat_once)
+        run.start()
+        run.join(timeout=0.5)
+        assert run.is_alive() and switched == [], "the switcher waits while a desk switch holds the lock"
+        # The desk switch finishes: the owner chose c, which the switcher's reading knew nothing about.
+        desk_record = json.dumps({"from": "a", "to": "c", "at": T0_MS})
+        settings_store.set_text("hotseat-switcher.claude.last-switch", desk_record)
+    finally:
+        d.switch_lock("claude").release()
+    run.join(timeout=10)
+
+    assert not run.is_alive() and switched == []
+    assert settings_store.get("hotseat-switcher.claude.last-switch") == desk_record
+    assert sent == [], "no notification about a switch that did not happen"
+    assert status.payload()["actions"] == [] or all(
+        a["provider"] != "claude" for a in status.payload()["actions"])
+    runs = [r for r in janitors.list_runs(owner["session"]) if (r["demand_result"] or {}).get("reason") == "superseded by another switch"]
+    assert len(runs) == 1 and runs[0]["outcome"] == "completed"
+
+
+# --- continuing stopped work -----------------------------------------------------
+
+def _stopped(session: str, *, stopped_at_ms: int | None = T0_MS - 120_000, readiness="ready", kind="clarp") -> None:
+    """Put one row in the stored desk's stopped-work list, as a live read would."""
+    row = {"kind": kind, "cause": "usage_limit", "pending": 0, "id": session, "name": session,
+           "backend": "claude", "stopped_at": stopped_at_ms,
+           "readiness": {"ready": True, "hard": None, "warning": None} if readiness == "ready" else readiness}
+    settings_store.set_text(desk.SNAPSHOT_KEY, json.dumps(
+        {"v": 1, "observed_at": T0_MS, "accounts": [], "stopped_work": [row]}))
+
+
+class _Dispatcher:
+    """The send path as the desk sees it: one turn per message id, like /send."""
+
+    def __init__(self):
+        self.sent: list[tuple[str, str, str]] = []
+        self.turns: list[str] = []
+        self.ok = True
+
+    def __call__(self, session, text, client_msg_id):
+        self.sent.append((session, text, client_msg_id))
+        if not self.ok:
+            return {"ok": False, "error": "503: could not durably queue message"}
+        if client_msg_id not in self.turns:
+            self.turns.append(client_msg_id)
+            agent = agents_db.get_by_session(session)
+            agents_db.record_user_message(
+                agent_id=agent["agent_id"], backend_session_id=agent.get("backend_session_id") or "bsid-1",
+                text=text, client_msg_id=client_msg_id, origin="automation", sender_agent_id=None,
+                prompt_admission_id="", trace_id="t-" + client_msg_id)
+        return {"ok": True}
+
+
+def _worker(session: str = "worker-1") -> str:
+    return agents_db.create_agent(persona="Worker", voice_id="", cwd="/tmp", session=session, backend="claude")
+
+
+def test_native_work_gets_its_command_and_nothing_runs():
+    d = desk.HotseatDesk()
+    code_nat, body_nat = d.resume_work("0195abcd", kind="native", backend="codex")
     assert code_nat == 200
     assert body_nat["continued"] is False
     assert body_nat["resume_command"] == "codex resume 0195abcd"
+    assert d.resume_work("0195abcd", kind="native")[1]["resume_command"] == "claude --resume 0195abcd"
+    assert d.resume_work("missing-agent")[0] == 404
+    assert d.resume_work("--help")[1]["error"] == "invalid_id"
+    assert d.resume_work("x", kind="other")[1]["error"] == "invalid_kind"
+    assert d.resume_work("x", action="restart")[1]["error"] == "invalid_action"
 
-    # Unknown Clarp session -> 404.
-    assert desk.resume_work("missing-agent")[0] == 404
 
-    # Real Clarp agent: continue sends automation prompt; paused queue refuses continue until unpaused.
-    agent_id = agents_db.create_agent(
-        persona="Worker", voice_id="", cwd="/tmp", session="worker-1", backend="claude"
-    )
+def test_continue_sends_one_prompt_under_the_id_of_the_stop():
+    agent_id = _worker()
+    _stopped("worker-1")
+    send = _Dispatcher()
+    d = desk.HotseatDesk()
 
-    sent: list[tuple[str, str]] = []
-    code_cont, body_cont = desk.resume_work(
-        "worker-1",
-        send_prompt=lambda session, text: sent.append((session, text)) or {"ok": True},
-    )
-    assert code_cont == 200 and body_cont["continued"] is True
-    assert sent == [("worker-1", desk.RESUME_PROMPT)]
+    first = d.resume_work("worker-1", send_prompt=send)
+    second = d.resume_work("worker-1", send_prompt=send)
+    by_agent_id = d.resume_work(agent_id, send_prompt=send)
 
+    stop_id = f"hotseat-resume-{agent_id}-{T0_MS - 120_000}"
+    assert first == (200, {"ok": True, "id": "worker-1", "kind": "clarp", "action": "continue",
+                           "continued": True, "already_sent": False, "stopped_at": T0_MS - 120_000})
+    assert second[0] == by_agent_id[0] == 200
+    assert second[1]["already_sent"] is True and by_agent_id[1]["already_sent"] is True
+    assert send.sent == [("worker-1", desk.RESUME_PROMPT, stop_id)] * 3, (
+        "every request about one stop is the same send; the dispatcher's retry protection decides")
+    assert send.turns == [stop_id]
+
+
+def test_a_prompt_the_dispatcher_refused_can_be_tried_again():
+    _worker()
+    _stopped("worker-1")
+    send = _Dispatcher()
+    send.ok = False
+    d = desk.HotseatDesk()
+
+    status, body = d.resume_work("worker-1", send_prompt=send)
+    assert status == 502 and body["error"] == "prompt_failed" and body["message"]
+    assert "could not durably queue" in body["detail"]
+
+    send.ok = True
+    status, body = d.resume_work("worker-1", send_prompt=send)
+    assert status == 200 and body["already_sent"] is False and len(send.turns) == 1
+    assert d.resume_work("worker-1", send_prompt=None)[0] == 503
+
+
+@pytest.mark.parametrize("readiness,sentence", [
+    ({"ready": False, "hard": "ai13 is still rate limited", "warning": None},
+     "Worker cannot continue yet: ai13 is still rate limited."),
+    ({"ready": False, "hard": None, "warning": "cannot verify Fable quota; per-model limits are unavailable"},
+     "Worker cannot continue yet: cannot verify Fable quota; per-model limits are unavailable."),
+    ({"ready": False, "hard": None, "warning": None}, "Worker cannot continue yet."),
+    (None, "Worker cannot continue yet."),
+])
+def test_continue_is_refused_until_readiness_says_ready(readiness, sentence):
+    _worker()
+    _stopped("worker-1", readiness=readiness)
+    send = _Dispatcher()
+
+    status, body = desk.HotseatDesk().resume_work("worker-1", send_prompt=send)
+
+    assert (status, body) == (409, {"ok": False, "error": "not_ready", "message": sentence})
+    assert send.sent == []
+
+
+def test_continue_is_refused_for_an_agent_the_desk_does_not_list_as_stopped():
+    _worker()
+    _worker("worker-2")
+    send = _Dispatcher()
+    d = desk.HotseatDesk()
+
+    assert d.resume_work("worker-1", send_prompt=send)[1]["error"] == "not_stopped", "no stored desk at all"
+    _stopped("worker-2")
+    status, body = d.resume_work("worker-1", send_prompt=send)
+    assert status == 409 and body["error"] == "not_stopped" and body["message"].startswith("Worker is not in the list")
+    _stopped("worker-1", kind="native")
+    assert d.resume_work("worker-1", send_prompt=send)[1]["error"] == "not_stopped"
+    _stopped("worker-1", stopped_at_ms=None)
+    assert d.resume_work("worker-1", send_prompt=send)[1]["error"] == "not_stopped", "a stop without a time has no id"
+    assert send.sent == []
+
+
+def test_continue_is_refused_once_the_agent_ran_or_runs_again():
+    agent_id = _worker()
+    send = _Dispatcher()
+    d = desk.HotseatDesk()
+    _stopped("worker-1", stopped_at_ms=agents_db.now_ms() + 60_000)
+    agents_db.record_state(agent_id, AgentState.DONE)
+    assert d.resume_work("worker-1", send_prompt=send)[0] == 200, "a turn that ended before the stop does not count"
+
+    _stopped("worker-1", stopped_at_ms=agents_db.now_ms() - 120_000)
+    status, body = d.resume_work("worker-1", send_prompt=send)
+    assert status == 409 and body["error"] == "not_stopped" and "finished a turn since it stopped" in body["message"]
+
+    other = _worker("worker-2")
+    _stopped("worker-2")
+    agents_db.record_state(other, AgentState.THINKING)
+    status, body = d.resume_work("worker-2", send_prompt=send)
+    assert (status, body["error"], body["message"]) == (409, "agent_busy", "Worker is working now.")
+    assert len(send.sent) == 1
+
+
+def test_archived_and_janitor_agents_are_refused_for_both_actions():
+    from lib import db
+    archived = _worker("worker-1")
+    janitor = _worker("worker-2")
+    con = db.conn()
+    con.execute("UPDATE agents SET archived_at = ? WHERE agent_id = ?", (T0_MS, archived))
+    con.execute("UPDATE agents SET is_janitor = 1 WHERE agent_id = ?", (janitor,))
+    con.commit()
+    turn_queue.set_paused(archived, True)
+    turn_queue.set_paused(janitor, True)
+    send = _Dispatcher()
+    unpaused: list[str] = []
+    d = desk.HotseatDesk()
+
+    for action in ("continue", "unpause"):
+        _stopped("worker-1")
+        status, body = d.resume_work("worker-1", action=action, send_prompt=send,
+                                     unpause_fn=lambda a, s: unpaused.append(a) or {})
+        assert (status, body["error"]) == (409, "agent_archived") and body["message"].startswith("Worker is archived")
+        _stopped("worker-2")
+        status, body = d.resume_work("worker-2", action=action, send_prompt=send,
+                                     unpause_fn=lambda a, s: unpaused.append(a) or {})
+        assert (status, body["error"]) == (409, "janitor_inspection_only") and "Janitor" in body["message"]
+    assert send.sent == [] and unpaused == []
+    assert turn_queue.is_paused(archived) and turn_queue.is_paused(janitor)
+
+
+def test_a_paused_queue_refuses_continue_until_it_is_unpaused():
+    agent_id = _worker()
+    _stopped("worker-1")
+    send = _Dispatcher()
+    d = desk.HotseatDesk()
     turn_queue.set_paused(agent_id, True)
-    code_paused, body_paused = desk.resume_work(
-        "worker-1",
-        send_prompt=lambda *_a: {"ok": True},
-    )
-    assert code_paused == 409 and body_paused["error"] == "queue_paused"
 
-    code_unpause, body_unpause = desk.resume_work("worker-1", action="unpause")
+    status, body = d.resume_work("worker-1", send_prompt=send)
+    assert status == 409 and body["error"] == "queue_paused" and "queue is paused" in body["message"]
+    assert send.sent == []
+
+    code_unpause, body_unpause = d.resume_work("worker-1", action="unpause")
     assert code_unpause == 200
     assert body_unpause["queue_paused"] is False
     assert turn_queue.state(agent_id)["paused"] is False
+    assert d.resume_work("worker-1", send_prompt=send)[0] == 200
+
+
+# --- the handler's own part -------------------------------------------------------
+
+def _handler(ctx):
+    handler = host.Handler.__new__(host.Handler)
+    handler.server = SimpleNamespace(ctx=ctx)
+    return handler
+
+
+def test_unpause_hands_the_waiting_turns_to_the_runtime_when_there_is_one(monkeypatch):
+    agent_id = _worker()
+    recovered: list[str] = []
+    broadcasts: list[tuple[str, str]] = []
+    runtime = SimpleNamespace(recover_queued=lambda: recovered.append("runtime"))
+    handler = _handler(SimpleNamespace(runtime_client=runtime))
+    handler._broadcast_turn_queue = lambda a, s: broadcasts.append((a, s))
+    monkeypatch.setattr(host.TurnDispatchService, "recover_queued",
+                        lambda self, *a, **k: recovered.append("in-process"))
+    turn_queue.set_paused(agent_id, True)
+
+    state = handler._hotseat_unpause_queue(agent_id, "worker-1")
+    handler._hotseat_unpause_queue(agent_id, "worker-1")
+
+    assert state["paused"] is False and recovered == ["runtime"], "once, and by the process that owns turns"
+    assert broadcasts == [(agent_id, "worker-1")] * 2
+
+    handler = _handler(SimpleNamespace(runtime_client=None))
+    handler._broadcast_turn_queue = lambda a, s: None
+    turn_queue.set_paused(agent_id, True)
+    handler._hotseat_unpause_queue(agent_id, "worker-1")
+    assert recovered == ["runtime", "in-process"]
+
+
+def test_the_handler_sends_the_prompt_through_the_dispatcher_as_automation(monkeypatch):
+    commands: list = []
+
+    def submit(self, command):
+        commands.append(command)
+        return SimpleNamespace(queued=False)
+
+    monkeypatch.setattr(host.TurnDispatchService, "submit", submit)
+    handler = _handler(SimpleNamespace(runtime_client=None, auth_token="admin-secret"))
+
+    assert handler._hotseat_send_prompt("worker-1", "go on", "hotseat-resume-a-1") == {"ok": True, "queued": False}
+    command = commands[0]
+    assert (command.text, command.forced_session, command.requested_session) == ("go on", "worker-1", "worker-1")
+    assert (command.client_msg_id, command.origin) == ("hotseat-resume-a-1", "automation")
+    assert command.synthesize_audio is False and command.queue_if_busy is False
+    assert command.prompt_admission is None and command.trace_id
+
+    def refuse(self, command):
+        raise host.DispatchError(503, "runtime unavailable")
+
+    monkeypatch.setattr(host.TurnDispatchService, "submit", refuse)
+    assert handler._hotseat_send_prompt("worker-1", "go on", "x") == {"ok": False, "error": "503: runtime unavailable"}
+
+
+@pytest.mark.parametrize("method,name", [("GET", "_handle_hotseat_desk"), ("POST", "_handle_hotseat_switch"),
+                                         ("POST", "_handle_hotseat_resume")])
+def test_a_host_without_a_desk_object_answers_503(method, name):
+    handler = _handler(SimpleNamespace(hotseat_desk=None))
+    answers: list[int] = []
+    handler._json_error = lambda code, _msg: answers.append(code)
+    getattr(handler, name)()
+    assert answers == [503]
 
 
 @pytest.mark.parametrize(

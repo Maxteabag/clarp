@@ -46,7 +46,10 @@ def test_services_swap_in_place_for_every_holder(tmp_path):
     ctx.install_herald(herald)
     ctx.install_tool_explanations(explanations)
     assert (holder.herald, holder.tool_explanations) == (herald, explanations)
-    assert REPLACEABLE_SERVICES == {"stt", "tool_explanations", "herald", "runtime_client"}
+    desk = object()
+    assert ctx.hotseat_desk is None and ctx.replace_service("hotseat_desk", desk) is None
+    assert holder.hotseat_desk is desk
+    assert REPLACEABLE_SERVICES == {"stt", "tool_explanations", "herald", "runtime_client", "hotseat_desk"}
 
 
 def test_service_assignment_is_refused_and_names_the_replacement_path(tmp_path):
