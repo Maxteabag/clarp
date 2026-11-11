@@ -19,7 +19,6 @@ import subprocess
 from typing import Callable
 
 from . import hotseat_desk_reading, hotseat_status
-from .clock import now_ms
 
 ROLE = "account-hotseat"
 LADDER_TAIL = (10, 0)
@@ -580,22 +579,9 @@ def _run(command: str, args: list[str], timeout: int) -> subprocess.CompletedPro
                           stderr=subprocess.PIPE, text=True, timeout=timeout, check=False)
 
 
-def observed(observe, provider: str, payload, started_at: int) -> None:
-    """Hand a finished read to whoever else keeps a copy of it (the Hotseat
-    desk). `started_at` is when the read began. Never raises: an observer's
-    trouble is not the switcher's."""
-    if observe is None:
-        return
-    try:
-        observe(provider, payload, started_at=started_at)
-    except Exception as exc:  # noqa: BLE001
-        hotseat_status.diagnose("hotseatReadObserverFailed", f"provider={provider} error={type(exc).__name__}")
-
-
-def read_accounts(command: str, provider: str, *, observe=None) -> list[dict]:
+def read_accounts(command: str, provider: str) -> list[dict]:
     """Ask Hotseat for every saved account of one provider. Raises on any failure."""
     spec = PROVIDERS[provider]
-    started_at = now_ms()
     proc = _run(command, list(spec.read_args), spec.read_timeout)
     if proc.returncode:
         raise RuntimeError(f"hotseat exited {proc.returncode}")
@@ -603,7 +589,6 @@ def read_accounts(command: str, provider: str, *, observe=None) -> list[dict]:
     # The status view keeps an allowlisted copy of this same read; no extra call.
     # Never raises: the timestamp, persistence and diagnostics all sit inside its own guard.
     hotseat_status.record_read(provider, payload)
-    observed(observe, provider, payload, started_at)
     return spec.parse(payload)
 
 

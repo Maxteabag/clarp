@@ -603,8 +603,6 @@ def test_the_host_builds_one_desk_and_the_automatic_switcher_takes_its_lock(desk
     switcher = fake.server.workers.get("autonomy-janitors")
     for provider in ("claude", "codex"):
         assert switcher.hotseat_switch_lock(provider) is ctx.hotseat_desk.switch_lock(provider)
-    assert switcher.hotseat_observe == ctx.hotseat_desk.absorb_switcher_read
-    assert switcher.hotseat_switched == ctx.hotseat_desk.mark_switched
     assert ctx.hotseat_desk.switch_lock("claude") is not ctx.hotseat_desk.switch_lock("codex")
 
 
