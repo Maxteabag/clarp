@@ -114,8 +114,9 @@ hourly.
   resets does not count. The reason says "no account with usage", quotes the
   provider's own words when the wake got far enough to hear them, and gives the
   next try as HH:MM in the Host's local time; the Host keeps trying.
-- Whatever the reason, a goal none of whose wakes has started for 8 days goes
-  to `attention`, and the reason names the last failure.
+- Whatever the reason, a goal none of whose wakes has completed for 8 days
+  goes to `attention`, and the reason names the last failure. Only a wake that
+  runs to its end, a checkpoint or a resume ends that count.
 
 ```sh
 clarp-goal checkpoint PLAN_ID REVISION \

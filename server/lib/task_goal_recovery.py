@@ -259,13 +259,15 @@ PERSON_CODES = {
                     "or choose another model",
     "billing": "a person has to pay or raise the limit, or pick another model or account",
 }
-# A goal none of whose wakes has started for this long goes to attention
+# A goal none of whose wakes has completed for this long goes to attention
 # whatever the reason: the net under the exemption above, should something
 # that never clears be read as lack of usage. Eight days, because a real
 # usage window lasts up to a week and must not reach attention; a wait longer
-# than any window is not a window. A wake that was launched only to be turned
-# away for lack of usage has not started in this sense.
-WAKE_START_CEILING_MS = 8 * 24 * 3_600_000
+# than any window is not a window. The streak runs from the dispatch of the
+# first wake that failed and ends only with a wake that completed, a
+# checkpoint or a resume. A wake that started and then failed is one more
+# failure in it.
+WAKE_COMPLETION_CEILING_MS = 8 * 24 * 3_600_000
 # The account park's own message as a failure text: a runtime from before the
 # fix refused a wake at the end of its park with it and called that a runner
 # exit. The wake waited for an account and never ran; that is capacity too.
@@ -361,6 +363,42 @@ def _undelivered_wake(plan, state):
     }
 
 
+def _wake_completed(plan, state):
+    """Whether the wake the scheduler last sent ran to its end: the newest
+    turn of its trace settled as completed."""
+    request = state.get("request_id") or ""
+    if not request:
+        return False
+    turn = (
+        db.conn()
+        .execute(
+            "SELECT settled_at,outcome FROM turns WHERE agent_id=? AND trace_id=? "
+            "ORDER BY turn_id DESC LIMIT 1",
+            (plan["agent_id"], request),
+        )
+        .fetchone()
+    )
+    return bool(turn and turn["settled_at"] is not None and turn["outcome"] == "completed")
+
+
+def _quota_unconfirmed(detail):
+    """A failure that reads like a usage limit but whose quota the provider
+    did not confirm exhausted. A backend that records its limits (Codex)
+    writes the event's id on the failed state when the limit is confirmed, so
+    its absence says it was not; no text is needed for that. The message the
+    runner shows for the unconfirmed case is the second sign, for a state
+    whose backend cannot be asked."""
+    from . import backends, error_classify
+
+    if str(detail.get("message") or "").startswith(error_classify.QUOTA_UNCONFIRMED_MESSAGE):
+        return True
+    try:
+        records = backends.by_id(backends.normalize(detail.get("dispatch"))).records_usage_limits()
+    except Exception:  # noqa: BLE001 - an unknown backend records nothing
+        return False
+    return bool(records) and not detail.get("provider_limit_event_id")
+
+
 def _limit_code(plan, detail):
     """``usage_limit`` only for a failure that clears when a usage window
     resets; ``billing`` for the rest of that error category, which a person
@@ -375,10 +413,8 @@ def _limit_code(plan, detail):
     reads like an ordinary window."""
     from . import backend_usage, backends, error_classify
 
-    if str(detail.get("message") or "").startswith(error_classify.QUOTA_UNCONFIRMED_MESSAGE):
-        # Codex: the text read like a limit, the provider did not confirm
-        # that the quota is exhausted. Not known to be lack of usage: an
-        # ordinary failure, which counts.
+    if _quota_unconfirmed(detail):
+        # Not known to be lack of usage: an ordinary failure, which counts.
         return "unconfirmed_limit"
     text = " ".join(str(detail.get(key) or "") for key in ("error", "provider_message"))
     if not error_classify.usage_limit_resets(text):
@@ -561,12 +597,9 @@ def _claim(plan_id, now):
                 + undelivered["reason"]
                 + f"; attempt {counted} of {goal['recovery_limit']}"
             )
-        if capacity or not undelivered["started"]:
-            # The clock of the 24-hour net starts with the first wake, since
-            # one last started, that got nowhere.
-            state.setdefault("unstarted_since", state.get("last_dispatch_at") or now)
-        else:
-            state.pop("unstarted_since", None)
+        # The first failure of a streak starts the ceiling's clock; the
+        # failures after it leave it running.
+        state.setdefault("uncompleted_since", state.get("last_dispatch_at") or now)
         state.update(
             reason=f"{said}; next try {_next_try(state, now)}",
             undelivered_request_id=undelivered["request_id"],
@@ -583,6 +616,11 @@ def _claim(plan_id, now):
                 detail={k: v for k, v in undelivered.items() if k != "provider"},
             )
         )
+        changed = True
+    if state.get("uncompleted_since") and _wake_completed(plan, state):
+        # Seen, not inferred: only a turn of the wake that settled as
+        # completed ends the streak of failures.
+        del state["uncompleted_since"]
         changed = True
     gate = boundary(plan, goal, check_live=False) or live_gate
     if gate:
@@ -667,15 +705,14 @@ def _claim(plan_id, now):
     if not state.get("attempts"):
         # A checkpoint or resume began anew.
         state.pop("capacity_failures", None)
-        state.pop("unstarted_since", None)
-    elif state.get("state") in {"admitted", "queued"} and not spent:
-        state.pop("unstarted_since", None)  # the last wake ran: it started
-    stalled_since = state.get("unstarted_since")
-    if stalled_since and now - stalled_since >= WAKE_START_CEILING_MS:
+        state.pop("uncompleted_since", None)
+    stalled_since = state.get("uncompleted_since")
+    if stalled_since and now - stalled_since >= WAKE_COMPLETION_CEILING_MS:
         state.update(
             state="attention",
-            reason=f"No wake of this goal has started in {WAKE_START_CEILING_MS // 86_400_000} "
-            f"days; {_last_wake(state)}; a person has to find out why, then resume the goal",
+            reason="No wake of this goal has completed in "
+            f"{WAKE_COMPLETION_CEILING_MS // 86_400_000} days; {_last_wake(state)}; "
+            "a person has to find out why, then resume the goal",
         )
         _commit(plan, text, stored, goal)
         return None

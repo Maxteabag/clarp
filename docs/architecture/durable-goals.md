@@ -61,23 +61,26 @@ is. Retries follow the backoff, which starts at the dispatch: 2, 4, 8, 16 and
   `credits_depleted`). Everything not known to clear at a reset counts, as
   `billing`. A Codex failure that reads like a limit but whose quota the
   provider did not confirm exhausted counts too, as an ordinary failure
-  (`unconfirmed_limit`). The reason keeps the provider's own words beside the
-  category's, so it says which limit it was.
+  (`unconfirmed_limit`). No text decides that: a backend that records its
+  limits writes `provider_limit_event_id` on the failed state when the quota is
+  confirmed, and its absence says it was not. The reason keeps the provider's
+  own words beside the category's, so it says which limit it was.
 - Sign-in, plan and billing failures (`auth`, `account_plan`, `billing`) count,
   because a person has to act; the `attention` reason says what: sign in, switch
   account or model, pay or raise the limit.
-- The ceiling under the exemption: a goal none of whose wakes has started for 8
-  days (`task_goal_recovery.WAKE_START_CEILING_MS`) goes to `attention`
+- The ceiling under the exemption: a goal none of whose wakes has completed for
+  8 days (`task_goal_recovery.WAKE_COMPLETION_CEILING_MS`) goes to `attention`
   whatever the reason, and the reason names the last failure. Eight days
   because a real usage window lasts up to a week and must not reach
   `attention`, where nothing would resume the goal when usage returns; a wait
-  longer than any window is not a window. The clock starts at the dispatch of
-  the first wake that got nowhere since one last started; a wake that was
-  launched only to be turned away for lack of usage has not started in this
-  sense. A wake that runs, a checkpoint or a resume clears it. It is checked
-  when the next try is due, so with the hourly backoff it fires within an hour
-  after the eighth day. Until then a misread failure costs up to 192 hourly
-  tries.
+  longer than any window is not a window. The clock
+  (`continuation.uncompleted_since`) starts at the dispatch of the first wake
+  of a streak that failed, for whatever reason, and is cleared only by a wake
+  whose turn settled as completed, by a checkpoint or by a resume. A wake that
+  starts and then fails is one more failure in the streak; a turn that ended
+  with no recorded outcome is not a completion. It is checked when the next
+  try is due, so with the hourly backoff it fires within an hour after the
+  eighth day. Until then a misread failure costs up to 192 hourly tries.
 
 What is still not announced:
 

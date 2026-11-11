@@ -841,9 +841,9 @@ def test_a_wake_that_fails_for_lack_of_usage_does_not_use_the_recovery_budget(tm
     wake = _continuation(plan)
     assert wake["state"] == "admitted" and wake["attempts"] == len(dispatched)
     assert wake["capacity_failures"] == len(dispatched)
-    # The 24-hour clock runs from the dispatch of the first wake that got nowhere.
+    # The ceiling's clock runs from the dispatch of the first wake that failed.
     first_dispatch = wake["last_dispatch_at"] - dispatched[-1] * 60_000
-    assert abs(wake["unstarted_since"] - first_dispatch) < 60_000
+    assert abs(wake["uncompleted_since"] - first_dispatch) < 60_000
     assert re.fullmatch(
         r"Wake started and failed: no account with usage \(You've hit your session limit\); "
         r"next try \d\d:\d\d", wake["reason"]), wake["reason"]
@@ -859,7 +859,7 @@ def test_a_wake_that_fails_for_lack_of_usage_does_not_use_the_recovery_budget(tm
     assert _tick(service, offset_ms=9 * HOUR_MS) == 1
     fresh = _continuation(plan)
     assert fresh["attempts"] == 1 and not fresh.get("capacity_failures")
-    assert "unstarted_since" not in fresh      # and the 24-hour clock
+    assert "uncompleted_since" not in fresh    # and the ceiling's clock
 
 
 def test_other_failures_reach_attention_after_five_wakes_in_62_minutes(tmp_path):
@@ -949,11 +949,11 @@ def test_credits_the_host_knows_are_depleted_count_whatever_the_error_says(
 DAY_MIN = 24 * 60
 
 
-def test_a_goal_whose_wakes_have_not_started_in_8_days_reaches_attention(tmp_path):
+def test_a_goal_none_of_whose_wakes_completed_in_8_days_reaches_attention(tmp_path):
     """The net under the exemption. A real usage window lasts up to a week
     and must not reach attention; a wait longer than any window is not a
     window, whatever the failure said."""
-    assert task_goal_recovery.WAKE_START_CEILING_MS == 8 * 24 * HOUR_MS
+    assert task_goal_recovery.WAKE_COMPLETION_CEILING_MS == 8 * 24 * HOUR_MS
     service, backends, agent_id = _goal_owner(tmp_path)
     backends.live = False
     plan = _arm(_goal())
@@ -965,7 +965,7 @@ def test_a_goal_whose_wakes_have_not_started_in_8_days_reaches_attention(tmp_pat
     assert attention is not None and 8 * DAY_MIN <= attention <= 8 * DAY_MIN + 65, attention
     stuck = _continuation(plan)
     assert stuck["reason"] == (
-        "No wake of this goal has started in 8 days; the last wake found no account with "
+        "No wake of this goal has completed in 8 days; the last wake found no account with "
         "usage (Usage limit reached: You've hit your session limit · resets 3:20pm "
         "(Europe/Oslo)); a person has to find out why, then resume the goal")
     assert stuck["capacity_failures"] == len(dispatched)
@@ -983,12 +983,35 @@ def test_a_week_without_usage_does_not_reach_attention(tmp_path):
     assert _continuation(plan)["state"] == "admitted"
 
 
-def test_a_wake_that_starts_resets_the_ceiling_clock(tmp_path):
+def test_a_wake_that_starts_and_fails_does_not_reset_the_ceiling_clock(tmp_path):
+    """Only a wake that completes ends the streak. One that starts and then
+    fails, for whatever reason, is one more failure in it."""
     service, backends, agent_id = _goal_owner(tmp_path)
     backends.live = False
     plan = _arm(_goal())
-    # About three days without usage, one wake that runs (and ends without a
-    # checkpoint), then no usage again.
+    # About three days without usage, one wake that starts and crashes (it
+    # counts once against the budget of five), then no usage again.
+    outage = [USAGE_WINDOW] * 80
+
+    dispatched, attention = _every_wake_fails(
+        service, backends, plan, [*outage, "boom: the runner died", USAGE_WINDOW],
+        hours=9 * 24, step_ms=300_000)
+
+    crashed_at = dispatched[80]
+    assert 2 * DAY_MIN <= crashed_at <= 4 * DAY_MIN
+    # Eight days after the FIRST failure, not after the crash.
+    assert attention is not None and 8 * DAY_MIN <= attention <= 8 * DAY_MIN + 65, attention
+    stuck = _continuation(plan)
+    assert stuck["reason"].startswith("No wake of this goal has completed in 8 days; ")
+    assert stuck["attempts"] - stuck["capacity_failures"] == 1
+
+
+def test_a_wake_that_completes_resets_the_ceiling_clock(tmp_path):
+    service, backends, agent_id = _goal_owner(tmp_path)
+    backends.live = False
+    plan = _arm(_goal())
+    # About three days without usage, one wake that runs to its end (without
+    # a checkpoint), then no usage again.
     outage = [USAGE_WINDOW] * 80
 
     dispatched, attention = _every_wake_fails(
@@ -998,11 +1021,44 @@ def test_a_wake_that_starts_resets_the_ceiling_clock(tmp_path):
     ran_at = dispatched[80]
     assert 2 * DAY_MIN <= ran_at <= 4 * DAY_MIN
     # Nothing 8 days after the first failure; only 8 days after the first
-    # fruitless wake that followed the one that ran.
+    # failure that followed the wake that completed.
     assert attention is None, (ran_at, attention)
     wake = _continuation(plan)
-    started_again = wake["last_dispatch_at"] - wake["unstarted_since"]
-    assert started_again < (10 * DAY_MIN - ran_at) * 60_000
+    streak = wake["last_dispatch_at"] - wake["uncompleted_since"]
+    assert streak < (10 * DAY_MIN - ran_at) * 60_000
+
+
+def test_the_clock_is_cleared_when_the_completed_wake_is_seen_not_guessed(tmp_path):
+    """A wake whose turn ended without a recorded outcome did not complete:
+    the absence of a failure is not a completion."""
+    service, backends, agent_id = _goal_owner(tmp_path)
+    backends.live = False
+    plan = _arm(_goal())
+    assert _tick(service) == 1
+    _wakes(backends)[0]["on_error"](USAGE_WINDOW)
+    backends.live = False
+    assert _tick(service) == 0
+    since = _continuation(plan)["uncompleted_since"]
+
+    # The next wake's turn is closed with no outcome (a launch nobody settled).
+    assert _tick(service, offset_ms=HOUR_MS) == 1
+    request = _continuation(plan)["request_id"]
+    db.conn().execute("UPDATE turns SET ended_at=? WHERE agent_id=? AND trace_id=?",
+                      (db.now_ms(), agent_id, request))
+    backends.live = False
+    _td._SLOTS.release(agent_id, request)
+    _tick(service, offset_ms=3 * HOUR_MS)
+    assert _continuation(plan)["uncompleted_since"] == since
+
+    # And one that does complete clears it.
+    request = _continuation(plan)["request_id"]
+    real = db.now_ms
+    with pytest.MonkeyPatch.context() as later:
+        later.setattr(db, "now_ms", lambda: real() + 3 * HOUR_MS)
+        _wakes(backends)[-1]["on_result"]({"duration_ms": 5})
+    backends.live = False
+    _tick(service, offset_ms=3 * HOUR_MS + 60_000)
+    assert "uncompleted_since" not in _continuation(plan)
 
 
 class _Unconfirmed(str):
@@ -1025,6 +1081,30 @@ def test_a_codex_limit_the_provider_did_not_confirm_is_not_exempt(tmp_path):
     assert "Codex could not complete this request" in stuck["reason"]
     assert {entry["detail"]["code"] for entry in _history(plan, "wake_failed")} == {
         "unconfirmed_limit"}
+
+
+@pytest.mark.parametrize("confirmed", [False, True])
+def test_a_backend_that_records_its_limits_is_confirmed_by_the_event_not_the_wording(
+        tmp_path, monkeypatch, confirmed):
+    """Codex records a limit event for a quota the provider confirmed, and the
+    failed state carries its id. Without the id the limit is unconfirmed,
+    whatever the message says."""
+    from lib import backends as registry
+    backend = registry.by_id("claude")
+    monkeypatch.setattr(backend, "records_usage_limits", lambda: True, raising=False)
+    monkeypatch.setattr(backend, "classify_usage_limit", lambda message, **_kw: (
+        {"provider_limit_event_id": "limit-event-1", "_new": False} if confirmed else None))
+    service, backends, agent_id = _goal_owner(tmp_path)
+    backends.live = False
+    plan = _arm(_goal())
+
+    dispatched, attention = _every_wake_fails(service, backends, plan, USAGE_WINDOW, hours=3)
+
+    codes = {entry["detail"]["code"] for entry in _history(plan, "wake_failed")}
+    if confirmed:
+        assert attention is None and codes == {"usage_limit"}
+    else:
+        assert attention == 62 and codes == {"unconfirmed_limit"}
 
 
 def test_a_plan_without_the_model_counts_and_asks_for_a_person(tmp_path):
@@ -1155,6 +1235,8 @@ def test_a_wake_that_ran_and_failed_is_recorded_as_failed_not_as_undelivered(tmp
     failed = _history(plan, "wake_failed")
     assert [(e["detail"]["request_id"], e["detail"]["started"]) for e in failed] == [
         (request, True)]
+    # Any failure begins the streak the 8-day ceiling measures.
+    assert _continuation(plan)["uncompleted_since"] == _continuation(plan)["last_dispatch_at"]
     assert _continuation(plan)["reason"].startswith("Wake started and failed: ")
     kinds = [tuple(row) for row in db.conn().execute(
         "SELECT kind, actor_kind FROM goal_events WHERE plan_id=? AND kind LIKE 'wake_%' "
