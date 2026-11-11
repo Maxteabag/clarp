@@ -128,6 +128,39 @@ def _codex_extras(row: dict) -> dict:
     }
 
 
+def _claude_switcher_row(row: dict) -> dict | None:
+    """The quota part of a Claude row of `list --json`, as the TUI's windows:
+    Hotseat's bridge builds the TUI row from these same numbers."""
+    usage = _usage_of(row)
+    error = str(row.get("error") or "").strip()
+    if usage is None and not error:
+        return None
+    usage = usage or {}
+    windows: list[dict] = []
+    for label, used_key, reset_key in (("All models · 5-hour", "used_5h", "reset_5h"),
+                                       ("All models · weekly", "used_7d", "reset_7d")):
+        if _num(usage.get(used_key)) is not None:
+            windows.append({"label": label, "used": usage[used_key], "reset": usage.get(reset_key) or 0})
+    for scoped in usage.get("scoped") or []:
+        if isinstance(scoped, dict) and isinstance(scoped.get("model"), str) and scoped["model"].strip():
+            windows.append({"label": f"{scoped['model']} · weekly", "used": scoped.get("used"),
+                            "reset": scoped.get("reset") or 0})
+    return {"error": error, "windows": windows, "no_reset_reason": "",
+            "limited": usage.get("limited") is True or usage.get("status") == "rejected"}
+
+
+def _codex_switcher_row(row: dict) -> dict | None:
+    """The quota part of a Codex row of `codex --json`, as the TUI's windows."""
+    usage = _usage_of(row)
+    if usage is None:
+        return None
+    windows = [{"label": w.get("label"), "used": w.get("used"), "reset": w.get("reset") or 0}
+               for w in usage.get("windows") or [] if isinstance(w, dict)]
+    # Codex's block is `usage.blocked`, which the row carries into the extras itself.
+    return {"error": str(usage.get("error") or "").strip(), "windows": windows, "limited": False,
+            "no_reset_reason": str(usage.get("no_reset_reason") or "")}
+
+
 def _codex_list_rows(list_data: dict):
     block = list_data.get("codex")
     return block.get("accounts") if isinstance(block, dict) else None
@@ -143,11 +176,19 @@ class DeskReading:
     list_rows: Callable[[dict], object]
     # What such a row adds to an account of the desk (the keys of no_extras).
     extras: Callable[[dict], dict]
+    # The quota part of the row the switcher's scheduled read has for an account,
+    # as the TUI's windows: {error, windows, limited, no_reset_reason}.
+    switcher_row: Callable[[dict], dict | None]
+    # The switcher's scheduled read of this provider is `list --json`: the read
+    # that carries every account, the stopped work and the agents' accounts.
+    whole_list: bool
 
 
 def _claude_list_rows(list_data: dict):
     return list_data.get("accounts")
 
 
-CLAUDE_READING = DeskReading(_claude_window_meta, _claude_list_rows, _claude_extras)
-CODEX_READING = DeskReading(_codex_window_meta, _codex_list_rows, _codex_extras)
+CLAUDE_READING = DeskReading(_claude_window_meta, _claude_list_rows, _claude_extras, _claude_switcher_row,
+                             whole_list=True)
+CODEX_READING = DeskReading(_codex_window_meta, _codex_list_rows, _codex_extras, _codex_switcher_row,
+                            whole_list=False)
