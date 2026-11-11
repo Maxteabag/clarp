@@ -986,6 +986,21 @@ def cmd_doctor(_args) -> int:
         failures += 1
         print(f"FAIL  APNs push: {exc}")
     try:
+        from lib import config as config_module, fcm
+
+        sa_path = config_module.load(CONFIG_FILE).fcm_service_account_file()
+        if sa_path:
+            try:
+                account = fcm.load_service_account(sa_path)
+                print(f"OK    Android push: FCM direct (project {account.project_id}, "
+                      f"{account.client_email})")
+            except fcm.ServiceAccountError as exc:
+                failures += 1
+                print(f"FAIL  Android push: {exc}")
+    except Exception as exc:  # noqa: BLE001 - doctor reports rather than crashes
+        failures += 1
+        print(f"FAIL  Android push: {exc}")
+    try:
         server_root = SHARE if (SHARE / "lib").is_dir() else REPO / "server"
         sys.path.insert(0, str(server_root))
         from lib.tts_providers import status as tts_status

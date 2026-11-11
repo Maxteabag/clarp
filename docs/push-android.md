@@ -28,6 +28,9 @@ service_account = "~/.config/clarp/fcm-service-account.json"
 - `FCM_SERVICE_ACCOUNT` in the environment is used when the config has no
   path.
 - The file is a secret; keep it out of git.
+- `clarp-admin doctor` prints `OK    Android push: FCM direct (project …,
+  …)` when the file reads as a service account, or `FAIL  Android push:`
+  with the reason.
 
 `[apns] background_sync = true` turns background sync on for Android as well
 as iPhones. `[apns] mode` only affects iPhones; a Host with `mode = "off"` and
