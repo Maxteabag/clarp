@@ -585,6 +585,12 @@ class Config:
     # (and managed voice), reached with this Computer's cav1.… credential.
     audio_central_url: str = DEFAULT_AUDIO_CENTRAL_URL
     audio_central_credential: str = field(default="", repr=False)
+    # [fcm] service_account: path to a Google service account JSON key for
+    # the Firebase project of the Android app. When set (and readable), this
+    # Host pushes to Android phones directly through FCM HTTP v1 and
+    # advertises feature `push_fcm` (docs/push-android.md). The project id
+    # comes from the file.
+    fcm_service_account: str = ""
     # [transcript_shadow]: the incremental-import shadow comparison (kill
     # switch and resource budget; read by lib.transcript_incremental). Off
     # unless `enabled = true`; see docs/transcript-incremental-import.md.
@@ -659,6 +665,22 @@ class Config:
         deterministic code, which is the default state.
         """
         return self.auth_token_or_env(self.typesafe_api_key, "TYPESAFE_API_KEY")
+
+    def fcm_service_account_file(self) -> str:
+        """The configured service account path ("" when unset), expanded."""
+        raw = (self.fcm_service_account or os.environ.get("FCM_SERVICE_ACCOUNT", "")).strip()
+        return str(pathlib.Path(raw).expanduser()) if raw else ""
+
+    def fcm_enabled(self) -> bool:
+        """True when Android pushes can go out through FCM (a usable service
+        account file; whether Google accepts it shows at the first send)."""
+        from . import fcm
+        return fcm.configured(self)
+
+    def push_enabled(self) -> bool:
+        """True when any push path is configured: APNs for iPhones or FCM
+        for Android phones."""
+        return self.apns_enabled() or self.fcm_enabled()
 
     def apns_enabled(self) -> bool:
         """True when pushes have a delivery path (relay or direct)."""
@@ -960,6 +982,7 @@ def _parse_into_cache(path: pathlib.Path) -> Config:
     network = data.get("network", {}) or {}
     apns    = data.get("apns", {}) or {}
     audio_central = data.get("audio_central", {}) or {}
+    fcm_section = data.get("fcm") if isinstance(data.get("fcm"), dict) else {}
     controller_actions = data.get("controller_actions", {}) or {}
     hotseat = data.get("hotseat", {}) or {}
     if (str(network.get("mode", "off")).strip().lower() != "off"
@@ -1153,6 +1176,7 @@ def _parse_into_cache(path: pathlib.Path) -> Config:
         audio_central_url = (str(audio_central.get("url", "")).strip().rstrip("/")
                              or DEFAULT_AUDIO_CENTRAL_URL),
         audio_central_credential = str(audio_central.get("credential", "")).strip(),
+        fcm_service_account = str(fcm_section.get("service_account", "")).strip(),
         transcript_shadow = dict(data.get("transcript_shadow") or {})
             if isinstance(data.get("transcript_shadow"), dict) else {},
         runtime_release_drain = str(
