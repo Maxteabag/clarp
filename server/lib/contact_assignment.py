@@ -15,14 +15,8 @@ def available_contacts(backend, exclude_agent_id=""):
         p for p in personas.list_all()
         if p["name"].casefold() not in occupied
         and roster.validate_contact_backend(p["name"], backend, p.get("tier", ""))[0]
+        and not ((v := resolve_voice(p.get("voice_id") or "", CARTESIA)) and v in voices)
     ]
-    eligible.sort(
-        key=lambda p: (
-            1
-            if (v := resolve_voice(p.get("voice_id") or "", CARTESIA)) and v in voices
-            else 0
-        )
-    )
     return eligible
 
 
@@ -80,7 +74,7 @@ def assign_contact(session, mode="auto", name=""):
         except Exception:
             connection.rollback()
             raise
-        if needs_avatar:
-            persona_avatar_generation.start_best_effort(
-                contact["name"], backend=agent["backend"])
-        return {"ok": True, "session": session, "name": contact["name"], "agent_id": agent["agent_id"]}
+    if needs_avatar:
+        persona_avatar_generation.start_best_effort(
+            contact["name"], backend=agent["backend"])
+    return {"ok": True, "session": session, "name": contact["name"], "agent_id": agent["agent_id"]}
