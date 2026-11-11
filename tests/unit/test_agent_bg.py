@@ -1,10 +1,15 @@
 import hashlib
 import importlib.util
 import pathlib
+import sqlite3
+import threading
+import time
 
 from lib import agents, background_jobs
+from lib import db
+from lib import state_watcher
 from lib import turn_lifecycle
-from lib.protocol import AgentState
+from lib.protocol import AgentState, SSEType
 from lib.turn_lifecycle import TurnEvent
 from tests.patching import patch_shared
 
@@ -14,6 +19,14 @@ _SPEC = importlib.util.spec_from_file_location("agent_bg_script", _SCRIPT)
 assert _SPEC and _SPEC.loader
 agent_bg = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(agent_bg)
+
+
+class _Stream:
+    def __init__(self):
+        self.events = []
+
+    def broadcast(self, event):
+        self.events.append(event)
 
 
 def test_message_watch_worker_argv_maps_to_exact_target_job_ids(monkeypatch):
@@ -121,6 +134,129 @@ def test_background_off_preserves_a_new_interactive_turn(tmp_path):
     assert agent_bg.main(["agent_bg.py", "nadia-bg", "off"]) == 0
     assert turn_lifecycle.current_kind(agent_id) == AgentState.THINKING
     assert agents.get_by_session("nadia-bg")["custom_status"] == ""
+    assert agents.latest_state(agent_id)["detail"]["status_text_cleared"] is True
+    assert not db.conn().in_transaction
+
+
+def test_background_off_targets_its_agents_latest_state(tmp_path):
+    target_id = agents.create_agent(
+        persona="Target", voice_id="voice", cwd=str(tmp_path), session="target-bg")
+    other_id = agents.create_agent(
+        persona="Other", voice_id="voice", cwd=str(tmp_path), session="other-bg")
+    assert agent_bg.main(["agent_bg.py", "target-bg", "on", "Watching CI"]) == 0
+    turn_lifecycle.transition(other_id, TurnEvent.PROMPT_ADMITTED, {"source": "pwa"})
+    assert turn_lifecycle.current_kind(target_id) == AgentState.BACKGROUND
+    assert turn_lifecycle.current_kind(other_id) == AgentState.THINKING
+
+    assert agent_bg.main(["agent_bg.py", "target-bg", "off"]) == 0
+    assert turn_lifecycle.current_kind(target_id) == AgentState.IDLE
+    assert agents.latest_state(target_id)["kind"] == AgentState.IDLE
+
+
+def test_background_off_after_done_broadcasts_only_state_neutral_status_clear(tmp_path):
+    agent_id = agents.create_agent(
+        persona="Nadia", voice_id="voice", cwd=str(tmp_path), session="nadia-done")
+    assert agent_bg.main(["agent_bg.py", "nadia-done", "on", "Watching CI"]) == 0
+    turn_lifecycle.transition(agent_id, TurnEvent.PROMPT_ADMITTED, {"source": "pwa"})
+    turn_lifecycle.transition(agent_id, TurnEvent.PROCESS_EXITED_OK, {"source": "test"})
+    stream = _Stream()
+    watcher = state_watcher.StateLogWatcher(stream)
+    watcher._last_id = int(db.conn().execute(
+        "SELECT COALESCE(MAX(state_id), 0) FROM state_log").fetchone()[0])
+
+    assert agent_bg.main(["agent_bg.py", "nadia-done", "off"]) == 0
+    watcher._poll_once()
+
+    assert [event["type"] for event in stream.events] == [SSEType.AGENT_STATE]
+    assert stream.events[0]["kind"] == AgentState.DONE
+    assert stream.events[0]["status_text"] == ""
+    assert "detail" not in stream.events[0]
+    assert agents.latest_state(agent_id)["kind"] == AgentState.DONE
+    assert watcher._notify_queue.empty()
+
+
+def test_background_on_without_initial_state_has_a_clean_error(tmp_path, capsys):
+    agent_id = agents.create_agent(
+        persona="Nadia", voice_id="voice", cwd=str(tmp_path), session="nadia-empty")
+    db.conn().execute("DELETE FROM state_log WHERE agent_id = ?", (agent_id,))
+
+    assert agent_bg.main(["agent_bg.py", "nadia-empty", "on", "Watching CI"]) == 1
+    stderr = capsys.readouterr().err
+    assert "cannot mark background before its initial state is recorded" in stderr
+    assert "Traceback" not in stderr
+    assert agents.get_by_session("nadia-empty")["custom_status"] == ""
+
+
+def test_background_finish_waits_for_writer_and_rechecks_agent_state(tmp_path, monkeypatch):
+    agent_id = agents.create_agent(
+        persona="Nadia", voice_id="voice", cwd=str(tmp_path), session="nadia-lock")
+    assert agent_bg.main(["agent_bg.py", "nadia-lock", "on", "Watching CI"]) == 0
+
+    writer = sqlite3.connect(str(db.DB_PATH), isolation_level=None, timeout=2)
+    writer.execute("BEGIN IMMEDIATE")
+    writer.execute(
+        """INSERT INTO state_log(agent_id, runtime_id, ts, kind, detail)
+           VALUES (?, NULL, ?, ?, ?)""",
+        (agent_id, db.now_ms(), AgentState.THINKING, '{"source":"pwa"}'),
+    )
+    waiting_for_writer = threading.Event()
+    finished = threading.Event()
+    connection_ready = threading.Event()
+    worker_connections = []
+    result = []
+    errors = []
+
+    real_conn = turn_lifecycle.conn
+
+    def observe_worker_connection():
+        connection = real_conn()
+        if threading.current_thread().name == "background-finish":
+            worker_connections.append(connection)
+            connection_ready.set()
+        return connection
+
+    real_critical_write = turn_lifecycle._critical_write
+
+    def signal_writer_wait():
+        if threading.current_thread().name == "background-finish":
+            waiting_for_writer.set()
+        return real_critical_write()
+
+    monkeypatch.setattr(turn_lifecycle, "conn", observe_worker_connection)
+    monkeypatch.setattr(turn_lifecycle, "_critical_write", signal_writer_wait)
+
+    def finish():
+        try:
+            result.append(turn_lifecycle.transition(
+                agent_id, TurnEvent.BACKGROUND_FINISHED))
+        except BaseException as exc:
+            errors.append(exc)
+        finally:
+            finished.set()
+
+    worker = threading.Thread(target=finish, name="background-finish")
+    try:
+        worker.start()
+        assert connection_ready.wait(2)
+        assert waiting_for_writer.wait(2)
+        deadline = time.monotonic() + 0.2
+        while not worker_connections[0].in_transaction and time.monotonic() < deadline:
+            time.sleep(0.001)
+        assert worker_connections[0].in_transaction is False
+        assert not finished.wait(0.1)
+        writer.commit()
+        assert finished.wait(5)
+        worker.join(timeout=1)
+    finally:
+        if writer.in_transaction:
+            writer.rollback()
+        writer.close()
+        if worker.is_alive():
+            worker.join(timeout=1)
+
+    assert not errors
+    assert result == [None]
+    assert turn_lifecycle.current_kind(agent_id) == AgentState.THINKING
 
 
 def test_cancel_cleanup_handle_is_rejected_after_restart():
