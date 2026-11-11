@@ -64,7 +64,10 @@ class RetryMixin:
                 and backend.account_pool()
                 and not switch_pending   # switched already; no loop (BACKENDS-06 (c))
                 and account_failover(spec.backend).request(
-                    spec.agent_id, spec.trace_id, account_selector(spec.backend))):
+                    spec.agent_id, spec.trace_id, account_selector(spec.backend),
+                    # A plan failure is about this turn's model: it must not
+                    # stop the turns that run fine on other models.
+                    only_if_alone=category == error_classify.ACCOUNT_PLAN)):
             eventlog.emit("server", "claudeAccountRecovery", context=spec.context,
                           detail={"reason": category})
             return
