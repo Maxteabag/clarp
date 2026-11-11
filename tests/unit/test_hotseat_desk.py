@@ -512,6 +512,154 @@ def test_a_passed_account_reset_is_not_kept_exhausted_by_a_full_model_window(mon
     assert windows["model:fable"]["used_ratio"] == 1.0, "the model limit is still there, as itself"
 
 
+# --- what the Host does not know stays null (issue 263, point 3) ----------------
+
+def test_an_unknown_cause_kind_or_backend_is_not_filled_with_a_guess(monkeypatch):
+    monkeypatch.setattr(desk, "now_ms", lambda: T0_MS)
+    stopped = [
+        {"id": "koko", "name": "Koko", "backend": "claude", "stopped_at": T0_MS / 1000 - 60,
+         "readiness": {"ready": True, "hard": None, "warning": None}},                       # no kind, no cause
+        {"kind": "clarp", "cause": "usage_limit", "id": "luna", "backend": "agy", "stopped_at": T0_MS / 1000 - 60},
+        {"kind": "native", "cause": "usage_limit", "id": "0195aaaa", "backend": "claude", "stopped_at": 1.0},
+        {"kind": "native", "cause": "usage_limit", "id": "0195bbbb", "backend": "codex", "stopped_at": 1.0},
+        {"kind": "native", "cause": "usage_limit", "id": "0195cccc", "backend": "agy", "stopped_at": 1.0},
+        {"kind": "native", "cause": "", "id": "0195dddd", "backend": "", "stopped_at": 1.0},
+        {"kind": "hybrid", "cause": "usage_limit", "id": "0195eeee", "backend": "claude", "stopped_at": 1.0},
+    ]
+    work = {"items": [{"id": "t-claude", "provider": "claude", "can_resume": True},
+                      {"id": "t-codex", "provider": "codex", "can_resume": True},
+                      {"id": "t-muse", "provider": "muse", "can_resume": True},
+                      {"id": "t-none", "can_resume": True},
+                      {"id": "t-live", "provider": "codex", "can_resume": True, "live": True}]}
+    list_p = {"accounts": [], "extensions": {"clarp": {"stopped": stopped}}}
+    d = desk.HotseatDesk()
+    body = d.payload(refresh=True, command="hotseat",
+                     runner=_fake_runner_factory({"sessions": 0, "errors": [], "accounts": []}, list_p, work))
+
+    rows = {item["id"]: item for item in body["stopped_work"]}
+    assert (rows["koko"]["kind"], rows["koko"]["cause"], rows["koko"]["resume_command"]) == (None, None, None)
+    assert (rows["luna"]["kind"], rows["luna"]["cause"], rows["luna"]["resume_command"]) == ("clarp", "usage_limit", None)
+    assert rows["0195aaaa"]["resume_command"] == "claude --resume 0195aaaa"
+    assert rows["0195bbbb"]["resume_command"] == "codex resume 0195bbbb"
+    assert rows["0195cccc"]["resume_command"] is None, "no Claude command for another backend's session"
+    assert (rows["0195dddd"]["cause"], rows["0195dddd"]["resume_command"]) == (None, None)
+    assert (rows["0195eeee"]["kind"], rows["0195eeee"]["resume_command"]) == (None, None)
+    commands = {item["id"]: item["resume_command"] for item in body["recent_work"]}
+    assert commands == {"t-claude": "claude --resume t-claude", "t-codex": "codex resume t-codex",
+                        "t-muse": None, "t-none": None, "t-live": None}
+
+    # A row of unknown kind is not something Continue may start a turn for.
+    agents_db.create_agent(persona="Koko", voice_id="", cwd="/tmp", session="koko", backend="claude")
+    sent: list = []
+    status_code, answer = d.resume_work("koko", send_prompt=lambda *a: sent.append(a) or {"ok": True})
+    assert (status_code, answer["error"]) == (409, "not_stopped") and sent == []
+
+
+def test_a_native_resume_command_is_given_only_for_a_backend_whose_command_is_known():
+    d = desk.HotseatDesk()
+    assert d.resume_work("0195abcd", kind="native", backend="claude")[1]["resume_command"] == "claude --resume 0195abcd"
+    assert d.resume_work("0195abcd", kind="native", backend=" Codex ")[1]["resume_command"] == "codex resume 0195abcd"
+    for backend in ("", "agy", "muse", "grok"):
+        assert d.resume_work("0195abcd", kind="native", backend=backend) == (409, {
+            "ok": False, "error": "no_resume_command",
+            "message": "No resume command is known for this session's backend."}), backend
+
+
+def test_a_missing_check_time_stays_missing_and_the_last_good_one_is_kept(monkeypatch):
+    clock = {"now": T0_MS}
+    monkeypatch.setattr(desk, "now_ms", lambda: clock["now"])
+    good, good_list = _claude_row("main", five_hour=0.2, weekly=0.3, fable=0.5, active=True)
+    never, never_list = _claude_row("never", five_hour=0.1, weekly=0.1, fable=0.1)
+    never.update(error="Access token expired; sign-in needed", checked_at=0, windows=[])
+    never_list.update(error="Access token expired", error_code="auth_error", usage=None)
+    muse = {"provider": "muse", "alias": "muse", "active": True, "saved": True, "error": "",
+            "windows": [{"label": "Muse · weekly", "used": 0.4, "reset": FUTURE_S}]}       # no checked_at at all
+    d = desk.HotseatDesk()
+    tui_p = {"sessions": 0, "errors": [], "accounts": [good, never, muse]}
+    list_p = {"accounts": [good_list, never_list]}
+    first = {a["alias"]: a for a in d.payload(refresh=True, command="hotseat",
+                                              runner=_fake_runner_factory(tui_p, list_p, {"items": []}))["accounts"]}
+
+    assert (first["main"]["checked_at"], first["main"]["last_good_checked_at"]) == (T0_MS, T0_MS)
+    assert (first["never"]["checked_at"], first["never"]["last_good_checked_at"]) == (None, None), (
+        "the time of the read is not the time this account was checked")
+    assert (first["muse"]["checked_at"], first["muse"]["last_good_checked_at"]) == (None, None)
+    assert [(w["observed_at"], w["stale"]) for w in first["muse"]["windows"]] == [(None, True)], (
+        "a number nobody can date is not served as current")
+
+    # Five minutes on the check of main fails: no check time, but the last good one is still known.
+    clock["now"] = T0_MS + 5 * 60_000
+    failed, failed_list = _claude_row("main", five_hour=0.2, weekly=0.3, fable=0.5, active=True)
+    failed.update(error="usage endpoint timed out", checked_at=0, windows=[])
+    tui_p = {"sessions": 0, "errors": [], "accounts": [failed, never, muse]}
+    later = {a["alias"]: a for a in d.payload(refresh=True, command="hotseat",
+                                              runner=_fake_runner_factory(tui_p, list_p, {"items": []}))["accounts"]}
+    assert (later["main"]["state"], later["main"]["checked_at"], later["main"]["last_good_checked_at"]) == (
+        "error", None, T0_MS)
+
+    # A failed check that Hotseat does date is dated, and still not a good one.
+    clock["now"] = T0_MS + 5 * 60_000 + desk.MIN_REFRESH_INTERVAL_MS
+    failed["checked_at"] = clock["now"] / 1000
+    dated = {a["alias"]: a for a in d.payload(refresh=True, command="hotseat",
+                                              runner=_fake_runner_factory(tui_p, list_p, {"items": []}))["accounts"]}
+    assert (dated["main"]["checked_at"], dated["main"]["last_good_checked_at"]) == (clock["now"], T0_MS)
+
+    # The switcher's read keeps it too, and a good one moves it on.
+    clock["now"] = T0_MS + 6 * 60_000 + desk.MIN_REFRESH_INTERVAL_MS
+    failed_list.update(error="usage endpoint timed out", usage=None)
+    assert d.absorb_switcher_read("claude", {"accounts": [failed_list]}, started_at=clock["now"])
+    assert d.payload(command="hotseat")["accounts"][0]["last_good_checked_at"] == T0_MS
+    clock["now"] += 60_000
+    assert d.absorb_switcher_read("claude", {"accounts": [good_list]}, started_at=clock["now"])
+    main = d.payload(command="hotseat")["accounts"][0]
+    assert (main["checked_at"], main["last_good_checked_at"]) == (clock["now"], clock["now"])
+
+
+# --- a partly failed read says so (issue 263, point 1) ---------------------------
+
+def test_the_desk_names_the_sources_that_answered(monkeypatch):
+    clock = {"now": T0_MS}
+    monkeypatch.setattr(desk, "now_ms", lambda: clock["now"])
+    tui_p, list_p, work_p = _sample_payloads()
+    failing: set[str] = set()
+
+    def runner(argv, **_kwargs):
+        args = list(argv[1:])
+        if args[0] in failing:
+            return subprocess.CompletedProcess(argv, 1, stdout="", stderr="boom")
+        out = tui_p if args == ["tui", "--snapshot"] else list_p if args == ["list", "--json"] else work_p
+        return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(out), stderr="")
+
+    d = desk.HotseatDesk()
+    nothing = d.payload(command="hotseat")
+    assert (nothing["sources"], nothing["partial"]) == (None, True), "no desk has been read: the status rows only"
+
+    whole = d.payload(refresh=True, command="hotseat", runner=runner)
+    assert whole["sources"] == {"tui": "ok", "list": "ok", "work": "ok"} and whole["partial"] is False
+
+    clock["now"] += desk.MIN_REFRESH_INTERVAL_MS
+    failing.update({"list", "bridge"})
+    part = d.payload(refresh=True, command="hotseat", runner=runner)
+    assert part["refreshed"] is True and part["error"] is None
+    assert part["sources"] == {"tui": "ok", "list": "failed", "work": "failed"} and part["partial"] is True
+    assert part["recent_work"] == [] and part["stopped_work"] == []
+    assert {a["alias"]: a["email"] for a in part["accounts"]}["ai13"] == "ai13@example.invalid"  # the TUI has it
+
+    # The switcher's scheduled list read answers what the failed one did not.
+    clock["now"] += 30_000
+    assert d.absorb_switcher_read("claude", list_p, started_at=clock["now"])
+    mended = d.payload(command="hotseat")
+    assert mended["sources"] == {"tui": "ok", "list": "ok", "work": "failed"} and mended["partial"] is True
+    assert [item["id"] for item in mended["stopped_work"]] == ["koko"]
+
+    # A read that fails as a whole leaves the stored desk and its sources as they were.
+    clock["now"] += desk.MIN_REFRESH_INTERVAL_MS
+    failing.add("tui")
+    broken = d.payload(refresh=True, command="hotseat", runner=runner)
+    assert (broken["refreshed"], broken["error"]) == (False, "cli_failed")
+    assert broken["sources"] == mended["sources"] and broken["observed_at"] == mended["observed_at"]
+
+
 # --- live reads: a minimum interval ------------------------------------------
 
 def test_a_live_read_inside_the_interval_serves_the_stored_snapshot(monkeypatch):
@@ -1293,7 +1441,7 @@ def test_native_work_gets_its_command_and_nothing_runs():
     assert code_nat == 200
     assert body_nat["continued"] is False
     assert body_nat["resume_command"] == "codex resume 0195abcd"
-    assert d.resume_work("0195abcd", kind="native")[1]["resume_command"] == "claude --resume 0195abcd"
+    assert d.resume_work("0195abcd", kind="native", backend="claude")[1]["resume_command"] == "claude --resume 0195abcd"
     assert d.resume_work("missing-agent")[0] == 404
     assert d.resume_work("--help")[1]["error"] == "invalid_id"
     assert d.resume_work("x", kind="other")[1]["error"] == "invalid_kind"
