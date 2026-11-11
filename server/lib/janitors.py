@@ -325,7 +325,9 @@ def _model(agent: dict, model, effort, *, provider=None):
             raise JanitorError("Deterministic bookkeeping does not use a model or reasoning effort")
         return
     if model is not None and (not isinstance(model, str) or len(model) > 160 or not backends.is_valid_model(agent["backend"], model)):
-        raise JanitorError("Invalid model for this agent")
+        detail = (backends.unknown_model_detail(agent["backend"], model)
+                  if isinstance(model, str) and len(model) <= 160 else "")
+        raise JanitorError("Invalid model for this agent" + (f": {detail}" if detail else ""))
     efforts = ("minimal", "low", "medium", "high") if provider == "openai" else backends.valid_efforts(agent["backend"])
     if effort is not None and (not isinstance(effort, str) or (effort and effort not in efforts)):
         raise JanitorError("Invalid reasoning effort for this agent")
