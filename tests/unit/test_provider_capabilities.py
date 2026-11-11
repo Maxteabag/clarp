@@ -202,10 +202,11 @@ def test_codex_free_tier_probe_appends_paid_and_api_fallback_models_with_efforts
         assert by_id[paid]["source"]["kind"] == "static_fallback"
         assert by_id[paid]["supported_efforts"] == [
             "low", "medium", "high", "xhigh", "max", "ultra"]
-    assert by_id["gpt-6.1-terra"]["default_effort"] == "low"
-    assert by_id["gpt-6-astra"]["default_effort"] == "medium"
+    for low_default in ("gpt-6.1-sol", "gpt-6-astra", "gpt-6.1-terra", "gpt-5.6-sol"):
+        assert by_id[low_default]["default_effort"] == "low"
+    for med_default in ("gpt-6-sol", "gpt-5.6-terra", "gpt-5.5"):
+        assert by_id[med_default]["default_effort"] == "medium"
     assert by_id["gpt-5.5"]["supported_efforts"] == ["low", "medium", "high", "xhigh"]
-    assert by_id["gpt-5.5"]["default_effort"] == "medium"
 
     # Pure fallback (when CLI is unavailable) also keeps Luna free of ultra.
     offline = capabilities._discover_provider(
@@ -430,6 +431,109 @@ def test_codex_auth_file_change_invalidates_cached_catalog_before_ttl(monkeypatc
     logged_out = capabilities.capability_catalog()
     assert probe_calls == 3
     assert logged_out["providers"]["codex"]["models"][0]["id"] == "gpt-6-astra"
+    capabilities.clear_cache()
+
+
+def test_auth_signature_ignores_atomic_rewrite_and_same_account_token_refresh(monkeypatch, tmp_path):
+    capabilities.clear_cache()
+    codex_home = tmp_path / "codex-home"
+    codex_home.mkdir()
+    auth_file = codex_home / "auth.json"
+    auth_file.write_text(
+        json.dumps({"auth_mode": "chatgpt", "tokens": {"account_id": "acct-1", "access_token": "tok-a"}}),
+        encoding="utf-8",
+    )
+    claude_file = tmp_path / "claude.json"
+    claude_file.write_text(
+        json.dumps({
+            "numStartups": 1,
+            "oauthAccount": {"accountUuid": "u-1", "organizationUuid": "org-1"},
+            "modelAccessCache": [{"value": "claude-fable-5-2", "label": "Fable 5.2"}],
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+    monkeypatch.setenv("CLAUDE_CONFIG_FILE", str(claude_file))
+    monkeypatch.setattr(capabilities.time, "monotonic", lambda: 100.0)
+    monkeypatch.setattr(
+        capabilities.shutil, "which",
+        lambda binary: f"/bin/{binary}" if binary == "codex" else None,
+    )
+
+    probe_calls = 0
+
+    def fake_run(argv, **_kwargs):
+        nonlocal probe_calls
+        if argv[-1] == "--version":
+            return subprocess.CompletedProcess(argv, 0, stdout="codex-cli 0.167.1\n", stderr="")
+        probe_calls += 1
+        acct = json.loads(auth_file.read_text(encoding="utf-8"))["tokens"]["account_id"]
+        slug = "gpt-6-luna" if acct == "acct-1" else "gpt-6-astra"
+        payload = json.dumps({"models": [{
+            "slug": slug, "display_name": slug, "visibility": "list",
+            "default_reasoning_level": "low",
+            "supported_reasoning_levels": [{"effort": "low"}],
+        }]})
+        return subprocess.CompletedProcess(argv, 0, stdout=payload, stderr="")
+
+    monkeypatch.setattr(capabilities, "_run", fake_run)
+
+    assert capabilities.capability_catalog()["providers"]["codex"]["models"][0]["id"] == "gpt-6-luna"
+    assert probe_calls == 1
+
+    # Atomic replace with identical bytes changes inode and mtime, not identity.
+    replacement = codex_home / "auth.json.tmp"
+    replacement.write_text(auth_file.read_text(encoding="utf-8"), encoding="utf-8")
+    replacement.replace(auth_file)
+    assert capabilities.capability_catalog()["providers"]["codex"]["models"][0]["id"] == "gpt-6-luna"
+    assert probe_calls == 1
+
+    # Rotating access_token on the same account_id and bumping Claude numStartups must not rebuild.
+    auth_file.write_text(
+        json.dumps({"auth_mode": "chatgpt", "tokens": {"account_id": "acct-1", "access_token": "tok-b"}}),
+        encoding="utf-8",
+    )
+    claude_file.write_text(
+        json.dumps({
+            "numStartups": 99,
+            "oauthAccount": {"accountUuid": "u-1", "organizationUuid": "org-1"},
+            "modelAccessCache": [{"value": "claude-fable-5-2", "label": "Fable 5.2"}],
+        }),
+        encoding="utf-8",
+    )
+    assert capabilities.capability_catalog()["providers"]["codex"]["models"][0]["id"] == "gpt-6-luna"
+    assert probe_calls == 1
+
+    # Switching account_id mid-flight invalidates the in-flight snapshot for subsequent callers
+    # and for any waiter that observes the new account signature.
+    entered_build = threading.Event()
+    finish_build = threading.Event()
+    original_build = capabilities._build_catalog
+
+    def gated_build(**kwargs):
+        if probe_calls == 1:
+            entered_build.set()
+            assert finish_build.wait(timeout=2)
+        return original_build(**kwargs)
+
+    monkeypatch.setattr(capabilities, "_build_catalog", gated_build)
+    auth_file.write_text(
+        json.dumps({"auth_mode": "chatgpt", "tokens": {"account_id": "acct-2", "access_token": "tok-c"}}),
+        encoding="utf-8",
+    )
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        first_switch = pool.submit(capabilities.capability_catalog)
+        assert entered_build.wait(timeout=2)
+        auth_file.write_text(
+            json.dumps({"auth_mode": "chatgpt", "tokens": {"account_id": "acct-1", "access_token": "tok-d"}}),
+            encoding="utf-8",
+        )
+        waiter = pool.submit(capabilities.capability_catalog)
+        finish_build.set()
+        assert first_switch.result(timeout=2)["providers"]["codex"]["models"][0]["id"] == "gpt-6-luna"
+        # Waiter arrived under acct-1 while first_switch started under acct-2, so waiter re-validates.
+        assert waiter.result(timeout=2)["providers"]["codex"]["models"][0]["id"] == "gpt-6-luna"
+    assert probe_calls == 3
     capabilities.clear_cache()
 
 

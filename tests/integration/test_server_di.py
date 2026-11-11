@@ -1371,7 +1371,11 @@ def test_agent_model_options_endpoint_returns_backend_choices(running_server, mo
             "freshness": "fresh",
         },
     }
-    assert codex_models[1:] and all(
+    assert [item["id"] for item in codex_models[1:]] == [
+        "gpt-6.1-sol", "gpt-6-astra", "gpt-6.1-terra", "gpt-6-sol",
+        "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5",
+    ]
+    assert all(
         item["source"]["kind"] == "static_fallback" for item in codex_models[1:]
     )
     assert response["providers"]["agy"]["models"][0]["id"] == "agy-test"
