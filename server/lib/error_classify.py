@@ -62,6 +62,12 @@ RUNNER_EXIT = "runner_exit"
 TIMEOUT = "timeout"
 NOT_STARTED = "not_started"
 UNKNOWN = "unknown"
+
+# What a Codex turn says when its failure text reads like a usage limit but the
+# provider did not confirm that the quota is exhausted. The category stays
+# USAGE_LIMIT; this message is how a later reader of the stored state tells
+# the two apart (nothing else on the state does, for a runtime of any age).
+QUOTA_UNCONFIRMED_MESSAGE = "Codex could not complete this request. Try again"
 MUSE_SESSION_LOCKED = "muse_session_locked"
 
 # Categories that should flip the agent to the INTERRUPTED badge once we

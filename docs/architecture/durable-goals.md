@@ -59,18 +59,25 @@ is. Retries follow the backoff, which starts at the dispatch: 2, 4, 8, 16 and
   as a spent window and as nothing else of the category), and the provider's
   own statement overrides it where the Host records one (`backend_usage`:
   `credits_depleted`). Everything not known to clear at a reset counts, as
-  `billing`.
+  `billing`. A Codex failure that reads like a limit but whose quota the
+  provider did not confirm exhausted counts too, as an ordinary failure
+  (`unconfirmed_limit`). The reason keeps the provider's own words beside the
+  category's, so it says which limit it was.
 - Sign-in, plan and billing failures (`auth`, `account_plan`, `billing`) count,
   because a person has to act; the `attention` reason says what: sign in, switch
   account or model, pay or raise the limit.
-- The ceiling under the exemption: a goal none of whose wakes has started for 24
-  hours (`task_goal_recovery.WAKE_START_CEILING_MS`) goes to `attention`
-  whatever the reason, and the reason names the last failure. The clock starts
-  at the dispatch of the first wake that got nowhere since one last started; a
-  wake that was launched only to be turned away for lack of usage has not
-  started in this sense. A wake that runs, a checkpoint or a resume clears it.
-  It is checked when the next try is due, so with the hourly backoff it fires
-  within an hour after the 24th.
+- The ceiling under the exemption: a goal none of whose wakes has started for 8
+  days (`task_goal_recovery.WAKE_START_CEILING_MS`) goes to `attention`
+  whatever the reason, and the reason names the last failure. Eight days
+  because a real usage window lasts up to a week and must not reach
+  `attention`, where nothing would resume the goal when usage returns; a wait
+  longer than any window is not a window. The clock starts at the dispatch of
+  the first wake that got nowhere since one last started; a wake that was
+  launched only to be turned away for lack of usage has not started in this
+  sense. A wake that runs, a checkpoint or a resume clears it. It is checked
+  when the next try is due, so with the hourly backoff it fires within an hour
+  after the eighth day. Until then a misread failure costs up to 192 hourly
+  tries.
 
 What is still not announced:
 
@@ -83,6 +90,16 @@ What is still not announced:
 - A never-closed turn of an agent that has not run any turn since is not judged
   over. The runtime now closes such a turn when it abandons the launch, so
   this concerns only rows left by an older runtime.
+
+Two limits of the above:
+
+- An abandoned launch is closed and its wake retired only when no process of
+  the agent is live. If the backend raised after its process existed, the turn
+  and the row are left to that process; should it die without settling, the
+  row heals by the open-turn rule once the agent has run a later turn.
+- `capacity_failures` is unknown to a Host older than this change. Rolling the
+  Host back to one sends a goal with many such tries straight to `attention`,
+  because every try counts there; resume the goal after the rollback.
 
 Native cards and detail show completed/working/remaining/blocked/deferred counts,
 current work or concrete wait, next wake, last checkpoint, evidence and revisions.

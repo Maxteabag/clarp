@@ -261,9 +261,11 @@ PERSON_CODES = {
 }
 # A goal none of whose wakes has started for this long goes to attention
 # whatever the reason: the net under the exemption above, should something
-# that never clears be read as lack of usage. A wake that was launched only
-# to be turned away for lack of usage has not started in this sense.
-WAKE_START_CEILING_MS = 24 * 3_600_000
+# that never clears be read as lack of usage. Eight days, because a real
+# usage window lasts up to a week and must not reach attention; a wait longer
+# than any window is not a window. A wake that was launched only to be turned
+# away for lack of usage has not started in this sense.
+WAKE_START_CEILING_MS = 8 * 24 * 3_600_000
 # The account park's own message as a failure text: a runtime from before the
 # fix refused a wake at the end of its park with it and called that a runner
 # exit. The wake waited for an account and never ran; that is capacity too.
@@ -336,16 +338,26 @@ def _undelivered_wake(plan, state):
         code = "usage_limit"
     elif failed and code == "usage_limit":
         code = _limit_code(plan, detail)
+    provider = ""
     if failed:
+        # The provider's own words beside the category's: "Usage limit
+        # reached" alone does not say whether to wait, pay or sign in.
+        provider = " ".join(
+            str(detail.get("provider_message") or detail.get("error") or "").split())[:200]
         reason = message or "Its turn " + turn["outcome"]
+        if provider and provider.lower() not in reason.lower():
+            reason = f"{reason}: {provider}"
     else:
-        reason = "It never started and its queued row was retired"
+        # No turn of it settled as failed. Its launch was never proven, which
+        # is not proof that nothing ran.
+        reason = "Its launch was never proven and its queued row was retired"
     return {
         "request_id": request,
         "outcome": turn["outcome"] if failed else "retired",
         "started": started,
         "code": code or ("not_started" if not started else "failed"),
         "reason": reason,
+        "provider": provider,
     }
 
 
@@ -353,7 +365,8 @@ def _limit_code(plan, detail):
     """``usage_limit`` only for a failure that clears when a usage window
     resets; ``billing`` for the rest of that error category, which a person
     has to clear (credits, payment, a suspended account, a hard or monthly
-    limit, a trial, a model that refuses this client).
+    limit, a trial, a model that refuses this client); ``unconfirmed_limit``
+    for a Codex failure whose quota the provider did not confirm exhausted.
 
     Two sources, the stricter wins. The failure's own text, split where the
     category is defined (error_classify.usage_limit_resets). And the
@@ -362,6 +375,11 @@ def _limit_code(plan, detail):
     reads like an ordinary window."""
     from . import backend_usage, backends, error_classify
 
+    if str(detail.get("message") or "").startswith(error_classify.QUOTA_UNCONFIRMED_MESSAGE):
+        # Codex: the text read like a limit, the provider did not confirm
+        # that the quota is exhausted. Not known to be lack of usage: an
+        # ordinary failure, which counts.
+        return "unconfirmed_limit"
     text = " ".join(str(detail.get(key) or "") for key in ("error", "provider_message"))
     if not error_classify.usage_limit_resets(text):
         return "billing"
@@ -528,7 +546,14 @@ def _claim(plan_id, now):
             # No account had usage: the goal is not at fault, so this try
             # does not use its recovery limit. The backoff still grows.
             state["capacity_failures"] = state.get("capacity_failures", 0) + 1
-            said = "Wake not delivered: no account with usage"
+            if undelivered["started"]:
+                # It ran and met the limit: not "not delivered". The
+                # provider's words say which limit, and when it resets.
+                said = "Wake started and failed: no account with usage"
+                if undelivered["provider"]:
+                    said += f" ({undelivered['provider']})"
+            else:
+                said = "Wake not delivered: no account with usage"
         else:
             counted = state.get("attempts", 0) - state.get("capacity_failures", 0)
             said = (
@@ -555,7 +580,7 @@ def _claim(plan_id, now):
                 # Two kinds, so the ledger says which of the two happened.
                 kind="wake_failed" if undelivered["started"] else "wake_undelivered",
                 revision=plan["revision"],
-                detail=undelivered,
+                detail={k: v for k, v in undelivered.items() if k != "provider"},
             )
         )
         changed = True
@@ -649,8 +674,8 @@ def _claim(plan_id, now):
     if stalled_since and now - stalled_since >= WAKE_START_CEILING_MS:
         state.update(
             state="attention",
-            reason=f"No wake of this goal has started in {WAKE_START_CEILING_MS // 3_600_000} "
-            f"hours; {_last_wake(state)}; a person has to find out why, then resume the goal",
+            reason=f"No wake of this goal has started in {WAKE_START_CEILING_MS // 86_400_000} "
+            f"days; {_last_wake(state)}; a person has to find out why, then resume the goal",
         )
         _commit(plan, text, stored, goal)
         return None

@@ -1163,8 +1163,10 @@ def dead_rows(agent_id: str = "", *, prefix: str = "", now_ms: int | None = None
 
     A turn is over when it settled or was closed. One that was opened and
     never closed (a launch abandoned at a phase nobody could prove; turn rows
-    that never end are common) is over only under all of these: no spawn was
-    ever recorded for it, a later turn of the same agent began at least
+    that never end are common) is over only under all of these: its launch is
+    unproven (``unknown``: no spawn record, or one that cannot be attributed
+    because the trace has more than one turn row, which does not prove that
+    it never ran), a later turn of the same agent began at least
     ``grace_ms`` ago, and ``live_trace(agent_id, trace_id)`` says the runtime
     no longer holds the agent's slot for it. A later turn alone proves
     nothing, since a hook inside a running process can mint a new trace; a
