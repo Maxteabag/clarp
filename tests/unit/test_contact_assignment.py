@@ -60,3 +60,21 @@ def test_create_and_assign_is_durable_auto_assigns_voice_and_keeps_session():
     assert agents.get_by_session("anon")["agent_id"] == before["agent_id"]
     with pytest.raises(AgentLifecycleError):
         assign_contact("anon", "create", "Brand New Contact")
+
+
+def test_available_contacts_excludes_voices_in_use_by_other_live_agents(monkeypatch):
+    make_agent(name="Codex-a123", session="anon")
+    agents.create_agent(
+        persona="Live Speaker",
+        voice_id='{"cartesia":"shared-voice"}',
+        cwd="/tmp",
+        session="speaker",
+        backend="codex",
+    )
+    definitions = [
+        {"name": "Shared Voice Contact", "voice_id": '{"cartesia":"shared-voice"}', "tier": "codex"},
+        {"name": "Unique Voice Contact", "voice_id": '{"cartesia":"unique-voice"}', "tier": "codex"},
+    ]
+    monkeypatch.setattr(personas, "list_all", lambda: definitions)
+    assert assign_contact("anon", "options")["contacts"] == [{"name": "Unique Voice Contact"}]
+    assert assign_contact("anon", "auto")["name"] == "Unique Voice Contact"
