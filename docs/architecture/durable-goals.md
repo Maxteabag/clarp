@@ -31,9 +31,41 @@ owners and changed native bindings must never launch work. Dependency deadlines
 produce an honest recovery checkpoint rather than an invented job success.
 Bounded retries eventually require attention. Explicit stop must suppress recovery.
 Only work that can still run suppresses a wake: a queued row whose turn is over
-and that nothing may launch again is not live work. The scheduler retires its
-own such wake rows on every pass and records an accepted wake that did not run
-as `wake_undelivered`, so a failed wake is retried and never silent.
+and that nothing may launch again is not live work. A turn is over when it
+settled or was closed. One that was opened and never closed counts as over only
+when no spawn was recorded for it, a later turn of the same agent began at least
+two minutes ago, and the runtime no longer holds the agent's slot for it; a
+turn that runs or waits for an account holds its slot until it finishes. The
+scheduler retires its own dead wake rows on every pass.
+
+A wake the scheduler sent that did not complete is recorded once, as
+`wake_undelivered` (it never started) or `wake_failed` (it started, then
+failed), and the continuation's reason says which, why, and when the next try
+is. Retries follow the backoff, which starts at the dispatch: 2, 4, 8, 16 and
+32 minutes, then hourly.
+
+- With the default recovery limit of 5 and wakes that fail at once, wakes go
+  out at minute 0, 2, 6, 14 and 30 and the goal reaches `attention` at minute
+  62. A try that first waits in the account park (up to 30 minutes) fails that
+  much later, and its backoff has usually passed by then: five such tries go
+  out at 0, 30, 60, 90 and 120 and reach `attention` at about minute 152.
+- A wake that fails only for lack of usage (`usage_limit`) does not count
+  against the limit. It keeps its growing backoff and is tried until usage
+  returns; the goal does not reach `attention` for it.
+- Sign-in and plan failures (`auth`, `account_plan`) count, because a person
+  has to act; the `attention` reason says so.
+
+What is still not announced:
+
+- `attention` is a state in the goal. Nothing pushes a notification when a goal
+  reaches it, and the owner cannot checkpoint because nothing wakes it; a
+  person has to resume the goal.
+- A dead queued row of another origin (a user or peer message) no longer holds
+  goal wakes, but still holds heartbeat, janitor and dreaming wakes and is
+  still listed as queued. Only goal wake rows are retired.
+- A never-closed turn of an agent that has not run any turn since is not judged
+  over. The runtime now closes such a turn when it abandons the launch, so
+  this concerns only rows left by an older runtime.
 
 Native cards and detail show completed/working/remaining/blocked/deferred counts,
 current work or concrete wait, next wake, last checkpoint, evidence and revisions.

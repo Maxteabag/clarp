@@ -121,7 +121,10 @@ class LauncherMixin:
                 self._end_launched_opening(resume_spec, error_classify.RUNNER_EXIT, str(exc),
                                            attempt)
             else:
-                self._mark_interrupted(resume_spec, error_classify.RUNNER_EXIT,
+                # Refused, or the backend failed to start: no process ran, so
+                # this is not a runner that exited (it used to say so, and
+                # read as a crash in every goal ledger that recorded it).
+                self._mark_interrupted(resume_spec, error_classify.NOT_STARTED,
                                        str(exc), attempts=attempt)
 
     def _admit_opening_launch(self, spec: _TurnSpec, attempt: int) -> bool:

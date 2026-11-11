@@ -2490,7 +2490,10 @@ def test_unknown_native_spawn_failure_protects_same_id_without_reinvocation(tmp_
     assert len(users) == len(turns) == 1
     assert users[0]["message_id"] == "u-lost" and users[0]["trace_id"] == "t-died"
     assert turns[0]["trace_id"] == "t-died"
-    assert turns[0]["outcome"] is None and turns[0]["settled_at"] is None and turns[0]["ended_at"] is None
+    # No outcome and no "never started" marker: the launch stays unknown. The
+    # turn row is closed, though: left open it read as a running turn for good.
+    assert turns[0]["outcome"] is None and turns[0]["settled_at"] is None
+    assert turns[0]["ended_at"] is not None
     assert not con.execute(
         """SELECT 1 FROM state_log WHERE agent_id=? AND json_extract(detail,'$.trace_id')='t-died'
              AND json_extract(detail,'$.dispatch_not_started')=1""", (agent_id,)).fetchone()

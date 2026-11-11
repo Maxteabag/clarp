@@ -6,8 +6,10 @@ of uncertain admission reuses the same client receipt, never a fresh message ID.
 
 from __future__ import annotations
 import json
+import re
 import secrets
 import shlex
+import time
 from contextlib import contextmanager
 from . import agents, db, task_goal_state
 from .log import log, log_exception
@@ -106,7 +108,8 @@ def boundary(plan, goal, *, check_live=True, wake_request=""):
         if queued:
             # A row nothing will run again is not work the owner still has:
             # counted, it held every wake of the agent for as long as it sat.
-            queued -= len(turn_queue.dead_rows(agent["agent_id"]))
+            queued -= len(turn_queue.dead_rows(
+                agent["agent_id"], live_trace=turn_dispatch.owns_inflight_trace))
         if (
             reconcile.has_live_work(agent["agent_id"], agent.get("backend"))
             or live.compacting
@@ -224,9 +227,9 @@ def _retire_dead_wakes(now, retired=None):
     here, by rows and not by goals: one whose goal was since paused or
     completed heals too. This pass is also what heals a Host that was updated
     with such rows in place. ``retired(row)`` tells the apps."""
-    from . import turn_queue
+    from . import turn_dispatch, turn_queue
 
-    for row in turn_queue.dead_rows(prefix=PREFIX):
+    for row in turn_queue.dead_rows(prefix=PREFIX, live_trace=turn_dispatch.owns_inflight_trace):
         queue_id = str(row["queue_id"])
         try:
             if not turn_queue.cancel(queue_id):
@@ -243,16 +246,29 @@ def _retire_dead_wakes(now, retired=None):
                 log_exception("goalQueueRetiredNotifyFail", exc, detail=queue_id)
 
 
+# Failures that say nothing about the goal: no account had usage left. They
+# do not use the goal's recovery limit; the wake is tried again on its backoff.
+CAPACITY_CODES = frozenset({"usage_limit"})
+# Failures only a person can clear (sign in again, a plan without the model).
+PERSON_CODES = frozenset({"auth", "account_plan"})
+# The account park's own message as a failure text: a runtime from before the
+# fix refused a wake at the end of its park with it and called that a runner
+# exit. The wake waited for an account and never ran; that is capacity too.
+_PARK_REFUSAL = re.compile(r"Waiting for an? \S+ account with available usage")
+
+
 def _undelivered_wake(plan, state):
-    """How the accepted wake ended without running to its end, or None while
+    """How the wake the scheduler sent ended without completing, or None while
     it waits, runs, completed, or was already noted. Read from the wake's own
     turn and queue row, never from the agent's newest state: that may belong
-    to a later turn."""
+    to a later turn. ``started`` tells a wake that never ran (refused, parked
+    and failed before its spawn, its row retired) from one whose process ran
+    and then failed; ``code`` is the failure category of its terminal state."""
     from . import turn_queue
 
     request = state.get("request_id") or ""
     if (
-        state.get("state") not in {"admitted", "queued"}
+        state.get("state") not in {"admitted", "queued", "retry"}
         or not request
         or state.get("undelivered_request_id") == request
     ):
@@ -266,12 +282,19 @@ def _undelivered_wake(plan, state):
         )
         .fetchone()
     )
-    failed = bool(
-        turn and turn["settled_at"] is not None and turn["outcome"] in {"failed", "interrupted"}
+    settled = turn is not None and turn["settled_at"] is not None
+    if settled and turn["outcome"] == "completed":
+        return None  # it ran to its end, whatever became of its row
+    failed = settled and turn["outcome"] in {"failed", "interrupted"}
+    receipt = (
+        db.conn()
+        .execute("SELECT status,started_at FROM queued_turns WHERE queue_id=?", (request,))
+        .fetchone()
     )
-    retired = turn_queue.status(request) == "cancelled"
+    retired = receipt is not None and receipt["status"] == "cancelled"
     if not failed and not retired:
         return None
+    code, message = "", ""
     if failed:
         # The terminal state written with that turn's settlement says why.
         ended = (
@@ -284,17 +307,39 @@ def _undelivered_wake(plan, state):
             .fetchone()
         )
         try:
-            message = json.loads(ended["detail"] or "{}").get("message") if ended else ""
+            detail = json.loads(ended["detail"] or "{}") if ended else {}
         except ValueError:
-            message = ""
-        reason = str(message or "Its turn " + turn["outcome"])
+            detail = {}
+        code = str(detail.get("reason") or "")
+        message = str(detail.get("message") or "")
+    # A receipt that started is a process that was launched.
+    started = bool(failed and receipt is not None and receipt["started_at"] is not None)
+    if (
+        failed
+        and not started
+        and code in {"runner_exit", "not_started"}
+        and _PARK_REFUSAL.fullmatch(str(detail.get("error") or ""))
+    ):
+        code = "usage_limit"
+    if failed:
+        reason = message or "Its turn " + turn["outcome"]
     else:
-        reason = "Its queued row was retired before it started"
+        reason = "It never started and its queued row was retired"
     return {
         "request_id": request,
         "outcome": turn["outcome"] if failed else "retired",
+        "started": started,
+        "code": code or ("not_started" if not started else "failed"),
         "reason": reason,
     }
+
+
+def _next_try(state, now):
+    """When the goal is woken next, as the Host's wall clock reads."""
+    due = state.get("due_at") or 0
+    if due <= now:
+        return "now"
+    return time.strftime("%H:%M", time.localtime(due / 1000))
 
 
 def tick(dispatch, *, now=None, cursor=None, retired=None):
@@ -426,18 +471,31 @@ def _claim(plan_id, now):
     # until this, a goal whose wake failed read as active and admitted.
     undelivered = _undelivered_wake(plan, state)
     if undelivered:
+        capacity = undelivered["code"] in CAPACITY_CODES
+        if capacity:
+            # No account had usage: the goal is not at fault, so this try
+            # does not use its recovery limit. The backoff still grows.
+            state["capacity_failures"] = state.get("capacity_failures", 0) + 1
+            said = "Wake not delivered: no account with usage"
+        else:
+            counted = state.get("attempts", 0) - state.get("capacity_failures", 0)
+            said = (
+                ("Wake started and failed: " if undelivered["started"] else "Wake did not start: ")
+                + undelivered["reason"]
+                + f"; attempt {counted} of {goal['recovery_limit']}"
+            )
         state.update(
-            reason="Wake not delivered: "
-            + undelivered["reason"]
-            + f"; attempt {state.get('attempts', 0)} of {goal['recovery_limit']}, "
-            "the next follows its backoff",
+            reason=f"{said}; next try {_next_try(state, now)}",
             undelivered_request_id=undelivered["request_id"],
             undelivered_reason=undelivered["reason"],
+            undelivered_started=undelivered["started"],
+            undelivered_code=undelivered["code"],
         )
         goal["history"].append(
             dict(
                 at=now,
-                kind="wake_undelivered",
+                # Two kinds, so the ledger says which of the two happened.
+                kind="wake_failed" if undelivered["started"] else "wake_undelivered",
                 revision=plan["revision"],
                 detail=undelivered,
             )
@@ -519,23 +577,36 @@ def _claim(plan_id, now):
             if state.get("job_handle")
             else "External dependency deadline passed; inspect its actual outcome",
         )
-    if state.get("attempts", 0) >= goal["recovery_limit"]:
-        last = (
-            f"; the last wake was not delivered ({state.get('undelivered_reason')})"
-            if state.get("request_id")
-            and state.get("undelivered_request_id") == state.get("request_id")
-            else ""
-        )
+    spent = bool(
+        state.get("request_id")
+        and state.get("undelivered_request_id") == state.get("request_id")
+    )
+    # Tries that failed for lack of usage are not the goal's failures.
+    if state.get("attempts", 0) - state.get("capacity_failures", 0) >= goal["recovery_limit"]:
+        last, then = "", "checkpoint or resume to continue"
+        if spent:
+            how = "started and failed" if state.get("undelivered_started") else "did not start"
+            last = f"; the last wake {how} ({state.get('undelivered_reason')})"
+            if state.get("undelivered_code") in PERSON_CODES:
+                then = (
+                    "a person has to sign in to the account or change its plan, "
+                    "then resume the goal"
+                )
         state.update(
             state="attention",
-            reason=f"Recovery attempt limit reached{last}; checkpoint or resume to continue",
+            reason=f"Recovery attempt limit reached{last}; {then}",
         )
         _commit(plan, text, stored, goal)
         return None
+    if not state.get("attempts"):
+        state.pop("capacity_failures", None)  # a checkpoint or resume began anew
     # Successful admission followed by an idle owner is an unfinished turn,
-    # not a completed goal. A new generation gets one new receipt.
+    # not a completed goal. A new generation gets one new receipt. So does a
+    # retry whose receipt can never launch (its turn failed, its row was
+    # retired): reusing that id would only be answered "already admitted".
     if (
         state.get("state") in {"admitted", "queued"}
+        or spent
         or state.get("plan_revision", plan["revision"]) != plan["revision"]
     ):
         state.update(generation=state["generation"] + 1, request_id="")

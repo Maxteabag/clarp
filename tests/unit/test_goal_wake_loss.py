@@ -14,6 +14,7 @@ coordinator and scheduler.
 from __future__ import annotations
 
 import json
+import re
 from types import SimpleNamespace
 
 import pytest
@@ -145,20 +146,22 @@ def test_a_wake_released_at_the_park_cap_fails_visibly_and_is_tried_again(
     assert turn_queue.pending_count(host.agent_id) == 0
     host.backends.live = False
 
-    # The scheduler sees its wake did not run and says so, where the owner
-    # and the apps read the goal.
+    # The scheduler sees its wake did not complete and says so, where the
+    # owner and the apps read the goal: it ran and met the usage limit.
     assert _tick(host.service) == 0
-    undelivered = _history(plan, "wake_undelivered")
-    assert [entry["detail"]["request_id"] for entry in undelivered] == [request]
-    assert "Usage limit" in undelivered[0]["detail"]["reason"]
-    assert "not delivered" in _continuation(plan)["reason"]
+    failed = _history(plan, "wake_failed")
+    assert [entry["detail"]["request_id"] for entry in failed] == [request]
+    assert "Usage limit" in failed[0]["detail"]["reason"]
+    assert (failed[0]["detail"]["started"], failed[0]["detail"]["code"]) == (True, "usage_limit")
+    assert _continuation(plan)["reason"].startswith(
+        "Wake not delivered: no account with usage; next try ")
     # In the append-only ledger too, as the Host's own event: a bookkeeping
     # delegate on the goal must never be able to refuse it.
     ledger = db.conn().execute(
-        "SELECT actor_kind, reason FROM goal_events WHERE plan_id=? AND kind='wake_undelivered'",
+        "SELECT actor_kind, reason FROM goal_events WHERE plan_id=? AND kind='wake_failed'",
         (plan["plan_id"],)).fetchall()
     assert [tuple(row) for row in ledger] == [
-        ("system", undelivered[0]["detail"]["reason"])]
+        ("system", failed[0]["detail"]["reason"])]
 
     # After the backoff it wakes the goal again, with a new receipt.
     assert _tick(host.service, offset_ms=HOUR_MS) == 1
@@ -292,6 +295,11 @@ def test_a_stale_wake_row_from_an_older_release_heals_in_the_scheduler_pass(
     assert undelivered[0]["detail"]["reason"] == "Agent process exited unexpectedly"
     requests = [_continuation(p)["request_id"] for p in (plan, other)]
     assert request not in requests and _continuation(plan)["attempts"] == 2
+    # The older runtime called it a runner exit, but the wake had waited for an
+    # account and was refused with the park's own message: lack of usage, which
+    # does not use the goal's recovery limit.
+    assert undelivered[0]["detail"]["code"] == "usage_limit"
+    assert _continuation(plan)["capacity_failures"] == 1
     # One runs, the other waits behind it as real queued work.
     assert len(_wakes(backends)) == 1
     assert sorted(turn_queue.status(r) for r in requests) == ["queued", "started"]
@@ -394,7 +402,352 @@ def test_wakes_that_keep_failing_end_in_attention_that_says_why(tmp_path):
 
     stuck = _continuation(plan)
     assert stuck["state"] == "attention"
-    assert "Recovery attempt limit reached" in stuck["reason"]
-    assert "not delivered" in stuck["reason"]
+    assert stuck["reason"] == (
+        "Recovery attempt limit reached; the last wake started and failed (Turn failed); "
+        "checkpoint or resume to continue")
+    assert [entry["detail"]["request_id"]
+            for entry in _history(plan, "wake_failed")] == [request]
+
+
+# --- a turn that never closed (the review of 258, finding 1) ---------------------
+
+
+def _one_broken_spawn(backends):
+    """The backend cannot start once, then works again."""
+    spawn = backends.spawn_turn
+
+    def broken(*_args, **_kwargs):
+        backends.spawn_turn = spawn
+        raise OSError("claude binary went away")
+
+    backends.spawn_turn = broken
+
+
+def test_a_wake_whose_backend_fails_to_spawn_closes_its_turn_and_is_tried_again(tmp_path):
+    """spawn_turn raises on the wake's first dispatch. Nothing can prove at
+    which phase, so no "never started" marker is written. The turn used to
+    stay open and the row ``queued``: recovery skipped it for good, and an
+    open turn read as a running one."""
+    service, backends, agent_id = _goal_owner(tmp_path)
+    backends.live = False
+    plan = _arm(_goal())
+    _one_broken_spawn(backends)
+
+    assert _tick(service) == 0           # the dispatch raised
+    wake = _continuation(plan)
+    request = wake["request_id"]
+    assert wake["state"] == "retry" and "spawn failed" in wake["reason"]
+    turns = db.conn().execute(
+        "SELECT ended_at FROM turns WHERE agent_id=? AND trace_id=?", (agent_id, request)).fetchall()
+    assert len(turns) == 1 and turns[0]["ended_at"] is not None, "the abandoned turn stays open"
+    assert turn_queue.pending_count(agent_id) == 0
+    assert turn_queue.status(request) == "cancelled"
+    assert _td._INFLIGHT.get(agent_id) is None
+
+    # The next pass after the backoff uses a new receipt (the spent one could
+    # never launch) and the wake runs.
+    assert _tick(service, offset_ms=HOUR_MS) == 1
+    again = _continuation(plan)
+    assert again["request_id"] != request and len(_wakes(backends)) == 1
+    assert turn_queue.status(again["request_id"]) == "started"
+    undelivered = _history(plan, "wake_undelivered")
+    assert [entry["detail"]["request_id"] for entry in undelivered] == [request]
+    assert undelivered[0]["detail"]["started"] is False
+
+
+def _retry_wake(tmp_path):
+    """A goal whose dispatch raised six hours ago, as the scheduler recorded it."""
+    service, backends, agent_id = _goal_owner(tmp_path)
+    backends.live = False
+    sent = []
+
+    def raised(session, text, request):
+        sent.append((request, text))
+        raise RuntimeError("claude spawn failed: claude binary went away")
+
+    real = db.now_ms
+    with pytest.MonkeyPatch.context() as earlier:
+        earlier.setattr(db, "now_ms", lambda: real() - STALE_AGE_MS)
+        plan = _arm(_goal())
+        assert task_goal_recovery.tick(raised, now=db.now_ms()) == 0
+    request, text = sent[0]
+    assert _continuation(plan)["state"] == "retry"
+    return service, backends, agent_id, plan, request, text
+
+
+def _never_closed_row(agent_id, request, text, *, later_turn_age_ms=5 * HOUR_MS):
+    """What the unfixed runtime left: the row queued, its turn opened and
+    never ended or settled, no spawn record. The agent has run other turns
+    since (or not, with ``later_turn_age_ms=None``)."""
+    start = db.now_ms() - STALE_AGE_MS + 47
+    turn_queue.enqueue(
+        queue_id=request, agent_id=agent_id, session="mike", text=text,
+        trace_id=request, client_msg_id=request, synthesize_audio=False,
+        origin="automation", sender_agent_id="")
+    db.conn().execute("UPDATE queued_turns SET enqueued_at=? WHERE queue_id=?", (start, request))
+    _turn(agent_id, request, start + 1)
+    if later_turn_age_ms is not None:
+        then = db.now_ms() - later_turn_age_ms
+        _turn(agent_id, "a-later-user-turn", then, ended=then + 60_000, settled=then + 60_000,
+              outcome="completed")
+    row = turn_queue.get(request)
+    assert turn_queue._launch_status(row) == "unknown"
+    assert turn_queue.pending_for_dispatch() == []
+
+
+def test_a_wake_row_whose_turn_never_closed_heals_once_the_agent_has_moved_on(tmp_path):
+    service, backends, agent_id, plan, request, text = _retry_wake(tmp_path)
+    other = _arm(_goal(title="A second goal of the same agent"))
+    _never_closed_row(agent_id, request, text)
+
+    assert _tick(service, offset_ms=HOUR_MS) == 2
+
+    assert turn_queue.status(request) == "cancelled"
+    requests = [_continuation(p)["request_id"] for p in (plan, other)]
+    assert request not in requests
+    assert sorted(turn_queue.status(r) for r in requests) == ["queued", "started"]
     assert [entry["detail"]["request_id"]
             for entry in _history(plan, "wake_undelivered")] == [request]
+
+
+@pytest.mark.parametrize("case", ["no-later-turn", "later-turn-just-started", "slot-held"])
+def test_an_open_turn_is_over_only_when_nothing_holds_it_and_the_agent_moved_on(
+        tmp_path, case):
+    service, backends, agent_id, plan, request, text = _retry_wake(tmp_path)
+    _never_closed_row(agent_id, request, text, later_turn_age_ms={
+        "no-later-turn": None, "later-turn-just-started": 30_000, "slot-held": 5 * HOUR_MS}[case])
+    if case == "slot-held":
+        _td._SLOTS.claim(agent_id, request)     # the runtime still owns this very turn
+
+    assert task_goal_recovery.tick(lambda *_: pytest.fail("woke"), now=db.now_ms()) == 0
+
+    assert turn_queue.status(request) == "queued"
+    assert turn_queue.dead_rows(live_trace=_td.owns_inflight_trace) == []
+    if case == "slot-held":
+        _td._SLOTS.release(agent_id, request)
+
+
+def test_a_parked_wake_stays_live_whatever_else_the_agent_opened(tmp_path, monkeypatch):
+    """The bound on the rule above: a later turn row of the same agent can
+    exist while the first is alive (a hook inside a running process mints a
+    new trace), so a later turn alone proves nothing. A turn that runs or is
+    parked holds its agent's slot until it finishes; that is what decides."""
+    host = _exhausted_pool(tmp_path, monkeypatch)
+    plan, request = _parked_wake(host)
+    db.conn().execute("UPDATE turns SET started_at = started_at - ? WHERE trace_id = ?",
+                      (2 * HOUR_MS, request))
+    then = db.now_ms() - HOUR_MS
+    _turn(host.agent_id, "hook-minted-trace", then, ended=then + 1000, settled=then + 1000,
+          outcome="completed")
+    assert _td.owns_inflight_trace(host.agent_id, request)
+
+    assert _tick(host.service, offset_ms=HOUR_MS) == 0
+
+    assert turn_queue.status(request) == "queued"
+    _end_park(host, account_available=True)       # and it still runs when an account is back
+    assert [call["trace_id"] for call in _wakes(host.backends)] == [request]
+
+
+def test_an_open_turn_that_was_spawned_is_left_to_its_receipt(tmp_path):
+    """A spawn was recorded for it: it ran, and may still. Its receipt is
+    converged by the receipt reconciler, never retired as a wake that did
+    not start."""
+    service, backends, agent_id, plan, request, text = _retry_wake(tmp_path)
+    _never_closed_row(agent_id, request, text)
+    _state(agent_id, "thinking", db.now_ms() - STALE_AGE_MS + 60, {
+        "source": "pwa", "dispatch": "claude", "origin": "automation", "trace_id": request})
+    assert turn_queue._launch_status(turn_queue.get(request)) == "observed"
+
+    assert turn_queue.dead_rows(live_trace=lambda *_: False) == []
+
+
+def test_a_liveness_check_that_cannot_answer_leaves_the_row(tmp_path):
+    service, backends, agent_id, plan, request, text = _retry_wake(tmp_path)
+    _never_closed_row(agent_id, request, text)
+
+    def unreachable(_agent_id, _trace_id):
+        raise OSError("runtime socket is gone")
+
+    assert turn_queue.dead_rows(live_trace=unreachable) == []
+    assert turn_queue.dead_rows() == []            # no liveness source: open means open
+    assert [row["queue_id"] for row in turn_queue.dead_rows(
+        live_trace=lambda *_: False)] == [request]
+
+
+# --- the recovery budget ------------------------------------------------------
+
+
+def _every_wake_fails(service, backends, plan, messages, *, hours):
+    """Run the scheduler for ``hours`` with every wake failing at once: the
+    n-th wake on the n-th of ``messages``, repeating. Returns the minutes at
+    which wakes were dispatched and the minute the goal reached attention
+    (None if it never did)."""
+    if isinstance(messages, str):
+        messages = [messages]
+    dispatched, minute = [], None
+    for step in range(hours * 240 + 1):
+        offset = step * 15_000
+        if _tick(service, offset_ms=offset):
+            wakes = _wakes(backends)
+            assert len(wakes) == len(dispatched) + 1
+            real = db.now_ms
+            with pytest.MonkeyPatch.context() as later:
+                later.setattr(db, "now_ms", lambda: real() + offset)
+                wakes[-1]["on_error"](messages[len(dispatched) % len(messages)])
+            dispatched.append(round(offset / 60_000))
+            backends.live = False
+        if _continuation(plan)["state"] == "attention":
+            minute = round(offset / 60_000)
+            break
+    return dispatched, minute
+
+
+def test_a_wake_that_fails_for_lack_of_usage_does_not_use_the_recovery_budget(tmp_path):
+    service, backends, agent_id = _goal_owner(tmp_path)
+    backends.live = False
+    plan = _arm(_goal())                      # the default limit of five
+
+    dispatched, attention = _every_wake_fails(
+        service, backends, plan, "You've hit your session limit", hours=8)
+
+    assert attention is None, f"attention after {attention} minutes"
+    # Its backoff still grows, to an hour between tries.
+    assert dispatched[:7] == [0, 2, 6, 14, 30, 62, 122] and len(dispatched) >= 10
+    wake = _continuation(plan)
+    assert wake["state"] == "admitted" and wake["attempts"] == len(dispatched)
+    assert wake["capacity_failures"] == len(dispatched)
+    assert re.fullmatch(
+        r"Wake not delivered: no account with usage; next try \d\d:\d\d",
+        wake["reason"]), wake["reason"]
+    assert {entry["detail"]["code"] for entry in _history(plan, "wake_failed")} == {
+        "usage_limit"}
+
+    # The owner's next checkpoint starts both counts again.
+    current = task_plans.get(plan["plan_id"])
+    task_goal_state.mutate(
+        current["plan_id"], revision=current["revision"], action="checkpoint",
+        data={"progress": "Usage is back", "next_work": "Carry on",
+              "continuation": {"kind": "timer", "due_at": db.now_ms()}})
+    assert _tick(service, offset_ms=9 * HOUR_MS) == 1
+    fresh = _continuation(plan)
+    assert fresh["attempts"] == 1 and not fresh.get("capacity_failures")
+
+
+def test_other_failures_reach_attention_after_five_wakes_in_62_minutes(tmp_path):
+    """The figures docs/architecture/durable-goals.md gives."""
+    service, backends, agent_id = _goal_owner(tmp_path)
+    backends.live = False
+    plan = _arm(_goal())
+
+    dispatched, attention = _every_wake_fails(
+        service, backends, plan, "boom: the runner died", hours=3)
+
+    assert dispatched == [0, 2, 6, 14, 30] and attention == 62
+    assert "the last wake started and failed" in _continuation(plan)["reason"]
+
+
+def test_capacity_failures_between_others_do_not_shorten_the_budget(tmp_path):
+    service, backends, agent_id = _goal_owner(tmp_path)
+    backends.live = False
+    plan = task_plans.create(
+        session="mike", title="Finish the outcome", items=[{"id": "probe", "title": "Probe"}],
+        goal={"criteria": ["Verified result"], "limits": "No deployment", "enroll": True,
+              "recovery_limit": 2})
+    plan = _arm(plan)
+
+    dispatched, attention = _every_wake_fails(
+        service, backends, plan,
+        ["You've hit your session limit", "boom: the runner died"], hours=4)
+
+    # Two wakes that count, two that do not: four dispatched before attention.
+    assert len(dispatched) == 4 and attention is not None
+    wake = _continuation(plan)
+    assert (wake["attempts"], wake["capacity_failures"]) == (4, 2)
+
+
+def test_a_sign_in_failure_counts_and_attention_says_a_person_is_needed(tmp_path):
+    service, backends, agent_id = _goal_owner(tmp_path)
+    backends.live = False
+    plan = task_plans.create(
+        session="mike", title="Finish the outcome", items=[{"id": "probe", "title": "Probe"}],
+        goal={"criteria": ["Verified result"], "limits": "No deployment", "enroll": True,
+              "recovery_limit": 1})
+    plan = _arm(plan)
+    assert _tick(service) == 1
+    _wakes(backends)[0]["on_error"]("OAuth session expired; please run /login")
+    backends.live = False
+
+    assert _tick(service, offset_ms=HOUR_MS) == 0
+
+    stuck = _continuation(plan)
+    assert stuck["state"] == "attention"
+    assert "sign in" in stuck["reason"] and "person" in stuck["reason"]
+    assert _history(plan, "wake_failed")[0]["detail"]["code"] == "auth"
+
+
+# --- what the ledger says happened -----------------------------------------------
+
+
+def test_a_wake_that_ran_and_failed_is_recorded_as_failed_not_as_undelivered(tmp_path):
+    service, backends, agent_id = _goal_owner(tmp_path)
+    backends.live = False
+    plan = _arm(_goal())
+    assert _tick(service) == 1
+    request = _continuation(plan)["request_id"]
+    _wakes(backends)[0]["on_error"]("boom: the runner died")
+    backends.live = False
+
+    assert _tick(service) == 0
+
+    assert _history(plan, "wake_undelivered") == []
+    failed = _history(plan, "wake_failed")
+    assert [(e["detail"]["request_id"], e["detail"]["started"]) for e in failed] == [
+        (request, True)]
+    assert _continuation(plan)["reason"].startswith("Wake started and failed: ")
+    kinds = [tuple(row) for row in db.conn().execute(
+        "SELECT kind, actor_kind FROM goal_events WHERE plan_id=? AND kind LIKE 'wake_%' "
+        "AND kind <> 'wake_claim'", (plan["plan_id"],))]
+    assert kinds == [("wake_failed", "system")]
+
+
+def test_a_wake_refused_at_the_end_of_its_park_says_it_never_started(tmp_path, monkeypatch):
+    """The resume path used to report every refusal as "Agent process exited
+    unexpectedly" (runner_exit), though no process had run."""
+    host = _exhausted_pool(tmp_path, monkeypatch)
+    plan, request = _parked_wake(host)
+    spawn = host.backends.spawn_turn
+
+    def refuses(*_args, **_kwargs):
+        raise OSError("claude binary went away")
+
+    host.backends.spawn_turn = refuses
+    _end_park(host, account_available=True)
+    host.backends.spawn_turn = spawn
+
+    latest = agents_db.latest_state(host.agent_id)
+    assert latest["kind"] == AgentState.INTERRUPTED
+    assert latest["detail"]["reason"] == "not_started"
+    assert "exited unexpectedly" not in latest["detail"]["message"]
+    assert "claude binary went away" in latest["detail"]["error"]
+
+    assert _tick(host.service) == 0
+    undelivered = _history(plan, "wake_undelivered")
+    assert [(e["detail"]["request_id"], e["detail"]["started"], e["detail"]["code"])
+            for e in undelivered] == [(request, False, "not_started")]
+    assert _continuation(plan)["reason"].startswith("Wake did not start: ")
+    assert _history(plan, "wake_failed") == []
+
+
+def test_a_wake_that_completed_is_never_reported_though_its_row_was_retired(tmp_path):
+    service, backends, agent_id, plan, request, text = _admitted_wake(tmp_path)
+    start = db.now_ms() - STALE_AGE_MS + 47
+    turn_queue.enqueue(
+        queue_id=request, agent_id=agent_id, session="mike", text=text,
+        trace_id=request, client_msg_id=request, synthesize_audio=False,
+        origin="automation", sender_agent_id="")
+    _turn(agent_id, request, start, ended=start + 9000, settled=start + 9000, outcome="completed")
+    assert turn_queue.cancel(request)
+
+    _tick(service, offset_ms=HOUR_MS)
+
+    assert _history(plan, "wake_undelivered") == [] and _history(plan, "wake_failed") == []
