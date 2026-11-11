@@ -3,6 +3,9 @@ import importlib.util
 import pathlib
 
 from lib import agents, background_jobs
+from lib import turn_lifecycle
+from lib.protocol import AgentState
+from lib.turn_lifecycle import TurnEvent
 from tests.patching import patch_shared
 
 
@@ -100,6 +103,24 @@ def test_message_watch_style_registration_captures_worker_and_gates_delivery(
     assert agent_bg.main([
         "agent_bg.py", "_", "job-active", handle,
     ]) == 1
+
+
+def test_background_off_preserves_a_new_interactive_turn(tmp_path):
+    agent_id = agents.create_agent(
+        persona="Nadia", voice_id="voice", cwd=str(tmp_path), session="nadia-bg")
+
+    assert agent_bg.main(["agent_bg.py", "nadia-bg", "on", "Watching replies"]) == 0
+    assert turn_lifecycle.current_kind(agent_id) == AgentState.BACKGROUND
+    assert agent_bg.main(["agent_bg.py", "nadia-bg", "off"]) == 0
+    assert turn_lifecycle.current_kind(agent_id) == AgentState.IDLE
+
+    assert agent_bg.main(["agent_bg.py", "nadia-bg", "on", "Watching replies"]) == 0
+    turn_lifecycle.transition(agent_id, TurnEvent.PROMPT_ADMITTED, {"source": "pwa"})
+    assert turn_lifecycle.current_kind(agent_id) == AgentState.THINKING
+
+    assert agent_bg.main(["agent_bg.py", "nadia-bg", "off"]) == 0
+    assert turn_lifecycle.current_kind(agent_id) == AgentState.THINKING
+    assert agents.get_by_session("nadia-bg")["custom_status"] == ""
 
 
 def test_cancel_cleanup_handle_is_rejected_after_restart():
