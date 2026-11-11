@@ -104,6 +104,7 @@ class TurnEvent:
     COMPACTION_FINISHED = "compaction_finished"  # backend
     NOTIFICATION = "notification"                # hook: waiting on the user
     BACKGROUND_DECLARED = "background_declared"  # agent-declared out-of-band work
+    BACKGROUND_FINISHED = "background_finished"  # agent's out-of-band work ended
     HOOK_STOP = "hook_stop"                      # hook: Stop
     PROCESS_EXITED_OK = "process_exited_ok"      # dispatcher: clean result
     PROCESS_EXITED_FAILED = "process_exited_failed"  # dispatcher: gave up
@@ -124,9 +125,8 @@ class TurnEvent:
     # current state with new detail. Not an inferred change of state: the
     # target is whatever the agent is in now, and it needs a started agent.
     AUDIT_NOTED = "audit_noted"
-    # Compatibility shim for writers that have not adopted an event yet
-    # (`agents.record_state`). The kind is given explicitly and the edge is
-    # legal from every state, so behaviour is unchanged for those callers.
+    # Test-fixture writer: production callers report a named event instead.
+    # Tests use an explicit state to arrange a particular starting condition.
     RECORDED = "recorded"
 
     @classmethod
@@ -154,6 +154,7 @@ TRANSITIONS: dict[str, tuple[str, frozenset[str]]] = {
     # Claude Code nags about idleness from a settled turn too.
     TurnEvent.NOTIFICATION: (AgentState.WAITING, STARTED),
     TurnEvent.BACKGROUND_DECLARED: (AgentState.BACKGROUND, STARTED),
+    TurnEvent.BACKGROUND_FINISHED: (AgentState.IDLE, frozenset({AgentState.BACKGROUND})),
     TurnEvent.HOOK_STOP: (AgentState.DONE, ENDABLE),
     TurnEvent.PROCESS_EXITED_OK: (AgentState.DONE, ENDABLE),
     TurnEvent.PROCESS_EXITED_FAILED: (AgentState.INTERRUPTED, ENDABLE),
@@ -372,10 +373,10 @@ class TurnStateMachine:
                    ts: int | None = None, expect_trace: str | None = None,
                    anchor: int | None = None, s_open: int | None = None,
                    begun_at: int | None = None,
-                   _expected_busy_state: tuple[int, str] | None = None) -> Transition:
+                   _expected_busy_state: tuple[int, str] | None = None) -> Transition | None:
         """Apply ``event`` to ``agent_id`` and write its ``state_log`` row.
 
-        ``kind`` is only read for :attr:`TurnEvent.RECORDED`, the compatibility
+        ``kind`` is only read for :attr:`TurnEvent.RECORDED`, the test-fixture
         event whose target the caller names. ``force`` skips the legality
         check (repairs); ``ts`` back-dates the row (historical receipts).
         ``expect_trace`` selects the conditional write (``anchor``, ``s_open``):
@@ -383,6 +384,12 @@ class TurnStateMachine:
         causal baseline (a state_generation read when it decided to write);
         a traced non-terminal write is refused if its trace ended after it.
         """
+        if event == TurnEvent.BACKGROUND_FINISHED:
+            if (kind is not None or force or ts is not None or expect_trace is not None
+                    or anchor is not None or s_open is not None or begun_at is not None
+                    or _expected_busy_state is not None):
+                raise ValueError("background completion accepts only event detail")
+            return self._finish_background_if_current(agent_id, detail)
         if _expected_busy_state is not None:
             if (type(_expected_busy_state) is not tuple or len(_expected_busy_state) != 2
                     or type(_expected_busy_state[0]) is not int
@@ -499,6 +506,59 @@ class TurnStateMachine:
             agent_id=agent_id, event=event, from_state=from_state,
             to_state=target, ts=stamp, detail=detail, forced=force,
             state_id=int(cursor.lastrowid or 0))
+
+    def _finish_background_if_current(self, agent_id: str,
+                                      detail: dict[str, Any] | None = None) -> Transition | None:
+        """Return a still-background agent to IDLE, preserving newer work.
+
+        The background worker's ``off`` notification can race with a new
+        interactive turn. Check and write under one SQLite writer transaction
+        so a late cleanup cannot replace that turn's state with IDLE.
+        """
+        database = conn()
+        if database.in_transaction:
+            raise ValueError("background completion cannot use a caller transaction")
+        with _critical_write():
+            database.execute("BEGIN IMMEDIATE")
+            try:
+                row = database.execute(
+                    """SELECT kind FROM state_log WHERE agent_id = ?
+                       ORDER BY ts DESC, state_id DESC LIMIT 1""",
+                    (agent_id,),
+                ).fetchone()
+                from_state = str(row["kind"] or "") if row else NONE
+                if from_state != AgentState.BACKGROUND:
+                    database.execute("COMMIT")
+                    return None
+
+                event = TurnEvent.BACKGROUND_FINISHED
+                target = AgentState.IDLE
+                stamp = now_ms()
+                stored_detail = _detail_with_origin(agent_id, target, detail, stamp)
+                from . import agents as agents_db
+                cursor = database.execute(
+                    """INSERT INTO state_log (agent_id, runtime_id, ts, kind, detail)
+                       VALUES (?, ?, ?, ?, ?)""",
+                    (agent_id, agents_db.current_runtime_id(agent_id), stamp, target,
+                     json.dumps(stored_detail) if stored_detail else None),
+                )
+                _settle_turn(agent_id, event, target, stored_detail, stamp)
+                database.execute("COMMIT")
+            except BaseException:
+                if database.in_transaction:
+                    database.execute("ROLLBACK")
+                raise
+
+        from . import live_hub
+        live_hub.observe_transition(
+            agent_id, event, target,
+            {**(stored_detail or {}), "_state_id": int(cursor.lastrowid or 0)},
+        )
+        return Transition(
+            agent_id=agent_id, event=event, from_state=from_state,
+            to_state=target, ts=stamp, detail=stored_detail,
+            state_id=int(cursor.lastrowid or 0),
+        )
 
     def _write_unless_ended(self, agent_id: str, event: str, target: str,
                             detail: dict[str, Any] | None, runtime_id, stamp: int,
