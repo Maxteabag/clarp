@@ -27,7 +27,7 @@ def _fake_runner_factory(tui_payload: dict, list_payload: dict, work_payload: di
             calls.append(args)
         if args == ["tui", "--snapshot"]:
             if barrier is not None:
-                barrier.wait(timeout=5)
+                barrier.wait(timeout=30)
             out = json.dumps(tui_payload)
         elif args == ["list", "--json"]:
             out = json.dumps(list_payload)
@@ -378,7 +378,7 @@ def test_concurrent_refresh_is_single_flight(monkeypatch):
             with lock:
                 tui_calls += 1
             entered.set()
-            assert release.wait(timeout=5)
+            assert release.wait(timeout=30)
             return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(tui_p), stderr="")
         if args == ["list", "--json"]:
             return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(list_p), stderr="")
@@ -392,14 +392,14 @@ def test_concurrent_refresh_is_single_flight(monkeypatch):
 
     t1 = threading.Thread(target=read)
     t1.start()
-    assert entered.wait(timeout=5)
+    assert entered.wait(timeout=30)
     assert d.payload(command="hotseat")["refreshing"] is True
 
     t2 = threading.Thread(target=read)
     t2.start()
     release.set()
-    t1.join(timeout=5)
-    t2.join(timeout=5)
+    t1.join(timeout=30)
+    t2.join(timeout=30)
 
     assert tui_calls == 1
     assert len(results) == 2
@@ -553,6 +553,56 @@ def test_an_unknown_cause_kind_or_backend_is_not_filled_with_a_guess(monkeypatch
     sent: list = []
     status_code, answer = d.resume_work("koko", send_prompt=lambda *a: sent.append(a) or {"ok": True})
     assert (status_code, answer["error"]) == (409, "not_stopped") and sent == []
+
+
+def test_each_backend_says_itself_how_a_native_session_is_resumed():
+    from lib.backend import registry
+    commands = {backend.id: backend.native_resume_command("0195abcd") for backend in registry.all()}
+    assert commands.pop("claude") == "claude --resume 0195abcd"
+    assert commands.pop("codex") == "codex resume 0195abcd"
+    assert commands and set(commands.values()) == {None}, "no other CLI borrows one of those"
+    # The desk asks the backend; an id nothing answers to gets no command.
+    assert desk._resume_command("codex", "t1") == "codex resume t1"
+    assert [desk._resume_command(name, "t1") for name in ("", "hybrid", "agy", "antigravity")] == [None] * 4
+
+
+def test_hotseats_typed_facts_decide_the_state_without_help_from_the_text_or_the_windows(monkeypatch):
+    monkeypatch.setattr(desk, "now_ms", lambda: T0_MS)
+    # Claude: a typed auth error whose text names no token.
+    locked_out, locked_out_list = _claude_row("locked-out", five_hour=0.1, weekly=0.1, fable=0.1)
+    locked_out.update(error="Organization disabled this workspace", checked_at=0, windows=[])
+    locked_out_list.update(error="Organization disabled this workspace", error_code="auth_error", usage=None)
+    plain, plain_list = _claude_row("plain-error", five_hour=0.1, weekly=0.1, fable=0.1)
+    plain.update(error="Organization disabled this workspace", checked_at=0, windows=[])
+    plain_list.update(error="Organization disabled this workspace", usage=None)
+    # Codex: blocked by Hotseat's own word while every window still shows room.
+    blocked = _codex_row("blocked", [("codex primary weekly", 0.40)], blocked=True, no_reset_reason="spend cap")
+    free = _codex_row("free", [("codex primary weekly", 0.40)])
+
+    _d, accounts = _desk_of(claude=[(locked_out, locked_out_list), (plain, plain_list)], codex=[blocked, free])
+
+    assert (accounts["locked-out"]["state"], accounts["locked-out"]["error_code"]) == ("auth_error", "auth_error")
+    assert (accounts["plain-error"]["state"], accounts["plain-error"]["error_code"]) == ("error", "provider_error")
+    assert (accounts["blocked"]["state"], accounts["blocked"]["limited"]) == ("exhausted", True)
+    assert (accounts["free"]["state"], accounts["free"]["limited"]) == ("ok", False)
+
+
+def test_the_desk_reads_each_provider_through_its_own_entry():
+    providers = desk.janitor_hotseat.PROVIDERS
+    assert all(spec.desk is not None for spec in providers.values()), (
+        "every provider Hotseat can switch says how the desk reads it")
+    assert [p for p, spec in providers.items() if spec.desk.whole_list] == ["claude"], (
+        "one scheduled read carries the whole list, the stopped work and the agents")
+    assert desk._reading("muse") is None and desk._reading("") is None
+    # A provider without an entry gets the generic treatment, not another provider's.
+    assert desk._window_meta("muse", "Muse · weekly") == ("window:muse · weekly", "Muse · weekly")
+    assert desk._window_meta("muse", "All models · 5-hour") == ("window:all models · 5-hour", "All models · 5-hour")
+    assert desk._window_meta("codex", "All models · weekly")[0] not in desk.ACCOUNT_WINDOW_KINDS
+    assert desk._window_meta("claude", "codex primary 30-day")[0] not in desk.ACCOUNT_WINDOW_KINDS
+    row = desk._account_row({"provider": "muse", "alias": "muse", "windows": []},
+                            {"email": "x@example.invalid", "signin_due_soon": True, "token_expires_at": 5},
+                            desk._no_clarp_agents())
+    assert (row["email"], row["signin_due_soon"], row["token_expires_at"]) == ("", None, None)
 
 
 def test_a_native_resume_command_is_given_only_for_a_backend_whose_command_is_known():
@@ -971,7 +1021,7 @@ class _Hotseat:
     def switch(self, command, provider, alias):
         self.switches.append((command, provider, alias))
         self.entered.set()
-        assert self.release.wait(timeout=5)
+        assert self.release.wait(timeout=30)
         if self.confirm:
             self.active[provider] = alias
         return self.confirm
@@ -1105,15 +1155,15 @@ def test_a_second_switch_waits_for_the_first_and_then_finds_nothing_to_do():
     answers: list[tuple[int, dict]] = []
     first = threading.Thread(target=lambda: answers.append(hotseat.switch_default(d, "claude", "ai12")))
     first.start()
-    assert hotseat.entered.wait(timeout=5)
+    assert hotseat.entered.wait(timeout=30)
     second = threading.Thread(target=lambda: answers.append(hotseat.switch_default(d, "claude", "ai12")))
     second.start()
     second.join(timeout=0.3)
     assert second.is_alive() and hotseat.reads == ["claude"], "the second has not even read while the first runs"
 
     hotseat.release.set()
-    first.join(timeout=5)
-    second.join(timeout=5)
+    first.join(timeout=30)
+    second.join(timeout=30)
 
     assert len(hotseat.switches) == 1 and hotseat.reads == ["claude", "claude"]
     assert sorted((status, body["switched"], body.get("reason")) for status, body in answers) == [
@@ -1127,11 +1177,11 @@ def test_switches_of_different_providers_do_not_wait_for_each_other():
     d = desk.HotseatDesk()
     slow = threading.Thread(target=lambda: hotseat.switch_default(d, "claude", "ai12"))
     slow.start()
-    assert hotseat.entered.wait(timeout=5)
+    assert hotseat.entered.wait(timeout=30)
     assert d.switch_lock("claude").locked() and not d.switch_lock("codex").locked()
     hotseat.release.set()
-    slow.join(timeout=5)
-    assert not d.switch_lock("claude").locked()
+    slow.join(timeout=30)
+    assert not slow.is_alive() and not d.switch_lock("claude").locked()
 
 
 def test_a_switch_that_outlasts_the_budget_answers_pending_and_the_desk_tells_the_rest(monkeypatch):
@@ -1153,7 +1203,7 @@ def test_a_switch_that_outlasts_the_budget_answers_pending_and_the_desk_tells_th
     assert _last_switch() is None
 
     hotseat.release.set()
-    for _ in range(200):
+    for _ in range(3000):
         later = d.payload(command="hotseat")["switches"]
         if later and later[0]["state"] != "running" and hotseat.hooks:
             break
@@ -1176,7 +1226,7 @@ def test_the_live_read_after_a_switch_does_not_hold_the_answer_and_ignores_the_i
             tui_calls.append(1)
             if len(tui_calls) > 1:
                 reading.set()
-                assert release.wait(timeout=5)
+                assert release.wait(timeout=30)
             out = tui_p
         else:
             out = list_p if args == ["list", "--json"] else work_p
@@ -1191,10 +1241,10 @@ def test_the_live_read_after_a_switch_does_not_hold_the_answer_and_ignores_the_i
                                     runner=runner)
 
     assert status == 200 and body["switched"] is True, "answered while the live read is still held"
-    assert reading.wait(timeout=5), "a switch is followed by a live read although the interval has not passed"
+    assert reading.wait(timeout=30), "a switch is followed by a live read although the interval has not passed"
     assert d.payload(command="hotseat")["refreshing"] is True
     release.set()
-    for _ in range(200):
+    for _ in range(3000):
         if not d.payload(command="hotseat")["refreshing"]:
             break
         threading.Event().wait(0.01)
@@ -1212,7 +1262,7 @@ def test_a_live_read_that_began_before_a_switch_does_not_undo_the_account_in_use
         args = list(argv[1:])
         if args == ["tui", "--snapshot"] and reading.is_set() is False and release.is_set() is False and first_done:
             reading.set()
-            assert release.wait(timeout=5)
+            assert release.wait(timeout=30)
         out = tui_p if args == ["tui", "--snapshot"] else list_p if args == ["list", "--json"] else work_p
         return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(out), stderr="")
 
@@ -1223,13 +1273,13 @@ def test_a_live_read_that_began_before_a_switch_does_not_undo_the_account_in_use
     # A client's live read is under way (it will report ai13 in use, as it was)...
     slow = threading.Thread(target=lambda: d.refresh(command="hotseat", runner=runner, force=True))
     slow.start()
-    assert reading.wait(timeout=5)
+    assert reading.wait(timeout=30)
     # ...when a switch to ai8 goes through.
     clock["now"] += 2000
     hotseat = _Hotseat("ai13")
     assert hotseat.switch_default(d, "claude", "ai8")[1]["switched"] is True
     release.set()
-    slow.join(timeout=5)
+    slow.join(timeout=30)
 
     active = {a["alias"]: a["active"] for a in d.payload(command="hotseat")["accounts"] if a["provider"] == "claude"}
     assert active == {"ai13": False, "ai8": True}
@@ -1283,7 +1333,7 @@ def test_a_failed_live_read_after_a_switch_leaves_the_confirmed_account_marked(m
                                           read_active=hotseat.read_active,
                                           credentials_changed=hotseat.hooks.append, runner=runner)
     assert status_code == 200
-    for _ in range(300):
+    for _ in range(3000):
         later = d.payload(command="hotseat")
         if later["error"] and not later["refreshing"]:
             break

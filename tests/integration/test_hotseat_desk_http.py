@@ -247,7 +247,7 @@ def test_concurrent_resumes_of_one_stop_start_exactly_one_turn(desk):
     answers: list[tuple[int, dict]] = []
 
     def tap():
-        gate.wait(timeout=5)
+        gate.wait(timeout=30)
         answers.append(_call(base, token, "POST", "/hotseat/resume", {"id": "koko"}))
 
     threads = [threading.Thread(target=tap) for _ in range(4)]

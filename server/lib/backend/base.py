@@ -293,6 +293,12 @@ class Backend:
         """
         raise NotImplementedError(f"{self.id}: resume_target")
 
+    def native_resume_command(self, session_id: str) -> str | None:
+        """The command a person types in a terminal to resume a native session
+        of this CLI, for a client to show or copy. ``None`` when this CLI has
+        no such command the Host knows: nobody is offered another CLI's."""
+        return None
+
     def bind_new_session(self, agent_id: str, session: str, *,
                          uuid_factory: Callable[[], str] | None = None) -> str:
         """Pre-mint and bind the backend session id before the first spawn.

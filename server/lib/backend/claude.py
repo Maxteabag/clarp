@@ -841,6 +841,9 @@ class ClaudeBackend(Backend):
 
     # --- sessions and transcripts -----------------------------------------
 
+    def native_resume_command(self, session_id: str) -> str | None:
+        return f"claude --resume {session_id}"
+
     def resume_target(self, session_id: str, cwd: str,
                       home: pathlib.Path | None = None):
         """The transcript to resume from, or ``None`` for a ghost session.
