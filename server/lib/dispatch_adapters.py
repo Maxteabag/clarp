@@ -79,10 +79,8 @@ class DispatchAdapters:
     def _queue_holds(agent_id: str) -> bool:
         """A Stop paused the agent's queue, or work already waits in it: the
         janitor's rule (janitor_autonomy) for staying out with automation."""
-        from . import db, turn_queue
-        return turn_queue.is_paused(agent_id) or db.conn().execute(
-            "SELECT 1 FROM queued_turns WHERE agent_id = ?"
-            " AND status IN ('queued', 'claimed')", (agent_id,)).fetchone() is not None
+        from . import turn_queue
+        return turn_queue.holds_autonomous_wake(agent_id)
 
     # -- scheduler callbacks --------------------------------------------------
     # A tick's idle check cannot be atomic with the dispatch, so heartbeat and

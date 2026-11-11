@@ -1221,6 +1221,20 @@ def is_paused(agent_id: str) -> bool:
     return bool(row and row["paused"])
 
 
+def holds_autonomous_wake(agent_id: str) -> bool:
+    """True when a Stop paused the queue or work is already queued or claimed."""
+    row = db.conn().execute(
+        """SELECT
+               COALESCE((SELECT paused FROM queue_state_revisions WHERE agent_id = ?), 0)
+               OR EXISTS (
+                   SELECT 1 FROM queued_turns
+                    WHERE agent_id = ? AND status IN ('queued', 'claimed')
+               ) AS held""",
+        (agent_id, agent_id),
+    ).fetchone()
+    return bool(row and row["held"])
+
+
 STOP_GENERATION_KEY = "turn_queue.stop_generation."
 
 

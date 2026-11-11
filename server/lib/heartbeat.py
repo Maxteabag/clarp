@@ -502,18 +502,15 @@ class _AgentSnapshot:
     recent_activity: str = ""  # _recent_real_activity_reason's skip reason
 
 
-def _compacting(agent_id: str, session: str) -> bool:
-    from . import turn_dispatch
-    return bool(session) and turn_dispatch.live_work(agent_id, session=session).compacting
-
-
 def _gather_snapshot(agent: dict, now: float) -> _AgentSnapshot:
+    from . import wake_admission
     agent_id = agent["agent_id"]
+    busy, active, compacting = wake_admission.execution_busy_state(agent)
     return _AgentSnapshot(
         latest=agents_db.latest_state(agent_id) or {},
-        busy=bool(agents_db.is_busy(agent_id)),
-        active=bool(backends.active_handles(agent.get("backend"), agent_id)),
-        compacting=_compacting(agent_id, agent.get("session") or ""),
+        busy=busy,
+        active=active,
+        compacting=compacting,
         recent_activity=_recent_real_activity_reason(agent_id, now),
     )
 
@@ -707,20 +704,14 @@ def _last_real_message_activity_ms(agent_id: str) -> int:
 
 
 def _recent_real_activity_reason(agent_id: str, now: float) -> str:
-    quiet_period = _quiet_period_sec()
-    if quiet_period <= 0:
-        return ""
-    try:
-        last_ms = _last_real_message_activity_ms(agent_id)
-    except Exception as e:  # noqa: BLE001
-        log_exception("heartbeatQuietActivityFail", e, detail=agent_id)
-        return "activity-unknown"
-    if not last_ms:
-        return ""
-    age = now - (last_ms / 1000.0)
-    if age < quiet_period:
-        return f"recent-activity:{max(0, int(age))}s"
-    return ""
+    from . import wake_admission
+    return wake_admission.recent_real_activity_reason(
+        agent_id,
+        now=now,
+        quiet_period_sec=_quiet_period_sec(),
+        failure_event="heartbeatQuietActivityFail",
+        activity_ms_fn=_last_real_message_activity_ms,
+    )
 
 
 def _flooded(state: _HeartbeatState, now: float) -> bool:
