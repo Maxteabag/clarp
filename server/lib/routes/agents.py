@@ -184,6 +184,7 @@ class AgentRoutes:
             if not backends.is_valid_model(backend, model):
                 return self._json(400, {
          "error": "invalid model for backend", "backend": backend,
+         "valid_models": backends.known_models(backend),
      })
             update["model"] = model
         if "effort" in data:
