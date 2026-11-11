@@ -190,13 +190,43 @@ def _file_signature(path: Path) -> tuple[Any, ...]:
         stat = path.stat()
     except OSError:
         return (resolved, None)
-    digest = b""
-    if stat.st_size <= 262_144:
-        try:
-            digest = hashlib.sha256(path.read_bytes()).digest()
-        except OSError:
-            pass
-    return (resolved, stat.st_mtime_ns, stat.st_size, stat.st_ino, digest)
+    if stat.st_size > 262_144:
+        return (resolved, "oversize", stat.st_size)
+    try:
+        raw = path.read_bytes()
+    except OSError:
+        return (resolved, None)
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        payload = None
+    if isinstance(payload, dict):
+        tokens = payload.get("tokens")
+        api_key = payload.get("OPENAI_API_KEY")
+        if (isinstance(tokens, dict) and tokens.get("account_id")) or api_key:
+            account_id = tokens.get("account_id") if isinstance(tokens, dict) else None
+            return (
+                resolved,
+                "codex-auth",
+                account_id,
+                payload.get("auth_mode"),
+                hashlib.sha256(str(api_key or "").encode("utf-8")).digest(),
+            )
+        if any(k in payload for k in ("oauthAccount", "modelAccessCache", "additionalModelOptionsCache")):
+            oauth = payload.get("oauthAccount") if isinstance(payload.get("oauthAccount"), dict) else {}
+            scoped = json.dumps(
+                {
+                    "accountUuid": oauth.get("accountUuid"),
+                    "organizationUuid": oauth.get("organizationUuid"),
+                    "modelAccessCache": payload.get("modelAccessCache"),
+                    "additionalModelOptionsCache": payload.get("additionalModelOptionsCache"),
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+                default=str,
+            ).encode("utf-8")
+            return (resolved, "claude-cache", hashlib.sha256(scoped).digest())
+    return (resolved, "sha256", hashlib.sha256(raw).digest())
 
 
 def _auth_signature() -> tuple[tuple[str, tuple[Any, ...]], ...]:
@@ -928,10 +958,10 @@ def capability_catalog(*, force_refresh: bool = False) -> dict[str, Any]:
         current_signature = _auth_signature()
         monotonic_now = time.monotonic()
         with _cache_condition:
-            if not force_refresh and _cache is not None:
+            if not force_refresh and _cache is not None and len(_cache) > 2:
                 cached_at = _cache[0]
                 value = _cache[1]
-                cached_signature = _cache[2] if len(_cache) > 2 else current_signature
+                cached_signature = _cache[2]
                 if (monotonic_now - cached_at <= CACHE_TTL_SECONDS
                         and cached_signature == current_signature):
                     return copy.deepcopy(value)
@@ -942,21 +972,31 @@ def capability_catalog(*, force_refresh: bool = False) -> dict[str, Any]:
                 if _last_error_generation == waiting_for and _last_error is not None:
                     raise RuntimeError("provider capability refresh failed") \
                         from _last_error
-                if _cache is not None:
-                    cached_signature = _cache[2] if len(_cache) > 2 else current_signature
-                    if cached_signature == current_signature:
-                        return copy.deepcopy(_cache[1])
+                cached_snapshot = (
+                    (copy.deepcopy(_cache[1]), _cache[2])
+                    if _cache is not None and len(_cache) > 2
+                    else None
+                )
+                if cached_snapshot is not None:
+                    break
                 force_refresh = False
                 continue
             _refreshing = True
             _refresh_generation += 1
             generation = _refresh_generation
+            observed_signature = current_signature
+            cached_snapshot = None
             break
+
+        if cached_snapshot is not None:
+            if cached_snapshot[1] == _auth_signature():
+                return cached_snapshot[0]
+            force_refresh = False
+            continue
 
     # Never hold the condition lock around provider subprocesses. Whatever
     # happens, the refresh latch is released so waiters can never hang.
     try:
-        observed_signature = _auth_signature()
         value = _build_catalog(
             wall_time=time.time(), which=_resolve_executable, run=_run)
         stored_at = time.monotonic()
