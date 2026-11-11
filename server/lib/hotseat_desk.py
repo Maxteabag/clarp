@@ -235,6 +235,27 @@ def _run_json(command: str, args: list[str], timeout: int, *, runner=subprocess.
     return data
 
 
+def _resume_command(backend: str, item_id: str) -> str | None:
+    """The command that resumes a native session, for the backends whose
+    command is known. None for any other: a Claude command is not offered for
+    a session of something else."""
+    if backend == "codex":
+        return f"codex resume {item_id}"
+    if backend == "claude":
+        return f"claude --resume {item_id}"
+    return None
+
+
+def _carry_last_good(accounts: list[dict], previous) -> None:
+    """`last_good_checked_at` of an account whose check failed this time is the
+    one the stored desk had for it: when it was last known good."""
+    known = {(acc.get("provider"), acc.get("alias")): acc.get("last_good_checked_at")
+             for acc in previous or [] if isinstance(acc, dict)}
+    for acc in accounts:
+        if acc.get("last_good_checked_at") is None:
+            acc["last_good_checked_at"] = _int_ms(known.get((acc.get("provider"), acc.get("alias"))))
+
+
 def _rows_by_alias(rows) -> dict[str, dict]:
     return {row["alias"]: row for row in rows or []
             if isinstance(row, dict) and isinstance(row.get("alias"), str)}
@@ -271,14 +292,17 @@ def _clarp_block(list_data: dict | None) -> tuple[dict, list[dict]]:
     return summary, stopped
 
 
-def _account_row(raw: dict, claude_extra: dict, codex_extra: dict, clarp_agents: dict, *, observed_at: int) -> dict | None:
+def _account_row(raw: dict, claude_extra: dict, codex_extra: dict, clarp_agents: dict) -> dict | None:
     """One account of the desk: `raw` as `hotseat tui --snapshot` reports it,
     the extras `hotseat list --json` has for the same alias."""
     provider = str(raw.get("provider") or "").strip().lower()
     alias = str(raw.get("alias") or "").strip()
     if not provider or not alias:
         return None
-    checked_ms = _epoch_ms_from_seconds(raw.get("checked_at")) or observed_at
+    # When Hotseat checked this account, or None when it gave no time (a failed
+    # check, an account it never verified). Never the time of the read: that
+    # would date a number nobody dated.
+    checked_ms = _epoch_ms_from_seconds(raw.get("checked_at"))
     error = str(raw.get("error") or "").strip()
     no_reset_reason = str(raw.get("no_reset_reason") or "").strip()
 
@@ -351,6 +375,7 @@ def _account_row(raw: dict, claude_extra: dict, codex_extra: dict, clarp_agents:
         "profile_notes": [str(n) for n in (raw.get("profile_notes") or []) if isinstance(n, str) and n.strip()],
         "no_reset_reason": no_reset_reason,
         "checked_at": checked_ms,
+        "last_good_checked_at": None if error else checked_ms,
         "reset_credits": reset_credits,
         "reset_credits_error": str(raw.get("reset_credits_error") or ""),
         "access_expires_at": _int_ms(claude_extra.get("access_expires_at")),
@@ -373,7 +398,10 @@ def _account_row(raw: dict, claude_extra: dict, codex_extra: dict, clarp_agents:
 def _stopped_rows(stopped_raw: list[dict]) -> list[dict]:
     stopped_work: list[dict] = []
     for item in stopped_raw:
-        kind = str(item.get("kind") or "clarp")
+        # What Hotseat did not say stays unknown: a row of unknown kind is not
+        # continuable, and an unknown cause is not shown as a usage limit.
+        kind = item.get("kind") if item.get("kind") in ("clarp", "native") else None
+        cause = item.get("cause").strip() if isinstance(item.get("cause"), str) else ""
         item_id = str(item.get("id") or "").strip()
         if not item_id:
             continue
@@ -386,12 +414,10 @@ def _stopped_rows(stopped_raw: list[dict]) -> list[dict]:
                 "hard": str(readiness_raw["hard"]) if isinstance(readiness_raw.get("hard"), str) and readiness_raw["hard"] else None,
                 "warning": str(readiness_raw["warning"]) if isinstance(readiness_raw.get("warning"), str) and readiness_raw["warning"] else None,
             }
-        resume_cmd = None
-        if kind != "clarp":
-            resume_cmd = f"codex resume {item_id}" if backend == "codex" else f"claude --resume {item_id}"
+        resume_cmd = _resume_command(backend, item_id) if kind == "native" else None
         stopped_work.append({
             "kind": kind,
-            "cause": str(item.get("cause") or "usage_limit"),
+            "cause": cause or None,
             "pending": int(item.get("pending") or 0),
             "id": item_id,
             "name": str(item.get("name") or item_id),
@@ -429,7 +455,7 @@ def _build_desk_snapshot(
             continue
         alias = str(raw.get("alias") or "").strip()
         row = _account_row(raw, claude_by_alias.get(alias, {}), codex_by_alias.get(alias, {}),
-                           clarp_agents_summary, observed_at=observed_at)
+                           clarp_agents_summary)
         if row is not None:
             accounts.append(row)
 
@@ -443,9 +469,7 @@ def _build_desk_snapshot(
                 continue
             provider = str(item.get("provider") or "")
             can_resume = bool(item.get("can_resume"))
-            resume_cmd = None
-            if can_resume and not item.get("live"):
-                resume_cmd = f"codex resume {item_id}" if provider == "codex" else f"claude --resume {item_id}"
+            resume_cmd = _resume_command(provider, item_id) if can_resume and not item.get("live") else None
             recent_work.append({
                 "id": item_id,
                 "provider": provider,
@@ -541,6 +565,7 @@ def _fallback_accounts_from_status(status_payload: dict) -> tuple[list[dict], in
                 "profile_notes": [],
                 "no_reset_reason": "",
                 "checked_at": _int_ms(acc.get("last_good_observed_at")),
+                "last_good_checked_at": _int_ms(acc.get("last_good_observed_at")),
                 "reset_credits": None,
                 "reset_credits_error": "",
                 "access_expires_at": None,
@@ -579,8 +604,9 @@ def _serve_accounts(raw_accounts: list[dict], *, served_at: int, snapshot_stale:
             obs = _int_ms(w.get("observed_at"))
             # A window also ages on its own: the switcher's scheduled read
             # refreshes one provider's rows, the others keep their own time.
+            # One nobody can date is not served as current either.
             stale = (bool(w.get("stale")) or snapshot_stale
-                     or (obs is not None and served_at - obs > STALE_MS))
+                     or obs is None or served_at - obs > STALE_MS)
             if not no_reset and resets_at is not None and resets_at <= served_at and (obs is None or obs < resets_at):
                 used = None
                 stale = True
@@ -608,22 +634,30 @@ def _read_live(cmd: str, runner, observed_at: int) -> dict:
         fut_work = pool.submit(_run_json, cmd, ["bridge", "work"], WORK_TIMEOUT_S, runner=runner)
 
         tui_data = fut_tui.result()
+        sources = {"tui": "ok", "list": "ok", "work": "ok"}
         try:
             list_data = fut_list.result()
         except Exception as exc:  # noqa: BLE001
             log("hotseatDeskListPartial", f"error={type(exc).__name__}")
             list_data = None
+            sources["list"] = "failed"
         try:
             work_data = fut_work.result()
         except Exception as exc:  # noqa: BLE001
             log("hotseatDeskWorkPartial", f"error={type(exc).__name__}")
             work_data = None
+            sources["work"] = "failed"
 
     if isinstance(list_data, dict):
         hotseat_status.record_read("claude", list_data, observed_at=observed_at)
         if isinstance(list_data.get("codex"), dict):
             hotseat_status.record_read("codex", list_data["codex"], observed_at=observed_at)
-    return _build_desk_snapshot(tui_data, list_data, work_data, observed_at=observed_at)
+    snapshot = _build_desk_snapshot(tui_data, list_data, work_data, observed_at=observed_at)
+    # Which of the three reads this desk is made of answered. Without `list`
+    # the accounts lack sign-in clocks, blocked models and typed errors and
+    # there is no stopped work; without `work` there is no recent work.
+    snapshot["sources"] = sources
+    return snapshot
 
 
 def read_active_alias(command: str, provider: str, *, runner=subprocess.run) -> str | None:
@@ -806,6 +840,7 @@ class HotseatDesk:
         try:
             snapshot = _read_live(cmd, runner, now)
             with self._store_lock:
+                _carry_last_good(snapshot["accounts"], (_load_persisted() or {}).get("accounts"))
                 self._keep_switched_accounts(snapshot, now, janitor_hotseat.PROVIDERS)
                 settings_store.set_text(SNAPSHOT_KEY, json.dumps(snapshot, separators=(",", ":")))
                 settings_store.set_text(ERROR_KEY, "")
@@ -877,11 +912,16 @@ class HotseatDesk:
                         stored["would_use_sessions"] = int(clarp_agents["would_use_by_account"].get(alias, 0))
                     accounts.append(stored)
                     continue
-                accounts.append(_account_row(raw, row, row, clarp_agents, observed_at=now) or stored)
+                fresh = _account_row(raw, row, row, clarp_agents)
+                if fresh is not None and fresh["last_good_checked_at"] is None:
+                    fresh["last_good_checked_at"] = _int_ms(stored.get("last_good_checked_at"))
+                accounts.append(fresh or stored)
             snapshot["accounts"] = accounts
             self._keep_switched_accounts(snapshot, now if started_at is None else int(started_at), (provider,))
             if provider == "claude":
                 snapshot["observed_at"] = now
+                if isinstance(snapshot.get("sources"), dict):
+                    snapshot["sources"]["list"] = "ok"  # this read is the one `list` stands for
                 settings_store.set_text(ERROR_KEY, "")
             settings_store.set_text(SNAPSHOT_KEY, json.dumps(snapshot, separators=(",", ":")))
         return True
@@ -924,6 +964,7 @@ class HotseatDesk:
         switches = [record for p in janitor_hotseat.PROVIDERS
                     if (record := running.get(p) or _stored_switch(p))]
 
+        sources = persisted.get("sources") if persisted is not None and isinstance(persisted.get("sources"), dict) else None
         if persisted is not None:
             observed_at = _int_ms(persisted.get("observed_at"))
             stale = observed_at is None or (now - observed_at > STALE_MS) or bool(last_error)
@@ -956,6 +997,11 @@ class HotseatDesk:
             "refreshed": outcome == "ok",
             "refresh_throttled": outcome == "throttled",
             "next_refresh_at": self._next_refresh_at(persisted),
+            # Which of Hotseat's three reads the stored desk is made of answered
+            # ("ok" or "failed" for tui, list, work); null when no desk read is
+            # stored or it predates this field. `partial`: not all three did.
+            "sources": sources,
+            "partial": sources is None or any(sources.get(key) != "ok" for key in ("tui", "list", "work")),
             "installed": installed,
             "error": last_error,
             "errors": errors,
@@ -1149,8 +1195,9 @@ class HotseatDesk:
             return 400, {"ok": False, "error": "invalid_action"}
 
         if item_kind == "native":
-            prov = str(backend or "").strip().lower()
-            cmd = f"codex resume {target_id}" if prov == "codex" else f"claude --resume {target_id}"
+            cmd = _resume_command(str(backend or "").strip().lower(), target_id)
+            if cmd is None:
+                return _refusal("no_resume_command", "No resume command is known for this session's backend.")
             return 200, {
                 "ok": True,
                 "id": target_id,
