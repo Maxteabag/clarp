@@ -20,12 +20,14 @@ process group. Keep account credentials in the provider's own credential store.
 
 A selector may activate an account that serves only some of the requested
 models and say which: `{"available": true, "models": ["sonnet"]}`. The runtime
-then resumes only the turns whose model is in that list. A turn whose model is
-not in it has no saved account that offers it: it ends at once, visibly, with
-"No saved Claude account offers model X" (`account_plan`), and is not resumed
-to fail again. A `models` value that is not a list of strings, or that names
-none of the requested models, is no verdict. Without `models` the answer
-covers every requested model, as before.
+then resumes only the turns whose model is in that list. A model that is not in
+it is not served by the chosen account now: its quota for that model is spent
+(Claude's weekly limits are per model), its plan lacks it, or its probe failed.
+That says nothing about the other saved accounts, so such a turn is neither
+resumed nor ended. It stays parked in its own park (see below). A `models`
+value that is not a list of strings is no verdict; one that names none of the
+requested models keeps every turn parked for the next check. Without `models`
+the answer covers every requested model, as before.
 
 The local `claude-usage` skill supplies `scripts/auto_switch.py` for installations
 using `claude-switch-account` saved profiles. That helper checks saved account
@@ -55,10 +57,23 @@ validates stdin without switching accounts or making provider requests.
   when no other turn of the pool is running. Otherwise that one turn ends at
   once with the provider's sentence and nothing else is paused or stopped: the
   selector switches the machine's account while it probes, which must never
-  happen under turns that run fine. When a recovery does start for it and the
-  selector answers that no account serves the model, the turn stays paused for
-  three such answers (`PLAN_CHECKS`, about two minutes) and then ends; a plan
-  does not reset the way a usage window does.
+  happen under turns that run fine. When a recovery does start for it, the
+  turn stays paused until the selector has answered three times without its
+  model (`PLAN_CHECKS`, about two minutes: "no account", or a `models` list
+  that lacks it) and then ends with the provider's sentence from its own
+  failure; a plan does not reset the way a usage window does. No other turn
+  ends early.
+- Turns a `models` answer leaves out stay parked while the turns it covers
+  work. Their state reads "Waiting for a claude account that serves <model>;
+  the active one does not right now". For them nothing is done to the working
+  turns: none is stopped, and the selector, which switches the account, is not
+  run. A new turn for such a model waits with them instead of running into the
+  same limit; a new turn for a served model runs. Once a minute the runtime
+  looks again: a parked turn whose own park is 30 minutes old is released to
+  run and fail visibly with the provider's message, as the cap always did; and
+  when no turn of the pool is running, a recovery begins for the parked ones
+  and the selector is asked. A working turn that meets its own limit starts a
+  recovery as usual, and that one asks for the parked turns' models too.
 - A turn that fails on its account within two minutes of being resumed by a
   recovery (`RESUME_GRACE_SECONDS`) has not left its park; what happens next
   depends on the failure.
@@ -120,8 +135,9 @@ validates stdin without switching accounts or making provider requests.
   isolated dreaming subprocesses retain their separate lifecycles.
 
 `claudeAccountRecovery`, `claudeAccountWaiting`, `claudeAccountRecoveryFail`,
-`claudeAccountRecovered` and `claudeAccountUnserved` (turns ended because no
-saved account offers their model) log events explain recovery progress without
+`claudeAccountRecovered` (with how many stayed parked for which models) and
+`claudeAccountPlanEnded` (turns parked for their plan, ended after three
+answers without their model) log events explain recovery progress without
 credentials. The same coordinator and the same rules serve the Codex pool
 (`codex_account_switch_command`); its events carry the same names.
 The runtime status includes `claude_account_recovery` with `recovering` and waiting
