@@ -51,7 +51,12 @@ class AgentLifecycleService:
 
     def create(self, data: dict) -> AgentLifecycleResult:
         with self._create_lock:
-            return self._create_locked(data)
+            result, should_generate_avatar = self._create_locked(data)
+        if should_generate_avatar:
+            from . import persona_avatar_generation
+            persona_avatar_generation.start_best_effort(
+                result.persona, backend=result.backend)
+        return result
 
     def create_janitor(self, data: dict) -> AgentLifecycleResult:
         """Private creation path for the dedicated Janitor configuration API.
@@ -64,9 +69,12 @@ class AgentLifecycleService:
         if data.get("replace_sid"):
             raise AgentLifecycleError(400, "Use Janitor configure for an existing agent")
         with self._create_lock:
-            return self._create_locked(data, janitor=True)
+            result, _ = self._create_locked(data, janitor=True)
+        return result
 
-    def _create_locked(self, data: dict, *, janitor: bool = False) -> AgentLifecycleResult:
+    def _create_locked(
+        self, data: dict, *, janitor: bool = False
+    ) -> tuple[AgentLifecycleResult, bool]:
         """Parse the request, check the IO-backed collisions, persist, announce."""
         agents = load_agents(self.ctx.agents_path)
         parsed = AgentSpec.parse(
@@ -78,8 +86,12 @@ class AgentLifecycleService:
                                       extra=dict(parsed.extra))
         if parsed.reopen is not None:
             owner = parsed.reopen
-            return AgentLifecycleResult(
-                owner["session"], owner["persona"], owner["voice_id"], parsed.backend)
+            return (
+                AgentLifecycleResult(
+                    owner["session"], owner["persona"], owner["voice_id"], parsed.backend
+                ),
+                False,
+            )
         if parsed.recommendation:
             log(parsed.recommendation)
         spec = parsed if parsed.session else replace(
@@ -89,7 +101,7 @@ class AgentLifecycleService:
             backend=spec.backend, backend_session_id=resume_session_id,
             session=spec.session)
         agent = self._persist(spec, agents, resume_session_id)
-        if (
+        should_generate_avatar = bool(
             not janitor
             and data.get("anonymous") is not True
             and spec.avatar_raw is None
@@ -97,11 +109,8 @@ class AgentLifecycleService:
             and not spec.persona_definition.get("builtin")
             and not spec.persona_definition.get("avatar_path")
             and not spec.persona_definition.get("avatar_symbol")
-        ):
-            from . import persona_avatar_generation
-            persona_avatar_generation.start_best_effort(
-                spec.persona, backend=spec.backend)
-        return self._announce(spec, agent)
+        )
+        return self._announce(spec, agent), should_generate_avatar
 
     @staticmethod
     def _roster_view(agents: dict) -> RosterView:
@@ -125,7 +134,7 @@ class AgentLifecycleService:
             session_exists=agents_db.session_exists,
             contact_pool=lambda backend: [c["name"] for c in available_contacts(backend)],
             mint_contact=lambda backend: contact_minting.mint_contact(
-                backend, occupied_names=occupied)["name"],
+                backend, occupied_names=occupied, generate_avatar=False)["name"],
             resume_owner=agents_db.get_by_backend_session,
             resume_listed=lambda backend, cwd, sid: any(
                 item.get("id") == sid

@@ -472,6 +472,30 @@ def update_agent(agent_id: str, *, persona: str | None = None,
     )
 
 
+def sync_contact_avatar(persona_name: str, avatar_path: str) -> int:
+    """Fill ``avatar_path`` on agents using ``persona_name`` that have no custom avatar."""
+    name = (persona_name or "").strip()
+    path = (avatar_path or "").strip()
+    if not name or not path:
+        return 0
+    c = conn()
+    c.execute("BEGIN IMMEDIATE")
+    try:
+        changed = c.execute(
+            """UPDATE agents
+                  SET avatar_path = ?
+                WHERE persona = ? COLLATE NOCASE
+                  AND COALESCE(avatar_path, '') = ''
+                  AND COALESCE(avatar_symbol, '') = ''""",
+            (path, name),
+        ).rowcount
+        c.commit()
+        return int(changed)
+    except Exception:
+        c.rollback()
+        raise
+
+
 def record_path_usage(path: str) -> None:
     path = str(path or "").strip()
     if not path:
