@@ -138,6 +138,38 @@ def test_missing_prompt_becomes_empty_initial_prompt():
     assert seen["initial_prompt"] == "" and seen["language"] is None
 
 
+def test_transcribe_honors_beam_size_and_validates_positive_int(monkeypatch):
+    seen_beams: list[int] = []
+
+    class Model:
+        def transcribe(self, path, **kw):
+            seen_beams.append(kw["beam_size"])
+            return iter([]), None
+
+    monkeypatch.setattr(stt_worker, "_load", lambda req: Model())
+    code, out = _run(monkeypatch, [
+        json.dumps({"op": "load"}),
+        json.dumps({"op": "transcribe", "id": "default", "path": "/a.wav"}),
+        json.dumps({"op": "transcribe", "id": "four", "path": "/a.wav", "beam_size": 4}),
+        json.dumps({"op": "transcribe", "id": "clamped", "path": "/a.wav", "beam_size": 99}),
+        json.dumps({"op": "transcribe", "id": "zero", "path": "/a.wav", "beam_size": 0}),
+        json.dumps({"op": "transcribe", "id": "bool", "path": "/a.wav", "beam_size": True}),
+        json.dumps({"op": "transcribe", "id": "str", "path": "/a.wav", "beam_size": "3"}),
+        json.dumps({"op": "transcribe", "id": "after", "path": "/a.wav", "beam_size": 2}),
+        json.dumps({"op": "quit"}),
+    ])
+    assert code == 0
+    assert seen_beams == [1, 4, 8, 2]
+    by_id = {msg["id"]: msg for msg in out if "id" in msg}
+    assert by_id["default"] == {"id": "default", "segments": []}
+    assert by_id["four"] == {"id": "four", "segments": []}
+    assert by_id["clamped"] == {"id": "clamped", "segments": []}
+    assert "beam_size" in by_id["zero"]["error"]
+    assert "beam_size" in by_id["bool"]["error"]
+    assert "beam_size" in by_id["str"]["error"]
+    assert by_id["after"] == {"id": "after", "segments": []}
+
+
 def test_language_from_load_is_reused_for_every_transcribe(monkeypatch):
     seen = []
 
