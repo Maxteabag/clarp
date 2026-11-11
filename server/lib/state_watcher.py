@@ -37,12 +37,33 @@ def _emit(*a, **kw):
 _NOTIFY_STOP = object()
 
 
+def _public_detail(kind: str, raw: str | None):
+    detail = None
+    if raw:
+        try:
+            detail = json.loads(raw)
+        except json.JSONDecodeError:
+            detail = None
+    if (kind == AgentState.IDLE and isinstance(detail, dict)
+            and detail.get("reason") == "update_handoff"):
+        # Queue-only proof remains stored, never part of public state.
+        detail = dict(detail)
+        detail.pop("dispatch_not_started", None)
+        detail.pop("dispatch_not_started_through_turn_id", None)
+    elif (kind == AgentState.INTERRUPTED and isinstance(detail, dict)
+          and detail.get("dispatch_not_started") is True):
+        detail = dict(detail)
+        detail.pop("dispatch_not_started_turn_id", None)
+    return detail
+
+
 class StateLogWatcher:
     INTERVAL_SEC = SERVER_TIMING.state_watcher_poll_sec
 
     def __init__(self, stream):
         self.stream = stream
         self._last_id = 0
+        self._last_status: dict[str, str] = {}
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         # Completed-turn notification policy settles for up to
@@ -121,14 +142,25 @@ class StateLogWatcher:
                 user_notifications.event_payload(notification)))
             apns.on_user_notification(notification)
 
-    def _loop(self) -> None:
+    def prime(self) -> None:
+        """Record the current state_log tail and custom_status baseline."""
         from . import db
+        c = db.conn()
+        row = c.execute(
+            "SELECT COALESCE(MAX(state_id), 0) AS m FROM state_log"
+        ).fetchone()
+        self._last_id = int(row["m"]) if row else 0
+        self._last_status = {
+            str(r["agent_id"]): str(r["custom_status"] or "")
+            for r in c.execute(
+                "SELECT agent_id, custom_status FROM agents WHERE deleted_at IS NULL"
+            ).fetchall()
+        }
+
+    def _loop(self) -> None:
         # Start watching from the current tail — don't replay history.
         try:
-            row = db.conn().execute(
-                "SELECT COALESCE(MAX(state_id), 0) AS m FROM state_log"
-            ).fetchone()
-            self._last_id = int(row["m"]) if row else 0
+            self.prime()
         except Exception as e:
             log_exception("stateWatcherInitFail", e)
         while not self._stop.wait(self.INTERVAL_SEC):
@@ -139,7 +171,8 @@ class StateLogWatcher:
 
     def _poll_once(self) -> None:
         from . import db
-        cur = db.conn().execute(
+        c = db.conn()
+        cur = c.execute(
             """SELECT s.state_id, s.agent_id, s.ts, s.kind, s.detail,
                       a.persona, a.session, a.custom_status
                  FROM state_log s
@@ -149,25 +182,8 @@ class StateLogWatcher:
             (self._last_id,),
         )
         rows = cur.fetchall()
-        if not rows:
-            return
         for r in rows:
-            detail = None
-            if r["detail"]:
-                try:
-                    detail = json.loads(r["detail"])
-                except json.JSONDecodeError:
-                    detail = None
-            if (r["kind"] == AgentState.IDLE and isinstance(detail, dict)
-                    and detail.get("reason") == "update_handoff"):
-                # Queue-only proof remains stored, never part of public state.
-                detail = dict(detail)
-                detail.pop("dispatch_not_started", None)
-                detail.pop("dispatch_not_started_through_turn_id", None)
-            elif (r["kind"] == AgentState.INTERRUPTED and isinstance(detail, dict)
-                  and detail.get("dispatch_not_started") is True):
-                detail = dict(detail)
-                detail.pop("dispatch_not_started_turn_id", None)
+            detail = _public_detail(r["kind"], r["detail"])
             events.broadcast(self.stream, events.agent_state(
                 agent_id=r["agent_id"],
                 session=r["session"],
@@ -185,6 +201,7 @@ class StateLogWatcher:
                 ts=int(r["ts"]),
                 detail=detail,
             )))
+            self._last_status[str(r["agent_id"])] = str(r["custom_status"] or "")
             if r["kind"] == AgentState.DONE:
                 self._ensure_notify_worker()
                 self._notify_queue.put({
@@ -195,5 +212,47 @@ class StateLogWatcher:
                     "detail": detail,
                 })
             self._last_id = int(r["state_id"])
-        _emit("state_watcher", "broadcast",
-              detail={"count": len(rows), "last_id": self._last_id})
+        if rows:
+            _emit("state_watcher", "broadcast",
+                  detail={"count": len(rows), "last_id": self._last_id})
+        self._poll_status_changes(c)
+
+    def _poll_status_changes(self, c) -> None:
+        """Broadcast custom_status updates that occurred without a state_log row."""
+        live = c.execute(
+            """SELECT agent_id, persona, session, custom_status
+                 FROM agents
+                WHERE deleted_at IS NULL"""
+        ).fetchall()
+        live_ids = {str(a["agent_id"]) for a in live}
+        for stale_id in list(self._last_status):
+            if stale_id not in live_ids:
+                del self._last_status[stale_id]
+        for a in live:
+            agent_id = str(a["agent_id"])
+            status_text = str(a["custom_status"] or "")
+            if self._last_status.get(agent_id, "") == status_text:
+                continue
+            if c.execute(
+                "SELECT 1 FROM state_log WHERE agent_id = ? AND state_id > ? LIMIT 1",
+                (agent_id, self._last_id),
+            ).fetchone() is not None:
+                continue
+            self._last_status[agent_id] = status_text
+            latest = c.execute(
+                """SELECT kind, ts, detail FROM state_log
+                    WHERE agent_id = ?
+                    ORDER BY ts DESC, state_id DESC LIMIT 1""",
+                (agent_id,),
+            ).fetchone()
+            if latest is None:
+                continue
+            events.broadcast(self.stream, events.agent_state(
+                agent_id=agent_id,
+                session=a["session"],
+                persona=a["persona"],
+                kind=latest["kind"],
+                ts=int(latest["ts"]),
+                detail=_public_detail(latest["kind"], latest["detail"]),
+                status_text=status_text,
+            ))

@@ -31,9 +31,9 @@ sys.path.insert(0, os.environ.get(
     "CLARP_CODE_ROOT", os.environ.get(
         "CLARP_SHARE_DIR", str(pathlib.Path.home() / ".local/share/clarp"))))
 
-from lib import agents               # noqa: E402
-from lib.protocol import AgentState  # noqa: E402
+from lib import agents, turn_lifecycle               # noqa: E402
 from lib.status_labels import shorten_status_label  # noqa: E402
+from lib.turn_lifecycle import TurnEvent            # noqa: E402
 
 
 def job_handle(job: dict) -> str:
@@ -193,17 +193,35 @@ def main(argv: list[str]) -> int:
     if not a:
         print(f"agent_bg: no agent for session {session!r}", file=sys.stderr)
         return 1
-    kind = AgentState.BACKGROUND if mode == "on" else AgentState.IDLE
-    agents.set_custom_status(a["agent_id"], label if mode == "on" else "")
-    agents.record_state(a["agent_id"], kind, {"label": label} if label else None)
-    if mode == "on":
-        from lib import background_jobs
-        worker_pid, worker_token = background_jobs.current_worker_identity()
-        if worker_pid and worker_token:
-            background_jobs.heartbeat_jobs(
-                background_jobs.adopted_worker_job_ids(worker_pid, session),
-                worker_pid=worker_pid, worker_start_token=worker_token,
-            )
+    if mode == "off":
+        agents.set_custom_status(a["agent_id"], "")
+        turn_lifecycle.transition(a["agent_id"], TurnEvent.BACKGROUND_FINISHED)
+        return 0
+    if turn_lifecycle.current_kind(a["agent_id"]) == turn_lifecycle.NONE:
+        print(
+            f"agent_bg: cannot mark {session!r} background before its initial state is recorded",
+            file=sys.stderr,
+        )
+        return 1
+    previous_status = str(a.get("custom_status") or "")
+    agents.set_custom_status(a["agent_id"], label)
+    try:
+        turn_lifecycle.transition(
+            a["agent_id"],
+            TurnEvent.BACKGROUND_DECLARED,
+            {"label": label} if label else None,
+        )
+    except turn_lifecycle.IllegalTransition as exc:
+        agents.set_custom_status(a["agent_id"], previous_status)
+        print(f"agent_bg: {exc}", file=sys.stderr)
+        return 1
+    from lib import background_jobs
+    worker_pid, worker_token = background_jobs.current_worker_identity()
+    if worker_pid and worker_token:
+        background_jobs.heartbeat_jobs(
+            background_jobs.adopted_worker_job_ids(worker_pid, session),
+            worker_pid=worker_pid, worker_start_token=worker_token,
+        )
     return 0
 
 

@@ -65,6 +65,11 @@ tests/integration/test_server_di.py::test_a_turn_cannot_send_as_another_agent
 # Turn dispatch and lifecycle: the happy path, queue, stop, repair, restart
 tests/unit/test_turn_lifecycle.py
 --deselect=tests/unit/test_turn_lifecycle.py::test_every_legal_edge_writes_its_target
+tests/unit/test_agent_bg.py::test_background_off_preserves_a_new_interactive_turn
+tests/unit/test_agent_bg.py::test_background_off_targets_its_agents_latest_state
+tests/unit/test_agent_bg.py::test_background_off_after_done_broadcasts_status_clear_without_state_row_or_notification
+tests/unit/test_agent_bg.py::test_background_on_without_initial_state_has_a_clean_error
+tests/unit/test_agent_bg.py::test_background_finish_waits_for_writer_and_rechecks_agent_state
 tests/unit/test_turn_queue.py
 tests/unit/test_turn_slots.py
 tests/unit/test_stop_holds_queue.py

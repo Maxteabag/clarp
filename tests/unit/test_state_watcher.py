@@ -151,3 +151,41 @@ def test_state_watcher_stop_joins_notification_worker():
     watcher.stop()
 
     assert not worker.is_alive()
+
+
+def test_state_watcher_broadcasts_status_only_changes_without_state_rows():
+    rachel = agents_db.create_agent(
+        persona="Rachel", voice_id="V", cwd="/tmp", session="rachel")
+    mike = agents_db.create_agent(
+        persona="Mike", voice_id="V", cwd="/tmp", session="mike")
+    agents_db.record_state(rachel, "done", {"backend_session_id": "bs"})
+    agents_db.record_state(mike, "thinking", {"source": "pwa"})
+
+    stream = FakeStream()
+    watcher = StateLogWatcher(stream)
+    watcher.prime()
+
+    watcher._poll_once()
+    assert stream.events == []
+
+    agents_db.set_custom_status(rachel, "Reviewing")
+    watcher._poll_once()
+
+    assert len(stream.events) == 1
+    assert stream.events[0]["type"] == SSEType.AGENT_STATE
+    assert stream.events[0]["agent_id"] == rachel
+    assert stream.events[0]["kind"] == "done"
+    assert stream.events[0]["detail"] == {"backend_session_id": "bs"}
+    assert stream.events[0]["status_text"] == "Reviewing"
+    assert watcher._notify_queue.unfinished_tasks == 0
+
+    stream.events.clear()
+    agents_db.set_custom_status(rachel, "")
+    watcher._poll_once()
+
+    assert len(stream.events) == 1
+    assert stream.events[0]["type"] == SSEType.AGENT_STATE
+    assert stream.events[0]["agent_id"] == rachel
+    assert stream.events[0]["kind"] == "done"
+    assert stream.events[0]["status_text"] == ""
+    assert watcher._notify_queue.unfinished_tasks == 0

@@ -162,21 +162,64 @@ def test_unlaunched_receipt_is_back_dated_before_newer_state(tmp_path):
 def test_no_server_module_writes_state_without_an_event():
     """Rule 4: production writers name an event; record_state is for fixtures."""
     import ast
-    server = pathlib.Path(__file__).resolve().parents[2] / "server"
-    callers = []
-    for path in sorted(server.rglob("*.py")):
-        tree = ast.parse(path.read_text(), filename=str(path))
-        for func in ast.walk(tree):
-            if not isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                continue
-            for node in ast.walk(func):
-                if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
-                        and node.func.attr in {"record_state", "record"}
-                        and isinstance(node.func.value, ast.Name)
-                        and node.func.value.id in {"agents", "agents_db", "turn_lifecycle"}):
-                    callers.append(f"{path.relative_to(server)}:{func.name}")
+    root = pathlib.Path(__file__).resolve().parents[2]
+    callers: list[str] = []
+
+    def scan(node: ast.AST, rel: str, scope: str) -> None:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            scope = node.name
+        if isinstance(node, ast.Call):
+            func = node.func
+            if (isinstance(func, ast.Attribute)
+                    and func.attr in {"record_state", "record"}
+                    and isinstance(func.value, ast.Name)
+                    and func.value.id in {"agents", "agents_db", "turn_lifecycle"}):
+                callers.append(f"{rel}:{scope}")
+            elif isinstance(func, ast.Name) and func.id == "record_state":
+                callers.append(f"{rel}:{scope}")
+        elif (isinstance(node, ast.Attribute)
+              and node.attr == "RECORDED"
+              and isinstance(node.value, ast.Name)
+              and node.value.id == "TurnEvent"
+              and rel != "server/lib/turn_lifecycle.py"):
+            callers.append(f"{rel}:{scope}")
+        for child in ast.iter_child_nodes(node):
+            scan(child, rel, scope)
+
+    for dirname in ("server", "scripts", "bin", "plugin", "skills"):
+        base = root / dirname
+        if not base.exists():
+            continue
+        for path in sorted(base.rglob("*.py")):
+            tree = ast.parse(path.read_text(), filename=str(path))
+            scan(tree, path.relative_to(root).as_posix(), "<module>")
     # The fixture wrapper itself delegates to turn_lifecycle.record.
-    assert callers == ["lib/agents.py:record_state"], callers
+    assert callers == ["server/lib/agents.py:record_state"], callers
+
+
+def test_background_finished_guard_rejects_repairs_and_caller_transactions(tmp_path):
+    agent_id = _agent(tmp_path, "bg-guard")
+    _put(agent_id, AgentState.BACKGROUND)
+    before = _rows(agent_id)
+    for bad_kwargs in (
+        {"force": True},
+        {"ts": 123},
+        {"kind": AgentState.IDLE},
+        {"expect_trace": "T"},
+        {"begun_at": 1},
+    ):
+        with pytest.raises(ValueError, match="background completion"):
+            turn_lifecycle.transition(agent_id, TurnEvent.BACKGROUND_FINISHED, **bad_kwargs)
+    con = db.conn()
+    con.execute("BEGIN IMMEDIATE")
+    try:
+        with pytest.raises(ValueError, match="caller transaction"):
+            turn_lifecycle.transition(agent_id, TurnEvent.BACKGROUND_FINISHED)
+        assert con.in_transaction
+    finally:
+        con.execute("ROLLBACK")
+    assert _rows(agent_id) == before
+    assert turn_lifecycle.current_kind(agent_id) == AgentState.BACKGROUND
 
 
 def test_audit_note_repeats_the_current_state(tmp_path):

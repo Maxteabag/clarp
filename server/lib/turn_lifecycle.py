@@ -104,6 +104,7 @@ class TurnEvent:
     COMPACTION_FINISHED = "compaction_finished"  # backend
     NOTIFICATION = "notification"                # hook: waiting on the user
     BACKGROUND_DECLARED = "background_declared"  # agent-declared out-of-band work
+    BACKGROUND_FINISHED = "background_finished"  # agent-declared out-of-band work done
     HOOK_STOP = "hook_stop"                      # hook: Stop
     PROCESS_EXITED_OK = "process_exited_ok"      # dispatcher: clean result
     PROCESS_EXITED_FAILED = "process_exited_failed"  # dispatcher: gave up
@@ -124,9 +125,8 @@ class TurnEvent:
     # current state with new detail. Not an inferred change of state: the
     # target is whatever the agent is in now, and it needs a started agent.
     AUDIT_NOTED = "audit_noted"
-    # Compatibility shim for writers that have not adopted an event yet
-    # (`agents.record_state`). The kind is given explicitly and the edge is
-    # legal from every state, so behaviour is unchanged for those callers.
+    # Compatibility shim for test fixtures (`agents.record_state`). Production
+    # writers must name a real TurnEvent.
     RECORDED = "recorded"
 
     @classmethod
@@ -154,6 +154,7 @@ TRANSITIONS: dict[str, tuple[str, frozenset[str]]] = {
     # Claude Code nags about idleness from a settled turn too.
     TurnEvent.NOTIFICATION: (AgentState.WAITING, STARTED),
     TurnEvent.BACKGROUND_DECLARED: (AgentState.BACKGROUND, STARTED),
+    TurnEvent.BACKGROUND_FINISHED: (AgentState.IDLE, frozenset({AgentState.BACKGROUND})),
     TurnEvent.HOOK_STOP: (AgentState.DONE, ENDABLE),
     TurnEvent.PROCESS_EXITED_OK: (AgentState.DONE, ENDABLE),
     TurnEvent.PROCESS_EXITED_FAILED: (AgentState.INTERRUPTED, ENDABLE),
@@ -372,7 +373,7 @@ class TurnStateMachine:
                    ts: int | None = None, expect_trace: str | None = None,
                    anchor: int | None = None, s_open: int | None = None,
                    begun_at: int | None = None,
-                   _expected_busy_state: tuple[int, str] | None = None) -> Transition:
+                   _expected_busy_state: tuple[int, str] | None = None) -> Transition | None:
         """Apply ``event`` to ``agent_id`` and write its ``state_log`` row.
 
         ``kind`` is only read for :attr:`TurnEvent.RECORDED`, the compatibility
@@ -382,7 +383,17 @@ class TurnStateMachine:
         see :meth:`_conditional_transition`. ``begun_at`` is the caller's
         causal baseline (a state_generation read when it decided to write);
         a traced non-terminal write is refused if its trace ended after it.
+        :attr:`TurnEvent.BACKGROUND_FINISHED` settles ``BACKGROUND`` to ``IDLE``
+        under ``BEGIN IMMEDIATE`` and returns ``None`` if another state already
+        superseded ``BACKGROUND``.
         """
+        if event == TurnEvent.BACKGROUND_FINISHED:
+            if (force is not False or _expected_busy_state is not None
+                    or any(value is not None for value in
+                           (kind, ts, expect_trace, anchor, s_open, begun_at))):
+                raise ValueError("background completion accepts only event detail")
+            if conn().in_transaction:
+                raise ValueError("background completion cannot use a caller transaction")
         if _expected_busy_state is not None:
             if (type(_expected_busy_state) is not tuple or len(_expected_busy_state) != 2
                     or type(_expected_busy_state[0]) is not int
@@ -431,7 +442,9 @@ class TurnStateMachine:
                 target = self.table[event][0]
             except KeyError:
                 raise ValueError(f"unknown turn event: {event}") from None
-        if not force and not self.is_legal(from_state, event):
+        if event == TurnEvent.BACKGROUND_FINISHED:
+            from_state = AgentState.BACKGROUND
+        elif not force and not self.is_legal(from_state, event):
             self._refuse(agent_id, event, from_state, target)
             raise IllegalTransition(agent_id, event, from_state, target)
         if (event == TurnEvent.SPAWN_STARTED and not force and ts is None and trace
@@ -476,6 +489,8 @@ class TurnStateMachine:
                         **({"_expected_busy_state": _expected_busy_state}
                            if _expected_busy_state is not None else {}))
                 cursor, trace, stamp = db.retry_locked(write)
+                if cursor is None:
+                    return None
                 _after_settle(agent_id, event, target, trace)
             elif late_fence is not None and target not in TERMINAL:
                 cursor = self._write_unless_ended(agent_id, event, target, detail, runtime_id,
@@ -547,6 +562,17 @@ class TurnStateMachine:
         database = conn()
         database.execute("BEGIN IMMEDIATE")
         try:
+            if event == TurnEvent.BACKGROUND_FINISHED:
+                latest = database.execute(
+                    """SELECT kind, ts FROM state_log WHERE agent_id = ?
+                       ORDER BY ts DESC, state_id DESC LIMIT 1""",
+                    (agent_id,)).fetchone()
+                if latest is None or latest["kind"] != AgentState.BACKGROUND:
+                    database.execute("COMMIT")
+                    return None, None, stamp
+                stamp = max(stamp, int(latest["ts"] or 0), now_ms())
+                recheck = None
+                own_since = None
             if _expected_busy_state is not None:
                 latest = database.execute(
                     """SELECT state_id,kind FROM state_log WHERE agent_id = ?
@@ -953,7 +979,7 @@ def transition(agent_id: str, event: str, detail: dict[str, Any] | None = None,
                ts: int | None = None, expect_trace: str | None = None,
                anchor: int | None = None, s_open: int | None = None,
                begun_at: int | None = None,
-               _expected_busy_state: tuple[int, str] | None = None) -> Transition:
+               _expected_busy_state: tuple[int, str] | None = None) -> Transition | None:
     return MACHINE.transition(agent_id, event, detail, kind=kind, force=force,
                               ts=ts, expect_trace=expect_trace, anchor=anchor,
                               s_open=s_open, begun_at=begun_at,
