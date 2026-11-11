@@ -6,11 +6,14 @@ import subprocess
 import threading
 from types import SimpleNamespace
 
+import pytest
+
 from lib import (
     agents,
     background_job_watcher,
     background_jobs,
     config,
+    contact_assignment,
     contact_minting,
     events,
     persona_avatar_generation,
@@ -19,6 +22,8 @@ from lib import (
     service_manager,
     snapshot,
 )
+from lib.agent_lifecycle import AgentLifecycleService
+from lib.routes.personas import PersonaRoutes
 from tests.patching import patch_shared
 
 
@@ -59,16 +64,7 @@ def test_mint_contact_is_available_immediately_and_avatar_arrives_in_background(
     tmp_path, monkeypatch
 ):
     raw_png = _sample_1024_png(tmp_path)
-    monkeypatch.setattr(
-        config, "load",
-        lambda: SimpleNamespace(
-            openai_key=lambda: "sk-test",
-            cartesia_voices={},
-            roster=config.DEFAULT_ROSTER,
-            cartesia_voice_for=lambda name: config.DEFAULT_CARTESIA_VOICES.get(name, ""),
-            gemini_voice_for=lambda _name: "",
-        ),
-    )
+    _stub_cfg(monkeypatch)
     launched: list[list[str]] = []
     monkeypatch.setattr(
         service_manager, "launch_detached",
@@ -134,16 +130,7 @@ def test_mint_contact_is_available_immediately_and_avatar_arrives_in_background(
 
 
 def test_background_avatar_never_overwrites_manual_user_avatar(tmp_path, monkeypatch):
-    monkeypatch.setattr(
-        config, "load",
-        lambda: SimpleNamespace(
-            openai_key=lambda: "sk-test",
-            cartesia_voices={},
-            roster=config.DEFAULT_ROSTER,
-            cartesia_voice_for=lambda name: config.DEFAULT_CARTESIA_VOICES.get(name, ""),
-            gemini_voice_for=lambda _name: "",
-        ),
-    )
+    _stub_cfg(monkeypatch)
     row = personas.create(name="Clara", avatar_symbol="sparkles")
     result = persona_avatar_generation.generate_for_persona(
         row["persona_id"],
@@ -152,3 +139,474 @@ def test_background_avatar_never_overwrites_manual_user_avatar(tmp_path, monkeyp
     )
     assert result["avatar_symbol"] == "sparkles"
     assert result["avatar_path"] == ""
+
+
+def _stub_cfg(
+    monkeypatch,
+    *,
+    enabled: bool = True,
+    daily_limit: int = 20,
+    max_attempts: int = 3,
+):
+    monkeypatch.setattr(
+        config,
+        "load",
+        lambda: SimpleNamespace(
+            openai_key=lambda: "sk-test",
+            contact_avatar_generation=enabled,
+            contact_avatar_daily_limit=daily_limit,
+            contact_avatar_max_attempts=max_attempts,
+            cartesia_voices={},
+            roster=config.DEFAULT_ROSTER,
+            cartesia_voice_for=lambda name: config.DEFAULT_CARTESIA_VOICES.get(name, ""),
+            gemini_voice_for=lambda _name: "",
+            read_global_mcp_servers=lambda: {},
+        ),
+    )
+
+
+def test_builtin_and_existing_avatar_contacts_never_enqueue_or_generate(
+    tmp_path, monkeypatch
+):
+    _stub_cfg(monkeypatch)
+    launched: list[list[str]] = []
+    monkeypatch.setattr(
+        service_manager,
+        "launch_detached",
+        lambda command, **_kwargs: (launched.append(list(command)) or True, ""),
+    )
+    personas.ensure_builtins()
+    mike = personas.get("Mike")
+    assert mike is not None and mike["builtin"] == 1
+    assert mike["avatar_path"] == "" and mike["avatar_symbol"] == ""
+
+    assert persona_avatar_generation.start_best_effort("Mike") is None
+    unchanged_mike = persona_avatar_generation.generate_for_persona(
+        mike["persona_id"],
+        request=lambda **_kwargs: (_ for _ in ()).throw(AssertionError("builtin paid call")),
+    )
+    assert unchanged_mike["avatar_path"] == ""
+
+    with_symbol = personas.create(name="Symbol Custom", avatar_symbol="bolt")
+    assert persona_avatar_generation.start_best_effort(with_symbol["name"]) is None
+
+    raw_png = _sample_1024_png(tmp_path)
+    import base64
+    with_photo = personas.create(
+        name="Photo Custom",
+        avatar_base64=base64.b64encode(
+            persona_avatar_generation._normalize_avatar_jpeg(raw_png)
+        ).decode("ascii"),
+    )
+    assert with_photo["avatar_path"] != ""
+    assert persona_avatar_generation.start_best_effort(with_photo["name"]) is None
+    assert launched == []
+
+
+def test_active_and_succeeded_jobs_coalesce_without_relaunching(monkeypatch):
+    _stub_cfg(monkeypatch)
+    launched: list[list[str]] = []
+    monkeypatch.setattr(
+        service_manager,
+        "launch_detached",
+        lambda command, **_kwargs: (launched.append(list(command)) or True, ""),
+    )
+    t0 = 1_800_000_000_000
+    monkeypatch.setattr("lib.db.now_ms", lambda: t0)
+    row = personas.create(name="Coalesce Clara")
+
+    first = persona_avatar_generation.start_best_effort(row["name"], now_ms=t0)
+    assert first is not None and first["status"] == "queued"
+    assert len(launched) == 1
+    assert background_jobs.count_launches_since("persona-avatar", since_ms=0) == 1
+
+    # Duplicate call while queued returns the active job without spawning a second unit
+    # or recording an extra queued launch event against the daily cap.
+    monkeypatch.setattr("lib.db.now_ms", lambda: t0 + 500)
+    second = persona_avatar_generation.start_best_effort(row["name"], now_ms=t0 + 500)
+    assert second is not None and second["job_id"] == first["job_id"]
+    assert second["revision"] == first["revision"]
+    assert len(launched) == 1
+    assert background_jobs.count_launches_since("persona-avatar", since_ms=0) == 1
+
+    # Duplicate call while running also coalesces without adding queued launch events.
+    patch_shared(monkeypatch, background_jobs, "process_start_token", lambda _pid: "boot:1")
+    patch_shared(monkeypatch, background_jobs, "worker_is_alive", lambda _pid, _tok: True)
+    monkeypatch.setattr("lib.db.now_ms", lambda: t0 + 1_000)
+    background_jobs.start(
+        first["job_id"], generation=1, worker_pid=4242, worker_start_token="boot:1"
+    )
+    third = persona_avatar_generation.start_best_effort(row["name"], now_ms=t0 + 1_500)
+    assert third is not None and third["status"] == "running"
+    assert len(launched) == 1
+    assert background_jobs.count_launches_since("persona-avatar", since_ms=0) == 1
+
+    # Once succeeded, start_best_effort does not re-run even hours past retry backoff
+    # when avatar_path is still empty (e.g. user cleared/switched avatar mid-flight).
+    t_done = t0 + 2_000
+    monkeypatch.setattr("lib.db.now_ms", lambda: t_done)
+    background_jobs.finish(
+        first["job_id"],
+        generation=1,
+        status="succeeded",
+        worker_pid=4242,
+        worker_start_token="boot:1",
+    )
+    assert personas.get(row["name"])["avatar_path"] == ""
+    t_hours_later = t_done + 2 * 60 * 60 * 1000
+    monkeypatch.setattr("lib.db.now_ms", lambda: t_hours_later)
+    assert persona_avatar_generation.start_best_effort(row["name"], now_ms=t_hours_later) is None
+    assert len(launched) == 1
+    assert background_jobs.count_launches_since("persona-avatar", since_ms=0) == 1
+
+
+def test_lifecycle_skips_janitor_anonymous_and_builtin_and_releases_lock_and_api_key(
+    tmp_path, monkeypatch
+):
+    _stub_cfg(monkeypatch)
+    monkeypatch.setattr(config, "read_global_mcp_servers", lambda: {})
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-env-secret-must-not-leak")
+    monkeypatch.setenv("CLAUDE_PWA_DB", str(tmp_path / "inherited.db"))
+
+    launches: list[tuple[list[str], dict, bool]] = []
+
+    def spy_launch(command, **kwargs):
+        lock_free_on_other_thread = False
+
+        def probe():
+            nonlocal lock_free_on_other_thread
+            acquired = AgentLifecycleService._create_lock.acquire(blocking=False)
+            if acquired:
+                lock_free_on_other_thread = True
+                AgentLifecycleService._create_lock.release()
+
+        t = threading.Thread(target=probe)
+        t.start()
+        t.join()
+        launches.append((list(command), dict(kwargs.get("environment") or {}), lock_free_on_other_thread))
+        return True, ""
+
+    monkeypatch.setattr(service_manager, "launch_detached", spy_launch)
+
+    personas.ensure_builtins()
+    janitor_contact = personas.create(name="Janitor Custom")
+    ctx = SimpleNamespace(
+        agents_path=tmp_path / "agents.json",
+        stream=SimpleNamespace(broadcast=lambda _ev: None),
+        speak_announcement=lambda *_a, **_kw: None,
+    )
+    svc = AgentLifecycleService(ctx)
+
+    # 1. Janitor creation never triggers avatar generation.
+    svc.create_janitor({"name": janitor_contact["name"], "cwd": str(tmp_path), "backend": "claude"})
+    assert launches == []
+    assert background_jobs.count_launches_since("persona-avatar", since_ms=0) == 0
+
+    # 2. Anonymous session creation never triggers avatar generation even if name is supplied.
+    anon = svc.create({
+        "anonymous": True,
+        "name": janitor_contact["name"],
+        "cwd": str(tmp_path),
+        "backend": "codex",
+    })
+    assert launches == []
+    assert background_jobs.count_launches_since("persona-avatar", since_ms=0) == 0
+
+    # 3. Built-in Contact, session-level avatar overrides, and reopen never trigger generation.
+    svc.create({"name": "Mike", "session": "mike-live", "cwd": str(tmp_path), "backend": "claude"})
+    assert launches == []
+
+    inline_symbol = personas.create(name="Inline Symbol Contact")
+    svc.create({
+        "name": inline_symbol["name"],
+        "avatar_symbol": "star.fill",
+        "cwd": str(tmp_path),
+        "backend": "claude",
+    })
+    assert launches == []
+
+    import base64
+    inline_photo = personas.create(name="Inline Photo Contact")
+    tiny_jpeg = persona_avatar_generation._normalize_avatar_jpeg(_sample_1024_png(tmp_path))
+    svc.create({
+        "name": inline_photo["name"],
+        "avatar_base64": base64.b64encode(tiny_jpeg).decode("ascii"),
+        "cwd": str(tmp_path),
+        "backend": "claude",
+    })
+    assert launches == []
+
+    reopen_contact = personas.create(name="Reopen Contact")
+    reopen_agent_id = agents.create_agent(
+        persona=reopen_contact["name"],
+        voice_id=reopen_contact["voice_id"],
+        cwd=str(tmp_path),
+        session="reopen-live",
+        backend="claude",
+    )
+    agents.start_runtime(reopen_agent_id, "reopen-live")
+    agents.bind_backend_session(reopen_agent_id, "sid-reopen-1")
+    reopened = svc.create({
+        "open_existing": True,
+        "resume_session_id": "sid-reopen-1",
+        "cwd": str(tmp_path),
+        "backend": "claude",
+    })
+    assert reopened.session == "reopen-live"
+    assert launches == []
+
+    # 4. Minted Contact session creation runs start_best_effort AFTER releasing _create_lock
+    #    and never passes OPENAI_API_KEY onto the systemd-run environment.
+    svc.create({"mint_contact": True, "cwd": str(tmp_path), "backend": "codex"})
+    assert len(launches) == 1
+    cmd_1, env_1, lock_free_1 = launches[0]
+    assert lock_free_1 is True
+    assert "OPENAI_API_KEY" not in env_1
+    assert "sk-env-secret-must-not-leak" not in " ".join(cmd_1)
+    assert env_1.get("CLAUDE_PWA_DB") == str(tmp_path / "inherited.db")
+
+    # 5. Assigning a newly created Contact also releases _create_lock before launching.
+    contact_assignment.assign_contact(anon.session, "create", "Assigned Fresh")
+    assert len(launches) == 2
+    assert launches[1][2] is True
+
+
+def test_persona_route_honors_generate_avatar_false(monkeypatch):
+    _stub_cfg(monkeypatch)
+    launched: list[list[str]] = []
+    monkeypatch.setattr(
+        service_manager,
+        "launch_detached",
+        lambda command, **_kwargs: (launched.append(list(command)) or True, ""),
+    )
+
+    class _DummyHandler(PersonaRoutes):
+        def __init__(self, payload: dict):
+            self._payload = payload
+            self.ctx = SimpleNamespace(stream=SimpleNamespace(broadcast=lambda _e: None))
+            self.response: tuple[int, dict] | None = None
+
+        def _read_json(self):
+            return self._payload
+
+        def _json(self, status: int, body: dict):
+            self.response = (status, body)
+            return self.response
+
+        def _json_error(self, status: int, message: str):
+            self.response = (status, {"error": message})
+            return self.response
+
+    opted_out = _DummyHandler({"name": "Opted Out Contact", "generate_avatar": False})
+    opted_out._handle_create_persona()
+    assert opted_out.response is not None and opted_out.response[0] == 201
+    assert launched == []
+
+    default_on = _DummyHandler({"name": "Default Avatar Contact"})
+    default_on._handle_create_persona()
+    assert default_on.response is not None and default_on.response[0] == 201
+    assert len(launched) == 1
+
+
+def test_mid_flight_user_avatar_is_not_overwritten_when_worker_finishes(
+    tmp_path, monkeypatch
+):
+    _stub_cfg(monkeypatch)
+    raw_png = _sample_1024_png(tmp_path)
+    row = personas.create(name="Race Clara")
+
+    def slow_provider(**_kwargs) -> bytes:
+        # User manually chooses a symbol while OpenAI image generation is in flight.
+        personas.update(
+            original_name="Race Clara",
+            name="Race Clara",
+            voice_id=row["voice_id"],
+            avatar_symbol="star.fill",
+        )
+        return raw_png
+
+    result = persona_avatar_generation.generate_for_persona(
+        row["persona_id"],
+        tier="claude",
+        request=slow_provider,
+    )
+    assert result["avatar_symbol"] == "star.fill"
+    assert result["avatar_path"] == ""
+    stored = personas.get("Race Clara")
+    assert stored is not None
+    assert stored["avatar_symbol"] == "star.fill"
+    assert stored["avatar_path"] == ""
+
+
+def test_spending_guards_off_switch_backoff_attempt_cap_and_daily_limit(
+    tmp_path, monkeypatch
+):
+    # 1. Config file + env parsing for defaults, off-switch words, unreadable values, and caps.
+    cfg_file = tmp_path / "config.toml"
+    cfg_file.write_text("", encoding="utf-8")
+    monkeypatch.setenv("CLAUDE_PWA_CONFIG", str(cfg_file))
+    monkeypatch.delenv("CLARP_CONTACT_AVATAR_GENERATION", raising=False)
+    config.reset_cache()
+    defaults = config.load()
+    assert defaults.contact_avatar_generation is config.DEFAULT_CONTACT_AVATAR_GENERATION
+    assert defaults.contact_avatar_daily_limit == config.DEFAULT_CONTACT_AVATAR_DAILY_LIMIT
+    assert defaults.contact_avatar_max_attempts == config.DEFAULT_CONTACT_AVATAR_MAX_ATTEMPTS
+
+    for raw_toml in (
+        "false", "0", '"false"', '"FALSE"', '"off"', '"OFF"', '"no"', '"0"',
+        '""', '"maybe"', "2", '["on"]',
+    ):
+        cfg_file.write_text(
+            f"[contacts]\navatar_generation = {raw_toml}\n"
+            "avatar_daily_limit = 2\navatar_max_attempts = 3\n",
+            encoding="utf-8",
+        )
+        config.reset_cache()
+        parsed = config.load()
+        assert parsed.contact_avatar_generation is False, f"[contacts] {raw_toml} stayed on"
+        assert parsed.contact_avatar_daily_limit == 2
+        assert parsed.contact_avatar_max_attempts == 3
+
+        cfg_file.write_text(
+            f"[openai]\ncontact_avatar_generation = {raw_toml}\n",
+            encoding="utf-8",
+        )
+        config.reset_cache()
+        assert config.load().contact_avatar_generation is False, f"[openai] {raw_toml} stayed on"
+
+    for raw_toml in ("true", "1", '"true"', '"on"', '"yes"', '"1"'):
+        cfg_file.write_text(f"[contacts]\navatar_generation = {raw_toml}\n", encoding="utf-8")
+        config.reset_cache()
+        assert config.load().contact_avatar_generation is True, f"[contacts] {raw_toml} was off"
+
+    cfg_file.write_text("[contacts]\navatar_generation = false\n", encoding="utf-8")
+    for env_true in ("1", "true", "TRUE", "yes", "on"):
+        monkeypatch.setenv("CLARP_CONTACT_AVATAR_GENERATION", env_true)
+        config.reset_cache()
+        assert config.load().contact_avatar_generation is True
+    cfg_file.write_text("[contacts]\navatar_generation = true\n", encoding="utf-8")
+    for env_false in ("0", "false", "no", "off", "unreadable"):
+        monkeypatch.setenv("CLARP_CONTACT_AVATAR_GENERATION", env_false)
+        config.reset_cache()
+        assert config.load().contact_avatar_generation is False
+    monkeypatch.delenv("CLARP_CONTACT_AVATAR_GENERATION", raising=False)
+    config.reset_cache()
+
+    # 2. Off-switch and zero limits block enqueueing and in-flight worker execution.
+    _stub_cfg(monkeypatch, enabled=False)
+    launched: list[list[str]] = []
+    monkeypatch.setattr(
+        service_manager,
+        "launch_detached",
+        lambda command, **_kwargs: (launched.append(list(command)) or True, ""),
+    )
+    disabled_contact = personas.create(name="Disabled Contact")
+    assert persona_avatar_generation.start_best_effort(disabled_contact["name"]) is None
+    _stub_cfg(monkeypatch, enabled=True, daily_limit=0, max_attempts=3)
+    assert persona_avatar_generation.start_best_effort(disabled_contact["name"]) is None
+    _stub_cfg(monkeypatch, enabled=True, daily_limit=20, max_attempts=0)
+    assert persona_avatar_generation.start_best_effort(disabled_contact["name"]) is None
+    assert launched == []
+    _stub_cfg(monkeypatch, enabled=False)
+    with pytest.raises(persona_avatar_generation.PersonaAvatarCancelled):
+        persona_avatar_generation.generate_for_persona(
+            disabled_contact["persona_id"],
+            request=lambda **_kwargs: (_ for _ in ()).throw(AssertionError("paid call while disabled")),
+        )
+
+    # 3. Per-Contact retry backoff (5m, then 30m) and max_attempts=3 cap.
+    _stub_cfg(monkeypatch, enabled=True, daily_limit=20, max_attempts=3)
+    flaky = personas.create(name="Flaky Contact")
+    t0 = 1_800_000_000_000
+    monkeypatch.setattr("lib.db.now_ms", lambda: t0)
+
+    job1 = persona_avatar_generation.start_best_effort(flaky["name"], now_ms=t0)
+    assert job1 is not None and job1["generation"] == 1
+    assert len(launched) == 1
+    monkeypatch.setattr("lib.db.now_ms", lambda: t0 + 1_000)
+    background_jobs.finish(job1["job_id"], generation=1, status="failed", reason="http 500")
+
+    # Before 5-minute backoff expires -> refused.
+    assert persona_avatar_generation.start_best_effort(
+        flaky["name"], now_ms=t0 + 1_000 + 5 * 60 * 1000 - 1
+    ) is None
+    assert len(launched) == 1
+
+    # At 5-minute backoff -> attempt 2 launches.
+    t2 = t0 + 1_000 + 5 * 60 * 1000
+    monkeypatch.setattr("lib.db.now_ms", lambda: t2)
+    job2 = persona_avatar_generation.start_best_effort(flaky["name"], now_ms=t2)
+    assert job2 is not None and job2["generation"] == 2
+    assert len(launched) == 2
+    monkeypatch.setattr("lib.db.now_ms", lambda: t2 + 1_000)
+    background_jobs.finish(job2["job_id"], generation=2, status="failed", reason="http 500")
+
+    # Before 30-minute second backoff expires -> refused.
+    assert persona_avatar_generation.start_best_effort(
+        flaky["name"], now_ms=t2 + 1_000 + 30 * 60 * 1000 - 1
+    ) is None
+    assert len(launched) == 2
+
+    # At 30-minute backoff -> attempt 3 launches.
+    t3 = t2 + 1_000 + 30 * 60 * 1000
+    monkeypatch.setattr("lib.db.now_ms", lambda: t3)
+    job3 = persona_avatar_generation.start_best_effort(flaky["name"], now_ms=t3)
+    assert job3 is not None and job3["generation"] == 3
+    assert len(launched) == 3
+    monkeypatch.setattr("lib.db.now_ms", lambda: t3 + 1_000)
+    background_jobs.finish(job3["job_id"], generation=3, status="failed", reason="http 500")
+
+    # After 3 failed attempts -> permanently capped even hours later.
+    assert persona_avatar_generation.start_best_effort(
+        flaky["name"], now_ms=t3 + 6 * 60 * 60 * 1000
+    ) is None
+    assert len(launched) == 3
+
+    # 4. Daily rolling limit caps launches across distinct Contacts until 24h rolls over.
+    t_day = t3 + 48 * 60 * 60 * 1000
+    monkeypatch.setattr("lib.db.now_ms", lambda: t_day)
+    _stub_cfg(monkeypatch, enabled=True, daily_limit=2, max_attempts=3)
+    c1 = personas.create(name="Cap One")
+    c2 = personas.create(name="Cap Two")
+    c3 = personas.create(name="Cap Three")
+
+    assert persona_avatar_generation.start_best_effort(c1["name"], now_ms=t_day) is not None
+    monkeypatch.setattr("lib.db.now_ms", lambda: t_day + 100)
+    assert persona_avatar_generation.start_best_effort(c2["name"], now_ms=t_day + 100) is not None
+    assert persona_avatar_generation.start_best_effort(c3["name"], now_ms=t_day + 200) is None
+    assert len(launched) == 5
+
+    # Still blocked just before the full 24-hour window elapses (e.g. 23h 59m 59s).
+    t_almost_day = t_day + 24 * 60 * 60 * 1000 - 1_000
+    monkeypatch.setattr("lib.db.now_ms", lambda: t_almost_day)
+    assert persona_avatar_generation.start_best_effort(c3["name"], now_ms=t_almost_day) is None
+    assert len(launched) == 5
+
+    # Once the 24h window rolls past t_day, c3 is eligible to launch.
+    t_next_day = t_day + 24 * 60 * 60 * 1000 + 1_000
+    monkeypatch.setattr("lib.db.now_ms", lambda: t_next_day)
+    assert persona_avatar_generation.start_best_effort(c3["name"], now_ms=t_next_day) is not None
+    assert len(launched) == 6
+
+
+def test_background_job_watcher_caps_status_cache_without_dropping_active_jobs():
+    watcher = background_job_watcher.BackgroundJobWatcher(
+        SimpleNamespace(broadcast=lambda _e: None)
+    )
+    watcher._statuses["active-keep"] = (1, "running")
+    for idx in range(1_024):
+        watcher._statuses[f"done-{idx}"] = (1, "succeeded")
+
+    job = background_jobs.upsert_computer(
+        computer_id="srv-1",
+        job_id="overflow-trigger",
+        kind="persona-avatar",
+        title="Trigger prune",
+        status="queued",
+    )
+    background_jobs.finish(job["job_id"], generation=1, status="succeeded")
+    watcher._poll_once()
+
+    assert len(watcher._statuses) <= 1_024
+    assert watcher._statuses["active-keep"] == (1, "running")
+    assert watcher._statuses["overflow-trigger"] == (1, "succeeded")
