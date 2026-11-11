@@ -32,6 +32,12 @@ A turn can end three interesting ways beyond "clean":
     ended by the next preempting send — so this only matches backend text.)
     Never retry silently (it would likely wedge again), surface it to the user.
 
+  * NOT_STARTED — the dispatcher ended a turn before any process ran for it:
+    a turn parked for an account that was refused, or whose backend failed to
+    start, when the park ended. Never produced by classifying backend output;
+    the dispatcher names it itself, so that such a turn is not reported as a
+    process that exited.
+
 Anything else is CLEAN / UNKNOWN and flows through the normal path.
 
 Both an error string (from `on_error`) and a result event (from
@@ -54,13 +60,14 @@ AUTH = "auth"                     # sign-in expired / refresh failed; account re
 ACCOUNT_PLAN = "account_plan"     # the account's plan lacks the model; account recovery applies
 RUNNER_EXIT = "runner_exit"
 TIMEOUT = "timeout"
+NOT_STARTED = "not_started"
 UNKNOWN = "unknown"
 MUSE_SESSION_LOCKED = "muse_session_locked"
 
 # Categories that should flip the agent to the INTERRUPTED badge once we
 # stop trying (connection errors only reach here after retries are spent).
 NOTIFY = frozenset({CONNECTION, TRANSIENT, INTERRUPTED, USAGE_LIMIT, AUTH, ACCOUNT_PLAN,
-                    RUNNER_EXIT, TIMEOUT, MUSE_SESSION_LOCKED})
+                    RUNNER_EXIT, TIMEOUT, NOT_STARTED, MUSE_SESSION_LOCKED})
 
 # Order matters: INTERRUPTED is checked before CONNECTION because a SIGTERM'd
 # turn often *also* prints a broken-pipe message as it dies, and we must not

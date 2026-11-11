@@ -87,12 +87,24 @@ A lost callback times out into owner reconciliation. Scheduling is not delivery:
 inspect continuation state/history for the admission receipt, failures and retry
 state. A running checklist row alone is not a live process.
 
-A wake that was accepted but did not run (its turn failed, for example while no
-account had usage left, or its queued row could never start) is recorded as
-`wake_undelivered` with the reason, and `continuation.reason` reads "Wake not
-delivered: ...". The Host retries after the backoff, up to the goal's recovery
-limit; then `continuation.state` is `attention` and names the last failure, and
-nothing more wakes you until you checkpoint or the goal is resumed.
+The Host records, once per wake, what became of one that did not complete:
+`wake_undelivered` when it never started (it was refused, its backend failed to
+start, or its queued row was retired) and `wake_failed` when its turn started
+and then failed. `continuation.reason` then reads "Wake did not start: ..." or
+"Wake started and failed: ...", with the attempt and the time of the next try.
+The wake is sent again on a growing backoff: 2, 4, 8, 16 and 32 minutes, then
+hourly.
+
+- Failures count against the goal's recovery limit (default 5). Five wakes that
+  fail at once use it up in about an hour; then `continuation.state` is
+  `attention`, names the last failure, and nothing more wakes you until you
+  checkpoint or the goal is resumed. Nothing notifies the user of that state.
+- A sign-in failure counts too, because only a person can clear it; the
+  `attention` reason says that someone has to sign in.
+- A wake that fails only because no account has usage left does not count.
+  The reason reads "Wake not delivered: no account with usage; next try HH:MM"
+  (the Host's local time) and the Host keeps trying without reaching
+  `attention`.
 
 ```sh
 clarp-goal checkpoint PLAN_ID REVISION \

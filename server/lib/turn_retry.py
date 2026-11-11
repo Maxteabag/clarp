@@ -166,6 +166,7 @@ class RetryMixin:
             error_classify.AUTH: "Sign-in expired — could not refresh the account",
             error_classify.RUNNER_EXIT: "Agent process exited unexpectedly",
             error_classify.TIMEOUT: "Turn timed out — backend stopped responding",
+            error_classify.NOT_STARTED: "The turn could not be started",
             error_classify.ACCOUNT_PLAN: (
                 f"This account's plan does not include {spec.model or 'this model'}. "
                 "Switch to an account that has it or choose another model"),
