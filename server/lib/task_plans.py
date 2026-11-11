@@ -845,20 +845,83 @@ def _goal_mutate(plan_id, *, revision, action, data=None):
                     raise ValueError(
                         "background dependency must match this owner and job generation"
                     )
-            state.update(job_handle=job_handle)
-            state.update(
-                generation=state["generation"] + 1,
-                state="waiting"
-                if kind == "dependency"
-                else ("blocked" if kind == "blocked" else "ready"),
-                reason=str(wake.get("reason") or "Scheduled continuation"),
-                due_at=None if kind == "blocked" else max(now, due),
-                dependency_key=str(wake.get("key") or ""),
-                dependency_result=None,
-                request_id="",
-                lease_until=None,
-                attempts=0,
+            # A dependency the goal still waits for is never dropped as a
+            # side effect. A routine progress checkpoint, with a timer or with
+            # no continuation at all, used to replace it with a two-minute
+            # timer: the job ended and woke nobody (2026-11-10).
+            # Also one a blocker holds for the resume.
+            pending = bool(state.get("dependency_key")) and (
+                state.get("state") == "waiting"
+                or (state.get("state") == "blocked" and "paused_dependency_due_at" in state)
             )
+            awaited = {
+                "key": str(state.get("dependency_key") or ""),
+                "job_handle": str(state.get("job_handle") or ""),
+            }
+            named = awaited["key"] + (
+                f" (job {awaited['job_handle']})" if awaited["job_handle"] else ""
+            )
+            replaces = kind == "dependency" or wake.get("replace_dependency") is True
+            if pending and not wake:
+                # No continuation: the checkpoint is saved and the wake stands.
+                state.update(
+                    generation=state["generation"] + 1,
+                    request_id="",
+                    lease_until=None,
+                    attempts=0,
+                )
+                data = {**data, "dependency_kept": {**awaited, "due_at": state.get("due_at")}}
+            elif pending and kind == "timer" and not replaces:
+                raise ValueError(
+                    f"goal is waiting on dependency {named}: a timer would replace that wake. "
+                    "Omit continuation to keep waiting for it; to be woken earlier, send the "
+                    "dependency continuation again with an earlier due_at; to stop waiting "
+                    'for it, add "replace_dependency": true'
+                )
+            elif pending and kind == "blocked":
+                # Held as a pause holds it: the resume awaits it again and a
+                # result that arrived meanwhile is delivered then.
+                state.setdefault("paused_dependency_due_at", state.get("due_at"))
+                state.update(
+                    generation=state["generation"] + 1,
+                    state="blocked",
+                    reason=str(wake["reason"]),
+                    due_at=None,
+                    request_id="",
+                    lease_until=None,
+                    attempts=0,
+                )
+            else:
+                if pending and str(wake.get("key") or "") != awaited["key"]:
+                    by = "dependency " + str(wake["key"]) if kind == "dependency" else kind
+                    goal["history"].append(
+                        dict(
+                            at=now,
+                            kind="dependency_replaced",
+                            revision=revision + 1,
+                            detail={
+                                **awaited,
+                                "by": by,
+                                "reason": "Checkpoint replaced the pending dependency on "
+                                + awaited["key"],
+                            },
+                        )
+                    )
+                state.pop("paused_dependency_due_at", None)
+                state.update(job_handle=job_handle)
+                state.update(
+                    generation=state["generation"] + 1,
+                    state="waiting"
+                    if kind == "dependency"
+                    else ("blocked" if kind == "blocked" else "ready"),
+                    reason=str(wake.get("reason") or "Scheduled continuation"),
+                    due_at=None if kind == "blocked" else max(now, due),
+                    dependency_key=str(wake.get("key") or ""),
+                    dependency_result=None,
+                    request_id="",
+                    lease_until=None,
+                    attempts=0,
+                )
         elif action == "dependency":
             # A result that arrives while the user has the goal paused or
             # blocked is kept for the resume, which then delivers it.

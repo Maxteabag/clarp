@@ -148,14 +148,21 @@ When the job ends, goal recovery records it as the dependency result
 runs, `execution_observed`. A worker killed without a receipt reads
 `outcome: failed`, `outcome_state: unknown`, `terminal_reason:
 worker_vanished`: look at the log and output before saying it failed or
-finished. If the deadline passes first you are woken to inspect it. A
-closing self-prompt inside your own script is not a substitute: a killed
-script never reaches it.
+finished. If the deadline passes first you are woken to inspect it; a job
+still running then is no longer awaited, so name it again as the dependency
+in the checkpoint you write on that wake. A closing self-prompt inside your
+own script is not a substitute: a killed script never reaches it.
+
+While the job runs, a progress checkpoint with no `continuation` keeps this
+wake. One with a timer is refused and names the job, because it would replace
+the wake; `clarp-goal` describes how to be woken earlier or to stop waiting
+on purpose.
 
 That wake depends on goal recovery running on this Host. The goal's
 `continuation.observed_state` reads `host_paused` when autonomous wakes are
 paused (`CLARP_HEARTBEATS_DISABLED`), and `blocked`, `attention` or
-`owner_changed` when it cannot wake you. A paused goal is not woken until it
+`owner_changed` when it cannot wake you. A wake that was accepted but did
+not run is in the history as `wake_undelivered`. A paused goal is not woken until it
 is resumed, and then with the job's actual ending; a cancelled goal is never
 woken. Then tell the user so, say where the result will appear (job detail,
 the exit file), and check it yourself on the next turn. Never describe a

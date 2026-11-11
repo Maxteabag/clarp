@@ -3207,7 +3207,8 @@ def _server_workers(ctx: ServerContext, srv: "ContextHTTPServer", cfg,
         Worker("autonomy-janitors", start_autonomy_janitors),
         Worker("dreaming", lambda: started(DreamingScheduler(send_dream=adapters.dream))),
         Worker("agent-scheduler",
-               lambda: started(AgentScheduleRunner(dispatch_turn=adapters.scheduled_job, dispatch_goal=adapters.goal_continuation))),
+               lambda: started(AgentScheduleRunner(dispatch_turn=adapters.scheduled_job, dispatch_goal=adapters.goal_continuation,
+                                                    goal_wake_retired=adapters.goal_wake_retired))),
         Worker("janitor-runner", start_janitor_runner),
         # Listeners that accept outside requests on their own thread start
         # only after restart recovery has repaired state.
