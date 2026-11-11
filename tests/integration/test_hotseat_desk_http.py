@@ -229,7 +229,7 @@ def test_two_resumes_of_one_stop_start_exactly_one_turn(desk):
     second = _call(base, token, "POST", "/hotseat/resume", {"id": "koko"})
 
     assert first[0] == 200 and first[1]["ok"] is True and first[1]["continued"] is True
-    assert first[1].get("already_sent") is False
+    assert first[1].get("already_sent") is False and first[1]["queued"] is False
     assert second[0] == 200 and second[1]["ok"] is True and second[1]["already_sent"] is True
     prompts = _resume_prompts("koko")
     assert len(prompts) == 1 and prompts[0]["origin"] == "automation"
@@ -381,6 +381,70 @@ def test_resume_dispatches_in_process_without_calling_the_host_or_its_admin_toke
     assert host_calls == [] and len(turns) == 1
     admitted = db.conn().execute("SELECT COUNT(*) AS n FROM prompt_admissions").fetchone()["n"]
     assert admitted == 0, "no prompt is admitted under the administrator's credential"
+
+
+def test_a_start_that_fails_is_told_as_it_is_and_leaves_nothing_waiting(desk, monkeypatch):
+    base, token, fake, turns, _ctx = desk
+    from lib.backend.registry import by_id
+    fake.stop("koko")
+    _live_read(base, token)
+    attempts: list[str] = []
+
+    def start_turn(*, text, **metadata):
+        attempts.append(text)
+        raise RuntimeError("claude spawn failed")
+
+    monkeypatch.setattr(by_id("claude"), "start_turn", start_turn)
+
+    first = _call(base, token, "POST", "/hotseat/resume", {"id": "koko"})
+
+    assert first[0] == 502 and first[1]["error"] == "prompt_failed" and first[1]["saved"] is True
+    assert "claude spawn failed" in first[1]["detail"]
+    assert first[1]["message"] == ("Koko did not start. The prompt is saved in Koko's chat but was not delivered. "
+                                   "Open Koko's chat and send a message to continue.")
+    assert len(_resume_prompts("koko")) == 1, "the prompt is in the chat, as the answer says"
+    queue = _call(base, token, "GET", "/turn-queue?session=koko")[1]
+    assert queue["items"] == [], "no message is left waiting in a queue that nothing would ever run"
+
+    # The dispatcher keeps no proof that this prompt never reached a backend, so it
+    # will not launch it again; the desk says that instead of pretending.
+    again = _call(base, token, "POST", "/hotseat/resume", {"id": "koko"})
+    assert again == (409, {
+        "ok": False, "error": "delivery_unconfirmed", "saved": True,
+        "message": ("The prompt for this stop is saved in Koko's chat, but Koko did not start and the Host "
+                    "cannot send it again. Open Koko's chat and send a message to continue.")})
+    assert len(attempts) == 1 and turns == [] and len(_resume_prompts("koko")) == 1
+
+
+def test_a_turn_that_started_meanwhile_is_not_interrupted_the_prompt_waits_behind_it(desk, monkeypatch):
+    base, token, fake, turns, _ctx = desk
+    from lib import agents as agents_db
+    from lib.backend.registry import by_id
+    from lib.protocol import AgentState
+    # A turn of Koko's is running for the dispatcher...
+    assert _call(base, token, "POST", "/send", {"session": "koko", "text": "the owner's own message",
+                                                "client_msg_id": "own-1"})[0] == 200
+    assert len(turns) == 1
+    agent_id = agents_db.get_by_session("koko")["agent_id"]
+    monkeypatch.setattr(by_id("claude"), "active_handles", lambda aid: [object()] if aid == agent_id else [])
+    interrupted: list[str] = []
+    monkeypatch.setattr(by_id("claude"), "interrupt", lambda aid, *a, **k: interrupted.append(aid) or 1)
+    # ...while the desk's own check does not see it (the state row has not landed yet).
+    agents_db.record_state(agent_id, AgentState.IDLE)
+    fake.stop("koko", stopped_at=time.time() + 3600)
+    _live_read(base, token)
+
+    status, body = _call(base, token, "POST", "/hotseat/resume", {"id": "koko"})
+
+    assert interrupted == [], "the running turn is never preempted by Continue"
+    assert len(turns) == 1, "and no second turn is started beside it"
+    assert status == 200 and body["continued"] is True and body["queued"] is True
+    queue = _call(base, token, "GET", "/turn-queue?session=koko")[1]
+    assert len(queue["items"]) == 1 and queue["items"][0]["id"].startswith("hotseat-resume-"), (
+        "the prompt waits in Koko's queue, where the owner can see it")
+    again = _call(base, token, "POST", "/hotseat/resume", {"id": "koko"})
+    assert again[0] == 200 and again[1]["already_sent"] is True and again[1]["queued"] is True
+    assert len(turns) == 1 and interrupted == []
 
 
 def test_unpause_lifts_the_pause_and_lets_the_waiting_turns_run(desk, monkeypatch):
