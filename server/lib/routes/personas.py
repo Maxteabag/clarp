@@ -90,20 +90,33 @@ class PersonaRoutes:
         self._json_ok(result)
 
     def _handle_create_persona(self):
-        from lib import personas
+        from lib import persona_avatar_generation, personas
         data = self._read_json()
         if data is None:
             return self._json_error(400, "bad json")
+        raw_voice = str(data.get("voice_id") or "").strip()
+        if raw_voice == "{}":
+            raw_voice = ""
         try:
             row = personas.create(
                 name=str(data.get("name") or ""),
-                voice_id=str(data.get("voice_id") or ""),
+                voice_id=raw_voice,
                 avatar_symbol=str(data.get("avatar_symbol") or ""),
                 personality=str(data.get("personality") or ""),
                 avatar_base64=str(data.get("avatar_base64") or ""),
             )
         except (ValueError, OSError) as exc:
             return self._json_error(409, str(exc))
+        if (
+            not row.get("avatar_path")
+            and not row.get("avatar_symbol")
+            and data.get("generate_avatar", True) is not False
+        ):
+            persona_avatar_generation.start_best_effort(
+                row["name"],
+                tier=str(data.get("tier") or ""),
+                backend=str(data.get("backend") or ""),
+            )
         events.broadcast(self.ctx.stream, events.agent_roster("persona-created"))
         return self._json(201, {"persona": personas.public(row)})
 

@@ -115,3 +115,10 @@ def test_builtin_contact_gains_gemini_voice_beside_cartesia(monkeypatch):
     assert voices["gemini"] == "voice_arnold_au"
     assert voices["cartesia"] == cfg.cartesia_voice_for("Arnold")
     assert "gemini" not in json.loads(personas.get("Mike")["voice_id"])
+
+
+def test_create_without_voice_auto_assigns_cartesia_and_exposes_tier():
+    row = personas.create(name="Clara")
+    assert '"cartesia":' in row["voice_id"]
+    pub = personas.public(row)
+    assert pub["tier"] == "claude"

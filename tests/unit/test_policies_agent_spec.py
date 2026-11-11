@@ -172,9 +172,17 @@ def test_anonymous_launch_mints_a_free_label():
     assert spec.session == "" and spec.synthesize_audio is False
 
 
-def test_auto_contact_takes_the_first_free_contact():
-    view = replace(VIEW, contact_pool=lambda backend: ["Nora", "Ivy"])
+def test_auto_contact_takes_the_first_free_contact_or_mints_when_exhausted():
+    view = replace(VIEW, contact_pool=lambda backend: ["Nora", "Ivy"],
+                   mint_contact=lambda backend: "Clara")
     assert parse({"auto_contact": True}, view).persona == "Nora"
+
+    exhausted = replace(VIEW, contact_pool=lambda backend: [],
+                        mint_contact=lambda backend: f"Minted-{backend}")
+    assert parse({"auto_contact": True, "backend": "grok"}, exhausted).persona == "Minted-grok"
+    assert parse({"mint_contact": True, "backend": "claude"}, view).persona == "Clara"
+    conflict = parse({"auto_contact": True, "mint_contact": True}, view)
+    assert isinstance(conflict, SpecError) and conflict.message == "conflicting launch options"
 
 
 def test_open_existing_returns_the_owner():

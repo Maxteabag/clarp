@@ -89,22 +89,43 @@ class AgentLifecycleService:
             backend=spec.backend, backend_session_id=resume_session_id,
             session=spec.session)
         agent = self._persist(spec, agents, resume_session_id)
+        if (
+            not janitor
+            and data.get("anonymous") is not True
+            and spec.avatar_raw is None
+            and spec.persona_definition
+            and not spec.persona_definition.get("builtin")
+            and not spec.persona_definition.get("avatar_path")
+            and not spec.persona_definition.get("avatar_symbol")
+        ):
+            from . import persona_avatar_generation
+            persona_avatar_generation.start_best_effort(
+                spec.persona, backend=spec.backend)
         return self._announce(spec, agent)
 
     @staticmethod
     def _roster_view(agents: dict) -> RosterView:
         from . import config as app_config
+        from . import contact_minting
         from .contact_assignment import available_contacts
         from .workspace_paths import recover_user_path
         from .session_models import launch_default, recorded_model
         cfg = app_config.load()
+        occupied = frozenset(
+            {str(a["persona"]).casefold() for a in agents_db.list_agents()}
+            | {
+                str((info or {}).get("name") or sid).strip().casefold()
+                for sid, info in agents.items()
+            }
+        )
         return RosterView(
             agents=agents,
-            occupied_personas=frozenset(
-                str(a["persona"]).casefold() for a in agents_db.list_agents()),
+            occupied_personas=occupied,
             existing_agent=lambda session: agents_db.get_by_session(session) or {},
             session_exists=agents_db.session_exists,
             contact_pool=lambda backend: [c["name"] for c in available_contacts(backend)],
+            mint_contact=lambda backend: contact_minting.mint_contact(
+                backend, occupied_names=occupied)["name"],
             resume_owner=agents_db.get_by_backend_session,
             resume_listed=lambda backend, cwd, sid: any(
                 item.get("id") == sid

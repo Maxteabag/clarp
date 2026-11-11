@@ -133,6 +133,7 @@ def test_installer_creates_versioned_release_and_compatibility_links(tmp_path):
     assert (current / "scripts/server_update_job.py").is_file()
     assert (current / "scripts/transcription_model_job.py").is_file()
     assert (current / "scripts/portrait_generation_job.py").is_file()
+    assert (current / "scripts/persona_avatar_job.py").is_file()
     assert (current / "bin/clarp-tui.py").is_file()
     assert (current / "TOOLCHAIN_MODE").read_text().strip() == "none"
     selected = json.loads((config / "install.json").read_text())["skills"]

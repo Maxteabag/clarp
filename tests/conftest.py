@@ -530,7 +530,7 @@ def _isolated_db(_transcript_importer_quiescent, tmp_path, monkeypatch):
     # load() falls back to safe defaults, and drop any provider keys/overrides
     # leaking in from the environment.
     monkeypatch.setenv("CLAUDE_PWA_CONFIG", str(tmp_path / "no-such-config.toml"))
-    for var in ("CARTESIA_API_KEY", "ELEVEN_API_KEY",
+    for var in ("CARTESIA_API_KEY", "ELEVEN_API_KEY", "OPENAI_API_KEY",
                 "CLAUDE_PWA_TTS_PROVIDER", "CLAUDE_PWA_DELIVERY",
                 "CLAUDE_PWA_CLAUDE_CLI",
                 "CLAUDE_PWA_HEARTBEAT_INTERVAL_SEC",
