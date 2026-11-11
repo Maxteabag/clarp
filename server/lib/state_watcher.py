@@ -158,6 +158,12 @@ class StateLogWatcher:
                     detail = json.loads(r["detail"])
                 except json.JSONDecodeError:
                     detail = None
+            status_text_cleared = bool(
+                isinstance(detail, dict) and detail.get("status_text_cleared") is True)
+            if status_text_cleared:
+                # This row exists to publish the status field, not to replace
+                # the client's existing state detail with the note metadata.
+                detail = events.OMIT
             if (r["kind"] == AgentState.IDLE and isinstance(detail, dict)
                     and detail.get("reason") == "update_handoff"):
                 # Queue-only proof remains stored, never part of public state.
@@ -177,15 +183,16 @@ class StateLogWatcher:
                 detail=detail,
                 status_text=r["custom_status"] or "",
             ))
-            events.broadcast(self.stream, events.as_event(state_activity_event(
-                agent_id=r["agent_id"],
-                session=r["session"],
-                persona=r["persona"],
-                kind=r["kind"],
-                ts=int(r["ts"]),
-                detail=detail,
-            )))
-            if r["kind"] == AgentState.DONE:
+            if not status_text_cleared:
+                events.broadcast(self.stream, events.as_event(state_activity_event(
+                    agent_id=r["agent_id"],
+                    session=r["session"],
+                    persona=r["persona"],
+                    kind=r["kind"],
+                    ts=int(r["ts"]),
+                    detail=detail,
+                )))
+            if r["kind"] == AgentState.DONE and not status_text_cleared:
                 self._ensure_notify_worker()
                 self._notify_queue.put({
                     "agent_id": r["agent_id"],
