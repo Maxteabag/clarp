@@ -467,7 +467,10 @@ class TurnDispatchService(AdmissionMixin, LauncherMixin, HandoffMixin, ClaimMixi
                     resume=lambda: defer_on(
                         coordinator.lock,
                         lambda: self._resume_after_account_switch(spec, attempt, state)),
-                    work=(spec, attempt))
+                    work=(spec, attempt),
+                    fail=lambda: defer_on(
+                        coordinator.lock,
+                        lambda: self._end_unserved_by_any_account(spec, attempt)))
                 if coordinator.register(account_attempt):
                     return
             on_init, on_result, on_error = self._attempt_callbacks(spec, attempt, state)

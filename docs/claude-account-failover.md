@@ -18,6 +18,15 @@ zero. Any other result leaves the turns waiting. Its stdout and stderr are not
 logged. It has a five-minute deadline; on POSIX the deadline kills its entire
 process group. Keep account credentials in the provider's own credential store.
 
+A selector may activate an account that serves only some of the requested
+models and say which: `{"available": true, "models": ["sonnet"]}`. The runtime
+then resumes only the turns whose model is in that list. A turn whose model is
+not in it has no saved account that offers it: it ends at once, visibly, with
+"No saved Claude account offers model X" (`account_plan`), and is not resumed
+to fail again. A `models` value that is not a list of strings, or that names
+none of the requested models, is no verdict. Without `models` the answer
+covers every requested model, as before.
+
 The local `claude-usage` skill supplies `scripts/auto_switch.py` for installations
 using `claude-switch-account` saved profiles. That helper checks saved account
 usage, attempts native OAuth refresh when needed, verifies each requested model,
@@ -41,6 +50,23 @@ validates stdin without switching accounts or making provider requests.
   an owner is idle, including before restart rehydration.
 - Claude's rejected/blocked structured limit event and classified terminal usage
   errors trigger recovery. Allowed/warning events and temporary 429s do not.
+- A plan failure ("this account does not offer this model") is a fact about
+  one turn's model, not about the account's quota. It starts a recovery only
+  when no other turn of the pool is running. Otherwise that one turn ends at
+  once with the provider's sentence and nothing else is paused or stopped: the
+  selector switches the machine's account while it probes, which must never
+  happen under turns that run fine. When a recovery does start for it and the
+  selector answers that no account serves the model, the turn stays paused for
+  three such answers (`PLAN_CHECKS`, about two minutes) and then ends; a plan
+  does not reset the way a usage window does.
+- A turn that fails with an account failure within two minutes of being
+  resumed by a recovery (`RESUME_GRACE_SECONDS`) gets no further recovery. It
+  ends with the provider's sentence. The selector said an account serves it
+  and it does not; asking again stopped and resumed every turn of the pool,
+  round after round (2026-11-11: 146 rounds in three and a half hours, started
+  by two helpers whose model id no account offered). So a turn receives the
+  recovery message at most once per recovery, and only after it has worked for
+  a while can the next one follow.
 - One recovery coordinates all Claude turns owned by the runtime. New turns wait
   behind the recovery barrier; queued follow-ups retain their order. Other
   providers, completed agents, and idle agents receive no continuation.
@@ -68,8 +94,11 @@ validates stdin without switching accounts or making provider requests.
 - This covers runtime-dispatched turns. Interactive terminal attachments and
   isolated dreaming subprocesses retain their separate lifecycles.
 
-`claudeAccountRecovery`, `claudeAccountWaiting`, `claudeAccountRecoveryFail`, and
-`claudeAccountRecovered` log events explain recovery progress without credentials.
+`claudeAccountRecovery`, `claudeAccountWaiting`, `claudeAccountRecoveryFail`,
+`claudeAccountRecovered` and `claudeAccountUnserved` (turns ended because no
+saved account offers their model) log events explain recovery progress without
+credentials. The same coordinator and the same rules serve the Codex pool
+(`codex_account_switch_command`); its events carry the same names.
 The runtime status includes `claude_account_recovery` with `recovering` and waiting
 agent IDs. Waiting agents keep a THINKING state with `account_recovery=waiting`.
 The separate runtime service preserves this coordination across HTTP restarts.

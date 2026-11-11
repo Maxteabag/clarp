@@ -124,6 +124,21 @@ class LauncherMixin:
                 self._mark_interrupted(resume_spec, error_classify.RUNNER_EXIT,
                                        str(exc), attempts=attempt)
 
+    def _end_unserved_by_any_account(self, spec: _TurnSpec, attempt: int) -> None:
+        """The selector looked at every saved account and none offers this
+        turn's model. The turn ends here, visibly, and says so. Resumed, it
+        would only fail again and start the next recovery, which stops every
+        other turn of the pool (2026-11-11)."""
+        if (_INFLIGHT.get(spec.agent_id) != spec.trace_id
+                or self._superseded(spec)):
+            return
+        pool = backends.by_id(spec.backend).account_pool() or spec.backend
+        message = f"No saved {pool.capitalize()} account offers model {spec.model or 'default'}"
+        if _is_call_opening(spec):
+            self._end_launched_opening(spec, error_classify.ACCOUNT_PLAN, message, attempt)
+            return
+        self._mark_interrupted(spec, error_classify.ACCOUNT_PLAN, message, attempts=attempt)
+
     def _admit_opening_launch(self, spec: _TurnSpec, attempt: int) -> bool:
         """L2: an initiative is admitted again before it runs (agent_rings.authorize_parked_launch):
         when a parked first launch resumes, and as the final check before the spawn flag on every
