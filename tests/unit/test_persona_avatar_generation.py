@@ -474,6 +474,29 @@ def test_spending_guards_off_switch_backoff_attempt_cap_and_daily_limit(
         config.reset_cache()
         assert config.load().contact_avatar_generation is False, f"[openai] {raw_toml} stayed on"
 
+    for non_table_toml in (
+        'contacts = "x"\n',
+        "contacts = false\n",
+        "contacts = 0\n",
+        "contacts = []\n",
+        'openai = "x"\n',
+        "openai = false\n",
+        "[contacts]\navatar_daily_limit = 5\n\n[server]\nport = 7682\n",
+    ):
+        if "[contacts]" in non_table_toml:
+            non_table_toml = 'openai = "x"\n\n' + non_table_toml
+        cfg_file.write_text(non_table_toml, encoding="utf-8")
+        config.reset_cache()
+        assert config.load().contact_avatar_generation is False, (
+            f"non-table section stayed on:\n{non_table_toml}"
+        )
+
+    cfg_file.write_text('contacts = false\n', encoding="utf-8")
+    monkeypatch.setenv("CLARP_CONTACT_AVATAR_GENERATION", "true")
+    config.reset_cache()
+    assert config.load().contact_avatar_generation is True
+    monkeypatch.delenv("CLARP_CONTACT_AVATAR_GENERATION", raising=False)
+
     for raw_toml in ("true", "1", '"true"', '"on"', '"yes"', '"1"'):
         cfg_file.write_text(f"[contacts]\navatar_generation = {raw_toml}\n", encoding="utf-8")
         config.reset_cache()
@@ -610,3 +633,95 @@ def test_background_job_watcher_caps_status_cache_without_dropping_active_jobs()
     assert len(watcher._statuses) <= 1_024
     assert watcher._statuses["active-keep"] == (1, "running")
     assert watcher._statuses["overflow-trigger"] == (1, "succeeded")
+
+
+def test_simultaneous_starts_never_overshoot_daily_limit_or_duplicate_retry(monkeypatch):
+    _stub_cfg(monkeypatch, enabled=True, daily_limit=20, max_attempts=3)
+    launched_lock = threading.Lock()
+    launched: list[list[str]] = []
+
+    def record_launch(command, **_kwargs):
+        with launched_lock:
+            launched.append(list(command))
+        return True, ""
+
+    monkeypatch.setattr(service_manager, "launch_detached", record_launch)
+    t0 = 1_800_000_000_000
+    monkeypatch.setattr("lib.db.now_ms", lambda: t0)
+
+    # Pre-launch 19 Contacts, leaving exactly 1 slot in the 20/day rolling window.
+    for idx in range(19):
+        pre = personas.create(name=f"Pre Cap {idx}")
+        assert persona_avatar_generation.start_best_effort(pre["name"], now_ms=t0) is not None
+    assert len(launched) == 19
+    assert background_jobs.count_launches_since("persona-avatar", since_ms=t0 - 1_000) == 19
+
+    # Release 16 distinct Contact starts at the exact same barrier instant.
+    contenders = [personas.create(name=f"Burst Cap {idx}") for idx in range(16)]
+    barrier = threading.Barrier(len(contenders))
+    results: list[dict | None] = [None] * len(contenders)
+    errors: list[BaseException] = []
+
+    def burst_worker(slot: int, name: str) -> None:
+        try:
+            barrier.wait(timeout=5.0)
+            results[slot] = persona_avatar_generation.start_best_effort(name, now_ms=t0 + 50)
+        except BaseException as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    threads = [
+        threading.Thread(target=burst_worker, args=(idx, row["name"]))
+        for idx, row in enumerate(contenders)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=10.0)
+
+    assert errors == []
+    admitted = [r for r in results if r is not None]
+    assert len(admitted) == 1
+    assert len(launched) == 20
+    assert background_jobs.count_launches_since("persona-avatar", since_ms=t0 - 1_000) == 20
+
+    # Advance past the 24h window and verify simultaneous retry callers on a failed
+    # Contact admit at most 1 retry generation and 1 queued event.
+    t_retry_base = t0 + 48 * 60 * 60 * 1000
+    monkeypatch.setattr("lib.db.now_ms", lambda: t_retry_base)
+    retry_contact = personas.create(name="Concurrent Retry Contact")
+    initial_job = persona_avatar_generation.start_best_effort(
+        retry_contact["name"], now_ms=t_retry_base
+    )
+    assert initial_job is not None and initial_job["generation"] == 1
+    monkeypatch.setattr("lib.db.now_ms", lambda: t_retry_base + 1_000)
+    background_jobs.finish(
+        initial_job["job_id"], generation=1, status="failed", reason="transient"
+    )
+    launches_before_retry = len(launched)
+    t_after_backoff = t_retry_base + 1_000 + 5 * 60 * 1000
+    monkeypatch.setattr("lib.db.now_ms", lambda: t_after_backoff)
+
+    retry_barrier = threading.Barrier(8)
+    retry_results: list[dict | None] = [None] * 8
+
+    def retry_worker(slot: int) -> None:
+        try:
+            retry_barrier.wait(timeout=5.0)
+            retry_results[slot] = persona_avatar_generation.start_best_effort(
+                retry_contact["name"], now_ms=t_after_backoff
+            )
+        except BaseException as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    retry_threads = [threading.Thread(target=retry_worker, args=(idx,)) for idx in range(8)]
+    for thread in retry_threads:
+        thread.start()
+    for thread in retry_threads:
+        thread.join(timeout=10.0)
+
+    assert errors == []
+    assert all(r is not None and r["generation"] == 2 for r in retry_results)
+    assert len(launched) == launches_before_retry + 1
+    assert background_jobs.count_launches_since(
+        "persona-avatar", since_ms=t_retry_base
+    ) == 2

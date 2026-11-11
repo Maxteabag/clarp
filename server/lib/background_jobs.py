@@ -303,6 +303,144 @@ def claim_queued_launch(job_id: str, *, generation: int) -> bool:
     return changed == 1
 
 
+def enqueue_computer_capped(
+    *,
+    computer_id: str,
+    job_id: str,
+    kind: str,
+    title: str,
+    detail: str = "",
+    metadata: dict[str, Any] | None = None,
+    heartbeat_timeout_ms: int = DEFAULT_HEARTBEAT_TIMEOUT_MS,
+    restart_cancelled: bool = True,
+    max_launches: int,
+    window_ms: int,
+    max_attempts: int | None = None,
+    retry_backoffs_ms: tuple[int, ...] = (),
+    now_ms: int | None = None,
+) -> tuple[dict | None, bool]:
+    """Atomically check retry/rolling-window caps, enqueue, and claim launch.
+
+    Runs inside a single ``BEGIN IMMEDIATE`` transaction so simultaneous callers
+    cannot overshoot ``max_launches`` or emit duplicate ``queued`` events.
+    Returns ``(job, claimed)``: ``claimed`` is ``True`` only for the single
+    caller admitted to spawn the detached worker.
+    """
+    computer_id = computer_id.strip()
+    if not computer_id:
+        raise ValueError("computer-owned background job requires computer_id")
+    job_id = job_id.strip()
+    if not job_id:
+        raise ValueError("capped computer background job requires job_id")
+    if job_id.startswith("claude-task:"):
+        raise ValueError("provider task identity is reserved for native observation")
+    if int(max_launches) <= 0:
+        return None, False
+    if max_attempts is not None and int(max_attempts) <= 0:
+        return None, False
+    now = int(now_ms if now_ms is not None else db.now_ms())
+    timeout = max(30_000, min(int(heartbeat_timeout_ms), 24 * 60 * 60 * 1000))
+    c = db.conn()
+    c.execute("BEGIN IMMEDIATE")
+    try:
+        existing = c.execute(
+            "SELECT * FROM background_jobs WHERE job_id=?", (job_id,)
+        ).fetchone()
+        if existing and (
+            str(existing["owner_kind"] or "agent") != "computer"
+            or str(existing["agent_id"] or "") != ""
+            or str(existing["session"] or "") != ""
+            or str(existing["computer_id"] or "") != computer_id
+        ):
+            raise ValueError(f"job id already belongs to another owner: {job_id}")
+        if existing and existing["status"] in ACTIVE_STATUSES:
+            c.execute("COMMIT")
+            return get(job_id, reconcile=False, observed_at=now), False
+        if existing and existing["status"] == "succeeded":
+            c.execute("COMMIT")
+            return None, False
+        if existing and existing["status"] == "cancelled" and not restart_cancelled:
+            c.execute("COMMIT")
+            return get(job_id, reconcile=False, observed_at=now), False
+        if existing and existing["status"] in TERMINAL_STATUSES:
+            attempts = int(existing["generation"] or 1)
+            if max_attempts is not None and attempts >= int(max_attempts):
+                c.execute("COMMIT")
+                return None, False
+            if retry_backoffs_ms:
+                backoff = int(
+                    retry_backoffs_ms[min(max(0, attempts - 1), len(retry_backoffs_ms) - 1)]
+                )
+                ended_at = int(existing["terminal_at"] or existing["updated_at"] or 0)
+                if ended_at and now - ended_at < backoff:
+                    c.execute("COMMIT")
+                    return None, False
+        launched_row = c.execute(
+            """SELECT COUNT(*) AS n
+                 FROM background_job_events e
+                 JOIN background_jobs j ON j.job_id = e.job_id
+                WHERE j.kind = ? AND e.status = 'queued' AND e.observed_at >= ?""",
+            (kind[:40], now - int(window_ms)),
+        ).fetchone()
+        if int(launched_row["n"] if launched_row else 0) >= int(max_launches):
+            c.execute("COMMIT")
+            return None, False
+        generation = int(existing["generation"] or 1) + 1 if existing else 1
+        c.execute(
+            """INSERT INTO background_jobs
+               (job_id, agent_id, session, owner_kind, computer_id,
+                kind, title, detail, status,
+                started_at, updated_at, metadata_json, heartbeat_at,
+                heartbeat_timeout_ms, heartbeat_source, worker_pid,
+                worker_start_token, terminal_at, terminal_reason, revision,
+                generation, started_trace_id, progress_text, progress_at,
+                log_path, worker_cwd)
+               VALUES (?, '', '', 'computer', ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?,
+                       'launch_claimed', NULL, '', NULL, '', 0, ?, '', '', NULL, '', '')
+               ON CONFLICT(job_id) DO UPDATE SET
+                 owner_kind=excluded.owner_kind,
+                 computer_id=excluded.computer_id,
+                 kind=excluded.kind, title=excluded.title, detail=excluded.detail,
+                 status=excluded.status,
+                 started_at=excluded.started_at,
+                 updated_at=excluded.updated_at,
+                 heartbeat_at=excluded.heartbeat_at,
+                 heartbeat_timeout_ms=excluded.heartbeat_timeout_ms,
+                 heartbeat_source=excluded.heartbeat_source,
+                 worker_pid=NULL,
+                 worker_start_token='',
+                 terminal_at=NULL, terminal_reason='', cancelled_at=NULL,
+                 metadata_json=excluded.metadata_json,
+                 generation=excluded.generation,
+                 started_trace_id='',
+                 progress_text='',
+                 progress_at=NULL,
+                 log_path='',
+                 worker_cwd=''""",
+            (
+                job_id,
+                computer_id,
+                kind[:40],
+                title[:120],
+                detail[:1000],
+                now,
+                now,
+                json.dumps(metadata or {}, separators=(",", ":")),
+                now,
+                timeout,
+                generation,
+            ),
+        )
+        _record_event(c, job_id, now)
+        c.execute("COMMIT")
+    except BaseException:
+        c.execute("ROLLBACK")
+        raise
+    result = get(job_id, reconcile=False, observed_at=now)
+    assert result is not None
+    return result, True
+
+
 def snapshot(*, include_terminal: bool = True, now_ms: int | None = None) -> dict:
     now = int(now_ms if now_ms is not None else db.now_ms())
     reconcile_stale(now_ms=now)
