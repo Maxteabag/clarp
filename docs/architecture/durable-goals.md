@@ -28,6 +28,10 @@ cancelled or superseded goals, pending approval, unavailable capacity, missing
 owners and changed native bindings must never launch work. Dependency deadlines
 produce an honest recovery checkpoint rather than an invented job success.
 Bounded retries eventually require attention. Explicit stop must suppress recovery.
+Only work that can still run suppresses a wake: a queued row whose turn is over
+and that nothing may launch again is not live work. The scheduler retires its
+own such wake rows on every pass and records an accepted wake that did not run
+as `wake_undelivered`, so a failed wake is retried and never silent.
 
 Native cards and detail show completed/working/remaining/blocked/deferred counts,
 current work or concrete wait, next wake, last checkpoint, evidence and revisions.

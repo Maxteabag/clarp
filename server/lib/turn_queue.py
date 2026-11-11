@@ -1145,6 +1145,50 @@ def pending_for_dispatch() -> list[dict]:
     return [row for row in pending() if not _consumed_or_uncertain(row)]
 
 
+# A queued row whose turn just ended may be a head the dispatcher is about to
+# retry from memory (a failed handoff retries within a minute).
+DEAD_ROW_GRACE_MS = 120_000
+
+
+def dead_rows(agent_id: str = "", *, prefix: str = "", now_ms: int | None = None,
+              grace_ms: int = DEAD_ROW_GRACE_MS) -> list[dict]:
+    """Queued rows that nothing will run again.
+
+    The newest turn of the row's trace is over (settled or closed) for at
+    least ``grace_ms`` and its launch evidence permits no relaunch:
+    ``pending_for_dispatch`` skips such a row, and ``reconcile_receipts``
+    defers it unless the launch is proven. It stays ``queued`` for good; a
+    wake parked for an account and then failed before its spawn left one
+    (2026-11-10). Read-only: what becomes of the row is its owner's call. The
+    goal scheduler retires its own wakes; a message's payload is kept."""
+    now = db.now_ms() if now_ms is None else now_ms
+    where, args = "status = 'queued'", []
+    if agent_id:
+        where += " AND agent_id = ?"
+        args.append(agent_id)
+    if prefix:
+        where += " AND substr(queue_id, 1, ?) = ?"
+        args.extend((len(prefix), prefix))
+    dead = []
+    for row in db.conn().execute(
+            f"SELECT * FROM queued_turns WHERE {where} ORDER BY queue_seq", args).fetchall():
+        row = dict(row)
+        if not row["agent_id"] or not row["trace_id"]:
+            continue
+        turn = db.conn().execute(
+            """SELECT ended_at, settled_at FROM turns
+                WHERE agent_id = ? AND trace_id = ? ORDER BY turn_id DESC LIMIT 1""",
+            (row["agent_id"], row["trace_id"])).fetchone()
+        if turn is None:
+            continue  # never opened: it waits for its dispatch
+        over_at = max(int(turn["settled_at"] or 0), int(turn["ended_at"] or 0))
+        if not over_at or now - over_at < grace_ms:
+            continue  # running, or a retry may still follow
+        if _consumed_or_uncertain(row):
+            dead.append(row)
+    return dead
+
+
 def pending_counts() -> dict[str, int]:
     return {
         str(row["agent_id"]): int(row["count"])

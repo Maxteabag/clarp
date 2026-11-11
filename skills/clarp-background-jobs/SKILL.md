@@ -155,7 +155,8 @@ script never reaches it.
 That wake depends on goal recovery running on this Host. The goal's
 `continuation.observed_state` reads `host_paused` when autonomous wakes are
 paused (`CLARP_HEARTBEATS_DISABLED`), and `blocked`, `attention` or
-`owner_changed` when it cannot wake you. A paused goal is not woken until it
+`owner_changed` when it cannot wake you. A wake that was accepted but did
+not run is in the history as `wake_undelivered`. A paused goal is not woken until it
 is resumed, and then with the job's actual ending; a cancelled goal is never
 woken. Then tell the user so, say where the result will appear (job detail,
 the exit file), and check it yourself on the next turn. Never describe a
