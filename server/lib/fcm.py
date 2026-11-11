@@ -313,16 +313,25 @@ def _size(data: dict[str, str]) -> int:
     return len(json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
 
 
-def _cut(text: str, max_bytes: int) -> str:
-    """``text`` shortened to at most ``max_bytes`` UTF-8 bytes, with an ellipsis."""
-    if max_bytes <= 0:
+def _fit(data: dict[str, str], key: str) -> str:
+    """The longest prefix of ``data[key]`` (plus "…") that brings the encoded
+    map within MAX_DATA_BYTES, or "" when even that is not enough. A binary
+    search on the encoded size, since JSON escapes make bytes a poor guide."""
+    text = data[key]
+    lo, hi = 0, len(text) - 1        # the whole text is already known not to fit
+
+    def fits(n: int) -> bool:
+        return _size({**data, key: text[:n] + "…"}) <= MAX_DATA_BYTES
+
+    if not fits(0):
         return ""
-    raw = text.encode("utf-8")
-    if len(raw) <= max_bytes:
-        return text
-    ellipsis = "…".encode("utf-8")
-    keep = max(0, max_bytes - len(ellipsis))
-    return raw[:keep].decode("utf-8", "ignore") + ("…" if keep else "")
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if fits(mid):
+            lo = mid
+        else:
+            hi = mid - 1
+    return text[:lo] + "…"
 
 
 def data_payload(payload: dict, context: dict | None = None, *,
@@ -367,9 +376,10 @@ def data_payload(payload: dict, context: dict | None = None, *,
     if data.get("kind") == "agent-ring":
         cuttable.append("reason")      # a ring's reason is free text, not an id
     for key in cuttable:
-        while data.get(key) and (over := _size(data) - MAX_DATA_BYTES) > 0:
-            # Each pass removes at least `over` bytes; JSON escapes only add.
-            data[key] = _cut(data[key], len(data[key].encode("utf-8")) - over)
+        if _size(data) <= MAX_DATA_BYTES:
+            break
+        if data.get(key):
+            data[key] = _fit(data, key)
     return data if _size(data) <= MAX_DATA_BYTES else None
 
 
