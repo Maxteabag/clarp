@@ -534,11 +534,8 @@ def _serve_accounts(raw_accounts: list[dict], *, served_at: int, snapshot_stale:
             used = _ratio(w.get("used_ratio"))
             resets_at = _int_ms(w.get("resets_at"))
             obs = _int_ms(w.get("observed_at"))
-            # A window also ages on its own: the switcher's scheduled read
-            # refreshes one provider's rows, the others keep their own time.
-            # One nobody can date is not served as current either.
-            stale = (bool(w.get("stale")) or snapshot_stale
-                     or obs is None or served_at - obs > STALE_MS)
+            # A window nobody can date is not served as current.
+            stale = bool(w.get("stale")) or snapshot_stale or obs is None
             if not no_reset and resets_at is not None and resets_at <= served_at and (obs is None or obs < resets_at):
                 used = None
                 stale = True
@@ -613,27 +610,6 @@ def _credentials_changed(provider: str) -> None:
     backends.by_id(provider).on_credential_change()
 
 
-def _raw_from_switcher_row(provider: str, stored: dict, row: dict, observed_at: int) -> dict | None:
-    """One account as `hotseat tui --snapshot` would report it now, put together
-    from the row the switcher's own read has for it (`list --json` for Claude,
-    `codex --json` for Codex) the way Hotseat's bridge builds that row from the
-    same numbers. What only the TUI knows (grouping, reset credits, whether the
-    account can be switched to) is kept from the stored row. None when the row
-    says nothing about the account's quota."""
-    reading = _reading(provider)
-    quota = reading.switcher_row(row) if reading is not None else None
-    if quota is None:
-        return None
-    raw = {key: stored.get(key) for key in (
-        "provider", "alias", "display_alias", "aliases", "email", "plan", "rate_limit_tier", "workspace",
-        "saved", "can_switch", "can_launch", "warning", "profile_notes", "reset_credits", "reset_credits_error")}
-    error = quota["error"]
-    raw.update(active=row.get("is_active") is True, cached=False, error=error, limited=quota["limited"],
-               no_reset_reason=quota["no_reset_reason"], windows=[] if error else quota["windows"],
-               checked_at=0 if error else observed_at / 1000)
-    return raw
-
-
 def _set_active(snapshot: dict, provider: str, alias: str) -> bool:
     """Name `alias` as the account in use among `provider`'s accounts of `snapshot`.
     False, and nothing changed, when the snapshot does not list that alias."""
@@ -691,14 +667,14 @@ class HotseatDesk:
         self._last_read_at = 0
         self._switch_locks = {provider: threading.Lock() for provider in janitor_hotseat.PROVIDERS}
         self._switches: dict[str, dict] = {}
-        # provider -> (when, alias) of the last switch this process saw end,
-        # the desk's or the automatic switcher's. A read that began before
-        # that moment knows the account in use less well than the switch does.
+        # provider -> (when, alias) of the last switch made on this desk. A
+        # read that began before that moment knows the account in use less
+        # well than the switch does.
         self._switched: dict[str, tuple[int, str]] = {}
         self._last_read_ok = False
         self._resume_lock = threading.Lock()
         # Orders the read-change-write of the stored snapshot between a live
-        # read, a switch marking the new account and the switcher's read.
+        # read and a switch marking the new account.
         self._store_lock = threading.Lock()
 
     def switch_lock(self, provider: str) -> threading.Lock:
@@ -771,87 +747,6 @@ class HotseatDesk:
                 self._last_read_ok = succeeded
             done.set()
         return "ok" if succeeded else "failed"
-
-    def absorb_switcher_read(self, provider: str, payload, *, started_at: int | None = None) -> bool:
-        """The Hotseat switcher just read `provider` on its own schedule
-        (`hotseat list --json` for Claude, `hotseat codex --json` for Codex).
-        The stored desk takes from that read what it says: quota windows,
-        state, the account in use, sign-in and token clocks of the accounts it
-        already lists, and from the Claude read the stopped work and the
-        agents' accounts. So a desk nobody refreshes stays as fresh as the
-        switcher's cadence, at no extra read of the providers.
-
-        It never adds or removes an account and creates no desk where no live
-        read has stored one: that takes `tui --snapshot`. Only the Claude read,
-        which carries the whole list, moves the desk's `observed_at`; rows the
-        read did not cover keep their own `checked_at` and age by it.
-        `started_at` is when the read began: a switch that ended since then
-        knows the account in use better than this read does.
-
-        True when the stored desk was updated. Never raises: the switcher's
-        read must not fail because of the desk."""
-        try:
-            return self._absorb(provider, payload, started_at)
-        except Exception as exc:  # noqa: BLE001
-            log("hotseatDeskAbsorbFailed", f"provider={provider} error={type(exc).__name__}")
-            return False
-
-    def _absorb(self, provider: str, payload, started_at: int | None) -> bool:
-        from . import server_identity
-        reading = _reading(provider)
-        if reading is None or not isinstance(payload, dict):
-            return False
-        if not server_identity.hotseat_desk_enabled():
-            return False
-        rows = _rows_by_alias(payload.get("accounts") if isinstance(payload.get("accounts"), list) else [])
-        now = now_ms()
-        with self._store_lock:
-            snapshot = _load_persisted()
-            if snapshot is None:
-                return False
-            extensions = payload.get("extensions")
-            has_clarp = (reading.whole_list and isinstance(extensions, dict)
-                         and isinstance(extensions.get("clarp"), dict))
-            if has_clarp:
-                snapshot["clarp_agents"], stopped_raw = _clarp_block(payload)
-                snapshot["stopped_work"] = _stopped_rows(stopped_raw)
-            clarp_agents = {**_no_clarp_agents(), **(snapshot.get("clarp_agents") or {})}
-            accounts = []
-            for stored in snapshot.get("accounts") or []:
-                if not isinstance(stored, dict):
-                    continue
-                alias = stored.get("alias")
-                row = rows.get(alias) if stored.get("provider") == provider else None
-                raw = _raw_from_switcher_row(provider, stored, row, now) if row is not None else None
-                if raw is None:
-                    if has_clarp:
-                        stored["live_sessions"] = int(clarp_agents["live_by_account"].get(alias, 0))
-                        stored["would_use_sessions"] = int(clarp_agents["would_use_by_account"].get(alias, 0))
-                    accounts.append(stored)
-                    continue
-                fresh = _account_row(raw, row, clarp_agents)
-                if fresh is not None and fresh["last_good_checked_at"] is None:
-                    fresh["last_good_checked_at"] = _int_ms(stored.get("last_good_checked_at"))
-                accounts.append(fresh or stored)
-            snapshot["accounts"] = accounts
-            self._keep_switched_accounts(snapshot, now if started_at is None else int(started_at), (provider,))
-            if reading.whole_list:
-                snapshot["observed_at"] = now
-                if isinstance(snapshot.get("sources"), dict):
-                    snapshot["sources"]["list"] = "ok"  # this read is the one `list` stands for
-                settings_store.set_text(ERROR_KEY, "")
-            settings_store.set_text(SNAPSHOT_KEY, json.dumps(snapshot, separators=(",", ":")))
-        return True
-
-    def mark_switched(self, provider: str, alias: str) -> None:
-        """The automatic switcher made `alias` the default: the stored desk
-        names it at once, not at the switcher's next read. Never raises."""
-        try:
-            self._saw_switch(provider, alias)
-            with self._store_lock:
-                _mark_active(provider, alias)
-        except Exception as exc:  # noqa: BLE001
-            log("hotseatDeskMarkFailed", f"provider={provider} error={type(exc).__name__}")
 
     def payload(
         self,
