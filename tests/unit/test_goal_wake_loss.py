@@ -668,23 +668,31 @@ def test_only_the_wakes_own_park_marker_is_exempt(tmp_path, monkeypatch):
 # --- the recovery budget ------------------------------------------------------
 
 
-def _every_wake_fails(service, backends, plan, messages, *, hours):
-    """Run the scheduler for ``hours`` with every wake failing at once: the
-    n-th wake on the n-th of ``messages``, repeating. Returns the minutes at
-    which wakes were dispatched and the minute the goal reached attention
-    (None if it never did)."""
+USAGE_WINDOW = "You've hit your session limit · resets 3:20pm (Europe/Oslo)"
+
+
+def _every_wake_fails(service, backends, plan, messages, *, hours, step_ms=15_000):
+    """Run the scheduler for ``hours`` with every wake ending at once: the
+    n-th wake fails on the n-th of ``messages`` (repeating its last entry),
+    or completes where that entry is None. Returns the minutes at which wakes
+    were dispatched and the minute the goal reached attention (None if it
+    never did)."""
     if isinstance(messages, str):
         messages = [messages]
     dispatched, minute = [], None
-    for step in range(hours * 240 + 1):
-        offset = step * 15_000
+    for step in range(hours * 3_600_000 // step_ms + 1):
+        offset = step * step_ms
         if _tick(service, offset_ms=offset):
             wakes = _wakes(backends)
             assert len(wakes) == len(dispatched) + 1
+            message = messages[min(len(dispatched), len(messages) - 1)]
             real = db.now_ms
             with pytest.MonkeyPatch.context() as later:
                 later.setattr(db, "now_ms", lambda: real() + offset)
-                wakes[-1]["on_error"](messages[len(dispatched) % len(messages)])
+                if message is None:
+                    wakes[-1]["on_result"]({"duration_ms": 5})
+                else:
+                    wakes[-1]["on_error"](message)
             dispatched.append(round(offset / 60_000))
             backends.live = False
         if _continuation(plan)["state"] == "attention":
@@ -707,6 +715,9 @@ def test_a_wake_that_fails_for_lack_of_usage_does_not_use_the_recovery_budget(tm
     wake = _continuation(plan)
     assert wake["state"] == "admitted" and wake["attempts"] == len(dispatched)
     assert wake["capacity_failures"] == len(dispatched)
+    # The 24-hour clock runs from the dispatch of the first wake that got nowhere.
+    first_dispatch = wake["last_dispatch_at"] - dispatched[-1] * 60_000
+    assert abs(wake["unstarted_since"] - first_dispatch) < 60_000
     assert re.fullmatch(
         r"Wake not delivered: no account with usage; next try \d\d:\d\d",
         wake["reason"]), wake["reason"]
@@ -722,6 +733,7 @@ def test_a_wake_that_fails_for_lack_of_usage_does_not_use_the_recovery_budget(tm
     assert _tick(service, offset_ms=9 * HOUR_MS) == 1
     fresh = _continuation(plan)
     assert fresh["attempts"] == 1 and not fresh.get("capacity_failures")
+    assert "unstarted_since" not in fresh      # and the 24-hour clock
 
 
 def test_other_failures_reach_attention_after_five_wakes_in_62_minutes(tmp_path):
@@ -748,12 +760,102 @@ def test_capacity_failures_between_others_do_not_shorten_the_budget(tmp_path):
 
     dispatched, attention = _every_wake_fails(
         service, backends, plan,
-        ["You've hit your session limit", "boom: the runner died"], hours=4)
+        ["You've hit your session limit", "boom: the runner died"] * 2, hours=4)
 
     # Two wakes that count, two that do not: four dispatched before attention.
     assert len(dispatched) == 4 and attention is not None
     wake = _continuation(plan)
     assert (wake["attempts"], wake["capacity_failures"]) == (4, 2)
+
+
+# What the classifier also files under "usage limit" but no reset will clear:
+# depleted credits, payment, a suspended account, hard limits, a trial, a model
+# that refuses this client. A person has to act; waiting does nothing.
+NEEDS_A_PERSON = [
+    "agy exited rc=1: Your AI credits balance is too low to continue.",
+    "Your workspace is out of credits. Ask your workspace owner to refill in order to continue.",
+    "API error (status 402 Payment Required)",
+    "Account acct-1 is suspended, possibly due to reaching the monthly spending limit",
+    "You have reached your billing hard limit",
+    "Your trial quota is used up for this model",
+    "free tier can only be used from within opencode",
+]
+
+
+@pytest.mark.parametrize("message", NEEDS_A_PERSON, ids=[
+    "credits-too-low", "out-of-credits", "402-payment", "monthly-spending-limit",
+    "billing-hard-limit", "trial-quota", "opencode-free-tier"])
+def test_a_limit_that_no_reset_clears_uses_the_budget_and_says_what_to_do(tmp_path, message):
+    service, backends, agent_id = _goal_owner(tmp_path)
+    backends.live = False
+    plan = _arm(_goal())
+
+    dispatched, attention = _every_wake_fails(service, backends, plan, message, hours=12)
+
+    assert dispatched == [0, 2, 6, 14, 30] and attention == 62
+    stuck = _continuation(plan)
+    assert not stuck.get("capacity_failures")
+    assert "no account with usage" not in stuck["reason"]
+    assert stuck["reason"].startswith("Recovery attempt limit reached; the last wake started and failed (")
+    assert stuck["reason"].endswith(
+        "a person has to pay or raise the limit, or pick another model or account, "
+        "then resume the goal")
+    assert {entry["detail"]["code"] for entry in _history(plan, "wake_failed")} == {"billing"}
+
+
+def test_credits_the_host_knows_are_depleted_count_whatever_the_error_says(
+        tmp_path, monkeypatch):
+    """The provider's own statement (backend_usage: credits_depleted) wins
+    over an error text that reads like an ordinary usage window."""
+    from lib import backend_usage
+    monkeypatch.setattr(backend_usage, "exhausted_backends", lambda: {
+        "claude": {"state": "exhausted", "provider_id": "claude", "reason": "credits_depleted"}})
+    service, backends, agent_id = _goal_owner(tmp_path)
+    backends.live = False
+    plan = _arm(_goal())
+
+    dispatched, attention = _every_wake_fails(service, backends, plan, USAGE_WINDOW, hours=3)
+
+    assert dispatched == [0, 2, 6, 14, 30] and attention == 62
+    assert {entry["detail"]["code"] for entry in _history(plan, "wake_failed")} == {"billing"}
+
+
+def test_a_goal_whose_wakes_have_not_started_in_24_hours_reaches_attention(tmp_path):
+    """The net under the exemption: whatever the reason, a day without one
+    wake getting anywhere is for a person to look at."""
+    service, backends, agent_id = _goal_owner(tmp_path)
+    backends.live = False
+    plan = _arm(_goal())
+
+    dispatched, attention = _every_wake_fails(
+        service, backends, plan, USAGE_WINDOW, hours=30, step_ms=60_000)
+
+    # Hourly tries once the backoff has grown: the first one past 24 hours.
+    assert attention is not None and 24 * 60 <= attention <= 25 * 60 + 2, attention
+    stuck = _continuation(plan)
+    assert stuck["reason"] == (
+        "No wake of this goal has started in 24 hours; the last wake found no account "
+        "with usage (Usage limit reached); a person has to find out why, then resume the goal")
+    assert stuck["capacity_failures"] == len(dispatched)
+
+
+def test_a_wake_that_starts_resets_the_24_hour_clock(tmp_path):
+    service, backends, agent_id = _goal_owner(tmp_path)
+    backends.live = False
+    plan = _arm(_goal())
+    # About 14 hours without usage, one wake that runs (and ends without a
+    # checkpoint), then no usage again.
+    outage = [USAGE_WINDOW] * 18
+
+    dispatched, attention = _every_wake_fails(
+        service, backends, plan, [*outage, None, USAGE_WINDOW], hours=36, step_ms=60_000)
+
+    ran_at = dispatched[18]
+    assert 12 * 60 <= ran_at <= 16 * 60
+    # Nothing at 24 hours after the first failure; only 24 hours after the
+    # first fruitless wake that followed the one that ran.
+    assert attention is None or attention >= ran_at + 24 * 60, (ran_at, attention)
+    assert "unstarted_since" in _continuation(plan)
 
 
 def test_a_sign_in_failure_counts_and_attention_says_a_person_is_needed(tmp_path):

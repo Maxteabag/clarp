@@ -102,9 +102,23 @@ _TRANSIENT_RE = re.compile(
     r"upstream request failed|endpoint is unavailable",
     re.I,
 )
-_USAGE_LIMIT_RE = re.compile(
+# USAGE_LIMIT in two named parts, because the category holds two different
+# things for anything that decides whether to wait. Together they are the
+# category (one word list; ``usage_limit_resets`` reads the same parts, so the
+# two cannot drift).
+#
+# A usage window: the account's allowance is spent until its window resets.
+# Nothing to do but wait, or use another account.
+_USAGE_WINDOW_PATTERN = (
     r"out of usage|usage (limit|cap|quota|exhausted|exceeded|reached)|"
-    r"session limit|hit your .*limit.*resets|"
+    r"session limit|hit your .*limit.*resets"
+)
+# Everything else: credits, billing, payment, a suspended account, a monthly
+# or hard limit, a trial, a model that refuses this client. No reset clears
+# these; a person has to pay, raise the limit, or pick another model or
+# account. A quota that is merely "exceeded" is here too: it is not known to
+# clear by waiting.
+_USAGE_OTHER_PATTERN = (
     r"out of credits?|workspace is out of credits?|"
     # Grok reports exhaustion as "Grok Build usage balance exhausted"; the
     # noun there is "balance", qualified by usage/credit/account.
@@ -124,9 +138,11 @@ _USAGE_LIMIT_RE = re.compile(
     r"payment required|status(?: code)? 402\b|\b402 payment\b|"
     r"resource[_ ]exhausted|no credits? remaining|trial quota|"
     # Antigravity (agy 1.2.15+): "Your AI credits balance is too low to continue."
-    r"credits? balance is too low",
-    re.I,
+    r"credits? balance is too low"
 )
+_USAGE_LIMIT_RE = re.compile(_USAGE_WINDOW_PATTERN + "|" + _USAGE_OTHER_PATTERN, re.I)
+_USAGE_WINDOW_RE = re.compile(_USAGE_WINDOW_PATTERN, re.I)
+_USAGE_OTHER_RE = re.compile(_USAGE_OTHER_PATTERN, re.I)
 # The CLI's own wording when its OAuth token is gone. Twelve agents launched
 # together 30 s after a reboot on 2026-09-19 all failed this way; it was
 # classified TRANSIENT, which is never retried, so every heartbeat and the
@@ -170,6 +186,18 @@ _EXPLANATIONS: tuple[tuple[re.Pattern[str], str], ...] = (
      "This model's provider is unavailable right now. "
      "Try again later or choose another model"),
 )
+
+
+def usage_limit_resets(message: str | None) -> bool:
+    """Whether a failure text is a usage window that clears at its reset.
+
+    True only for a text that reads as a spent window and as nothing else of
+    the USAGE_LIMIT category. A text that also names credits, billing, payment
+    or the like is not known to clear by waiting. The category itself
+    (``classify_error``) is unchanged; this is for callers that would
+    otherwise wait on something only a person can fix."""
+    text = message or ""
+    return bool(_USAGE_WINDOW_RE.search(text)) and not _USAGE_OTHER_RE.search(text)
 
 
 def explain(message: str | None) -> str:
