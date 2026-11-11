@@ -138,8 +138,84 @@ def test_discovery_uses_unknown_not_false_when_installed_probe_is_unusable():
     assert codex["authenticated"] is None
     assert codex["authentication_source"]["freshness"] == "unknown"
     assert codex["source"]["freshness"] == "unknown"
-    assert codex["models"][0]["supported_efforts"] is None
+    assert codex["models"][0]["supported_efforts"] == [
+        "low", "medium", "high", "xhigh", "max", "ultra"]
+    assert codex["models"][0]["default_effort"] == "medium"
     assert codex["models"][0]["source"]["kind"] == "static_fallback"
+    assert result["providers"]["opencode"]["models"][0]["supported_efforts"] is None
+
+
+def test_codex_free_tier_probe_appends_paid_and_api_fallback_models_with_efforts():
+    free_subset = json.dumps({
+        "models": [
+            {
+                "slug": "gpt-6-luna",
+                "display_name": "GPT-6-Luna",
+                "visibility": "list",
+                "default_reasoning_level": "medium",
+                "supported_reasoning_levels": [
+                    {"effort": "low"}, {"effort": "medium"},
+                    {"effort": "high"}, {"effort": "xhigh"}, {"effort": "max"},
+                ],
+            },
+            {
+                "slug": "gpt-5.6-terra",
+                "display_name": "GPT-5.6-Terra",
+                "visibility": "list",
+                "default_reasoning_level": "medium",
+                "supported_reasoning_levels": [
+                    {"effort": "low"}, {"effort": "medium"}, {"effort": "high"},
+                    {"effort": "xhigh"}, {"effort": "max"}, {"effort": "ultra"},
+                ],
+            },
+            {
+                "slug": "gpt-5.6-luna",
+                "display_name": "GPT-5.6-Luna",
+                "visibility": "list",
+                "default_reasoning_level": "medium",
+                "supported_reasoning_levels": [
+                    {"effort": "low"}, {"effort": "medium"},
+                    {"effort": "high"}, {"effort": "xhigh"}, {"effort": "max"},
+                ],
+            },
+        ]
+    })
+
+    def fake_run(argv, **_kwargs):
+        if argv[-1] == "--version":
+            return subprocess.CompletedProcess(argv, 0, stdout="codex-cli 0.167.1\n", stderr="")
+        return subprocess.CompletedProcess(argv, 0, stdout=free_subset, stderr="")
+
+    row = capabilities._discover_provider(
+        "codex", OBSERVED_AT, resolve=lambda binary: f"/bin/{binary}", run=fake_run,
+    )
+    by_id = {m["id"]: m for m in row["models"]}
+    assert [m["id"] for m in row["models"][:3]] == [
+        "gpt-6-luna", "gpt-5.6-terra", "gpt-5.6-luna"]
+    assert all(m["source"]["kind"] == "cli_probe" for m in row["models"][:3])
+    assert {
+        "gpt-6.1-sol", "gpt-6-astra", "gpt-6.1-terra",
+        "gpt-6-sol", "gpt-5.6-sol", "gpt-5.5",
+    } <= by_id.keys()
+    assert len(row["models"]) == len(by_id)
+    for paid in ("gpt-6.1-sol", "gpt-6-astra", "gpt-6.1-terra", "gpt-6-sol", "gpt-5.6-sol"):
+        assert by_id[paid]["source"]["kind"] == "static_fallback"
+        assert by_id[paid]["supported_efforts"] == [
+            "low", "medium", "high", "xhigh", "max", "ultra"]
+    assert by_id["gpt-6.1-terra"]["default_effort"] == "low"
+    assert by_id["gpt-6-astra"]["default_effort"] == "medium"
+    assert by_id["gpt-5.5"]["supported_efforts"] == ["low", "medium", "high", "xhigh"]
+    assert by_id["gpt-5.5"]["default_effort"] == "medium"
+
+    # Pure fallback (when CLI is unavailable) also keeps Luna free of ultra.
+    offline = capabilities._discover_provider(
+        "codex", OBSERVED_AT, resolve=lambda _binary: None, run=fake_run,
+    )
+    offline_by_id = {m["id"]: m for m in offline["models"]}
+    for luna in ("gpt-6-luna", "gpt-5.6-luna"):
+        assert offline_by_id[luna]["supported_efforts"] == [
+            "low", "medium", "high", "xhigh", "max"]
+        assert offline_by_id[luna]["default_effort"] == "medium"
 
 
 def test_missing_cli_is_explicitly_unavailable_but_model_fallback_is_unknown():
@@ -292,12 +368,69 @@ def test_fresh_host_accepts_agy_claude_5_5_models_before_any_probe(monkeypatch):
     """A Host that has never run ``agy models`` still admits the Claude 5.5
     variants agy offers, effort folded into the id, and not a bare family id."""
     monkeypatch.setattr(capabilities, "_cache", None)
-    for model in ("claude-opus-5-5-high", "claude-opus-5-5-medium",
+    assert [m[0] for m in capabilities._fallback_model_rows("agy")[:6]] == [
+        "gemini-4-carbon-high", "gemini-4-carbon-medium", "gemini-4-carbon-low",
+        "gemini-4-argon-high", "gemini-4-argon-medium", "gemini-4-argon-low",
+    ]
+    for model in ("gemini-4-carbon-high", "gemini-4-carbon-medium", "gemini-4-carbon-low",
+                  "gemini-4-argon-high", "gemini-4-argon-medium", "gemini-4-argon-low",
+                  "claude-opus-5-5-high", "claude-opus-5-5-medium",
                   "claude-opus-5-5-low", "claude-sonnet-5-5-high",
                   "claude-sonnet-5-5-medium", "claude-sonnet-5-5-low",
                   "gemini-3.8-flash-high"):
         assert capabilities.is_dispatchable_agy_model(model), model
     assert not capabilities.is_dispatchable_agy_model("claude-opus-5-5")
+
+
+def test_codex_auth_file_change_invalidates_cached_catalog_before_ttl(monkeypatch, tmp_path):
+    capabilities.clear_cache()
+    codex_home = tmp_path / "codex-home"
+    codex_home.mkdir()
+    auth_file = codex_home / "auth.json"
+    auth_file.write_text('{"account":"free-tier"}\n', encoding="utf-8")
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+    monkeypatch.setattr(capabilities.time, "monotonic", lambda: 100.0)
+    monkeypatch.setattr(
+        capabilities.shutil, "which",
+        lambda binary: f"/bin/{binary}" if binary == "codex" else None,
+    )
+
+    probe_calls = 0
+
+    def fake_run(argv, **_kwargs):
+        nonlocal probe_calls
+        if argv[-1] == "--version":
+            return subprocess.CompletedProcess(argv, 0, stdout="codex-cli 0.167.1\n", stderr="")
+        probe_calls += 1
+        active = json.loads(auth_file.read_text(encoding="utf-8"))["account"] if auth_file.exists() else "none"
+        slug = "gpt-6-luna" if active == "free-tier" else "gpt-6-astra"
+        payload = json.dumps({"models": [{
+            "slug": slug, "display_name": slug, "visibility": "list",
+            "default_reasoning_level": "medium",
+            "supported_reasoning_levels": [{"effort": "medium"}],
+        }]})
+        return subprocess.CompletedProcess(argv, 0, stdout=payload, stderr="")
+
+    monkeypatch.setattr(capabilities, "_run", fake_run)
+
+    first = capabilities.capability_catalog()
+    second = capabilities.capability_catalog()
+    assert probe_calls == 1
+    assert first["providers"]["codex"]["models"][0]["id"] == "gpt-6-luna"
+    assert second["providers"]["codex"]["models"][0]["id"] == "gpt-6-luna"
+
+    # Same byte length as "free-tier" -> "paid-plus" so even sub-tick in-place writes bust cache.
+    auth_file.write_text('{"account":"paid-plus"}\n', encoding="utf-8")
+    switched = capabilities.capability_catalog()
+    assert probe_calls == 2
+    assert switched["providers"]["codex"]["models"][0]["id"] == "gpt-6-astra"
+    assert switched["providers"]["codex"]["models"][0]["source"]["kind"] == "cli_probe"
+
+    auth_file.unlink()
+    logged_out = capabilities.capability_catalog()
+    assert probe_calls == 3
+    assert logged_out["providers"]["codex"]["models"][0]["id"] == "gpt-6-astra"
+    capabilities.clear_cache()
 
 
 def test_cache_reuses_one_observation_until_forced(monkeypatch):

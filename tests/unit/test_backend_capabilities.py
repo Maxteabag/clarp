@@ -181,7 +181,7 @@ def test_declared_values_match_the_behaviour_they_replaced():
     # routing provider and the native tool explainer.
     codex = by["codex"]
     assert codex.api_providers == ("openai",) and codex.native_tool_explainer
-    assert codex.janitor_default_model == "gpt-5.3-codex-spark"
+    assert codex.janitor_default_model == "gpt-6-luna"
     for other in ("claude", "agy", "grok", "opencode", "deepseek", "muse"):
         a = by[other]
         assert a.api_providers == () and not a.native_tool_explainer, other
