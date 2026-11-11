@@ -1099,3 +1099,369 @@ def test_completed_codex_turn_reconciles_stale_exhaustion_until_new_failure(monk
     now[0] += 200
     backend_usage.record_classified_usage_limit("codex")
     assert "codex" in backend_usage.exhausted_backends()
+
+
+def _write_claude_auth(
+    claude_dir,
+    token: str,
+    *,
+    config_file=None,
+    account_uuid: str = "",
+    org_uuid: str = "",
+    email: str = "",
+    profile_alias: str = "",
+) -> None:
+    claude_dir.mkdir(parents=True, exist_ok=True)
+    (claude_dir / ".credentials.json").write_text(json.dumps({
+        "claudeAiOauth": {
+            "accessToken": token,
+            "expiresAt": 0,
+            "subscriptionType": "max",
+        }
+    }))
+    if config_file is not None and (account_uuid or org_uuid or email):
+        config_file.write_text(json.dumps({
+            "oauthAccount": {
+                "accountUuid": account_uuid,
+                "organizationUuid": org_uuid,
+                "emailAddress": email,
+            }
+        }))
+    if profile_alias:
+        profiles = claude_dir / "profiles"
+        profiles.mkdir(parents=True, exist_ok=True)
+        (profiles / ".current_profile").write_text(profile_alias)
+
+
+def _mock_claude_usage_response(monkeypatch, five_hour: float, seven_day: float = 20.0) -> None:
+    body = json.dumps({
+        "five_hour": {"utilization": five_hour, "resets_at": "2030-01-01T05:00:00Z"},
+        "seven_day_oauth_apps": {"utilization": seven_day, "resets_at": "2030-01-07T00:00:00Z"},
+    }).encode()
+
+    class Response:
+        def __enter__(self): return self
+        def __exit__(self, *_args): return False
+        def read(self): return body
+
+    monkeypatch.setattr(
+        backend_usage.urllib.request, "urlopen", lambda *_args, **_kwargs: Response()
+    )
+
+
+def test_same_account_token_refresh_keeps_codex_and_claude_windows_without_refetch(tmp_path, monkeypatch):
+    codex_home = tmp_path / "codex"
+    claude_dir = tmp_path / "claude"
+    claude_cfg_file = tmp_path / "claude.json"
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(claude_dir))
+    monkeypatch.setenv("CLAUDE_CONFIG_FILE", str(claude_cfg_file))
+
+    now = [1_800_000_000_000]
+    patch_shared(monkeypatch, backend_usage, "_now_ms", lambda: now[0])
+
+    _write_codex_auth(codex_home, "tok-1", "acct-a")
+    _write_claude_auth(
+        claude_dir, "ctok-1",
+        config_file=claude_cfg_file,
+        account_uuid="u-1", org_uuid="o-1", email="a@example.com",
+        profile_alias="ai10",
+    )
+    backend_usage.capture_codex_rate_limits({
+        "plan_type": "pro",
+        "rate_limit": {
+            "allowed": True, "limit_reached": False,
+            "primary_window": {"used_percent": 40, "limit_window_seconds": 18_000, "reset_at": 1_900_000_000},
+            "secondary_window": {"used_percent": 60, "limit_window_seconds": 604_800, "reset_at": 1_900_000_000},
+        },
+    }, source_detail="/wham/usage")
+    _mock_claude_usage_response(monkeypatch, 30.0, 45.0)
+    backend_usage.fetch_claude_usage()
+
+    assert len(backend_usage._structured_provider("codex", now[0])["windows"]) == 2
+    assert len(backend_usage._structured_provider("claude", now[0])["windows"]) == 2
+    assert backend_usage._codex_needs_refresh() is False
+    assert backend_usage._claude_needs_refresh() is False
+
+    # Same accounts refresh their short-lived OAuth access tokens in place.
+    _write_codex_auth(codex_home, "tok-2", "acct-a")
+    _write_claude_auth(
+        claude_dir, "ctok-2",
+        config_file=claude_cfg_file,
+        account_uuid="u-1", org_uuid="o-1", email="a@example.com",
+        profile_alias="ai10",
+    )
+    assert len(backend_usage._structured_provider("codex", now[0])["windows"]) == 2
+    assert len(backend_usage._structured_provider("claude", now[0])["windows"]) == 2
+    assert backend_usage._codex_needs_refresh() is False
+    assert backend_usage._claude_needs_refresh() is False
+
+    # Bare .credentials.json without oauthAccount/profile marker also preserves windows across token refresh.
+    bare_dir = tmp_path / "claude-bare"
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(bare_dir))
+    monkeypatch.delenv("CLAUDE_CONFIG_FILE", raising=False)
+    _write_claude_auth(bare_dir, "bare-1")
+    backend_usage.fetch_claude_usage()
+    _write_claude_auth(bare_dir, "bare-2")
+    assert len(backend_usage._structured_provider("claude", now[0])["windows"]) == 2
+    assert backend_usage._claude_needs_refresh() is False
+
+
+def test_switching_claude_account_clears_stale_windows_and_exhaustion_immediately(tmp_path, monkeypatch):
+    claude_dir = tmp_path / "claude"
+    claude_cfg_file = tmp_path / "claude.json"
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(claude_dir))
+    monkeypatch.setenv("CLAUDE_CONFIG_FILE", str(claude_cfg_file))
+
+    now = [1_800_000_000_000]
+    patch_shared(monkeypatch, backend_usage, "_now_ms", lambda: now[0])
+
+    _write_claude_auth(
+        claude_dir, "ctok-a",
+        config_file=claude_cfg_file,
+        account_uuid="u-a", org_uuid="o-a", email="a@example.com",
+        profile_alias="ai9",
+    )
+    _mock_claude_usage_response(monkeypatch, 100.0, 80.0)
+    backend_usage.fetch_claude_usage()
+
+    assert "claude" in backend_usage.exhausted_backends()
+    assert len(backend_usage._structured_provider("claude", now[0])["windows"]) == 2
+    assert backend_usage._claude_needs_refresh() is False
+    payload_text = json.dumps(backend_usage.get_backend_usage(refresh_codex=False))
+    assert "account_scope_ref" not in payload_text
+    assert "claude-account-" not in payload_text
+
+    # Hotseat switches active Claude account to ai7 before next poll.
+    _write_claude_auth(
+        claude_dir, "ctok-b",
+        config_file=claude_cfg_file,
+        account_uuid="u-b", org_uuid="o-b", email="b@example.com",
+        profile_alias="ai7",
+    )
+    assert backend_usage._structured_provider("claude", now[0])["windows"] == []
+    assert "claude" not in backend_usage.exhausted_backends()
+    assert backend_usage._claude_needs_refresh() is True
+
+
+def test_switching_codex_back_to_previously_observed_account_triggers_refresh(tmp_path, monkeypatch):
+    codex_home = tmp_path / "codex"
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+    now = [1_800_000_000_000]
+    patch_shared(monkeypatch, backend_usage, "_now_ms", lambda: now[0])
+
+    # Observe healthy acct-b first so provider_usage_windows already has fresh rows for acct-b.
+    _write_codex_auth(codex_home, "tok-b", "acct-b")
+    backend_usage.capture_codex_rate_limits({
+        "plan_type": "pro",
+        "rate_limit": {
+            "allowed": True, "limit_reached": False,
+            "primary_window": {"used_percent": 20, "limit_window_seconds": 18_000, "reset_at": 1_900_000_000},
+            "secondary_window": {"used_percent": 30, "limit_window_seconds": 604_800, "reset_at": 1_900_000_000},
+        },
+    }, source_detail="/wham/usage")
+    assert backend_usage._codex_needs_refresh() is False
+
+    # Switch to exhausted acct-a and observe it, overwriting the single-row backend_usage CODEX entry.
+    now[0] += 1_000
+    _write_codex_auth(codex_home, "tok-a", "acct-a")
+    backend_usage.capture_codex_rate_limits(_depleted({
+        "allowed": False, "limit_reached": True,
+        "primary_window": {"used_percent": 100, "limit_window_seconds": 604_800, "reset_at": 1_900_000_000},
+        "secondary_window": None,
+    }), source_detail="/wham/usage")
+    assert "codex" in backend_usage.exhausted_backends()
+
+    # Switch back to acct-b within the 5-minute window: exhaustion clears at once AND legacy row refreshes.
+    now[0] += 1_000
+    _write_codex_auth(codex_home, "tok-b", "acct-b")
+    assert backend_usage.exhausted_backends() == {}
+    assert [w["used_percentage"] for w in backend_usage._structured_provider("codex", now[0])["windows"]] == [20.0, 30.0]
+    assert backend_usage._codex_needs_refresh() is True
+
+
+def test_completed_turn_reconciliation_requires_newer_same_backend_turn_for_codex_and_claude(tmp_path, monkeypatch):
+    from lib import agents, db, turn_lifecycle
+
+    now = [1_800_000_000_000]
+    patch_shared(monkeypatch, backend_usage, "_now_ms", lambda: now[0])
+    monkeypatch.setattr(db, "now_ms", lambda: now[0])
+    monkeypatch.setattr(turn_lifecycle, "now_ms", lambda: now[0])
+
+    codex_home = tmp_path / "codex"
+    claude_dir = tmp_path / "claude"
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(claude_dir))
+    _write_codex_auth(codex_home, "tok-a", "acct-a")
+    _write_claude_auth(claude_dir, "ctok-a")
+
+    codex_aid = agents.create_agent(persona="G", voice_id="v", cwd="/tmp", session="g-1", backend="codex")
+    claude_aid = agents.create_agent(persona="K", voice_id="v", cwd="/tmp", session="k-1", backend="claude")
+
+    # Turns completed BEFORE exhaustion is observed must never clear the later exhaustion.
+    agents.record_state(codex_aid, "thinking", {"source": "user"})
+    agents.record_state(codex_aid, "done", {"source": "user"})
+    agents.record_state(claude_aid, "thinking", {"source": "user"})
+    agents.record_state(claude_aid, "done", {"source": "user"})
+
+    now[0] += 5_000
+    backend_usage.capture_codex_rate_limits(_depleted({
+        "allowed": False, "limit_reached": True,
+        "primary_window": {"used_percent": 100, "limit_window_seconds": 604_800, "reset_at": 1_900_000_000},
+        "secondary_window": None,
+    }), source_detail="/wham/usage")
+    _mock_claude_usage_response(monkeypatch, 100.0, 50.0)
+    backend_usage.fetch_claude_usage()
+
+    assert set(backend_usage.exhausted_backends()) == {"codex", "claude"}
+
+    # Completing a Claude turn clears ONLY Claude, leaving Codex exhausted.
+    now[0] += 5_000
+    agents.record_state(claude_aid, "thinking", {"source": "user"})
+    agents.record_state(claude_aid, "done", {"source": "user"})
+    assert set(backend_usage.exhausted_backends()) == {"codex"}
+
+    # Re-exhaust Claude, then complete a Codex turn: clears ONLY Codex, leaving Claude exhausted.
+    now[0] += 5_000
+    backend_usage.fetch_claude_usage()
+    assert set(backend_usage.exhausted_backends()) == {"codex", "claude"}
+
+    now[0] += 5_000
+    agents.record_state(codex_aid, "thinking", {"source": "user"})
+    agents.record_state(codex_aid, "done", {"source": "user"})
+    assert set(backend_usage.exhausted_backends()) == {"claude"}
+
+
+def test_authoritative_codex_refresh_at_100_percent_keeps_unknown_terminal_until_sub_100(tmp_path, monkeypatch):
+    codex_home = tmp_path / "codex"
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+    now = [1_800_000_000_000]
+    patch_shared(monkeypatch, backend_usage, "_now_ms", lambda: now[0])
+
+    _write_codex_auth(codex_home, "tok-1", "acct-a")
+    terminal = backend_usage.record_classified_usage_limit("codex")
+
+    # Authoritative payload with allowed=True (no block) BUT window at 100% must NOT close unknown terminal.
+    now[0] += 1_000
+    still_full = backend_usage.capture_codex_rate_limits({
+        "plan_type": "pro",
+        "rate_limit": {
+            "allowed": True, "limit_reached": False,
+            "primary_window": {"used_percent": 100, "limit_window_seconds": 604_800, "reset_at": 1_900_000_000},
+            "secondary_window": None,
+        },
+    }, source_detail="/wham/usage")
+    assert not any(
+        ev["episode_id"] == terminal["episode_id"] and ev["kind"] == "recovered"
+        for ev in still_full["limit_events"]
+    )
+    unknown_rows = backend_usage.db.conn().execute(
+        "SELECT COUNT(*) FROM provider_usage_windows WHERE window_kind='unknown'"
+    ).fetchone()[0]
+    assert unknown_rows == 1
+
+    # Even if access token rotated on same account, authoritative sub-100% refresh cleans up unknown window.
+    now[0] += 1_000
+    _write_codex_auth(codex_home, "tok-2", "acct-a")
+    backend_usage.capture_codex_rate_limits({
+        "plan_type": "pro",
+        "rate_limit": {
+            "allowed": True, "limit_reached": False,
+            "primary_window": {"used_percent": 25, "limit_window_seconds": 604_800, "reset_at": 1_900_000_000},
+            "secondary_window": None,
+        },
+    }, source_detail="/wham/usage")
+    unknown_after = backend_usage.db.conn().execute(
+        "SELECT COUNT(*) FROM provider_usage_windows WHERE window_kind='unknown'"
+    ).fetchone()[0]
+    assert unknown_after == 0
+    assert backend_usage.exhausted_backends() == {}
+
+
+def test_snapshot_and_exhaustion_take_no_write_lock_behind_active_writer(tmp_path, monkeypatch):
+    import sqlite3
+    import time
+    from lib import agents, db, snapshot as snapshot_mod
+
+    codex_home = tmp_path / "codex"
+    claude_dir = tmp_path / "claude"
+    claude_cfg_file = tmp_path / "claude.json"
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(claude_dir))
+    monkeypatch.setenv("CLAUDE_CONFIG_FILE", str(claude_cfg_file))
+    _write_codex_auth(codex_home, "tok-1", "acct-a")
+    _write_claude_auth(
+        claude_dir, "ctok-1",
+        config_file=claude_cfg_file,
+        account_uuid="u-1", org_uuid="o-1", email="a@example.com",
+    )
+    agents.create_agent(persona="G", voice_id="v", cwd="/tmp", session="g-lock", backend="codex")
+
+    def _assert_zero_writes_under_writer_lock():
+        seen: list[str] = []
+        db.conn().set_trace_callback(seen.append)
+        try:
+            backend_usage.exhausted_backends()
+            snapshot_mod.build_agent_snapshot(None)
+        finally:
+            db.conn().set_trace_callback(None)
+        writes = [
+            s for s in seen
+            if s.lstrip().upper().startswith(("INSERT", "UPDATE", "DELETE", "BEGIN"))
+        ]
+        assert writes == []
+
+        held = threading.Event()
+        release = threading.Event()
+
+        def writer():
+            c = sqlite3.connect(str(db.DB_PATH), isolation_level=None)
+            c.execute("BEGIN IMMEDIATE")
+            held.set()
+            release.wait(10)
+            c.execute("COMMIT")
+            c.close()
+
+        th = threading.Thread(target=writer)
+        th.start()
+        assert held.wait(5)
+        try:
+            t0 = time.perf_counter()
+            backend_usage.exhausted_backends()
+            snapshot_mod.build_agent_snapshot(None)
+            elapsed = time.perf_counter() - t0
+            assert elapsed < 1.0, f"Read path blocked behind writer lock for {elapsed:.2f}s"
+        finally:
+            release.set()
+            th.join(5)
+
+    # 1. Cold DB (before provider_usage_identity_secret exists in settings):
+    # warm one-time server_identity / builtin janitor / preview cache bootstrap, then assert 0 writes.
+    snapshot_mod.build_agent_snapshot(None)
+    assert backend_usage.settings_store.get(backend_usage._IDENTITY_SECRET_KEY) is None
+    _assert_zero_writes_under_writer_lock()
+
+    # 2. Warm DB with both healthy and exhausted observations + indexed state_log seek check.
+    backend_usage.capture_codex_rate_limits(_depleted({
+        "allowed": False, "limit_reached": True,
+        "primary_window": {"used_percent": 100, "limit_window_seconds": 604_800, "reset_at": 1_900_000_000},
+        "secondary_window": None,
+    }), source_detail="/wham/usage")
+    _mock_claude_usage_response(monkeypatch, 30.0, 40.0)
+    backend_usage.fetch_claude_usage()
+    # Warm dashboard preview cache once outside lock, then verify steady-state snapshot + exhaustion.
+    snapshot_mod.build_agent_snapshot(None)
+    _assert_zero_writes_under_writer_lock()
+
+    plan = db.conn().execute(
+        """EXPLAIN QUERY PLAN
+           SELECT MAX((
+               SELECT s.ts FROM state_log s
+                WHERE s.agent_id = a.agent_id
+                  AND s.ts > ? AND s.ts <= ? AND s.kind = 'done'
+                ORDER BY s.ts DESC LIMIT 1
+           )) FROM agents a WHERE a.backend = ?""",
+        (1, 2, "codex"),
+    ).fetchall()
+    plan_text = " | ".join(str(tuple(r)) for r in plan)
+    assert "idx_state_log_agent_ts" in plan_text

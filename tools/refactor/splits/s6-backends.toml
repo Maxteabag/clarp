@@ -20,7 +20,8 @@ names = [
     "_record_unknown", "_freshness", "_decode_raw", "_quota_windows", "_canonical_id", "_identity_secret",
     "_private_ref", "_codex_identity", "_computer_id", "_provider_instance_id", "_iso_to_ms", "_window_id",
     "_event_payload", "_insert_limit_event", "_open_episode", "_invalidate_rotated_auth",
-    "_observe_auth_generation", "_retire_omitted_windows", "_response_row", "_OPEN_LIMITS_SQL",
+    "_observe_auth_generation", "_retire_omitted_windows", "_resolve_unknown_terminals",
+    "_latest_completed_turn_ms", "_codex_window_observed_ms", "_response_row", "_OPEN_LIMITS_SQL",
     "_expired_limits", "_reconcile_expired_limits", "_limit_projection",
     "_window_by_duration", "_record_codex_five_hour", "_record_codex_weekly",
 ]
@@ -28,7 +29,10 @@ names = [
 [[split.part]]
 # Claude OAuth credentials and the Claude usage row.
 module = "lib/backend_usage_claude.py"
-names = ["_claude_response_row", "_claude_config_dir", "_read_claude_auth", "_claude_needs_refresh"]
+names = [
+    "_claude_response_row", "_claude_config_dir", "_read_claude_auth",
+    "_claude_account_marker", "_active_claude_account_ref", "_claude_needs_refresh",
+]
 
 [[split.part]]
 # Antigravity (agy /usage) collector.
@@ -40,7 +44,7 @@ names = ["AGY_WINDOW_KINDS", "_agy_executable", "_AGY_FETCH_LOCK", "_AGY_LAST_AT
 # Codex auth, app-server probe, rate-limit capture and classified limits.
 module = "lib/backend_usage_codex.py"
 names = [
-    "_codex_needs_refresh", "_codex_home",
+    "_active_codex_identity", "_codex_needs_refresh", "_codex_home",
     "_read_codex_auth", "_read_codex_chatgpt_base_url", "_codex_usage_url", "_codex_rpc",
     "fetch_codex_usage_app_server", "capture_codex_rate_limits", "_codex_block_from_payload", "_fresh_codex_block",
     "_codex_snapshot_from_payload", "_select_rate_limit_payload", "record_classified_usage_limit",

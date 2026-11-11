@@ -1910,3 +1910,231 @@ def test_hotseat_fable_starvation_reports_honestly_without_thrashing(switcher):
     assert latest["status"] == "noop"
     assert "0% Fable quota left and no saved account can serve Fable" in latest["summary"]
     assert "keeping ai9 (100% of the 5-hour window) for running models" in latest["summary"]
+
+
+def test_claude_available_false_alone_marks_account_zero_remaining():
+    payload = {"accounts": [
+        {"alias": "a", "is_active": True, "error": None, "usage": {
+            "status": "allowed", "available": False, "limited": False,
+            "used_5h": 0.1, "used_7d": 0.2}},
+        {"alias": "b", "is_active": False, "error": None, "usage": {
+            "status": "allowed", "available": True, "limited": False,
+            "used_5h": 0.3, "used_7d": 0.2}},
+    ]}
+    parsed = hotseat.parse_claude(payload)
+    assert parsed[0]["remaining"] == 0
+    decision = hotseat.decide(parsed, 25)
+    assert decision["action"] == "switch" and decision["target"] == "b"
+
+
+def test_hotseat_decide_never_oscillates_or_strands_running_models():
+    def _acct(alias, active=False, used_5h=0.2, used_7d=0.3, **usage):
+        return {"alias": alias, "is_active": active, "usage": {
+            "used_5h": used_5h, "used_7d": used_7d, "status": "allowed", "limited": False, **usage,
+        }}
+
+    def _scoped(**families):
+        return [
+            {"model": name.capitalize(), "used": used, "exhausted": used >= 1.0}
+            for name, used in families.items()
+        ]
+
+    def _sim(accounts, required, active, *, start_alias, ticks=12):
+        state = [{**a, "is_active": a["alias"] == start_alias} for a in accounts]
+        switches = []
+        for _ in range(ticks):
+            d = hotseat.decide(
+                hotseat.parse_claude({"accounts": state}), 25,
+                required_models=required, active_models=active,
+            )
+            if d["action"] == "switch":
+                switches.append((d["active"], d["target"], d.get("model")))
+                state = [{**a, "is_active": a["alias"] == d["target"]} for a in state]
+        return switches, next(x["alias"] for x in state if x["is_active"])
+
+    fable = ("claude-fable-5-2",)
+    sonnet = ("claude-sonnet-5-5",)
+
+    # 1. Fault 1a: a Fable-blocked with plenty of 5h room; b Fable-ok at 20% or 8% (under floor 25).
+    for b_used_5h in (0.80, 0.92):
+        two = [_acct("a", used_5h=0.1, blocked_models=["Fable"]), _acct("b", used_5h=b_used_5h)]
+        sw_a, end_a = _sim(two, fable, fable, start_alias="a")
+        sw_b, end_b = _sim(two, fable, fable, start_alias="b")
+        assert sw_a == [("a", "b", "Fable")] and end_a == "b"
+        assert sw_b == [] and end_b == "b"
+
+    # 2. Fault 1b: two models (a: Fable=0, Sonnet=80; b: Fable=60, Sonnet=5) across running/queued/recent-limit mixes.
+    flap_pair = [
+        _acct("a", blocked_models=["Fable"], scoped=_scoped(fable=1.0, sonnet=0.2)),
+        _acct("b", scoped=_scoped(fable=0.4, sonnet=0.95)),
+    ]
+    for req, act in (
+        (fable + sonnet, fable + sonnet),
+        (fable + sonnet, sonnet),
+        (sonnet + fable, sonnet),
+        (fable + sonnet, ()),
+    ):
+        sw_a, end_a = _sim(flap_pair, req, act, start_alias="a")
+        sw_b, end_b = _sim(flap_pair, req, act, start_alias="b")
+        assert len(sw_a) == 1 and end_a == "b"
+        assert sw_b == [] and end_b == "b"
+
+    # 3. Symmetric bottleneck (a: Fable=15, Sonnet=80; b: Fable=80, Sonnet=15) never ping-pongs.
+    sym_pair = [
+        _acct("a", scoped=_scoped(fable=0.85, sonnet=0.2)),
+        _acct("b", scoped=_scoped(fable=0.2, sonnet=0.85)),
+    ]
+    for start in ("a", "b"):
+        sw, end = _sim(sym_pair, fable + sonnet, fable + sonnet, start_alias=start)
+        assert sw == [] and end == start
+
+    # 4. Never strand another running model or an unblocked required model.
+    mutually_exclusive = [
+        _acct("a", True, blocked_models=["Fable"], scoped=_scoped(fable=1.0, sonnet=0.2)),
+        _acct("b", blocked_models=["Sonnet"], scoped=_scoped(fable=0.2, sonnet=1.0)),
+    ]
+    d_keep = hotseat.decide(
+        hotseat.parse_claude({"accounts": mutually_exclusive}), 25,
+        required_models=fable + sonnet, active_models=fable + sonnet,
+    )
+    assert d_keep["action"] == "noop" and d_keep["blocked_model"] == "Fable"
+
+    # Running model outside required_models (Sonnet running, Fable queued) is also protected from stranding.
+    d_keep_running = hotseat.decide(
+        hotseat.parse_claude({"accounts": mutually_exclusive}), 25,
+        required_models=fable, active_models=sonnet,
+    )
+    assert d_keep_running["action"] == "noop" and d_keep_running["blocked_model"] == "Fable"
+
+    # Unblocked required model (Fable at 5%, Sonnet blocked, none running) is not sacrificed even if b has higher leximin.
+    unblocked_req_pair = [
+        _acct("a", True, used_5h=0.95, blocked_models=["Sonnet"], scoped=_scoped(fable=0.95, sonnet=1.0)),
+        _acct("b", used_5h=0.2, blocked_models=["Fable"], scoped=_scoped(fable=1.0, sonnet=0.2)),
+    ]
+    assert hotseat.decide(
+        hotseat.parse_claude({"accounts": unblocked_req_pair}), 25,
+        required_models=fable + sonnet, active_models=(),
+    ) == {"action": "exhausted", "active": "a", "remaining": 0, "general_remaining": 5, "model": "Sonnet"}
+
+    with_healthy_c = mutually_exclusive + [_acct("c", scoped=_scoped(fable=0.5, sonnet=0.5))]
+    d_pick_c = hotseat.decide(
+        hotseat.parse_claude({"accounts": with_healthy_c}), 25,
+        required_models=fable + sonnet, active_models=fable + sonnet,
+    )
+    assert d_pick_c["action"] == "switch" and d_pick_c["target"] == "c"
+
+    # 5. Model switch rejects a candidate no better than active on the model, or with 0 weekly secondary (non-overage).
+    no_better = [
+        _acct("a", True, used_5h=0.2, scoped=_scoped(fable=0.85)),
+        _acct("b", used_5h=0.05, scoped=_scoped(fable=0.85)),
+    ]
+    assert hotseat.decide(
+        hotseat.parse_claude({"accounts": no_better}), 25,
+        required_models=fable, active_models=fable,
+    )["action"] == "noop"
+
+    assert hotseat.decide([
+        {"alias": "a", "active": True, "remaining": 80, "secondary": 50, "blocked_models": ("fable",)},
+        {"alias": "b", "active": False, "remaining": 80, "secondary": 0},
+    ], 25, required_models=fable, active_models=fable)["action"] == "exhausted"
+
+    assert hotseat.decide([
+        {"alias": "a", "active": True, "remaining": 80, "secondary": 50, "blocked_models": ("fable",)},
+        {"alias": "b", "active": False, "remaining": 80, "secondary": 0, "overage": True},
+    ], 25, required_models=fable, active_models=fable)["target"] == "b"
+
+    # 6. General switch ranks candidates that clear the rung on required models ahead of raw 5-hour room.
+    ranked = [
+        _acct("a", True, used_5h=0.95),
+        _acct("b", used_5h=0.05, scoped=_scoped(fable=0.85)),  # 95% 5h, only 15% Fable (< 25)
+        _acct("c", used_5h=0.40, scoped=_scoped(fable=0.40)),  # 60% 5h, 60% Fable (>= 25)
+    ]
+    d_ranked = hotseat.decide(
+        hotseat.parse_claude({"accounts": ranked}), 25,
+        required_models=fable, active_models=fable,
+    )
+    assert d_ranked["action"] == "switch" and d_ranked["target"] == "c"
+
+
+def test_hotseat_demand_includes_unpaused_queued_and_recently_limited_agents_and_enforces_reversal_cooldown(switcher, monkeypatch):
+    from lib import turn_queue
+
+    owner, worker, readings, calls, sent = switcher
+    now = [1_800_000_000_000]
+    monkeypatch.setattr(db, "now_ms", lambda: now[0])
+
+    def _fable_readings():
+        return {"accounts": [
+            {"alias": "ai9", "is_active": True, "error": None, "usage": {
+                "status": "allowed", "available": True, "limited": False,
+                "used_5h": 0.1, "used_7d": 0.4, "blocked_models": ["Fable"]}},
+            {"alias": "ai7", "is_active": False, "error": None, "usage": {
+                "status": "allowed", "available": True, "limited": False,
+                "used_5h": 0.2, "used_7d": 0.3, "blocked_models": [],
+                "scoped": [{"model": "Fable", "used": 0.3, "exhausted": False}]}},
+        ]}
+
+    # 1. Queued turn on an unpaused queue triggers model-scoped Fable switch; paused queue does not.
+    q_aid = agents.create_agent(persona="Q", voice_id="v", cwd="/tmp", session="q-fable", backend="claude")
+    agents.update_agent(q_aid, model="claude-fable-5-2")
+    agents.record_state(q_aid, "done", {"source": "user"})
+    turn_queue.enqueue(
+        queue_id="q-1", agent_id=q_aid, session="q-fable", text="run",
+        trace_id="t-q1", client_msg_id="q-1", synthesize_audio=False,
+        origin="user", sender_agent_id="",
+    )
+    turn_queue.set_paused(q_aid, True, user_stop=True)
+    readings["claude"] = _fable_readings()
+    worker.hotseat_once()
+    assert not [c for c in calls if c[0] == "switch"]
+
+    turn_queue.set_paused(q_aid, False)
+    _check_again("hotseat-switcher.claude")
+    now[0] += 60_000
+    worker.hotseat_once()
+    assert [c for c in calls if c[0] == "switch"] == [("switch", "hotseat", "claude", "ai7")]
+    turn_queue.remove("q-1")
+    calls.clear()
+
+    # 2. Reversal cooldown: ai7 is now active (8% 5h < rung 10) and ai9 has 18% (>= rung 10, < floor 25) -> holds ai7 during cooldown.
+    readings["claude"] = {"accounts": [
+        {"alias": "ai9", "is_active": False, "error": None, "usage": {
+            "status": "allowed", "available": True, "limited": False,
+            "used_5h": 0.82, "used_7d": 0.4}},
+        {"alias": "ai7", "is_active": True, "error": None, "usage": {
+            "status": "allowed", "available": True, "limited": False,
+            "used_5h": 0.92, "used_7d": 0.3}},
+    ]}
+    _check_again("hotseat-switcher.claude")
+    now[0] += 60_000
+    worker.hotseat_once()
+    assert not [c for c in calls if c[0] == "switch"]
+
+    # After cooldown expires (20 minutes later), general ladder may switch to ai9.
+    _check_again("hotseat-switcher.claude")
+    now[0] += 20 * 60_000
+    worker.hotseat_once()
+    assert [c for c in calls if c[0] == "switch"] == [("switch", "hotseat", "claude", "ai9")]
+    calls.clear()
+
+    # 3. Recently usage-limited agent (within 15 min, without parked account_recovery) counts as model demand.
+    lim_aid = agents.create_agent(persona="L", voice_id="v", cwd="/tmp", session="lim-fable", backend="claude")
+    agents.update_agent(lim_aid, model="claude-fable-5-2")
+    db.conn().execute(
+        "INSERT INTO state_log (agent_id, ts, kind, detail) VALUES (?, ?, 'error', ?)",
+        (lim_aid, now[0] - 2 * 3_600_000, json.dumps({"reason": "usage_limit"})),
+    )
+    readings["claude"] = _fable_readings()
+    _check_again("hotseat-switcher.claude")
+    now[0] += 20 * 60_000
+    worker.hotseat_once()
+    assert not [c for c in calls if c[0] == "switch"]
+
+    db.conn().execute(
+        "INSERT INTO state_log (agent_id, ts, kind, detail) VALUES (?, ?, 'error', ?)",
+        (lim_aid, now[0] - 60_000, json.dumps({"reason": "usage_limit"})),
+    )
+    _check_again("hotseat-switcher.claude")
+    now[0] += 60_000
+    worker.hotseat_once()
+    assert [c for c in calls if c[0] == "switch"] == [("switch", "hotseat", "claude", "ai7")]

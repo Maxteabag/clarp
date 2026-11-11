@@ -57,12 +57,61 @@ def _read_claude_auth() -> tuple[str, int, str]:
     return token, expires, tier or plan
 
 
-def _active_claude_auth_generation() -> str | None:
+def _claude_account_marker() -> str | None:
+    """Stable account marker across OAuth access-token refreshes, or None when
+    only a bare accessToken is present. Never hashes accessToken/refreshToken."""
+    cfg_dir = _claude_config_dir()
+    candidates: list[pathlib.Path] = []
+    explicit = (os.environ.get("CLAUDE_CONFIG_FILE") or "").strip()
+    if explicit:
+        candidates.append(pathlib.Path(explicit).expanduser())
+    candidates.append(cfg_dir / ".claude.json")
+    candidates.append(cfg_dir.parent / ".claude.json")
+    for path in candidates:
+        try:
+            if not path.is_file():
+                continue
+            data = json.loads(path.read_text())
+        except (OSError, UnicodeDecodeError, ValueError, TypeError):
+            continue
+        oauth = data.get("oauthAccount") if isinstance(data, dict) else None
+        if isinstance(oauth, dict):
+            acct_uuid = str(oauth.get("accountUuid") or "").strip()
+            org_uuid = str(oauth.get("organizationUuid") or "").strip()
+            email = str(oauth.get("emailAddress") or "").strip().casefold()
+            if acct_uuid or org_uuid or email:
+                return f"oauth:{acct_uuid}\0{org_uuid}\0{email}"
+    marker_path = cfg_dir / "profiles" / ".current_profile"
     try:
-        token, _expires, _plan = _read_claude_auth()
-        return _private_ref("claude-auth", token)
-    except Exception:  # noqa: BLE001
+        if marker_path.is_file():
+            alias = marker_path.read_text().strip()
+            if alias:
+                return f"profile:{alias}"
+    except (OSError, UnicodeDecodeError):
+        pass
+    try:
+        cred_data = json.loads((cfg_dir / ".credentials.json").read_text())
+        login = cred_data.get("claudeAiOauth") if isinstance(cred_data, dict) else None
+        if isinstance(login, dict):
+            acct_uuid = str(login.get("accountUuid") or "").strip()
+            org_uuid = str(login.get("organizationUuid") or "").strip()
+            email = str(login.get("emailAddress") or "").strip().casefold()
+            if acct_uuid or org_uuid or email:
+                return f"cred:{acct_uuid}\0{org_uuid}\0{email}"
+    except (OSError, UnicodeDecodeError, ValueError, TypeError):
+        pass
+    return None
+
+
+def _active_claude_account_ref(*, create: bool = False) -> str | None:
+    try:
+        _read_claude_auth()
+    except (OSError, UnicodeDecodeError, ValueError, TypeError, KeyError, RuntimeError):
         return None
+    marker = _claude_account_marker()
+    if not marker:
+        return None
+    return _private_ref("claude-account", marker, create=create)
 
 
 def _claude_needs_refresh() -> bool:
@@ -70,7 +119,9 @@ def _claude_needs_refresh() -> bool:
     if not row:
         return True
     raw = _decode_raw(row)
-    active = _active_claude_auth_generation()
-    if active is not None and raw.get("auth_generation_id") and raw.get("auth_generation_id") != active:
-        return True
+    stored_ref = raw.get("account_scope_ref")
+    if stored_ref:
+        active_ref = _active_claude_account_ref(create=False)
+        if active_ref is not None and stored_ref != active_ref:
+            return True
     return _now_ms() - int(row.get("fetched_at") or 0) > CLAUDE_REFRESH_MS

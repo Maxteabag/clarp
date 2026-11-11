@@ -56,11 +56,11 @@ from .backend_usage_store import (  # noqa: E402,F401  (split_apply: backend-usa
 
 from .backend_usage_claude import (  # noqa: E402,F401  (split_apply: backend-usage)
     _claude_response_row, _claude_config_dir, _read_claude_auth,
-    _active_claude_auth_generation, _claude_needs_refresh,
+    _claude_account_marker, _active_claude_account_ref, _claude_needs_refresh,
 )
 def fetch_claude_usage(*, timeout: float = 8.0) -> dict[str, Any]:
     token, _expires, plan = _read_claude_auth()
-    auth_generation_id = _private_ref("claude-auth", token)
+    account_scope_ref = _active_claude_account_ref(create=True)
     request = urllib.request.Request(CLAUDE_USAGE_ENDPOINT, headers={
         "Authorization": f"Bearer {token}",
         "anthropic-beta": "oauth-2025-04-20",
@@ -92,11 +92,13 @@ def fetch_claude_usage(*, timeout: float = 8.0) -> dict[str, Any]:
     if not windows:
         raise RuntimeError("Claude usage endpoint returned no usable limits")
     preferred = windows.get("five_hour") or windows.get("seven_day") or {}
+    raw_payload: dict[str, Any] = {"windows": windows, "plan_type": plan}
+    if account_scope_ref:
+        raw_payload["account_scope_ref"] = account_scope_ref
     _upsert(CLAUDE, used_percentage=preferred.get("used_percentage"),
             resets_at=preferred.get("resets_at") or "",
             source="anthropic-oauth-usage",
-            raw={"windows": windows, "plan_type": plan,
-                 "auth_generation_id": auth_generation_id})
+            raw=raw_payload)
     return {"windows": windows, "plan_type": plan}
 
 
@@ -119,10 +121,10 @@ def _structured_provider(provider_id: str, now_ms: int) -> dict[str, Any]:
         windows = _quota_windows(raw)
         if not row or not windows:
             return base
-        stored_claude_gen = raw.get("auth_generation_id")
-        if stored_claude_gen:
-            active_claude_gen = _active_claude_auth_generation()
-            if active_claude_gen is not None and stored_claude_gen != active_claude_gen:
+        stored_claude_ref = raw.get("account_scope_ref")
+        if stored_claude_ref:
+            active_claude_ref = _active_claude_account_ref(create=False)
+            if active_claude_ref is not None and stored_claude_ref != active_claude_ref:
                 return base
         freshness = _freshness(row, now_ms)
         observed_at = int(row.get("fetched_at") or 0)
@@ -179,9 +181,18 @@ def _structured_provider(provider_id: str, now_ms: int) -> dict[str, Any]:
     if provider_id != CODEX:
         return base
     database = db.conn()
-    active_codex = _active_codex_identity()
+    active_codex = _active_codex_identity(create=False)
     if active_codex is not None:
-        target_generation = active_codex[0]
+        active_gen, active_acct = active_codex
+        current_identity = database.execute(
+            """SELECT auth_generation_id FROM provider_usage_windows
+                WHERE provider_instance_id=?
+                  AND (account_scope_ref=? OR (account_scope_ref IS NULL AND auth_generation_id=?))
+                ORDER BY observed_at DESC,rowid DESC LIMIT 1""",
+            (provider_instance_id, active_acct, active_gen),).fetchone()
+        if not current_identity:
+            return base
+        target_generation = current_identity["auth_generation_id"]
     else:
         current_identity = database.execute(
             """SELECT auth_generation_id FROM provider_usage_windows
@@ -328,26 +339,40 @@ def exhausted_backends(now_ms: int | None = None) -> dict[str, dict[str, Any]]:
             hard = (window.get("limit") or {}).get("state") == "hard_limit"
             if hard or (used is not None and float(used) >= 100.0):
                 blocking.append(window)
-        block = _fresh_codex_block(now) if provider_id == CODEX else None
+        is_codex = provider_id == CODEX
+        provider_row = _row(CODEX) if is_codex else None
+        block = _fresh_codex_block(now, row=provider_row) if is_codex else None
         if not blocking and block is None:
             continue
-        done_ms = _latest_completed_turn_ms(provider_id, up_to_ms=now)
-        if done_ms is not None:
-            if provider_id == CODEX:
+        if is_codex:
+            obs_map = (
+                _codex_window_observed_ms(
+                    _provider_instance_id(CODEX),
+                    [str(w["window_id"]) for w in blocking if w.get("window_id")],
+                )
+                if blocking else {}
+            )
+            block_fetched = int((provider_row or {}).get("fetched_at") or 0)
+            candidate_stamps = [
+                *(obs_map.get(str(w.get("window_id") or ""), _iso_to_ms(w.get("observed_at")) or 0)
+                  for w in blocking),
+                *([block_fetched] if block is not None else []),
+            ]
+            min_obs_ms = min(candidate_stamps) if candidate_stamps else 0
+            done_ms = _latest_completed_turn_ms(CODEX, after_ms=min_obs_ms, up_to_ms=now)
+            if done_ms is not None:
                 if blocking:
-                    obs_map = _codex_window_observed_ms(
-                        _provider_instance_id(CODEX),
-                        [str(w["window_id"]) for w in blocking if w.get("window_id")],
-                    )
                     blocking = [
                         w for w in blocking
                         if obs_map.get(str(w.get("window_id") or ""), _iso_to_ms(w.get("observed_at")) or 0) >= done_ms
                     ]
-                if block is not None and int((_row(CODEX) or {}).get("fetched_at") or 0) < done_ms:
+                if block is not None and block_fetched < done_ms:
                     block = None
-            elif provider_id == CLAUDE:
-                if int((_row(CLAUDE) or {}).get("fetched_at") or 0) < done_ms:
-                    blocking = []
+        else:
+            fetched_ms = int((_row(provider_id) or {}).get("fetched_at") or 0)
+            done_ms = _latest_completed_turn_ms(provider_id, after_ms=fetched_ms, up_to_ms=now)
+            if done_ms is not None and fetched_ms < done_ms:
+                blocking = []
         if not blocking and block is None:
             continue
         if not blocking:

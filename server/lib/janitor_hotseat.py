@@ -241,6 +241,7 @@ def parse_claude(payload) -> list[dict]:
             weekly_exhausted = (
                 not overage_ok
                 and (usage.get("status_7d") == "rejected"
+                     or entry["secondary"] == 0
                      or (not isinstance(used_7d, bool)
                          and isinstance(used_7d, (int, float))
                          and used_7d >= 1.0))
@@ -261,6 +262,8 @@ def parse_claude(payload) -> list[dict]:
                 entry["scoped_remaining"] = scoped
             if usage.get("degraded"):
                 entry["degraded"] = True
+            if overage_ok:
+                entry["overage"] = True
         out.append(entry)
     return out
 
@@ -331,12 +334,13 @@ class HotseatProvider:
     # profile helper only has its exit code.
     confirms_json: bool
     auth_repair: HotseatAuthRepair | None = None
+    model_scoped: bool = False
 
 
 PROVIDERS: dict[str, HotseatProvider] = {
     "claude": HotseatProvider("5-hour", ("list", "--json"), 60, parse_claude, "claude_min_remaining",
                               "interval_seconds", lambda alias: ["switch", alias, "--yes", "--json"], True,
-                              auth_repair=HotseatAuthRepair("claude", _repair_model_pin)),
+                              auth_repair=HotseatAuthRepair("claude", _repair_model_pin), model_scoped=True),
     "codex": HotseatProvider("weekly", ("codex", "--json"), 150, parse_codex, "codex_min_remaining",
                              "codex_interval_seconds", lambda alias: ["codex-account", "switch", alias], False),
 }
@@ -372,12 +376,74 @@ def _account_model_remaining(account: dict, family: str) -> int | None:
     return general
 
 
+DEFAULT_SWITCH_COOLDOWN_MS = 15 * 60 * 1000
+
+
+def _leximin_headroom(
+    account: dict, req_specs: tuple[tuple[str, str], ...],
+) -> tuple[int, ...]:
+    """Sorted ascending vector of (general_remaining, *required_model_remaining).
+
+    Requiring `_leximin_headroom(cand) > _leximin_headroom(active)` whenever
+    `req_specs` is non-empty establishes a strict partial order over finite
+    quota states, preventing 2-way or k-way switch cycles across ticks.
+    """
+    general = int(account.get("remaining") or 0)
+    if not req_specs:
+        return (general,)
+    values = [general]
+    for fam, _ in req_specs:
+        rem = _account_model_remaining(account, fam)
+        values.append(0 if rem is None else int(rem))
+    return tuple(sorted(values))
+
+
+def _reversal_blocked(
+    active: dict,
+    cand: dict,
+    *,
+    floor: int,
+    req_specs: tuple[tuple[str, str], ...],
+    last_switch: dict | None,
+    now_ms: int | None,
+    cooldown_ms: int,
+) -> bool:
+    """Guard against flipping straight back to `last_switch['from']` within
+    `cooldown_ms` unless `active` hit hard 0% exhaustion or `cand` now clears
+    `floor` on general and all required model windows."""
+    if not isinstance(last_switch, dict) or now_ms is None or cooldown_ms <= 0:
+        return False
+    if last_switch.get("to") != active.get("alias") or last_switch.get("from") != cand.get("alias"):
+        return False
+    at = last_switch.get("at")
+    if isinstance(at, bool) or not isinstance(at, (int, float)):
+        return False
+    if not (0 <= int(now_ms) - int(at) < int(cooldown_ms)):
+        return False
+    have = int(active.get("remaining") or 0)
+    if have <= 0:
+        return False
+    if any(
+        (_account_model_remaining(active, fam) or 0) <= 0
+        and (_account_model_remaining(cand, fam) or 0) > 0
+        for fam, _ in req_specs
+    ):
+        return False
+    if int(cand.get("remaining") or 0) < floor:
+        return True
+    return not all((_account_model_remaining(cand, fam) or 0) >= floor for fam, _ in req_specs)
+
+
 def decide(accounts: list[dict], floor: int, *,
            required_models: tuple[str, ...] | list[str] = (),
-           active_models: tuple[str, ...] | list[str] = ()) -> dict:
+           active_models: tuple[str, ...] | list[str] = (),
+           last_switch: dict | None = None,
+           now_ms: int | None = None,
+           cooldown_ms: int = DEFAULT_SWITCH_COOLDOWN_MS) -> dict:
     """Walk the ladder: switch when the account in use is under a rung on either
     general or required per-model quota and another account clears that rung on
-    both general and required model windows. Unknown readings never count as room."""
+    both general and required model windows without stranding running or
+    unblocked required models. Unknown readings never count as room."""
     active = next((a for a in accounts if a["active"]), None)
     if active is None:
         return {"action": "skip", "reason": "Hotseat reports no account in use"}
@@ -390,6 +456,29 @@ def decide(accounts: list[dict], floor: int, *,
         (fam, label) for fam, label in act_specs
         if (_account_model_remaining(active, fam) or 0) > 0
     ]
+    unblocked_required = [
+        (fam, label) for fam, label in req_specs
+        if (_account_model_remaining(active, fam) or 0) > 0
+    ]
+    active_leximin = _leximin_headroom(active, req_specs)
+
+    def _admissible(cand: dict) -> bool:
+        if cand["active"] or cand["remaining"] is None or cand["remaining"] <= 0:
+            return False
+        if cand.get("secondary") is not None and cand["secondary"] <= 0 and not cand.get("overage"):
+            return False
+        if not all((_account_model_remaining(cand, afam) or 0) > 0 for afam, _ in running_unblocked):
+            return False
+        if not all((_account_model_remaining(cand, rfam) or 0) > 0 for rfam, _ in unblocked_required):
+            return False
+        if req_specs and _leximin_headroom(cand, req_specs) <= active_leximin:
+            return False
+        if _reversal_blocked(
+            active, cand, floor=floor, req_specs=req_specs,
+            last_switch=last_switch, now_ms=now_ms, cooldown_ms=cooldown_ms,
+        ):
+            return False
+        return True
 
     noop_rung = None
     for rung in rungs(floor):
@@ -397,18 +486,19 @@ def decide(accounts: list[dict], floor: int, *,
         if not beneath:
             noop_rung = rung
             break
-        candidates = [a for a in accounts if not a["active"] and a["remaining"] is not None
-                      and a["remaining"] > have and (a["remaining"] >= rung if rung > 0 else a["remaining"] > 0)]
+        candidates = [
+            a for a in accounts
+            if _admissible(a)
+            and (a["remaining"] >= rung if rung > 0 else a["remaining"] > 0)
+        ]
         if candidates:
             if req_specs:
                 def _general_rank(cand: dict):
                     vals = [_account_model_remaining(cand, fam) for fam, _ in req_specs]
                     serves_all = int(all(v is not None and (v >= rung if rung > 0 else v > 0) for v in vals))
                     serves_any = sum(1 for v in vals if (v or 0) > 0)
-                    serves_act = int(all((_account_model_remaining(cand, fam) or 0) > 0
-                                         for fam, _ in running_unblocked))
                     min_req = min((v if v is not None else -1) for v in vals)
-                    return (serves_all, serves_any, serves_act, min_req,
+                    return (serves_all, serves_any, _leximin_headroom(cand, req_specs), min_req,
                             cand["remaining"], cand["secondary"] or 0, cand["alias"])
                 best = max(candidates, key=_general_rank)
             else:
@@ -430,25 +520,19 @@ def decide(accounts: list[dict], floor: int, *,
                 break
             candidates = []
             for cand in accounts:
-                if cand["active"] or cand["remaining"] is None or cand["remaining"] <= 0:
+                if not _admissible(cand):
                     continue
                 if not (cand["remaining"] >= rung if rung > 0 else cand["remaining"] > 0):
                     continue
-                if cand.get("secondary") is not None and cand["secondary"] <= 0:
-                    continue
                 cand_model = _account_model_remaining(cand, fam)
-                if cand_model is None or cand_model <= model_have:
-                    continue
-                if not (cand_model >= rung if rung > 0 else cand_model > 0):
-                    continue
-                if not all((_account_model_remaining(cand, afam) or 0) > 0
-                           for afam, _ in running_unblocked if afam != fam):
+                if cand_model is None or not (cand_model >= rung if rung > 0 else cand_model > 0):
                     continue
                 candidates.append(cand)
             if candidates:
                 best = max(
                     candidates,
-                    key=lambda a: (_account_model_remaining(a, fam) or 0,
+                    key=lambda a: (_leximin_headroom(a, req_specs),
+                                   _account_model_remaining(a, fam) or 0,
                                    a["remaining"], a["secondary"] or 0, a["alias"]),
                 )
                 return {

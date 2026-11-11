@@ -972,27 +972,13 @@ def capability_catalog(*, force_refresh: bool = False) -> dict[str, Any]:
                 if _last_error_generation == waiting_for and _last_error is not None:
                     raise RuntimeError("provider capability refresh failed") \
                         from _last_error
-                cached_snapshot = (
-                    (copy.deepcopy(_cache[1]), _cache[2])
-                    if _cache is not None and len(_cache) > 2
-                    else None
-                )
-                if cached_snapshot is not None:
-                    break
                 force_refresh = False
                 continue
             _refreshing = True
             _refresh_generation += 1
             generation = _refresh_generation
             observed_signature = current_signature
-            cached_snapshot = None
             break
-
-        if cached_snapshot is not None:
-            if cached_snapshot[1] == _auth_signature():
-                return cached_snapshot[0]
-            force_refresh = False
-            continue
 
     # Never hold the condition lock around provider subprocesses. Whatever
     # happens, the refresh latch is released so waiters can never hang.

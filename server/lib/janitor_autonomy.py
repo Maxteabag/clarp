@@ -167,13 +167,13 @@ def _automatic_hotseat_quota_snapshot(provider):
         hotseat_status.diagnose('quotaThresholdOwnerUnavailable',f'provider={provider} error={type(exc).__name__}')
         return None
 
-def _claude_model_demand(now_ms: int, base_seconds: int) -> tuple[tuple[str, ...], tuple[str, ...]]:
-    """Return (required_models, active_models) for active, queued, or quota-parked Claude work."""
+def _provider_model_demand(provider: str, now_ms: int, base_seconds: int) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Return (required_models, active_models) for active, queued, or quota-parked provider work."""
     required: list[str] = []
     active: list[str] = []
     try:
         from . import turn_dispatch_state
-        coordinator = turn_dispatch_state.account_failover("claude")
+        coordinator = turn_dispatch_state.account_failover(provider)
         with coordinator.lock:
             for attempt in list(coordinator.attempts.values()):
                 if not attempt.owned() or (attempt.agent_id, attempt.trace_id) in coordinator.park_expired:
@@ -184,14 +184,14 @@ def _claude_model_demand(now_ms: int, base_seconds: int) -> tuple[tuple[str, ...
                 required.append(model)
                 if not attempt.state.get("account_recovery") and not attempt.stopped:
                     active.append(model)
-    except Exception:
-        pass
+    except Exception as exc:
+        hotseat_status.diagnose('hotseatModelFailoverDemandUnavailable', f'provider={provider} error={type(exc).__name__}')
     try:
-        claude_agents = [
+        scoped_agents = [
             a for a in agents.list_agents()
-            if a.get("backend") == "claude" and not a.get("deleted_at") and not a.get("archived_at")
+            if a.get("backend") == provider and not a.get("deleted_at") and not a.get("archived_at")
         ]
-        if claude_agents:
+        if scoped_agents:
             from . import config, session_models, turn_queue
             queued_ids = {
                 r[0] for r in db.conn().execute(
@@ -200,7 +200,7 @@ def _claude_model_demand(now_ms: int, base_seconds: int) -> tuple[tuple[str, ...
             }
             recent_limit_ms = max(2 * int(base_seconds) * 1000, 900_000)
             default_model: str | None = None
-            for agent in claude_agents:
+            for agent in scoped_agents:
                 aid = agent["agent_id"]
                 state = agents.latest_state(aid) or {}
                 detail = state.get("detail") if isinstance(state.get("detail"), dict) else {}
@@ -208,7 +208,7 @@ def _claude_model_demand(now_ms: int, base_seconds: int) -> tuple[tuple[str, ...
                 parked = (detail.get("account_recovery") == "waiting"
                           and (state_ts <= 0 or now_ms - state_ts <= 3_600_000))
                 running = not parked and (
-                    bool(agents.is_busy(aid)) or bool(backends.active_handles("claude", aid))
+                    bool(agents.is_busy(aid)) or bool(backends.active_handles(provider, aid))
                 )
                 queued = aid in queued_ids and not turn_queue.state(aid).get("paused")
                 recent_limit = (
@@ -223,14 +223,14 @@ def _claude_model_demand(now_ms: int, base_seconds: int) -> tuple[tuple[str, ...
                 model = session_models.agent_model(agent, live_sess)
                 if not model:
                     if default_model is None:
-                        default_model = session_models.launch_default("claude", config.load())
+                        default_model = session_models.launch_default(provider, config.load())
                     model = default_model
                 if model:
                     required.append(model)
                     if running:
                         active.append(model)
-    except Exception:
-        pass
+    except Exception as exc:
+        hotseat_status.diagnose('hotseatModelAgentDemandUnavailable', f'provider={provider} error={type(exc).__name__}')
     return tuple(dict.fromkeys(required)), tuple(dict.fromkeys(active))
 
 
@@ -419,11 +419,19 @@ class AutonomyJanitors:
                 if withheld:
                     accounts=[dict(a) if a['active'] or a['alias'] not in withheld
                               else {**a,'remaining':None,'secondary':None} for a in accounts]
-            if provider=='claude':
-                req_models,act_models=_claude_model_demand(now,base)
-                decision=janitor_hotseat.decide(accounts,janitor_hotseat.floor_for(options,provider),required_models=req_models,active_models=act_models)
+            last_switch=None
+            raw_last_switch=settings_store.get(f'hotseat-switcher.{provider}.last-switch')
+            if raw_last_switch:
+                try:
+                    parsed_switch=json.loads(raw_last_switch)
+                    if isinstance(parsed_switch,dict):last_switch=parsed_switch
+                except (ValueError,TypeError):pass
+            cooldown_ms=max(3*int(base)*1000,janitor_hotseat.DEFAULT_SWITCH_COOLDOWN_MS)
+            if janitor_hotseat.PROVIDERS[provider].model_scoped:
+                req_models,act_models=_provider_model_demand(provider,now,base)
+                decision=janitor_hotseat.decide(accounts,janitor_hotseat.floor_for(options,provider),required_models=req_models,active_models=act_models,last_switch=last_switch,now_ms=now,cooldown_ms=cooldown_ms)
             else:
-                decision=janitor_hotseat.decide(accounts,janitor_hotseat.floor_for(options,provider))
+                decision=janitor_hotseat.decide(accounts,janitor_hotseat.floor_for(options,provider),last_switch=last_switch,now_ms=now,cooldown_ms=cooldown_ms)
             if not janitor_builtins.is_current(run['run_id']):return
             switched=None;outcome='completed';error=''
             if decision['action']=='switch' and options['mode']=='automatic':
