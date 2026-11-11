@@ -214,156 +214,142 @@ def _run_json(command: str, args: list[str], timeout: int, *, runner=subprocess.
     return data
 
 
-def _build_desk_snapshot(
-    tui_data: dict,
-    list_data: dict | None,
-    work_data: dict | None,
-    *,
-    observed_at: int,
-) -> dict:
-    claude_by_alias: dict[str, dict] = {}
-    codex_by_alias: dict[str, dict] = {}
-    clarp_agents_summary = {
-        "total": 0,
-        "live": 0,
-        "claude_backed": 0,
-        "by_backend": {},
-        "live_by_account": {},
-        "would_use_by_account": {},
-    }
-    stopped_raw: list[dict] = []
+def _rows_by_alias(rows) -> dict[str, dict]:
+    return {row["alias"]: row for row in rows or []
+            if isinstance(row, dict) and isinstance(row.get("alias"), str)}
 
-    if isinstance(list_data, dict):
-        for row in list_data.get("accounts") or []:
-            if isinstance(row, dict) and isinstance(row.get("alias"), str):
-                claude_by_alias[row["alias"]] = row
-        codex_block = list_data.get("codex")
-        if isinstance(codex_block, dict):
-            for row in codex_block.get("accounts") or []:
-                if isinstance(row, dict) and isinstance(row.get("alias"), str):
-                    codex_by_alias[row["alias"]] = row
-        ext_clarp = ((list_data.get("extensions") or {}).get("clarp") or {}) if isinstance(list_data.get("extensions"), dict) else {}
-        if isinstance(ext_clarp, dict):
-            agents_block = ext_clarp.get("agents")
-            if isinstance(agents_block, dict):
-                would_counts: dict[str, int] = {}
-                for agent_row in agents_block.get("agents") or []:
-                    if isinstance(agent_row, dict):
-                        target = agent_row.get("would_use")
-                        if isinstance(target, str) and target:
-                            would_counts[target] = would_counts.get(target, 0) + 1
-                live_map = agents_block.get("live_by_account") if isinstance(agents_block.get("live_by_account"), dict) else {}
-                by_backend = agents_block.get("by_backend") if isinstance(agents_block.get("by_backend"), dict) else {}
-                clarp_agents_summary = {
-                    "total": int(agents_block.get("total") or 0),
-                    "live": int(agents_block.get("live") or 0),
-                    "claude_backed": int(agents_block.get("claude_backed") or 0),
-                    "by_backend": {str(k): int(v) for k, v in by_backend.items() if isinstance(v, int)},
-                    "live_by_account": {str(k): int(v) for k, v in live_map.items() if isinstance(v, int)},
-                    "would_use_by_account": would_counts,
-                }
-            if isinstance(ext_clarp.get("stopped"), list):
-                stopped_raw = [item for item in ext_clarp["stopped"] if isinstance(item, dict)]
 
-    accounts: list[dict] = []
-    for raw in tui_data.get("accounts") or []:
-        if not isinstance(raw, dict):
+def _clarp_block(list_data: dict | None) -> tuple[dict, list[dict]]:
+    """(agents summary, stopped items) from the Clarp extension of `hotseat list --json`."""
+    summary = _no_clarp_agents()
+    stopped: list[dict] = []
+    extensions = list_data.get("extensions") if isinstance(list_data, dict) else None
+    ext_clarp = (extensions.get("clarp") or {}) if isinstance(extensions, dict) else {}
+    if not isinstance(ext_clarp, dict):
+        return summary, stopped
+    agents_block = ext_clarp.get("agents")
+    if isinstance(agents_block, dict):
+        would_counts: dict[str, int] = {}
+        for agent_row in agents_block.get("agents") or []:
+            if isinstance(agent_row, dict):
+                target = agent_row.get("would_use")
+                if isinstance(target, str) and target:
+                    would_counts[target] = would_counts.get(target, 0) + 1
+        live_map = agents_block.get("live_by_account") if isinstance(agents_block.get("live_by_account"), dict) else {}
+        by_backend = agents_block.get("by_backend") if isinstance(agents_block.get("by_backend"), dict) else {}
+        summary = {
+            "total": int(agents_block.get("total") or 0),
+            "live": int(agents_block.get("live") or 0),
+            "claude_backed": int(agents_block.get("claude_backed") or 0),
+            "by_backend": {str(k): int(v) for k, v in by_backend.items() if isinstance(v, int)},
+            "live_by_account": {str(k): int(v) for k, v in live_map.items() if isinstance(v, int)},
+            "would_use_by_account": would_counts,
+        }
+    if isinstance(ext_clarp.get("stopped"), list):
+        stopped = [item for item in ext_clarp["stopped"] if isinstance(item, dict)]
+    return summary, stopped
+
+
+def _account_row(raw: dict, claude_extra: dict, codex_extra: dict, clarp_agents: dict, *, observed_at: int) -> dict | None:
+    """One account of the desk: `raw` as `hotseat tui --snapshot` reports it,
+    the extras `hotseat list --json` has for the same alias."""
+    provider = str(raw.get("provider") or "").strip().lower()
+    alias = str(raw.get("alias") or "").strip()
+    if not provider or not alias:
+        return None
+    checked_ms = _epoch_ms_from_seconds(raw.get("checked_at")) or observed_at
+    error = str(raw.get("error") or "").strip()
+    no_reset_reason = str(raw.get("no_reset_reason") or "").strip()
+
+    windows: list[dict] = []
+    for win in raw.get("windows") or []:
+        if not isinstance(win, dict):
             continue
-        provider = str(raw.get("provider") or "").strip().lower()
-        alias = str(raw.get("alias") or "").strip()
-        if not provider or not alias:
-            continue
-        checked_ms = _epoch_ms_from_seconds(raw.get("checked_at")) or observed_at
-        error = str(raw.get("error") or "").strip()
-        no_reset_reason = str(raw.get("no_reset_reason") or "").strip()
-
-        windows: list[dict] = []
-        for win in raw.get("windows") or []:
-            if not isinstance(win, dict):
-                continue
-            label = str(win.get("label") or "").strip()
-            kind, short_label = _window_meta(provider, label)
-            used = None if error else _ratio(win.get("used"))
-            resets_at = _epoch_ms_from_seconds(win.get("reset"))
-            windows.append({
-                "kind": kind,
-                "label": label,
-                "short_label": short_label,
-                "used_ratio": used,
-                "remaining_ratio": None if used is None else round(1.0 - used, 4),
-                "resets_at": resets_at,
-                "observed_at": checked_ms,
-                "stale": bool(raw.get("cached")),
-            })
-
-        claude_extra = claude_by_alias.get(alias, {}) if provider == "claude" else {}
-        codex_extra = codex_by_alias.get(alias, {}) if provider == "codex" else {}
-        claude_usage = claude_extra.get("usage") if isinstance(claude_extra.get("usage"), dict) else {}
-        codex_usage = codex_extra.get("usage") if isinstance(codex_extra.get("usage"), dict) else {}
-
-        error_code = claude_extra.get("error_code") if isinstance(claude_extra.get("error_code"), str) else None
-        limited = bool(raw.get("limited")) or bool(codex_usage.get("blocked"))
-        state, code = _classify_account_state(
-            error=error,
-            error_code=error_code,
-            limited=limited,
-            windows=windows,
-            extra_usage=claude_usage.get("extra_usage_enabled") is True,
-        )
-
-        reset_credits = raw.get("reset_credits")
-        if isinstance(reset_credits, bool) or not isinstance(reset_credits, int):
-            reset_credits = None
-
-        blocked_models = [
-            str(m) for m in (claude_usage.get("blocked_models") or [])
-            if isinstance(m, str) and m.strip()
-        ]
-        access_hours = _num(claude_extra.get("access_hours_left"))
-        signin_days = _num(claude_extra.get("signin_days_left"))
-        token_hours = _num(codex_extra.get("token_hours_left"))
-
-        accounts.append({
-            "provider": provider,
-            "alias": alias,
-            "display_alias": str(raw.get("display_alias") or alias),
-            "aliases": [str(a) for a in (raw.get("aliases") or [alias]) if isinstance(a, str)],
-            "email": str(raw.get("email") or claude_extra.get("email") or codex_extra.get("email") or ""),
-            "workspace": str(raw.get("workspace") or claude_extra.get("org") or codex_extra.get("account_id") or ""),
-            "plan": str(raw.get("plan") or claude_extra.get("plan_label") or codex_extra.get("plan") or ""),
-            "plan_code": str(claude_extra.get("plan") or codex_extra.get("plan") or "").lower() or None,
-            "rate_limit_tier": str(raw.get("rate_limit_tier") or claude_extra.get("rate_limit_tier") or ""),
-            "active": bool(raw.get("active")),
-            "saved": bool(raw.get("saved", True)),
-            "can_switch": bool(raw.get("can_switch")),
-            "can_launch": bool(raw.get("can_launch")),
-            "limited": limited,
-            "cached": bool(raw.get("cached")),
-            "state": state,
-            "error_code": code,
-            "error": error,
-            "warning": str(raw.get("warning") or ""),
-            "profile_notes": [str(n) for n in (raw.get("profile_notes") or []) if isinstance(n, str) and n.strip()],
-            "no_reset_reason": no_reset_reason,
-            "checked_at": checked_ms,
-            "reset_credits": reset_credits,
-            "reset_credits_error": str(raw.get("reset_credits_error") or ""),
-            "access_expires_at": _int_ms(claude_extra.get("access_expires_at")),
-            "access_hours_left": round(access_hours, 2) if access_hours is not None else None,
-            "refresh_expires_at": _int_ms(claude_extra.get("refresh_expires_at")),
-            "signin_days_left": round(signin_days, 1) if signin_days is not None else None,
-            "signin_due_soon": bool(claude_extra.get("signin_due_soon")) if provider == "claude" else None,
-            "token_expires_at": _epoch_ms_from_seconds(codex_extra.get("token_expires_at")),
-            "token_hours_left": round(token_hours, 2) if token_hours is not None else None,
-            "api_key_present": bool(codex_extra["api_key_present"]) if "api_key_present" in codex_extra else None,
-            "blocked_models": blocked_models,
-            "extra_usage_enabled": bool(claude_usage["extra_usage_enabled"]) if "extra_usage_enabled" in claude_usage else None,
-            "extra_usage_reason": str(claude_usage.get("extra_usage_reason") or "") if claude_usage else "",
-            "live_sessions": int(clarp_agents_summary["live_by_account"].get(alias, 0)),
-            "would_use_sessions": int(clarp_agents_summary["would_use_by_account"].get(alias, 0)),
-            "windows": windows,
+        label = str(win.get("label") or "").strip()
+        kind, short_label = _window_meta(provider, label)
+        used = None if error else _ratio(win.get("used"))
+        resets_at = _epoch_ms_from_seconds(win.get("reset"))
+        windows.append({
+            "kind": kind,
+            "label": label,
+            "short_label": short_label,
+            "used_ratio": used,
+            "remaining_ratio": None if used is None else round(1.0 - used, 4),
+            "resets_at": resets_at,
+            "observed_at": checked_ms,
+            "stale": bool(raw.get("cached")),
         })
 
+    claude_extra = claude_extra if provider == "claude" else {}
+    codex_extra = codex_extra if provider == "codex" else {}
+    claude_usage = claude_extra.get("usage") if isinstance(claude_extra.get("usage"), dict) else {}
+    codex_usage = codex_extra.get("usage") if isinstance(codex_extra.get("usage"), dict) else {}
+
+    error_code = claude_extra.get("error_code") if isinstance(claude_extra.get("error_code"), str) else None
+    limited = bool(raw.get("limited")) or bool(codex_usage.get("blocked"))
+    state, code = _classify_account_state(
+        error=error,
+        error_code=error_code,
+        limited=limited,
+        windows=windows,
+        extra_usage=claude_usage.get("extra_usage_enabled") is True,
+    )
+
+    reset_credits = raw.get("reset_credits")
+    if isinstance(reset_credits, bool) or not isinstance(reset_credits, int):
+        reset_credits = None
+
+    blocked_models = [
+        str(m) for m in (claude_usage.get("blocked_models") or [])
+        if isinstance(m, str) and m.strip()
+    ]
+    access_hours = _num(claude_extra.get("access_hours_left"))
+    signin_days = _num(claude_extra.get("signin_days_left"))
+    token_hours = _num(codex_extra.get("token_hours_left"))
+
+    return {
+        "provider": provider,
+        "alias": alias,
+        "display_alias": str(raw.get("display_alias") or alias),
+        "aliases": [str(a) for a in (raw.get("aliases") or [alias]) if isinstance(a, str)],
+        "email": str(raw.get("email") or claude_extra.get("email") or codex_extra.get("email") or ""),
+        "workspace": str(raw.get("workspace") or claude_extra.get("org") or codex_extra.get("account_id") or ""),
+        "plan": str(raw.get("plan") or claude_extra.get("plan_label") or codex_extra.get("plan") or ""),
+        "plan_code": str(claude_extra.get("plan") or codex_extra.get("plan") or "").lower() or None,
+        "rate_limit_tier": str(raw.get("rate_limit_tier") or claude_extra.get("rate_limit_tier") or ""),
+        "active": bool(raw.get("active")),
+        "saved": bool(raw.get("saved", True)),
+        "can_switch": bool(raw.get("can_switch")),
+        "can_launch": bool(raw.get("can_launch")),
+        "limited": limited,
+        "cached": bool(raw.get("cached")),
+        "state": state,
+        "error_code": code,
+        "error": error,
+        "warning": str(raw.get("warning") or ""),
+        "profile_notes": [str(n) for n in (raw.get("profile_notes") or []) if isinstance(n, str) and n.strip()],
+        "no_reset_reason": no_reset_reason,
+        "checked_at": checked_ms,
+        "reset_credits": reset_credits,
+        "reset_credits_error": str(raw.get("reset_credits_error") or ""),
+        "access_expires_at": _int_ms(claude_extra.get("access_expires_at")),
+        "access_hours_left": round(access_hours, 2) if access_hours is not None else None,
+        "refresh_expires_at": _int_ms(claude_extra.get("refresh_expires_at")),
+        "signin_days_left": round(signin_days, 1) if signin_days is not None else None,
+        "signin_due_soon": bool(claude_extra.get("signin_due_soon")) if provider == "claude" else None,
+        "token_expires_at": _epoch_ms_from_seconds(codex_extra.get("token_expires_at")),
+        "token_hours_left": round(token_hours, 2) if token_hours is not None else None,
+        "api_key_present": bool(codex_extra["api_key_present"]) if "api_key_present" in codex_extra else None,
+        "blocked_models": blocked_models,
+        "extra_usage_enabled": bool(claude_usage["extra_usage_enabled"]) if "extra_usage_enabled" in claude_usage else None,
+        "extra_usage_reason": str(claude_usage.get("extra_usage_reason") or "") if claude_usage else "",
+        "live_sessions": int(clarp_agents["live_by_account"].get(alias, 0)),
+        "would_use_sessions": int(clarp_agents["would_use_by_account"].get(alias, 0)),
+        "windows": windows,
+    }
+
+
+def _stopped_rows(stopped_raw: list[dict]) -> list[dict]:
     stopped_work: list[dict] = []
     for item in stopped_raw:
         kind = str(item.get("kind") or "clarp")
@@ -397,6 +383,34 @@ def _build_desk_snapshot(
             "readiness": readiness,
             "resume_command": resume_cmd,
         })
+    return stopped_work
+
+
+def _build_desk_snapshot(
+    tui_data: dict,
+    list_data: dict | None,
+    work_data: dict | None,
+    *,
+    observed_at: int,
+) -> dict:
+    claude_by_alias: dict[str, dict] = {}
+    codex_by_alias: dict[str, dict] = {}
+    if isinstance(list_data, dict):
+        claude_by_alias = _rows_by_alias(list_data.get("accounts"))
+        codex_block = list_data.get("codex")
+        if isinstance(codex_block, dict):
+            codex_by_alias = _rows_by_alias(codex_block.get("accounts"))
+    clarp_agents_summary, stopped_raw = _clarp_block(list_data)
+
+    accounts: list[dict] = []
+    for raw in tui_data.get("accounts") or []:
+        if not isinstance(raw, dict):
+            continue
+        alias = str(raw.get("alias") or "").strip()
+        row = _account_row(raw, claude_by_alias.get(alias, {}), codex_by_alias.get(alias, {}),
+                           clarp_agents_summary, observed_at=observed_at)
+        if row is not None:
+            accounts.append(row)
 
     recent_work: list[dict] = []
     if isinstance(work_data, dict):
@@ -436,7 +450,7 @@ def _build_desk_snapshot(
         "errors": errors,
         "clarp_agents": clarp_agents_summary,
         "accounts": accounts,
-        "stopped_work": stopped_work,
+        "stopped_work": _stopped_rows(stopped_raw),
         "recent_work": recent_work,
     }
 
@@ -542,7 +556,10 @@ def _serve_accounts(raw_accounts: list[dict], *, served_at: int, snapshot_stale:
             used = _ratio(w.get("used_ratio"))
             resets_at = _int_ms(w.get("resets_at"))
             obs = _int_ms(w.get("observed_at"))
-            stale = bool(w.get("stale")) or snapshot_stale
+            # A window also ages on its own: the switcher's scheduled read
+            # refreshes one provider's rows, the others keep their own time.
+            stale = (bool(w.get("stale")) or snapshot_stale
+                     or (obs is not None and served_at - obs > STALE_MS))
             if not no_reset and resets_at is not None and resets_at <= served_at and (obs is None or obs < resets_at):
                 used = None
                 stale = True
@@ -606,6 +623,56 @@ def _credentials_changed(provider: str) -> None:
     backends.by_id(provider).on_credential_change()
 
 
+def _raw_from_switcher_row(provider: str, stored: dict, row: dict, observed_at: int) -> dict | None:
+    """One account as `hotseat tui --snapshot` would report it now, put together
+    from the row the switcher's own read has for it (`list --json` for Claude,
+    `codex --json` for Codex) the way Hotseat's bridge builds that row from the
+    same numbers. What only the TUI knows (grouping, reset credits, whether the
+    account can be switched to) is kept from the stored row. None when the row
+    says nothing about the account's quota."""
+    raw = {key: stored.get(key) for key in (
+        "provider", "alias", "display_alias", "aliases", "email", "plan", "rate_limit_tier", "workspace",
+        "saved", "can_switch", "can_launch", "warning", "profile_notes", "reset_credits", "reset_credits_error")}
+    usage = row.get("usage") if isinstance(row.get("usage"), dict) else None
+    windows: list[dict] = []
+    if provider == "claude":
+        error = str(row.get("error") or "").strip()
+        if usage is None and not error:
+            return None
+        usage = usage or {}
+        for label, used_key, reset_key in (("All models · 5-hour", "used_5h", "reset_5h"),
+                                           ("All models · weekly", "used_7d", "reset_7d")):
+            if _num(usage.get(used_key)) is not None:
+                windows.append({"label": label, "used": usage[used_key], "reset": usage.get(reset_key) or 0})
+        for scoped in usage.get("scoped") or []:
+            if isinstance(scoped, dict) and isinstance(scoped.get("model"), str) and scoped["model"].strip():
+                windows.append({"label": f"{scoped['model']} · weekly", "used": scoped.get("used"),
+                                "reset": scoped.get("reset") or 0})
+        raw["limited"] = usage.get("limited") is True or usage.get("status") == "rejected"
+        raw["no_reset_reason"] = ""
+    else:
+        if usage is None:
+            return None
+        error = str(usage.get("error") or "").strip()
+        windows = [{"label": w.get("label"), "used": w.get("used"), "reset": w.get("reset") or 0}
+                   for w in usage.get("windows") or [] if isinstance(w, dict)]
+        raw["limited"] = False  # Codex's block is `usage.blocked`, which the row carries itself
+        raw["no_reset_reason"] = str(usage.get("no_reset_reason") or "")
+    raw.update(active=row.get("is_active") is True, cached=False, error=error,
+               windows=[] if error else windows, checked_at=0 if error else observed_at / 1000)
+    return raw
+
+
+def _switched_since(provider: str, since_ms: int) -> bool:
+    """Whether a switch of `provider` (the desk's or the switcher's) ended at or after `since_ms`."""
+    try:
+        record = json.loads(settings_store.get(f"hotseat-switcher.{provider}.last-switch") or "null")
+    except ValueError:
+        return False
+    at = record.get("at") if isinstance(record, dict) else None
+    return isinstance(at, (int, float)) and not isinstance(at, bool) and int(at) >= int(since_ms)
+
+
 def _mark_active(provider: str, alias: str) -> None:
     """Hotseat confirmed the switch: the stored desk names the new account at
     once, before the live read that follows has finished (or if it fails)."""
@@ -659,6 +726,9 @@ class HotseatDesk:
         self._switch_locks = {provider: threading.Lock() for provider in janitor_hotseat.PROVIDERS}
         self._switches: dict[str, dict] = {}
         self._resume_lock = threading.Lock()
+        # Orders the read-change-write of the stored snapshot between a live
+        # read, a switch marking the new account and the switcher's read.
+        self._store_lock = threading.Lock()
 
     def switch_lock(self, provider: str) -> threading.Lock:
         """Held around every `hotseat switch` of `provider` and the write of its
@@ -696,8 +766,9 @@ class HotseatDesk:
                 return True
         try:
             snapshot = _read_live(cmd, runner, now)
-            settings_store.set_text(SNAPSHOT_KEY, json.dumps(snapshot, separators=(",", ":")))
-            settings_store.set_text(ERROR_KEY, "")
+            with self._store_lock:
+                settings_store.set_text(SNAPSHOT_KEY, json.dumps(snapshot, separators=(",", ":")))
+                settings_store.set_text(ERROR_KEY, "")
         except Exception as exc:  # noqa: BLE001
             code = hotseat_status.error_code_for(exc)
             log("hotseatDeskRefreshFailed", f"code={code} error={type(exc).__name__}")
@@ -707,6 +778,82 @@ class HotseatDesk:
                 self._inflight = None
             done.set()
         return True
+
+    def absorb_switcher_read(self, provider: str, payload, *, started_at: int | None = None) -> bool:
+        """The Hotseat switcher just read `provider` on its own schedule
+        (`hotseat list --json` for Claude, `hotseat codex --json` for Codex).
+        The stored desk takes from that read what it says: quota windows,
+        state, the account in use, sign-in and token clocks of the accounts it
+        already lists, and from the Claude read the stopped work and the
+        agents' accounts. So a desk nobody refreshes stays as fresh as the
+        switcher's cadence, at no extra read of the providers.
+
+        It never adds or removes an account and creates no desk where no live
+        read has stored one: that takes `tui --snapshot`. Only the Claude read,
+        which carries the whole list, moves the desk's `observed_at`; rows the
+        read did not cover keep their own `checked_at` and age by it.
+        `started_at` is when the read began: a switch that ended since then
+        knows the account in use better than this read does.
+
+        True when the stored desk was updated. Never raises: the switcher's
+        read must not fail because of the desk."""
+        try:
+            return self._absorb(provider, payload, started_at)
+        except Exception as exc:  # noqa: BLE001
+            log("hotseatDeskAbsorbFailed", f"provider={provider} error={type(exc).__name__}")
+            return False
+
+    def _absorb(self, provider: str, payload, started_at: int | None) -> bool:
+        from . import server_identity
+        if provider not in janitor_hotseat.PROVIDERS or not isinstance(payload, dict):
+            return False
+        if not server_identity.hotseat_desk_enabled():
+            return False
+        rows = _rows_by_alias(payload.get("accounts") if isinstance(payload.get("accounts"), list) else [])
+        now = now_ms()
+        with self._store_lock:
+            snapshot = _load_persisted()
+            if snapshot is None:
+                return False
+            extensions = payload.get("extensions")
+            has_clarp = (provider == "claude" and isinstance(extensions, dict)
+                         and isinstance(extensions.get("clarp"), dict))
+            if has_clarp:
+                snapshot["clarp_agents"], stopped_raw = _clarp_block(payload)
+                snapshot["stopped_work"] = _stopped_rows(stopped_raw)
+            clarp_agents = {**_no_clarp_agents(), **(snapshot.get("clarp_agents") or {})}
+            keep_active = _switched_since(provider, now if started_at is None else started_at)
+            accounts = []
+            for stored in snapshot.get("accounts") or []:
+                if not isinstance(stored, dict):
+                    continue
+                alias = stored.get("alias")
+                row = rows.get(alias) if stored.get("provider") == provider else None
+                raw = _raw_from_switcher_row(provider, stored, row, now) if row is not None else None
+                if raw is None:
+                    if has_clarp:
+                        stored["live_sessions"] = int(clarp_agents["live_by_account"].get(alias, 0))
+                        stored["would_use_sessions"] = int(clarp_agents["would_use_by_account"].get(alias, 0))
+                    accounts.append(stored)
+                    continue
+                if keep_active:
+                    raw["active"] = bool(stored.get("active"))
+                accounts.append(_account_row(raw, row, row, clarp_agents, observed_at=now) or stored)
+            snapshot["accounts"] = accounts
+            if provider == "claude":
+                snapshot["observed_at"] = now
+                settings_store.set_text(ERROR_KEY, "")
+            settings_store.set_text(SNAPSHOT_KEY, json.dumps(snapshot, separators=(",", ":")))
+        return True
+
+    def mark_switched(self, provider: str, alias: str) -> None:
+        """The automatic switcher made `alias` the default: the stored desk
+        names it at once, not at the switcher's next read. Never raises."""
+        try:
+            with self._store_lock:
+                _mark_active(provider, alias)
+        except Exception as exc:  # noqa: BLE001
+            log("hotseatDeskMarkFailed", f"provider={provider} error={type(exc).__name__}")
 
     def payload(
         self,
@@ -864,7 +1011,8 @@ class HotseatDesk:
         if str(settings_store.get(ERROR_KEY) or "").strip():
             latest = _stored_switch(prov) or {}
             if latest.get("state") == "switched" and latest.get("alias") == target:
-                _mark_active(prov, target)
+                with self._store_lock:
+                    _mark_active(prov, target)
 
     def _switch(self, prov: str, target: str, cmd: str, switch_fn, read_active, credentials_changed) -> tuple[int, dict]:
         base = {"provider": prov, "alias": target}
@@ -905,7 +1053,8 @@ class HotseatDesk:
                         f"hotseat-switcher.{prov}.last-switch",
                         json.dumps({"from": active, "to": target, "at": stamp}),
                     )
-                    _mark_active(prov, target)
+                    with self._store_lock:
+                        _mark_active(prov, target)
                     state = "switched"
             finally:
                 self._finish_switch(prov, state)

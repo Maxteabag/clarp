@@ -3115,12 +3115,15 @@ def _server_workers(ctx: ServerContext, srv: "ContextHTTPServer", cfg,
         # A Codex switch through Hotseat rewrites auth.json; the Codex backend
         # restarts its idle app-servers from on_credential_change(), exactly
         # as after `codex login`.
-        # The desk's switch and the switcher's switch share one lock per provider.
+        # The desk's switch and the switcher's switch share one lock per provider,
+        # and the switcher's scheduled reads keep the stored desk fresh.
         desk = getattr(ctx, "hotseat_desk", None)
         return started(AutonomyJanitors(
             adapters.decided_heartbeat, apns.send_user_notification,
             recover=adapters.recover_janitor_quota,
-            hotseat_switch_lock=desk.switch_lock if desk is not None else None))
+            hotseat_switch_lock=desk.switch_lock if desk is not None else None,
+            hotseat_observe=desk.absorb_switcher_read if desk is not None else None,
+            hotseat_switched=desk.mark_switched if desk is not None else None))
 
     def start_janitor_runner():
         from lib.janitor_http import runtime_available

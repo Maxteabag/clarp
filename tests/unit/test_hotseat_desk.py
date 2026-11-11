@@ -435,9 +435,11 @@ def _codex_row(alias, windows, *, blocked=False, no_reset_reason=""):
                "limited": False, "windows": [{"label": label, "used": used, "reset": FUTURE_S}
                                              for label, used in windows],
                "error": "", "checked_at": T0_MS / 1000, "no_reset_reason": no_reset_reason}
-    list_row = {"provider": "codex", "alias": alias, "is_active": False,
-                "usage": {"usable": not blocked, "blocked": blocked, "error": None,
-                          "windows": [{"label": label, "used": used, "reset": FUTURE_S} for label, used in windows]}}
+    usage = {"usable": not blocked, "blocked": blocked, "error": None,
+             "windows": [{"label": label, "used": used, "reset": FUTURE_S} for label, used in windows]}
+    if no_reset_reason:
+        usage["no_reset_reason"] = no_reset_reason  # Hotseat omits the key when it is empty
+    list_row = {"provider": "codex", "alias": alias, "is_active": False, "usage": usage}
     return tui_row, list_row
 
 
@@ -479,6 +481,7 @@ def test_codex_is_exhausted_by_its_own_windows_or_hotseats_block_not_by_a_model_
         _codex_row("month-out", [("codex primary weekly", 0.20), ("codex primary 30-day", 1.0)], blocked=True),
         _codex_row("spark-out", [("codex primary weekly", 0.20), ("codex_spark primary weekly", 1.0)]),
         _codex_row("no-flag", [("codex primary weekly", 1.0)]),
+        _codex_row("other-limit", [("codex primary weekly", 0.20), ("gpt-5.3-codex primary weekly", 1.0)]),
     ])
 
     assert accounts["month-out"]["state"] == "exhausted"
@@ -487,6 +490,11 @@ def test_codex_is_exhausted_by_its_own_windows_or_hotseats_block_not_by_a_model_
     spark = next(w for w in accounts["spark-out"]["windows"] if w["kind"] == "model:spark")
     assert (spark["remaining_ratio"], spark["resets_at"]) == (0.0, int(FUTURE_S * 1000))
     assert accounts["no-flag"]["state"] == "exhausted"
+    # A limit that is not the provider's own is not an account window, whatever its span.
+    other = accounts["other-limit"]
+    assert other["state"] == "ok"
+    assert [w["kind"] in desk.ACCOUNT_WINDOW_KINDS for w in other["windows"]] == [True, False]
+    assert other["windows"][1]["remaining_ratio"] == 0.0
 
 
 def test_a_passed_account_reset_is_not_kept_exhausted_by_a_full_model_window(monkeypatch):
@@ -560,6 +568,237 @@ def test_the_interval_survives_a_restart_of_the_host(monkeypatch):
 
     assert len(calls) == 3 and restarted["refresh_throttled"] is True
     assert restarted["next_refresh_at"] == T0_MS + desk.MIN_REFRESH_INTERVAL_MS
+
+
+# --- the switcher's scheduled read keeps the stored desk fresh ------------------
+
+MINUTE = 60_000
+
+
+def _lists(claude=(), codex=(), stopped=None, agents=None):
+    """(tui, list, codex) payloads of one moment, consistent as Hotseat's own are."""
+    tui_p = {"sessions": 2, "errors": [], "accounts": [t for t, _ in (*claude, *codex)]}
+    list_p = {"accounts": [l for _, l in claude],
+              "codex": {"quota_read": True, "accounts": [l for _, l in codex]}}
+    if stopped is not None or agents is not None:
+        list_p["extensions"] = {"clarp": {"agents": agents or {"total": 0, "live": 0}, "stopped": stopped or []}}
+    return tui_p, list_p, {"accounts": [l for _, l in codex]}
+
+
+def _stop(session, stopped_at_s, ready=True):
+    return {"kind": "clarp", "cause": "usage_limit", "id": session, "name": session, "backend": "claude",
+            "stopped_at": stopped_at_s, "readiness": {"ready": ready, "hard": None, "warning": None}}
+
+
+def _live(d, tui_p, list_p):
+    return d.payload(refresh=True, command="hotseat",
+                     runner=_fake_runner_factory(tui_p, list_p, {"items": [{"id": "t1", "provider": "codex"}]}))
+
+
+def _no_cli(*_a, **_k):
+    raise AssertionError("a plain read of the desk runs nothing")
+
+
+def test_the_switchers_read_refreshes_the_stored_desk_without_a_live_read(monkeypatch):
+    clock = {"now": T0_MS}
+    monkeypatch.setattr(desk, "now_ms", lambda: clock["now"])
+    main = _claude_row("main", five_hour=0.20, weekly=0.30, fable=0.50, active=True)
+    main[0].update(reset_credits=3, display_alias="Main", email="main@example.invalid", plan="Team 5×")
+    spare = _claude_row("spare", five_hour=0.10, weekly=0.10, fable=0.10)
+    cx = _codex_row("cx", [("codex primary weekly", 0.25)])
+    tui_p, list_p, _ = _lists([main, spare], [cx], stopped=[_stop("koko", T0_MS / 1000 - 60)],
+                              agents={"total": 4, "live": 1, "live_by_account": {"main": 1}})
+    d = desk.HotseatDesk()
+    _live(d, tui_p, list_p)
+
+    # Eleven minutes on with nobody refreshing: the stored desk is stale, as before.
+    clock["now"] = T0_MS + 11 * MINUTE
+    assert d.payload(command="hotseat", runner=_no_cli)["stale"] is True
+
+    # The switcher's scheduled `hotseat list --json`: main went on working and hit
+    # Fable's limit, koko was continued and luna stopped, the default moved to spare.
+    later = [_claude_row("main", five_hour=0.60, weekly=0.35, fable=1.0),
+             _claude_row("spare", five_hour=0.15, weekly=0.10, fable=0.10, active=True)]
+    _, switcher_list, _ = _lists(later, [], stopped=[_stop("luna", clock["now"] / 1000 - 30)],
+                                 agents={"total": 4, "live": 2, "live_by_account": {"spare": 2}})
+    assert d.absorb_switcher_read("claude", switcher_list, started_at=clock["now"]) is True
+
+    clock["now"] += 1000
+    body = d.payload(command="hotseat", runner=_no_cli)
+    accounts = {a["alias"]: a for a in body["accounts"]}
+    assert body["stale"] is False and body["observed_at"] == T0_MS + 11 * MINUTE
+    main_now = accounts["main"]
+    assert (main_now["state"], main_now["active"], main_now["blocked_models"]) == ("ok", False, ["Fable"])
+    assert {w["kind"]: w["remaining_ratio"] for w in main_now["windows"]} == {"5h": 0.4, "7d": 0.65, "model:fable": 0.0}
+    assert all(w["observed_at"] == body["observed_at"] and w["stale"] is False for w in main_now["windows"])
+    assert main_now["checked_at"] == body["observed_at"] and main_now["live_sessions"] == 0
+    assert (accounts["spare"]["active"], accounts["spare"]["live_sessions"]) == (True, 2)
+    # What only `tui --snapshot` knows stays as the last live read left it.
+    assert (main_now["reset_credits"], main_now["display_alias"], main_now["email"], main_now["plan"],
+            main_now["can_switch"]) == (3, "Main", "main@example.invalid", "Team 5×", True)
+    assert [item["id"] for item in body["stopped_work"]] == ["luna"]
+    assert body["clarp_agents"]["live_by_account"] == {"spare": 2}
+    assert [item["id"] for item in body["recent_work"]] == ["t1"] and body["sessions"] == 2
+    # Codex was not in this read: its row keeps its own age and says so, window by window.
+    assert accounts["cx"]["checked_at"] == T0_MS
+    assert [(w["observed_at"], w["stale"]) for w in accounts["cx"]["windows"]] == [(T0_MS, True)]
+    # The minimum interval for a client's live read counts from this read too.
+    assert body["next_refresh_at"] == body["observed_at"] + desk.MIN_REFRESH_INTERVAL_MS
+
+
+def test_a_desk_refreshed_by_the_switcher_equals_one_read_live_at_the_same_moment(monkeypatch):
+    monkeypatch.setattr(desk, "now_ms", lambda: T0_MS)
+    old = [_claude_row("main", five_hour=0.20, weekly=0.30, fable=0.50, active=True),
+           _claude_row("spare", five_hour=0.10, weekly=0.10, fable=0.10),
+           _claude_row("spent", five_hour=0.80, weekly=0.10, fable=0.10)]
+    old_cx = [_codex_row("cx", [("codex primary weekly", 0.25), ("codex primary 30-day", 0.5)])]
+    new = [_claude_row("main", five_hour=0.60, weekly=0.35, fable=1.0),
+           _claude_row("spare", five_hour=0.15, weekly=0.10, fable=0.10, active=True),
+           _claude_row("spent", five_hour=1.0, weekly=0.10, fable=0.10, limited=True)]
+    new_cx = [_codex_row("cx", [("codex primary weekly", 0.40), ("codex primary 30-day", 1.0)], blocked=True)]
+    stopped = [_stop("koko", T0_MS / 1000 - 60, ready=False)]
+    agents = {"total": 3, "live": 1, "live_by_account": {"spare": 1}, "agents": [{"would_use": "spare"}]}
+
+    live = desk.HotseatDesk()
+    expected = _live(live, *_lists(new, new_cx, stopped=stopped, agents=agents)[:2])
+
+    settings_store.set_text(desk.SNAPSHOT_KEY, "")
+    absorbed = desk.HotseatDesk()
+    _live(absorbed, *_lists(old, old_cx, stopped=[], agents={"total": 3, "live": 0})[:2])
+    _, new_list, new_codex = _lists(new, new_cx, stopped=stopped, agents=agents)
+    assert absorbed.absorb_switcher_read("claude", new_list, started_at=T0_MS)
+    assert absorbed.absorb_switcher_read("codex", new_codex, started_at=T0_MS)
+    got = absorbed.payload(command="hotseat", runner=_no_cli)
+
+    for key in ("accounts", "stopped_work", "clarp_agents", "observed_at", "stale"):
+        assert got[key] == expected[key], key
+
+
+def test_the_switchers_codex_read_refreshes_only_codex_rows(monkeypatch):
+    clock = {"now": T0_MS}
+    monkeypatch.setattr(desk, "now_ms", lambda: clock["now"])
+    d = desk.HotseatDesk()
+    tui_p, list_p, _ = _lists([_claude_row("main", five_hour=0.2, weekly=0.3, fable=0.5, active=True)],
+                              [_codex_row("cx", [("codex primary weekly", 0.25)])])
+    _live(d, tui_p, list_p)
+    clock["now"] = T0_MS + 4 * MINUTE
+    _, _, codex_read = _lists([], [_codex_row("cx", [("codex primary weekly", 1.0)], blocked=True,
+                                              no_reset_reason="no credits")])
+
+    assert d.absorb_switcher_read("codex", codex_read, started_at=clock["now"]) is True
+
+    body = d.payload(command="hotseat", runner=_no_cli)
+    accounts = {a["alias"]: a for a in body["accounts"]}
+    assert (accounts["cx"]["state"], accounts["cx"]["no_reset_reason"]) == ("exhausted", "no credits")
+    assert accounts["cx"]["windows"][0]["observed_at"] == clock["now"]
+    assert accounts["main"]["checked_at"] == T0_MS
+    assert body["observed_at"] == T0_MS, "only the read that carries the whole account list moves the desk's time"
+
+
+def test_the_switchers_read_neither_invents_nor_removes_accounts_and_needs_a_stored_desk(monkeypatch):
+    monkeypatch.setattr(desk, "now_ms", lambda: T0_MS)
+    d = desk.HotseatDesk()
+    _, switcher_list, _ = _lists([_claude_row("main", five_hour=0.6, weekly=0.3, fable=0.5, active=True),
+                                  _claude_row("brand-new", five_hour=0.0, weekly=0.0, fable=0.0)])
+    assert d.absorb_switcher_read("claude", switcher_list, started_at=T0_MS) is False, "no desk has been read yet"
+    assert settings_store.get(desk.SNAPSHOT_KEY) in (None, "")
+
+    tui_p, list_p, _ = _lists([_claude_row("main", five_hour=0.2, weekly=0.3, fable=0.5, active=True),
+                               _claude_row("only-on-desk", five_hour=0.3, weekly=0.3, fable=0.3)],
+                              stopped=[_stop("koko", T0_MS / 1000 - 60)])
+    _live(d, tui_p, list_p)
+    assert d.absorb_switcher_read("claude", switcher_list, started_at=T0_MS) is True
+
+    body = d.payload(command="hotseat", runner=_no_cli)
+    assert [a["alias"] for a in body["accounts"]] == ["main", "only-on-desk"]
+    assert body["accounts"][0]["windows"][0]["remaining_ratio"] == 0.4
+    assert body["accounts"][1]["windows"][0]["remaining_ratio"] == 0.7
+    assert [item["id"] for item in body["stopped_work"]] == ["koko"], (
+        "a read without the Clarp extension says nothing about stopped work")
+
+
+def test_a_read_that_began_before_a_switch_does_not_undo_the_account_in_use(monkeypatch):
+    clock = {"now": T0_MS}
+    monkeypatch.setattr(desk, "now_ms", lambda: clock["now"])
+    d = desk.HotseatDesk()
+    rows = [_claude_row("ai13", five_hour=0.2, weekly=0.3, fable=0.5, active=True),
+            _claude_row("ai8", five_hour=0.1, weekly=0.1, fable=0.1)]
+    tui_p, list_p, _ = _lists(rows)
+    _live(d, tui_p, list_p)
+    read_started = T0_MS + 1000
+    clock["now"] = T0_MS + 2000
+    hotseat = _Hotseat("ai13")
+    assert hotseat.switch_default(d, "claude", "ai8")[1]["switched"] is True
+
+    clock["now"] = T0_MS + 3000
+    assert d.absorb_switcher_read("claude", list_p, started_at=read_started) is True
+
+    accounts = {a["alias"]: a for a in d.payload(command="hotseat", runner=_no_cli)["accounts"]}
+    assert (accounts["ai13"]["active"], accounts["ai8"]["active"]) == (False, True)
+
+    clock["now"] = T0_MS + 5 * MINUTE
+    _, after, _ = _lists([_claude_row("ai13", five_hour=0.2, weekly=0.3, fable=0.5, active=True),
+                          _claude_row("ai8", five_hour=0.1, weekly=0.1, fable=0.1)])
+    assert d.absorb_switcher_read("claude", after, started_at=clock["now"]) is True
+    accounts = {a["alias"]: a for a in d.payload(command="hotseat", runner=_no_cli)["accounts"]}
+    assert accounts["ai13"]["active"] is True, "a read that began after the switch is believed"
+
+
+def test_the_switchers_read_never_raises_clears_an_old_read_error_and_respects_the_off_switch(monkeypatch):
+    clock = {"now": T0_MS}
+    monkeypatch.setattr(desk, "now_ms", lambda: clock["now"])
+    d = desk.HotseatDesk()
+    rows = [_claude_row("main", five_hour=0.2, weekly=0.3, fable=0.5, active=True)]
+    tui_p, list_p, _ = _lists(rows)
+    _live(d, tui_p, list_p)
+    before = settings_store.get(desk.SNAPSHOT_KEY)
+    for junk in (None, [], "x", {"accounts": "nope"}, {"accounts": [{"alias": "main", "usage": "?"}, 7]}):
+        d.absorb_switcher_read("claude", junk, started_at=T0_MS)
+    assert d.absorb_switcher_read("muse", list_p, started_at=T0_MS) is False
+    assert json.loads(settings_store.get(desk.SNAPSHOT_KEY))["accounts"][0]["alias"] == "main"
+
+    settings_store.set_text(desk.SNAPSHOT_KEY, before)
+    settings_store.set_text(desk.ERROR_KEY, "timeout")
+    clock["now"] = T0_MS + MINUTE
+    assert d.absorb_switcher_read("claude", list_p, started_at=clock["now"]) is True
+    body = d.payload(command="hotseat", runner=_no_cli)
+    assert body["error"] is None and body["stale"] is False
+
+    settings_store.set_text(desk.SNAPSHOT_KEY, before)
+    _desk_setting(monkeypatch, False)
+    assert d.absorb_switcher_read("claude", list_p, started_at=clock["now"]) is False
+    assert settings_store.get(desk.SNAPSHOT_KEY) == before
+
+
+def test_the_switcher_hands_every_scheduled_read_to_the_desk(monkeypatch):
+    from lib import janitor_hotseat
+    seen: list[tuple] = []
+    list_payload = {"accounts": [{"alias": "a", "is_active": True, "error": None,
+                                  "usage": {"status": "allowed", "limited": False, "used_5h": 0.1, "used_7d": 0.1}}]}
+
+    def run(command, args, timeout):
+        return subprocess.CompletedProcess([command, *args], 0, stdout=json.dumps(list_payload), stderr="")
+
+    monkeypatch.setattr(janitor_hotseat, "_run", run)
+    monkeypatch.setattr(janitor_hotseat, "now_ms", lambda: T0_MS, raising=False)
+
+    def observe(provider, payload, *, started_at):
+        seen.append((provider, payload, started_at))
+
+    accounts = janitor_hotseat.read_accounts("hotseat", "claude", observe=observe)
+    assert accounts[0]["alias"] == "a" and seen == [("claude", list_payload, T0_MS)]
+
+    def broken(provider, payload, *, started_at):
+        raise RuntimeError("desk store unavailable")
+
+    assert janitor_hotseat.read_accounts("hotseat", "claude", observe=broken)[0]["alias"] == "a", (
+        "the switcher's read never fails because of the desk")
+    assert janitor_hotseat.read_accounts("hotseat", "claude")[0]["alias"] == "a"
+
+    worker = janitor_autonomy.AutonomyJanitors(lambda *_: True, lambda p: {"sent": 1}, hotseat_observe=observe)
+    seen.clear()
+    assert worker.hotseat_read("hotseat", "claude")[0]["alias"] == "a"
+    assert [(provider, started) for provider, _payload, started in seen] == [("claude", T0_MS)]
 
 
 # --- switching -----------------------------------------------------------------
@@ -913,6 +1152,39 @@ def test_the_automatic_switch_waits_for_a_desk_switch_and_then_stands_down(switc
         a["provider"] != "claude" for a in status.payload()["actions"])
     runs = [r for r in janitors.list_runs(owner["session"]) if (r["demand_result"] or {}).get("reason") == "superseded by another switch"]
     assert len(runs) == 1 and runs[0]["outcome"] == "completed"
+
+
+def test_a_scheduled_run_refreshes_the_desk_and_an_automatic_switch_names_the_new_account(switcher, monkeypatch):
+    owner, _read, _calls = switcher
+    monkeypatch.setattr(desk, "now_ms", lambda: T0_MS)
+    d = desk.HotseatDesk()
+    before = [_claude_row("a", five_hour=0.20, weekly=0.10, fable=0.10, active=True),
+              _claude_row("b", five_hour=0.10, weekly=0.10, fable=0.10)]
+    tui_p, list_p, _ = _lists(before)
+    _live(d, tui_p, list_p)
+    # The switcher's own read, through the real reader: a is nearly spent, b has room.
+    _, now_list, _ = _lists([_claude_row("a", five_hour=0.90, weekly=0.10, fable=0.10, active=True),
+                             _claude_row("b", five_hour=0.10, weekly=0.10, fable=0.10)])
+    codex_list = {"accounts": [{"alias": "p", "is_active": True, "usage": {"usable": True, "blocked": False,
+                                                                           "error": None, "worst_used": 0.5}}]}
+    from lib import janitor_hotseat
+
+    def run(command, args, timeout):
+        out = now_list if args == ["list", "--json"] else codex_list
+        return subprocess.CompletedProcess([command, *args], 0, stdout=json.dumps(out), stderr="")
+
+    monkeypatch.setattr(janitor_hotseat, "_run", run)
+    switched: list[str] = []
+    worker = janitor_autonomy.AutonomyJanitors(
+        lambda *_: True, lambda p: {"sent": 1}, hotseat_switch=lambda c, p, alias: switched.append(alias) or True,
+        hotseat_switch_lock=d.switch_lock, hotseat_observe=d.absorb_switcher_read, hotseat_switched=d.mark_switched)
+
+    worker.hotseat_once()
+
+    assert switched == ["b"]
+    accounts = {a["alias"]: a for a in d.payload(command="hotseat", runner=_no_cli)["accounts"]}
+    assert accounts["a"]["windows"][0]["remaining_ratio"] == 0.1, "the run's own read reached the desk"
+    assert (accounts["a"]["active"], accounts["b"]["active"]) == (False, True), "and so did its switch"
 
 
 # --- continuing stopped work -----------------------------------------------------
