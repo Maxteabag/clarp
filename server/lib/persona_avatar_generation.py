@@ -26,8 +26,8 @@ MAX_GENERATED_BYTES = 20 * 1024 * 1024
 AVATAR_MAX_BYTES = 512_000
 HEARTBEAT_TIMEOUT_MS = 5 * 60 * 1000
 DAILY_WINDOW_MS = 24 * 60 * 60 * 1000
-DEFAULT_DAILY_LIMIT = 20
-DEFAULT_MAX_ATTEMPTS = 3
+DEFAULT_DAILY_LIMIT = config.DEFAULT_CONTACT_AVATAR_DAILY_LIMIT
+DEFAULT_MAX_ATTEMPTS = config.DEFAULT_CONTACT_AVATAR_MAX_ATTEMPTS
 RETRY_BACKOFF_MS = (5 * 60 * 1000, 30 * 60 * 1000)
 WORKER_ENV_NAMES = (
     "CLAUDE_PWA_DB", "CLAUDE_PWA_CONFIG",
@@ -155,7 +155,11 @@ def start_best_effort(
         if row.get("avatar_path") or row.get("avatar_symbol"):
             return None
         cfg = config.load()
-        if getattr(cfg, "contact_avatar_generation", True) is False:
+        if not getattr(
+            cfg,
+            "contact_avatar_generation",
+            config.DEFAULT_CONTACT_AVATAR_GENERATION,
+        ):
             return None
         daily_limit = int(getattr(cfg, "contact_avatar_daily_limit", DEFAULT_DAILY_LIMIT))
         max_attempts = int(getattr(cfg, "contact_avatar_max_attempts", DEFAULT_MAX_ATTEMPTS))
@@ -267,7 +271,11 @@ def generate_for_persona(
     if row.get("builtin") or row.get("avatar_path") or row.get("avatar_symbol"):
         return row
     cfg = config.load()
-    if getattr(cfg, "contact_avatar_generation", True) is False:
+    if not getattr(
+        cfg,
+        "contact_avatar_generation",
+        config.DEFAULT_CONTACT_AVATAR_GENERATION,
+    ):
         raise PersonaAvatarCancelled("Contact avatar generation is disabled")
     api_key = cfg.openai_key()
     if not api_key:
