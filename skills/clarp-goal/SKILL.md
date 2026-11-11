@@ -54,6 +54,29 @@ clarp-goal dependency PLAN_ID REVISION \
 # Use outcome "failed" for an actual failure; never invent success after timeout.
 ```
 
+A goal carries one wake, and a checkpoint never drops a dependency it is still
+waiting for as a side effect. While `continuation.state` is `waiting` (a job, a
+peer request or another dependency is pending):
+
+- A checkpoint with no `continuation` saves your progress, next work and
+  evidence and leaves the wake exactly as it is. This is the routine progress
+  checkpoint; write it freely while a job runs.
+- A checkpoint with a timer continuation is refused, and the error names the
+  dependency (and job) it would have replaced. Nothing is saved; send it again
+  without `continuation`.
+- To be woken before the dependency ends, send the same dependency again (same
+  `key`, same `job_handle`) with an earlier `due_at`. That wake tells you the job
+  was still running and is no longer awaited: name it again in the checkpoint
+  you write then, or its end wakes nobody.
+- To stop waiting on purpose, say so: a different dependency replaces it, or a
+  timer with `"replace_dependency": true`. The ledger records
+  `dependency_replaced` with the key and job that were dropped.
+- A `blocked` continuation holds the dependency: `resume` waits for it again
+  and delivers a result that arrived meanwhile.
+
+With no dependency pending, a checkpoint without `continuation` schedules a wake
+two minutes later, as before.
+
 Track detached workers (including systemd/nohup and watchers) with
 [clarp-background-jobs](../clarp-background-jobs/SKILL.md), so purpose, status,
 output and cancellation remain visible while this goal waits.

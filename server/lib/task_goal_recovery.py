@@ -507,9 +507,17 @@ def _claim(plan_id, now):
             _commit(plan, text, stored, goal)
         return None
     if state.get("state") == "waiting":
+        # A job that is still running is no longer awaited after this wake:
+        # say so, or its later end is expected to wake someone and does not.
         state.update(
             state="ready",
-            reason="External dependency deadline passed; inspect its actual outcome",
+            reason=(
+                f"Background job {state.get('dependency_key')} was still running when its "
+                "deadline passed and is no longer awaited; to be woken when it ends, name it "
+                "again as the dependency in your checkpoint"
+            )
+            if state.get("job_handle")
+            else "External dependency deadline passed; inspect its actual outcome",
         )
     if state.get("attempts", 0) >= goal["recovery_limit"]:
         last = (
