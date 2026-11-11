@@ -41,7 +41,7 @@ CAPABILITIES_VERSION = 1
 # adds a row to docs/compatibility.md; tests/unit/test_client_contract.py
 # fails when the table and these constants disagree. Clients identify
 # themselves with the X-Clarp-Client header ("ios/2620 contract=1").
-HOST_CONTRACT = 87  # 86 plus the Hotseat desk answering only what the Host knows (issue 263; no new feature).
+HOST_CONTRACT = 88  # 87 plus Android push through FCM (feature push_fcm, POST /devices provider "fcm").
 MIN_IOS_CONTRACT = 1
 # F4 delivery state: read paths and committed-transition hints share the
 # advertised feature gate; an unavailable runtime still leaves delivery unknown.
@@ -146,6 +146,8 @@ FEATURES: tuple[str, ...] = (
     "server_home_terminal",
     # GET /agents/snapshot?include_archived=0 and GET /agents/archived.
     "snapshot_without_archived",
+    # Android push through FCM; advertised only with a service account.
+    "push_fcm",
 )
 
 
@@ -203,6 +205,7 @@ FEATURE_CONTRACTS["agent_fork"] = 41
 FEATURE_CONTRACTS["hotseat_desk"] = 84
 FEATURE_CONTRACTS["auto_contact_minting"] = 85
 FEATURE_CONTRACTS["hotseat_desk_actions"] = 86  # PROVISIONAL: next free above main's 85; PR 260 also wants a number
+FEATURE_CONTRACTS["push_fcm"] = 88  # PROVISIONAL: next free above main's 87
 
 
 # Features that exist only while live events actually flow: the hub runs in
@@ -241,12 +244,29 @@ def hotseat_desk_enabled() -> bool:
         return True
 
 
+# Android push is offered only by a Host that can deliver it: one with a
+# usable FCM service account ([fcm] service_account, docs/push-android.md).
+FCM_FEATURES = frozenset({"push_fcm"})
+
+
+def fcm_push_enabled() -> bool:
+    try:
+        from . import config
+        return bool(config.load().fcm_enabled())
+    except Exception as e:  # noqa: BLE001 - unknown means not advertised
+        from .log import log
+        log("fcmFeatureProbeFail", f"{type(e).__name__}: {e}")
+        return False
+
+
 def _features() -> list[str]:
     serving = live_serving()
     desk = hotseat_desk_enabled()
+    fcm = fcm_push_enabled()
     return [f for f in FEATURES
             if (serving or f not in LIVE_FEATURES)
             and (desk or f not in HOTSEAT_DESK_FEATURES)
+            and (fcm or f not in FCM_FEATURES)
             and (os.name == "posix" or f != "server_home_terminal")]
 
 
