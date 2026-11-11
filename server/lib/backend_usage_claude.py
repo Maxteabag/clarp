@@ -8,7 +8,7 @@ import os
 import pathlib
 from typing import Any
 from .clock import now_ms as _now_ms
-from .backend_usage_store import CLAUDE, CLAUDE_REFRESH_MS, FRESH_MS, _normalize_time, _row
+from .backend_usage_store import CLAUDE, CLAUDE_REFRESH_MS, FRESH_MS, _decode_raw, _normalize_time, _private_ref, _row
 
 
 def _claude_response_row(now: int) -> dict[str, Any]:
@@ -57,6 +57,20 @@ def _read_claude_auth() -> tuple[str, int, str]:
     return token, expires, tier or plan
 
 
+def _active_claude_auth_generation() -> str | None:
+    try:
+        token, _expires, _plan = _read_claude_auth()
+        return _private_ref("claude-auth", token)
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _claude_needs_refresh() -> bool:
     row = _row(CLAUDE)
-    return not row or _now_ms() - int(row.get("fetched_at") or 0) > CLAUDE_REFRESH_MS
+    if not row:
+        return True
+    raw = _decode_raw(row)
+    active = _active_claude_auth_generation()
+    if active is not None and raw.get("auth_generation_id") and raw.get("auth_generation_id") != active:
+        return True
+    return _now_ms() - int(row.get("fetched_at") or 0) > CLAUDE_REFRESH_MS

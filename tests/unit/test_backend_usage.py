@@ -1003,3 +1003,99 @@ def test_antigravitys_answer_stands_when_a_helper_keeps_its_pipes_open(tmp_path,
     fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
     monkeypatch.setenv("CLARP_AGY_BIN", str(fake))
     assert backend_usage.fetch_agy_usage(timeout=1.0)["groups"]
+
+
+def _write_codex_auth(codex_home, token: str, account_id: str) -> None:
+    codex_home.mkdir(parents=True, exist_ok=True)
+    (codex_home / "auth.json").write_text(json.dumps({
+        "auth_mode": "chatgpt",
+        "tokens": {"access_token": token, "account_id": account_id},
+    }))
+
+
+def test_switching_codex_auth_profile_clears_stale_exhaustion_before_next_poll(tmp_path, monkeypatch):
+    codex_home = tmp_path / "codex-home"
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+    now = [1_800_000_000_000]
+    patch_shared(monkeypatch, backend_usage, "_now_ms", lambda: now[0])
+
+    _write_codex_auth(codex_home, "token-profile-a", "acct-a")
+    backend_usage.capture_codex_rate_limits(_depleted({
+        "allowed": False, "limit_reached": True,
+        "primary_window": {"used_percent": 100, "limit_window_seconds": 604_800,
+                           "reset_at": 1_900_000_000},
+        "secondary_window": None,
+    }), source_detail="/wham/usage")
+    assert backend_usage.exhausted_backends()["codex"]["reason"] == "credits_depleted"
+    assert backend_usage._codex_needs_refresh() is False
+
+    # Hotseat switches auth.json to profile B before UsageRefreshWorker polls again.
+    _write_codex_auth(codex_home, "token-profile-b", "acct-b")
+    assert backend_usage.exhausted_backends() == {}
+    assert backend_usage._codex_needs_refresh() is True
+
+
+def test_authoritative_codex_refresh_resolves_classified_terminal_and_caches_weekly_only_plan(monkeypatch):
+    now = [1_800_000_000_000]
+    patch_shared(monkeypatch, backend_usage, "_now_ms", lambda: now[0])
+    patch_shared(monkeypatch, backend_usage, "_read_codex_auth", lambda: ("token-a", "acct-a"))
+
+    terminal = backend_usage.record_classified_usage_limit("codex")
+    assert backend_usage.exhausted_backends()["codex"]["window"] == "unknown"
+
+    now[0] += 1_000
+    refreshed = backend_usage.capture_codex_rate_limits({
+        "plan_type": "self_serve_business_prolite",
+        "rate_limit": {
+            "allowed": True, "limit_reached": False,
+            "primary_window": {"used_percent": 18, "limit_window_seconds": 604_800,
+                               "reset_at": 1_900_000_000},
+            "secondary_window": None,
+        },
+    }, source_detail="/wham/usage")
+
+    assert any(
+        ev["episode_id"] == terminal["episode_id"] and ev["kind"] == "recovered"
+        for ev in refreshed["limit_events"]
+    )
+    assert backend_usage.exhausted_backends() == {}
+    assert backend_usage._codex_needs_refresh() is False
+
+
+def test_completed_codex_turn_reconciles_stale_exhaustion_until_new_failure(monkeypatch):
+    from lib import agents, db, snapshot as snapshot_mod, turn_lifecycle
+
+    now = [1_800_000_000_000]
+    patch_shared(monkeypatch, backend_usage, "_now_ms", lambda: now[0])
+    monkeypatch.setattr(db, "now_ms", lambda: now[0])
+    monkeypatch.setattr(turn_lifecycle, "now_ms", lambda: now[0])
+    patch_shared(monkeypatch, backend_usage, "_read_codex_auth", lambda: ("token-a", "acct-a"))
+
+    aid = agents.create_agent(persona="Gordon", voice_id="v", cwd="/tmp", session="gpt-6-luna", backend="codex")
+    backend_usage.capture_codex_rate_limits(_depleted({
+        "allowed": False, "limit_reached": True,
+        "primary_window": {"used_percent": 100, "limit_window_seconds": 604_800,
+                           "reset_at": 1_900_000_000},
+        "secondary_window": None,
+    }), source_detail="/wham/usage")
+    backend_usage.record_classified_usage_limit("codex")
+
+    snap_before = snapshot_mod.build_agent_snapshot(None)
+    row_before = next(r for r in snap_before["agents"] if r["agent_id"] == aid)
+    assert row_before["backend_quota"]["state"] == "exhausted"
+
+    # A live Codex turn succeeds 5 seconds later, proving the active credentials can serve turns.
+    now[0] += 5_000
+    agents.record_state(aid, "thinking", {"source": "user"})
+    agents.record_state(aid, "done", {"source": "user"})
+
+    assert backend_usage.exhausted_backends() == {}
+    assert backend_usage._codex_needs_refresh() is True
+    snap_after = snapshot_mod.build_agent_snapshot(None)
+    row_after = next(r for r in snap_after["agents"] if r["agent_id"] == aid)
+    assert row_after["backend_quota"] is None
+
+    # A subsequent turn failing 200ms later (within the same wall-clock second) still reports live exhaustion.
+    now[0] += 200
+    backend_usage.record_classified_usage_limit("codex")
+    assert "codex" in backend_usage.exhausted_backends()
