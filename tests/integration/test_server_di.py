@@ -689,7 +689,8 @@ def test_snapshot_leaves_archived_agents_out_only_when_asked(running_server):
     names, lean = sessions("/agents/snapshot?include_archived=0")
     assert names == {"claude"} and lean["archived_count"] == 1
     full = sessions("/agents/snapshot")[1]
-    assert {k: v for k, v in lean.items() if k not in ("agents", "archived_count")} == {
+    assert lean["archived_parents"] == [] and "archived_parents" not in full
+    assert {k: v for k, v in lean.items() if k not in ("agents", "archived_count", "archived_parents")} == {
         k: v for k, v in full.items() if k != "agents"}
 
     names, page = sessions("/agents/archived")

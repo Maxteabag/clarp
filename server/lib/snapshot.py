@@ -212,15 +212,35 @@ def build_agent_snapshot(ctx, *, include_archived: bool = True) -> dict[str, Any
     Host is most of the work (1,019 of 1,375 agents on 10 Nov 2026). Only an
     archived agent that still looks active is reconciled (_reconcile_unlisted).
     The rows that remain are exactly the rows the full snapshot has for those
-    agents, counts of archived children included, and ``archived_count`` says
-    how many were left out; SharedSnapshot.archived_page pages them. The full
-    snapshot, the default, is unchanged: clients that do not ask keep getting
+    agents, counts of archived children included; ``archived_count`` says how
+    many were left out and ``archived_parents`` which of them still have a
+    child in the list (_archived_parents); SharedSnapshot.archived_page pages
+    them. The full snapshot, the default, is unchanged: clients that do not
+    ask keep getting
     every agent.
     """
     snapshot, agent_rows = _project(ctx, None if include_archived else _not_archived)
     if not include_archived:
         snapshot["archived_count"] = sum(1 for a in agent_rows if a.get("archived_at"))
+        snapshot["archived_parents"] = _archived_parents(agent_rows)
     return snapshot
+
+
+def _archived_parents(agent_rows: list[dict[str, Any]]) -> list[str]:
+    """The ids of the archived agents that an agent left in the list names as
+    its parent.
+
+    A client that has every agent hides a helper whose parent is archived and
+    shows one whose parent is gone. Without the archived agents it sees the
+    same thing in both cases, a ``parent_agent_id`` that is not in the list,
+    and this is what tells them apart: an id here is an archived parent, any
+    other missing parent has been deleted. ``agent_rows`` holds no deleted
+    agent, so a deleted parent is never listed. Sorted, so equal fleets give
+    equal bytes.
+    """
+    archived = {a["agent_id"] for a in agent_rows if a.get("archived_at")}
+    return sorted({a["parent_agent_id"] for a in agent_rows
+                   if not a.get("archived_at") and a.get("parent_agent_id") in archived})
 
 
 @backends.runtime_status_scope(timeout=2.0)
