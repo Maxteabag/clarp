@@ -235,8 +235,14 @@ def _provider_model_demand(provider: str, now_ms: int, base_seconds: int) -> tup
 
 
 class AutonomyJanitors:
-    def __init__(self,dispatch,notify,model_call=decision_model,usage_read=None,recover=None,hotseat_read=janitor_hotseat.read_accounts,hotseat_switch=janitor_hotseat.switch_account,label_judge=None,hotseat_switch_lock=None):
+    def __init__(self,dispatch,notify,model_call=decision_model,usage_read=None,recover=None,hotseat_read=None,hotseat_switch=janitor_hotseat.switch_account,label_judge=None,hotseat_switch_lock=None,hotseat_observe=None,hotseat_switched=None):
         self.recover=recover;self.dispatch=dispatch;self.notify=notify;self.model_call=model_call;self.usage_read=usage_read;self.stop_event=threading.Event();self.thread=None
+        # hotseat_observe(provider, payload, started_at=ms) gets every scheduled read: the server passes
+        # the Hotseat desk's, so the stored desk stays as fresh as this cadence with no read of its own.
+        # hotseat_switched(provider, alias) hears of a switch this worker made (the desk marks the account).
+        self.hotseat_observe=hotseat_observe;self.hotseat_switched=hotseat_switched
+        if hotseat_read is None:
+            def hotseat_read(command,provider):return janitor_hotseat.read_accounts(command,provider,observe=self.hotseat_observe)
         self.hotseat_read=hotseat_read;self.hotseat_switch=hotseat_switch
         # provider -> the lock held around a `hotseat switch` and its flip-back record. The server
         # passes the Hotseat desk's, so a switch asked for there and this one never overlap.
@@ -387,6 +393,7 @@ class AutonomyJanitors:
             try:
                 if repair_enabled:
                     accounts,repair_payload,repair_started=janitor_hotseat.read_repair_accounts(options['hotseat_command'])
+                    janitor_hotseat.observed(self.hotseat_observe,provider,repair_payload,getattr(repair_started,'started_ms',now))
                 else:accounts=self.hotseat_read(options['hotseat_command'],provider)
             except Exception as exc:
                 _hotseat_receipt('read_failure',lambda:hotseat_status.record_failure(provider,exc,now=now))
@@ -462,6 +469,9 @@ class AutonomyJanitors:
                     # A runner that read credentials once must restart to see the new account.
                     try:backends.by_id(provider).on_credential_change()
                     except Exception:pass
+                    if self.hotseat_switched is not None:
+                        try:self.hotseat_switched(provider,decision['target'])
+                        except Exception as exc:hotseat_status.diagnose('hotseatSwitchObserverFailed',f'provider={provider} error={type(exc).__name__}')
                 else:outcome='failed';error=error or f'{provider}: Hotseat did not confirm the switch'
             _hotseat_receipt('action',lambda:hotseat_status.record_action(provider,decision,mode=options['mode'],switched=switched,now=now,floor_pct=janitor_hotseat.floor_for(options,provider),cadence_s=base,next_due_at=lane_next_run(lane,owner,base,key)))
             text=janitor_hotseat.preview(provider,decision,mode=options['mode'],switched=switched)
