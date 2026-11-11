@@ -93,8 +93,9 @@ def test_without_archived_agents_the_rest_is_the_same_snapshot(fleet):
     for row in lean["agents"]:
         assert json.dumps(row) == json.dumps(full_rows[row["agent_id"]])
     # Every other key is the same; one key is added.
-    assert set(lean) == FULL_KEYS | {"archived_count"}
+    assert set(lean) == FULL_KEYS | {"archived_count", "archived_parents"}
     assert lean["archived_count"] == 8
+    assert lean["archived_parents"] == []                  # every helper of the fleet has a parent in the list
     for key in FULL_KEYS - {"agents"}:
         assert json.dumps(lean[key]) == json.dumps(default[key]), key
     assert len(json.dumps(lean["agents"])) < len(json.dumps(default["agents"])) / 3   # 3 rows of 11
@@ -110,6 +111,77 @@ def test_the_roster_keeps_the_names_of_archived_agents(fleet):
     lean = snapshot.build_agent_snapshot(None, include_archived=False)
     assert "Retired" in lean["roster"] and "Helper-Old-3" in lean["roster"]
     assert lean["roster"] == snapshot.build_agent_snapshot(None)["roster"]
+
+
+# --- which missing parents are archived (Host contract 83) -----------------------------------
+#
+# A client that has every agent hides a helper whose parent is archived and shows one whose
+# parent is gone. In the lean snapshot both are a parent_agent_id that is not in the list.
+# laptopstudio had 19 helpers under archived parents on 11 Nov 2026.
+
+def _lean() -> dict:
+    return snapshot.build_agent_snapshot(None, include_archived=False)
+
+
+def test_archived_parents_names_exactly_the_archived_agents_a_listed_row_points_at(fleet):
+    con = db.conn()
+    shelved = _agent("shelved-lead", archived_at=5000)             # archived, with a helper still in the list
+    orphaned = _agent("orphaned", parent=shelved, state="waiting", helper_state="abandoned")
+    gone = _agent("deleted-lead")
+    stranded = _agent("stranded", parent=gone, helper_state="abandoned")
+    con.execute("UPDATE agents SET deleted_at=6000 WHERE agent_id=?", (gone,))
+    never = _agent("names-nobody", parent="no-such-agent")         # a parent id that was never an agent
+    quiet = _agent("quiet-lead", archived_at=5001)                 # archived, its only helper archived too
+    _agent("quiet-helper", parent=quiet, archived_at=5002)
+    _agent("childless", archived_at=5003)
+
+    lean = _lean()
+    listed = _by_id(lean["agents"])
+    assert lean["archived_parents"] == [shelved]
+    # The three helpers are all in the list, each naming a parent that is not.
+    for helper, parent in ((orphaned, shelved), (stranded, gone), (never, "no-such-agent")):
+        assert listed[helper]["parent_agent_id"] == parent and parent not in listed
+    # Only one of those parents is archived; the lead of the fleet is in the list, so it is not named.
+    assert fleet["lead"] in listed and listed[fleet["running"]]["parent_agent_id"] == fleet["lead"]
+    assert gone not in lean["archived_parents"] and "no-such-agent" not in lean["archived_parents"]
+    # Every id in it is one of the agents the archive listing has.
+    archived = {row["agent_id"] for page in _pages(limit=200) for row in page["agents"]}
+    assert set(lean["archived_parents"]) <= archived and gone not in archived
+
+
+def test_archived_parents_follows_archiving_restoring_and_deleting(fleet):
+    assert _lean()["archived_parents"] == []
+    agents_db.set_archived(fleet["lead"], True)                    # its running helper stays in the list
+    assert _lean()["archived_parents"] == [fleet["lead"]]
+    agents_db.set_archived(fleet["lead"], False)
+    assert _lean()["archived_parents"] == []
+
+    agents_db.set_archived(fleet["lead"], True)
+    agents_db.set_archived(fleet["running"], True)                 # no row in the list names it any more
+    assert _lean()["archived_parents"] == []
+    agents_db.set_archived(fleet["running"], False)
+    db.conn().execute("UPDATE agents SET deleted_at=7000 WHERE agent_id=?", (fleet["lead"],))
+    assert _lean()["archived_parents"] == []                       # a deleted parent is never named
+
+
+def test_archived_parents_is_sorted_names_each_parent_once_and_any_depth(fleet):
+    parents = sorted(_agent(f"shelved-{n}", archived_at=5000 + n) for n in range(4))
+    for n, parent in enumerate(reversed(parents)):                 # created in the opposite order
+        _agent(f"first-of-{n}", parent=parent, helper_state="abandoned")
+        _agent(f"second-of-{n}", parent=parent, helper_state="abandoned")
+    # A helper of a helper: its parent is in the list, and that parent's parent is archived.
+    middle = _agent("middle", parent=parents[0], helper_state="abandoned")
+    _agent("leaf", parent=middle, state="waiting", helper_state="running")
+    assert _lean()["archived_parents"] == parents
+
+
+def test_the_default_snapshot_says_nothing_about_archived_parents(fleet):
+    agents_db.set_archived(fleet["lead"], True)
+    assert _lean()["archived_parents"] == [fleet["lead"]]
+    default = snapshot.build_agent_snapshot(None)
+    assert set(default) == FULL_KEYS                               # no new key for a client that did not ask
+    # And what it answers is the same bytes with or without such a parent in the fleet's lean answer.
+    assert json.dumps(default) == json.dumps(snapshot.build_agent_snapshot(None, include_archived=True))
 
 
 # --- the archived agents ------------------------------------------------------------------

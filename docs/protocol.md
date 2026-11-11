@@ -125,7 +125,15 @@ Rules:
   - `focus` can name an agent that is not in `agents`: archiving an agent
     does not clear the focus.
   - A row's `parent_agent_id` can name an agent that is not in `agents`: an
-    archived agent can still have helpers that are not archived.
+    archived agent can still have helpers that are not archived. The key
+    `archived_parents` (Host contract 83) says which: it is the list of ids
+    of archived agents that some row in `agents` names as its parent. A
+    parent id that is neither in `agents` nor in `archived_parents` belongs
+    to a deleted agent. So a client that hides a helper under an archived
+    parent and shows a helper whose parent is gone can keep doing both
+    without loading the archive. The list is empty when there is none, and
+    the key is absent from a contract 82 Host, where the two cases cannot be
+    told apart until the archive is read.
   - `child_count`, `running_children` and `background_jobs.sub_agents` count
     archived helpers too, and `roster` still holds the names of archived
     agents.
