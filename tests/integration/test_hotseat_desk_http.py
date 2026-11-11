@@ -594,3 +594,30 @@ def test_only_a_full_device_reaches_the_desk(desk):
     assert [_call(base, limited, m, p, b)[0] for m, p, b in routes] == [403, 403, 403]
     assert [_call(base, "wrong", m, p, b)[0] for m, p, b in routes] == [401, 401, 401]
     assert [_call(base, token, m, p, b)[0] for m, p, b in routes] == [200, 400, 404]
+
+
+def test_with_the_desk_switched_off_the_routes_are_gone_and_the_feature_is_not_advertised(desk, monkeypatch):
+    base, token, fake, turns, _ctx = desk
+    import dataclasses
+    from lib import config
+    fake.stop("koko")
+    _live_read(base, token)
+    ran = len(fake.calls())
+    _, info = _call(base, token, "GET", "/server-info")
+    assert {"hotseat_desk", "hotseat_desk_actions"} <= set(info["capabilities"]["features"])
+    current = config.load()
+    monkeypatch.setattr(config, "load", lambda *a, **k: dataclasses.replace(current, hotseat_desk_enabled=False))
+
+    answers = [_call(base, token, "GET", "/hotseat/desk?refresh=1"),
+               _call(base, token, "POST", "/hotseat/switch", {"provider": "claude", "alias": "ai12"}),
+               _call(base, token, "POST", "/hotseat/resume", {"id": "koko"})]
+    _, info = _call(base, token, "GET", "/server-info")
+
+    assert [status for status, _ in answers] == [404, 404, 404]
+    assert all(body == {"raw": "not found"} for _, body in answers), "exactly what an unknown route answers"
+    assert len(fake.calls()) == ran and turns == []
+    features = set(info["capabilities"]["features"])
+    assert not {"hotseat_desk", "hotseat_desk_actions"} & features and "accounts_hotseat" in features
+    assert not {"hotseat_desk", "hotseat_desk_actions"} & set(info["contract"]["features"])
+    assert _call(base, token, "GET", "/hotseat/status")[0] == 200, "the read-only view the app falls back to"
+    assert _call(base, token, "GET", "/hotseat/nothing-here")[1] == {"raw": "not found"}

@@ -93,6 +93,16 @@ realtime_voice = "cedar"
 # other URL prefix it may call here.
 # allowed_urls = ["https://example.com/hooks/"]
 
+[hotseat]
+# The Hotseat desk in the apps: every saved Claude and Codex account with its
+# quota, "Use" to switch the default account, "Continue" for work a usage limit
+# stopped, and live reads of the providers. Set this to false to turn all of
+# it off: the Host stops advertising the desk and answers 404 on /hotseat/desk,
+# /hotseat/switch and /hotseat/resume, so the apps fall back to the read-only
+# account view (/hotseat/status), which stays. The Hotseat switcher Janitor is
+# not affected. The file is re-read while the Host runs; no restart is needed.
+# desk = true
+
 [network]
 # Phone connectivity is explicit. "tailscale" uses HTTPS Serve, "lan" uses
 # Bonjour discovery, "manual" records an existing HTTPS proxy, and "off" is

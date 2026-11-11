@@ -227,10 +227,26 @@ def live_serving() -> bool:
         return False
 
 
+# The Hotseat desk can be turned off in the config ([hotseat] desk = false):
+# its features are then not advertised and its three routes answer 404.
+HOTSEAT_DESK_FEATURES = frozenset({"hotseat_desk", "hotseat_desk_actions"})
+
+
+def hotseat_desk_enabled() -> bool:
+    """Whether this Host serves the Hotseat desk. On unless the config says no."""
+    try:
+        from . import config
+        return config.load().hotseat_desk_enabled is not False
+    except Exception:  # noqa: BLE001 - an unreadable config is not an owner's "off"
+        return True
+
+
 def _features() -> list[str]:
     serving = live_serving()
+    desk = hotseat_desk_enabled()
     return [f for f in FEATURES
             if (serving or f not in LIVE_FEATURES)
+            and (desk or f not in HOTSEAT_DESK_FEATURES)
             and (os.name == "posix" or f != "server_home_terminal")]
 
 
