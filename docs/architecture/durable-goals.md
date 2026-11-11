@@ -16,7 +16,9 @@ readable, retain their recorded status, and are explicitly not enrolled in
 recovery. Ambiguous old completion is not upgraded into verified accomplishment.
 
 A checkpoint atomically persists progress, evidence, next work and an optional
-wake or external dependency. Continuation belongs to the goal and the bound
+wake or external dependency. A dependency the goal still waits for is replaced
+only explicitly: a checkpoint without a continuation keeps it, a timer over it
+is refused, and a replacement is recorded. Continuation belongs to the goal and the bound
 agent/native conversation. Revisions, generation fencing, dispatch idempotency
 and expiring claims prevent stale edits or duplicate work. Scheduling and
 admission are distinct from execution; failures and retries remain visible.
