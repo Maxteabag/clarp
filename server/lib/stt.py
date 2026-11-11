@@ -104,11 +104,11 @@ def inference_cpu_threads(cpu_count: int | None = None) -> int:
     return max(1, min(4, cores // 2))
 
 
-# Greedy decoding (beam_size=1) commits to the first plausible token and cannot
-# back out, which is precisely how a coined name becomes a common word. Beam
-# search keeps alternatives alive long enough for the biasing prompt to pull
-# the right one through. 5 is the usual default; 1 restores the old behaviour.
-DEFAULT_BEAM_SIZE = 5
+# Production Hosts have always decoded with greedy beam_size=1 via the default
+# subprocess worker; keeping DEFAULT_BEAM_SIZE = 1 preserves unconfigured Host
+# latency while allowing `transcription.decode.beam_size` to opt into wider beam
+# search identically across both worker and in-process paths.
+DEFAULT_BEAM_SIZE = 1
 _BEAM_SIZE_KEY = "transcription.decode.beam_size"
 
 
@@ -715,6 +715,7 @@ class SubprocessWhisperSTT(WhisperSTT):
                     proc.stdin.write(json.dumps({
                         "op": "transcribe", "id": rid, "path": path,
                         "prompt": vocab_prompt or "",
+                        "beam_size": inference_beam_size(),
                     }) + "\n")
                     proc.stdin.flush()
                 except (OSError, ValueError) as e:

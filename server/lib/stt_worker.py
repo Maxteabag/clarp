@@ -6,7 +6,8 @@ stdin/stdout:
   → {"op": "load", "model_source": ..., "compute_type": ..., "cpu_threads": N,
      "language": ...}
   ← {"event": "ready"} | {"event": "load_error", "error": "..."}
-  → {"op": "transcribe", "id": "...", "path": "/tmp/x.wav", "prompt": "..."}
+  → {"op": "transcribe", "id": "...", "path": "/tmp/x.wav", "prompt": "...",
+     "beam_size": 1}
   ← {"id": "...", "segments": [{"text": "...", "no_speech_prob": 0.1}, ...]}
     | {"id": "...", "error": "..."}
 
@@ -45,11 +46,18 @@ def _load(req: dict):
     )
 
 
+def _beam_size(req: dict) -> int:
+    raw = req.get("beam_size", 1)
+    if isinstance(raw, bool) or not isinstance(raw, int) or raw < 1:
+        raise ValueError(f"beam_size must be a positive int, got {raw!r}")
+    return min(raw, 8)
+
+
 def _transcribe(model, req: dict, language: str | None) -> list[dict]:
     segments_iter, _info = model.transcribe(
         req["path"],
         language=language,
-        beam_size=1,
+        beam_size=_beam_size(req),
         condition_on_previous_text=False,
         initial_prompt=req.get("prompt") or "",
         no_speech_threshold=0.7,
