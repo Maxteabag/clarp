@@ -474,6 +474,7 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         "/diagnostics/health": "_handle_diagnostics_health",
         "/backend-usage": "_handle_backend_usage",
         "/hotseat/status": "_handle_hotseat_status",
+        "/hotseat/desk": "_handle_hotseat_desk",
         "/backend-auth": "_handle_backend_auth",
         "/harness-providers": "_handle_harness_providers",
         "/harness-providers/models": "_handle_harness_provider_models",
@@ -602,6 +603,8 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         "/backend-auth/login": "_handle_backend_auth_login",
         "/backend-auth/login-code": "_handle_backend_auth_login_code",
         "/backend-auth/logout": "_handle_backend_auth_logout",
+        "/hotseat/switch": "_handle_hotseat_switch",
+        "/hotseat/resume": "_handle_hotseat_resume",
         "/harness-providers/login": "_handle_harness_provider_login",
         "/harness-providers/login-code": "_handle_harness_provider_login_code",
         "/harness-providers/logout": "_handle_harness_provider_logout",
@@ -1148,6 +1151,7 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
 
     _DEVICE_FULL_ONLY_PREFIXES = (
         "/backend-auth", "/harness-providers", "/server-update", "/managed-skills",
+        "/hotseat/desk", "/hotseat/switch", "/hotseat/resume",
         "/orchestrator/", "/herald/", "/personalities/",
         "/automation-settings", "/avatar-settings", "/paired-devices",
         "/tts/providers", "/network/", "/server-terminal",
@@ -1511,6 +1515,88 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         """The persisted Hotseat snapshot only: no CLI, subprocess or provider read."""
         from lib import hotseat_status
         self._send(200, json.dumps(hotseat_status.payload()).encode(), "application/json")
+
+    def _handle_hotseat_desk(self):
+        """Full Hotseat TUI desk snapshot (`refresh=1` runs a single-flight live CLI read)."""
+        from lib import hotseat_desk
+        qs = self._query()
+        force = any(str(v).lower() in {"1", "true", "yes"} for v in qs.get("refresh", []))
+        self._send(200, json.dumps(hotseat_desk.payload(refresh=force)).encode(), "application/json")
+
+    def _handle_hotseat_switch(self):
+        """Switch the machine-wide default Claude or Codex account via Hotseat."""
+        from lib import hotseat_desk
+        data = self._read_json()
+        if not isinstance(data, dict):
+            return self._json_error(400, "bad json")
+        status, body = hotseat_desk.switch_default(
+            str(data.get("provider") or ""),
+            str(data.get("alias") or ""),
+        )
+        return self._json(status, body)
+
+    def _handle_hotseat_resume(self):
+        """Continue a stopped Clarp agent, unpause its queue, or get a native resume command."""
+        import urllib.error
+        import urllib.request
+        from lib import hotseat_desk, turn_queue
+        data = self._read_json()
+        if not isinstance(data, dict):
+            return self._json_error(400, "bad json")
+
+        def send_prompt(session: str, text: str) -> dict:
+            port = int(self.server.server_address[1])
+            payload = {
+                "session": session,
+                "text": text,
+                "force_session": True,
+                "synthesize_audio": False,
+                "hands_free": False,
+                "origin": "automation",
+                "client_msg_id": f"hotseat-resume-{secrets.token_hex(8)}",
+            }
+            req = urllib.request.Request(
+                f"http://127.0.0.1:{port}/send",
+                data=json.dumps(payload).encode(),
+                method="POST",
+                headers={"Content-Type": "application/json"},
+            )
+            token = getattr(self.ctx, "auth_token", "") or ""
+            if token:
+                req.add_header("Authorization", f"Bearer {token}")
+            try:
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    resp.read()
+                return {"ok": True}
+            except urllib.error.HTTPError as exc:
+                return {"ok": False, "error": f"HTTP {exc.code}: {exc.read(200).decode('utf-8', 'replace')}"}
+            except OSError as exc:
+                return {"ok": False, "error": type(exc).__name__}
+
+        def unpause_queue(agent_id: str, session: str) -> dict:
+            changed = turn_queue.set_paused(agent_id, False)
+            if changed:
+                log("queueResumed", f"session={session} source=hotseat_desk")
+                runtime_client = getattr(self.ctx, "runtime_client", None)
+                try:
+                    if runtime_client is not None:
+                        runtime_client.recover_queued()
+                    else:
+                        TurnDispatchService(self.ctx).recover_queued()
+                except Exception as exc:  # noqa: BLE001
+                    log_exception("queueResumeRecoverFail", exc, detail=session)
+            self._broadcast_turn_queue(agent_id, session)
+            return turn_queue.state(agent_id)
+
+        status, body = hotseat_desk.resume_work(
+            str(data.get("id") or ""),
+            kind=str(data.get("kind") or "clarp"),
+            backend=str(data.get("backend") or ""),
+            action=str(data.get("action") or "continue"),
+            send_prompt=send_prompt,
+            unpause_fn=unpause_queue,
+        )
+        return self._json(status, body)
 
     def _handle_backend_usage(self):
         qs = self._query()
