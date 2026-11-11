@@ -101,14 +101,9 @@ class AgentLifecycleService:
             backend=spec.backend, backend_session_id=resume_session_id,
             session=spec.session)
         agent = self._persist(spec, agents, resume_session_id)
-        should_generate_avatar = bool(
-            not janitor
-            and data.get("anonymous") is not True
-            and spec.avatar_raw is None
-            and spec.persona_definition
-            and not spec.persona_definition.get("builtin")
-            and not spec.persona_definition.get("avatar_path")
-            and not spec.persona_definition.get("avatar_symbol")
+        should_generate_avatar = (
+            spec.avatar_raw is None
+            and not str(data.get("avatar_symbol") or "").strip()
         )
         return self._announce(spec, agent), should_generate_avatar
 

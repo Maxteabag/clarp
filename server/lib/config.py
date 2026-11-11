@@ -48,6 +48,11 @@ CONFIG_PATH = pathlib.Path(os.environ.get(
 DEFAULT_AUDIO_CENTRAL_URL = "https://clarp-audio-central.peter-w-adams96.workers.dev"
 APNS_MODES = ("auto", "relay", "direct", "off")
 
+# Paid Contact portrait generation defaults (single place to flip default policy).
+DEFAULT_CONTACT_AVATAR_GENERATION = True
+DEFAULT_CONTACT_AVATAR_DAILY_LIMIT = 20
+DEFAULT_CONTACT_AVATAR_MAX_ATTEMPTS = 3
+
 
 DEFAULT_ROSTER: dict[str, str] = {
     "Mike":   "nPczCjzI2devNBz1zQrb",
@@ -531,11 +536,11 @@ class Config:
     job_heartbeat_grace_minutes: float = 15.0
     helper_idle_after_minutes: float = 30.0
     custom_status_ttl_hours: float = 2.0
-    # Paid Contact portrait generation ([contacts] or [openai]). On by default
-    # when an OpenAI key is configured, bounded per day and per Contact.
-    contact_avatar_generation: bool = True
-    contact_avatar_daily_limit: int = 20
-    contact_avatar_max_attempts: int = 3
+    # Paid Contact portrait generation ([contacts] or [openai]). Controlled by
+    # DEFAULT_CONTACT_AVATAR_* above so changing the default is a one-line edit.
+    contact_avatar_generation: bool = DEFAULT_CONTACT_AVATAR_GENERATION
+    contact_avatar_daily_limit: int = DEFAULT_CONTACT_AVATAR_DAILY_LIMIT
+    contact_avatar_max_attempts: int = DEFAULT_CONTACT_AVATAR_MAX_ATTEMPTS
     codex_model: str = ""
     codex_reasoning_effort: str = ""     # "" | "low" | "medium" | "high"
     agy_model: str = ""
@@ -836,6 +841,30 @@ def _non_negative_int(raw: Any, default: int) -> int:
     return value if value >= 0 else default
 
 
+def _parse_contact_avatar_switch(raw: Any) -> bool:
+    """Parse a spend-stopping switch; only explicit true values enable it."""
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, int):
+        return raw == 1
+    if isinstance(raw, str):
+        return raw.strip().lower() in ("1", "true", "yes", "on")
+    return False
+
+
+def _resolve_contact_avatar_generation(
+    contacts: dict[str, Any], openai: dict[str, Any]
+) -> bool:
+    env_raw = os.environ.get("CLARP_CONTACT_AVATAR_GENERATION")
+    if env_raw is not None and env_raw.strip() != "":
+        return _parse_contact_avatar_switch(env_raw)
+    if "avatar_generation" in contacts:
+        return _parse_contact_avatar_switch(contacts.get("avatar_generation"))
+    if "contact_avatar_generation" in openai:
+        return _parse_contact_avatar_switch(openai.get("contact_avatar_generation"))
+    return DEFAULT_CONTACT_AVATAR_GENERATION
+
+
 def load(path: pathlib.Path | None = None) -> Config:
     """Read TOML config; return a Config with defaults filled in. Cached.
 
@@ -1070,17 +1099,8 @@ def _parse_into_cache(path: pathlib.Path) -> Config:
             agents.get("helper_idle_after_minutes"), 30.0),
         custom_status_ttl_hours=_non_negative_float(
             agents.get("custom_status_ttl_hours"), 2.0),
-        contact_avatar_generation=(
-            os.environ.get("CLARP_CONTACT_AVATAR_GENERATION", "").strip().lower()
-            not in ("0", "false", "no", "off")
-            if os.environ.get("CLARP_CONTACT_AVATAR_GENERATION") is not None
-            and os.environ.get("CLARP_CONTACT_AVATAR_GENERATION", "").strip() != ""
-            else bool(
-                contacts.get(
-                    "avatar_generation",
-                    openai.get("contact_avatar_generation", True),
-                )
-            )
+        contact_avatar_generation=_resolve_contact_avatar_generation(
+            contacts, openai
         ),
         contact_avatar_daily_limit=_non_negative_int(
             os.environ.get("CLARP_CONTACT_AVATAR_DAILY_LIMIT")
@@ -1090,7 +1110,7 @@ def _parse_into_cache(path: pathlib.Path) -> Config:
                 "avatar_daily_limit",
                 openai.get("contact_avatar_daily_limit"),
             ),
-            20,
+            DEFAULT_CONTACT_AVATAR_DAILY_LIMIT,
         ),
         contact_avatar_max_attempts=_non_negative_int(
             os.environ.get("CLARP_CONTACT_AVATAR_MAX_ATTEMPTS")
@@ -1100,7 +1120,7 @@ def _parse_into_cache(path: pathlib.Path) -> Config:
                 "avatar_max_attempts",
                 openai.get("contact_avatar_max_attempts"),
             ),
-            3,
+            DEFAULT_CONTACT_AVATAR_MAX_ATTEMPTS,
         ),
         codex_model     = str(agents.get("codex_model", "")),
         codex_reasoning_effort = str(agents.get("codex_reasoning_effort", "")),
