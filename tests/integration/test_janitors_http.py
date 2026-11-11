@@ -324,7 +324,7 @@ def test_new_identity_retry_is_one_silent_paused_agent(host):
     assert request(host, "/janitors", body) == first
     row = first[1]["janitor"]
     assert row["name"] == "Labels Helper" and row["enabled"] is False
-    assert row["model"] == "gpt-6-luna" and row["effort"] == "low"
+    assert row["model"] == "gpt-6-sol" and row["effort"] == "low"
     assert agents.get_by_agent_id(row["agent_id"])["voice_id"] == ""
     assert agents.get_focus() == host.theo
     assert db.conn().execute("SELECT COUNT(*) FROM agents WHERE persona='Labels Helper'").fetchone()[0] == 1

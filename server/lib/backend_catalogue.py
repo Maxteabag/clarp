@@ -180,7 +180,7 @@ CODEX = BackendDefinition(
     config_account_switch_field='codex_account_switch_command',
     api_providers=('openai',),
     native_tool_explainer=True,
-    janitor_default_model='gpt-6-luna',
+    janitor_default_model='gpt-6-sol',
     model_family='codex',
     fallback_models=(
         ('gpt-6.1-sol', 'GPT-6.1 Sol'),

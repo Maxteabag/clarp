@@ -45,7 +45,7 @@ def _max_interval_option(default: int) -> dict:
 def templates() -> list[dict]:
     return autonomy_templates() + [{"id": "task-labels", "name": "Task labels",
              "description": "Keep agents' current task labels clear and useful.",
-             "recommended_backend": "codex", "recommended_model": "gpt-5.3-codex-spark",
+             "recommended_backend": "codex", "recommended_model": "gpt-6-sol",
              "recommended_effort": "low",
              "allowed_effects": ["task_label"], "creatable": True,
              "supported_trigger_ids": ["agent-work-completed", "schedule", "active-interval"],
@@ -65,7 +65,7 @@ def templates() -> list[dict]:
                  _max_interval_option(86400)]},
             {"id": "message-delegator", "name": "Message delegator",
              "description": "Choose an eligible recipient for an explicitly requested message route.",
-             "recommended_backend": "codex", "recommended_model": "gpt-5.3-codex-spark",
+             "recommended_backend": "codex", "recommended_model": "gpt-6-sol",
              "recommended_effort": "low", "allowed_effects": ["message_route"], "creatable": True,
              "supported_trigger_ids": ["routing-requested"], "default_trigger_id": "routing-requested",
              "supported_providers": ["openai", *(item.id for item in backends.routing_adapters())],
@@ -99,7 +99,7 @@ def templates() -> list[dict]:
                  _max_interval_option(86400)]},
             {"id": "tool-explainer", "name": "Tool explainer",
              "description": "Explain requested tool activity using bounded read-only input.",
-             "recommended_backend": "codex", "recommended_model": "gpt-5.3-codex-spark",
+             "recommended_backend": "codex", "recommended_model": "gpt-6-sol",
              "recommended_effort": "low", "allowed_effects": ["tool_explanation"], "creatable": True,
              "supported_trigger_ids": ["tool-explanation-requested"], "default_trigger_id": "tool-explanation-requested",
              "supported_providers": ["codex"],
@@ -116,7 +116,7 @@ def templates() -> list[dict]:
 def autonomy_templates():
     return [
         {"id": role, "name": name, "description": description,
-         "recommended_backend": "codex", "recommended_model": "gpt-5.3-codex-spark",
+         "recommended_backend": "codex", "recommended_model": "gpt-6-sol",
          "recommended_effort": "low", "allowed_effects": [effect], "creatable": True,
          "supported_trigger_ids": [trigger], "default_trigger_id": trigger,
          "supported_providers": ["openai", *(item.id for item in backends.routing_adapters())],

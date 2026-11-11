@@ -162,7 +162,7 @@ def as_source_lines(proposals: list[dict]) -> str:
 
 
 # --- autonomous three-tier cold path -------------------------------------
-TIER_ONE = "gpt-5.3-codex-spark"
+TIER_ONE = "gpt-6-sol"
 TIER_TWO = "gpt-6-astra"
 
 
