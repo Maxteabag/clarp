@@ -268,6 +268,11 @@ def is_valid_model(backend: str, model: str | None) -> bool:
     return by_id(backend).is_valid_model(model)
 
 
+def known_models(backend: str) -> list[str]:
+    """See Backend.known_models: what an invalid model id may be chosen from."""
+    return by_id(backend).known_models()
+
+
 
 
 

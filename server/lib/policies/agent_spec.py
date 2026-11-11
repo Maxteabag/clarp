@@ -254,7 +254,11 @@ def _parse(data: dict, *, backends, roster: RosterView, personas,
         return SpecError(400, "model must be a string or null")
     requested_model = (data.get("model") or "").strip() if "model" in data else ""
     if "model" in data and not backends.is_valid_model(backend, requested_model):
-        return SpecError(400, "invalid model for backend")
+        known = list(getattr(backends, "known_models", lambda _backend: [])(backend) or [])
+        return SpecError(
+            400, "invalid model for backend",
+            detail=(f"{backend} has no model '{requested_model}'; it offers "
+                    + ", ".join(known)) if known else "")
     if "effort" in data and data.get("effort") is not None \
             and not isinstance(data.get("effort"), str):
         return SpecError(400, "effort must be a string or null")
