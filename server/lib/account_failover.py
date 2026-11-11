@@ -42,9 +42,13 @@ CARRIED_WORK_POLL_SECONDS = 1.0
 # - A usage limit or a failed sign-in goes back into the park. The selector
 #   can pick an account with a sliver left (2026-11-11 14:28 and 14:32 on
 #   laptopstudio: 20%, then 6%), and waiting does help: those turns resumed at
-#   15:01 and worked. But the park's clock is not started again, so the
-#   MAX_PARK_SECONDS cap counts from the turn's first park and stays the one
-#   place that gives up.
+#   15:01 and worked. But the recovery is not started again: the park's
+#   clock keeps counting, so the MAX_PARK_SECONDS cap counts from the turn's
+#   first park and stays the one place that gives up; the selector is asked
+#   at the park's next recheck, not at once; and the turn is not told a
+#   second time that it was recovered (``state["same_park"]``).
+# The shortest real gap between a resume and the next limit that afternoon
+# was 145 s of work, which is a new park.
 RESUME_GRACE_SECONDS = 120.0
 # A turn parked because the account does not offer its model waits for this
 # many selector answers of "no saved account does" and then ends. A plan is
@@ -208,7 +212,7 @@ class AccountFailover:
                                  if key[0] != attempt.agent_id or key[1] == attempt.trace_id}
             self.attempts[attempt.agent_id] = attempt
             self.awaiting.discard(attempt.agent_id)
-            if self.recovering and not self._expired(attempt):
+            if self.recovering and not self._park_over(attempt):
                 attempt.state["account_recovery"] = True
                 self._note_park(attempt)
                 attempt.pause()
@@ -240,10 +244,24 @@ class AccountFailover:
         resumed = self.resumed_at.get(key)
         return resumed is not None and self.now() - resumed < RESUME_GRACE_SECONDS
 
-    def _note_park(self, attempt: Attempt) -> None:
-        """Start the turn's park clock, unless this is its park going on."""
+    def _park_over(self, attempt: Attempt) -> bool:
+        """Whether this turn may not be parked (again): its park expired, or
+        it would go back into a park that is MAX_PARK_SECONDS old, which
+        expires it here. It runs on and fails visibly, whoever's recovery
+        this is. Called with the lock held, before the turn is parked."""
         key = (attempt.agent_id, attempt.trace_id)
-        if not (key in self.first_parked and self._same_park(key)):
+        if (key not in self.park_expired and self._same_park(key)
+                and self.now() - self.first_parked.get(key, self.now()) >= MAX_PARK_SECONDS):
+            self.park_expired.add(key)
+        return key in self.park_expired
+
+    def _note_park(self, attempt: Attempt) -> None:
+        """Start the turn's park clock, unless this is its park going on; then
+        say so to whoever resumes it."""
+        key = (attempt.agent_id, attempt.trace_id)
+        if key in self.first_parked and self._same_park(key):
+            attempt.state["same_park"] = True
+        else:
             self.first_parked[key] = self.now()
 
     def request(self, agent_id, trace_id, command, *, plan=False) -> bool:
@@ -263,13 +281,14 @@ class AccountFailover:
             if not command or not trigger or trigger.trace_id != trace_id:
                 return False
             key = (agent_id, trace_id)
-            if key in self.park_expired:
-                return False   # its park already expired: fail visibly now
+            if self._park_over(trigger):
+                return False   # its park's time is up: fail visibly now
             if self._same_park(key):
                 if plan:
                     return False   # resumed onto an account said to offer it; it does not
-                if self.now() - self.first_parked.get(key, self.now()) >= MAX_PARK_SECONDS:
-                    return False   # back in the same park, and that park's time is up
+                # The park goes on, and so does its pace: the selector's last
+                # answer was wrong, which is no reason to ask it again at once.
+                self.next_check = max(self.next_check, self.now() + RECHECK_SECONDS)
             if self.recovering:
                 return True
             if plan:
@@ -282,7 +301,7 @@ class AccountFailover:
             self.parked_since = self.now()
             self.command = tuple(command)
             for attempt in self.attempts.values():
-                if attempt.owned() and not self._expired(attempt):
+                if attempt.owned() and not self._park_over(attempt):
                     attempt.state["account_recovery"] = True
                     self._note_park(attempt)
                     attempt.pause()
@@ -381,6 +400,10 @@ class AccountFailover:
         # Every exit from a failed check lands here, including a raised one, so
         # this is the one place that can guarantee work is not parked for ever.
         with self.lock:
+            # Turns are restarted only by an answer, and the selector is not
+            # asked again until a recheck after this one. So no answers,
+            # however wrong, restart turns more often than the recheck.
+            self.next_check = self.now() + settings.recheck_seconds
             pending = self._pending()
             # Work no saved account serves ends now, with a sentence that says
             # so. Resumed, it would fail again and start the next recovery;
