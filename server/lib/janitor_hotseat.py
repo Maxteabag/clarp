@@ -145,21 +145,123 @@ def _percent_remaining(used) -> int | None:
     return max(0, min(100, round(100 - used * 100)))
 
 
+_CLAUDE_FAMILY_LABELS = (
+    ("fable", "Fable"),
+    ("opus", "Opus"),
+    ("sonnet", "Sonnet"),
+    ("haiku", "Haiku"),
+)
+_SAFE_MODEL_TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._ -]{0,39}\Z")
+
+
+def _claude_model_spec(value) -> tuple[str, str] | None:
+    """Normalize a model identifier or scoped-limit label to (family, display_label)."""
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    lowered = text.casefold()
+    for family, label in _CLAUDE_FAMILY_LABELS:
+        if family in lowered:
+            return family, label
+    if _SAFE_MODEL_TOKEN.fullmatch(text):
+        return lowered, text
+    return None
+
+
+def _unique_model_specs(models) -> tuple[tuple[str, str], ...]:
+    seen = set()
+    out = []
+    for item in models or ():
+        spec = _claude_model_spec(item)
+        if spec is not None and spec[0] not in seen:
+            seen.add(spec[0])
+            out.append(spec)
+    return tuple(out)
+
+
+def _parsed_blocked_families(usage: dict) -> tuple[str, ...]:
+    blocked = []
+    seen = set()
+    raw_blocked = usage.get("blocked_models")
+    if isinstance(raw_blocked, list):
+        for item in raw_blocked[:REPAIR_MAX_PROFILES]:
+            spec = _claude_model_spec(item)
+            if spec is not None and spec[0] not in seen:
+                seen.add(spec[0])
+                blocked.append(spec[0])
+    raw_scoped = usage.get("scoped")
+    if isinstance(raw_scoped, list):
+        for limit in raw_scoped[:REPAIR_MAX_PROFILES]:
+            if not isinstance(limit, dict):
+                continue
+            spec = _claude_model_spec(limit.get("model"))
+            if spec is None or spec[0] in seen:
+                continue
+            rem = _percent_remaining(limit.get("used"))
+            if limit.get("exhausted") is True or rem == 0:
+                seen.add(spec[0])
+                blocked.append(spec[0])
+    return tuple(blocked)
+
+
+def _parsed_scoped_remaining(usage: dict) -> dict[str, int]:
+    scoped = {}
+    raw_scoped = usage.get("scoped")
+    if not isinstance(raw_scoped, list):
+        return scoped
+    for limit in raw_scoped[:REPAIR_MAX_PROFILES]:
+        if not isinstance(limit, dict):
+            continue
+        spec = _claude_model_spec(limit.get("model"))
+        if spec is None:
+            continue
+        rem = 0 if limit.get("exhausted") is True else _percent_remaining(limit.get("used"))
+        if rem is not None:
+            prev = scoped.get(spec[0])
+            scoped[spec[0]] = rem if prev is None else min(prev, rem)
+    return scoped
+
+
 def parse_claude(payload) -> list[dict]:
-    """`hotseat list --json`: one entry per saved Claude account, 5-hour first."""
+    """`hotseat list --json`: one entry per saved Claude account, 5-hour + weekly + model limits."""
     out = []
     for account in (payload or {}).get("accounts", []) if isinstance(payload, dict) else []:
         if not isinstance(account, dict) or not account.get("alias"):
             continue
         usage = account.get("usage") if isinstance(account.get("usage"), dict) else {}
         remaining = None
+        entry = {"alias": str(account["alias"]), "active": bool(account.get("is_active")),
+                 "remaining": None, "secondary": _percent_remaining(usage.get("used_7d"))}
         if not account.get("error"):
-            if usage.get("limited") or usage.get("status") == "rejected":
+            overage_ok = (bool(usage.get("extra_usage_enabled"))
+                          or usage.get("overage_status") in {"allowed", "allowed_warning"})
+            used_7d = usage.get("used_7d")
+            weekly_exhausted = (
+                not overage_ok
+                and (usage.get("status_7d") == "rejected"
+                     or (not isinstance(used_7d, bool)
+                         and isinstance(used_7d, (int, float))
+                         and used_7d >= 1.0))
+            )
+            if (usage.get("limited")
+                    or usage.get("status") == "rejected"
+                    or usage.get("available") is False
+                    or weekly_exhausted):
                 remaining = 0
             else:
                 remaining = _percent_remaining(usage.get("used_5h"))
-        out.append({"alias": str(account["alias"]), "active": bool(account.get("is_active")),
-                    "remaining": remaining, "secondary": _percent_remaining(usage.get("used_7d"))})
+            entry["remaining"] = remaining
+            blocked = _parsed_blocked_families(usage)
+            scoped = _parsed_scoped_remaining(usage)
+            if blocked:
+                entry["blocked_models"] = blocked
+            if scoped:
+                entry["scoped_remaining"] = scoped
+            if usage.get("degraded"):
+                entry["degraded"] = True
+        out.append(entry)
     return out
 
 
@@ -253,26 +355,131 @@ def _auth_repair_provider() -> HotseatProvider:
     return supported[0]
 
 
-def decide(accounts: list[dict], floor: int) -> dict:
-    """Walk the ladder: switch only when the account in use is under a rung and
-    another account is at or above it. Unknown readings never count as room."""
+def _account_model_remaining(account: dict, family: str) -> int | None:
+    """Effective headroom % for `family` on `account`, or None when per-model quota is unknown."""
+    general = account.get("remaining")
+    if general is None:
+        return None
+    if general <= 0:
+        return 0
+    if family in (account.get("blocked_models") or ()):
+        return 0
+    if account.get("degraded"):
+        return None
+    scoped = (account.get("scoped_remaining") or {}).get(family)
+    if scoped is not None:
+        return min(general, scoped)
+    return general
+
+
+def decide(accounts: list[dict], floor: int, *,
+           required_models: tuple[str, ...] | list[str] = (),
+           active_models: tuple[str, ...] | list[str] = ()) -> dict:
+    """Walk the ladder: switch when the account in use is under a rung on either
+    general or required per-model quota and another account clears that rung on
+    both general and required model windows. Unknown readings never count as room."""
     active = next((a for a in accounts if a["active"]), None)
     if active is None:
         return {"action": "skip", "reason": "Hotseat reports no account in use"}
     have = active["remaining"]
     if have is None:
         return {"action": "skip", "reason": f"{active['alias']}: quota unknown"}
+    req_specs = _unique_model_specs(required_models)
+    act_specs = _unique_model_specs(active_models)
+    running_unblocked = [
+        (fam, label) for fam, label in act_specs
+        if (_account_model_remaining(active, fam) or 0) > 0
+    ]
+
+    noop_rung = None
     for rung in rungs(floor):
         beneath = have < rung if rung > 0 else have <= 0
         if not beneath:
-            return {"action": "noop", "active": active["alias"], "remaining": have, "rung": rung}
+            noop_rung = rung
+            break
         candidates = [a for a in accounts if not a["active"] and a["remaining"] is not None
                       and a["remaining"] > have and (a["remaining"] >= rung if rung > 0 else a["remaining"] > 0)]
         if candidates:
-            best = max(candidates, key=lambda a: (a["remaining"], a["secondary"] or 0, a["alias"]))
+            if req_specs:
+                def _general_rank(cand: dict):
+                    vals = [_account_model_remaining(cand, fam) for fam, _ in req_specs]
+                    serves_all = int(all(v is not None and (v >= rung if rung > 0 else v > 0) for v in vals))
+                    serves_any = sum(1 for v in vals if (v or 0) > 0)
+                    serves_act = int(all((_account_model_remaining(cand, fam) or 0) > 0
+                                         for fam, _ in running_unblocked))
+                    min_req = min((v if v is not None else -1) for v in vals)
+                    return (serves_all, serves_any, serves_act, min_req,
+                            cand["remaining"], cand["secondary"] or 0, cand["alias"])
+                best = max(candidates, key=_general_rank)
+            else:
+                best = max(candidates, key=lambda a: (a["remaining"], a["secondary"] or 0, a["alias"]))
             return {"action": "switch", "active": active["alias"], "remaining": have,
                     "target": best["alias"], "target_remaining": best["remaining"], "rung": rung}
-    return {"action": "exhausted", "active": active["alias"], "remaining": have}
+    if noop_rung is None:
+        return {"action": "exhausted", "active": active["alias"], "remaining": have}
+
+    for fam, label in req_specs:
+        model_have = _account_model_remaining(active, fam)
+        if model_have is None:
+            continue
+        model_cleared = False
+        for rung in rungs(floor):
+            beneath = model_have < rung if rung > 0 else model_have <= 0
+            if not beneath:
+                model_cleared = True
+                break
+            candidates = []
+            for cand in accounts:
+                if cand["active"] or cand["remaining"] is None or cand["remaining"] <= 0:
+                    continue
+                if not (cand["remaining"] >= rung if rung > 0 else cand["remaining"] > 0):
+                    continue
+                if cand.get("secondary") is not None and cand["secondary"] <= 0:
+                    continue
+                cand_model = _account_model_remaining(cand, fam)
+                if cand_model is None or cand_model <= model_have:
+                    continue
+                if not (cand_model >= rung if rung > 0 else cand_model > 0):
+                    continue
+                if not all((_account_model_remaining(cand, afam) or 0) > 0
+                           for afam, _ in running_unblocked if afam != fam):
+                    continue
+                candidates.append(cand)
+            if candidates:
+                best = max(
+                    candidates,
+                    key=lambda a: (_account_model_remaining(a, fam) or 0,
+                                   a["remaining"], a["secondary"] or 0, a["alias"]),
+                )
+                return {
+                    "action": "switch",
+                    "active": active["alias"],
+                    "remaining": model_have,
+                    "target": best["alias"],
+                    "target_remaining": _account_model_remaining(best, fam),
+                    "target_general_remaining": best["remaining"],
+                    "rung": rung,
+                    "model": label,
+                }
+        if not model_cleared and model_have <= 0:
+            if any(afam != fam for afam, _ in running_unblocked):
+                return {
+                    "action": "noop",
+                    "active": active["alias"],
+                    "remaining": have,
+                    "rung": noop_rung,
+                    "blocked_model": label,
+                    "model_remaining": 0,
+                }
+            return {
+                "action": "exhausted",
+                "active": active["alias"],
+                "remaining": 0,
+                "general_remaining": have,
+                "model": label,
+            }
+
+    return {"action": "noop", "active": active["alias"], "remaining": have, "rung": noop_rung}
 
 
 def _run(command: str, args: list[str], timeout: int) -> subprocess.CompletedProcess:
@@ -319,17 +526,47 @@ def preview(provider: str, decision: dict, *, mode: str, switched: bool | None =
     """One line for the phone; no credentials, no command output."""
     name = provider.capitalize()
     window = WINDOW_LABEL[provider]
+    model = decision.get("model")
     if decision["action"] == "switch":
-        detail = (f"{decision['target']} has {decision['target_remaining']}% of the {window} window left; "
-                  f"{decision['active']} had {decision['remaining']}%")
+        if model:
+            gen = decision.get("target_general_remaining", decision["target_remaining"])
+            detail = (f"{decision['target']} has {decision['target_remaining']}% {model} quota "
+                      f"({gen}% of the {window} window) left; "
+                      f"{decision['active']} had {decision['remaining']}% {model}")
+            target_desc = f"{decision['target']} for {model}"
+        else:
+            detail = (f"{decision['target']} has {decision['target_remaining']}% of the {window} window left; "
+                      f"{decision['active']} had {decision['remaining']}%")
+            target_desc = str(decision["target"])
         if mode != "automatic":
-            return f"{name}: would switch to {decision['target']}. {detail}"
+            return f"{name}: would switch to {target_desc}. {detail}"
         if switched:
-            return f"{name}: switched to {decision['target']}. {detail}"
-        return f"{name}: could not switch to {decision['target']}. {detail}"
+            return f"{name}: switched to {target_desc}. {detail}"
+        return f"{name}: could not switch to {target_desc}. {detail}"
     if decision["action"] == "exhausted":
+        if model:
+            gen = decision.get("general_remaining")
+            tail = (f" ({decision['active']} keeps {gen}% of the {window} window for other models)"
+                    if gen else "")
+            return (f"{name}: {decision['active']} has {decision['remaining']}% {model} quota left "
+                    f"and no saved account can serve {model}{tail}")
         return f"{name}: {decision['active']} has {decision['remaining']}% of the {window} window left and no saved account has more"
     return ""
+
+
+def run_summary(provider: str, decision: dict, *, text: str = "") -> str:
+    """Summary recorded on the Janitor run and schedule lane."""
+    if text:
+        return text
+    window = WINDOW_LABEL[provider]
+    blocked_model = decision.get("blocked_model")
+    if blocked_model:
+        active = decision.get("active", "?")
+        rem = decision.get("remaining", "?")
+        model_rem = decision.get("model_remaining", 0)
+        return (f"{provider}: {active} has {model_rem}% {blocked_model} quota left and no saved account "
+                f"can serve {blocked_model}; keeping {active} ({rem}% of the {window} window) for running models")
+    return f"{provider}: {decision.get('active', '?')} keeps {decision.get('remaining', '?')}% of the {window} window"
 
 
 # Internal settings only. Older releases ignore this key; no schema or public

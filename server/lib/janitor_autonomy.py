@@ -168,6 +168,73 @@ def _automatic_hotseat_quota_snapshot(provider):
         hotseat_status.diagnose('quotaThresholdOwnerUnavailable',f'provider={provider} error={type(exc).__name__}')
         return None
 
+def _claude_model_demand(now_ms: int, base_seconds: int) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Return (required_models, active_models) for active, queued, or quota-parked Claude work."""
+    required: list[str] = []
+    active: list[str] = []
+    try:
+        from . import turn_dispatch_state
+        coordinator = turn_dispatch_state.account_failover("claude")
+        with coordinator.lock:
+            for attempt in list(coordinator.attempts.values()):
+                if not attempt.owned() or (attempt.agent_id, attempt.trace_id) in coordinator.park_expired:
+                    continue
+                model = str(attempt.model or "").strip()
+                if not model:
+                    continue
+                required.append(model)
+                if not attempt.state.get("account_recovery") and not attempt.stopped:
+                    active.append(model)
+    except Exception:
+        pass
+    try:
+        claude_agents = [
+            a for a in agents.list_agents()
+            if a.get("backend") == "claude" and not a.get("deleted_at") and not a.get("archived_at")
+        ]
+        if claude_agents:
+            from . import config, session_models, turn_queue
+            queued_ids = {
+                r[0] for r in db.conn().execute(
+                    "SELECT DISTINCT agent_id FROM queued_turns WHERE status IN ('queued','claimed')"
+                ).fetchall()
+            }
+            recent_limit_ms = max(2 * int(base_seconds) * 1000, 900_000)
+            default_model: str | None = None
+            for agent in claude_agents:
+                aid = agent["agent_id"]
+                state = agents.latest_state(aid) or {}
+                detail = state.get("detail") if isinstance(state.get("detail"), dict) else {}
+                state_ts = int(state.get("ts") or 0)
+                parked = (detail.get("account_recovery") == "waiting"
+                          and (state_ts <= 0 or now_ms - state_ts <= 3_600_000))
+                running = not parked and (
+                    bool(agents.is_busy(aid)) or bool(backends.active_handles("claude", aid))
+                )
+                queued = aid in queued_ids and not turn_queue.state(aid).get("paused")
+                recent_limit = (
+                    state.get("kind") in {"interrupted", "error"}
+                    and detail.get("reason") == "usage_limit"
+                    and state_ts > 0
+                    and 0 <= now_ms - state_ts <= recent_limit_ms
+                )
+                if not (running or parked or queued or recent_limit):
+                    continue
+                live_sess = agents.live_backend_session(aid) or ""
+                model = session_models.agent_model(agent, live_sess)
+                if not model:
+                    if default_model is None:
+                        default_model = session_models.launch_default("claude", config.load())
+                    model = default_model
+                if model:
+                    required.append(model)
+                    if running:
+                        active.append(model)
+    except Exception:
+        pass
+    return tuple(dict.fromkeys(required)), tuple(dict.fromkeys(active))
+
+
 class AutonomyJanitors:
     def __init__(self,dispatch,notify,model_call=decision_model,usage_read=None,recover=None,hotseat_read=janitor_hotseat.read_accounts,hotseat_switch=janitor_hotseat.switch_account,label_judge=None):
         self.recover=recover;self.dispatch=dispatch;self.notify=notify;self.model_call=model_call;self.usage_read=usage_read;self.stop_event=threading.Event();self.thread=None
@@ -353,7 +420,11 @@ class AutonomyJanitors:
                 if withheld:
                     accounts=[dict(a) if a['active'] or a['alias'] not in withheld
                               else {**a,'remaining':None,'secondary':None} for a in accounts]
-            decision=janitor_hotseat.decide(accounts,janitor_hotseat.floor_for(options,provider))
+            if provider=='claude':
+                req_models,act_models=_claude_model_demand(now,base)
+                decision=janitor_hotseat.decide(accounts,janitor_hotseat.floor_for(options,provider),required_models=req_models,active_models=act_models)
+            else:
+                decision=janitor_hotseat.decide(accounts,janitor_hotseat.floor_for(options,provider))
             if not janitor_builtins.is_current(run['run_id']):return
             switched=None;outcome='completed';error=''
             if decision['action']=='switch' and options['mode']=='automatic':
@@ -369,7 +440,7 @@ class AutonomyJanitors:
             text=janitor_hotseat.preview(provider,decision,mode=options['mode'],switched=switched)
             if repair_text:text=(text+'; ' if text else '')+repair_text
             # Advice and exhaustion repeat every interval; notify once per distinct situation.
-            marker=f'hotseat-switcher.{provider}.notified';situation=json.dumps([decision['action'],decision.get('active'),decision.get('target'),switched]+([repair_text] if repair_text else []),sort_keys=True)
+            marker=f'hotseat-switcher.{provider}.notified';situation=json.dumps([decision['action'],decision.get('active'),decision.get('target'),switched]+([decision['model']] if decision.get('model') else [])+([repair_text] if repair_text else []),sort_keys=True)
             # Worked: it switched, or found a situation that needs the owner (switch advice, exhaustion).
             worked=bool(switched) or decision['action']!='noop'
             if text and (decision['action']=='switch' and switched or settings_store.get_text(marker,default='')!=situation):
@@ -378,7 +449,7 @@ class AutonomyJanitors:
                 payload={'notification_id':rid,'session':owner['session'],'agent_id':owner['agent_id'],'persona':owner['name'],'preview':text,'push':True,'reason':'account_switch','owner_generation':owner['generation']}
                 janitor_store.insert_quota_receipt(rid,run['run_id'],json.dumps(payload),now)
             elif decision['action']=='noop' and not repair_text:settings_store.set_text(marker,'')
-            summary=text or f"{provider}: {decision.get('active','?')} keeps {decision.get('remaining','?')}% of the {janitor_hotseat.WINDOW_LABEL[provider]} window"
+            summary=janitor_hotseat.run_summary(provider,decision,text=text)
             activity='failed' if outcome=='failed' else 'worked' if worked else 'idle'
             janitor_builtins.complete_run(run['run_id'],outcome,result={'summary':summary[:500],'status':decision['action'],'reason':decision.get('reason','')[:500]},error=error,activity=activity,summary=summary[:300])
             lane_record(lane,owner,base,activity,summary,now)

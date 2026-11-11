@@ -1809,3 +1809,104 @@ def test_fingerprint_read_failure_inside_writer_is_not_a_fallback_delivery(notif
     assert c["sent"] == []
     assert db.conn().execute("SELECT COUNT(*) FROM janitor_quota_receipts").fetchone()[0] == 0
     assert not db.conn().in_transaction
+
+
+def test_claude_parse_and_decide_reject_weekly_exhaustion_and_unavailable_accounts():
+    payload = {"accounts": [
+        {"alias": "ai5", "is_active": True, "error": None, "usage": {
+            "status": "allowed", "available": False, "limited": False,
+            "used_5h": 0.0, "used_7d": 1.0, "status_7d": "rejected"}},
+        {"alias": "ai6", "is_active": False, "error": None, "usage": {
+            "status": "allowed", "available": True, "limited": False,
+            "used_5h": 0.0, "used_7d": 1.0}},
+        {"alias": "ai7", "is_active": False, "error": None, "usage": {
+            "status": "allowed", "available": True, "limited": False,
+            "used_5h": 0.3, "used_7d": 0.4}},
+        {"alias": "overage", "is_active": False, "error": None, "usage": {
+            "status": "allowed", "available": True, "limited": False,
+            "used_5h": 0.1, "used_7d": 1.0, "extra_usage_enabled": True}},
+    ]}
+    parsed = {row["alias"]: row for row in hotseat.parse_claude(payload)}
+    assert parsed["ai5"]["remaining"] == 0
+    assert parsed["ai6"]["remaining"] == 0
+    assert parsed["ai7"]["remaining"] == 70
+    assert parsed["overage"]["remaining"] == 90
+    decision = hotseat.decide(list(parsed.values()), 25)
+    assert decision["action"] == "switch" and decision["target"] == "overage"
+
+
+def test_hotseat_switches_for_model_scoped_fable_quota_skipping_weekly_exhausted_and_degraded(switcher):
+    owner, worker, readings, calls, sent = switcher
+    aid = agents.create_agent(persona="Koko", voice_id="v", cwd="/tmp", session="koko-8255", backend="claude")
+    agents.update_agent(aid, model="claude-fable-5-2")
+    agents.record_state(aid, "interrupted", {"account_recovery": "waiting", "reason": "usage_limit"})
+
+    readings["claude"] = {"accounts": [
+        {"alias": "ai9", "is_active": True, "error": None, "usage": {
+            "status": "allowed", "available": True, "limited": False,
+            "used_5h": 0.0, "used_7d": 0.63, "blocked_models": ["Fable"],
+            "scoped": [{"model": "Fable", "used": 1.0, "exhausted": True}]}},
+        {"alias": "ai5", "is_active": False, "error": None, "usage": {
+            "status": "rejected", "available": False, "limited": True,
+            "used_5h": 0.0, "used_7d": 1.0}},
+        {"alias": "ai6", "is_active": False, "error": None, "usage": {
+            "status": "allowed", "available": True, "limited": False,
+            "used_5h": 0.05, "used_7d": 0.2, "blocked_models": [], "scoped": [],
+            "degraded": "per-model limits unavailable"}},
+        {"alias": "ai7", "is_active": False, "error": None, "usage": {
+            "status": "allowed", "available": True, "limited": False,
+            "used_5h": 0.2, "used_7d": 0.3, "blocked_models": [],
+            "scoped": [{"model": "Fable", "used": 0.4, "exhausted": False}]}},
+    ]}
+
+    worker.hotseat_once()
+    assert [c for c in calls if c[0] == "switch"] == [("switch", "hotseat", "claude", "ai7")]
+    assert len(sent) == 1
+    assert "switched to ai7 for Fable" in sent[0]["preview"]
+    assert "60% Fable quota" in sent[0]["preview"]
+
+
+def test_hotseat_fable_starvation_reports_honestly_without_thrashing(switcher):
+    owner, worker, readings, calls, sent = switcher
+    fable_aid = agents.create_agent(persona="Koko", voice_id="v", cwd="/tmp", session="koko-8255", backend="claude")
+    agents.update_agent(fable_aid, model="claude-fable-5-2")
+    agents.record_state(fable_aid, "interrupted", {"account_recovery": "waiting", "reason": "usage_limit"})
+
+    readings["claude"] = {"accounts": [
+        {"alias": "ai9", "is_active": True, "error": None, "usage": {
+            "status": "allowed", "available": True, "limited": False,
+            "used_5h": 0.0, "used_7d": 0.63, "blocked_models": ["Fable"]}},
+        {"alias": "ai5", "is_active": False, "error": None, "usage": {
+            "status": "rejected", "available": False, "limited": True,
+            "used_5h": 0.0, "used_7d": 1.0}},
+    ]}
+
+    # 1. No other Claude models running: reports model exhaustion once, never switches to ai5.
+    worker.hotseat_once()
+    assert not [c for c in calls if c[0] == "switch"]
+    claude_runs = [r for r in janitors.list_runs(owner["session"])
+                   if ((r.get("demand_result") or {}).get("summary") or "").lower().startswith("claude:")]
+    assert claude_runs[0]["demand_result"]["status"] == "exhausted"
+    assert "0% Fable quota left and no saved account can serve Fable" in claude_runs[0]["demand_result"]["summary"]
+    assert len(sent) == 1 and "no saved account can serve Fable" in sent[0]["preview"]
+
+    _check_again("hotseat-switcher.claude")
+    worker.hotseat_once()
+    assert not [c for c in calls if c[0] == "switch"]
+    assert len(sent) == 1
+
+    # 2. Another non-blocked model (Sonnet) is actively running on ai9: keeps ai9 (noop)
+    # with an honest summary rather than claiming "ai9 keeps 100% of the 5-hour window".
+    sonnet_aid = agents.create_agent(persona="Builder", voice_id="v", cwd="/tmp", session="builder-1", backend="claude")
+    agents.update_agent(sonnet_aid, model="claude-sonnet-4-6")
+    agents.record_state(sonnet_aid, "thinking", {"source": "user"})
+
+    _check_again("hotseat-switcher.claude")
+    worker.hotseat_once()
+    assert not [c for c in calls if c[0] == "switch"]
+    claude_runs = [r for r in janitors.list_runs(owner["session"])
+                   if ((r.get("demand_result") or {}).get("summary") or "").lower().startswith("claude:")]
+    latest = claude_runs[0]["demand_result"]
+    assert latest["status"] == "noop"
+    assert "0% Fable quota left and no saved account can serve Fable" in latest["summary"]
+    assert "keeping ai9 (100% of the 5-hour window) for running models" in latest["summary"]
