@@ -41,7 +41,7 @@ CAPABILITIES_VERSION = 1
 # adds a row to docs/compatibility.md; tests/unit/test_client_contract.py
 # fails when the table and these constants disagree. Clients identify
 # themselves with the X-Clarp-Client header ("ios/2620 contract=1").
-HOST_CONTRACT = 83  # 82 plus archived_parents in the snapshot without archived agents.
+HOST_CONTRACT = 84  # 83 plus Hotseat TUI desk (hotseat_desk).
 MIN_IOS_CONTRACT = 1
 # F4 delivery state: read paths and committed-transition hints share the
 # advertised feature gate; an unavailable runtime still leaves delivery unknown.
@@ -50,6 +50,7 @@ CLIENT_HEADER = "X-Clarp-Client"
 FEATURES: tuple[str, ...] = (
     "decision_on_behalf",
     "accounts_hotseat",
+    "hotseat_desk",
     SEND_DELIVERY_STATE,
     "harness_model_providers",
     "agent_call_live",
@@ -197,6 +198,7 @@ FEATURE_CONTRACTS["voice_humanness"] = 46
 FEATURE_CONTRACTS["oracle_gemini_voice"] = 36
 FEATURE_CONTRACTS["push_grants"] = 39
 FEATURE_CONTRACTS["agent_fork"] = 41
+FEATURE_CONTRACTS["hotseat_desk"] = 84
 
 
 # Features that exist only while live events actually flow: the hub runs in
