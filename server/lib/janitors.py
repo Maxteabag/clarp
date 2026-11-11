@@ -1222,10 +1222,10 @@ def begin_creation(request_id: str, payload: dict) -> dict:
         backend = backends.normalize(values.get("backend") or "codex")
         if any(values.get(key) is not None and not isinstance(values[key], str) for key in ("model", "effort")):
             raise JanitorError("Model and effort must be text")
-        model = (values.get("model") or "") if "model" in values else (
-            backends.by_id(backend).janitor_default_model)
+        default_model = backends.by_id(backend).janitor_default_model
+        model = (values.get("model") or "") if "model" in values else default_model
         effort = (values.get("effort") or "") if "effort" in values else (
-            "low" if model == "gpt-5.3-codex-spark" else "")
+            "low" if default_model and model == default_model else "")
         if not isinstance(model, str) or not isinstance(effort, str):
             raise JanitorError("Model and effort must be text")
         model, effort = model.strip(), effort.strip().lower()

@@ -59,6 +59,7 @@ class ModelProbe:
     argv: tuple[str, ...] = ()
     timeout: float | None = None
     cache_path: str = ""
+    auth_path: str = ""
     append_fallback: bool = False
     fallback_efforts: bool = False
     remember_model_ids: bool = False
@@ -92,6 +93,8 @@ class BackendDefinition:
     config_effort_field: str = ''
     config_account_switch_field: str = ''
     fallback_models: tuple[tuple[str, str], ...] = ()
+    fallback_model_efforts: MappingProxyType[str, tuple[str, ...]] = MappingProxyType({})
+    fallback_model_defaults: MappingProxyType[str, str] = MappingProxyType({})
     resumable: bool = True
     continues_lost_conversations: bool = False
     context_window: int | None = None
@@ -143,8 +146,21 @@ CLAUDE = BackendDefinition(
     ),
 )
 
+_CODEX_ULTRA_EFFORTS = ('low', 'medium', 'high', 'xhigh', 'max', 'ultra')
+_CODEX_MAX_EFFORTS = ('low', 'medium', 'high', 'xhigh', 'max')
+_CODEX_XHIGH_EFFORTS = ('low', 'medium', 'high', 'xhigh')
+
 CODEX = BackendDefinition(
-    probe=ModelProbe("command", "parse_codex_models", "codex debug models", argv=("debug", "models"), timeout=2.5),
+    probe=ModelProbe(
+        "command",
+        "parse_codex_models",
+        "codex debug models",
+        argv=("debug", "models"),
+        timeout=2.5,
+        auth_path="codex_auth_path",
+        append_fallback=True,
+        fallback_efforts=True,
+    ),
     id='codex',
     label='Codex',
     required_binary='codex',
@@ -156,7 +172,7 @@ CODEX = BackendDefinition(
     supports_steer=True,
     supports_usage=True,
     login_kind='device_code',
-    efforts=('low', 'medium', 'high', 'xhigh', 'max', 'ultra'),
+    efforts=_CODEX_ULTRA_EFFORTS,
     effort_scope='model',
     runner='codex',
     config_model_field='codex_model',
@@ -164,17 +180,41 @@ CODEX = BackendDefinition(
     config_account_switch_field='codex_account_switch_command',
     api_providers=('openai',),
     native_tool_explainer=True,
-    janitor_default_model='gpt-5.3-codex-spark',
+    janitor_default_model='gpt-6-luna',
     model_family='codex',
     fallback_models=(
         ('gpt-6.1-sol', 'GPT-6.1 Sol'),
-        ('gpt-5.4', 'GPT-5.4'),
-        ('gpt-5.4-mini', 'GPT-5.4 Mini'),
-        ('gpt-5.2-codex', 'GPT-5.2 Codex'),
-        ('gpt-5.1-codex-max', 'GPT-5.1 Codex Max'),
-        ('gpt-5.1-codex', 'GPT-5.1 Codex'),
-        ('gpt-5-codex', 'GPT-5 Codex'),
+        ('gpt-6-astra', 'GPT-6 Astra'),
+        ('gpt-6.1-terra', 'GPT-6.1 Terra'),
+        ('gpt-6-sol', 'GPT-6 Sol'),
+        ('gpt-6-luna', 'GPT-6 Luna'),
+        ('gpt-5.6-sol', 'GPT-5.6 Sol'),
+        ('gpt-5.6-terra', 'GPT-5.6 Terra'),
+        ('gpt-5.6-luna', 'GPT-5.6 Luna'),
+        ('gpt-5.5', 'GPT-5.5'),
     ),
+    fallback_model_efforts=MappingProxyType({
+        'gpt-6.1-sol': _CODEX_ULTRA_EFFORTS,
+        'gpt-6-astra': _CODEX_ULTRA_EFFORTS,
+        'gpt-6.1-terra': _CODEX_ULTRA_EFFORTS,
+        'gpt-6-sol': _CODEX_ULTRA_EFFORTS,
+        'gpt-6-luna': _CODEX_MAX_EFFORTS,
+        'gpt-5.6-sol': _CODEX_ULTRA_EFFORTS,
+        'gpt-5.6-terra': _CODEX_ULTRA_EFFORTS,
+        'gpt-5.6-luna': _CODEX_MAX_EFFORTS,
+        'gpt-5.5': _CODEX_XHIGH_EFFORTS,
+    }),
+    fallback_model_defaults=MappingProxyType({
+        'gpt-6.1-sol': 'medium',
+        'gpt-6-astra': 'medium',
+        'gpt-6.1-terra': 'low',
+        'gpt-6-sol': 'medium',
+        'gpt-6-luna': 'medium',
+        'gpt-5.6-sol': 'medium',
+        'gpt-5.6-terra': 'medium',
+        'gpt-5.6-luna': 'medium',
+        'gpt-5.5': 'medium',
+    }),
 )
 
 AGY = BackendDefinition(
@@ -196,6 +236,12 @@ AGY = BackendDefinition(
     config_model_field='agy_model',
     model_family='gemini',
     fallback_models=(
+        ('gemini-4-carbon-high', 'Gemini 4 Carbon (High)'),
+        ('gemini-4-carbon-medium', 'Gemini 4 Carbon (Medium)'),
+        ('gemini-4-carbon-low', 'Gemini 4 Carbon (Low)'),
+        ('gemini-4-argon-high', 'Gemini 4 Argon (High)'),
+        ('gemini-4-argon-medium', 'Gemini 4 Argon (Medium)'),
+        ('gemini-4-argon-low', 'Gemini 4 Argon (Low)'),
         ('gemini-3.8-flash-high', 'Gemini 3.8 Flash (High)'),
         ('gemini-3.8-flash-medium', 'Gemini 3.8 Flash (Medium)'),
         ('gemini-3.8-flash-low', 'Gemini 3.8 Flash (Low)'),

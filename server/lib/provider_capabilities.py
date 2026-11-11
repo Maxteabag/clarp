@@ -13,6 +13,7 @@ from .backend.claude_models import claude_model_pin
 
 import copy
 import concurrent.futures
+import hashlib
 import os
 import datetime as _dt
 import json
@@ -62,7 +63,7 @@ def _static_efforts(provider_id: str) -> list[str]:
 
 _cache_lock = threading.Lock()
 _cache_condition = threading.Condition(_cache_lock)
-_cache: tuple[float, dict[str, Any]] | None = None
+_cache: tuple[float, dict[str, Any]] | tuple[float, dict[str, Any], tuple[Any, ...]] | None = None
 _refreshing = False
 _refresh_generation = 0
 _last_error: BaseException | None = None
@@ -174,6 +175,41 @@ def parse_codex_models(raw: str, *, observed_at: str) -> list[dict[str, Any]]:
 def claude_model_cache_path() -> Path:
     """Where the Claude CLI keeps its account state."""
     return Path(os.environ.get("CLAUDE_CONFIG_FILE") or (Path.home() / ".claude.json"))
+
+
+def codex_auth_path() -> Path:
+    """Where the Codex CLI reads its active account credentials."""
+    raw = (os.environ.get("CODEX_HOME") or "").strip()
+    home = Path(raw).expanduser() if raw else (Path.home() / ".codex")
+    return home / "auth.json"
+
+
+def _file_signature(path: Path) -> tuple[Any, ...]:
+    resolved = str(path)
+    try:
+        stat = path.stat()
+    except OSError:
+        return (resolved, None)
+    digest = b""
+    if stat.st_size <= 262_144:
+        try:
+            digest = hashlib.sha256(path.read_bytes()).digest()
+        except OSError:
+            pass
+    return (resolved, stat.st_mtime_ns, stat.st_size, stat.st_ino, digest)
+
+
+def _auth_signature() -> tuple[tuple[str, tuple[Any, ...]], ...]:
+    """Fingerprint provider auth files so account switches invalidate cache."""
+    signatures: list[tuple[str, tuple[Any, ...]]] = []
+    for provider_id in _provider_ids():
+        definition = backend_catalogue.get(provider_id)
+        probe = definition.probe if definition and definition.id == provider_id else None
+        if probe and probe.auth_path:
+            path_fn = globals().get(probe.auth_path)
+            if callable(path_fn):
+                signatures.append((provider_id, _file_signature(path_fn())))
+    return tuple(signatures)
 
 
 # The aliases Claude Code's --model resolves itself (its RP table). "default"
@@ -682,17 +718,23 @@ def _fallback_models(provider_id: str, observed_at: str) -> list[dict[str, Any]]
                      observed_at, "unknown")
     definition = backend_catalogue.get(provider_id)
     probe = definition.probe if definition and definition.id == provider_id else None
-    efforts = _static_efforts(provider_id) if probe and probe.fallback_efforts else None
-    return [
-        _model(
+    default_efforts = _static_efforts(provider_id) if probe and probe.fallback_efforts else None
+    model_efforts = definition.fallback_model_efforts if probe and probe.fallback_efforts else {}
+    model_defaults = definition.fallback_model_defaults if probe and probe.fallback_efforts else {}
+    rows: list[dict[str, Any]] = []
+    for model_id, label in _fallback_model_rows(provider_id):
+        per_model = model_efforts.get(model_id)
+        efforts = list(per_model) if per_model is not None else (
+            list(default_efforts) if default_efforts is not None else None
+        )
+        rows.append(_model(
             model_id,
             label,
-            default_effort=None,
-            supported_efforts=list(efforts) if efforts is not None else None,
+            default_effort=model_defaults.get(model_id),
+            supported_efforts=efforts,
             source=dict(source),
-        )
-        for model_id, label in _fallback_model_rows(provider_id)
-    ]
+        ))
+    return rows
 
 
 def _probe_models(
@@ -882,28 +924,39 @@ def capability_catalog(*, force_refresh: bool = False) -> dict[str, Any]:
     """Return one cached catalog, coalescing concurrent refresh callers."""
     global _cache, _refreshing, _refresh_generation
     global _last_error, _last_error_generation
-    monotonic_now = time.monotonic()
-    with _cache_condition:
-        if not force_refresh and _cache is not None:
-            cached_at, value = _cache
-            if monotonic_now - cached_at <= CACHE_TTL_SECONDS:
-                return copy.deepcopy(value)
-        if _refreshing:
-            waiting_for = _refresh_generation
-            while _refreshing and _refresh_generation == waiting_for:
-                _cache_condition.wait()
-            if _last_error_generation == waiting_for and _last_error is not None:
-                raise RuntimeError("provider capability refresh failed") \
-                    from _last_error
-            if _cache is not None:
-                return copy.deepcopy(_cache[1])
-        _refreshing = True
-        _refresh_generation += 1
-        generation = _refresh_generation
+    while True:
+        current_signature = _auth_signature()
+        monotonic_now = time.monotonic()
+        with _cache_condition:
+            if not force_refresh and _cache is not None:
+                cached_at = _cache[0]
+                value = _cache[1]
+                cached_signature = _cache[2] if len(_cache) > 2 else current_signature
+                if (monotonic_now - cached_at <= CACHE_TTL_SECONDS
+                        and cached_signature == current_signature):
+                    return copy.deepcopy(value)
+            if _refreshing:
+                waiting_for = _refresh_generation
+                while _refreshing and _refresh_generation == waiting_for:
+                    _cache_condition.wait()
+                if _last_error_generation == waiting_for and _last_error is not None:
+                    raise RuntimeError("provider capability refresh failed") \
+                        from _last_error
+                if _cache is not None:
+                    cached_signature = _cache[2] if len(_cache) > 2 else current_signature
+                    if cached_signature == current_signature:
+                        return copy.deepcopy(_cache[1])
+                force_refresh = False
+                continue
+            _refreshing = True
+            _refresh_generation += 1
+            generation = _refresh_generation
+            break
 
     # Never hold the condition lock around provider subprocesses. Whatever
     # happens, the refresh latch is released so waiters can never hang.
     try:
+        observed_signature = _auth_signature()
         value = _build_catalog(
             wall_time=time.time(), which=_resolve_executable, run=_run)
         stored_at = time.monotonic()
@@ -915,7 +968,7 @@ def capability_catalog(*, force_refresh: bool = False) -> dict[str, Any]:
             _cache_condition.notify_all()
         raise
     with _cache_condition:
-        _cache = (stored_at, value)
+        _cache = (stored_at, value, observed_signature)
         _last_error = None
         _last_error_generation = 0
         _refreshing = False

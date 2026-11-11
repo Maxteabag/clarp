@@ -1358,7 +1358,8 @@ def test_agent_model_options_endpoint_returns_backend_choices(running_server, mo
     assert response["freshness_scope"] == "response_observation"
     assert response["providers"]["codex"]["cli_version"] == "test-cli 1.0"
     assert response["providers"]["codex"]["authenticated"] is None
-    assert response["providers"]["codex"]["models"] == [{
+    codex_models = response["providers"]["codex"]["models"]
+    assert codex_models[0] == {
         "id": "gpt-test",
         "label": "GPT Test",
         "default_effort": "high",
@@ -1369,7 +1370,10 @@ def test_agent_model_options_endpoint_returns_backend_choices(running_server, mo
             "observed_at": response["observed_at"],
             "freshness": "fresh",
         },
-    }]
+    }
+    assert codex_models[1:] and all(
+        item["source"]["kind"] == "static_fallback" for item in codex_models[1:]
+    )
     assert response["providers"]["agy"]["models"][0]["id"] == "agy-test"
     assert response["providers"]["agy"]["models"][0]["supported_efforts"] is None
     assert response["providers"]["agy"]["supported_efforts"] \
