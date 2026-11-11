@@ -813,6 +813,9 @@ class CodexBackend(StreamJsonBackend):
         to watch, so the Host waits a fixed window."""
         return CompactionStrategy(launch=(self.required_binary, "resume"), command="/compact")
 
+    def native_resume_command(self, session_id: str) -> str | None:
+        return f"codex resume {session_id}"
+
     # --- credentials and quota --------------------------------------------
 
     def on_credential_change(self) -> None:
