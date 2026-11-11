@@ -71,13 +71,27 @@ validates stdin without switching accounts or making provider requests.
     ends early. A selector can pick an account with a sliver left, and
     waiting does help (the same day, 14:28 to 15:01: resumed twice onto such
     accounts, parked again each time, working once the windows reset). The
-    park's clock is not started again: the 30-minute cap counts from the
-    turn's first park and stays the one place that gives up for usage, per
-    turn. A turn that worked for more than two minutes after its resume has
-    left the park; its next limit begins a new one.
-- The recovery message is built from the original request each time, so a turn
-  resumed more than once receives the same message, never one wrapped inside
-  another.
+    recovery is not started again. The park's clock keeps counting: the
+    30-minute cap counts from the turn's first park and stays the one place
+    that gives up for usage, per turn. The selector is asked at the park's
+    next recheck (`RECHECK_SECONDS` after the turn fell back), not at once.
+    And the turn is not told a second time (next point). A turn that worked
+    for two minutes or more after its resume has left the park; its next
+    limit begins a new one (that afternoon's shortest real gap was 145 s).
+  - A turn whose park is 30 minutes old when it would go back into it is not
+    parked again, by its own failure or by another turn's recovery: it runs
+    on and its next account failure ends it visibly.
+- The selector is not asked again until `RECHECK_SECONDS` after its previous
+  answer, whatever that answer was and whoever asks. Turns are restarted only
+  by an answer, so no sequence of answers restarts turns more often than once
+  a minute.
+- One recovery message for each park. It is built from the original request,
+  never one wrapped inside another. A turn resumed again inside the same park
+  already has it in its conversation, so that resume carries one line
+  (`SAME_PARK_RESUME_TEXT`: carry on, nothing new is asked) in the same
+  envelope, without the message and without the request. A resume needs a
+  prompt, so it cannot carry nothing. If the resumed process was stopped
+  before it started its session, the message never arrived and is sent again.
 - One recovery coordinates all Claude turns owned by the runtime. New turns wait
   behind the recovery barrier; queued follow-ups retain their order. Other
   providers, completed agents, and idle agents receive no continuation.
