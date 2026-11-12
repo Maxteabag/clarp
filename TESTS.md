@@ -2,8 +2,8 @@
 
 ## How to run
 
-Before pushing, run `make test-critical` and the test files for the code you
-changed; do not run the full suite locally. The critical list
+Before pushing, run `make test-critical`, `make test-guards` and the test files
+for the code you changed; do not run the full suite locally. The critical list
 (`tests/critical.txt`) holds only what can brick the Host or lose data: state
 database schema and migrations, boot and route wiring, authentication and
 device scope, turn dispatch/queue/stop, update and installer, transcript
@@ -15,6 +15,7 @@ branch with `paths` set to the test files (space separated); nothing else runs.
 | Layer | Command | Where it runs | Time |
 |---|---|---|---|
 | Critical gate (pre-push) | `make test-critical` | serial, in-process | ~1 min |
+| Structural guards (pre-push) | `make test-guards` | serial, in-process | ~1 min |
 | Python unit + integration (1,500 tests) | `make py` | in-process, every core, 60 s per-test timeout | ~30 s |
 | JavaScript unit (250 tests) | `make js` | vitest, in-process | ~15 s |
 | Container install, restart, backup | `make docker-test` | throwaway Docker node | minutes |

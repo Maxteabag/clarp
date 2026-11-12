@@ -1,4 +1,4 @@
-.PHONY: test test-critical py js e2e docker-test isolated-codex install-py deploy deploy-static deploy-detached deploy-status deploy-log
+.PHONY: test test-critical test-guards py js e2e docker-test isolated-codex install-py deploy deploy-static deploy-detached deploy-status deploy-log
 
 test: py js
 
@@ -6,6 +6,15 @@ test: py js
 # Serial on purpose, so forty agents running it do not each take every core.
 test-critical:
 	uv run --frozen --group dev python -m pytest -n0 $$(sed -e 's/#.*//' tests/critical.txt)
+
+# The structural guards, also before pushing: caught exceptions that are not
+# logged, import layers and cycles, module state, backend capabilities. New
+# code trips them more often than it trips the critical list. Serial.
+GUARDS = tests/unit/test_swallowed_excepts.py tests/unit/test_import_layers.py \
+         tests/unit/test_module_import_cycles.py tests/unit/test_module_state_guard.py \
+         tests/unit/test_backend_capabilities.py
+test-guards:
+	uv run --frozen --group dev python -m pytest -n0 $(GUARDS)
 
 py:
 	uv run --frozen --group dev python -m pytest

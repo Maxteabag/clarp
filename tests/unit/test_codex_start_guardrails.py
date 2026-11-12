@@ -103,14 +103,17 @@ def test_the_own_follow_up_is_durable_before_it_is_acknowledged_and_runs_once(po
 
 def test_a_failed_park_refuses_the_follow_up(pool, monkeypatch):
     held, release = _hold(pool, "turn/start", lambda p: "HOLD" in str(p.get("input")))
-    _timed(lambda: pool.service.dispatch(text="HOLD", requested_session="rachel", trace_id="t-r1",
-                                         synthesize_audio=False), 0.0)
+    _ok, _, _, starter = _timed(lambda: pool.service.dispatch(
+        text="HOLD", requested_session="rachel", trace_id="t-r1", synthesize_audio=False), 0.0)
     assert held.wait(15)
     patch_shared(monkeypatch, td, "_park", lambda spec, prefix="park": "")
     with pytest.raises(td.DispatchError) as error:
         pool.service.dispatch(text="and also", requested_session="rachel", trace_id="t-r2",
                               synthesize_audio=False)
     assert error.value.status == 503
+    release.set()
+    starter.join(15)
+    assert _wait(lambda: not cas.active_handles(pool.rachel), 15)
 
 
 def test_a_stop_before_the_launch_sends_no_turn_start(pool):
