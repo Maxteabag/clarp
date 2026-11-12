@@ -15,7 +15,7 @@ from __future__ import annotations
 
 # Versions 81 and 82 also exist on installed Hosts with additive indexing
 # migrations. History must run when upgrading those Hosts, not only main's v80.
-_SCHEMA_VERSION = 123  # device_tokens.provider (apns | fcm). Before it: 122, the janitor_runs newest-run index. 120 is a hole: no step has that number (see db_migrations._migrate)
+_SCHEMA_VERSION = 124  # transcript_import_frontiers (a table). Before it: 123, device_tokens.provider (apns | fcm); 122, the janitor_runs newest-run index. 120 is a hole: no step has that number (see db_migrations._migrate)
 
 
 # The schema below is the complete current shape. It is applied in one step to
@@ -280,6 +280,24 @@ CREATE TABLE transcript_import_checkpoints (
     store_carry_json TEXT NOT NULL,
     imports_since_audit INTEGER NOT NULL DEFAULT 0,
     audited_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (agent_id, backend_session_id, source_file)
+);
+
+-- What lets the next import of a transcript read only its tail, kept across a
+-- Host restart (it used to live in the Host's memory only). One row beside
+-- the checkpoint it belongs to, written in the same transaction: the digest
+-- of that checkpoint, of every imported byte of the file, and of the database
+-- rows the import read. Any mismatch means a full import. A release that does
+-- not know this table never reads it.
+CREATE TABLE transcript_import_frontiers (
+    agent_id TEXT NOT NULL,
+    backend_session_id TEXT NOT NULL,
+    source_file TEXT NOT NULL,
+    parser_version TEXT NOT NULL,
+    checkpoint_digest TEXT NOT NULL,
+    file_hash TEXT NOT NULL,
+    inputs_digest TEXT NOT NULL,
     updated_at INTEGER NOT NULL,
     PRIMARY KEY (agent_id, backend_session_id, source_file)
 );
