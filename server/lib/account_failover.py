@@ -13,11 +13,13 @@ import json
 import os
 import signal
 import subprocess
+import pathlib
 import threading
 import time
+import traceback
 from typing import Callable
 
-from .log import log
+from .log import log, log_exception
 from .policies.failover import (
     FAILED, NOT_CHECKED, PARK_EXPIRED, FailoverPlan, FailoverSettings, Kill,
     Park, PendingWork, Release, Resume)
@@ -208,6 +210,10 @@ class AccountFailover:
         # The latest timer armed for work that stays parked while the pool
         # works (see ``_begin``); an older one does nothing.
         self.hold_timer = 0
+        # Turns released at their cap while others stayed parked for the same
+        # model: (agent, trace) -> (model, when released). Each is a trial of
+        # whether the active account serves that model again (``_proven``).
+        self.trials: dict[tuple[str, str], tuple[str, float]] = {}
 
     @staticmethod
     def _schedule(delay, callback):
@@ -225,6 +231,8 @@ class AccountFailover:
                                if key[0] != attempt.agent_id or key[1] == attempt.trace_id}
             self.first_parked = {key: at for key, at in self.first_parked.items()
                                  if key[0] != attempt.agent_id or key[1] == attempt.trace_id}
+            self.trials = {key: trial for key, trial in self.trials.items()
+                           if key[0] != attempt.agent_id or key[1] == attempt.trace_id}
             self.attempts[attempt.agent_id] = attempt
             self.awaiting.discard(attempt.agent_id)
             # Behind a recovery, or behind the work already parked for this
@@ -235,6 +243,10 @@ class AccountFailover:
                 self._note_park(attempt)
                 (attempt.pause if self.recovering or attempt.hold is None else attempt.hold)()
                 attempt.spawned.set()
+                # Parked before it started: there is no process to stop. A
+                # recovery pass that found it "still running" lost the pass
+                # (2026-11-12 06:49:31, see _recover).
+                attempt.stopped = True
                 return True
             return False
 
@@ -243,6 +255,7 @@ class AccountFailover:
             self.park_expired.discard((agent_id, trace_id))
             self.resumed_at.pop((agent_id, trace_id), None)
             self.first_parked.pop((agent_id, trace_id), None)
+            self.trials.pop((agent_id, trace_id), None)
             attempt = self.attempts.get(agent_id)
             if attempt and attempt.trace_id == trace_id:
                 self.attempts.pop(agent_id, None)
@@ -301,6 +314,7 @@ class AccountFailover:
                 return False
             key = (agent_id, trace_id)
             if self._expired(trigger):
+                self.trials.pop(key, None)   # the model is still not served
                 return False   # its park's time is up: fail visibly now
             relapsed = self._relapsed(key)
             if plan and relapsed:
@@ -407,6 +421,35 @@ class AccountFailover:
             if attempt.owned():
                 attempt.resume()
 
+    def _note_trials(self, released: list[Attempt], parked: list[Attempt]) -> None:
+        """A turn released at its cap, while others still wait for its model,
+        is the trial for them. Called with the lock held."""
+        waiting = {attempt.model for attempt in parked}
+        for attempt in released:
+            if attempt.model in waiting:
+                self.trials[(attempt.agent_id, attempt.trace_id)] = (attempt.model, self.now())
+
+    def _proven(self) -> set[str]:
+        """The models a trial has shown the active account serves again: its
+        turn, released a recheck ago or more, is still running and has met no
+        account failure (that ends a released turn, and the trial with it).
+        A trial that is over, either way, proves nothing more. Called with
+        the lock held.
+
+        Without this a model that came back was noticed only when the pool
+        went idle: every turn for it waited its own half hour, because a new
+        one parks behind those already parked."""
+        proven = set()
+        for key, (model, released) in list(self.trials.items()):
+            if self.now() - released < RECHECK_SECONDS:
+                continue
+            del self.trials[key]
+            attempt = self.attempts.get(key[0])
+            if (attempt is not None and attempt.trace_id == key[1] and attempt.owned()
+                    and not attempt.state.get("account_recovery")):
+                proven.add(model)
+        return proven
+
     def _arm_hold(self) -> None:
         """Look again in a recheck at the work that stays parked while the
         pool works. Called with the lock held."""
@@ -432,6 +475,19 @@ class AccountFailover:
             parked = self._parked()
             overdue = self._take_overdue(parked)
             parked = [attempt for attempt in parked if attempt not in overdue]
+            # The model is served again: the turns parked for it start, and
+            # with none of them parked a new one for it runs at once.
+            proven = self._proven()
+            back = [attempt for attempt in parked if attempt.model in proven]
+            parked = [attempt for attempt in parked if attempt not in back]
+            if back:
+                at = self.last_resumed = self.now()
+                for attempt in back:
+                    self.attempts.pop(attempt.agent_id, None)
+                for attempt in back:
+                    self.resumed_at[(attempt.agent_id, attempt.trace_id)] = at
+                    attempt.resume()
+            self._note_trials(overdue, parked)
             running = any(attempt.owned() and not attempt.state.get("account_recovery")
                           for attempt in self.attempts.values())
             begin = bool(parked) and not running
@@ -440,6 +496,10 @@ class AccountFailover:
                 self.parked_since = self.now()
             elif parked:
                 self._arm_hold()
+        if back:
+            log("claudeAccountModelBack",
+                f"resumed={len(back)} for {sorted(proven)}: a turn released at its cap "
+                "ran a recheck without an account failure")
         self._release(overdue)
         return begin
 
@@ -491,11 +551,24 @@ class AccountFailover:
                 if isinstance(decision, Park):
                     self.schedule(decision.delay, self.recover)
                     return
+                if isinstance(decision, Kill):
+                    # Owned work that still runs, though this pass stopped all
+                    # it had found: it came in meanwhile. It gets a pass of
+                    # its own, at once. Read as a decision to ask the selector
+                    # it failed the pass on ``decision.models`` and cost every
+                    # parked turn another minute.
+                    self.schedule(0.0, self.recover)
+                    return
                 self.next_check = self.now() + settings.recheck_seconds
                 self.checked_models = decision.models
             verdict = self.switch(self.command, list(decision.models))
         except Exception as exc:  # Keep the owned work parked for a later check.
-            log("claudeAccountRecoveryFail", type(exc).__name__)
+            # One line with the message and the place it was raised: the type
+            # alone ("AttributeError") left nothing to go on.
+            where = " < ".join(
+                f"{pathlib.Path(frame.filename).name}:{frame.lineno} {frame.name}"
+                for frame in reversed(traceback.extract_tb(exc.__traceback__)[-3:]))
+            log_exception("claudeAccountRecoveryFail", exc, detail=where)
             verdict = FAILED
         # Every exit from a failed check lands here, including a raised one, so
         # this is the one place that can guarantee work is not parked for ever.
@@ -533,6 +606,7 @@ class AccountFailover:
             overdue = self._take_overdue(waiting + (pending if verdict is not True else []))
             pending = [attempt for attempt in pending if attempt not in overdue]
             waiting = [attempt for attempt in waiting if attempt not in overdue]
+            self._note_trials(overdue, waiting)
             decision = self._decide(pending, verdict, settings)
             if isinstance(decision, Resume):
                 self.recovering = False
@@ -630,13 +704,25 @@ class AccountFailover:
     def carry_over(self, wall: float, agents=()) -> dict | None:
         """What the next runtime needs to keep this recovery's bound: when
         the work was first parked (wall-clock ms) and whose parked work was
-        handed over. None when not recovering."""
+        handed over. None when there is neither a recovery nor such work.
+
+        Parked work can be handed over with no recovery running: turns parked
+        for a model the active account does not serve, in the minute after
+        the last working turn finished and before the look that begins a
+        recovery for them. They are carried too, from the earliest of their
+        own parks, so the next runtime asks the selector before it starts
+        them instead of running them into the limit."""
         with self.lock:
-            if not self.recovering:
+            agents = sorted(set(agents))
+            if self.recovering:
+                since = self.parked_since
+            elif agents:
+                since = min([at for (agent, _trace), at in self.first_parked.items()
+                             if agent in agents] or [self.now()])
+            else:
                 return None
-            return {"parked_since_ms": int(
-                (wall - max(0.0, self.now() - self.parked_since)) * 1000),
-                "agents": sorted(set(agents))}
+            return {"parked_since_ms": int((wall - max(0.0, self.now() - since)) * 1000),
+                    "agents": agents}
 
     def resume_recovery(self, command, parked_since_ms: int, wall: float,
                         agents=()) -> bool:

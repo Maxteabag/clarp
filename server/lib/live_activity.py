@@ -32,7 +32,9 @@ STALE_AFTER_SEC = 15 * 60
 # --- registry -----------------------------------------------------------------
 
 def register(*, token: str, activity_id: str = "", kind: str = "agents-working",
-             environment: str = "") -> dict[str, Any]:
+             environment: str = "", principal: str = "") -> dict[str, Any]:
+    """``principal``: the paired device registering it ('' = unattributed). A revoked device's
+    activities get no further updates (apns.send_live_activity)."""
     token = str(token or "").strip().lower()
     if not token or any(c not in "0123456789abcdef" for c in token) or len(token) > 400:
         raise ValueError("token must be a hex ActivityKit push token")
@@ -46,6 +48,7 @@ def register(*, token: str, activity_id: str = "", kind: str = "agents-working",
     previous = _load(settings_store.get(key))
     row = {"token": token, "activity_id": activity_id, "kind": "agents-working",
            "environment": environment or (previous or {}).get("environment") or "",
+           "principal": str(principal or ""),
            "registered_at": int(time.time() * 1000)}
     settings_store.set_text(key, json.dumps(row))
     return row

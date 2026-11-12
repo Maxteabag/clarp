@@ -353,8 +353,9 @@ Alert tokens are owned by the device that registered them: `POST /devices` binds
 full-scope device (never a body field or the session) and refuses with 409 `device_token_owned_elsewhere` a token that
 another device owns. Legacy tokens registered before this are unbound and still get ring alerts, so rings-off reads
 `partial` while any live unbound token remains: show it as pending, never as off. A revoked device keeps its
-provenance and gets no ring alerts; a re-paired phone with a new device id cannot take the old id's token until an
-explicit owner release is designed. Provenance means token possession by an authenticated device, not proof of the
+provenance and gets no pushes of any kind (its rows are disabled when it is revoked, see
+[push-android.md](push-android.md#unregistering-and-revocation)); a re-paired phone with a new device id cannot take
+the old id's token while the old pairing is valid, and takes it over once the old pairing is revoked. Provenance means token possession by an authenticated device, not proof of the
 physical phone.
 
 

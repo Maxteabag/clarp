@@ -1320,6 +1320,29 @@ def _pairing_public_url(explicit: str = "") -> str:
     return f"http://{host}:{int(server.get('port', 7682))}"
 
 
+def cmd_push(args) -> int:
+    """Push tokens through the running Host: list them, or stop pushes to one (DELETE /devices)."""
+    if args.push_command == "list":
+        rows = api_request("GET", "/devices/push-tokens").get("tokens") or []
+        if args.json:
+            print(json.dumps(rows, indent=2))
+            return 0
+        for row in rows:
+            state = "disabled" if row.get("disabled_at") else (
+                "live" if row.get("owner_can_receive") else "live-but-owner-revoked")
+            print(f"{row['token_prefix']}…  {row.get('platform', '')}/{row.get('provider', '')}  "
+                  f"owner={row.get('owner') or '-'}  {state}")
+        return 0
+    body = ({"device_id": args.device} if args.device else {"token_prefix": args.token_prefix})
+    try:
+        result = api_request("DELETE", "/devices", body)
+    except urllib.error.HTTPError as error:
+        detail = error.read().decode("utf-8", "replace")[:300]
+        raise SystemExit(f"push disable failed: HTTP {error.code} {detail}")
+    print(f"disabled: {result.get('disabled', 0)} row(s)")
+    return 0
+
+
 def cmd_pair(args) -> int:
     server_root = SHARE
     if not (server_root / "lib").is_dir():
@@ -3221,6 +3244,18 @@ Run ./setup.sh --help to see TUI, interactive CLI, and automation routes.
     pair_revoke = pair.add_parser("revoke")
     pair_revoke.add_argument("device_id")
     pair_revoke.set_defaults(func=cmd_pair)
+
+    push = sub.add_parser("push", help="list push tokens, or stop pushes to one, through the Host"
+                          ).add_subparsers(dest="push_command", required=True)
+    push_list = push.add_parser("list")
+    push_list.add_argument("--json", action="store_true")
+    push_list.set_defaults(func=cmd_push)
+    push_disable = push.add_parser("disable")
+    push_target = push_disable.add_mutually_exclusive_group(required=True)
+    push_target.add_argument("--token-prefix", default="",
+                             help="the first 12 or more characters `push list` shows")
+    push_target.add_argument("--device", default="", help="every live row of this paired device")
+    push_disable.set_defaults(func=cmd_push)
 
     network = sub.add_parser("network").add_subparsers(
         dest="network_command", required=True)
