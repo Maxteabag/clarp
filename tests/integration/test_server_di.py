@@ -4176,6 +4176,36 @@ def test_build_server_starts_the_worker_registry_in_order(fake_ctx, monkeypatch)
     assert started == ["tts", "tts-stopped"]
 
 
+def test_the_goal_pass_of_a_built_server_tells_the_apps_about_a_retired_wake(
+        fake_ctx, monkeypatch):
+    """The scheduler's goal pass retires a wake row that can never run; the
+    built server must hand it the adapter that tells the apps, or the row
+    stays listed as a queued message until the next unrelated event."""
+    from lib import agents as agents_db, db, turn_queue
+    agent = agents_db.get_by_session("rachel")
+    request = "task-goal-" + "0" * 32
+    then = db.now_ms() - 3_600_000
+    turn_queue.enqueue(
+        queue_id=request, agent_id=agent["agent_id"], session="rachel", text="wake",
+        trace_id=request, client_msg_id=request, synthesize_audio=False,
+        origin="automation", sender_agent_id="")
+    db.conn().execute(
+        "INSERT INTO turns(agent_id, source, trace_id, started_at, settled_at, outcome,"
+        " synthesize_audio) VALUES (?, 'pwa', ?, ?, ?, 'failed', 0)",
+        (agent["agent_id"], request, then, then + 1000))
+    sent = []
+    monkeypatch.setattr(fake_ctx.stream, "broadcast", sent.append)
+    srv = build_server(fake_ctx, _free_port(), bind_addr="127.0.0.1")
+    try:
+        srv.workers.get("agent-scheduler").tick()
+    finally:
+        srv.server_close()
+    assert turn_queue.status(request) == "cancelled"
+    updates = [event for event in sent if event.get("type") == "queue-updated"
+               and event.get("client_msg_id") == request]
+    assert [(event["session"], event["queue_depth"]) for event in updates] == [("rachel", 0)]
+
+
 def test_build_server_attaches_the_herald_before_workers_start(fake_ctx):
     herald = object()
     captured = {}

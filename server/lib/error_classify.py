@@ -32,6 +32,12 @@ A turn can end three interesting ways beyond "clean":
     ended by the next preempting send — so this only matches backend text.)
     Never retry silently (it would likely wedge again), surface it to the user.
 
+  * NOT_STARTED — the dispatcher ended a turn before any process ran for it:
+    a turn parked for an account that was refused, or whose backend failed to
+    start, when the park ended. Never produced by classifying backend output;
+    the dispatcher names it itself, so that such a turn is not reported as a
+    process that exited.
+
 Anything else is CLEAN / UNKNOWN and flows through the normal path.
 
 Both an error string (from `on_error`) and a result event (from
@@ -54,13 +60,20 @@ AUTH = "auth"                     # sign-in expired / refresh failed; account re
 ACCOUNT_PLAN = "account_plan"     # the account's plan lacks the model; account recovery applies
 RUNNER_EXIT = "runner_exit"
 TIMEOUT = "timeout"
+NOT_STARTED = "not_started"
 UNKNOWN = "unknown"
+
+# What a Codex turn says when its failure text reads like a usage limit but the
+# provider did not confirm that the quota is exhausted. The category stays
+# USAGE_LIMIT; this message is how a later reader of the stored state tells
+# the two apart (nothing else on the state does, for a runtime of any age).
+QUOTA_UNCONFIRMED_MESSAGE = "Codex could not complete this request. Try again"
 MUSE_SESSION_LOCKED = "muse_session_locked"
 
 # Categories that should flip the agent to the INTERRUPTED badge once we
 # stop trying (connection errors only reach here after retries are spent).
 NOTIFY = frozenset({CONNECTION, TRANSIENT, INTERRUPTED, USAGE_LIMIT, AUTH, ACCOUNT_PLAN,
-                    RUNNER_EXIT, TIMEOUT, MUSE_SESSION_LOCKED})
+                    RUNNER_EXIT, TIMEOUT, NOT_STARTED, MUSE_SESSION_LOCKED})
 
 # Order matters: INTERRUPTED is checked before CONNECTION because a SIGTERM'd
 # turn often *also* prints a broken-pipe message as it dies, and we must not
@@ -95,9 +108,23 @@ _TRANSIENT_RE = re.compile(
     r"upstream request failed|endpoint is unavailable",
     re.I,
 )
-_USAGE_LIMIT_RE = re.compile(
+# USAGE_LIMIT in two named parts, because the category holds two different
+# things for anything that decides whether to wait. Together they are the
+# category (one word list; ``usage_limit_resets`` reads the same parts, so the
+# two cannot drift).
+#
+# A usage window: the account's allowance is spent until its window resets.
+# Nothing to do but wait, or use another account.
+_USAGE_WINDOW_PATTERN = (
     r"out of usage|usage (limit|cap|quota|exhausted|exceeded|reached)|"
-    r"session limit|hit your .*limit.*resets|"
+    r"session limit|hit your .*limit.*resets"
+)
+# Everything else: credits, billing, payment, a suspended account, a monthly
+# or hard limit, a trial, a model that refuses this client. No reset clears
+# these; a person has to pay, raise the limit, or pick another model or
+# account. A quota that is merely "exceeded" is here too: it is not known to
+# clear by waiting.
+_USAGE_OTHER_PATTERN = (
     r"out of credits?|workspace is out of credits?|"
     # Grok reports exhaustion as "Grok Build usage balance exhausted"; the
     # noun there is "balance", qualified by usage/credit/account.
@@ -117,9 +144,20 @@ _USAGE_LIMIT_RE = re.compile(
     r"payment required|status(?: code)? 402\b|\b402 payment\b|"
     r"resource[_ ]exhausted|no credits? remaining|trial quota|"
     # Antigravity (agy 1.2.15+): "Your AI credits balance is too low to continue."
-    r"credits? balance is too low",
-    re.I,
+    r"credits? balance is too low"
 )
+_USAGE_LIMIT_RE = re.compile(_USAGE_WINDOW_PATTERN + "|" + _USAGE_OTHER_PATTERN, re.I)
+_USAGE_WINDOW_RE = re.compile(_USAGE_WINDOW_PATTERN, re.I)
+_USAGE_OTHER_RE = re.compile(_USAGE_OTHER_PATTERN, re.I)
+# A text of the category that states its own reset is a window, whatever else
+# it calls the allowance. Muse says "Subscription quota exhausted. Your usage
+# window resets at ..." (27 failures on elitebook on 2026-11-11), and "quota
+# exhausted" alone is in the other part. Unless it also names something no
+# reset clears. These two are read only by ``usage_limit_resets``; the
+# category's own pattern is not touched.
+_STATES_ITS_RESET_RE = re.compile(r"\bresets\b|\breset (?:at|in|on)\b|\bwill reset\b", re.I)
+_NO_RESET_CLEARS_RE = re.compile(
+    r"\bcredits?\b|payment|suspend|billing|\btrial\b|free tier", re.I)
 # The CLI's own wording when its OAuth token is gone. Twelve agents launched
 # together 30 s after a reboot on 2026-09-19 all failed this way; it was
 # classified TRANSIENT, which is never retried, so every heartbeat and the
@@ -163,6 +201,23 @@ _EXPLANATIONS: tuple[tuple[re.Pattern[str], str], ...] = (
      "This model's provider is unavailable right now. "
      "Try again later or choose another model"),
 )
+
+
+def usage_limit_resets(message: str | None) -> bool:
+    """Whether a failure text is a usage window that clears at its reset.
+
+    True only for a text that reads as a spent window and as nothing else of
+    the USAGE_LIMIT category. A text that also names credits, billing, payment
+    or the like is not known to clear by waiting. A text of the category that
+    states its reset ("Your usage window resets at ...") is a window unless
+    it names credits, payment, suspension, billing, a trial or the free tier.
+    The category itself
+    (``classify_error``) is unchanged; this is for callers that would
+    otherwise wait on something only a person can fix."""
+    text = message or ""
+    if _STATES_ITS_RESET_RE.search(text) and _USAGE_LIMIT_RE.search(text):
+        return not _NO_RESET_CLEARS_RE.search(text)
+    return bool(_USAGE_WINDOW_RE.search(text)) and not _USAGE_OTHER_RE.search(text)
 
 
 def explain(message: str | None) -> str:
