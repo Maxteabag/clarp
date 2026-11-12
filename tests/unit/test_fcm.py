@@ -695,17 +695,6 @@ def test_a_slow_google_never_holds_the_same_agents_next_iphone_push(tmp_path, rs
         "pn-first", "pn-second"]
 
 
-def test_a_decision_also_sends_android_outside_the_iphone_lock(monkeypatch):
-    seen = []
-    real = apns._send_lock
-    monkeypatch.setattr(apns, "_send_lock", lambda key: seen.append(key) or real(key))
-    groups = apns._send_groups("mike", [{"token": "a", "provider": "fcm"}, {"token": "i"}])
-    assert [[r["token"] for r in rows] for _, rows in groups] == [["i"], ["a"]]
-    assert seen == ["mike", "fcm\x00mike"]
-    assert apns._send_groups("mike", [{"token": "i", "provider": "apns"}])[0][1] == [
-        {"token": "i", "provider": "apns"}]
-
-
 def test_an_unbound_iphone_row_is_never_turned_into_an_android_row():
     """Finding 4: the provider of an existing token never changes."""
     legacy = "Gx" * 40                                     # FCM-shaped (not hex), stored as an APNs row
@@ -736,41 +725,6 @@ def test_rotation_retires_only_rows_of_the_same_provider():
     assert rows[IPHONE]["disabled_at"] is None and rows[ANDROID_2]["disabled_at"] is None
 
 
-def test_the_google_client_has_a_ten_second_timeout(monkeypatch):
-    """Finding 5: the HTTP timeout is what bounds an Android send (finding 1)."""
-    import httpx
-    made = []
-
-    class Recorder:
-        def __init__(self, *a, **k):
-            made.append(k)
-
-        def close(self):
-            pass
-    monkeypatch.setattr(httpx, "Client", Recorder)
-    fcm._reset_client()
-    fcm.http_client()
-    assert made == [{"timeout": 10.0}]
-    assert fcm._TIMEOUT_SEC == 10.0 and fcm._MAX_ATTEMPTS == 3
-
-
-def test_a_token_google_calls_malformed_is_disabled(fcm_host, google):
-    """Finding 7 of the review: a 400 about the registration token is a dead token."""
-    _register_android()
-    google.sends = [_fcm_error(400, "INVALID_ARGUMENT", "INVALID_ARGUMENT",
-                               "The registration token is not a valid FCM registration token")]
-    assert apns.send_user_notification(_notification())["disabled"] == 1
-    assert _rows()[ANDROID]["disabled_at"] is not None
-
-
-def test_any_other_400_is_a_failure_and_keeps_the_token(fcm_host, google, sleeps):
-    _register_android()
-    google.sends = [_fcm_error(400, "INVALID_ARGUMENT", "INVALID_ARGUMENT",
-                               "Invalid value at 'message.data[0].value'")]
-    assert apns.send_user_notification(_notification())["failed"] == 1
-    assert _rows()[ANDROID]["disabled_at"] is None and sleeps == []
-
-
 def test_config_does_not_import_the_push_side():
     """Finding 2: lib.config (core) never imports lib.fcm (a feature)."""
     import inspect
@@ -783,3 +737,233 @@ def test_without_the_probe_push_fcm_is_never_advertised(fcm_host, monkeypatch):
     from lib import server_identity
     monkeypatch.setattr(server_identity, "_fcm_probe", None)
     assert "push_fcm" not in server_identity.get_server_info()["capabilities"]["features"]
+
+
+# --------------------------------------------------------------------------
+# review of PR 274 (review-274.md): decisions on the real path, the documented
+# 400 rule, a trickling Google, a bounded Android queue
+# --------------------------------------------------------------------------
+def _decision(decision_id: str) -> dict:
+    return {"artifact_id": f"art-{decision_id}", "session": "mike", "agent_name": "Mike",
+            "agent_id": "a1", "title": "Deploy?",
+            "decision": {"decision_id": decision_id, "status": "pending", "question": "Ship it?"}}
+
+
+def test_a_decisions_iphone_push_leaves_while_google_hangs(tmp_path, rsa_key, monkeypatch):
+    """Two decisions of one agent: the second reaches the iPhone while Google still holds the first's
+    Android send (send_decision_created on the conversation lock alone fails this)."""
+    import threading
+    import time as clock
+    import httpx
+    slow = _SlowGoogle()
+    monkeypatch.setattr(httpx, "Client", slow.client)
+    _mixed_host(tmp_path, rsa_key)
+    apns.register_token(IPHONE, session="mike")
+    _register_android()
+    first = threading.Thread(target=apns.send_decision_created, args=(_decision("d1"),), daemon=True)
+    first.start()
+    assert slow.fcm_started.wait(5)
+    second = threading.Thread(target=apns.send_decision_created, args=(_decision("d2"),), daemon=True)
+    second.start()
+    deadline = clock.monotonic() + 5
+    while len(slow.apns_calls) < 2 and clock.monotonic() < deadline:
+        clock.sleep(0.01)
+    assert len(slow.apns_calls) == 2 and not slow.release.is_set()
+    assert [json.loads(c["content"])["decision_id"] for c in slow.apns_calls] == ["d1", "d2"]
+    slow.release.set()
+    first.join(10)
+    second.join(10)
+    assert [c["json"]["message"]["data"]["decision_id"] for c in slow.send_calls] == ["d1", "d2"]
+
+
+def test_the_groups_are_the_conversation_lock_then_the_android_lane():
+    groups = apns._send_groups("mike", [{"token": "a", "provider": "fcm"}, {"token": "i"}], "pn-1")
+    assert [[r["token"] for r in rows] for _, rows in groups] == [["i"], ["a"]]
+    assert groups[0][0] is apns._send_lock("mike")
+    assert isinstance(groups[1][0], apns._AndroidTurn)
+
+
+def _bad_request(*fields, code="INVALID_ARGUMENT", status=400, message="Request contains an invalid argument."):
+    details = [{"@type": "type.googleapis.com/google.firebase.fcm.v1.FcmError", "errorCode": code}]
+    if fields:
+        details.append({"@type": "type.googleapis.com/google.rpc.BadRequest",
+                        "fieldViolations": [{"field": f, "description": "Invalid value"} for f in fields]})
+    return _Resp(status, {"error": {"code": status, "message": message, "status": "INVALID_ARGUMENT",
+                                    "details": details}})
+
+
+def test_a_400_naming_the_token_field_disables_the_token(fcm_host, google):
+    """Google: INVALID_ARGUMENT is an invalid registration when its google.rpc.BadRequest names the token."""
+    _register_android()
+    google.sends = [_bad_request("message.token", message="The registration token is not a valid FCM registration token")]
+    assert apns.send_user_notification(_notification())["disabled"] == 1
+    assert _rows()[ANDROID]["disabled_at"] is not None
+
+
+@pytest.mark.parametrize("answer", [
+    # About the payload, even when its text mentions the registration token: the token is kept.
+    _bad_request("message.data[0].value", message="Invalid value; the registration token is fine"),
+    _bad_request("message.android.ttl"),
+    # No field named at all: Google's docs make this a token problem only if the payload is valid,
+    # which the Host cannot know, so the token is kept and the push counts as failed.
+    _bad_request(),
+    _Resp(400, {"error": {"code": 400, "message": "Request contains an invalid argument.",
+                          "status": "INVALID_ARGUMENT"}}),
+])
+def test_any_other_400_keeps_the_token(fcm_host, google, sleeps, answer):
+    _register_android()
+    google.sends = [answer]
+    assert apns.send_user_notification(_notification())["failed"] == 1
+    assert _rows()[ANDROID]["disabled_at"] is None and sleeps == []
+
+
+def test_the_token_field_disables_only_on_a_400(fcm_host, google, sleeps):
+    """The status is part of the rule: the same body on a 429 is retried, never a dead token."""
+    _register_android()
+    google.sends = [_bad_request("message.token", status=429)]
+    assert apns.send_user_notification(_notification())["failed"] == 1
+    assert _rows()[ANDROID]["disabled_at"] is None
+    assert len(google.send_calls) == fcm._MAX_ATTEMPTS
+
+
+class _Trickle:
+    """A local HTTP server that answers one byte at a time, never finishing: each read succeeds well
+    inside the read timeout, so only a total deadline ends the request."""
+
+    def __init__(self, gap=0.05):
+        import socket
+        import threading
+        self.gap, self.requests, self.stop = gap, 0, threading.Event()
+        self.server = socket.socket()
+        self.server.bind(("127.0.0.1", 0))
+        self.server.listen(8)
+        self.url = f"http://127.0.0.1:{self.server.getsockname()[1]}/v1/send"
+        threading.Thread(target=self._serve, daemon=True).start()
+
+    def _serve(self):
+        import threading
+        while not self.stop.is_set():
+            try:
+                conn, _ = self.server.accept()
+            except OSError:
+                return
+            self.requests += 1
+            threading.Thread(target=self._answer, args=(conn,), daemon=True).start()
+
+    def _answer(self, conn):
+        try:
+            conn.recv(65536)
+            conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 100000\r\n\r\n")
+            while not self.stop.is_set():
+                conn.sendall(b" ")
+                self.stop.wait(self.gap)
+        except OSError:
+            pass
+        finally:
+            conn.close()
+
+    def close(self):
+        self.stop.set()
+        self.server.close()
+
+
+def test_a_trickling_google_is_cut_at_the_attempt_deadline(monkeypatch):
+    import time as clock
+    import httpx
+    trickle = _Trickle()
+    try:
+        monkeypatch.setattr(fcm, "_ATTEMPT_DEADLINE_SEC", 0.5)
+        fcm._reset_client()
+        client = fcm.http_client()
+        started = clock.monotonic()
+        with pytest.raises(httpx.TimeoutException):
+            with fcm._attempt(fcm._ATTEMPT_DEADLINE_SEC):
+                client.post(trickle.url, json={})
+        assert clock.monotonic() - started < 2.0          # the read timeout alone is 10 s per read
+    finally:
+        trickle.close()
+        fcm._reset_client()
+
+
+def test_a_trickling_google_bounds_a_whole_android_send(fcm_host, monkeypatch, sleeps):
+    """Three attempts, each cut at its deadline, then the batch logs a failure; the token is kept."""
+    import time as clock
+    trickle = _Trickle()
+    try:
+        monkeypatch.setattr(fcm, "_ATTEMPT_DEADLINE_SEC", 0.4)
+        monkeypatch.setattr(fcm, "SEND_URL", trickle.url + "?project={project}")
+        monkeypatch.setattr(fcm, "access_token", lambda sa, client: "ya29.test")
+        fcm._reset_client()
+        _register_android()
+        started = clock.monotonic()
+        assert apns.send_user_notification(_notification())["failed"] == 1
+        assert clock.monotonic() - started < 3 * 0.4 + 2.0
+        assert trickle.requests == fcm._MAX_ATTEMPTS and sleeps == [1.0, 2.0]
+        assert _rows()[ANDROID]["disabled_at"] is None
+    finally:
+        trickle.close()
+        fcm._reset_client()
+
+
+def test_the_google_client_has_a_ten_second_timeout_and_a_deadline_backend(monkeypatch):
+    """The per-read timeout and the per-attempt deadline that bound an Android send (finding 1)."""
+    import httpx
+    made = []
+
+    class Recorder:
+        def __init__(self, *a, **k):
+            made.append(k)
+
+        def close(self):
+            pass
+    monkeypatch.setattr(httpx, "Client", Recorder)
+    fcm._reset_client()
+    fcm.http_client()
+    assert made[0]["timeout"] == 10.0
+    backend = made[0]["transport"]._pool._network_backend
+    assert type(backend).__name__ == "Backend" and hasattr(backend, "_inner")
+    assert fcm._TIMEOUT_SEC == 10.0 and fcm._ATTEMPT_DEADLINE_SEC == 10.0 and fcm._MAX_ATTEMPTS == 3
+    fcm._reset_client()
+
+
+def test_a_slow_google_drops_the_oldest_waiting_android_alert_never_an_iphone_push(
+        tmp_path, rsa_key, monkeypatch, logs):
+    """One in flight, ANDROID_MAX_WAITING waiting: a newer notification drops the oldest waiting
+    one (logged); every iPhone push leaves at once."""
+    import threading
+    import time as clock
+    import httpx
+    slow = _SlowGoogle()
+    monkeypatch.setattr(httpx, "Client", slow.client)
+    dropped = []
+    real_log = apns.log
+    monkeypatch.setattr(apns, "log", lambda event, detail="": (
+        dropped.append(detail) if event == "apnsAndroidDropped" else None) or real_log(event, detail))
+    _mixed_host(tmp_path, rsa_key)
+    apns.register_token(IPHONE, session="mike")
+    _register_android()
+    ids = [f"pn-{n}" for n in range(1, 5)]                 # 1 in flight, 2 may wait, the 4th drops pn-2
+    threads = []
+    results = {}
+
+    def send(notification_id):
+        results[notification_id] = apns.send_user_notification(_notification(notification_id=notification_id))
+    for n, notification_id in enumerate(ids):
+        threads.append(threading.Thread(target=send, args=(notification_id,), daemon=True))
+        threads[-1].start()
+        if n == 0:
+            assert slow.fcm_started.wait(5)
+        deadline = clock.monotonic() + 5
+        while len(slow.apns_calls) < n + 1 and clock.monotonic() < deadline:
+            clock.sleep(0.01)
+        lane = apns._android_lane("mike")
+        while n and len(lane.waiting) + len(lane.dropped) < n and clock.monotonic() < deadline:
+            clock.sleep(0.01)
+    assert len(slow.apns_calls) == 4 and not slow.release.is_set()   # iPhones never waited
+    slow.release.set()
+    for thread in threads:
+        thread.join(10)
+    sent = [c["json"]["message"]["data"]["notification_id"] for c in slow.send_calls]
+    assert sent[0] == "pn-1" and sorted(sent[1:]) == ["pn-3", "pn-4"]
+    assert len(dropped) == 1 and "notification=pn-2" in dropped[0] and "queue-full" in dropped[0]
+    assert results["pn-2"]["failed"] == 1 and results["pn-2"]["sent"] == 1     # its iPhone push went
