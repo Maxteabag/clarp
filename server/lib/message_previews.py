@@ -130,6 +130,7 @@ def list_messages(*, agent_id: str, backend_session_id: str = "",
         )
         display_text = _display_text_for_message(
             role=row["role"], origin=row["origin"], text=row["text"],
+            message_id=row["message_id"],
         )
         try:
             tools = json.loads(row["tools_json"] or "[]")
@@ -237,6 +238,7 @@ def _format_preview(row, max_len: int) -> dict[str, Any]:
                 "conversation_id": "", "activity": 0}
     raw_text = _display_text_for_message(
         role=row["role"], origin=row["origin"], text=row["text"],
+        message_id=row["message_id"],
     )
     text = clean_for_display(raw_text, oneline=True)
     if not text:
