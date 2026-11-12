@@ -275,3 +275,7 @@ muse_effort            = ""   # none | minimal | low | medium | high | xhigh | m
 # max_load_per_cpu = 0.75           # skip when load1 / CPUs is above this
 # max_io_pressure = 10.0            # skip when /proc/pressure/io some avg10 is above this
 # max_memory_pressure = 10.0
+# digest_every_tail = false        # true: read and digest every imported byte of a
+#                                   # transcript at every tail import (as before schema
+#                                   # 124). false: at the first tail after a Host start,
+#                                   # at every audit, and when the file looks touched.

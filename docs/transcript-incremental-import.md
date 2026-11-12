@@ -81,6 +81,61 @@ first. A candidate is taken only when the range from it, parsed alone,
 reproduces the full parse's last turns exactly, begins with a user turn, and
 refers to nothing before it.
 
+## The frontier (schema 124)
+
+A tail import needs more than the checkpoint: the digest of every imported
+byte of the file, and the database rows the import read (every message row
+of the agent, its turn rows, the session's `/send` rows, the latest user
+row, its Oracle rows). Until schema 124 both lived in the Host's memory, so
+every Host start made the first import of every conversation a full one, of
+a file that had not changed.
+
+`transcript_import_frontiers` holds one row beside each checkpoint, written
+in the checkpoint's transaction: the parser version, a digest of that
+checkpoint, the digest of the imported bytes and a digest of those rows. No
+row is written for a session no frontier is kept for (automation provenance,
+Oracle history).
+
+A process that holds no frontier for a file takes the stored one when it
+never had one (a Host start), lost it to the cache's size limit, or the last
+import wrote nothing and could not publish (`checkpoint_not_written`: an
+import with nothing to write publishes by upgrading its read snapshot, which
+SQLite refuses once any other writer has committed; the frontier it started
+from is still the last one published). The stored frontier is used only when
+it names the stored checkpoint, the parser version is the current one and
+the rows digest to the stored value. Then:
+
+- the file is exactly the one the checkpoint describes (device, inode, size,
+  mtime, complete to its last byte): nothing is imported
+  (`transcriptTailDecision code=unchanged_file`);
+- otherwise the import is a tail, under the checks below.
+
+A rewritten transcript is found by: another inode or device; a size below
+the imported bytes; an mtime that went back; the stored hashes of the head
+(4 KiB), sixteen samples and the 64 KiB before the boundary; the hash of
+every byte after the boundary; and the digest of all imported bytes. That
+last one costs a read of the whole file. It is checked:
+
+- at the first tail after a Host start (this process has not read the bytes);
+- whenever the size is unchanged but the mtime moved;
+- at every audit, which is a full import (`audit_every` imports or
+  `audit_seconds`) and compares the bytes it reads with the stored digest;
+- at every tail when `digest_every_tail = true` in `[transcript_shadow]`,
+  which is how every tail worked before.
+
+Otherwise a tail adds the new bytes to a running hash. What that leaves
+open: an old record rewritten in place, same length, outside every sample,
+together with an append, is imported as a tail and found at the next of the
+moments above, not at once. Whenever a check finds the imported bytes or the
+file's identity changed, one line names the file and the check
+(`transcriptPrefixChanged file=… what=…`) and the import is full.
+
+Rolling back to a 123 release: the schema guard refuses older code on the
+newer database unless the rollback is asked for. With the override, the 123
+release never reads the new table and imports as it always did; the rows in
+it go stale and are replaced by the first import after the next upgrade
+(they name a parser version and a checkpoint that will no longer match).
+
 ## When the import must be full
 
 `decide` returns a reason for a full import when there is no checkpoint, the
