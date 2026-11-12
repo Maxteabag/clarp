@@ -67,7 +67,9 @@ exists nowhere else.
 ## A test run is green only when you read its result
 
 The gate before pushing is `make test-critical` (serial, about a minute; the
-list is `tests/critical.txt`) plus the test files for the code you changed.
+list is `tests/critical.txt`), `make test-guards` (the five structural guard
+files: logged exceptions, import layers and cycles, module state, backend
+capabilities) plus the test files for the code you changed.
 Do not run the full suite (`make test`) locally: forty agents doing so overload
 the owner's laptops. The full suite never runs automatically, on GitHub or anywhere:
 only the critical gate does. Start the full suite by hand on GitHub ("Run workflow"
