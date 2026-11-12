@@ -10,6 +10,7 @@ Discovery is deliberately read-only.  Missing provider evidence remains
 from __future__ import annotations
 
 from .backend.claude_models import claude_model_pin
+from .log import log_exception
 
 import copy
 import concurrent.futures
@@ -682,7 +683,9 @@ def observed_model_ids(provider_id: str) -> frozenset[str] | None:
             item["id"] for item in provider.get("models") or []
             if isinstance(item, dict) and isinstance(item.get("id"), str) and item["id"])
         return ids or None
-    except Exception:  # noqa: BLE001 - no observation is not a refusal
+    except Exception as exc:  # noqa: BLE001 - no observation is not a refusal
+        # The check is off for this id, which nobody would otherwise learn.
+        log_exception("observedModelIdsFail", exc, detail=provider_id)
         return None
 
 

@@ -6,12 +6,11 @@ of uncertain admission reuses the same client receipt, never a fresh message ID.
 
 from __future__ import annotations
 import json
-import re
 import secrets
 import shlex
 import time
 from contextlib import contextmanager
-from . import agents, db, task_goal_state
+from . import agents, db, error_classify, task_goal_state
 from .log import log, log_exception
 
 PREFIX = "task-goal-"
@@ -268,10 +267,10 @@ PERSON_CODES = {
 # checkpoint or a resume. A wake that started and then failed is one more
 # failure in it.
 WAKE_COMPLETION_CEILING_MS = 8 * 24 * 3_600_000
-# The account park's own message as a failure text: a runtime from before the
-# fix refused a wake at the end of its park with it and called that a runner
-# exit. The wake waited for an account and never ran; that is capacity too.
-_PARK_REFUSAL = re.compile(r"Waiting for an? \S+ account with available usage")
+# The account park's own message as a failure text (error_classify.
+# is_account_wait_message): a runtime from before the fix refused a wake at
+# the end of its park with it and called that a runner exit. The wake waited
+# for an account and never ran; that is capacity too.
 
 
 def _undelivered_wake(plan, state):
@@ -335,7 +334,7 @@ def _undelivered_wake(plan, state):
         failed
         and not started
         and code in {"runner_exit", "not_started"}
-        and _PARK_REFUSAL.fullmatch(str(detail.get("error") or ""))
+        and error_classify.is_account_wait_message(str(detail.get("error") or ""))
     ):
         code = "usage_limit"
     elif failed and code == "usage_limit":
@@ -388,13 +387,14 @@ def _quota_unconfirmed(detail):
     its absence says it was not; no text is needed for that. The message the
     runner shows for the unconfirmed case is the second sign, for a state
     whose backend cannot be asked."""
-    from . import backends, error_classify
+    from . import backends
 
     if str(detail.get("message") or "").startswith(error_classify.QUOTA_UNCONFIRMED_MESSAGE):
         return True
     try:
         records = backends.by_id(backends.normalize(detail.get("dispatch"))).records_usage_limits()
-    except Exception:  # noqa: BLE001 - an unknown backend records nothing
+    except Exception as exc:  # noqa: BLE001 - an unknown backend records nothing
+        log_exception("goalWakeBackendUnknown", exc, detail=str(detail.get("dispatch")))
         return False
     return bool(records) and not detail.get("provider_limit_event_id")
 
@@ -428,8 +428,6 @@ def _limit_code(plan, detail):
     for this turn: it confirms one only when the failed turn was quiet and
     alone on the app-server. And the failure's own text, split where the
     category is defined (error_classify.usage_limit_resets)."""
-    from . import error_classify
-
     known = _host_record(plan)
     if known == "credits_depleted":
         return "billing"
