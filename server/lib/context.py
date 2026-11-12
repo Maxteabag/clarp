@@ -135,6 +135,9 @@ class ServerContext:
 
     # Optional bearer-token guard. Empty = no auth check.
     auth_token: str = ""
+    # Run one-off TTS announcements on a daemon thread; tests that assert
+    # synchronous synthesis pass async_announcements=False.
+    async_announcements: bool = True
     local_tls_port: int = 0
     local_tls_directory: pathlib.Path | None = None
     relay_settings: Any | None = None
@@ -266,6 +269,33 @@ class ServerContext:
             self.tts.synthesize(text, voice_id, session=session)
         except Exception as e:
             log_exception("speakAnnounceFail", e, detail=text[:60])
+
+    def speak_announcement_async(
+        self, text: str, voice_id: str | None, session: str | None = None
+    ) -> None:
+        """Synthesise a one-off announcement without blocking the caller's request."""
+        if not voice_id:
+            return
+        if not self.async_announcements:
+            self.speak_announcement(text, voice_id, session=session)
+            return
+
+        def _run() -> None:
+            try:
+                self.speak_announcement(text, voice_id, session=session)
+            finally:
+                from . import db, telemetry
+                db.close_local()
+                try:
+                    telemetry.close_local()
+                except Exception as e:
+                    log_exception("announceTelemetryCloseFail", e)
+
+        threading.Thread(
+            target=_run,
+            daemon=True,
+            name="clarp-announce-tts",
+        ).start()
 
     @classmethod
     def production(cls, *, connect_runtime: bool = True) -> "ServerContext":

@@ -206,13 +206,23 @@ def delete(name: str) -> bool:
     return True
 
 
-def public(row: dict) -> dict:
+def public(
+    row: dict,
+    *,
+    active_avatar_statuses: dict[str, str] | None = None,
+) -> dict:
+    from . import persona_avatar_generation
+    avatar_url = versioned_avatar_url(
+        "/persona-avatars", row["persona_id"], str(row.get("avatar_path") or ""))
     return {
         "id": row["persona_id"], "name": row["name"],
         "voice_id": row.get("voice_id") or "",
         "avatar_symbol": row.get("avatar_symbol") or "",
-        "avatar_url": versioned_avatar_url(
-            "/persona-avatars", row["persona_id"], str(row.get("avatar_path") or "")),
+        "avatar_url": avatar_url,
+        "avatar_generation_status": (
+            None if avatar_url else persona_avatar_generation.avatar_generation_status_for_persona(
+                row, active_by_persona_id=active_avatar_statuses)
+        ),
         "personality": row.get("personality") or "",
         "tier": roster.tier_for_contact(row["name"]) or "",
         "builtin": bool(row.get("builtin")),

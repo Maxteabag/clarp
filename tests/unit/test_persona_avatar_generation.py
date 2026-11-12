@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import importlib.util
 import pathlib
 import subprocess
@@ -725,3 +726,330 @@ def test_simultaneous_starts_never_overshoot_daily_limit_or_duplicate_retry(monk
     assert background_jobs.count_launches_since(
         "persona-avatar", since_ms=t_retry_base
     ) == 2
+
+
+def test_post_agents_returns_queued_avatar_state_without_waiting_on_slow_tts_and_transitions_cleanly(
+    tmp_path, monkeypatch
+):
+    import time
+    from lib.audio_stream import AudioStream
+    from lib.context import ServerContext, StubSTT
+    from lib.routes.agents import AgentRoutes
+
+    raw_png = _sample_1024_png(tmp_path)
+    _stub_cfg(monkeypatch, enabled=True, daily_limit=1, max_attempts=2)
+    monkeypatch.setattr(config, "read_global_mcp_servers", lambda: {})
+    launched: list[list[str]] = []
+    monkeypatch.setattr(
+        service_manager,
+        "launch_detached",
+        lambda command, **_kwargs: (launched.append(list(command)) or True, ""),
+    )
+
+    tts_entered = threading.Event()
+    tts_release = threading.Event()
+    tts_calls: list[tuple[str, str, str | None]] = []
+
+    class BlockingTTSEngine:
+        def synthesize(self, text: str, voice_id: str, session: str | None = None):
+            tts_calls.append((text, voice_id, session))
+            tts_entered.set()
+            tts_release.wait(timeout=5.0)
+            return None
+
+    broadcasts: list[dict] = []
+    audio_dir = tmp_path / "audio"
+    audio_dir.mkdir()
+    real_static = pathlib.Path(__file__).resolve().parents[2] / "static"
+    ctx = ServerContext(
+        root=tmp_path,
+        static=real_static,
+        audio_dir=audio_dir,
+        agents_path=tmp_path / "agents.json",
+        default_session="claude",
+        tts=BlockingTTSEngine(),
+        stream=AudioStream(audio_dir),
+        stt=StubSTT(),
+        roster_names=("Mike", "Rachel"),
+    )
+    monkeypatch.setattr(ctx.stream, "broadcast", broadcasts.append)
+
+    class RouteHarness(AgentRoutes):
+        def __init__(self, payload: dict | None = None, query: dict | None = None):
+            self.ctx = ctx
+            self._payload = payload or {}
+            self._qs = query or {}
+            self.responses: list[tuple[int, dict]] = []
+
+        def _query(self):
+            return self._qs
+
+        def _read_json(self):
+            return dict(self._payload)
+
+        def _bookkeeping_lineage_refusal(self, _parent: str):
+            return None
+
+        def _json(self, code: int, body: dict):
+            self.responses.append((code, body))
+
+        def _json_ok(self, body: dict):
+            self.responses.append((200, body))
+
+        def _json_error(self, code: int, message: str):
+            self.responses.append((code, {"error": message}))
+
+    # 1. Empty Contact pool + slow network TTS + real Host static/ portraits:
+    #    occupy built-ins so auto_contact mints 'Clara', and verify POST /agents
+    #    returns immediately with default-claude.png AND avatar_generation_status == 'queued'
+    #    while TTS is still blocked.
+    for row in list(contact_assignment.available_contacts("claude")):
+        agents.create_agent(
+            persona=row["name"],
+            voice_id=row["voice_id"],
+            cwd=str(tmp_path),
+            session=f"occ-{row['name'].lower()}",
+            backend="claude",
+        )
+    assert contact_assignment.available_contacts("claude") == []
+
+    t_start = time.monotonic()
+    h1 = RouteHarness({"auto_contact": True, "backend": "claude", "cwd": str(tmp_path), "synthesize_audio": True})
+    h1._handle_create_agent()
+    elapsed = time.monotonic() - t_start
+    try:
+        assert elapsed < 0.5, f"POST /agents blocked on TTS ({elapsed:.3f}s)"
+        assert tts_entered.wait(timeout=2.0)
+    finally:
+        tts_release.set()
+
+    assert len(h1.responses) == 1
+    code, body = h1.responses[0]
+    assert code == 200
+    created_agent = body["agent"]
+    assert created_agent["persona"] == "Clara"
+    assert created_agent["avatar_url"].startswith("/static/avatars/default-claude.png?v=")
+    assert created_agent["avatar_generation_status"] == "queued"
+    assert len(tts_calls) == 1 and tts_calls[0][0] == "Clara is ready."
+    assert any(b.get("type") == "agent-roster" and b.get("kind") == "created" for b in broadcasts)
+
+    # Snapshot and Contact public rows also expose 'queued', then 'running'.
+    snap_queued = snapshot.build_agent_snapshot(ctx, include_archived=False)
+    snap_agent = next(a for a in snap_queued["agents"] if a["session"] == body["session"])
+    snap_persona = next(p for p in snap_queued["personas"] if p["name"] == "Clara")
+    assert snap_agent["avatar_url"].startswith("/static/avatars/default-claude.png?v=")
+    assert snap_agent["avatar_generation_status"] == "queued"
+    assert snap_persona["avatar_generation_status"] == "queued"
+
+    cmd = launched[0]
+    handle = cmd[cmd.index("--handle") + 1]
+    persona_id = cmd[cmd.index("--persona-id") + 1]
+    tier = cmd[cmd.index("--tier") + 1]
+    job_id = persona_avatar_generation.job_id_for(persona_id)
+
+    patch_shared(monkeypatch, background_jobs, "process_start_token", lambda _pid: "boot:av1")
+    patch_shared(monkeypatch, background_jobs, "worker_is_alive", lambda _pid, _tok: True)
+    background_jobs.start(job_id, generation=1, worker_pid=5151, worker_start_token="boot:av1")
+
+    snap_running = snapshot.build_agent_snapshot(ctx, include_archived=False)
+    assert next(a for a in snap_running["agents"] if a["session"] == body["session"])["avatar_generation_status"] == "running"
+    assert personas.public(personas.get("Clara"))["avatar_generation_status"] == "running"
+
+    # GET /agents/archived exposes the exact same running state on an archived agent,
+    # then clears once generation finishes.
+    agents.set_archived(created_agent["agent_id"], True)
+    h_arch_running = RouteHarness()
+    h_arch_running._handle_archived_agents()
+    arch_code, arch_body = h_arch_running.responses[0]
+    assert arch_code == 200 and arch_body["total"] == 1
+    assert arch_body["agents"][0]["session"] == body["session"]
+    assert arch_body["agents"][0]["avatar_url"].startswith("/static/avatars/default-claude.png?v=")
+    assert arch_body["agents"][0]["avatar_generation_status"] == "running"
+    agents.set_archived(created_agent["agent_id"], False)
+
+    # 2. Second Contact hits daily_limit=1 -> default family portrait, avatar_generation_status is None.
+    h2 = RouteHarness({"mint_contact": True, "backend": "claude", "cwd": str(tmp_path), "synthesize_audio": False})
+    h2._handle_create_agent()
+    capped_agent = h2.responses[0][1]["agent"]
+    assert capped_agent["avatar_generation_status"] is None
+    assert capped_agent["avatar_url"].startswith("/static/avatars/default-claude.png?v=")
+
+    # 3. Worker failure emits persona-updated SSE and clears avatar_generation_status to None.
+    watcher_events: list[dict] = []
+    watcher = background_job_watcher.BackgroundJobWatcher(SimpleNamespace(broadcast=watcher_events.append))
+    background_jobs.finish(job_id, generation=1, status="failed", reason="openai 500", worker_pid=5151, worker_start_token="boot:av1")
+    watcher._poll_once()
+    failed_roster_events = [
+        e for e in watcher_events
+        if e.get("type") == "agent-roster" and e.get("kind") == "persona-updated"
+    ]
+    assert len(failed_roster_events) == 1
+    assert failed_roster_events[0].get("persona") == "Clara"
+    snap_failed = snapshot.build_agent_snapshot(ctx, include_archived=False)
+    assert next(a for a in snap_failed["agents"] if a["session"] == body["session"])["avatar_generation_status"] is None
+    assert personas.public(personas.get("Clara"))["avatar_generation_status"] is None
+
+    # 4. Retry succeeds -> avatar_url populated and avatar_generation_status stays None
+    #    on both active snapshot and GET /agents/archived.
+    _stub_cfg(monkeypatch, enabled=True, daily_limit=5, max_attempts=2)
+    t_retry = background_jobs.get(job_id)["terminal_at"] + persona_avatar_generation.RETRY_BACKOFF_MS[0] + 1_000
+    monkeypatch.setattr("lib.db.now_ms", lambda: t_retry)
+    retried = persona_avatar_generation.start_best_effort("Clara", now_ms=t_retry)
+    assert retried is not None and retried["status"] == "queued"
+    watcher_events.clear()
+    watcher._poll_once()
+    # Retry re-entering queued from failed also nudges persona-updated so clients resume loading state.
+    assert any(e.get("type") == "agent-roster" and e.get("kind") == "persona-updated" for e in watcher_events)
+
+    retry_cmd = launched[-1]
+    retry_handle = retry_cmd[retry_cmd.index("--handle") + 1]
+    monkeypatch.setattr(persona_avatar_generation, "_request_generation", lambda **_kw: raw_png)
+    assert worker.run(handle=retry_handle, persona_id=persona_id, tier=tier, stop=threading.Event()) == 0
+    watcher_events.clear()
+    watcher._poll_once()
+    assert any(e.get("type") == "agent-roster" and e.get("kind") == "persona-updated" for e in watcher_events)
+    snap_done = snapshot.build_agent_snapshot(ctx, include_archived=False)
+    done_agent = next(a for a in snap_done["agents"] if a["session"] == body["session"])
+    assert done_agent["avatar_generation_status"] is None
+    assert done_agent["avatar_url"].startswith(f"/avatars/{done_agent['agent_id']}?v=")
+
+    agents.set_archived(created_agent["agent_id"], True)
+    h_arch_done = RouteHarness()
+    h_arch_done._handle_archived_agents()
+    arch_done = h_arch_done.responses[0][1]["agents"][0]
+    assert arch_done["avatar_generation_status"] is None
+    assert arch_done["avatar_url"].startswith(f"/avatars/{done_agent['agent_id']}?v=")
+
+
+def test_avatar_generation_status_respects_family_defaults_and_clears_for_builtins_janitors_and_explicit_avatars(
+    tmp_path, monkeypatch
+):
+    from lib.audio_stream import AudioStream
+    from lib.context import ServerContext, StubSTT
+    from lib.tts_engine import FakeTTSEngine
+
+    monkeypatch.setattr(config, "read_global_mcp_servers", lambda: {})
+    real_static = pathlib.Path(__file__).resolve().parents[2] / "static"
+    audio_dir = tmp_path / "audio"
+    audio_dir.mkdir()
+    ctx = ServerContext(
+        root=tmp_path,
+        static=real_static,
+        audio_dir=audio_dir,
+        agents_path=tmp_path / "agents.json",
+        default_session="claude",
+        tts=FakeTTSEngine(audio_dir),
+        stream=AudioStream(audio_dir),
+        stt=StubSTT(),
+        roster_names=("Mike",),
+        async_announcements=False,
+    )
+
+    # 1. Built-in Contact never reports avatar_generation_status even if an active job row exists.
+    mike = personas.get("Mike")
+    assert mike is not None and mike["builtin"]
+    background_jobs.upsert_computer(
+        computer_id="srv-test",
+        job_id=persona_avatar_generation.job_id_for(mike["persona_id"]),
+        kind="persona-avatar",
+        title="Unexpected builtin job",
+        status="running",
+        metadata={"persona_id": mike["persona_id"], "persona_name": "Mike"},
+    )
+    agents.create_agent(persona="Mike", voice_id=mike["voice_id"], cwd=str(tmp_path), session="mike-live", backend="claude")
+    assert persona_avatar_generation.avatar_generation_status_for_persona(mike) is None
+    assert personas.public(mike)["avatar_generation_status"] is None
+
+    # 2. Custom Contact with an active 'running' job:
+    #    - Claude, Codex, Grok, and Antigravity agents resolve Host default-<family>.png AND still report 'running'.
+    #    - Agent with its own avatar_symbol or avatar_path reports None.
+    #    - Janitor agent reports None.
+    active_contact = personas.create(name="Zorina Custom")
+    background_jobs.upsert_computer(
+        computer_id="srv-test",
+        job_id=persona_avatar_generation.job_id_for(active_contact["persona_id"]),
+        kind="persona-avatar",
+        title="Generating portrait for Zorina Custom",
+        status="running",
+        metadata={"persona_id": active_contact["persona_id"], "persona_name": "Zorina Custom"},
+    )
+    expected_defaults = {
+        "claude": "/static/avatars/default-claude.png?v=",
+        "codex": "/static/avatars/default-codex.png?v=",
+        "grok": "/static/avatars/default-grok.png?v=",
+        "agy": "/static/avatars/default-gemini.png?v=",
+    }
+    for backend_id in expected_defaults:
+        agents.create_agent(
+            persona="Zorina Custom", voice_id="v-zorina", cwd=str(tmp_path),
+            session=f"zorina-{backend_id}", backend=backend_id,
+        )
+    custom_img = tmp_path / "own-face.jpg"
+    custom_img.write_bytes(b"\xff\xd8\xff\xd9")
+    sym_id = agents.create_agent(
+        persona="Zorina Custom", voice_id="v-zorina", cwd=str(tmp_path),
+        session="zorina-symbol", backend="claude",
+    )
+    agents.update_agent(sym_id, avatar_symbol="⚡")
+    path_id = agents.create_agent(
+        persona="Zorina Custom", voice_id="v-zorina", cwd=str(tmp_path),
+        session="zorina-path", backend="claude",
+    )
+    agents.update_agent(path_id, avatar_path=str(custom_img))
+    janitor_id = agents.create_agent(
+        persona="Zorina Custom", voice_id="v-zorina", cwd=str(tmp_path),
+        session="zorina-janitor", backend="claude",
+    )
+    agents.mark_janitor(agents.conn(), janitor_id)
+    assert sym_id and path_id and janitor_id
+
+    # 3. Contacts that already have their own avatar_symbol or avatar_path also report None.
+    sym_contact = personas.create(name="Symbol Contact", avatar_symbol="🌿")
+    background_jobs.upsert_computer(
+        computer_id="srv-test",
+        job_id=persona_avatar_generation.job_id_for(sym_contact["persona_id"]),
+        kind="persona-avatar",
+        title="Stale job for symbol contact",
+        status="running",
+        metadata={"persona_id": sym_contact["persona_id"], "persona_name": sym_contact["name"]},
+    )
+    agents.create_agent(
+        persona=sym_contact["name"], voice_id="v-sym", cwd=str(tmp_path),
+        session="sym-contact-agent", backend="claude",
+    )
+    path_contact = personas.create(
+        name="Path Contact",
+        avatar_base64=base64.b64encode(custom_img.read_bytes()).decode(),
+    )
+    background_jobs.upsert_computer(
+        computer_id="srv-test",
+        job_id=persona_avatar_generation.job_id_for(path_contact["persona_id"]),
+        kind="persona-avatar",
+        title="Stale job for path contact",
+        status="running",
+        metadata={"persona_id": path_contact["persona_id"], "persona_name": path_contact["name"]},
+    )
+    agents.create_agent(
+        persona=path_contact["name"], voice_id="v-path", cwd=str(tmp_path),
+        session="path-contact-agent", backend="claude",
+    )
+    assert persona_avatar_generation.avatar_generation_status_for_persona(sym_contact) is None
+    assert persona_avatar_generation.avatar_generation_status_for_persona(path_contact) is None
+
+    snap = snapshot.build_agent_snapshot(ctx, include_archived=False)
+    by_session = {row["session"]: row for row in snap["agents"]}
+    assert by_session["mike-live"]["avatar_generation_status"] is None
+    for backend_id, expected_prefix in expected_defaults.items():
+        row = by_session[f"zorina-{backend_id}"]
+        assert row["avatar_url"].startswith(expected_prefix)
+        assert row["avatar_generation_status"] == "running"
+    assert by_session["zorina-symbol"]["avatar_generation_status"] is None
+    assert by_session["zorina-path"]["avatar_generation_status"] is None
+    assert by_session["zorina-janitor"]["avatar_generation_status"] is None
+    assert by_session["sym-contact-agent"]["avatar_generation_status"] is None
+    assert by_session["path-contact-agent"]["avatar_generation_status"] is None
+    personas_by_name = {p["name"]: p for p in snap["personas"]}
+    assert personas_by_name["Mike"]["avatar_generation_status"] is None
+    assert personas_by_name["Zorina Custom"]["avatar_generation_status"] == "running"
+    assert personas_by_name["Symbol Contact"]["avatar_generation_status"] is None
+    assert personas_by_name["Path Contact"]["avatar_generation_status"] is None
