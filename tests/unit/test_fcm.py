@@ -800,17 +800,43 @@ def test_a_400_naming_the_token_field_disables_the_token(fcm_host, google):
     assert _rows()[ANDROID]["disabled_at"] is not None
 
 
+# Google's two documented examples (firebase.google.com/docs/cloud-messaging/error-codes, "REST error
+# codes for the HTTP v1 API"), both 400 INVALID_ARGUMENT; "the details array contains values in different
+# types".
+_GOOGLE_INVALID_TOKEN = _Resp(400, {"error": {
+    "code": 400, "message": "The registration token is not a valid FCM registration token",
+    "status": "INVALID_ARGUMENT",
+    "details": [{"@type": "type.googleapis.com/google.firebase.fcm.v1.FcmError",
+                 "errorCode": "INVALID_ARGUMENT"}]}})
+_GOOGLE_INVALID_DATA = _Resp(400, {"error": {
+    "code": 400, "message": "Invalid value at 'message.data[0].value' (TYPE_STRING), 12",
+    "status": "INVALID_ARGUMENT",
+    "details": [{"@type": "type.googleapis.com/google.rpc.BadRequest",
+                 "fieldViolations": [{"field": "message.data[0].value",
+                                      "description": "Invalid value at 'message.data[0].value' (TYPE_STRING), 12"}]}]}})
+
+
 @pytest.mark.parametrize("answer", [
-    # About the payload, even when its text mentions the registration token: the token is kept.
-    _bad_request("message.data[0].value", message="Invalid value; the registration token is fine"),
-    _bad_request("message.android.ttl"),
-    # No field named at all: Google's docs make this a token problem only if the payload is valid,
-    # which the Host cannot know, so the token is kept and the push counts as failed.
-    _bad_request(),
+    _GOOGLE_INVALID_TOKEN,                                        # Google's own invalid-token example
+    _bad_request(),                                               # FcmError only, any wording
     _Resp(400, {"error": {"code": 400, "message": "Request contains an invalid argument.",
-                          "status": "INVALID_ARGUMENT"}}),
+                          "status": "INVALID_ARGUMENT"}}),         # no detail at all: names no field
 ])
-def test_any_other_400_keeps_the_token(fcm_host, google, sleeps, answer):
+def test_a_400_invalid_argument_naming_no_other_field_disables_the_token(fcm_host, google, answer):
+    _register_android()
+    google.sends = [answer]
+    assert apns.send_user_notification(_notification())["disabled"] == 1
+    assert _rows()[ANDROID]["disabled_at"] is not None
+
+
+@pytest.mark.parametrize("answer", [
+    _GOOGLE_INVALID_DATA,                                         # Google's own payload example
+    # About the payload even when the text mentions the token: the text is never read.
+    _bad_request("message.data[0].value", message="The registration token is not a valid FCM registration token"),
+    _bad_request("message.android.ttl"),
+    _bad_request("message.token", "message.data[1].key"),         # names another field too
+])
+def test_a_400_naming_a_payload_field_keeps_the_token(fcm_host, google, sleeps, answer):
     _register_android()
     google.sends = [answer]
     assert apns.send_user_notification(_notification())["failed"] == 1
@@ -926,15 +952,64 @@ def test_the_google_client_has_a_ten_second_timeout_and_a_deadline_backend(monke
     fcm._reset_client()
 
 
-def test_a_slow_google_drops_the_oldest_waiting_android_alert_never_an_iphone_push(
-        tmp_path, rsa_key, monkeypatch, logs):
-    """One in flight, ANDROID_MAX_WAITING waiting: a newer notification drops the oldest waiting
-    one (logged); every iPhone push leaves at once."""
+class _PacedGoogle(Google):
+    """A healthy Google: every FCM send answers after ``delay`` seconds."""
+
+    def __init__(self, delay):
+        super().__init__()
+        self.delay = delay
+
+    def post(self, url, headers=None, content=None, data=None, json=None):
+        if url == SEND:
+            import time as clock
+            clock.sleep(self.delay)
+        return super().post(url, headers=headers, content=content, data=data, json=json)
+
+
+def _record_lane_entries(monkeypatch):
+    """The order notifications reach the Android lane (the order they must leave in)."""
+    entered = []
+    real = apns._AndroidTurn.__enter__
+
+    def enter(self):
+        entered.append(self._ticket.label)
+        return real(self)
+    monkeypatch.setattr(apns._AndroidTurn, "__enter__", enter)
+    return entered
+
+
+@pytest.mark.parametrize("count,gap,delay", [(5, 0.0, 0.2), (5, 0.1, 0.2), (8, 0.0, 0.0)])
+def test_a_healthy_google_drops_nothing_and_keeps_the_order(tmp_path, rsa_key, monkeypatch, count, gap, delay):
+    """The reviewer's table: 5 at once and 5 at 0.1 s with a 0.2 s Google, 8 at once with an instant one."""
     import threading
     import time as clock
     import httpx
+    paced = _PacedGoogle(delay)
+    monkeypatch.setattr(httpx, "Client", paced.client)
+    _mixed_host(tmp_path, rsa_key)
+    apns.register_token(IPHONE, session="mike")
+    _register_android()
+    entered = _record_lane_entries(monkeypatch)
+    threads = []
+    for n in range(count):
+        threads.append(threading.Thread(target=apns.send_user_notification,
+                                        args=(_notification(notification_id=f"pn-{n}"),), daemon=True))
+        threads[-1].start()
+        if gap:
+            clock.sleep(gap)
+    for thread in threads:
+        thread.join(20)
+    sent = [c["json"]["message"]["data"]["notification_id"] for c in paced.send_calls]
+    assert sorted(sent) == sorted(f"pn-{n}" for n in range(count))      # nothing dropped
+    assert sent == entered                                                # first in, first out
+    assert len(paced.apns_calls) == count
+
+
+def _slow_lane(tmp_path, rsa_key, monkeypatch):
+    import httpx
     slow = _SlowGoogle()
     monkeypatch.setattr(httpx, "Client", slow.client)
+    monkeypatch.setattr(apns, "ANDROID_SLOW_SEC", 0.2)
     dropped = []
     real_log = apns.log
     monkeypatch.setattr(apns, "log", lambda event, detail="": (
@@ -942,28 +1017,47 @@ def test_a_slow_google_drops_the_oldest_waiting_android_alert_never_an_iphone_pu
     _mixed_host(tmp_path, rsa_key)
     apns.register_token(IPHONE, session="mike")
     _register_android()
-    ids = [f"pn-{n}" for n in range(1, 5)]                 # 1 in flight, 2 may wait, the 4th drops pn-2
-    threads = []
-    results = {}
+    return slow, dropped
 
-    def send(notification_id):
-        results[notification_id] = apns.send_user_notification(_notification(notification_id=notification_id))
-    for n, notification_id in enumerate(ids):
-        threads.append(threading.Thread(target=send, args=(notification_id,), daemon=True))
+
+def _queue_after(slow, sends):
+    """Start the first send, let it run past ANDROID_SLOW_SEC, then queue the rest one by one."""
+    import threading
+    import time as clock
+    threads = [threading.Thread(target=sends[0], daemon=True)]
+    threads[0].start()
+    assert slow.fcm_started.wait(5)
+    clock.sleep(0.3)                                                       # the send in progress is now slow
+    for send in sends[1:]:
+        before = len(slow.apns_calls)
+        threads.append(threading.Thread(target=send, daemon=True))
         threads[-1].start()
-        if n == 0:
-            assert slow.fcm_started.wait(5)
         deadline = clock.monotonic() + 5
-        while len(slow.apns_calls) < n + 1 and clock.monotonic() < deadline:
-            clock.sleep(0.01)
-        lane = apns._android_lane("mike")
-        while n and len(lane.waiting) + len(lane.dropped) < n and clock.monotonic() < deadline:
-            clock.sleep(0.01)
-    assert len(slow.apns_calls) == 4 and not slow.release.is_set()   # iPhones never waited
+        while len(slow.apns_calls) == before and clock.monotonic() < deadline:
+            clock.sleep(0.01)                                              # its iPhone push left at once
+        clock.sleep(0.05)
+    assert not slow.release.is_set() and len(slow.apns_calls) == len(sends)
     slow.release.set()
     for thread in threads:
         thread.join(10)
-    sent = [c["json"]["message"]["data"]["notification_id"] for c in slow.send_calls]
-    assert sent[0] == "pn-1" and sorted(sent[1:]) == ["pn-3", "pn-4"]
-    assert len(dropped) == 1 and "notification=pn-2" in dropped[0] and "queue-full" in dropped[0]
-    assert results["pn-2"]["failed"] == 1 and results["pn-2"]["sent"] == 1     # its iPhone push went
+    return [c["json"]["message"]["data"]["notification_id"] for c in slow.send_calls]
+
+
+def test_a_slow_google_drops_ordinary_alerts_before_a_decision(tmp_path, rsa_key, monkeypatch):
+    slow, dropped = _slow_lane(tmp_path, rsa_key, monkeypatch)
+    alert = lambda n: (lambda: apns.send_user_notification(_notification(notification_id=n)))
+    decision = lambda d: (lambda: apns.send_decision_created(_decision(d)))
+    sent = _queue_after(slow, [alert("pn-1"), decision("d1"), alert("pn-2"), alert("pn-3"), alert("pn-4")])
+    # pn-1 in flight; waiting is held to 2 once it is slow: pn-2, then pn-3 go; the decision stays.
+    assert sent == ["pn-1", "decision-d1", "pn-4"]
+    assert [d.split("notification=")[1].split()[0] for d in dropped] == ["pn-2", "pn-3"]
+    assert all("reason=google-slow" in d for d in dropped)
+
+
+def test_a_slow_google_never_drops_the_newest_decision(tmp_path, rsa_key, monkeypatch):
+    slow, dropped = _slow_lane(tmp_path, rsa_key, monkeypatch)
+    decision = lambda d: (lambda: apns.send_decision_created(_decision(d)))
+    sent = _queue_after(slow, [decision("d0"), decision("d1"), decision("d2"), decision("d3"), decision("d4")])
+    assert sent[0] == "decision-d0" and sent[-1] == "decision-d4"         # the newest always goes
+    assert len(sent) == 1 + apns.ANDROID_MAX_WAITING
+    assert [d.split("notification=")[1].split()[0] for d in dropped] == ["decision-d1", "decision-d2"]

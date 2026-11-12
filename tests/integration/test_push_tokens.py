@@ -114,3 +114,28 @@ def test_revoking_a_pairing_stops_its_pushes_and_the_phone_paired_again_takes_it
     assert (row["principal"], row["disabled_at"]) == (again["device_id"], None)
     # The administrator (an unbound registrant) never takes over a device's token.
     assert _call(base, ADMIN, "POST", "/devices", {"token": IPHONE})[0] == 409
+
+
+def test_an_ambiguous_prefix_is_refused_and_disables_nothing(running_server):
+    base, ctx, srv = running_server
+    first, second = _pair(srv, ctx), _pair(srv, ctx)
+    twin = FCM_TOKEN[:-1] + "y"                                       # same first 12 characters
+    assert _register(base, first, FCM_TOKEN, platform="android")[0] == 200
+    assert _register(base, second, twin, platform="android")[0] == 200
+    assert _call(base, ADMIN, "DELETE", "/devices", {"token_prefix": FCM_TOKEN[:12]}) == (
+        409, {"ok": False, "error": "token_prefix_ambiguous"})
+    assert all(row["disabled_at"] is None for row in _rows().values())
+    # One character more than the shared part names exactly one token.
+    assert _call(base, ADMIN, "DELETE", "/devices", {"token_prefix": twin}) == (200, {"ok": True, "disabled": 1})
+
+
+def test_a_live_activity_registration_records_the_device_that_sent_it(running_server):
+    from lib import live_activity
+    base, ctx, srv = running_server
+    phone = _pair(srv, ctx)
+    body = {"token": "c4" * 32, "activity_id": "act-phone"}
+    assert _call(base, phone["token"], "POST", "/devices/live-activity", body)[0] == 200
+    assert _call(base, ADMIN, "POST", "/devices/live-activity",
+                 {"token": "d5" * 32, "activity_id": "act-admin"})[0] == 200
+    owners = {row["activity_id"]: row["principal"] for row in live_activity.tokens()}
+    assert owners == {"act-phone": phone["device_id"], "act-admin": ""}
