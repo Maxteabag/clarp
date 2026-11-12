@@ -21,7 +21,8 @@ from .clock import iso_from_ms as _iso_from_ms, now_ms
 from .db import conn, note_import_holds_lock
 from . import dreaming, heartbeat, origins, team_leader, team_store
 from .voice_markup import strip_hidden_blocks
-from .message_text import CALL_OPENING_OPEN, _strip_voice_markup, strip_injected_context
+from .message_text import (CALL_OPENING_OPEN, _strip_voice_markup, strip_delivery_context,
+                           strip_injected_blocks)
 from .message_import_common import (  # noqa: F401 - facade compatibility
     _message_id,
     _client_message_id,
@@ -1130,7 +1131,13 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
             skipped_slot_removed = skipped_slot_removed or removed > 0
             continue
         if role == "user":
-            text = strip_injected_context(text)
+            text = strip_injected_blocks(text)
+            words = strip_delivery_context(text)
+            if words != text and not provenance.candidates(_norm_text(text)):
+                # A delivery notice in front of the words is the Host's,
+                # unless the user's own row begins with it (they pasted it):
+                # that row stands for this turn as it is.
+                text = words
             if heartbeat.should_skip_heartbeat_prompt(text):
                 current_heartbeat_key = msg_id
                 current_origin, current_sender_agent_id = "heartbeat", ""
@@ -1191,12 +1198,16 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
                 skipped_slot_removed = skipped_slot_removed or removed > 0
                 continue
             if rows:
+                running, began = turn_index.running_at(turn.get("timestamp"))
                 client_msg_id, current_origin, current_sender_agent_id, _ = \
-                    provenance.take(key, rows, _own_turns_row(
-                        database, rows, turn_index.trace_at(turn.get("timestamp"))))
+                    provenance.take(key, rows, _own_turns_row(database, rows, running, began))
                 unanswered_key = key
                 authored = database.execute("SELECT trace_id FROM messages WHERE message_id=?", (client_msg_id,)).fetchone()
                 current_request_trace = (authored["trace_id"] or "") if authored else ""
+                if running and current_request_trace not in turn_index.outcomes:
+                    # A message steered into the running turn has a trace but
+                    # no turn of its own: what follows it is that turn's reply.
+                    current_request_trace = running
                 current_heartbeat_key = (
                     client_msg_id if current_origin == "heartbeat" else ""
                 )
