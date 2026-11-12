@@ -8,16 +8,19 @@ found by accident four hours later.
 
 This runs in the Host, on the agent scheduler's tick. Once a minute it reads
 which agents say they wait; if any does, it asks the runtime who it holds. An
-agent that waits while no coordinator lists it, at every check for five
-minutes, is logged and gets one failed document in its own session, which
-Updates shows as blocking. The alert is withdrawn when the turn leaves the
+agent that waits while no coordinator lists it, at every check that could
+tell for five minutes of them, is logged and gets one failed document in its
+own session, which Updates shows as blocking. The alert is withdrawn when the turn leaves the
 wait or the runtime lists it again, and opened again if it is then dropped
 again; one the owner dismissed stays dismissed. It never dispatches, stops or
 repairs a turn: Stop is the owner's.
 
-Nothing is judged blind. A status that cannot be read raises no alarm and
-starts the five minutes again, so a runtime that is restarting or handing
-over is not mistaken for one that dropped a turn.
+Nothing is judged blind. A status that cannot be read, or that does not say
+who waits, raises no alarm and counts for nothing: the minutes found so far
+stand and the count goes on at the next status that can be read. So a runtime
+that is restarting or handing over is not mistaken for one that dropped a
+turn, and one too busy to answer every minute still ends in the alarm (cleared
+at each failure, the count never reached five minutes there).
 """
 from __future__ import annotations
 
@@ -33,7 +36,10 @@ PREFIX = "stranded-park:"
 AFTER_MS = 5 * 60_000
 EVERY_MS = 60_000
 _UNAVAILABLE_LOG_MS = 3_600_000
-_CLOSED = {"completed", "cancelled", "expired"}
+
+
+class NotJudged(RuntimeError):
+    """The status was read but does not say who waits for an account."""
 
 
 def runtime_status() -> dict[str, Any]:
@@ -46,6 +52,7 @@ def runtime_status() -> dict[str, Any]:
     if backends._RUNTIME_CLIENT is None:
         return own
     status = dict(backends.runtime_status())
+    _listed(status)        # the runtime's own answer has to say who waits
     status.update({f"host_{key}": value for key, value in own.items()
                    if key.endswith("_account_recovery")})
     return status
@@ -81,17 +88,24 @@ def _open_alerts() -> list[dict[str, Any]]:
 
 
 def _listed(status: dict[str, Any]) -> set[str]:
-    """Every agent a coordinator holds parked, whichever pool."""
-    return {str(agent) for key, value in status.items()
-            if key.endswith("_account_recovery") and isinstance(value, dict)
-            for agent in value.get("waiting") or ()}
+    """Every agent a coordinator holds parked, whichever pool. ``NotJudged``
+    when the status names no coordinator's waiting turns at all: that is not
+    "nobody holds it", it is a status that cannot answer."""
+    waiting = [value["waiting"] for key, value in status.items()
+               if key.endswith("_account_recovery") and isinstance(value, dict)
+               and isinstance(value.get("waiting"), (list, tuple))]
+    if not waiting:
+        raise NotJudged("the status has no account recovery entry that lists waiting turns")
+    return {str(agent) for agents_waiting in waiting for agent in agents_waiting}
 
 
 class StrandedParks:
     def __init__(self, status: Callable[[], dict[str, Any]] = runtime_status):
         self._status = status
         self._due = 0
-        self._absent_since: dict[str, int] = {}
+        # reference -> how long checks that could read the status have found
+        # it unlisted, without one between that found it listed.
+        self._unlisted_ms: dict[str, int] = {}
         self._logged: set[str] = set()
         self._unavailable_logged = -_UNAVAILABLE_LOG_MS
 
@@ -106,15 +120,18 @@ class StrandedParks:
             try:
                 listed = _listed(self._status())
             except Exception as exc:  # noqa: BLE001 - any failed read means unknown
-                self._absent_since.clear()
+                # Not judged: no alarm, and the count neither grows nor is lost.
                 if now - self._unavailable_logged >= _UNAVAILABLE_LOG_MS:
                     self._unavailable_logged = now
                     log_exception("strandedParkStatusUnavailable", exc, f"parked={len(parked)}")
                 return 0
             absent = {reference: park for reference, park in parked.items()
                       if park["agent_id"] not in listed}
-        self._absent_since = {reference: self._absent_since.get(reference, now)
-                              for reference in absent}
+        # Checks are a minute apart, so each one after the first that finds
+        # the turn unlisted is one more minute of it.
+        self._unlisted_ms = {
+            reference: self._unlisted_ms[reference] + EVERY_MS if reference in self._unlisted_ms else 0
+            for reference in absent}
         self._logged &= set(absent)
         changed = 0
         for alert in _open_alerts():
@@ -124,7 +141,7 @@ class StrandedParks:
                     "summary": "The turn ended or the runtime holds it again."})
                 changed += 1
         for reference, park in absent.items():
-            if now - self._absent_since[reference] >= AFTER_MS:
+            if self._unlisted_ms[reference] >= AFTER_MS:
                 changed += self._report(reference, park, now)
         return changed
 
@@ -134,7 +151,7 @@ class StrandedParks:
             self._logged.add(reference)
             log("strandedPark",
                 f"agent={park['agent_id']} session={park['session']} trace={park['trace_id']} "
-                f"parked_min={minutes} unlisted_min={(now - self._absent_since[reference]) // 60_000}")
+                f"parked_min={minutes} unlisted_min={self._unlisted_ms[reference] // 60_000}")
         artifact_id = "stranded-park-" + hashlib.sha256(reference.encode()).hexdigest()[:40]
         summary = ("This turn waits for an account, but the runtime no longer holds it, "
                    "so it will not continue on its own. Stop the agent and send the message again.")

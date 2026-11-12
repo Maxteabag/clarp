@@ -173,11 +173,13 @@ The runtime status includes `claude_account_recovery` with `recovering` and wait
 agent IDs. Waiting agents keep a THINKING state with `account_recovery=waiting`.
 The Host compares the two once a minute (`stranded_parks`, on the agent
 scheduler's tick): an agent that shows the wait while no coordinator lists it,
-at every check for five minutes, is logged as `strandedPark` and gets one
-failed document in its own session, which Updates shows as blocking. Nothing
-resumes such a turn; Stop it and send the message again. The alert is
-withdrawn when the turn ends or is listed again. A status that cannot be read
-raises no alarm and starts the five minutes again.
+at every check that could tell for five minutes of them, is logged as
+`strandedPark` and gets one failed document in its own session, which Updates
+shows as blocking. Nothing resumes such a turn; Stop it and send the message
+again. The alert is withdrawn when the turn ends or is listed again. A status
+that cannot be read, or that has no account recovery entry, raises no alarm
+and counts for nothing: the minutes found so far stand, and the count goes on
+at the next status that can be read.
 The separate runtime service preserves this coordination across HTTP restarts.
 Existing runtime startup recovery remains responsible for a runtime/Host crash.
 

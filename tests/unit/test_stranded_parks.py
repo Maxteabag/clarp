@@ -26,12 +26,15 @@ class Runtime:
     def __init__(self):
         self.waiting: dict[str, list[str]] = {"claude": [], "codex": []}
         self.down = False
+        self.answer = None            # a whole status to answer with instead
         self.asked = 0
 
     def status(self) -> dict:
         self.asked += 1
         if self.down:
             raise RuntimeUnavailable("agent runtime status unavailable")
+        if self.answer is not None:
+            return self.answer
         return {"active": {}, **{
             f"{pool}_account_recovery": {"recovering": False, "checking": False,
                                          "waiting": list(agents_waiting)}
@@ -135,20 +138,61 @@ def test_five_minutes_means_five_minutes_without_a_break(host):
     assert watch.tick(START + 11 * MINUTE) == 1
 
 
-def test_a_runtime_that_does_not_answer_raises_no_alarm_and_restarts_the_count(host):
+def test_a_runtime_that_does_not_answer_raises_no_alarm_and_the_count_waits(host):
     watch, runtime, lines = host
     sam = _agent("Sam")
     _park(sam)
-    assert _minutes(watch, 0, 3) == 0
+    assert _minutes(watch, 0, 3) == 0                 # unlisted for three minutes
 
     runtime.down = True
-    assert _minutes(watch, 4, 30) == 0
+    assert _minutes(watch, 4, 30) == 0                # half an hour without an answer
     assert _alerts(sam) == []
     assert [event for event, _ in lines] == ["strandedParkStatusUnavailable"]
 
+    # The outage counted for nothing, either way: the three minutes stand,
+    # and two more are needed.
     runtime.down = False
-    assert _minutes(watch, 35, 4) == 0
-    assert watch.tick(START + 40 * MINUTE) == 1
+    assert watch.tick(START + 35 * MINUTE) == 0
+    assert watch.tick(START + 36 * MINUTE) == 1
+
+
+def test_a_status_that_fails_every_other_minute_still_ends_in_the_alarm(host):
+    """Cleared at each failure, the count never got to five minutes on a
+    runtime too busy to answer every time."""
+    watch, runtime, lines = host
+    sam = _agent("Sam")
+    _park(sam)
+
+    raised = []
+    for minute in range(0, 13):
+        runtime.down = minute % 2 == 1
+        if watch.tick(START + minute * MINUTE):
+            raised.append(minute)
+
+    assert raised == [10]                             # five readable minutes, none while down
+    assert len(_alerts(sam)) == 1
+
+
+@pytest.mark.parametrize("answer", [
+    {}, {"active": {}, "queued": {}},
+    {"claude_account_recovery": None}, {"claude_account_recovery": {"recovering": False}},
+], ids=["empty", "no-entry", "entry-is-not-a-status", "entry-without-waiting"])
+def test_a_status_that_does_not_say_who_waits_is_not_judged(host, answer):
+    """It can be read, but it says nothing about parked turns (a runtime that
+    does not report them): that is not "nobody holds it"."""
+    watch, runtime, lines = host
+    sam = _agent("Sam")
+    _park(sam)
+    runtime.answer = answer
+
+    assert _minutes(watch, 0, 30) == 0
+    assert _alerts(sam) == []
+    assert [event for event, _ in lines] == ["strandedParkStatusUnavailable"]
+
+    # A status that does say, and lists nobody, is judged as before.
+    runtime.answer = None
+    assert _minutes(watch, 31, 4) == 0
+    assert watch.tick(START + 36 * MINUTE) == 1
 
 
 def test_nothing_parked_asks_the_runtime_nothing(host):
@@ -275,6 +319,12 @@ def test_a_runtime_that_cannot_be_reached_is_an_error_not_an_empty_answer(monkey
     monkeypatch.setattr(backends, "_RUNTIME_CLIENT", object())
     monkeypatch.setattr(backends, "runtime_status", unreachable)
     with pytest.raises(RuntimeUnavailable):
+        stranded_parks.runtime_status()
+
+    # Nor is a runtime that answers without saying who waits covered by this
+    # process's own coordinators, which always answer.
+    monkeypatch.setattr(backends, "runtime_status", lambda **kw: {"active": {}})
+    with pytest.raises(stranded_parks.NotJudged):
         stranded_parks.runtime_status()
 
 
