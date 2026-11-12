@@ -18,13 +18,17 @@ import sqlite3
 from . import db, db_schema
 
 
-def _migrate(con: sqlite3.Connection) -> None:
+def _migrate(con: sqlite3.Connection, *, upgrade: bool = True) -> None:
     """Bring the DB up to the current schema version.
 
     Runs inside one write transaction so that the server and a hook
     subprocess opening a brand-new database at the same moment cannot both
     try to create it: the second waits on the write lock and then sees the
     finished version.
+
+    ``upgrade=False`` is for a process that is not a service (``db.conn``):
+    it may create a database that does not exist yet and never upgrades one
+    that does.
     """
     if _user_version(con) >= db_schema._SCHEMA_VERSION:
         return
@@ -36,6 +40,11 @@ def _migrate(con: sqlite3.Connection) -> None:
             return
         if version == 0:
             _create_schema(con)
+        elif not upgrade:
+            raise db.DatabaseOlderThanCode(
+                f"state database {db.DB_PATH} is at schema {version}; this code is at "
+                f"schema {db_schema._SCHEMA_VERSION}. Only the Clarp Host and runtime "
+                "services upgrade a database; the file is left as it is.")
         elif version < db_schema._MIN_UPGRADABLE_VERSION:
             raise RuntimeError(
                 f"state database {db.DB_PATH} is at schema version {version}; "

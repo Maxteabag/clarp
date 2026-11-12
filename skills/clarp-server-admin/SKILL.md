@@ -18,6 +18,31 @@ Never hand-edit the active generated release. Use `clarp-admin paths` to find
 the platform-native release, configuration, database, cache, log, service, and
 toolchain paths.
 
+## Which code may meet which database
+
+Only the installed Host and runtime services upgrade a database, when they
+start. Every agent turn carries `CLAUDE_PWA_DB` naming the live database, so
+any Host code run from a checkout would otherwise open it: a script, a
+`python -c`, a probe, a test outside the fixtures. Such a process that meets
+a database below its own schema waits ten seconds for a service to upgrade
+it and then refuses with both versions (`DatabaseOlderThanCode`); it never
+writes to the file. Logging does not open the database at all, and importing
+Host code creates nothing. To work on a checkout, point `CLAUDE_PWA_DB`, the
+log, config, share and cache variables at a scratch directory first.
+
+The other direction is refused too. `clarp-admin update`, `clarp-admin
+rollback`, `install.sh` and the Host at start-up all refuse code whose schema
+is below the database's, naming both versions. `--allow-older-schema` on
+`update` and `rollback` is the override for a deliberate rollback: older code
+does not know the newer tables and columns, so restore a database backup that
+matches the release if you stay on it. The override is recorded for exactly
+that pair of versions (`schema-rollback.json` in the data directory) and
+allows nothing else.
+
+A bare `clarp-admin update` says what the channel resolved to and refuses it
+when it is older than what is installed (the stable channel's newest tag can
+be months behind an installed main). `--ref <ref>` installs what you name.
+
 ## Rehearse an additive state upgrade
 
 Before deploying a migration, compare the candidate's `_SCHEMA_VERSION` with

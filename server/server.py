@@ -3348,6 +3348,18 @@ def build_server(ctx: ServerContext, port: int,
 
 
 if __name__ == "__main__":
+    # This process is the Host service. It refuses a database newer than its
+    # own code, and is otherwise the one that upgrades the database it opens.
+    from lib import db as _state_db, db_schema as _db_schema, schema_guard as _schema_guard
+    from lib.deployment import LAYOUT as _layout
+    try:
+        _schema_guard.check_host_start(
+            _state_db.DB_PATH, _layout.share, code=_db_schema._SCHEMA_VERSION)
+    except _schema_guard.OlderCode as _refused:
+        print(f"clarp: {_refused}", file=sys.stderr, flush=True)
+        raise SystemExit(78)        # EX_CONFIG: restarting changes nothing
+    _state_db.run_as_service(
+        "host", code_root=pathlib.Path(__file__).resolve().parent, share=_layout.share)
     # Keep holding the entrypoint's data-root locks but never pass them to children (agent
     # terminals): a no-op unless fds 8/9 are exactly the lock files.
     from lib.data_root_locks import seal_inherited_lock_fds

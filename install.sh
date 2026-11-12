@@ -83,6 +83,15 @@ sha256_file() {
 # or mutates predecessor product directories. Importing data from another
 # product requires a separate, explicit tool rather than hidden install-time
 # filesystem moves.
+# A source whose database schema is below the database's is refused before
+# anything is changed (issue 262: a two-month-old source served for a minute
+# on a database 42 schema steps ahead of it). The check reads the version from
+# the source's text and from the file's header; it opens nothing for writing.
+if [[ -n "$PYTHON" && -f "$SHARE/state.sqlite" ]]; then
+    "$PYTHON" "$REPO_DIR/server/lib/schema_guard.py" --source "$REPO_DIR" \
+        --database "$SHARE/state.sqlite" --share "$SHARE" || exit 1
+fi
+
 echo ">> creating directories"
 mkdir -p "$SHARE" "$RELEASES" "$BIN" "$(dirname "$SERVICE_FILE")" "$SKILLS" \
          "$CACHE_DIR/audio" "$CFG_DIR"
