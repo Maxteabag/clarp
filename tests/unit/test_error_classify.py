@@ -207,3 +207,103 @@ def test_muse_session_lock_is_one_terminal_reason_even_with_provider_noise():
         assert ec.classify_error(message) == 'muse_session_locked'
         assert ec.classify_error(message) in ec.NOTIFY
     assert ec.classify_error('some text mentions muse_session_locked') == ec.UNKNOWN
+
+
+# A usage limit is two different things to anything that decides whether to
+# wait: a window that resets by itself, and everything else filed under the
+# same category (credits, billing, payment, suspension, a trial, a model that
+# refuses this client), which only a person can clear.
+
+USAGE_WINDOWS = [
+    "out of usage",
+    "Usage limit reached for this account",
+    "You've hit your session limit · resets 3:20pm (Europe/Oslo)",
+    "You've hit your usage limit. Upgrade to Pro or try again at 5:08 PM.",
+    "Claude usage limit reached. Your limit will reset at 1pm",
+    "You have hit your weekly limit, which resets Friday",
+]
+NOT_CLEARED_BY_A_RESET = [
+    "agy exited rc=1: Your AI credits balance is too low to continue.",
+    "Your workspace is out of credits. Ask your workspace owner to refill in order to continue.",
+    "out of credit",
+    "API error (status 402 Payment Required)",
+    "status code 402",
+    "402 Payment",
+    "Account acct-1 is suspended, possibly due to reaching the monthly spending limit",
+    "You have used your monthly included credits",
+    "You have reached your billing hard limit",
+    "Your trial quota is used up for this model",
+    "free tier can only be used from within opencode",
+    "insufficient credits",
+    "insufficient quota",
+    "credit balance depleted",
+    "Grok Build usage balance exhausted",
+    "account balance exhausted",
+    "no credits remaining",
+    "RESOURCE_EXHAUSTED: exceeded your current quota",
+    "quota exceeded",
+    "monthly limit reached",
+    # Both readings in one text: it is not known to clear by waiting.
+    "Usage limit reached. Your credits balance is too low to continue.",
+]
+
+
+# Muse's wording, as elitebook recorded it 27 times on 2026-11-11 (the request
+# id replaced). "Quota exhausted" alone reads as billing; this text says when
+# its window resets.
+MUSE_WINDOW = (
+    "Muse Code failed: API error 429 [request_id=00000000-0000-0000-0000-000000000000]: "
+    "Subscription quota exhausted. Your usage window resets at 2026-11-16T00:00:00Z. "
+    "(rate_limit_error)")
+STATES_ITS_RESET = [
+    MUSE_WINDOW,
+    "Quota exhausted. Resets at 15:00.",
+    "quota exceeded; your usage window resets in 3 hours",
+    "Monthly limit reached. It will reset on the 1st.",
+    "Quota exhausted. Limits reset at 15:00.",
+    "Quota exhausted. It will reset tomorrow.",
+]
+# A reset is stated, and so is something no reset clears.
+STATES_A_RESET_BUT_NEEDS_A_PERSON = [
+    "Quota exhausted. Your credits reset at midnight.",
+    "Payment required. Your usage window resets at 2026-11-16T00:00:00Z.",
+    "Account suspended: quota exhausted. Your usage window resets at 15:00.",
+    "You have reached your billing hard limit. It resets at the next period.",
+    "Your trial quota is used up. Your usage window resets at 15:00.",
+    "Free tier quota exhausted. Your usage window resets at 00:00 UTC.",
+]
+
+
+def test_a_text_that_states_its_reset_is_a_window():
+    """Whatever else it calls the allowance, unless it also names credits,
+    payment, suspension, billing, a trial or the free tier."""
+    for msg in STATES_ITS_RESET:
+        assert ec.classify_error(msg) == ec.USAGE_LIMIT, msg
+        assert ec.usage_limit_resets(msg) is True, msg
+    for msg in STATES_A_RESET_BUT_NEEDS_A_PERSON:
+        assert ec.classify_error(msg) == ec.USAGE_LIMIT, msg
+        assert ec.usage_limit_resets(msg) is False, msg
+    # A reset in a text that is no usage limit at all is nothing.
+    assert ec.usage_limit_resets("The preview server resets at midnight") is False
+    assert ec.usage_limit_resets("Connection reset by peer") is False
+
+
+def test_only_a_usage_window_clears_at_a_reset():
+    for msg in USAGE_WINDOWS:
+        assert ec.classify_error(msg) == ec.USAGE_LIMIT, msg
+        assert ec.usage_limit_resets(msg) is True, msg
+    for msg in NOT_CLEARED_BY_A_RESET:
+        assert ec.classify_error(msg) == ec.USAGE_LIMIT, msg
+        assert ec.usage_limit_resets(msg) is False, msg
+
+
+def test_what_is_no_usage_limit_does_not_reset_either():
+    for msg in ["", None, "read ECONNRESET", "claude exited rc=1", "wrote 402 tokens to the log"]:
+        assert ec.usage_limit_resets(msg) is False, msg
+
+
+def test_the_category_is_exactly_the_two_readings_together():
+    """One word list, in two named parts: nothing is a usage limit that is in
+    neither, and the split cannot drift from the category."""
+    assert ec._USAGE_LIMIT_RE.pattern == (
+        ec._USAGE_WINDOW_PATTERN + "|" + ec._USAGE_OTHER_PATTERN)

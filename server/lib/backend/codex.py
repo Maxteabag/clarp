@@ -866,6 +866,9 @@ class CodexBackend(StreamJsonBackend):
         coordinator by it and reads ``config_account_switch_field``."""
         return self.id
 
+    def records_usage_limits(self) -> bool:
+        return True
+
     def classify_usage_limit(self, message: str, *,
                              quota_confirmed: bool | None = None) -> dict | None:
         if quota_confirmed is False:

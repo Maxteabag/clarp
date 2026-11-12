@@ -389,6 +389,12 @@ class Backend:
         """
         return None
 
+    def records_usage_limits(self) -> bool:
+        """Whether ``classify_usage_limit`` records an event for a limit the
+        provider confirmed, so that a failed turn's state carries
+        ``provider_limit_event_id`` exactly when the quota is exhausted."""
+        return False
+
     def quota_identity(self, window: dict) -> Any:
         """The identity a quota-window notification is de-duplicated by.
 
