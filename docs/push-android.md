@@ -96,7 +96,7 @@ iOS registration is unchanged.
 ## Unregistering and revocation
 
 Pushes to a token stop through the Host, never by editing its database
-(feature `push_unregister`, Host contract 91):
+(feature `push_unregister`, Host contract 93):
 
 - **The phone itself**: `DELETE /devices` with `{"token": "<its token>"}`,
   authenticated as the paired device that registered it. Answers
