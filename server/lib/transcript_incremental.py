@@ -59,7 +59,7 @@ _VERSION_SOURCES = {
             "claude_transcript.py", "claude_reply_evidence.py", "backend/agy.py"),
 }
 _COMMON_SOURCES = ("transcript_incremental.py", "backend/base.py", "message_writes.py",
-                   "message_import_writer.py",
+                   "message_import_writer.py", "message_carry.py",
                    "message_import_rows.py", "message_import_common.py",
                    "message_context.py", "message_text.py", "message_turns.py", "voice_markup.py",
                    # The store's ack-token decisions (AUT-07).
@@ -666,7 +666,18 @@ _DEFAULTS = {
     # bytes read once and compared with the stored digest. False: it is
     # imported in full, as a grown file whose audit is due always is.
     "audit_unchanged_by_digest": True,
+    # What a tail may find changed among the database rows its frontier was
+    # published with (lib.message_carry gives each rule's reason). False: a
+    # change of that kind is a full import, as before the rule existed.
+    "carry_session_rows": True,      # rows of the agent's other sessions
+    "carry_later_turns": True,       # turn rows that began after the boundary's turns
+    "carry_new_sends": True,         # a new /send row whose words were not said before
 }
+
+
+def carry_rules(conf) -> frozenset:
+    from . import message_carry
+    return frozenset(rule for rule in message_carry.RULES if conf.get(rule))
 
 
 def settings() -> dict[str, Any]:
@@ -1084,7 +1095,8 @@ _RESTORABLE = frozenset({"missing_unknown", "unknown_reset", "evicted", "evicted
                          "publication_not_written"})
 
 
-def _stored_frontier(database, key, revision, agent_id, backend_session_id, path):
+def _stored_frontier(database, key, revision, agent_id, backend_session_id, path,
+                     session_rows=False):
     """(checkpoint, state or None) from the store. The state is None when the
     database rows the frontier was published with have changed since."""
     from . import message_writes
@@ -1095,7 +1107,7 @@ def _stored_frontier(database, key, revision, agent_id, backend_session_id, path
     if stored is None:
         return None, None
     raw_inputs = message_writes._prepare_import_prelude(
-        database, agent_id, backend_session_id, [], raw_only=True)
+        database, agent_id, backend_session_id, [], raw_only=True, session_rows=session_rows)
     if inputs_digest(raw_inputs) != stored["inputs_digest"]:
         return checkpoint, None
     hasher = None
@@ -1303,7 +1315,7 @@ def _cache_committed_tail(key, revision, checkpoint, raw_inputs, file_hash, *, r
 
 
 def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, diagnostic=None):
-    from . import db, message_writes
+    from . import db, message_carry, message_writes
     key = _tail_key(path, agent_id, backend_session_id)
     revision = parser_version(backend)
     size = diagnostic.get("size") if diagnostic is not None else None
@@ -1311,6 +1323,8 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, dia
     def refuse(code, *, reason=None):
         return _refuse_tail(code, reason=reason, backend=backend, size=size)
 
+    rules = carry_rules(conf)
+    session_rows = message_carry.SESSION_ROWS in rules
     found, state, reason = _TAIL_STATES.observe(key, revision)
     # Invalidate before any attempt, including a failure after a partial batch
     # or external effect. Only successful committed progress re-admits carry.
@@ -1322,7 +1336,7 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, dia
         # The frontier this process does not hold, as the last import that
         # published it left it in the store.
         stored, state = _stored_frontier(db.conn(), key, revision, agent_id,
-                                         backend_session_id, path)
+                                         backend_session_id, path, session_rows)
         restored = state is not None
         if stored is not None and diagnostic is not None:
             diagnostic["imported"] = stored
@@ -1427,16 +1441,19 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, dia
             return
         write_checkpoint(database, next_cp)
         raw_inputs = message_writes._prepare_import_prelude(
-            database, agent_id, backend_session_id, [], raw_only=True)
+            database, agent_id, backend_session_id, [], raw_only=True, session_rows=session_rows)
         write_frontier(database, next_cp, current_hash, raw_inputs)
 
     try:
         message_writes.store_transcript_tail(
             agent_id=agent_id, backend_session_id=backend_session_id,
             source_file=str(path), turns=turns, start_seq=cp.boundary_seq,
-            carry=cp.store_carry, expected_prelude=state.raw_inputs, on_stored=publish,
-            checkpoint_status=checkpoint_status)
-    except message_writes._TailInvalidated:
+            carry=cp.store_carry, expected_prelude=state.raw_inputs, carry_rules=rules,
+            on_stored=publish, checkpoint_status=checkpoint_status)
+    except message_writes._TailInvalidated as changed:
+        # Which rows stood in the way: what a further rule would have to cover.
+        from .log import log
+        log("transcriptCarryInputsChanged", f"what={getattr(changed, 'what', 'unknown')}")
         return refuse("carry_inputs_changed")
     try:
         source_invalidated = source_invalidated or identity(path) != before
@@ -1469,9 +1486,10 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, dia
 def _store_full_with_tail_checkpoint(backend, path, agent_id, backend_session_id,
                                      turns, before, conf, *, reason_token=None,
                                      parsed_evidence=None, imported=None):
-    from . import db, message_store, message_writes
+    from . import db, message_carry, message_store, message_writes
     key = _tail_key(path, agent_id, backend_session_id)
     revision = parser_version(backend)
+    session_rows = message_carry.SESSION_ROWS in carry_rules(conf)
     kwargs = {}
     checkpoint = None
     raw_inputs = None
@@ -1557,7 +1575,8 @@ def _store_full_with_tail_checkpoint(backend, path, agent_id, backend_session_id
                                 boundary.parser_carry, dict(carry), 0, now, now)
                             write_checkpoint(database, checkpoint)
                             raw_inputs = message_writes._prepare_import_prelude(
-                                database, agent_id, backend_session_id, [], raw_only=True)
+                                database, agent_id, backend_session_id, [], raw_only=True,
+                                session_rows=session_rows)
                             write_frontier(database, checkpoint, current_hash, raw_inputs)
                             return True
 
@@ -1582,7 +1601,8 @@ def _store_full_with_tail_checkpoint(backend, path, agent_id, backend_session_id
                             return valid
 
                         kwargs = {"capture_at": boundary.seq, "captured": captured,
-                                  "on_stored": publish, "recertify_checkpoint": prepare_publication}
+                                  "on_stored": publish, "recertify_checkpoint": prepare_publication,
+                                  "carry_session_rows": session_rows}
     except OSError:
         _tail_log("bootstrap_file_io", retention=True)
         refusal_logged = True
