@@ -830,6 +830,20 @@ class CodexBackend(StreamJsonBackend):
         except Exception as exc:  # noqa: BLE001
             log_exception("codexAppServerRecycleFail", exc)
 
+    def known_models(self) -> list[str]:
+        return sorted(resolve("provider_capabilities", "observed_model_ids")(self.id) or ())
+
+    def is_valid_model(self, model: str | None) -> bool:
+        """An id ``codex debug models`` did not list is refused when the Host
+        has that list. Codex only reports an unknown id when the turn runs
+        ("model is not supported when using Codex with a ChatGPT account"),
+        which reads as an account's plan failing and went into account
+        recovery (2026-11-11: two helpers started with ``gpt-6``). Without an
+        observed list the id is accepted, as before."""
+        value = (model or "").strip()
+        known = self.known_models()
+        return not value or not known or value in known
+
     def recover_usage_limit(self, message: str) -> bool:
         """Ask the app-server whether the limit was a stale connection it can
         reconnect past; True means the turn may be retried as is."""
