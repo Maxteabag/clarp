@@ -11,6 +11,7 @@ from typing import Any, NamedTuple
 
 from .clock import now_ms
 from .message_text import _strip_voice_markup
+from .message_turns import iso_ms
 from .message_import_common import (
     _FINAL_TWIN_WINDOW_S,
     _PARKED_SEQ_BASE,
@@ -291,11 +292,14 @@ class _ClientProvenance:
         return row
 
 
-def _own_turns_row(database, rows: list, trace: str) -> int:
+def _own_turns_row(database, rows: list, trace: str, began: int | None = None) -> int:
     """Which of several client rows with the same words a transcript turn
-    belongs to: the one sent for the turn that was running when the provider
-    wrote its copy (``trace``, from the turn index). The oldest when that
-    turn is unknown or none of them is its row.
+    belongs to. ``trace`` and ``began`` are the turn that was running when
+    the provider wrote its copy (from the turn index).
+
+    First the row sent for that turn. Else the copy was steered into it, and
+    is the first row sent after the turn began. Else the oldest, also when
+    no turn was running.
 
     The oldest is right when every send ran, in order. It is wrong when
     earlier ones never ran: sends removed from the queue or stopped before
@@ -311,6 +315,11 @@ def _own_turns_row(database, rows: list, trace: str) -> int:
             "SELECT trace_id FROM messages WHERE message_id=?", (row[0],)).fetchone()
         if sent is not None and (sent["trace_id"] or "") == trace:
             return index
+    if began is not None:
+        for index, row in enumerate(rows):
+            sent_at = iso_ms(row[3])
+            if sent_at is not None and sent_at > began:
+                return index
     return 0
 
 

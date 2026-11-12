@@ -80,17 +80,24 @@ class TurnIndex:
         self.outcomes = {str(r["trace_id"]): r["outcome"] for r in rows if r["trace_id"]}
 
     def trace_at(self, timestamp: Any) -> str:
+        return self.running_at(timestamp)[0]
+
+    def running_at(self, timestamp: Any) -> tuple[str, int | None]:
+        """The turn that was running at ``timestamp``: its trace and when it
+        began (ms); ("", None) when there was none."""
         ms = iso_ms(timestamp)
         if ms is None or not self._starts:
-            return ""
+            return "", None
         index = bisect.bisect_right(self._starts, ms + _START_SLACK_MS) - 1
         if index < 0:
-            return ""
+            return "", None
         row = self._rows[index]
         settled = row["settled_at"]
         reach = (int(settled) + _SETTLED_REACH_MS) if settled else \
             (int(row["started_at"]) + _UNSETTLED_REACH_MS)
-        return str(row["trace_id"] or "") if ms <= reach else ""
+        if ms > reach or not row["trace_id"]:
+            return "", None
+        return str(row["trace_id"]), int(row["started_at"])
 
 
 def settle_statuses(items: list, outcome: str | None) -> list:
