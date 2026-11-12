@@ -4,7 +4,10 @@ import pathlib
 import signal
 import subprocess
 import sys
+import threading
 import time
+
+import pytest
 
 from lib import agents, background_jobs, db
 from tests.patching import patch_shared
@@ -97,6 +100,83 @@ def test_only_one_request_claims_queued_worker_launch():
     assert repeated["heartbeat_source"] == "launch_claimed"
     assert background_jobs.claim_queued_launch(
         job["job_id"], generation=job["generation"]) is False
+
+
+def test_enqueue_computer_capped_waits_out_concurrent_writer_and_owner_guards():
+    background_jobs.upsert_computer(
+        computer_id="computer-zero",
+        job_id="holder-probe",
+        kind="probe",
+        title="Probe",
+        status="queued",
+    )
+    writer_holding = threading.Event()
+    writer_errors: list[BaseException] = []
+
+    def hold_unrelated_write() -> None:
+        try:
+            conn = db.conn()
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                conn.execute(
+                    "UPDATE background_jobs SET updated_at = updated_at + 1 "
+                    "WHERE job_id = 'holder-probe'"
+                )
+                writer_holding.set()
+                time.sleep(0.05)
+                conn.execute("COMMIT")
+            except BaseException:
+                if conn.in_transaction:
+                    conn.execute("ROLLBACK")
+                raise
+        except BaseException as exc:  # noqa: BLE001
+            writer_errors.append(exc)
+            writer_holding.set()
+
+    holder = threading.Thread(target=hold_unrelated_write)
+    holder.start()
+    assert writer_holding.wait(timeout=5.0)
+
+    job, claimed = background_jobs.enqueue_computer_capped(
+        computer_id="computer-zero",
+        job_id="capped-under-writer",
+        kind="persona-avatar",
+        title="Generate",
+        max_launches=5,
+        window_ms=60_000,
+        restart_cancelled=False,
+        now_ms=1_000,
+    )
+    holder.join(timeout=5.0)
+
+    assert writer_errors == []
+    assert job is not None and claimed is True
+    assert job["generation"] == 1
+
+    with pytest.raises(ValueError, match="already belongs to another owner"):
+        background_jobs.enqueue_computer_capped(
+            computer_id="computer-other",
+            job_id="capped-under-writer",
+            kind="persona-avatar",
+            title="Generate",
+            max_launches=5,
+            window_ms=60_000,
+            now_ms=1_100,
+        )
+
+    background_jobs.cancel("capped-under-writer")
+    kept_cancelled, reclaimed = background_jobs.enqueue_computer_capped(
+        computer_id="computer-zero",
+        job_id="capped-under-writer",
+        kind="persona-avatar",
+        title="Generate",
+        max_launches=5,
+        window_ms=60_000,
+        restart_cancelled=False,
+        now_ms=1_200,
+    )
+    assert kept_cancelled is not None and kept_cancelled["status"] == "cancelled"
+    assert reclaimed is False
 
 
 def test_terminate_worker_escalates_suspended_exact_identity():
