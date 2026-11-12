@@ -210,34 +210,22 @@ def test_a_stored_frontier_that_does_not_match_is_not_used(tmp_path, what):
         harness.assert_product_equal(reference, candidate)
 
 
-@pytest.mark.parametrize("row", ["a heartbeat's /send row", "an Oracle delegation"])
-def test_no_frontier_is_stored_for_a_session_none_is_kept_for(tmp_path, row):
-    """Exactly the sessions the process keeps no frontier for (automation
-    provenance, Oracle history): after a Host start they are imported in
-    full, as before."""
+def test_no_frontier_is_stored_for_a_session_with_oracle_history(tmp_path):
+    """The one kind of session the process keeps no frontier for: after a
+    Host start it is imported in full, as before."""
     backend = "claude"
     reference, candidate, transcript = _world(tmp_path, backend)
     for database in (reference, candidate):
         with sqlite3.connect(database) as other:
-            if row == "an Oracle delegation":
-                # Whatever the table requires, with the agent as its own.
-                columns = other.execute("PRAGMA table_info(oracle_delegations)").fetchall()
-                values = {name: (corpus.AGENT if name == "agent_id" else
-                                 0 if "INT" in kind.upper() else "synthetic")
-                          for _cid, name, kind, notnull, default, _pk in columns
-                          if notnull and default is None or name == "agent_id"}
-                other.execute(
-                    f"INSERT INTO oracle_delegations({','.join(values)}) "
-                    f"VALUES ({','.join('?' * len(values))})", list(values.values()))
-            else:
-                revision = other.execute(
-                    "UPDATE message_clock SET revision=revision+1 WHERE singleton=0 RETURNING revision"
-                ).fetchone()[0]
-                other.execute(
-                    "INSERT INTO messages(message_id,agent_id,backend_session_id,source_file,seq,role,"
-                    "timestamp,text,updated_at,revision,origin) VALUES ('u-hb',?,?,'client:hb',-2000,"
-                    "'user','2026-10-11T00:00:00Z','a heartbeat',?,?,'heartbeat')",
-                    (corpus.AGENT, corpus.SESSION, harness.BASE_MS - 5000, revision))
+            # Whatever the table requires, with the agent as its own.
+            columns = other.execute("PRAGMA table_info(oracle_delegations)").fetchall()
+            values = {name: (corpus.AGENT if name == "agent_id" else
+                             0 if "INT" in kind.upper() else "synthetic")
+                      for _cid, name, kind, notnull, default, _pk in columns
+                      if notnull and default is None or name == "agent_id"}
+            other.execute(
+                f"INSERT INTO oracle_delegations({','.join(values)}) "
+                f"VALUES ({','.join('?' * len(values))})", list(values.values()))
     with harness.PersistentLane(reference, transcript, backend, "reference") as full:
         with harness.PersistentLane(candidate, transcript, backend, "candidate") as before:
             full.tick(0)
