@@ -1,4 +1,4 @@
-"""Push tokens through the Host over real HTTP (feature push_unregister, contract 91):
+"""Push tokens through the Host over real HTTP (feature push_unregister, contract 93):
 DELETE /devices, GET /devices/push-tokens, and what revoking a pairing does to its tokens."""
 from __future__ import annotations
 
