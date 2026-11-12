@@ -487,6 +487,63 @@ def write_checkpoint(database, checkpoint: Checkpoint) -> None:
          checkpoint.imports_since_audit, checkpoint.audited_at, checkpoint.updated_at))
 
 
+def checkpoint_digest(checkpoint: Checkpoint) -> str:
+    return hashlib.blake2b(json.dumps(checkpoint.__dict__, sort_keys=True, default=str,
+                                      separators=(",", ":")).encode(), digest_size=16).hexdigest()
+
+
+def inputs_digest(raw_inputs) -> str:
+    """A digest of the database rows an import read (``_prepare_import_prelude``
+    with ``raw_only``): equal digests stand for equal rows, in order."""
+    digest = hashlib.blake2b(digest_size=16)
+    for component in raw_inputs:
+        digest.update(b"\x1e")
+        for item in component:
+            digest.update(repr(item if isinstance(item, str) else tuple(item)).encode())
+            digest.update(b"\x1f")
+    return digest.hexdigest()
+
+
+def write_frontier(database, checkpoint: Checkpoint, file_hash: str, raw_inputs) -> None:
+    """Beside its checkpoint, in the same transaction. Not for a session a
+    frontier is never kept for (see ``_cache_committed_tail``), and not when
+    the checkpoint row is another import's that covers more of the file."""
+    key = (checkpoint.agent_id, checkpoint.backend_session_id, checkpoint.source_file)
+    if load_checkpoint(database, *key) != checkpoint:
+        return
+    if raw_inputs[4] or any(row["origin"] not in ("user", "agent", None, "")
+                            for row in raw_inputs[1]):
+        database.execute(
+            """DELETE FROM transcript_import_frontiers
+                WHERE agent_id=? AND backend_session_id=? AND source_file=?""", key)
+        return
+    database.execute(
+        """INSERT INTO transcript_import_frontiers (
+               agent_id, backend_session_id, source_file, parser_version,
+               checkpoint_digest, file_hash, inputs_digest, updated_at
+           ) VALUES (?,?,?,?,?,?,?,?)
+           ON CONFLICT(agent_id, backend_session_id, source_file) DO UPDATE SET
+               parser_version=excluded.parser_version,
+               checkpoint_digest=excluded.checkpoint_digest,
+               file_hash=excluded.file_hash, inputs_digest=excluded.inputs_digest,
+               updated_at=excluded.updated_at""",
+        (*key, checkpoint.parser_version, checkpoint_digest(checkpoint), file_hash,
+         inputs_digest(raw_inputs), checkpoint.updated_at))
+
+
+def load_frontier(database, checkpoint: Checkpoint) -> dict | None:
+    """The stored frontier of exactly this checkpoint, or None."""
+    row = database.execute(
+        """SELECT parser_version, checkpoint_digest, file_hash, inputs_digest
+             FROM transcript_import_frontiers
+            WHERE agent_id=? AND backend_session_id=? AND source_file=?""",
+        (checkpoint.agent_id, checkpoint.backend_session_id, checkpoint.source_file)).fetchone()
+    if (row is None or row["parser_version"] != checkpoint.parser_version
+            or row["checkpoint_digest"] != checkpoint_digest(checkpoint)):
+        return None
+    return dict(row)
+
+
 @dataclass
 class Boundary:
     """Where a new checkpoint will sit, chosen from a full parse."""
@@ -568,6 +625,10 @@ _DEFAULTS = {
     "max_tail_bytes": 16 * 1024 * 1024,
     "audit_every": 50,
     "audit_seconds": 3600.0,
+    # True: read and digest every imported byte of the file at every tail
+    # import, as before. False: at the first tail after a Host start, at
+    # every audit, and whenever the file looks touched (see _try_tail).
+    "digest_every_tail": False,
 }
 
 
@@ -819,6 +880,10 @@ class _TailState:
     checkpoint: Checkpoint
     raw_inputs: tuple
     file_hash: str
+    # The digest of the imported bytes as a running hash, when this process
+    # read them: new bytes are added to it. None for a frontier taken from the
+    # store after a Host start, whose bytes this process has not read yet.
+    hasher: Any = None
 
 
 def _tail_weight(key, revision, state) -> int:
@@ -969,6 +1034,38 @@ class _TailCache(RevisionedCache):
 
 
 _TAIL_STATES = _TailCache()
+# The running hash of a file's imported bytes, by the checkpoint it belongs
+# to. It outlives the frontier it was admitted with, which is consumed before
+# every attempt: a frontier taken from the store again in the same process
+# (an import that could not publish) need not read the file a second time.
+_READ_PREFIXES = RevisionedCache("transcript-read-prefix", max_entries=256)
+# Why the process has no frontier, when the stored one may stand in for it:
+# it never had one (a Host start), lost it to the size limit, or the last
+# import wrote nothing and could not publish. The stored frontier is still
+# the last one that was published; its digests decide whether it holds.
+_RESTORABLE = frozenset({"missing_unknown", "unknown_reset", "evicted", "evicted_empty",
+                         "publication_not_written"})
+
+
+def _stored_frontier(database, key, revision, agent_id, backend_session_id, path):
+    """(checkpoint, state or None) from the store. The state is None when the
+    database rows the frontier was published with have changed since."""
+    from . import message_writes
+    checkpoint = load_checkpoint(database, agent_id, backend_session_id, str(path))
+    if checkpoint is None or checkpoint.parser_version != revision:
+        return None, None
+    stored = load_frontier(database, checkpoint)
+    if stored is None:
+        return None, None
+    raw_inputs = message_writes._prepare_import_prelude(
+        database, agent_id, backend_session_id, [], raw_only=True)
+    if inputs_digest(raw_inputs) != stored["inputs_digest"]:
+        return checkpoint, None
+    hasher = None
+    read = _READ_PREFIXES.peek(key)
+    if read is not None and read[0] == revision and read[1][0] == stored["checkpoint_digest"]:
+        hasher = read[1][1].copy()
+    return checkpoint, _TailState(checkpoint, raw_inputs, stored["file_hash"], hasher)
 
 
 def _tail_key(path, agent_id, backend_session_id):
@@ -1026,16 +1123,18 @@ def _prefix_effects(turns) -> str:
     return found
 
 
-def _tail_file_hashes(path, previous_size, current_size):
-    """One bounded-buffer read certifies ALL previously imported bytes.
+def _read_digest(path, previous_size, current_size, *, digest=None):
+    """Digest the file up to ``current_size``; the digest at ``previous_size``
+    too. With ``digest`` (a running hash that already holds the first
+    ``previous_size`` bytes) only the bytes after them are read.
 
-    Durable sampled hashes remain format-compatible shadow guards. Actual
-    tail writes additionally require this process-local full-prefix digest.
-    This read is outside SQLite transactions; its O(file bytes) cost is
-    separate from range parsing and exact DB-input validation.
+    Returns (digest at previous_size, digest at current_size, running hash).
     """
-    digest = hashlib.blake2b(digest_size=16)
+    start = 0 if digest is None else previous_size
+    digest = hashlib.blake2b(digest_size=16) if digest is None else digest
     with open(path, "rb") as source:
+        source.seek(start)
+
         def read_until(count):
             while count > 0:
                 block = source.read(min(count, 1 << 20))
@@ -1043,10 +1142,33 @@ def _tail_file_hashes(path, previous_size, current_size):
                     raise OSError("transcript shrank during prefix certification")
                 digest.update(block)
                 count -= len(block)
-        read_until(previous_size)
+        read_until(previous_size - start)
         previous = digest.hexdigest()
         read_until(current_size - previous_size)
-    return previous, digest.hexdigest()
+    return previous, digest.hexdigest(), digest
+
+
+def _tail_file_hashes(path, previous_size, current_size):
+    """One bounded-buffer read certifies ALL previously imported bytes.
+
+    Durable sampled hashes remain format-compatible shadow guards. A full
+    import, the first tail after a Host start, and a tail of a file that
+    looks touched read every imported byte for this digest; other tails add
+    the new bytes to the running hash (``digest_every_tail`` reads all of
+    it every time). This read is outside SQLite transactions; its O(file
+    bytes) cost is separate from range parsing and exact DB-input validation.
+    """
+    previous, current, _ = _read_digest(path, previous_size, current_size)
+    return previous, current
+
+
+def _prefix_changed(path, what, checkpoint) -> None:
+    """One line naming the file whose imported bytes or identity no longer
+    match what was imported, and which check found it. A full import follows."""
+    from .log import log
+    log("transcriptPrefixChanged",
+        f"file={path} what={what} imported_bytes={checkpoint.complete_size} "
+        f"boundary={checkpoint.boundary_offset}")
 
 
 def _size_bucket(size):
@@ -1096,7 +1218,8 @@ def _checkpoint_reason(status):
     return "publication_refused_unknown"
 
 
-def _cache_committed_tail(key, revision, checkpoint, raw_inputs, file_hash, *, reason_token=None):
+def _cache_committed_tail(key, revision, checkpoint, raw_inputs, file_hash, *, reason_token=None,
+                          hasher=None):
     from . import db
     if raw_inputs is None or file_hash is None:
         _TAIL_STATES.note_refusal(key, revision, reason_token, "publication_not_written")
@@ -1125,7 +1248,9 @@ def _cache_committed_tail(key, revision, checkpoint, raw_inputs, file_hash, *, r
         _TAIL_STATES.note_refusal(key, revision, reason_token, "automation_provenance")
         _tail_log("automation_provenance", retention=True)
         return
-    state = _TailState(checkpoint, raw_inputs, file_hash)
+    state = _TailState(checkpoint, raw_inputs, file_hash, hasher)
+    if hasher is not None:
+        _READ_PREFIXES.put(key, revision, (checkpoint_digest(checkpoint), hasher.copy()))
     _TAIL_STATES.put(key, revision, state)
     found, retained = _TAIL_STATES.get(key, revision)
     if not found or retained is not state:
@@ -1147,7 +1272,32 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, dia
     reason_token = _TAIL_STATES.consume(key, revision)
     if diagnostic is not None:
         diagnostic["token"] = reason_token
-    if not found or state is None:
+    if (not found or state is None) and reason in _RESTORABLE:
+        # The frontier this process does not hold, as the last import that
+        # published it left it in the store.
+        stored, state = _stored_frontier(db.conn(), key, revision, agent_id,
+                                         backend_session_id, path)
+        if stored is not None:
+            if diagnostic is not None:
+                diagnostic["imported"] = stored
+            before = identity(path)
+            if (state is not None
+                    and before == Identity(stored.device, stored.inode, stored.size, stored.mtime_ns)
+                    and stored.complete_size == before.size):
+                # The file is the one that import read, to its last byte, and
+                # the database rows it read are as they were: there is nothing
+                # to import. What the process's own record of an unchanged
+                # file says, which a Host start empties. (With other rows a
+                # full import may rewrite some, so it runs, as it always did.)
+                _TAIL_STATES.put(key, revision, state)
+                _tail_log("unchanged_file", backend=backend, size=size)
+                return {"rows": stored.turn_count, "parse_s": 0.0,
+                        "store_s": time.perf_counter() - started, "shadow": "not_sampled_tail",
+                        "apply_mode": "unchanged", "parsed_bytes": 0,
+                        "_clarp_transcript_completion_v1": "completed-unchanged"}
+    elif found and state is not None and diagnostic is not None:
+        diagnostic["imported"] = state.checkpoint
+    if state is None:
         return refuse("no_frontier", reason=reason)
     cp = load_checkpoint(db.conn(), agent_id, backend_session_id, str(path))
     if cp != state.checkpoint:
@@ -1159,10 +1309,28 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, dia
                     audit_every=int(conf["audit_every"]), audit_seconds=float(conf["audit_seconds"]),
                     max_tail_bytes=int(conf["max_tail_bytes"]))
     if reason:
+        if reason in ("inode", "shrink", "mtime_backwards", "prefix_rewritten", "tail_rewritten"):
+            _prefix_changed(path, reason, cp)
+            if diagnostic is not None:
+                diagnostic.pop("imported", None)
         return refuse(reason)
-    previous_hash, current_hash = _tail_file_hashes(path, cp.complete_size, before.size)
-    if previous_hash != state.file_hash:
-        return refuse("prefix_content_changed")
+    # Every imported byte is read again when the setting says so, when this
+    # process has not read them yet (the first tail after a Host start), and
+    # when the file was touched without growing. Otherwise the new bytes are
+    # added to the running hash: the checks in ``decide`` (identity, size,
+    # mtime, the head, the samples, the bytes after the boundary) stand for
+    # the rest until the next audit, which is a full import.
+    touched = before.size == cp.size and before.mtime_ns != cp.mtime_ns
+    if bool(conf.get("digest_every_tail")) or state.hasher is None or touched:
+        previous_hash, current_hash, hasher = _read_digest(path, cp.complete_size, before.size)
+        if previous_hash != state.file_hash:
+            _prefix_changed(path, "imported_bytes", cp)
+            if diagnostic is not None:
+                diagnostic.pop("imported", None)      # said once; the full import follows
+            return refuse("prefix_content_changed")
+    else:
+        _, current_hash, hasher = _read_digest(path, cp.complete_size, before.size,
+                                               digest=state.hasher)
     turns = parse_range(backend, path, cp.boundary_offset, before.size)
     parsed = time.perf_counter()
     if identity(path) != before:
@@ -1188,6 +1356,7 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, dia
         write_checkpoint(database, next_cp)
         raw_inputs = message_writes._prepare_import_prelude(
             database, agent_id, backend_session_id, [], raw_only=True)
+        write_frontier(database, next_cp, current_hash, raw_inputs)
 
     try:
         message_writes.store_transcript_tail(
@@ -1203,7 +1372,7 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, dia
         source_invalidated = True
     if not _checkpoint_refused(checkpoint_status) and not source_invalidated:
         _cache_committed_tail(key, revision, next_cp, raw_inputs, current_hash,
-                              reason_token=reason_token)
+                              reason_token=reason_token, hasher=hasher)
     else:
         _TAIL_STATES.note_refusal(key, revision, reason_token, _checkpoint_reason(checkpoint_status))
     # Include replacement during process-frontier publication, not just the
@@ -1227,7 +1396,7 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, dia
 
 def _store_full_with_tail_checkpoint(backend, path, agent_id, backend_session_id,
                                      turns, before, conf, *, reason_token=None,
-                                     parsed_evidence=None):
+                                     parsed_evidence=None, imported=None):
     from . import db, message_store, message_writes
     key = _tail_key(path, agent_id, backend_session_id)
     revision = parser_version(backend)
@@ -1240,6 +1409,7 @@ def _store_full_with_tail_checkpoint(backend, path, agent_id, backend_session_id
     refusal_logged = False
     source_invalidated = False
     effects = ""
+    hasher = None
     try:
         observed = identity(path) if before is not None else None
         growing_prefix = (parsed_evidence is not None and before is not None
@@ -1267,7 +1437,14 @@ def _store_full_with_tail_checkpoint(backend, path, agent_id, backend_session_id
             elif (effects := _prefix_effects(turns[:boundary.seq])) == "open":
                 refusal = "effect_bearing_prefix"
             else:
-                _, current_hash = _tail_file_hashes(path, before.size, before.size)
+                # The same read tells whether the bytes an earlier import
+                # read are still what they were (the audit of the bytes a
+                # tail does not read again). The full import goes on either way.
+                earlier = _imported_before(imported, before, agent_id, backend_session_id, path)
+                previous, current_hash, hasher = _read_digest(
+                    path, earlier[0] if earlier else before.size, before.size)
+                if earlier and previous != earlier[1]:
+                    _prefix_changed(path, "imported_bytes", imported)
                 # Compare against ACTUAL bytes delivered to the native parser,
                 # not a digest created after the parser saw some older file.
                 if parsed_evidence is not None and current_hash != parsed_evidence[1]:
@@ -1309,6 +1486,7 @@ def _store_full_with_tail_checkpoint(backend, path, agent_id, backend_session_id
                             write_checkpoint(database, checkpoint)
                             raw_inputs = message_writes._prepare_import_prelude(
                                 database, agent_id, backend_session_id, [], raw_only=True)
+                            write_frontier(database, checkpoint, current_hash, raw_inputs)
                             return True
 
                         def prepare_publication():
@@ -1373,8 +1551,21 @@ def _store_full_with_tail_checkpoint(backend, path, agent_id, backend_session_id
             # Counted apart: before this narrowing it was bootstrap_effect.
             _tail_log("checkpoint_closed_effects", retention=True)
         _cache_committed_tail(key, revision, checkpoint, raw_inputs, current_hash,
-                              reason_token=reason_token)
+                              reason_token=reason_token, hasher=hasher)
     return source_invalidated
+
+
+def _imported_before(checkpoint, before, agent_id, backend_session_id, path):
+    """(bytes, their digest) that an earlier import of this same file read,
+    when the store still says: for the full import to compare with."""
+    from . import db
+    if (checkpoint is None or before is None
+            or (checkpoint.device, checkpoint.inode) != (before.device, before.inode)
+            or checkpoint.complete_size > before.size):
+        return None
+    current = load_checkpoint(db.conn(), agent_id, backend_session_id, str(path))
+    stored = load_frontier(db.conn(), current) if current == checkpoint else None
+    return (checkpoint.complete_size, stored["file_hash"]) if stored else None
 
 
 def import_transcript(*, backend: str, path: pathlib.Path, agent_id: str,
@@ -1476,7 +1667,8 @@ def import_transcript(*, backend: str, path: pathlib.Path, agent_id: str,
                 invalidated = _store_full_with_tail_checkpoint(backend, path, agent_id, backend_session_id,
                                                  turns, before, conf,
                                                  reason_token=diagnostic.get("token"),
-                                                 parsed_evidence=parsed_evidence)
+                                                 parsed_evidence=parsed_evidence,
+                                                 imported=diagnostic.get("imported"))
                 retained = _TAIL_STATES.peek(_tail_key(path, agent_id, backend_session_id))
                 admission.retained = (retained is not None
                                       and retained[0] == parser_version(backend)

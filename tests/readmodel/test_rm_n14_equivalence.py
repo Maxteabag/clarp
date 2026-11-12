@@ -6,6 +6,7 @@ isolated lanes run the existing full importer through independent entries.
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 
 import pytest
@@ -54,7 +55,7 @@ def test_isolated_full_reference_and_candidate_match_after_every_tick(tmp_path, 
     reference, candidate = _clones(tmp_path, backend)
     transcript = tmp_path / "synthetic.jsonl"
     transcript.write_bytes(b"")
-    for tick in range(2):
+    for tick in range(4):
         with transcript.open("ab") as output:
             output.write(harness.append_bytes(backend, tick))
         reports = [harness.isolated_lane(path, transcript, backend, lane, tick=tick)
@@ -63,7 +64,12 @@ def test_isolated_full_reference_and_candidate_match_after_every_tick(tmp_path, 
         assert all(report["queries"].get("SELECT", 0) > 0 for report in reports)
         assert all(report["components"]["_row_phases"]["calls"] > 0 for report in reports)
         assert all(report["total_s"] >= report["parse_s"] for report in reports)
-        assert all(not report["candidate_fast_path_proven"] for report in reports)
+        # Every tick is a new process, as after a Host start. The first import
+        # is full; from then on the frontier it stored is taken up, after the
+        # imported bytes have been read once in that process.
+        assert not reports[0]["candidate_fast_path_proven"]
+        assert reports[1]["candidate_fast_path_proven"] is (tick > 0)
+        assert reports[1]["digest_reads"] == ["all"]
 
 
 def test_product_oracle_detects_side_effect_change_even_when_row_counts_match(tmp_path):
@@ -510,31 +516,98 @@ def test_assistant_prefix_replays_latest_user_provenance_like_full_import(tmp_pa
             assert report["apply_mode"] == "full"
 
 
-@pytest.mark.parametrize("backend", harness.BACKENDS)
-def test_rewrite_outside_durable_sample_windows_cannot_skip_changed_prefix(tmp_path, backend):
-    """Shadow's sampled prefix hash is insufficient for authoritative writes."""
+def _texts(database):
+    with sqlite3.connect(database) as connection:
+        return sorted(connection.execute(
+            "SELECT message_id, text FROM messages WHERE source_file NOT LIKE 'client:%'"))
+
+
+def _rewritten_outside_the_samples(tmp_path, backend):
+    """A full import, then one old record rewritten in place, same length,
+    where no stored sample looks, and a record appended."""
     from lib import transcript_incremental as inc
     reference, candidate = _clones(tmp_path, backend)
     transcript = tmp_path / "synthetic.jsonl"
     original = b"".join(harness.append_bytes(backend, i) for i in range(300))
     transcript.write_bytes(original)
+
+    def rewrite():
+        with sqlite3.connect(candidate) as connection:
+            offset, sampled = connection.execute(
+                "SELECT boundary_offset,prefix_hash FROM transcript_import_checkpoints").fetchone()
+        changed = original.replace(b"synthetic step 8", b"synthetic task 8", 1)
+        assert changed != original and len(changed) == len(original)
+        transcript.write_bytes(changed + harness.append_bytes(backend, 300))
+        # The mutation deliberately survives the existing durable sample guard.
+        assert inc.prefix_hash(transcript, offset) == sampled
+
+    return reference, candidate, transcript, rewrite
+
+
+@pytest.mark.parametrize("backend", harness.BACKENDS)
+def test_rewrite_outside_durable_sample_windows_cannot_skip_changed_prefix(tmp_path, backend):
+    """With ``digest_every_tail`` every imported byte is read at every tail,
+    and the rewrite is refused at once (the behaviour before the setting
+    existed, and what this test pinned without it)."""
+    reference, candidate, transcript, rewrite = _rewritten_outside_the_samples(tmp_path, backend)
+    every_tail = {"settings": {"digest_every_tail": True}}
+    with harness.PersistentLane(reference, transcript, backend, "reference") as full:
+        with harness.PersistentLane(candidate, transcript, backend, "candidate") as actual:
+            full.tick(0)
+            actual.tick(0, faults=every_tail)
+            rewrite()
+            full.tick(1)
+            report = actual.tick(1, faults=every_tail)
+            harness.assert_product_equal(reference, candidate)
+            assert report["apply_mode"] == "full" and report["digest_reads"][0] == "all"
+            [line] = report["prefix_changed"]
+            assert f"file={transcript} what=imported_bytes" in line
+
+
+@pytest.mark.parametrize("found_by", ["the audit", "a Host start", "a touch without growth"])
+@pytest.mark.parametrize("backend", harness.BACKENDS)
+def test_rewrite_outside_the_samples_is_found_when_all_bytes_are_next_read(
+        tmp_path, backend, found_by):
+    """The default reads only the new bytes at an ordinary tail. Such a
+    rewrite, together with an append, is therefore imported as a tail and the
+    old row keeps its old text, until every imported byte is read again: at
+    the audit, at the first tail after a Host start, or when the file is
+    touched without growing. Then one line names the file, the import is
+    full, and the rows are the full replay's again."""
+    reference, candidate, transcript, rewrite = _rewritten_outside_the_samples(tmp_path, backend)
     with harness.PersistentLane(reference, transcript, backend, "reference") as full:
         with harness.PersistentLane(candidate, transcript, backend, "candidate") as actual:
             full.tick(0)
             actual.tick(0)
-            with sqlite3.connect(candidate) as connection:
-                offset, sampled = connection.execute(
-                    "SELECT boundary_offset,prefix_hash FROM transcript_import_checkpoints").fetchone()
-            changed = original.replace(b"synthetic step 8", b"synthetic task 8", 1)
-            assert changed != original and len(changed) == len(original)
-            transcript.write_bytes(changed + harness.append_bytes(backend, 300))
-            # The mutation deliberately survives the existing durable sample
-            # guard, so only authoritative prefix certification can reject it.
-            assert inc.prefix_hash(transcript, offset) == sampled
+            rewrite()
             full.tick(1)
-            report = actual.tick(1)
-            harness.assert_product_equal(reference, candidate)
-            assert report["apply_mode"] == "full"
+            missed = actual.tick(1)
+            assert missed["apply_mode"] == "tail" and missed["digest_reads"] == ["added"]
+            assert missed["prefix_changed"] == []
+            with pytest.raises(AssertionError, match="product_state_differs"):
+                harness.assert_product_equal(reference, candidate)
+
+            if found_by == "a touch without growth":
+                stat = transcript.stat()
+                os.utime(transcript, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
+            else:
+                with transcript.open("ab") as output:
+                    output.write(harness.append_bytes(backend, 301))
+            full.tick(2)
+            if found_by == "the audit":
+                found = actual.tick(2, faults={"settings": {"audit_every": 1}})
+            elif found_by == "a touch without growth":
+                found = actual.tick(2)
+        if found_by == "a Host start":
+            with harness.PersistentLane(candidate, transcript, backend, "candidate") as restarted:
+                found = restarted.tick(2)
+    assert found["apply_mode"] == "full"
+    [line] = found["prefix_changed"]
+    assert f"file={transcript} what=imported_bytes" in line
+    # The rows are the full replay's again. Not their revision numbers: this
+    # row was rewritten one import later than in the reference.
+    assert _texts(candidate) == _texts(reference)
+    assert any("synthetic task 8" in text for _id, text in _texts(candidate))
 
 
 @pytest.mark.parametrize("backend", harness.BACKENDS)
@@ -800,7 +873,9 @@ def test_no_frontier_reason_reports_only_proven_cache_history(tmp_path, backend,
         output.write(harness.append_bytes(backend, 3))
     report = harness.run_lane(candidate, transcript, backend, "candidate", tick=1)
     decision = [e for e in report["tail_events"] if e["event"] == "transcriptTailDecision"]
-    if expected is None:
+    if expected is None or cause in ("evicted", "reset", "history_lost"):
+        # Nothing lost, or lost only from the process's memory: the frontier
+        # the last import stored is taken up, and it is a tail.
         assert report["apply_mode"] == "tail"
         assert decision == [{"event": "transcriptTailDecision", "code": "tail_applied", "count": 1}]
     else:
@@ -813,8 +888,9 @@ def test_no_frontier_reason_reports_only_proven_cache_history(tmp_path, backend,
         inc._TAIL_STATES.reset()  # successful explicit reset retires poisoned history
         reset = harness.run_lane(candidate, transcript, backend, "candidate", tick=2)
         observed = [e for e in reset["tail_events"] if e["event"] == "transcriptTailDecision"]
-        assert observed == [{"event": "transcriptTailDecision", "code": "full_no_frontier",
-                             "count": 1, "reason": "unknown_reset"}]
+        # The file is as the last import left it and its frontier is stored.
+        assert observed == [{"event": "transcriptTailDecision", "code": "unchanged_file", "count": 1}]
+        assert reset["apply_mode"] == "unchanged"
         harness.run_lane(reference, transcript, backend, "reference", tick=2)
         harness.assert_product_equal(reference, candidate)
 
