@@ -221,7 +221,13 @@ def test_dream_prefix_stays_full_so_a_replay_acts_as_the_full_import_does(
 
 
 @pytest.mark.parametrize("child_found", [True, False])
-def test_claude_subagent_prefix_stays_full_and_a_later_child_is_replayed(tmp_path, child_found):
+def test_claude_subagent_prefix_is_a_tail_until_its_child_directory_answers_differently(
+        tmp_path, child_found):
+    """A Claude sub-agent cell among the old turns reads one thing outside the
+    parent's bytes: which child transcript its Agent call finds. The
+    checkpoint records that answer. While it stands the import is a tail;
+    when a child appears or goes, with no change to the parent's bytes, the
+    tail is refused and the cell is rebuilt by a full import."""
     backend = "claude"
     reference, candidate = _clones(tmp_path, backend)
     transcript = tmp_path / "synthetic.jsonl"
@@ -230,29 +236,89 @@ def test_claude_subagent_prefix_stays_full_and_a_later_child_is_replayed(tmp_pat
     child = transcript.parent / "synthetic" / "subagents" / "agent-a0.jsonl"
     if child_found:
         _discover_child(transcript)
+
+    def stored_paths():
+        with sqlite3.connect(candidate) as connection:
+            stored = [json.loads(cells) for (cells,) in connection.execute(
+                "SELECT display_cells_json FROM messages WHERE display_cells_json LIKE '%subagents%'")]
+        return [cell["transcript_path"] for row in stored for cell in row]
+
     with harness.PersistentLane(reference, transcript, backend, "reference") as full:
         with harness.PersistentLane(candidate, transcript, backend, "candidate") as actual:
             full.tick(0)
             retention = _codes(actual.tick(0), "transcriptTailRetention")
-            assert "effect_bearing_prefix" in retention
-            assert "checkpoint_closed_effects" not in retention
+            assert "checkpoint_closed_effects" in retention
+            assert "effect_bearing_prefix" not in retention
+            assert stored_paths() == [str(child) if child_found else ""]
+            for tick in (1, 2):
+                _append(transcript, harness.append_bytes(backend, 19 + tick))
+                full.tick(tick)
+                report = actual.tick(tick)
+                assert _decision(report)["code"] == "tail_applied"
+                harness.assert_product_equal(reference, candidate)
             # The directory changes with no change to the parent's bytes.
             if child_found:
                 child.unlink()
                 child.with_name("agent-a0.meta.json").unlink()
             else:
                 _discover_child(transcript)
+            _append(transcript, harness.append_bytes(backend, 22))
+            full.tick(3)
+            report = actual.tick(3)
+            assert report["apply_mode"] == "full"
+            assert _decision(report)["code"] == "full_claude_subagent_children_changed"
+            harness.assert_product_equal(reference, candidate)
+            assert stored_paths() == ["" if child_found else str(child)]
+            # The new answer is recorded: tails again.
+            _append(transcript, harness.append_bytes(backend, 23))
+            full.tick(4)
+            assert _decision(actual.tick(4))["code"] == "tail_applied"
+            harness.assert_product_equal(reference, candidate)
+        # A Host start takes the stored frontier and asks the directory again.
+        _append(transcript, harness.append_bytes(backend, 24))
+        full.tick(5)
+        with harness.PersistentLane(candidate, transcript, backend, "candidate") as restarted:
+            assert _decision(restarted.tick(5))["code"] == "tail_applied"
+        harness.assert_product_equal(reference, candidate)
+
+
+def test_a_child_bound_to_another_call_refuses_the_tail(tmp_path):
+    """The child transcript stays, but its meta file now names another Agent
+    call: the old cell would no longer find it."""
+    backend = "claude"
+    reference, candidate = _clones(tmp_path, backend)
+    transcript = tmp_path / "synthetic.jsonl"
+    transcript.write_bytes(_claude_agent_turn() + b"".join(
+        harness.append_bytes(backend, i) for i in range(1, 20)))
+    _discover_child(transcript)
+    meta = transcript.parent / "synthetic" / "subagents" / "agent-a0.meta.json"
+    with harness.PersistentLane(reference, transcript, backend, "reference") as full:
+        with harness.PersistentLane(candidate, transcript, backend, "candidate") as actual:
+            full.tick(0)
+            actual.tick(0)
             _append(transcript, harness.append_bytes(backend, 20))
             full.tick(1)
-            report = actual.tick(1)
-            assert report["apply_mode"] == "full"
-            assert _decision(report).get("reason") == "bootstrap_effect"
+            assert _decision(actual.tick(1))["code"] == "tail_applied"
+            meta.write_text('{"toolUseId": "another-call"}', encoding="utf-8")
+            _append(transcript, harness.append_bytes(backend, 21))
+            full.tick(2)
+            report = actual.tick(2)
             harness.assert_product_equal(reference, candidate)
-            with sqlite3.connect(candidate) as connection:
-                stored = [json.loads(cells) for (cells,) in connection.execute(
-                    "SELECT display_cells_json FROM messages WHERE display_cells_json LIKE '%subagents%'")]
-            assert [cell["transcript_path"] for row in stored for cell in row] == [
-                "" if child_found else str(child)]
+            # Found by the agent id still, or not at all: either way it is
+            # what the full replay stores; a different answer refuses the tail.
+            assert _decision(report)["code"] in ("tail_applied", "full_claude_subagent_children_changed")
+
+
+def test_a_codex_subagent_prefix_stays_on_the_full_path(tmp_path):
+    """Only Claude's cell is certified. Codex attaches collab events to the
+    latest assistant turn, wherever it is; that is not shown safe."""
+    from lib import transcript_incremental as inc
+    assert inc._prefix_effects([{"role": "assistant", "text": "x", "display_cells": [
+        {"kind": "subagents", "id": "c0"}]}]) == "open"
+    assert inc._prefix_effects([{"role": "assistant", "text": "x", "display_cells": [
+        {"kind": "subagents", "id": "c0", "ephemeral": True}]}]) == "closed"
+    assert inc._prefix_effects([{"role": "assistant", "text": "x", "tools": [
+        {"name": "Agent"}]}]) == "open"
 
 
 @pytest.mark.parametrize("backend", harness.BACKENDS)

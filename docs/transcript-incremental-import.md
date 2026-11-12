@@ -93,8 +93,16 @@ a file that had not changed.
 `transcript_import_frontiers` holds one row beside each checkpoint, written
 in the checkpoint's transaction: the parser version, a digest of that
 checkpoint, the digest of the imported bytes and a digest of those rows. No
-row is written for a session no frontier is kept for (automation provenance,
-Oracle history).
+row is written for a session no frontier is kept for (Oracle history).
+
+A session that holds an automation's `/send` row (a heartbeat, a goal wake or
+schedule, a watcher event, a leader tick, a maintenance run) keeps a frontier
+like any other. It used to keep none (`automation_provenance`), so every
+import of it was a full one from its first heartbeat on. The reference lane
+(`tests/readmodel/test_rm_n14_automation.py`) compares every product table
+after every tick for each of those origins: the prompt and its reply arriving
+by tail, the same words sent again, an automation that was sent and never
+ran, a heartbeat accounted once, and a Host start.
 
 A process that holds no frontier for a file takes the stored one when it
 never had one (a Host start), lost it to the cache's size limit, or the last
@@ -158,12 +166,18 @@ reaches before it:
 
 A checkpoint is also refused (`effect_bearing_prefix`, counted as
 `bootstrap_effect`) while a turn before the boundary carries an effect that a
-full replay could repeat or change: a sub-agent cell or Agent/Task tool (its
-child transcripts are found outside the parent file), a `<team>` block
-(capture follows the agent's current teams), or a dream prompt or dream output
-(a replayed `DREAMING_OK` acts on whichever run is active now). Heartbeat and
-leader-tick prompts and acks need no replay once their row is stored (see
-`_prefix_effects`); a checkpoint over them is logged as
+full replay could repeat or change: a Codex sub-agent cell or an Agent/Task
+tool, a `<team>` block (capture follows the agent's current teams), or a
+dream prompt or dream output (a replayed `DREAMING_OK` acts on whichever run
+is active now). Heartbeat and leader-tick prompts and acks need no replay
+once their row is stored (see `_prefix_effects`). Nor does a Claude sub-agent
+cell: the one thing it reads outside the parent's bytes is which child
+transcript its Agent call finds in `<parent>/subagents`, and the checkpoint
+records that answer for every old cell (`subagent_children` in the parser
+carry, found or not). A tail asks the directory again; a child that appeared,
+went or was bound to another call refuses it
+(`claude_subagent_children_changed`) and the full import rebuilds the cell.
+A checkpoint over such settled effects is logged as
 `transcriptTailRetention code=checkpoint_closed_effects`.
 
 Residual risk: a same-length in-place edit that misses every sampled block

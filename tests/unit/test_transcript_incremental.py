@@ -744,11 +744,14 @@ _FOUND_CHILD = {"kind": "subagents", "id": "c0", "ephemeral": True,
     ([_turn("user", "hi"), _turn("assistant", "DREAMING_OK")], "open"),
     ([_turn("user", HEARTBEAT_PROMPT), _turn("assistant", "HEARTBEAT_OK"),
       _turn("user", "Deep Dreaming contract: night"), _turn("assistant", "DREAMING_OK")], "open"),
-    # Can still change: child transcripts found outside the parent, whether or
-    # not one was found yet, and team capture against the agent's current teams.
-    ([_turn("user", "hi"), _turn("assistant", "x", cells=[_FOUND_CHILD])], "open"),
+    # A Claude sub-agent cell: the one thing it reads outside the parent's
+    # bytes, the child directory's answer, is recorded with the checkpoint
+    # (found or not), so it needs no replay while that answer stands.
+    ([_turn("user", "hi"), _turn("assistant", "x", cells=[_FOUND_CHILD])], "closed"),
     ([_turn("user", "hi"), _turn("assistant", "x", cells=[dict(_FOUND_CHILD, transcript_path="")])],
-     "open"),
+     "closed"),
+    # Can still change: any other sub-agent cell, an Agent/Task tool, and
+    # team capture against the agent's current teams.
     ([_turn("user", "hi"), _turn("assistant", "x", cells=[dict(_FOUND_CHILD, ephemeral=False)])],
      "open"),
     ([_turn("user", "hi"), _turn("assistant", "x", tools=[{"name": "Task"}])], "open"),
@@ -756,7 +759,9 @@ _FOUND_CHILD = {"kind": "subagents", "id": "c0", "ephemeral": True,
     ([_turn("user", HEARTBEAT_PROMPT), _turn("assistant", "HEARTBEAT_OK"),
       _turn("assistant", "<team>go</team>")], "open"),
     ([_turn("user", HEARTBEAT_PROMPT), _turn("assistant", "HEARTBEAT_OK"),
-      _turn("assistant", "x", cells=[_FOUND_CHILD])], "open"),
+      _turn("assistant", "x", cells=[_FOUND_CHILD])], "closed"),
+    ([_turn("user", "hi"), _turn("assistant", "x", cells=[_FOUND_CHILD]),
+      _turn("assistant", "<team>go</team>")], "open"),
 ])
 def test_prefix_effects_keep_only_open_effects_on_the_full_path(prefix, expected):
     assert inc._prefix_effects(prefix) == expected
@@ -928,3 +933,54 @@ def test_a_frontier_is_not_replaced_by_an_import_whose_checkpoint_lost(tmp_path)
     assert inc.load_checkpoint(database, AGENT, SESSION, str(transcript)) == cp
     inc.write_frontier(database, behind, "the-losers-digest", raw_inputs)
     assert inc.load_frontier(database, cp) == kept
+
+
+# ---- the child directory's answer, recorded with the checkpoint ----------------
+
+def _agent_cell(call="c0", agent="", path=""):
+    return {"kind": "subagents", "id": call, "agent_id": agent, "ephemeral": True,
+            "status": "ok", "transcript_path": path}
+
+
+def test_the_claude_carry_records_what_the_child_directory_answered(tmp_path):
+    parent = tmp_path / "parent.jsonl"
+    parent.write_text("")
+    children = tmp_path / "parent" / "subagents"
+    children.mkdir(parents=True)
+    (children / "agent-a0.jsonl").write_text("{}\n")
+    (children / "agent-a0.meta.json").write_text('{"toolUseId": "c0"}')
+    found = str(children / "agent-a0.jsonl")
+    prefix = [_turn("user", "hi"),
+              _turn("assistant", "x", cells=[_agent_cell("c0", "a0", found), _agent_cell("c1")])]
+
+    carry = inc.parser_carry("claude", prefix, {}, parent)
+    # Every key a cell is looked up by, and what it finds now: nothing for c1.
+    assert carry["subagent_children"] == [["a0", found], ["c0", found], ["c1", None]]
+    assert inc.reference_outside_tail("claude", parent, 0, 0, carry) == ""
+
+    # A child appears for the call that had none; one goes; one is rebound.
+    (children / "agent-a1.jsonl").write_text("{}\n")
+    (children / "agent-a1.meta.json").write_text('{"toolUseId": "c1"}')
+    assert inc.reference_outside_tail("claude", parent, 0, 0, carry) == "claude_subagent_children_changed"
+    (children / "agent-a1.jsonl").unlink()
+    assert inc.reference_outside_tail("claude", parent, 0, 0, carry) == ""
+    (children / "agent-a0.meta.json").write_text('{"toolUseId": "c1"}')
+    assert inc.reference_outside_tail("claude", parent, 0, 0, carry) == "claude_subagent_children_changed"
+
+    # No cell among the old turns: nothing recorded, nothing asked.
+    plain = inc.parser_carry("claude", [_turn("user", "hi"), _turn("assistant", "x")], {}, parent)
+    assert "subagent_children" not in plain
+    assert inc.parser_carry("claude", prefix, {})["subagent_ids"] == ["c0", "c1"]
+
+
+def test_a_directory_that_already_answers_differently_is_never_certified(tmp_path):
+    """The parse read the directory before the checkpoint is chosen. If a
+    cell's stored path is not what the directory says now, there is nothing
+    to certify: every tail is refused until a full import records afresh."""
+    parent = tmp_path / "parent.jsonl"
+    parent.write_text("")
+    prefix = [_turn("user", "hi"),
+              _turn("assistant", "x", cells=[_agent_cell("c0", "a0", "/gone/agent-a0.jsonl")])]
+    carry = inc.parser_carry("claude", prefix, {}, parent)
+    assert carry["subagent_children"] is None
+    assert inc.reference_outside_tail("claude", parent, 0, 0, carry) == "claude_subagent_children_changed"
