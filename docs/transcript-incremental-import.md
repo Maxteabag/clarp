@@ -114,8 +114,12 @@ it names the stored checkpoint, the parser version is the current one and
 the rows digest to the stored value. Then:
 
 - the file is exactly the one the checkpoint describes (device, inode, size,
-  mtime, complete to its last byte): nothing is imported
-  (`transcriptTailDecision code=unchanged_file`);
+  mtime, complete to its last byte) and a tail from that checkpoint would be
+  allowed: nothing is imported (`transcriptTailDecision code=unchanged_file`).
+  The second half matters. Every check a tail passes is made first, so an
+  unchanged file is imported in full when its audit is due (`full_audit`)
+  and when a sub-agent child appeared or went while the parent was idle
+  (`full_claude_subagent_children_changed`);
 - otherwise the import is a tail, under the checks below.
 
 A rewritten transcript is found by: another inode or device; a size below
@@ -134,9 +138,20 @@ last one costs a read of the whole file. It is checked:
 Otherwise a tail adds the new bytes to a running hash. What that leaves
 open: an old record rewritten in place, same length, outside every sample,
 together with an append, is imported as a tail and found at the next of the
-moments above, not at once. Whenever a check finds the imported bytes or the
-file's identity changed, one line names the file and the check
-(`transcriptPrefixChanged file=… what=…`) and the import is full.
+moments above, not at once. A Host start by itself is not one of them: after
+it an unchanged file is not read at all, and a file that was rewritten and
+then went idle keeps its old rows across any number of starts while its
+audit is not due. The bound is the audit: an unchanged file is left alone
+only until `audit_seconds` have passed since its last full import (or it has
+had `audit_every` imports); the first import after that, the first time the
+conversation is opened after a Host start for instance, is a full one that
+reads every byte. Within one process a file whose size and mtime do not
+change is not handed to the importer again, so there the next growth, touch
+or Host start is what brings the audit. A rewrite that keeps the inode, the
+size and the mtime is found the same way, by the audit. Whenever a check
+finds the imported bytes or the file's identity changed, one line names the
+file and the check (`transcriptPrefixChanged file=… what=…`) and the import
+is full.
 
 Rolling back to a 123 release: the schema guard refuses older code on the
 newer database unless the rollback is asked for. With the override, the 123

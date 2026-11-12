@@ -1313,29 +1313,15 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, dia
     reason_token = _TAIL_STATES.consume(key, revision)
     if diagnostic is not None:
         diagnostic["token"] = reason_token
+    restored = False
     if (not found or state is None) and reason in _RESTORABLE:
         # The frontier this process does not hold, as the last import that
         # published it left it in the store.
         stored, state = _stored_frontier(db.conn(), key, revision, agent_id,
                                          backend_session_id, path)
-        if stored is not None:
-            if diagnostic is not None:
-                diagnostic["imported"] = stored
-            before = identity(path)
-            if (state is not None
-                    and before == Identity(stored.device, stored.inode, stored.size, stored.mtime_ns)
-                    and stored.complete_size == before.size):
-                # The file is the one that import read, to its last byte, and
-                # the database rows it read are as they were: there is nothing
-                # to import. What the process's own record of an unchanged
-                # file says, which a Host start empties. (With other rows a
-                # full import may rewrite some, so it runs, as it always did.)
-                _TAIL_STATES.put(key, revision, state)
-                _tail_log("unchanged_file", backend=backend, size=size)
-                return {"rows": stored.turn_count, "parse_s": 0.0,
-                        "store_s": time.perf_counter() - started, "shadow": "not_sampled_tail",
-                        "apply_mode": "unchanged", "parsed_bytes": 0,
-                        "_clarp_transcript_completion_v1": "completed-unchanged"}
+        restored = state is not None
+        if stored is not None and diagnostic is not None:
+            diagnostic["imported"] = stored
     elif found and state is not None and diagnostic is not None:
         diagnostic["imported"] = state.checkpoint
     if state is None:
@@ -1355,6 +1341,28 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, dia
             if diagnostic is not None:
                 diagnostic.pop("imported", None)
         return refuse(reason)
+    if (restored and (before.size, before.mtime_ns) == (cp.size, cp.mtime_ns)
+            and cp.complete_size == before.size):
+        # The file is the one that import read, to its last byte (a
+        # checkpoint's size can be ahead of its imported bytes: the file grew
+        # during that parse), and the database rows it read are as they were:
+        # there is nothing to import. What the process's own record of an
+        # unchanged file says, which a Host start empties. (With other rows a
+        # full import may rewrite some, so it runs, as it always did.)
+        #
+        # It stands after the checks above on purpose: a file is left alone
+        # only where a tail from its checkpoint would be allowed. They have
+        # compared the device and inode; an audit that is due is a full
+        # import here too, so a file rewritten in place and then idle is read
+        # at the latest by the first import after ``audit_seconds``; and a
+        # sub-agent child that appeared or went while the parent was idle is
+        # noticed.
+        _TAIL_STATES.put(key, revision, state)
+        _tail_log("unchanged_file", backend=backend, size=size)
+        return {"rows": cp.turn_count, "parse_s": 0.0,
+                "store_s": time.perf_counter() - started, "shadow": "not_sampled_tail",
+                "apply_mode": "unchanged", "parsed_bytes": 0,
+                "_clarp_transcript_completion_v1": "completed-unchanged"}
     # Every imported byte is read again when the setting says so, when this
     # process has not read them yet (the first tail after a Host start), and
     # when the file was touched without growing. Otherwise the new bytes are

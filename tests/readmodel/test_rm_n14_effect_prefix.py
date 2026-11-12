@@ -282,6 +282,63 @@ def test_claude_subagent_prefix_is_a_tail_until_its_child_directory_answers_diff
         harness.assert_product_equal(reference, candidate)
 
 
+@pytest.mark.parametrize("change", ["a child appears", "the child goes"])
+def test_a_child_that_changed_while_the_parent_was_idle_is_noticed_after_a_host_start(
+        tmp_path, change):
+    """The directory changes, the parent's file does not, and no import runs
+    before the Host starts again. The file is unchanged, but it is not left
+    alone: the stored answer is asked again, the import is full and the old
+    cell gets what the full replay gives it. On the next start the new answer
+    is the recorded one and the file is left alone."""
+    backend = "claude"
+    reference, candidate = _clones(tmp_path, backend)
+    transcript = tmp_path / "synthetic.jsonl"
+    transcript.write_bytes(_claude_agent_turn() + b"".join(
+        harness.append_bytes(backend, i) for i in range(1, 20)))
+    child = transcript.parent / "synthetic" / "subagents" / "agent-a0.jsonl"
+    if change == "the child goes":
+        _discover_child(transcript)
+
+    def stored_paths(database):
+        with sqlite3.connect(database) as connection:
+            stored = [json.loads(cells) for (cells,) in connection.execute(
+                "SELECT display_cells_json FROM messages WHERE display_cells_json LIKE '%subagents%'")]
+        return [cell["transcript_path"] for row in stored for cell in row]
+
+    with harness.PersistentLane(reference, transcript, backend, "reference") as full:
+        with harness.PersistentLane(candidate, transcript, backend, "candidate") as before:
+            full.tick(0)
+            before.tick(0)
+            _append(transcript, harness.append_bytes(backend, 20))
+            full.tick(1)
+            assert _decision(before.tick(1))["code"] == "tail_applied"
+            harness.assert_product_equal(reference, candidate)
+        if change == "a child appears":
+            _discover_child(transcript)
+        else:
+            child.unlink()
+            child.with_name("agent-a0.meta.json").unlink()
+        expected = [str(child) if change == "a child appears" else ""]
+
+        full.tick(2)
+        assert stored_paths(reference) == expected
+        with harness.PersistentLane(candidate, transcript, backend, "candidate") as after:
+            report = after.tick(2)
+            assert _decision(report)["code"] == "full_claude_subagent_children_changed"
+            assert report["apply_mode"] == "full"
+        harness.assert_product_equal(reference, candidate)
+        assert stored_paths(candidate) == expected
+
+        full.tick(3)
+        with harness.PersistentLane(candidate, transcript, backend, "candidate") as again:
+            assert _decision(again.tick(3))["code"] == "unchanged_file"
+            harness.assert_product_equal(reference, candidate)
+            _append(transcript, harness.append_bytes(backend, 21))
+            full.tick(4)
+            assert _decision(again.tick(4))["code"] == "tail_applied"
+            harness.assert_product_equal(reference, candidate)
+
+
 def test_a_child_bound_to_another_call_refuses_the_tail(tmp_path):
     """The child transcript stays, but its meta file now names another Agent
     call: the old cell would no longer find it."""
