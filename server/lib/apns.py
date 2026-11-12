@@ -202,10 +202,15 @@ def register_token(token: str, session: str | None = None,
         # Hex input matches its stored case variants only; any other token keeps exact, binary identity.
         hex_token = _is_hex(token)
         variants = database.execute(
-            "SELECT token, principal FROM device_tokens WHERE " + ("lower(token) = ?" if hex_token else "token = ?"),
+            "SELECT token, principal, provider FROM device_tokens WHERE "
+            + ("lower(token) = ?" if hex_token else "token = ?"),
             (token,)).fetchall()
         if any((v["principal"] or "") and v["principal"] != owner_key for v in variants):
             raise TokenOwnedElsewhere(next(v["principal"] for v in variants if v["principal"]))
+        if any((v["provider"] or "apns") != provider_key for v in variants):
+            # A token belongs to one push service for good: an APNs row (an unbound legacy iPhone row
+            # included) is never turned into an FCM row or back, which would silently stop that phone's push.
+            raise InvalidDeviceToken(f"token is registered for another push provider, not {provider_key}")
         if owner_key:
             if hex_token:
                 # The same owner's own other-case rows of this token: retire them (same phone, same token).
@@ -974,10 +979,24 @@ class _Router:
             self._fcm.reset()
 
 
+def fcm_configured(cfg) -> bool:
+    """True when Android pushes can go out through FCM: a usable service
+    account file (whether Google accepts it shows at the first send)."""
+    from . import fcm
+    return fcm.configured(cfg)
+
+
+def push_enabled(cfg) -> bool:
+    """True when any push path is configured: APNs for iPhones or FCM for
+    Android phones. Lives on the push side, not on Config, so the core
+    config module never imports a feature module."""
+    return cfg.apns_enabled() or fcm_configured(cfg)
+
+
 def _transport(cfg):
     """The transport for one batch of pushes, per `cfg.apns_transport()`
     for iPhones and the FCM service account for Android phones."""
-    if not cfg.push_enabled():
+    if not push_enabled(cfg):
         raise RuntimeError("push is not configured")
     return _Router(cfg)
 
@@ -988,7 +1007,7 @@ def _deliverable(cfg, rows: list[dict]) -> list[dict]:
     registered with a Host that lost its service account is reported once."""
     apns_on = cfg.apns_enabled()
     fcm_rows = [r for r in rows if r.get("provider") == "fcm"]
-    fcm_on = bool(fcm_rows) and cfg.fcm_enabled()
+    fcm_on = bool(fcm_rows) and fcm_configured(cfg)
     if fcm_rows and not fcm_on:
         from . import fcm
         try:
@@ -1001,6 +1020,27 @@ def _deliverable(cfg, rows: list[dict]) -> list[dict]:
     # timeouts (tens of seconds at worst). It must never sit in front of an
     # iPhone's push. The sort is stable, so each group keeps its order.
     return sorted(live, key=lambda r: r.get("provider") == "fcm")
+
+
+def _send_groups(session: str, rows: list[dict]) -> list[tuple[threading.Lock, list[dict]]]:
+    """The batch's rows with the lock each group is sent under, iPhones first.
+
+    The conversation's send lock keeps two notifications of one agent in order
+    on iPhones (an older, slower APNs request must not arrive after and
+    collapse over its successor). Android rows are sent after it is released,
+    under a lock of their own: an FCM send can wait on Google through its
+    retries and timeouts (about half a minute at worst), and that wait must
+    never hold the same agent's next iPhone push. Android sends of one
+    conversation still go out in order among themselves.
+    """
+    iphones = [r for r in rows if r.get("provider") != "fcm"]
+    androids = [r for r in rows if r.get("provider") == "fcm"]
+    groups = []
+    if iphones:
+        groups.append((_send_lock(session), iphones))
+    if androids:
+        groups.append((_send_lock(f"fcm\x00{session}"), androids))
+    return groups
 
 
 def _route(row: dict, context: dict | None = None) -> dict:
@@ -1019,7 +1059,7 @@ def send_user_notification(notification: dict) -> dict:
     """
     from . import config
     cfg = config.load()
-    if not cfg.push_enabled():
+    if not push_enabled(cfg):
         return {"enabled": False, "sent": 0, "failed": 0, "disabled": 0}
 
     tokens = _deliverable(cfg, active_tokens())
@@ -1057,63 +1097,66 @@ def send_user_notification(notification: dict) -> dict:
     source_message_id = str(notification.get("source_message_id") or "")
     preview_hash = _preview_fingerprint(body)
     started = time.monotonic()
-    with _send_lock(session):
-        try:
-            transport = _transport(cfg)
-            for row in tokens:
-                # A desktop may become active while this transport waited for
-                # another send. Recheck immediately before each phone alert.
-                if desktop_presence.active():
-                    suppressed = True
-                    log("apnsUserNotificationSuppressed", "reason=desktop-active")
-                    break
-                tok = row["token"]
-                env = row.get("environment") or cfg.apns_environment
-                avatar_url, avatar_custom = _avatar_details(
-                    cfg,
-                    persona,
-                    str(notification.get("agent_id") or ""),
-                    str(row.get("base_url") or ""),
-                )
-                payload = turn_done_payload(
-                    persona,
-                    session,
-                    body,
-                    avatar_url,
-                    avatar_custom,
-                    notification_id,
-                    _server_instance_id(),
-                    bool(notification.get("needs_response")),
-                )
-                try:
-                    status, reason, apns_id = transport.send(
-                        tok, env, payload, grant=row.get("push_grant") or "",
-                        **_route(row, {
-                            "agent_id": notification.get("agent_id") or "",
-                            "badge": bool(notification.get("badge")),
-                            "unread": bool(notification.get("unread")),
-                        }))
-                except Exception as e:  # noqa: BLE001 — one bad token shouldn't abort the batch
-                    log_exception("apnsSendFail", e,
-                                  detail=f"notification={notification_id} token={tok[:12]}…")
-                    transport.reset()
-                    failed += 1
-                    continue
-                log("apnsSendResult",
-                    f"notification={notification_id} source={source_message_id} "
-                    f"preview={preview_hash} session={session} status={status} "
-                    f"via={transport.name} apns_id={apns_id or '-'} token={tok[:12]}…")
-                if status == 200:
-                    sent += 1
-                    _mark_pushed(tok)
-                elif status == 410 or reason in _DEAD_REASONS:
-                    disable_token(tok, reason or str(status))
-                    disabled += 1
-                else:
-                    failed += 1
-                    log("apnsSendReject", f"{reason or status} token={tok[:12]}…")
-        except Exception as e:  # noqa: BLE001
-            log_exception("apnsBatchFail", e, detail=f"notification={notification_id}")
+    for lock, rows in _send_groups(session, tokens):
+        if suppressed:
+            break
+        with lock:
+            try:
+                transport = _transport(cfg)
+                for row in rows:
+                    # A desktop may become active while this transport waited for
+                    # another send. Recheck immediately before each phone alert.
+                    if desktop_presence.active():
+                        suppressed = True
+                        log("apnsUserNotificationSuppressed", "reason=desktop-active")
+                        break
+                    tok = row["token"]
+                    env = row.get("environment") or cfg.apns_environment
+                    avatar_url, avatar_custom = _avatar_details(
+                        cfg,
+                        persona,
+                        str(notification.get("agent_id") or ""),
+                        str(row.get("base_url") or ""),
+                    )
+                    payload = turn_done_payload(
+                        persona,
+                        session,
+                        body,
+                        avatar_url,
+                        avatar_custom,
+                        notification_id,
+                        _server_instance_id(),
+                        bool(notification.get("needs_response")),
+                    )
+                    try:
+                        status, reason, apns_id = transport.send(
+                            tok, env, payload, grant=row.get("push_grant") or "",
+                            **_route(row, {
+                                "agent_id": notification.get("agent_id") or "",
+                                "badge": bool(notification.get("badge")),
+                                "unread": bool(notification.get("unread")),
+                            }))
+                    except Exception as e:  # noqa: BLE001 — one bad token shouldn't abort the batch
+                        log_exception("apnsSendFail", e,
+                                      detail=f"notification={notification_id} token={tok[:12]}…")
+                        transport.reset()
+                        failed += 1
+                        continue
+                    log("apnsSendResult",
+                        f"notification={notification_id} source={source_message_id} "
+                        f"preview={preview_hash} session={session} status={status} "
+                        f"via={transport.name} apns_id={apns_id or '-'} token={tok[:12]}…")
+                    if status == 200:
+                        sent += 1
+                        _mark_pushed(tok)
+                    elif status == 410 or reason in _DEAD_REASONS:
+                        disable_token(tok, reason or str(status))
+                        disabled += 1
+                    else:
+                        failed += 1
+                        log("apnsSendReject", f"{reason or status} token={tok[:12]}…")
+            except Exception as e:  # noqa: BLE001
+                log_exception("apnsBatchFail", e, detail=f"notification={notification_id}")
     log("apnsUserNotification",
         f"{persona} notification={notification_id} source={source_message_id} "
         f"preview={preview_hash} session={session} sent={sent} failed={failed} "
@@ -1165,7 +1208,7 @@ def send_background_sync(session: str, agent_id: str = "") -> dict:
     """Wake a suspended app to sync its cursors (no alert). Never raises."""
     from . import config
     cfg = config.load()
-    if not (cfg.push_enabled() and getattr(cfg, "apns_background_sync", False)):
+    if not (push_enabled(cfg) and getattr(cfg, "apns_background_sync", False)):
         return {"enabled": False, "sent": 0, "failed": 0, "disabled": 0}
     tokens = _deliverable(cfg, active_tokens())
     if not tokens:
@@ -1214,7 +1257,7 @@ def send_turn_done(session: str | None, persona: str,
     """
     from . import config, user_notifications
     cfg = config.load()
-    if not cfg.push_enabled():
+    if not push_enabled(cfg):
         return {"enabled": False, "sent": 0, "failed": 0, "disabled": 0}
 
     tokens = _deliverable(cfg, active_tokens())
@@ -1241,7 +1284,7 @@ def on_turn_done(session: str | None, persona: str,
     when no push path is configured."""
     from . import config
     try:
-        if not config.load().push_enabled():
+        if not push_enabled(config.load()):
             return
     except Exception:  # noqa: BLE001
         return
@@ -1254,7 +1297,7 @@ def on_user_notification(notification: dict) -> None:
     """Fire-and-forget push transport (APNs and FCM) for a persisted User notification."""
     from . import config
     try:
-        if not notification.get("push") or not config.load().push_enabled():
+        if not notification.get("push") or not push_enabled(config.load()):
             return
     except Exception:  # noqa: BLE001
         return
@@ -1325,7 +1368,7 @@ def send_decision_created(artifact: dict) -> dict:
     """
     from . import agents as agents_db, config, desktop_presence, quiet_agents
     cfg = config.load()
-    if not cfg.push_enabled():
+    if not push_enabled(cfg):
         return {"enabled": False, "sent": 0, "failed": 0, "disabled": 0}
     tokens = _deliverable(cfg, active_tokens())
     if not tokens:
@@ -1359,48 +1402,49 @@ def send_decision_created(artifact: dict) -> dict:
     notification_id = decision_notification_id(decision_id)
     sent = failed = disabled = 0
     started = time.monotonic()
-    with _send_lock(session):
-        try:
-            transport = _transport(cfg)
-            for row in tokens:
-                tok = row["token"]
-                env = row.get("environment") or cfg.apns_environment
-                avatar_url, avatar_custom = _avatar_details(
-                    cfg, persona, agent_id, str(row.get("base_url") or ""))
-                payload = decision_payload(
-                    persona, session, title, question,
-                    decision_id=decision_id, artifact_id=artifact_id,
-                    time_sensitive=time_sensitive,
-                    text_input=decision.get("response_type") == "text_input",
-                    revision=int(decision.get("revision") or 1),
-                    expires_at=decision.get("expires_at"),
-                    avatar_url=avatar_url, avatar_custom=avatar_custom,
-                    server_instance_id=_server_instance_id())
-                try:
-                    status, reason, apns_id = transport.send(
-                        tok, env, payload, grant=row.get("push_grant") or "",
-                        **_route(row, {"agent_id": agent_id}))
-                except Exception as e:  # noqa: BLE001 — one bad token shouldn't abort the batch
-                    log_exception("apnsSendFail", e,
-                                  detail=f"notification={notification_id} token={tok[:12]}…")
-                    transport.reset()
-                    failed += 1
-                    continue
-                log("apnsSendResult",
-                    f"notification={notification_id} decision={decision_id} "
-                    f"session={session} status={status} via={transport.name} "
-                    f"apns_id={apns_id or '-'} token={tok[:12]}…")
-                if status == 200:
-                    sent += 1
-                    _mark_pushed(tok)
-                elif status == 410 or reason in _DEAD_REASONS:
-                    disable_token(tok, reason or str(status))
-                    disabled += 1
-                else:
-                    failed += 1
-                    log("apnsSendReject", f"{reason or status} token={tok[:12]}…")
-        except Exception as e:  # noqa: BLE001
-            log_exception("apnsBatchFail", e, detail=f"notification={notification_id}")
+    for lock, rows in _send_groups(session, tokens):
+        with lock:
+            try:
+                transport = _transport(cfg)
+                for row in rows:
+                    tok = row["token"]
+                    env = row.get("environment") or cfg.apns_environment
+                    avatar_url, avatar_custom = _avatar_details(
+                        cfg, persona, agent_id, str(row.get("base_url") or ""))
+                    payload = decision_payload(
+                        persona, session, title, question,
+                        decision_id=decision_id, artifact_id=artifact_id,
+                        time_sensitive=time_sensitive,
+                        text_input=decision.get("response_type") == "text_input",
+                        revision=int(decision.get("revision") or 1),
+                        expires_at=decision.get("expires_at"),
+                        avatar_url=avatar_url, avatar_custom=avatar_custom,
+                        server_instance_id=_server_instance_id())
+                    try:
+                        status, reason, apns_id = transport.send(
+                            tok, env, payload, grant=row.get("push_grant") or "",
+                            **_route(row, {"agent_id": agent_id}))
+                    except Exception as e:  # noqa: BLE001 — one bad token shouldn't abort the batch
+                        log_exception("apnsSendFail", e,
+                                      detail=f"notification={notification_id} token={tok[:12]}…")
+                        transport.reset()
+                        failed += 1
+                        continue
+                    log("apnsSendResult",
+                        f"notification={notification_id} decision={decision_id} "
+                        f"session={session} status={status} via={transport.name} "
+                        f"apns_id={apns_id or '-'} token={tok[:12]}…")
+                    if status == 200:
+                        sent += 1
+                        _mark_pushed(tok)
+                    elif status == 410 or reason in _DEAD_REASONS:
+                        disable_token(tok, reason or str(status))
+                        disabled += 1
+                    else:
+                        failed += 1
+                        log("apnsSendReject", f"{reason or status} token={tok[:12]}…")
+            except Exception as e:  # noqa: BLE001
+                log_exception("apnsBatchFail", e, detail=f"notification={notification_id}")
     log("apnsDecisionCreated",
         f"{persona} decision={decision_id} session={session} "
         f"time_sensitive={int(time_sensitive)} sent={sent} failed={failed} "
@@ -1413,7 +1457,7 @@ def on_decision_created(artifact: dict) -> None:
     no push path is configured; never blocks or fails the creating request."""
     from . import config
     try:
-        if not config.load().push_enabled():
+        if not push_enabled(config.load()):
             return
     except Exception:  # noqa: BLE001
         return
@@ -1843,7 +1887,7 @@ def send_agent_ring(ring: dict, kind: str, exclude_owners=None) -> dict:
     """
     from . import config
     cfg = config.load()
-    if not cfg.push_enabled():
+    if not push_enabled(cfg):
         return {"enabled": False, "sent": 0, "failed": 0, "disabled": 0}
     from . import agent_rings
     tokens = _deliverable(cfg, ring_alert_tokens(exclude_owners))

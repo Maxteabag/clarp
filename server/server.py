@@ -3319,6 +3319,9 @@ def build_server(ctx: ServerContext, port: int,
     """
     _configure_runtime_client(ctx)
     _seed_startup_invariants(ctx)
+    # /server-info offers Android push only while a service account is usable.
+    from lib import apns, config as config_module, server_identity
+    server_identity.set_fcm_probe(lambda: apns.fcm_configured(config_module.load()))
     if herald is not None:
         ctx.install_herald(herald)
     from lib import oracle_handoffs

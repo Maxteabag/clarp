@@ -81,6 +81,7 @@ ALLOWED: dict[tuple[str, str], str] = {
     ("lib/runtime_attestation.py", "_GATE"): THROTTLE,
     ("lib/live_core.py", "_HUB"): CLIENT,
     ("lib/server_identity.py", "_live_probe"): CLIENT,
+    ("lib/server_identity.py", "_fcm_probe"): CLIENT,
     ("lib/static_assets.py", "_hashes"): CACHE,
     ("lib/transcript_import_cache.py", "_last_started"): THROTTLE,
     ("lib/transcript_import_cache.py", "_deferred"): THROTTLE,

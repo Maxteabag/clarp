@@ -180,8 +180,8 @@ def _rows():
 # --------------------------------------------------------------------------
 def test_service_account_path_comes_from_the_fcm_section(fcm_host, tmp_path):
     assert fcm_host.fcm_service_account_file() == str(tmp_path / "fcm-service-account.json")
-    assert fcm_host.fcm_enabled() is True
-    assert fcm_host.push_enabled() is True          # APNs is off; FCM alone is a push path
+    assert fcm.configured(fcm_host) is True
+    assert apns.push_enabled(fcm_host) is True          # APNs is off; FCM alone is a push path
     assert fcm.load_service_account(fcm_host.fcm_service_account_file()).project_id == PROJECT
 
 
@@ -193,19 +193,22 @@ def test_a_missing_or_wrong_service_account_is_not_configured(tmp_path, content)
     if content is not None:
         path.write_text(content)
     cfg = _config(tmp_path, path)
-    assert cfg.fcm_enabled() is False
+    assert fcm.configured(cfg) is False
     with pytest.raises(fcm.ServiceAccountError):
         fcm.load_service_account(str(path))
 
 
 def test_no_fcm_section_means_no_fcm(tmp_path):
     cfg = _config(tmp_path)
-    assert cfg.fcm_service_account_file() == "" and cfg.fcm_enabled() is False
-    assert cfg.push_enabled() is False
+    assert cfg.fcm_service_account_file() == "" and fcm.configured(cfg) is False
+    assert apns.push_enabled(cfg) is False
 
 
-def test_push_fcm_is_advertised_only_with_a_service_account(tmp_path, rsa_key):
+def test_push_fcm_is_advertised_only_with_a_service_account(tmp_path, rsa_key, monkeypatch):
     from lib import server_identity
+    # build_server installs this probe; here it is installed by hand.
+    monkeypatch.setattr(server_identity, "_fcm_probe",
+                        lambda: apns.fcm_configured(config.load()))
     _config(tmp_path)
     info = server_identity.get_server_info()
     assert "push_fcm" not in info["capabilities"]["features"]
@@ -527,21 +530,25 @@ def test_a_service_account_removed_after_registration_is_logged_once(tmp_path, r
 # --------------------------------------------------------------------------
 # one decision, two transports
 # --------------------------------------------------------------------------
-def test_a_mixed_batch_sends_apns_to_the_iphone_and_fcm_to_the_android(tmp_path, rsa_key, google):
+def _mixed_host(tmp_path, rsa_key):
+    """A Host with both paths: a direct APNs key and an FCM service account."""
     from cryptography.hazmat.primitives import serialization
     from cryptography.hazmat.primitives.asymmetric import ec
     p8 = tmp_path / "AuthKey_TEST.p8"
     p8.write_text(ec.generate_private_key(ec.SECP256R1()).private_bytes(
         serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
         serialization.NoEncryption()).decode())
-    _config(tmp_path, _service_account(tmp_path, rsa_key[1]), apns_mode="direct",
-            extra=f'')
+    _config(tmp_path, _service_account(tmp_path, rsa_key[1]), apns_mode="direct")
     cfgfile = tmp_path / "config.toml"
     cfgfile.write_text(cfgfile.read_text().replace(
         'mode = "direct"\n',
         f'mode = "direct"\nkey_path = "{p8}"\nkey_id = "K"\nteam_id = "T"\n'))
     config.reset_cache()
-    config.load(cfgfile)
+    return config.load(cfgfile)
+
+
+def test_a_mixed_batch_sends_apns_to_the_iphone_and_fcm_to_the_android(tmp_path, rsa_key, google):
+    _mixed_host(tmp_path, rsa_key)
     apns.register_token(IPHONE, session="mike")
     _register_android()
     summary = apns.send_user_notification(_notification())
@@ -599,14 +606,17 @@ class _PushCfg:
     def apns_enabled(self) -> bool:
         return self._apns_on
 
-    def fcm_enabled(self) -> bool:
-        return self._fcm_on
-
     def fcm_service_account_file(self) -> str:
         return ""
 
 
-def test_iphones_are_sent_before_android_phones_in_one_batch():
+@pytest.fixture(autouse=False)
+def fake_fcm_switch(monkeypatch):
+    """apns asks fcm_configured(cfg); a _PushCfg answers it directly."""
+    monkeypatch.setattr(apns, "fcm_configured", lambda cfg: cfg._fcm_on)
+
+
+def test_iphones_are_sent_before_android_phones_in_one_batch(fake_fcm_switch):
     # An Android send can wait on Google through its retries; it must not
     # hold up an iPhone's push that happens to sit after it in the table.
     rows = [
@@ -619,7 +629,7 @@ def test_iphones_are_sent_before_android_phones_in_one_batch():
     assert order == ["iphone-1", "iphone-2", "android-1", "android-2"]
 
 
-def test_android_rows_never_change_which_iphones_get_a_push(monkeypatch):
+def test_android_rows_never_change_which_iphones_get_a_push(monkeypatch, fake_fcm_switch):
     rows = [
         {"token": "android-1", "provider": "fcm"},
         {"token": "iphone-1", "provider": "apns"},
@@ -629,3 +639,145 @@ def test_android_rows_never_change_which_iphones_get_a_push(monkeypatch):
     assert [r["token"] for r in apns._deliverable(_PushCfg(True, False), rows)] == ["iphone-1"]
     # APNs off, FCM on: the reverse, and nothing raises.
     assert [r["token"] for r in apns._deliverable(_PushCfg(False, True), rows)] == ["android-1"]
+
+
+# --------------------------------------------------------------------------
+# review findings of 12 Nov (review-fcm.md)
+# --------------------------------------------------------------------------
+class _SlowGoogle(Google):
+    """Google that holds every FCM send until released."""
+
+    def __init__(self):
+        super().__init__()
+        import threading
+        self.fcm_started = threading.Event()
+        self.release = threading.Event()
+
+    def post(self, url, headers=None, content=None, data=None, json=None):
+        if url == SEND:
+            self.fcm_started.set()
+            assert self.release.wait(10), "the test never released Google"
+        return super().post(url, headers=headers, content=content, data=data, json=json)
+
+
+def test_a_slow_google_never_holds_the_same_agents_next_iphone_push(tmp_path, rsa_key, monkeypatch):
+    """Finding 1: Android rows are sent outside the conversation's iPhone send lock."""
+    import threading
+    import time as clock
+    import httpx
+    slow = _SlowGoogle()
+    monkeypatch.setattr(httpx, "Client", slow.client)
+    _mixed_host(tmp_path, rsa_key)
+    apns.register_token(IPHONE, session="mike")
+    _register_android()
+    first = threading.Thread(target=apns.send_user_notification,
+                             args=(_notification(notification_id="pn-first"),), daemon=True)
+    first.start()
+    assert slow.fcm_started.wait(5)                        # batch 1 now waits on Google
+    second = threading.Thread(target=apns.send_user_notification,
+                              args=(_notification(notification_id="pn-second"),), daemon=True)
+    second.start()
+    deadline = clock.monotonic() + 5
+    while len(slow.apns_calls) < 2 and clock.monotonic() < deadline:
+        clock.sleep(0.01)
+    # The second notification reached the iPhone while Google still held the first.
+    assert len(slow.apns_calls) == 2 and not slow.release.is_set()
+    ids = [json.loads(c["content"])["notification_id"] for c in slow.apns_calls]
+    assert ids == ["pn-first", "pn-second"]
+    slow.release.set()
+    first.join(10)
+    second.join(10)
+    assert not first.is_alive() and not second.is_alive()
+    # Android sends of one conversation stay in order among themselves.
+    assert [c["json"]["message"]["data"]["notification_id"] for c in slow.send_calls] == [
+        "pn-first", "pn-second"]
+
+
+def test_a_decision_also_sends_android_outside_the_iphone_lock(monkeypatch):
+    seen = []
+    real = apns._send_lock
+    monkeypatch.setattr(apns, "_send_lock", lambda key: seen.append(key) or real(key))
+    groups = apns._send_groups("mike", [{"token": "a", "provider": "fcm"}, {"token": "i"}])
+    assert [[r["token"] for r in rows] for _, rows in groups] == [["i"], ["a"]]
+    assert seen == ["mike", "fcm\x00mike"]
+    assert apns._send_groups("mike", [{"token": "i", "provider": "apns"}])[0][1] == [
+        {"token": "i", "provider": "apns"}]
+
+
+def test_an_unbound_iphone_row_is_never_turned_into_an_android_row():
+    """Finding 4: the provider of an existing token never changes."""
+    legacy = "Gx" * 40                                     # FCM-shaped (not hex), stored as an APNs row
+    apns.register_token(legacy, session="mike", platform="mac")
+    with pytest.raises(apns.InvalidDeviceToken):
+        _register_android(legacy, owner="device_a")
+    row = _rows()[legacy]
+    assert (row["platform"], row["provider"], row["principal"], row["disabled_at"]) == (
+        "mac", "apns", "", None)
+
+
+def test_an_android_token_is_never_turned_into_an_apns_row():
+    _register_android()
+    with pytest.raises(apns.InvalidDeviceToken):
+        apns.register_token(ANDROID, session="mike", platform="mac")
+    assert _rows()[ANDROID]["provider"] == "fcm"
+
+
+def test_rotation_retires_only_rows_of_the_same_provider():
+    """Finding 5: a device's FCM rotation never disables its row of another provider."""
+    apns.register_token(IPHONE, session="mike", platform="android", provider="apns", owner="device_a")
+    _register_android(owner="device_a")
+    rows = _rows()
+    assert rows[IPHONE]["disabled_at"] is None and rows[ANDROID]["disabled_at"] is None
+    _register_android(ANDROID_2, owner="device_a")
+    rows = _rows()
+    assert rows[ANDROID]["disabled_at"] is not None
+    assert rows[IPHONE]["disabled_at"] is None and rows[ANDROID_2]["disabled_at"] is None
+
+
+def test_the_google_client_has_a_ten_second_timeout(monkeypatch):
+    """Finding 5: the HTTP timeout is what bounds an Android send (finding 1)."""
+    import httpx
+    made = []
+
+    class Recorder:
+        def __init__(self, *a, **k):
+            made.append(k)
+
+        def close(self):
+            pass
+    monkeypatch.setattr(httpx, "Client", Recorder)
+    fcm._reset_client()
+    fcm.http_client()
+    assert made == [{"timeout": 10.0}]
+    assert fcm._TIMEOUT_SEC == 10.0 and fcm._MAX_ATTEMPTS == 3
+
+
+def test_a_token_google_calls_malformed_is_disabled(fcm_host, google):
+    """Finding 7 of the review: a 400 about the registration token is a dead token."""
+    _register_android()
+    google.sends = [_fcm_error(400, "INVALID_ARGUMENT", "INVALID_ARGUMENT",
+                               "The registration token is not a valid FCM registration token")]
+    assert apns.send_user_notification(_notification())["disabled"] == 1
+    assert _rows()[ANDROID]["disabled_at"] is not None
+
+
+def test_any_other_400_is_a_failure_and_keeps_the_token(fcm_host, google, sleeps):
+    _register_android()
+    google.sends = [_fcm_error(400, "INVALID_ARGUMENT", "INVALID_ARGUMENT",
+                               "Invalid value at 'message.data[0].value'")]
+    assert apns.send_user_notification(_notification())["failed"] == 1
+    assert _rows()[ANDROID]["disabled_at"] is None and sleeps == []
+
+
+def test_config_does_not_import_the_push_side():
+    """Finding 2: lib.config (core) never imports lib.fcm (a feature)."""
+    import inspect
+    source = inspect.getsource(config)
+    assert "import fcm" not in source and "fcm_enabled" not in source and "push_enabled" not in source
+
+
+def test_without_the_probe_push_fcm_is_never_advertised(fcm_host, monkeypatch):
+    """A process that did not build the server (a script, clarp-admin) does not claim push_fcm."""
+    from lib import server_identity
+    monkeypatch.setattr(server_identity, "_fcm_probe", None)
+    assert "push_fcm" not in server_identity.get_server_info()["capabilities"]["features"]
