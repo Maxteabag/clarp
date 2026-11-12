@@ -84,9 +84,10 @@ refers to nothing before it.
 ## The frontier (schema 124)
 
 A tail import needs more than the checkpoint: the digest of every imported
-byte of the file, and the database rows the import read (every message row
-of the agent, its turn rows, the session's `/send` rows, the latest user
-row, its Oracle rows). Until schema 124 both lived in the Host's memory, so
+byte of the file, and the database rows the import read (the session's
+message rows, or with `carry_session_rows` off every message row of the
+agent; the agent's turn rows; the session's `/send` rows; the latest user
+row; the agent's Oracle rows). Until schema 124 both lived in the Host's memory, so
 every Host start made the first import of every conversation a full one, of
 a file that had not changed.
 
@@ -103,6 +104,53 @@ import of it was a full one from its first heartbeat on. The reference lane
 after every tick for each of those origins: the prompt and its reply arriving
 by tail, the same words sent again, an automation that was sent and never
 ran, a heartbeat accounted once, and a Host start.
+
+### Which rows a tail may find changed
+
+A tail leaves the turns before its boundary alone. That equals a full
+replay only while a full replay would leave them alone too and reach the
+boundary with the same carried state, so a tail is refused
+(`full_carry_inputs_changed`) when a row those turns could read has changed
+since the frontier was published. Until November 2026 "could read" was every
+row above, identical; during a running turn about every second import was a
+full one. `lib/message_carry.py` names three kinds of row the old turns
+cannot read. Each is a switch in `[transcript_shadow]`, on by default; off,
+that kind of change is a full import again.
+
+- `carry_session_rows`: message rows of the agent's other sessions. The
+  replay of one transcript reads message rows by this session, by a row id of
+  this session, or by the trace of a row it has just changed. The turn rows
+  stay agent-wide.
+- `carry_later_turns`: turn rows that began more than two seconds after the
+  last turn before the boundary (a turn counts as running from two seconds
+  before it began), unless the turn's trace is on a row the session already
+  held: a reply's trace and its tools' final status go by that. The
+  checkpoint's store carry records the time (`prefix_latest_ms`).
+- `carry_new_sends`: a new `/send` row whose words no turn before the
+  boundary said, by the linker's own key: the text of every old turn stored
+  as a transcript row and of every `/send` row an old turn was linked to. A
+  row that begins with the delivery notice always counts as said (it decides
+  whether an old copy keeps its notice). The latest user row changes with
+  such a row; it counts only when replies before the boundary read it (a
+  transcript that opens with a call opening), which the store carry records
+  (`initial_provenance_used`).
+
+What stays a full import on purpose: any other change to a row of this
+session (a streamed reply's live row, a finalized row, a turn's rows
+re-stamped when it settles), a new `/send` row with words said before (every
+heartbeat, once), and the Oracle rows. A refusal logs which rows stood in the
+way, as fixed words: `transcriptCarryInputsChanged what=row_live,turn_of_old_row`
+(`row_send`, `row_live`, `row_final`, `row_transcript`, `row_other`,
+`row_other_session`, `send_said_before`, `turn_rows`, `turn_before_boundary`,
+`turn_of_old_row`, `latest_user_row`, `oracle_rows`). The rules apply within
+one process, where the rows the frontier was published with are held; a
+frontier taken from the store after a Host start holds only when the digest
+of the rows is unchanged.
+
+`tests/readmodel/test_rm_n14_carry.py` runs every rule in pairs: the change
+it lets through is a tail and equals the full replay; its nearest harmful
+twin is a full import and equals it too, and imported as a tail leaves
+different rows.
 
 A process that holds no frontier for a file takes the stored one when it
 never had one (a Host start), lost it to the cache's size limit, or the last

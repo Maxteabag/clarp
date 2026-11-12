@@ -282,3 +282,10 @@ muse_effort            = ""   # none | minimal | low | medium | high | xhigh | m
 # audit_unchanged_by_digest = true  # an unchanged file whose audit is due (after a Host
 #                                   # start) has its bytes read once and compared with the
 #                                   # stored digest. false: it is imported in full.
+# What a tail import may find changed among the database rows its frontier was
+# published with (lib/message_carry.py gives each rule's reason). false: such a
+# change is a full import, as before the rule existed.
+# carry_session_rows = true         # message rows of the agent's other sessions
+# carry_later_turns = true          # turn rows that began after the turns before the
+#                                   # tail's boundary (two seconds of slack)
+# carry_new_sends = true            # a new /send row whose words were not said before
