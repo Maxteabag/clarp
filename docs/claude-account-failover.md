@@ -74,39 +74,47 @@ validates stdin without switching accounts or making provider requests.
   when no turn of the pool is running, a recovery begins for the parked ones
   and the selector is asked. A working turn that meets its own limit starts a
   recovery as usual, and that one asks for the parked turns' models too.
-- A turn that fails on its account within two minutes of being resumed by a
-  recovery (`RESUME_GRACE_SECONDS`) has not left its park; what happens next
-  depends on the failure.
-  - A plan failure ends the turn with the provider's sentence. The selector
-    said an account offers the model and it does not; asking again stopped and
-    resumed every turn of the pool, round after round (2026-11-11: 146 rounds
-    in three and a half hours, started by two helpers whose model id no account
-    offered).
-  - A usage limit or a failed sign-in goes back into the park, and nothing
-    ends early. A selector can pick an account with a sliver left, and
-    waiting does help (the same day, 14:28 to 15:01: resumed twice onto such
-    accounts, parked again each time, working once the windows reset). The
-    recovery is not started again. The park's clock keeps counting: the
-    30-minute cap counts from the turn's first park and stays the one place
-    that gives up for usage, per turn. The selector is asked at the park's
-    next recheck (`RECHECK_SECONDS` after the turn fell back), not at once.
-    And the turn is not told a second time (next point). A turn that worked
-    for two minutes or more after its resume has left the park; its next
-    limit begins a new one (that afternoon's shortest real gap was 145 s).
-  - A turn whose park is 30 minutes old when it would go back into it is not
-    parked again, by its own failure or by another turn's recovery: it runs
-    on and its next account failure ends it visibly.
-- The selector is not asked again until `RECHECK_SECONDS` after its previous
-  answer, whatever that answer was and whoever asks. Turns are restarted only
-  by an answer, so no sequence of answers restarts turns more often than once
-  a minute.
-- One recovery message for each park. It is built from the original request,
-  never one wrapped inside another. A turn resumed again inside the same park
-  already has it in its conversation, so that resume carries one line
-  (`SAME_PARK_RESUME_TEXT`: carry on, nothing new is asked) in the same
-  envelope, without the message and without the request. A resume needs a
-  prompt, so it cannot carry nothing. If the resumed process was stopped
-  before it started its session, the message never arrived and is sent again.
+- A relapse is an account failure of a turn of the pool less than ten minutes
+  (`QUIET_SECONDS`) after the pool's last recovery resumed its turns: the
+  selector said an account was available and it was not, or not for long.
+  - A plan failure of a turn that recovery resumed ends the turn at once with
+    the provider's sentence. Asking again stopped and resumed every turn of
+    the pool, round after round (2026-11-11: 146 rounds in three and a half
+    hours, started by two helpers whose model id no account offered).
+  - A usage limit or a failed sign-in starts the next recovery, because
+    waiting can help: a selector can pick an account with a sliver left (the
+    same day, 14:28 to 15:01: resumed twice onto such accounts, parked again
+    each time, working once the windows reset). But the pool counts the
+    recoveries a relapse followed. The selector's next run waits 60, 120, 240
+    and then 480 seconds after the relapse. At the fifth relapse in a row
+    (`MAX_RELAPSES`) a turn that a recovery resumed in the last ten minutes
+    ends visibly with the provider's message, whatever the gap between its
+    resume and its relapse was; the turns that run on are not stopped for it.
+    A turn that was never resumed still gets its recovery, eight minutes
+    later, and ends at its own relapse. The count starts again once the pool
+    has run ten minutes after a recovery without an account failure.
+  - What this does not bound: a turn that relapses more than ten minutes
+    after each resume is recovered every time, as before; and five accounts
+    in a row that each have only a sliver left end the relapsing turns
+    instead of leaving them to wait for the reset.
+- The wait is bounded per park, as it always was: 30 minutes
+  (`MAX_PARK_SECONDS`) from the park's start, and a relapse begins a new
+  park. Only a turn that stayed parked while the pool worked (above) keeps
+  its clock through the recoveries that follow.
+- One recovery message for each run of relapses. It is built from the
+  original request, never one wrapped inside another. A turn resumed again
+  after a relapse already has it in its conversation, so that resume carries
+  one line (`RELAPSE_RESUME_TEXT`: carry on, check interrupted operations,
+  nothing new is asked) in the same envelope, without the message and without
+  the request. A resume needs a prompt, so it cannot carry nothing. If the
+  resumed process was stopped before it started its session, the message
+  never arrived and is sent again. A limit met after ten quiet minutes is a
+  new recovery and gets the full message.
+- Turns Clarp does not dispatch are invisible to the coordinator. A Codex
+  goal continuation on the shared app-server is not registered with it, so
+  "no other turn of the pool is running" can be true while one runs, and a
+  recovery (a plan recovery included) can switch accounts under it. This was
+  so before these rules and is not changed by them.
 - One recovery coordinates all Claude turns owned by the runtime. New turns wait
   behind the recovery barrier; queued follow-ups retain their order. Other
   providers, completed agents, and idle agents receive no continuation.

@@ -31,7 +31,7 @@ import pytest
 from lib import account_failover
 from lib import agents as agents_db
 from lib.account_failover import (
-    MAX_PARK_SECONDS, RECHECK_SECONDS, RESUME_GRACE_SECONDS, AccountFailover, Attempt)
+    MAX_PARK_SECONDS, MAX_RELAPSES, QUIET_SECONDS, RECHECK_SECONDS, AccountFailover, Attempt)
 from lib.protocol import AgentState
 import lib.turn_dispatch as _td
 from lib.turn_dispatch import TurnDispatchService
@@ -601,181 +601,152 @@ def test_a_plan_failure_alone_right_after_its_recovery_ends_instead_of_looping(
 AFTERNOON = ["fable", "fable", "sonnet"]
 
 
-def _into_the_same_park(fleet):
-    """laptopstudio, 11 Nov 14:28 to 14:35: the account runs out, the selector
-    picks one with a sliver left, the resumed turns meet the limit again 90
-    seconds later, and now no account has usage."""
-    start = fleet.clock[0]
-    fleet.spawns(0)[-1]["on_error"](USAGE_LIMIT)
-    fleet.run_scheduled()
-    assert [len(fleet.spawns(index)) for index in range(3)] == [2, 2, 2]
-    fleet.clock[0] += 90
-    fleet.no_account_offers("fable", "sonnet")
-    fleet.spawns(0)[-1]["on_error"](USAGE_LIMIT)
-    fleet.run_scheduled()
-    assert fleet.coordinator.recovering
-    # Parked again, not ended: and it is the same park, begun at the start.
-    assert [fleet.state(index)["detail"].get("account_recovery") for index in range(3)] == [
-        "waiting"] * 3
-    assert [fleet.coordinator.first_parked[fleet.key(index)] for index in range(3)] == [start] * 3
-    return start
+SIGN_IN = "OAuth session expired; please run /login"
 
 
 @pytest.mark.parametrize("backend", BACKENDS)
-@pytest.mark.parametrize("failure", [USAGE_LIMIT, "OAuth session expired; please run /login"],
-                         ids=["usage-limit", "sign-in"])
-def test_the_afternoon_park_resume_park_resume_ends_with_the_turns_working(
+@pytest.mark.parametrize("failure", [USAGE_LIMIT, SIGN_IN], ids=["usage-limit", "sign-in"])
+def test_a_relapse_is_waited_out_and_the_turns_end_working(
         tmp_path, monkeypatch, backend, failure):
-    """A usage limit or a failed sign-in right after a resume is not the
-    evening's loop: waiting does help. The turns go back into their park and
-    work again when an account has usage."""
+    """A usage limit or a failed sign-in soon after a resume is not the
+    evening's loop: waiting does help. The turns are parked again and work
+    when an account has usage."""
     fleet = Fleet(tmp_path, monkeypatch, backend, AFTERNOON, unserved=())
     start = fleet.clock[0]
-    fleet.spawns(0)[-1]["on_error"](USAGE_LIMIT)
-    fleet.run_scheduled()
-    fleet.clock[0] += 90
+    fleet.limit(0)
+    fleet.run_until(start)
+    fleet.run_until(start + 90)
     fleet.no_account_offers("fable", "sonnet")
-    fleet.spawns(0)[-1]["on_error"](failure)            # within two minutes of its resume
-    fleet.run_scheduled()
-    assert fleet.coordinator.first_parked[fleet.key(0)] == start
+    fleet.limit(0, failure)
+    assert fleet.coordinator.relapses == 1
 
-    for _ in range(20):                                 # twenty minutes without an account
-        fleet.run_scheduled(advance=RECHECK_SECONDS + 1)
-        assert [fleet.state(index)["kind"] for index in range(3)] == [AgentState.THINKING] * 3
+    moment = start + 90
+    while moment < start + 90 + 20 * 60:                # twenty minutes without an account
+        moment += 30
+        fleet.run_until(moment)
+        assert fleet.kinds() == [AgentState.THINKING] * 3 and fleet.waiting() == ["waiting"] * 3
     assert [len(fleet.spawns(index)) for index in range(3)] == [2, 2, 2]
 
     fleet.no_account_offers()                           # the windows reset
-    fleet.run_scheduled(advance=RECHECK_SECONDS + 1)
+    fleet.run_until(moment + RECHECK_SECONDS)
 
-    assert not fleet.coordinator.recovering
-    assert [len(fleet.spawns(index)) for index in range(3)] == [3, 3, 3]
-    assert [fleet.state(index)["kind"] for index in range(3)] == [AgentState.THINKING] * 3
-    assert [fleet.state(index)["detail"].get("account_recovery") for index in range(3)] == [
-        None] * 3
-    for index in range(3):
-        fleet.spawns(index)[-1]["on_result"]({"duration_ms": 5})
-    assert [fleet.state(index)["kind"] for index in range(3)] == [AgentState.DONE] * 3
-
-
-def _at(clock):
-    hours, minutes, seconds = (int(part) for part in clock.split(":"))
-    return float(hours * 3600 + minutes * 60 + seconds)
-
-
-@pytest.mark.parametrize("backend", BACKENDS)
-def test_the_afternoon_with_its_real_timings_ends_with_the_turns_working(
-        tmp_path, monkeypatch, backend):
-    """laptopstudio, 11 Nov. Parked 14:28:30; the selector took 16 s and
-    resumed the turns on an account with a sliver left. The limit again 145 s
-    later (the shortest real gap), and on the next account 60 s later. Then no
-    account had usage until the window reset, and at 15:01 the turns resumed
-    and worked.
-
-    145 s is past the two minutes, so that limit begins a new park and the
-    selector is asked at once. 60 s is inside them: the same park goes on, the
-    selector waits for its recheck, and the turns are told nothing new."""
-    fleet = Fleet(tmp_path, monkeypatch, backend, AFTERNOON, unserved=())
-    everyone = range(3)
-    fleet.clock[0] = _at("14:28:30")
-    fleet.selector_seconds = 16
-    fleet.limit(0)
-    fleet.run_until(_at("14:28:46"))
-    assert [fleet.starts(index)[1:] for index in everyone] == [[_at("14:28:46")]] * 3
-    fleet.sessions_started()
-
-    fleet.run_until(_at("14:31:11"))                    # 145 s of work
-    fleet.selector_seconds = 11
-    fleet.limit(0)
-    fleet.run_until(_at("14:31:22"))
-    assert fleet.asked_at == [_at("14:28:30"), _at("14:31:11")]       # asked at once
-    assert [fleet.starts(index)[2:] for index in everyone] == [[_at("14:31:22")]] * 3
-    assert [fleet.coordinator.first_parked[fleet.key(index)] for index in everyone] == [
-        _at("14:31:11")] * 3                            # a new park, with its own half hour
-    fleet.sessions_started()
-
-    fleet.run_until(_at("14:32:22"))                    # 60 s, and now no account has usage
-    fleet.no_account_offers("fable", "sonnet")
-    fleet.selector_seconds = 0
-    fleet.limit(0)
-    fleet.run_until(_at("14:32:23"))
-    assert len(fleet.asked_at) == 2, "the selector was asked at once, not on its recheck"
-    assert fleet.waiting() == ["waiting"] * 3
-    assert [fleet.coordinator.first_parked[fleet.key(index)] for index in everyone] == [
-        _at("14:31:11")] * 3                            # the same park goes on
-
-    moment = _at("14:32:23")
-    while moment < _at("15:01:02"):                     # twenty-eight minutes without an account
-        moment = min(moment + 20, _at("15:01:02"))
-        fleet.run_until(moment)
-        assert fleet.kinds() == [AgentState.THINKING] * 3, f"ended early at {moment}"
-        assert fleet.waiting() == ["waiting"] * 3
-        assert [len(fleet.spawns(index)) for index in everyone] == [3, 3, 3]
-    checks = fleet.asked_at[2:]
-    assert checks[0] == _at("14:33:22")                 # the recheck, a minute after the limit
-    assert {later - earlier for earlier, later in zip(checks, checks[1:])} == {RECHECK_SECONDS}
-
-    fleet.no_account_offers()                           # the window reset
-    fleet.run_until(_at("15:01:30"))
-
-    # This park's half hour was up at 15:01:11. The check at 15:01:22 found an
-    # account, so the turns were resumed to work, not released to fail.
-    assert [fleet.starts(index)[3:] for index in everyone] == [[_at("15:01:22")]] * 3
     assert not fleet.coordinator.recovering and fleet.scheduled == []
+    assert [len(fleet.spawns(index)) for index in range(3)] == [3, 3, 3]
     assert fleet.kinds() == [AgentState.THINKING] * 3 and fleet.waiting() == [None] * 3
-    for index in everyone:
-        first, second, third, fourth = [call["text"] for call in fleet.spawns(index)]
-        # One recovery message for each park, and none for the park going on.
-        assert [text.count("Clarp recovered from") for text in (first, second, third, fourth)] == [
-            0, 1, 1, 0]
-        assert third == second
-        assert fourth.count("<clarp-account-recovery>") == 1
-        assert f"work of agent-{index}" not in fourth and "Original request" not in fourth
-        assert len(fourth) < 250
-    fleet.sessions_started()
-    for index in everyone:
+    for index in range(3):
         fleet.spawns(index)[-1]["on_result"]({"duration_ms": 5})
     assert fleet.kinds() == [AgentState.DONE] * 3
 
 
-@pytest.mark.parametrize("backend", BACKENDS)
-@pytest.mark.parametrize("failure", [USAGE_LIMIT, "OAuth session expired; please run /login"],
-                         ids=["usage-limit", "sign-in"])
-def test_the_worst_case_ends_at_the_cap_and_never_restarts_faster_than_the_recheck(
-        tmp_path, monkeypatch, backend, failure):
-    """The selector always says an account has usage and the account always
-    fails 25 s after the resume (the evening's pace). The turn goes back into
-    the same park each time, is restarted no more often than the recheck, is
-    told once, and half an hour after its first park it fails visibly."""
-    fleet = Fleet(tmp_path, monkeypatch, backend, ["sonnet"], unserved=())
+def _journal(clock):
+    hours, minutes, seconds = (int(part) for part in clock.split(":"))
+    return float(hours * 3600 + minutes * 60 + seconds)
+
+
+@pytest.mark.parametrize("relapse, backend, failure", [
+    *[(relapse, "claude", USAGE_LIMIT) for relapse in (3, 60, 119, 121, 145, 400)],
+    (25, "codex", USAGE_LIMIT), (25, "claude", SIGN_IN), (25, "codex", SIGN_IN),
+], ids=lambda value: {USAGE_LIMIT: "usage-limit", SIGN_IN: "sign-in"}.get(value, str(value)))
+def test_a_turn_that_keeps_meeting_the_limit_ends_after_five_rounds(
+        tmp_path, monkeypatch, relapse, backend, failure):
+    """The reviewer's table. The selector answers available every time (its
+    small probe passes) and one turn meets the limit again ``relapse`` seconds
+    after every resume. Whatever that gap, the fifth relapse ends the turn,
+    visibly; the selector's next run waits 60, 120, 240, then 480 seconds; and
+    the three other turns are stopped and resumed five times, not for ever."""
+    fleet = Fleet(tmp_path, monkeypatch, backend, GOOD, unserved=())
     start = fleet.clock[0]
+    fleet.selector_seconds = 30                         # the probes take about this long
     fleet.limit(0, failure)
-
+    fleet.run_until(start + 30)
+    relapses = []
     while fleet.state(0)["kind"] != AgentState.INTERRUPTED:
-        running = len(fleet.spawns(0))
-        while len(fleet.spawns(0)) == running:          # parked until the selector's next check
-            assert fleet.waiting() == ["waiting"]
-            fleet.run_until(fleet.clock[0] + 1)
-            assert fleet.clock[0] < start + 2 * MAX_PARK_SECONDS, "it never gives up"
+        assert len(relapses) < 5, "it never gives up"
+        assert fleet.waiting() == [None] * 4            # resumed, all four
         fleet.sessions_started()
-        fleet.run_until(fleet.clock[0] + 25)
+        fleet.run_until(fleet.clock[0] + relapse)
+        relapses.append(fleet.clock[0])
         fleet.spawns(0)[-1]["on_error"](failure)
-    ended = fleet.clock[0]
+        running = len(fleet.spawns(1))
+        while len(fleet.spawns(1)) == running and fleet.coordinator.recovering:
+            fleet.run_until(fleet.clock[0] + 1)
 
-    restarts = fleet.starts(0)[1:]
-    assert restarts[0] == start                         # a new park asks at once
-    gaps = [later - earlier for earlier, later in zip(restarts, restarts[1:])]
-    assert min(gaps) >= RECHECK_SECONDS and len(restarts) <= MAX_PARK_SECONDS / RECHECK_SECONDS
-    assert min(later - earlier for earlier, later in zip(fleet.asked_at, fleet.asked_at[1:])) >= (
-        RECHECK_SECONDS)
-    # The last restart is inside the half hour; that run's failure is the end.
-    assert restarts[-1] < start + MAX_PARK_SECONDS <= ended <= start + MAX_PARK_SECONDS + 25
-    assert fleet.state(0)["detail"]["reason"] in ("usage_limit", "auth")
-    assert not fleet.coordinator.recovering and fleet.scheduled == []
-    assert fleet.coordinator.first_parked == {} and fleet.coordinator.resumed_at == {}
-    # Told once: every later resume of this park carried one line, not the message.
+    assert len(relapses) == MAX_RELAPSES == 5
+    assert fleet.state(0)["detail"]["reason"] == ("usage_limit" if failure == USAGE_LIMIT else "auth")
+    # Told once: the resumes after a relapse carried one line, not the message.
     texts = [call["text"] for call in fleet.spawns(0)]
-    assert [text.count("Clarp recovered from") for text in texts] == [0, 1] + [0] * (len(texts) - 2)
-    assert len(set(texts[2:])) == 1 and "work of agent-0" not in texts[2]
+    assert [text.count("Clarp recovered from") for text in texts] == [0, 1, 0, 0, 0, 0]
+    assert len(set(texts[2:])) == 1 and "work of agent-0" not in texts[2] and len(texts[2]) < 260
+    assert texts[2].count("<clarp-account-recovery>") == 1
+    # How long the selector waited after each relapse before it ran again.
+    assert [asked - relapsed for asked, relapsed in zip(fleet.asked_at[1:], relapses)] == [
+        60, 120, 240, 480]
+    assert [len(fleet.spawns(index)) for index in range(4)] == [6, 6, 6, 6]
+    # The others work on, and nothing is left that could start another round.
+    assert fleet.kinds()[1:] == [AgentState.THINKING] * 3 and fleet.waiting()[1:] == [None] * 3
+    assert not fleet.coordinator.recovering and fleet.scheduled == []
+    assert fleet.coordinator.park_expired == set()
+    assert fleet.clock[0] - start == 30 + 5 * relapse + 900 + 4 * 30
+
+
+@pytest.mark.parametrize("first, back", [(145, "15:01:02"), (100, "15:01:02"), (145, "15:02:06")],
+                         ids=["as-it-happened", "first-relapse-after-100s", "usage-back-a-check-later"])
+def test_the_afternoon_replayed_from_the_journal_is_held_until_usage_is_back(
+        tmp_path, monkeypatch, first, back):
+    """laptopstudio, 11 Nov, with the journal's times: limit 14:27:10,
+    recovered 14:28:46, the limit again after 145 s, recovered 14:32:58, the
+    limit again after 60 s, then "no account" from 14:35 until usage was back
+    at 15:01:02. The turns are held until then and end working, also when the
+    first relapse comes after 100 s: each park has its own half hour."""
+    fleet = Fleet(tmp_path, monkeypatch, "claude", ["fable", "sonnet", "fable", "sonnet"],
+                  unserved=())
+    fleet.clock[0] = _journal("14:27:10")
+    fleet.selector_seconds = 96
+    fleet.limit(0)
+    fleet.run_until(_journal("14:28:46"))
+    assert [len(fleet.spawns(index)) for index in range(4)] == [2, 2, 2, 2]
+    fleet.sessions_started()
+
+    fleet.run_until(_journal("14:28:46") + first)
+    fleet.selector_seconds = 47
+    fleet.limit(0)                                      # one relapse: the selector waits 60 s
+    fleet.run_until(_journal("14:28:46") + first + 60 + 47)
+    assert [len(fleet.spawns(index)) for index in range(4)] == [3, 3, 3, 3]
+    if first == 145:
+        assert fleet.clock[0] == _journal("14:32:58")   # when the journal says "recovered"
+    fleet.sessions_started()
+
+    second = fleet.clock[0] + 60
+    fleet.run_until(second)
+    fleet.no_account_offers("fable", "sonnet")          # nothing has usage any more
+    fleet.selector_seconds = 4
+    fleet.limit(0)                                      # two relapses: it waits 120 s
+    moment = second
+    while moment < _journal(back):
+        moment = min(moment + 16, _journal(back))
+        fleet.run_until(moment)
+        assert fleet.kinds() == [AgentState.THINKING] * 4, f"ended early at {moment}"
+        assert fleet.waiting() == ["waiting"] * 4
+        assert fleet.coordinator.park_expired == set()
+    checks = fleet.asked_at[2:]
+    assert checks[0] == second + 120
+    assert {later - earlier for earlier, later in zip(checks, checks[1:])} == {RECHECK_SECONDS + 4}
+
+    fleet.no_account_offers()                           # usage is back
+    fleet.run_until(_journal(back) + RECHECK_SECONDS + 8)
+
+    assert [len(fleet.spawns(index)) for index in range(4)] == [4, 4, 4, 4]
+    assert _journal(back) <= fleet.starts(0)[-1] <= _journal(back) + RECHECK_SECONDS + 8
+    for index in range(4):
+        # One recovery message; the two resumes after a relapse carry one line.
+        assert [call["text"].count("Clarp recovered from") for call in fleet.spawns(index)] == [
+            0, 1, 0, 0]
+    assert not fleet.coordinator.recovering and fleet.coordinator.park_expired == set()
+    assert fleet.kinds() == [AgentState.THINKING] * 4 and fleet.waiting() == [None] * 4
+    fleet.sessions_started()
+    for index in range(4):
+        fleet.spawns(index)[-1]["on_result"]({"duration_ms": 5})
+    assert fleet.kinds() == [AgentState.DONE] * 4
 
 
 @pytest.mark.parametrize("backend", BACKENDS)
@@ -801,7 +772,7 @@ def test_a_process_that_never_started_its_session_is_told_again(tmp_path, monkey
     fleet.spawns(1)[-1]["on_session_init"](fleet.spawns(1)[-1]["backend_session_id"] or "native-1")
     fleet.run_until(fleet.clock[0] + 5)
     fleet.spawns(1)[-1]["on_error"](USAGE_LIMIT)        # the first one's third process never began
-    fleet.run_until(fleet.clock[0] + RECHECK_SECONDS)
+    fleet.run_until(fleet.clock[0] + 2 * RECHECK_SECONDS)             # a second relapse: 120 s
     assert [call["text"].count("Clarp recovered from") for call in fleet.spawns(0)] == [0, 1, 0, 0]
     assert [call["text"].count("Clarp recovered from") for call in fleet.spawns(1)] == [0, 1, 1, 0]
 
@@ -935,30 +906,39 @@ def test_no_selector_answers_restart_turns_more_often_than_the_recheck(seed):
 
 
 @pytest.mark.parametrize("seed", range(100))
-def test_an_account_that_always_fails_ends_every_turn_at_the_cap(seed):
+def test_an_account_that_always_fails_ends_every_turn_within_five_rounds(seed):
     """The selector always says available and every resumed turn meets its
-    limit again inside the two minutes. Each turn ends, and no later than its
-    own cap plus one recheck, one selector call and one last run."""
-    slowest, latest = 40, max(1, int(RESUME_GRACE_SECONDS) - 1)
+    limit again, after anything from a second to nearly seven minutes. The
+    pool asks the selector five times in all, and every turn ends."""
+    slowest, latest = 40, 400
     pool = _Pool(seed, answers=[True], selector_seconds=[0, 5, slowest],
-                 failures=[(after, kind) for after in (1, 25, 59, 100, latest)
+                 failures=[(after, kind) for after in (1, 25, 59, 100, 119, 121, 145, latest)
                            for kind in ("usage", "auth")])
     pool.run(3 * 3600)
 
-    assert not pool.timers and not pool.coordinator.recovering
+    assert not pool.timers and not pool.coordinator.recovering and pool.broken == []
+    assert len(pool.asked) == MAX_RELAPSES
+    waits = sum(RECHECK_SECONDS * 2 ** round_ for round_ in range(MAX_RELAPSES - 1))
     for turn in pool.turns:
         assert turn.ended is not None, turn.agent
-        assert turn.ended - turn.parks[0] <= MAX_PARK_SECONDS + RECHECK_SECONDS + slowest + latest
-        assert turn.starts[-1] - turn.parks[0] <= MAX_PARK_SECONDS + RECHECK_SECONDS + slowest
+        assert len(turn.starts) - 1 <= MAX_RELAPSES
+        assert turn.ended - pool.asked[0] <= (
+            MAX_RELAPSES * (slowest + latest) + waits + latest), turn.agent
 
 
 @pytest.mark.parametrize("backend", BACKENDS)
 def test_the_recovery_message_is_the_same_one_each_time_never_one_inside_another(
         tmp_path, monkeypatch, backend):
+    """Processes stopped before they started their session never delivered
+    the message, so the next resume carries it again: the same one, built
+    from the request, not one wrapped inside the other."""
     fleet = Fleet(tmp_path, monkeypatch, backend, AFTERNOON, unserved=())
-    _into_the_same_park(fleet)
-    fleet.no_account_offers()
-    fleet.run_scheduled(advance=RECHECK_SECONDS + 1)
+    start = fleet.clock[0]
+    fleet.spawns(0)[-1]["on_error"](USAGE_LIMIT)
+    fleet.run_until(start)
+    fleet.run_until(start + 90)
+    fleet.spawns(0)[-1]["on_error"](USAGE_LIMIT)
+    fleet.run_until(start + 90 + RECHECK_SECONDS)
 
     for index in range(3):
         first, second, third = [call["text"] for call in fleet.spawns(index)]
@@ -970,30 +950,31 @@ def test_the_recovery_message_is_the_same_one_each_time_never_one_inside_another
 
 
 @pytest.mark.parametrize("backend", BACKENDS)
-def test_the_park_cap_counts_from_the_turns_first_park_not_from_the_latest(
-        tmp_path, monkeypatch, backend):
-    """Half an hour without an account is where a usage wait gives up. A turn
-    that was resumed for 90 seconds in between does not get another half
-    hour: its park began at the first limit."""
+def test_a_relapse_begins_a_new_half_hour_as_it_always_did(tmp_path, monkeypatch, backend):
+    """The wait is bounded per park. A relapse is a new park: half an hour
+    without an account counts from there, not from the first limit."""
     fleet = Fleet(tmp_path, monkeypatch, backend, AFTERNOON, unserved=())
-    start = _into_the_same_park(fleet)
+    start = fleet.clock[0]
+    fleet.limit(0)
+    fleet.run_until(start)
+    fleet.run_until(start + 100)
+    fleet.no_account_offers("fable", "sonnet")
+    fleet.limit(0)
+    assert [fleet.coordinator.first_parked[fleet.key(index)] for index in range(3)] == [
+        start + 100] * 3
 
-    while fleet.clock[0] + RECHECK_SECONDS + 1 < start + MAX_PARK_SECONDS:
-        fleet.run_scheduled(advance=RECHECK_SECONDS + 1)
-    # Just short of thirty minutes from the first park: still waiting.
+    fleet.run_until(start + 100 + MAX_PARK_SECONDS - 1)
+    # Past half an hour from the first limit, short of it from the relapse.
     assert [len(fleet.spawns(index)) for index in range(3)] == [2, 2, 2]
-    assert fleet.coordinator.recovering
+    assert fleet.waiting() == ["waiting"] * 3 and fleet.coordinator.park_expired == set()
 
-    fleet.run_scheduled(advance=RECHECK_SECONDS + 1)
-    # Thirty minutes from the FIRST park, and a minute and a half before
-    # thirty from the second: released to run and fail visibly.
-    assert start + MAX_PARK_SECONDS <= fleet.clock[0] < start + 90 + MAX_PARK_SECONDS
+    fleet.run_until(start + 100 + MAX_PARK_SECONDS + RECHECK_SECONDS)
     assert [len(fleet.spawns(index)) for index in range(3)] == [3, 3, 3]
     assert not fleet.coordinator.recovering
     for index in range(3):
         fleet.spawns(index)[-1]["on_error"](USAGE_LIMIT)
-    assert [fleet.state(index)["kind"] for index in range(3)] == [AgentState.INTERRUPTED] * 3
-    assert not fleet.coordinator.recovering and fleet.run_scheduled(advance=90) == 0
+    assert fleet.kinds() == [AgentState.INTERRUPTED] * 3
+    assert not fleet.coordinator.recovering and fleet.scheduled == []
 
 
 def test_a_turn_that_arrives_during_a_recovery_starts_its_own_park_clock(tmp_path, monkeypatch):
@@ -1017,51 +998,30 @@ def test_a_turn_that_arrives_during_a_recovery_starts_its_own_park_clock(tmp_pat
 
 
 @pytest.mark.parametrize("backend", BACKENDS)
-def test_an_available_answer_that_keeps_being_wrong_gives_up_at_the_same_cap(
-        tmp_path, monkeypatch, backend):
-    """The evening's shape with a usage limit instead of a plan: the selector
-    keeps saying an account has usage and the turn keeps meeting the limit
-    seconds after each resume. Nothing ends early, and it does not go on for
-    ever: thirty minutes after the turn's first park it fails visibly."""
-    fleet = Fleet(tmp_path, monkeypatch, backend, ["sonnet"], unserved=())
-    start = fleet.clock[0]
-
-    rounds = 0
-    while fleet.state(0)["kind"] != AgentState.INTERRUPTED:
-        fleet.spawns(0)[-1]["on_error"](USAGE_LIMIT)
-        fleet.run_scheduled()
-        fleet.clock[0] += 90
-        rounds += 1
-        assert rounds < 40, "it never gives up"
-
-    assert fleet.coordinator.first_parked == {} and not fleet.coordinator.recovering
-    assert start + MAX_PARK_SECONDS <= fleet.clock[0] <= start + MAX_PARK_SECONDS + 180
-    _visible_failure(fleet.state(0), category="usage_limit", says="usage limit")
-    assert fleet.run_scheduled(advance=90) == 0
-
-
-@pytest.mark.parametrize("backend", BACKENDS)
 def test_a_turn_that_worked_after_its_recovery_may_be_recovered_again(
         tmp_path, monkeypatch, backend):
-    """The bound above is for a failure right after the resume. A turn that
-    ran for a while on the new account and then met its limit is a new
-    recovery, with its one recovery message."""
+    """The relapse rules are for a failure soon after a resume. A turn that
+    worked for twenty minutes on the new account and then met its limit is a
+    new recovery: asked at once, not counted, and told with the full message,
+    since what it was told twenty minutes ago is long behind it."""
     fleet = Fleet(tmp_path, monkeypatch, backend, ["gpt-6.1-sol"], unserved=())
-    fleet.spawns(0)[-1]["on_error"](USAGE_LIMIT)
-    fleet.run_scheduled()
+    start = fleet.clock[0]
+    fleet.limit(0)
+    fleet.run_until(start)
     assert len(fleet.spawns(0)) == 2
+    fleet.sessions_started()
 
-    fleet.clock[0] += 20 * 60                         # twenty minutes of work
+    fleet.run_until(start + 20 * 60)                  # twenty minutes of work
     fleet.spawns(0)[-1]["on_error"](USAGE_LIMIT)
-    fleet.run_scheduled()
+    fleet.run_until(start + 20 * 60)
 
-    assert len(fleet.selector_calls()) == 2
+    assert fleet.asked_at == [start, start + 20 * 60] and fleet.coordinator.relapses == 0
     assert len(fleet.spawns(0)) == 3
     assert fleet.state(0)["kind"] == AgentState.THINKING
-    # It had left its park: the second limit began a new one, with its own cap.
-    assert fleet.coordinator.first_parked[fleet.key(0)] == fleet.clock[0]
     # One message per recovery, never one wrapped inside the other.
-    assert [call["text"].count("Clarp recovered from") for call in fleet.spawns(0)] == [0, 1, 1]
+    texts = [call["text"] for call in fleet.spawns(0)]
+    assert [text.count("Clarp recovered from") for text in texts] == [0, 1, 1]
+    assert texts[2] == texts[1]
 
 
 def test_the_park_cap_counts_from_a_turns_first_park(tmp_path, monkeypatch):
@@ -1200,44 +1160,8 @@ def test_a_new_turn_of_the_agent_forgets_the_old_ones_resume_time():
     coordinator.register(attempt("first"))            # its own respawn keeps it
     assert coordinator.resumed_at == {("agent", "first"): 100.0}
     coordinator.register(attempt("second"))           # a new turn does not
-    assert coordinator.resumed_at == {}
+    assert coordinator.resumed_at == {} and coordinator.first_parked == {}
     assert coordinator.request("agent", "second", ("selector",))
-
-
-def test_a_turn_past_its_cap_is_not_parked_again_when_its_process_registers():
-    """A turn resumed just before its half hour is up, whose new process
-    registers after another turn began a recovery: its park is over. It runs
-    and fails visibly; it does not wait behind the other turn's recovery."""
-    from unittest.mock import Mock
-
-    def attempt(agent):
-        item = Attempt(agent, "trace", "sonnet", {}, Mock(return_value=True), Mock(), Mock(),
-                       handle=Mock(drain_thread=None))
-        item.spawned.set()
-        return item
-
-    clock, scheduled, answers = [0.0], [], [False, True, False]
-    coordinator = AccountFailover(
-        threading.RLock(), switch=lambda command, models: answers.pop(0),
-        schedule=lambda delay, cb: scheduled.append(cb), now=lambda: clock[0])
-    coordinator.register(attempt("old"))
-    assert coordinator.request("old", "trace", ("selector",))
-    scheduled.pop()()                                   # no account
-    clock[0] = MAX_PARK_SECONDS - 10
-    scheduled.pop()()                                   # an account: resumed, ten seconds early
-    assert coordinator.resumed_at == {("old", "trace"): clock[0]} and not coordinator.recovering
-
-    clock[0] += 5
-    coordinator.register(attempt("young"))
-    assert coordinator.request("young", "trace", ("selector",))
-    clock[0] += 10                                      # the old turn's park is half an hour old
-    respawned = attempt("old")
-
-    assert coordinator.register(respawned) is False
-    assert "account_recovery" not in respawned.state and respawned.pause.call_count == 0
-    assert ("old", "trace") in coordinator.park_expired
-    assert coordinator.request("old", "trace", ("selector",)) is False      # its next limit ends it
-
 
 
 def test_a_plan_parked_turn_counts_every_answer_without_its_model():
@@ -1297,8 +1221,8 @@ def _parked_beside_a_working_turn(answers):
 def test_the_parked_turns_have_one_timer_however_often_it_was_armed():
     coordinator, clock, scheduled, asked, _parked, _attempt = _parked_beside_a_working_turn(
         [frozenset({"sonnet"}), frozenset({"sonnet"})])
-    clock[0] += 300
-    assert coordinator.request("a", "trace", ("selector",))          # a's own limit, later
+    clock[0] += QUIET_SECONDS
+    assert coordinator.request("a", "trace", ("selector",))          # a's own limit, much later
     scheduled.pop()()                                                # its pass: the same answer
     assert coordinator.register(_attempt("a", "sonnet")) is False
     older, newer = scheduled
@@ -1315,7 +1239,7 @@ def test_a_timer_for_parked_turns_leaves_a_recovery_to_its_own_passes():
     coordinator, clock, scheduled, asked, _parked, _attempt = _parked_beside_a_working_turn(
         [frozenset({"sonnet"})])
     timer = scheduled.pop()
-    clock[0] += 300
+    clock[0] += QUIET_SECONDS
     assert coordinator.request("a", "trace", ("selector",)) and coordinator.recovering
 
     timer()
@@ -1335,4 +1259,204 @@ def test_a_failed_hand_over_puts_a_turn_back_among_the_parked_ones():
     assert coordinator.restore(taken) == [first]
     assert coordinator.attempts["b"] is first and first.resume.call_count == 0
     assert second.resume.call_count == 0
+
+
+# --- the relapse count -----------------------------------------------------------------
+
+def _pool_of(models, answers):
+    """The coordinator alone with one running attempt for each model."""
+    from unittest.mock import Mock
+
+    def attempt(agent, model, *, owned=True, fail=None):
+        item = Attempt(agent, "trace", model, {}, Mock(return_value=owned), Mock(), Mock(),
+                       handle=Mock(drain_thread=None), fail=fail)
+        item.spawned.set()
+        return item
+
+    clock, scheduled, asked = [0.0], [], []
+
+    def switch(command, models):
+        asked.append(clock[0])
+        return answers.pop(0) if answers else True
+
+    coordinator = AccountFailover(threading.RLock(), switch=switch, now=lambda: clock[0],
+                                  schedule=lambda delay, cb: scheduled.append((clock[0] + delay, cb)))
+    for index, model in enumerate(models):
+        coordinator.register(attempt(f"agent-{index}", model))
+
+    def run(until):
+        while scheduled and min(scheduled, key=lambda item: item[0])[0] <= until:
+            entry = min(scheduled, key=lambda item: item[0])
+            scheduled.remove(entry)
+            clock[0] = max(clock[0], entry[0])
+            entry[1]()
+        clock[0] = max(clock[0], until)
+
+    def respawn(*agents):
+        for agent in agents:
+            old = coordinator.attempts.get(agent)
+            assert old is None, f"{agent} is still parked"
+            assert coordinator.register(attempt(agent, "sonnet")) is False
+
+    return coordinator, clock, asked, run, respawn, attempt
+
+
+def _relapse(coordinator, clock, run, respawn, agent="agent-0", after=30.0):
+    """Resumed, then the limit again ``after`` seconds later. Returns whether
+    the turn was parked for another recovery."""
+    respawn(agent)
+    run(max(clock[0], coordinator.last_resumed + after))
+    return coordinator.request(agent, "trace", ("selector",))
+
+
+def test_the_count_starts_again_after_ten_quiet_minutes():
+    """Four relapses, then the pool works for ten minutes. The next limit is a
+    new one: asked at once, counted from nothing."""
+    coordinator, clock, asked, run, respawn, _attempt = _pool_of(["sonnet"], [])
+    assert coordinator.request("agent-0", "trace", ("selector",))
+    run(0)
+    for expected in (1, 2, 3, 4):
+        assert _relapse(coordinator, clock, run, respawn)
+        assert coordinator.relapses == expected
+        run(clock[0] + 480)
+    assert len(asked) == 5
+
+    respawn("agent-0")
+    run(clock[0] + QUIET_SECONDS)
+    assert coordinator.request("agent-0", "trace", ("selector",))
+    assert coordinator.relapses == 0
+    run(clock[0])
+    assert asked[-1] == clock[0] and len(asked) == 6                 # asked at once
+
+    # A second short of ten minutes would have been the fifth relapse: the end.
+    assert _relapse(coordinator, clock, run, respawn, after=QUIET_SECONDS - 1)
+    assert coordinator.relapses == 1
+
+
+def test_just_short_of_ten_minutes_the_fifth_relapse_ends_the_turn():
+    coordinator, clock, _asked, run, respawn, _attempt = _pool_of(["sonnet"], [])
+    assert coordinator.request("agent-0", "trace", ("selector",))
+    run(0)
+    for _ in range(4):
+        assert _relapse(coordinator, clock, run, respawn, after=QUIET_SECONDS - 1)
+        run(clock[0] + 480)
+
+    assert _relapse(coordinator, clock, run, respawn, after=QUIET_SECONDS - 1) is False
+    assert coordinator.relapses == 5 and not coordinator.recovering
+
+
+def test_a_turn_new_to_a_relapsing_pool_gets_its_recovery_and_ends_at_its_own_relapse():
+    """The count is the pool's; the end is the relapsing turn's. A turn that
+    was never resumed starts a recovery even after five rounds, eight minutes
+    later, and ends when it relapses itself."""
+    coordinator, clock, asked, run, respawn, attempt = _pool_of(["sonnet"], [])
+    assert coordinator.request("agent-0", "trace", ("selector",))
+    run(0)
+    for _ in range(4):
+        assert _relapse(coordinator, clock, run, respawn)
+        run(clock[0] + 480)
+    assert _relapse(coordinator, clock, run, respawn) is False       # agent-0 ends
+    coordinator.discard("agent-0", "trace")
+    assert len(asked) == 5
+
+    coordinator.register(attempt("new", "sonnet"))
+    failed = clock[0]
+    assert coordinator.request("new", "trace", ("selector",))        # not ended: never resumed
+    assert coordinator.relapses == 6
+    run(failed + 479)
+    assert len(asked) == 5
+    run(failed + 480)
+    assert asked[-1] == failed + 480 and len(asked) == 6
+    assert _relapse(coordinator, clock, run, respawn, agent="new") is False
+
+
+def test_a_plan_failure_is_not_a_relapse_of_the_pool():
+    """It is about one turn's model. It neither counts nor slows the selector
+    down for the turns that meet a real limit."""
+    coordinator, clock, asked, run, respawn, attempt = _pool_of(["sonnet"], [])
+    assert coordinator.request("agent-0", "trace", ("selector",))
+    run(0)
+    respawn("agent-0")
+    coordinator.discard("agent-0", "trace")                          # it finished
+    run(30)
+    coordinator.register(attempt("planless", "gpt-6"))
+    assert coordinator.request("planless", "trace", ("selector",), plan=True)
+    assert coordinator.relapses == 0
+
+
+# --- the reviewer's four mutants -------------------------------------------------------
+
+def test_a_plan_failure_recovers_when_the_only_other_turns_are_parked(tmp_path, monkeypatch):
+    """Rule 1 asks whether another turn of the pool is running. A turn that
+    waits for an account is not: nothing would be switched away under it."""
+    fleet = Fleet(tmp_path, monkeypatch, "claude", ["fable", "sonnet"], unserved=("fable",))
+    start = fleet.clock[0]
+    fleet.limit(0)
+    fleet.run_until(start)
+    assert fleet.waiting() == ["waiting", None]                      # fable waits, sonnet works
+    fleet.sessions_started()
+    fleet.no_account_offers()
+
+    fleet.run_until(start + QUIET_SECONDS)
+    fleet.spawns(1)[-1]["on_error"]("Your current plan does not include this model")
+    fleet.run_until(start + QUIET_SECONDS)
+
+    # A recovery, not the end of the turn: the selector found an account for both.
+    assert fleet.selector_calls()[-1] == ["fable", "sonnet"] and len(fleet.selector_calls()) == 2
+    assert fleet.kinds() == [AgentState.THINKING] * 2 and fleet.waiting() == [None, None]
+    assert [len(fleet.spawns(index)) for index in range(2)] == [2, 3]
+
+
+def test_a_plan_failure_recovers_when_the_only_other_turn_was_stopped():
+    """A turn the user stopped stays registered until the next pass looks. It
+    is not running either."""
+    coordinator, _clock, asked, run, _respawn, attempt = _pool_of([], [])
+    coordinator.register(attempt("stopped", "sonnet", owned=False))
+    coordinator.register(attempt("planless", "gpt-6"))
+
+    assert coordinator.request("planless", "trace", ("selector",), plan=True)
+    run(0)
+    assert len(asked) == 1
+
+
+def test_a_plan_parked_turn_that_cannot_be_ended_stays_parked():
+    """Work registered without a way to end it is not dropped after three
+    answers: it waits like any other, to the cap."""
+    coordinator, clock, asked, run, _respawn, attempt = _pool_of([], [False] * 40)
+    item = attempt("planless", "gpt-6")
+    coordinator.register(item)
+    assert coordinator.request("planless", "trace", ("selector",), plan=True)
+
+    run(5 * RECHECK_SECONDS)
+    assert len(asked) == 6 and item.unserved_checks == 6
+    assert coordinator.attempts["planless"] is item and coordinator.recovering
+    assert item.resume.call_count == 0
+
+    run(MAX_PARK_SECONDS)                                            # released at the cap
+    assert item.resume.call_count == 1 and not coordinator.recovering
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_an_account_found_at_the_cap_resumes_the_turn_to_work_not_to_fail(
+        tmp_path, monkeypatch, backend):
+    """The check that falls on the half hour finds an account. The turn is
+    resumed like any other: it is not marked as released, so a limit it meets
+    much later is recovered again."""
+    fleet = Fleet(tmp_path, monkeypatch, backend, ["sonnet"], unserved=("sonnet",))
+    start = fleet.clock[0]
+    fleet.limit(0)
+    fleet.run_until(start + MAX_PARK_SECONDS - 1)
+    assert len(fleet.spawns(0)) == 1 and fleet.waiting() == ["waiting"]
+    fleet.no_account_offers()
+    fleet.run_until(start + MAX_PARK_SECONDS)
+
+    assert fleet.asked_at[-1] == start + MAX_PARK_SECONDS
+    assert len(fleet.spawns(0)) == 2 and fleet.recovery_messages(0) == 1
+    assert fleet.coordinator.park_expired == set() and not fleet.coordinator.recovering
+    fleet.sessions_started()
+
+    fleet.run_until(start + MAX_PARK_SECONDS + 2 * QUIET_SECONDS)
+    fleet.spawns(0)[-1]["on_error"](USAGE_LIMIT)
+    fleet.run_until(fleet.clock[0])
+    assert len(fleet.spawns(0)) == 3 and fleet.kinds() == [AgentState.THINKING]
 

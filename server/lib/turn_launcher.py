@@ -15,13 +15,14 @@ from .turn_dispatch_state import _TURN_LOCK, _SLOTS, _INFLIGHT, _launching
 from .turn_command import _TurnSpec, DispatchError, JanitorDispatchError, _janitor_spawn_lock, OPENING_WITHDRAWN, _ADMISSION_REFUSED, _is_call_opening, _backend_invoked
 from .turn_stop import _result_error_text, _result_detail, _result_assistant_text, _record_dreaming_result
 
-# What a turn is resumed with when it fell back into the park it had just been
-# resumed from. A resume needs a prompt; this is all of it. The recovery
-# message and the request are already in the conversation and are not sent
+# What a turn is resumed with when it met the limit again soon after a recovery
+# had resumed it. A resume needs a prompt; this is all of it. The recovery
+# message and the request are in the conversation already and are not sent
 # again (laptopstudio, 2026-11-11: one more copy of both in each round).
-SAME_PARK_RESUME_TEXT = (
-    "The account ran out again before this turn could go on, and Clarp has resumed it "
-    "once more. Carry on from where the conversation stands; nothing new is asked.")
+RELAPSE_RESUME_TEXT = (
+    "The account ran out again and Clarp has resumed this turn once more. Carry on from "
+    "where the conversation stands; check the results of interrupted operations before "
+    "retrying them. Nothing new is asked.")
 
 
 class LauncherMixin:
@@ -106,17 +107,17 @@ class LauncherMixin:
             bsid, str(spec.cwd), self.home)
         interrupted = (state.get("spawn_started") or attempt > 1
                        or bool(spec.recovery_text))
-        # One recovery message for each park. A turn that fell back into the
-        # park it was resumed from has the message in its conversation: the
-        # process that carried it started its session, or the turn was already
-        # past that and carrying the one line.
-        told = bool(state.get("same_park") and (
-            spec.recovery_text == SAME_PARK_RESUME_TEXT
+        # One recovery message for each run of relapses. A turn that met the
+        # limit again soon after a recovery resumed it has the message in its
+        # conversation: the process that carried it started its session, or
+        # the turn was already past that and carrying the one line.
+        told = bool(state.get("relapsed") and (
+            spec.recovery_text == RELAPSE_RESUME_TEXT
             or (spec.recovery_text and state.get("saw_init"))))
         resume_spec = replace(
             spec, backend_session_id=bsid,
             is_new_session=spec.is_new_session and transcript is None,
-            recovery_text=(SAME_PARK_RESUME_TEXT if told else (
+            recovery_text=(RELAPSE_RESUME_TEXT if told else (
                 f"Clarp recovered from a {spec.backend} account usage limit. Continue "
                 "the unfinished request from the existing conversation. Check "
                 "the results of interrupted operations before retrying them; "

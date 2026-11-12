@@ -33,23 +33,26 @@ MAX_PARK_SECONDS = 1800.0
 # work it carried to be re-admitted before an empty pass may end it.
 CARRIED_WORK_WAIT_SECONDS = 120.0
 CARRIED_WORK_POLL_SECONDS = 1.0
-# A turn that fails on its account this soon after a recovery resumed it has
-# not left its park: what happens next continues it.
-# - A plan failure ends the turn with the provider's own sentence. The
-#   selector said an account offers the model, and it does not; asking again
-#   is a loop (2026-11-11: 146 rounds in three and a half hours, every running
-#   turn of the pool stopped and resumed in each).
-# - A usage limit or a failed sign-in goes back into the park. The selector
-#   can pick an account with a sliver left (2026-11-11 14:28 and 14:32 on
-#   laptopstudio: 20%, then 6%), and waiting does help: those turns resumed at
-#   15:01 and worked. But the recovery is not started again: the park's
-#   clock keeps counting, so the MAX_PARK_SECONDS cap counts from the turn's
-#   first park and stays the one place that gives up; the selector is asked
-#   at the park's next recheck, not at once; and the turn is not told a
-#   second time that it was recovered (``state["same_park"]``).
-# The shortest real gap between a resume and the next limit that afternoon
-# was 145 s of work, which is a new park.
-RESUME_GRACE_SECONDS = 120.0
+# A relapse: a turn of the pool fails on its account though the pool's last
+# recovery resumed its turns less than QUIET_SECONDS ago. The selector said an
+# account was available and it was not, or not for long.
+# - A plan failure of a turn that recovery resumed ends the turn at once, with
+#   the provider's sentence. Asking again is a loop (2026-11-11: 146 rounds in
+#   three and a half hours, every running turn of the pool stopped and resumed
+#   in each).
+# - A usage limit or a failed sign-in starts the next recovery, since waiting
+#   can help: the selector can pick an account with a sliver left (the same
+#   day 14:28 and 14:32 on laptopstudio: 20%, then 6%), and those turns resumed
+#   at 15:01 and worked. But the pool counts the recoveries a relapse followed.
+#   The selector's next run waits RECHECK_SECONDS, then twice, four and eight
+#   times that; and at MAX_RELAPSES a turn that relapses ends, visibly, whatever
+#   the gap between its resume and its relapse was (a clock that only counted
+#   relapses within two minutes let a turn relapse every 121 s for ever). The
+#   count starts again once the pool has run QUIET_SECONDS without a relapse.
+# The wait itself is bounded per park, as it always was: MAX_PARK_SECONDS from
+# the park's start, and a relapse begins a new park.
+QUIET_SECONDS = 600.0
+MAX_RELAPSES = 5
 # A turn parked because the provider said its account does not offer its model
 # waits for this many selector answers that do not serve that model and then
 # ends, with the provider's sentence. A plan is not a usage window: nothing
@@ -195,9 +198,13 @@ class AccountFailover:
         self.park_expired: set[tuple[str, str]] = set()
         # When a recovery last resumed each turn: (agent, trace) -> clock.
         self.resumed_at: dict[tuple[str, str], float] = {}
-        # When each turn's park began. A park a recovery resumed and that the
-        # turn fell back into within RESUME_GRACE_SECONDS is the same park.
+        # When each turn's present park began. A turn that stays parked while
+        # the pool works keeps it through the recoveries that follow.
         self.first_parked: dict[tuple[str, str], float] = {}
+        # When a recovery last resumed turns of the pool, and how many
+        # recoveries in a row a relapse has followed (see QUIET_SECONDS).
+        self.last_resumed: float | None = None
+        self.relapses = 0
         # The latest timer armed for work that stays parked while the pool
         # works (see ``_begin``); an older one does nothing.
         self.hold_timer = 0
@@ -223,7 +230,7 @@ class AccountFailover:
             # Behind a recovery, or behind the work already parked for this
             # model: run now, it would meet the same limit and stop the pool.
             unserved = attempt.model in self._unserved_models()
-            if (self.recovering or unserved) and not self._park_over(attempt):
+            if (self.recovering or unserved) and not self._expired(attempt):
                 attempt.state["account_recovery"] = True
                 self._note_park(attempt)
                 (attempt.pause if self.recovering or attempt.hold is None else attempt.hold)()
@@ -260,31 +267,19 @@ class AccountFailover:
         now and work is parked for. Called with the lock held."""
         return set() if self.recovering else {attempt.model for attempt in self._parked()}
 
-    def _same_park(self, key: tuple[str, str]) -> bool:
-        """A recovery resumed this turn so recently that it has not left its
-        park. Called with the lock held."""
+    def _relapsed(self, key: tuple[str, str]) -> bool:
+        """A recovery resumed this turn less than QUIET_SECONDS ago. Called
+        with the lock held."""
         resumed = self.resumed_at.get(key)
-        return resumed is not None and self.now() - resumed < RESUME_GRACE_SECONDS
-
-    def _park_over(self, attempt: Attempt) -> bool:
-        """Whether this turn may not be parked (again): its park expired, or
-        it would go back into a park that is MAX_PARK_SECONDS old, which
-        expires it here. It runs on and fails visibly, whoever's recovery
-        this is. Called with the lock held, before the turn is parked."""
-        key = (attempt.agent_id, attempt.trace_id)
-        if (key not in self.park_expired and self._same_park(key)
-                and self.now() - self.first_parked.get(key, self.now()) >= MAX_PARK_SECONDS):
-            self.park_expired.add(key)
-        return key in self.park_expired
+        return resumed is not None and self.now() - resumed < QUIET_SECONDS
 
     def _note_park(self, attempt: Attempt) -> None:
-        """Start the turn's park clock, unless this is its park going on; then
-        say so to whoever resumes it."""
+        """Start the turn's park clock, and tell whoever resumes it when it
+        was resumed only just before: it has had its recovery message."""
         key = (attempt.agent_id, attempt.trace_id)
-        if key in self.first_parked and self._same_park(key):
-            attempt.state["same_park"] = True
-        else:
-            self.first_parked[key] = self.now()
+        self.first_parked[key] = self.now()
+        if self._relapsed(key):
+            attempt.state["relapsed"] = True
 
     def request(self, agent_id, trace_id, command, *, plan=False) -> bool:
         """Start (or join) the pool's recovery for a turn that failed on its
@@ -296,21 +291,20 @@ class AccountFailover:
         selector switches the machine's account while it probes. That is
         right when the account is out for all of them and wrong when the
         others run fine, so such a failure starts a recovery only when no
-        other turn of the pool is running, and never again right after a
-        recovery resumed the turn (see RESUME_GRACE_SECONDS)."""
+        other turn of the pool is running, and never for a turn a recovery
+        has just resumed. A usage limit or a failed sign-in after a recovery
+        is counted and slowed down, and ends the turn at the fifth in a row
+        (see QUIET_SECONDS)."""
         with self.lock:
             trigger = self.attempts.get(agent_id)
             if not command or not trigger or trigger.trace_id != trace_id:
                 return False
             key = (agent_id, trace_id)
-            if self._park_over(trigger):
+            if self._expired(trigger):
                 return False   # its park's time is up: fail visibly now
-            if self._same_park(key):
-                if plan:
-                    return False   # resumed onto an account said to offer it; it does not
-                # The park goes on, and so does its pace: the selector's last
-                # answer was wrong, which is no reason to ask it again at once.
-                self.next_check = max(self.next_check, self.now() + RECHECK_SECONDS)
+            relapsed = self._relapsed(key)
+            if plan and relapsed:
+                return False   # resumed onto an account said to offer it; it does not
             if self.recovering:
                 return True
             if plan:
@@ -319,13 +313,24 @@ class AccountFailover:
                        for other in self.attempts.values()):
                     return False
                 trigger.plan = True
+            elif (self.last_resumed is None
+                    or self.now() - self.last_resumed >= QUIET_SECONDS):
+                self.relapses = 0      # ten quiet minutes: this is a new limit
+            else:
+                # The last recovery's answer did not hold. Ask again, later
+                # each time; a turn that keeps relapsing ends here.
+                self.relapses += 1
+                if relapsed and self.relapses >= MAX_RELAPSES:
+                    return False
+                wait = RECHECK_SECONDS * 2 ** (min(self.relapses, MAX_RELAPSES - 1) - 1)
+                self.next_check = max(self.next_check, self.now() + wait)
             self.recovering = True
             self.parked_since = self.now()
             self.command = tuple(command)
             for attempt in self.attempts.values():
                 if attempt.state.get("account_recovery"):
                     continue   # parked already; its clock runs from that park
-                if attempt.owned() and not self._park_over(attempt):
+                if attempt.owned() and not self._expired(attempt):
                     attempt.state["account_recovery"] = True
                     self._note_park(attempt)
                     attempt.pause()
@@ -495,10 +500,6 @@ class AccountFailover:
         # Every exit from a failed check lands here, including a raised one, so
         # this is the one place that can guarantee work is not parked for ever.
         with self.lock:
-            # Turns are restarted only by an answer, and the selector is not
-            # asked again until a recheck after this one. So no answers,
-            # however wrong, restart turns more often than the recheck.
-            self.next_check = self.now() + settings.recheck_seconds
             pending = self._pending()
             served = verdict if isinstance(verdict, frozenset) else None
             # A turn parked for its plan has heard one more answer that does
@@ -526,16 +527,16 @@ class AccountFailover:
                     pending, verdict = covered, True
                 else:
                     verdict = False     # it serves none of them now: keep asking
-            # The cap is per turn, from its first park: a turn that fell back
-            # into its park, or that waits while others work, is released when
-            # that park is MAX_PARK_SECONDS old, though this recovery began later.
+            # A turn that stayed parked while the pool worked is released when
+            # its own park is MAX_PARK_SECONDS old, though this recovery began
+            # later. For the rest that is this recovery's start, as it always was.
             overdue = self._take_overdue(waiting + (pending if verdict is not True else []))
             pending = [attempt for attempt in pending if attempt not in overdue]
             waiting = [attempt for attempt in waiting if attempt not in overdue]
             decision = self._decide(pending, verdict, settings)
             if isinstance(decision, Resume):
                 self.recovering = False
-                at = self.now()
+                at = self.last_resumed = self.now()
                 # All of them out first: a resumed turn registers its new
                 # process, which must not find the others still parked.
                 for attempt in pending:
