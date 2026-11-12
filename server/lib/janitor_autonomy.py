@@ -384,6 +384,10 @@ class AutonomyJanitors:
             if not run or not janitor_builtins.claim_run(run['run_id']):
                 lane_record(lane,owner,base,'failed','The check could not start',now);continue
             repair_owner=None;repair_payload=None;repair_started=None;repair_text=''
+            # The flip-back record as it stands BEFORE Hotseat is read. A switch that lands during the read or
+            # the decision changes it, and the stand-down below then sees that this run decided on a default
+            # that is gone. Read after the account read, a switch during that read went unnoticed.
+            raw_last_switch=settings_store.get(f'hotseat-switcher.{provider}.last-switch')
             repair_inflight=frozenset(p.alias for p in self.auth_repair.profiles)
             repair_policy=janitor_hotseat.PROVIDERS[provider].auth_repair
             repair_enabled=repair_policy is not None and options.get('auto_repair_auth') is True
@@ -432,7 +436,6 @@ class AutonomyJanitors:
                     accounts=[dict(a) if a['active'] or a['alias'] not in withheld
                               else {**a,'remaining':None,'secondary':None} for a in accounts]
             last_switch=None
-            raw_last_switch=settings_store.get(f'hotseat-switcher.{provider}.last-switch')
             if raw_last_switch:
                 try:
                     parsed_switch=json.loads(raw_last_switch)
