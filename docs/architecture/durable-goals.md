@@ -56,15 +56,24 @@ is. Retries follow the backoff, which starts at the dispatch: 2, 4, 8, 16 and
   suspended account, a monthly or hard billing limit, a trial quota and a model
   that refuses this client; no reset clears those. The split is made where the
   category is defined (`error_classify.usage_limit_resets`: a text that reads
-  as a spent window and as nothing else of the category), and the provider's
+  as a spent window and as nothing else of the category, or a text of the
+  category that states its own reset, as Muse's "Subscription quota exhausted.
+  Your usage window resets at ..." does, unless it also names credits,
+  payment, suspension, billing, a trial or the free tier), and the provider's
   own statement overrides it where the Host records one (`backend_usage`:
   `credits_depleted`). Everything not known to clear at a reset counts, as
   `billing`. A Codex failure that reads like a limit but whose quota the
-  provider did not confirm exhausted counts too, as an ordinary failure
-  (`unconfirmed_limit`). No text decides that: a backend that records its
-  limits writes `provider_limit_event_id` on the failed state when the quota is
-  confirmed, and its absence says it was not. The reason keeps the provider's
-  own words beside the category's, so it says which limit it was.
+  provider did not confirm exhausted is settled by the Host's own usage record
+  of the backend (`backend_usage.exhausted_backends`): a spent window there
+  makes it lack of usage, which does not count; depleted credits make it
+  `billing`; with no record it counts as an ordinary failure
+  (`unconfirmed_limit`). Codex confirms a limit only when the failed turn was
+  quiet and alone on the app-server, so on a busy host the Host's record is
+  usually what tells. No text decides whether a limit was confirmed: a backend
+  that records its limits writes `provider_limit_event_id` on the failed state
+  when the quota is confirmed, and its absence says it was not. The reason
+  keeps the provider's own words beside the category's, so it says which
+  limit it was.
 - Sign-in, plan and billing failures (`auth`, `account_plan`, `billing`) count,
   because a person has to act; the `attention` reason says what: sign in, switch
   account or model, pay or raise the limit.

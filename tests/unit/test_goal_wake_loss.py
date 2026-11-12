@@ -946,6 +946,67 @@ def test_credits_the_host_knows_are_depleted_count_whatever_the_error_says(
     assert {entry["detail"]["code"] for entry in _history(plan, "wake_failed")} == {"billing"}
 
 
+def _host_knows(monkeypatch, reason):
+    """What the Host's own usage record says about the owner's backend."""
+    from lib import backend_usage
+    monkeypatch.setattr(backend_usage, "exhausted_backends", lambda: {} if reason is None else {
+        "claude": {"state": "exhausted", "provider_id": "claude", "reason": reason}})
+
+
+def test_a_window_the_host_knows_is_spent_stays_exempt(tmp_path, monkeypatch):
+    """Only the Host's record of depleted credits overrides a window-like
+    text. Its record that the window is spent agrees with the text."""
+    _host_knows(monkeypatch, "usage_limit")
+    service, backends, agent_id = _goal_owner(tmp_path)
+    backends.live = False
+    plan = _arm(_goal())
+
+    dispatched, attention = _every_wake_fails(service, backends, plan, USAGE_WINDOW, hours=3)
+
+    assert attention is None and len(dispatched) >= 6
+    assert {entry["detail"]["code"] for entry in _history(plan, "wake_failed")} == {
+        "usage_limit"}
+
+
+# Muse's wording, as elitebook recorded it 27 times on 2026-11-11.
+MUSE_WINDOW = (
+    "Muse Code failed: API error 429 [request_id=00000000-0000-0000-0000-000000000000]: "
+    "Subscription quota exhausted. Your usage window resets at 2026-11-16T00:00:00Z. "
+    "(rate_limit_error)")
+
+
+def test_muses_usage_window_is_waited_out_not_sent_to_a_person(tmp_path):
+    service, backends, agent_id = _goal_owner(tmp_path)
+    backends.live = False
+    plan = _arm(_goal())
+
+    dispatched, attention = _every_wake_fails(service, backends, plan, MUSE_WINDOW, hours=3)
+
+    assert attention is None and len(dispatched) >= 6
+    wake = _continuation(plan)
+    assert wake["capacity_failures"] == len(dispatched)
+    assert "no account with usage" in wake["reason"] and "has to pay" not in wake["reason"]
+    assert {entry["detail"]["code"] for entry in _history(plan, "wake_failed")} == {
+        "usage_limit"}
+
+
+def test_the_providers_message_is_read_as_well_as_the_error(tmp_path):
+    """The state keeps 200 characters of the error and 500 of the provider's
+    message. A window named past the first 200 is still a window."""
+    service, backends, agent_id = _goal_owner(tmp_path)
+    backends.live = False
+    plan = _arm(_goal())
+    message = ("Runner failed: API error 429 [request_id=" + "0" * 180 + "]: " + USAGE_WINDOW)
+
+    dispatched, attention = _every_wake_fails(service, backends, plan, message, hours=3)
+
+    state = agents_db.latest_state(agent_id)["detail"]
+    assert "session limit" not in state["error"] and "session limit" in state["provider_message"]
+    assert attention is None and len(dispatched) >= 6
+    assert {entry["detail"]["code"] for entry in _history(plan, "wake_failed")} == {
+        "usage_limit"}
+
+
 DAY_MIN = 24 * 60
 
 
@@ -1081,6 +1142,55 @@ def test_a_codex_limit_the_provider_did_not_confirm_is_not_exempt(tmp_path):
     assert "Codex could not complete this request" in stuck["reason"]
     assert {entry["detail"]["code"] for entry in _history(plan, "wake_failed")} == {
         "unconfirmed_limit"}
+
+
+@pytest.mark.parametrize("known, code, minutes", [
+    ("usage_limit", "usage_limit", None),          # the Host saw the window spent: wait
+    ("credits_depleted", "billing", 62),           # the Host saw the credits gone: a person
+    (None, "unconfirmed_limit", 62),               # the Host knows nothing: an ordinary failure
+], ids=["window-spent", "credits-depleted", "no-record"])
+def test_the_hosts_own_record_settles_a_limit_the_provider_did_not_confirm(
+        tmp_path, monkeypatch, known, code, minutes):
+    """Codex confirms a limit only when the failed turn was quiet and alone on
+    the app-server, which on a busy host it rarely is. The Host's usage record
+    of the backend is asked before the failure is counted as unconfirmed."""
+    _host_knows(monkeypatch, known)
+    service, backends, agent_id = _goal_owner(tmp_path)
+    backends.live = False
+    plan = _arm(_goal())
+
+    dispatched, attention = _every_wake_fails(
+        service, backends, plan, _Unconfirmed("You've hit your usage limit"), hours=3)
+
+    assert attention == minutes
+    assert {entry["detail"]["code"] for entry in _history(plan, "wake_failed")} == {code}
+
+
+def test_codex_is_the_backend_that_records_its_limits():
+    """What ``_quota_unconfirmed`` asks. Codex writes the event's id on the
+    failed state for a limit the provider confirmed; the others write none,
+    so a missing id says nothing about them."""
+    from lib import backends as registry
+    assert registry.by_id("codex").records_usage_limits() is True
+    assert [registry.by_id(backend).records_usage_limits()
+            for backend in ("claude", "muse", "opencode")] == [False, False, False]
+
+
+def test_a_failure_that_is_not_about_usage_starts_the_ceilings_clock_too(tmp_path):
+    """The eight days count from the first wake of a streak that did not
+    complete, whatever it failed on."""
+    service, backends, agent_id = _goal_owner(tmp_path)
+    backends.live = False
+    plan = _arm(_goal())
+    assert "uncompleted_since" not in _continuation(plan)
+
+    assert _tick(service) == 1
+    _wakes(backends)[-1]["on_error"]("boom: the runner died")
+    backends.live = False
+    _tick(service, offset_ms=15_000)
+
+    wake = _continuation(plan)
+    assert abs(wake["uncompleted_since"] - wake["last_dispatch_at"]) < 60_000
 
 
 @pytest.mark.parametrize("confirmed", [False, True])

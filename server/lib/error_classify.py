@@ -149,6 +149,15 @@ _USAGE_OTHER_PATTERN = (
 _USAGE_LIMIT_RE = re.compile(_USAGE_WINDOW_PATTERN + "|" + _USAGE_OTHER_PATTERN, re.I)
 _USAGE_WINDOW_RE = re.compile(_USAGE_WINDOW_PATTERN, re.I)
 _USAGE_OTHER_RE = re.compile(_USAGE_OTHER_PATTERN, re.I)
+# A text of the category that states its own reset is a window, whatever else
+# it calls the allowance. Muse says "Subscription quota exhausted. Your usage
+# window resets at ..." (27 failures on elitebook on 2026-11-11), and "quota
+# exhausted" alone is in the other part. Unless it also names something no
+# reset clears. These two are read only by ``usage_limit_resets``; the
+# category's own pattern is not touched.
+_STATES_ITS_RESET_RE = re.compile(r"\bresets\b|\breset (?:at|in|on)\b|\bwill reset\b", re.I)
+_NO_RESET_CLEARS_RE = re.compile(
+    r"\bcredits?\b|payment|suspend|billing|\btrial\b|free tier", re.I)
 # The CLI's own wording when its OAuth token is gone. Twelve agents launched
 # together 30 s after a reboot on 2026-09-19 all failed this way; it was
 # classified TRANSIENT, which is never retried, so every heartbeat and the
@@ -199,10 +208,15 @@ def usage_limit_resets(message: str | None) -> bool:
 
     True only for a text that reads as a spent window and as nothing else of
     the USAGE_LIMIT category. A text that also names credits, billing, payment
-    or the like is not known to clear by waiting. The category itself
+    or the like is not known to clear by waiting. A text of the category that
+    states its reset ("Your usage window resets at ...") is a window unless
+    it names credits, payment, suspension, billing, a trial or the free tier.
+    The category itself
     (``classify_error``) is unchanged; this is for callers that would
     otherwise wait on something only a person can fix."""
     text = message or ""
+    if _STATES_ITS_RESET_RE.search(text) and _USAGE_LIMIT_RE.search(text):
+        return not _NO_RESET_CLEARS_RE.search(text)
     return bool(_USAGE_WINDOW_RE.search(text)) and not _USAGE_OTHER_RE.search(text)
 
 
