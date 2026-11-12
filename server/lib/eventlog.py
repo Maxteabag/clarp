@@ -52,11 +52,12 @@ from dataclasses import dataclass
 from .log import log_fault
 
 
+# Created when the first event is written (``_write_jsonl``), not here:
+# importing Host code must leave the live paths as they were.
 LOG_DIR = pathlib.Path(os.environ.get(
     "CLAUDE_PWA_LOG_DIR",
     str(pathlib.Path.home() / ".cache" / "clarp" / "logs"),
 ))
-LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # The size bound on one event's ``detail``: serialised, it never exceeds this
@@ -374,6 +375,7 @@ def _write_jsonl(record: dict, now: _dt.datetime) -> None:
     line = json.dumps(record, separators=(",", ":")) + "\n"
     path = _path_for(now)
     with _LOCK:
+        path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "a", encoding="utf-8") as f:
             fcntl.flock(f.fileno(), fcntl.LOCK_EX)
             try:

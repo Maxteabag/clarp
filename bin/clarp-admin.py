@@ -29,7 +29,7 @@ HOME = Path.home()
 REPO = Path(__file__).resolve().parents[1]
 SERVER_ROOT = REPO if (REPO / "lib").is_dir() else REPO / "server"
 sys.path.insert(0, str(SERVER_ROOT))
-from lib import service_manager, xdg  # noqa: E402
+from lib import schema_guard, service_manager, xdg  # noqa: E402
 from lib.config_writer import set_toml_value, toml_value  # noqa: E402
 
 CONFIG_DIR = Path(os.environ.get("CLARP_CONFIG_DIR", xdg.config_dir(HOME)))
@@ -2554,9 +2554,23 @@ def releases() -> list[Path]:
                   key=lambda p: p.stat().st_mtime, reverse=True) if root.is_dir() else []
 
 
-def activate_release(release: Path) -> None:
+def _refuse_older_schema(source: Path, *, allow: bool, what: str, how: str):
+    """Stop before code below the database's schema is put in place (issue
+    262). ``allow`` is the deliberate rollback; it is recorded for the Host,
+    for exactly this pair of versions. Returns (code, stored)."""
+    try:
+        return schema_guard.check_source(
+            source, SHARE / "state.sqlite", share=SHARE, allow=allow, what=what, how=how)
+    except schema_guard.OlderCode as refused:
+        raise SystemExit(f"ERROR: {refused}") from None
+
+
+def activate_release(release: Path, *, allow_older_schema: bool = False) -> None:
     if not (release / "server.py").is_file():
         raise SystemExit(f"invalid Clarp release: {release}")
+    _refuse_older_schema(
+        release, allow=allow_older_schema, what=f"Release {release.name}",
+        how="To roll back on purpose: clarp-admin rollback --allow-older-schema.")
     current = SHARE / "current"
     previous = current.resolve() if current.exists() else None
     live_unit = service_manager.definition_path(HOME)
@@ -2636,9 +2650,77 @@ def cmd_rollback(args) -> int:
         if args.version else (candidates[0] if candidates else None)
     if target is None:
         raise SystemExit("no previous matching release")
-    activate_release(target)
+    activate_release(
+        target, allow_older_schema=getattr(args, "allow_older_schema", False))
     print(f"rolled back to {target.name}")
     return 0
+
+
+def _git_text(source: Path, *args: str) -> str:
+    """One git answer, or "" when git cannot give it."""
+    done = subprocess.run(["git", *args], cwd=source, text=True, capture_output=True)
+    return done.stdout.strip() if done.returncode == 0 else ""
+
+
+def _installed_version() -> tuple[str, int]:
+    """The commit the installed release was built from ("" when it does not
+    say) and when it was built (epoch seconds, 0 when it does not say)."""
+    current = SHARE / "current"
+    try:
+        commit = (current / "DEPLOYED_VERSION").read_text().strip().removesuffix("-dirty")
+    except OSError:
+        commit = ""
+    built = 0
+    try:
+        stamp = re.search(r"-(\d{14})-\d+$", (current / "DEPLOYED_RELEASE_ID").read_text().strip())
+        if stamp:
+            built = int(time.mktime(time.strptime(stamp.group(1), "%Y%m%d%H%M%S")))
+    except (OSError, ValueError):
+        pass
+    return ("" if commit == "unknown" else commit), built
+
+
+def _refuse_silent_downgrade(source: Path, ref: str, channel: str) -> None:
+    """A bare ``clarp-admin update`` chose ``ref`` by itself. Say what that
+    is, and do not install it when it is older than what is installed: on
+    2026-11-11 the latest tag was two months behind the installed main, and a
+    bare update put a schema 80 Host on a schema 122 database."""
+    resolved = _git_text(source, "rev-parse", "--verify", f"{ref}^{{commit}}")
+    if not resolved:
+        return                  # the worktree below reports a ref that is none
+    describe = "%h, %cs, %s"
+    chosen = _git_text(source, "show", "-s", f"--format={describe}", resolved)
+    print(f"clarp-admin update: no --ref given; the {channel} channel resolves to "
+          f"{ref} ({chosen})")
+    commit, built = _installed_version()
+    if not commit:
+        return                  # nothing recorded to compare it with
+    installed = _git_text(source, "rev-parse", "--verify", f"{commit}^{{commit}}")
+    how = (f"To install it on purpose: clarp-admin update --ref {ref}. "
+           "For the newest code: clarp-admin update --ref origin/main.")
+    if not installed:
+        # Built from a commit this source does not have. Its build time still
+        # tells: a commit made before that build is not an update.
+        made = int(_git_text(source, "show", "-s", "--format=%ct", resolved) or 0)
+        if built and made and made < built:
+            raise SystemExit(
+                f"ERROR: not installing {ref} ({chosen}): it was committed before the "
+                f"installed release ({commit}) was built, and that commit is not in "
+                f"{source}, so it cannot be shown to be newer. {how}")
+        return
+    if installed == resolved:
+        print("  that is the installed version; installing it again")
+        return
+    behind = int(_git_text(source, "rev-list", "--count", f"{resolved}..{installed}") or 0)
+    ahead = int(_git_text(source, "rev-list", "--count", f"{installed}..{resolved}") or 0)
+    older = behind and (not ahead or int(
+        _git_text(source, "show", "-s", "--format=%ct", resolved) or 0) < int(
+        _git_text(source, "show", "-s", "--format=%ct", installed) or 0))
+    if older:
+        current = _git_text(source, "show", "-s", f"--format={describe}", installed)
+        raise SystemExit(
+            f"ERROR: not installing {ref} ({chosen}): it is {behind} commits behind "
+            f"what is installed ({current}). {how}")
 
 
 def cmd_update(args) -> int:
@@ -2655,12 +2737,15 @@ def cmd_update(args) -> int:
     run("git", "fetch", "--tags", "--prune", "origin",
         "+refs/heads/*:refs/remotes/origin/*", cwd=source)
     ref = args.ref
-    if not ref and state.get("channel", "stable") == "stable":
+    channel = state.get("channel", "stable")
+    if not ref and channel == "stable":
         tags = stable_release_tags(subprocess.run(
             ["git", "tag", "--list", "v*", "--sort=-version:refname"],
             cwd=source, text=True, capture_output=True, check=True).stdout.splitlines())
         ref = tags[0] if tags else "origin/main"
     ref = ref or "origin/main"
+    if not args.ref:
+        _refuse_silent_downgrade(source, ref, channel)
     with tempfile.TemporaryDirectory(prefix="clarp-update-") as temporary:
         worktree = Path(temporary) / "release"
         run("git", "worktree", "add", "--detach", str(worktree), ref, cwd=source)
@@ -2668,6 +2753,17 @@ def cmd_update(args) -> int:
             env = os.environ.copy()
             env["CLARP_TOOLCHAIN_MODE"] = str(
                 state.get("toolchain") or "existing")
+            # The source's own installer checks this too, if it is new enough
+            # to; an older one does not, so it is checked here first.
+            code, stored = _refuse_older_schema(
+                worktree, allow=getattr(args, "allow_older_schema", False),
+                what=f"{ref}",
+                how=(f"To install it on purpose: clarp-admin update --ref {ref} "
+                     "--allow-older-schema."))
+            if code is not None and stored > code:
+                env[schema_guard.ROLLBACK_ENV] = f"{stored}:{code}"
+            else:
+                env.pop(schema_guard.ROLLBACK_ENV, None)
             run(str(worktree / "install.sh"), cwd=worktree, env=env)
         finally:
             run("git", "worktree", "remove", "--force", str(worktree),
@@ -3196,11 +3292,17 @@ Run ./setup.sh --help to see TUI, interactive CLI, and automation routes.
         command = backup.add_parser(name)
         command.add_argument("path")
         command.set_defaults(func=cmd_backup)
+    older_schema_help = (
+        "install code whose database schema is below the database's, for a "
+        "deliberate rollback. Older code does not know the newer tables and "
+        "columns; restore a matching database backup if you stay on it")
     update = sub.add_parser("update")
     update.add_argument("--ref")
+    update.add_argument("--allow-older-schema", action="store_true", help=older_schema_help)
     update.set_defaults(func=cmd_update)
     rollback = sub.add_parser("rollback")
     rollback.add_argument("version", nargs="?")
+    rollback.add_argument("--allow-older-schema", action="store_true", help=older_schema_help)
     rollback.set_defaults(func=cmd_rollback)
     uninstall = sub.add_parser("uninstall")
     uninstall.add_argument("--purge-data", action="store_true")
