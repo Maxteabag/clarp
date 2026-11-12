@@ -1277,6 +1277,47 @@ def test_a_wake_an_older_runtime_refused_reads_not_delivered(tmp_path):
         "Wake not delivered: no account with usage; next try now")
 
 
+def test_the_park_for_a_model_reads_as_lack_of_usage_too(tmp_path):
+    """A wake refused at its resume because another turn's park marker was the
+    agent's newest state carries that marker's sentence. Since PR 269 there
+    are two: this is the one for a model the active account does not serve."""
+    from lib import error_classify
+
+    sentence = error_classify.account_wait_message("claude", "fable")
+    assert sentence == (
+        "Waiting for a claude account that serves fable; the active one does not right now")
+    service, plan, request = _old_refusal(tmp_path, error=sentence)
+
+    _tick(service, offset_ms=HOUR_MS)
+
+    assert _noted(plan)["code"] == "usage_limit" and _noted(plan)["started"] is False
+    assert _continuation(plan).get("capacity_failures") == 1
+
+
+def test_the_two_park_sentences_are_written_and_read_in_one_place():
+    """What the runtime shows while a turn waits and what the goal pass reads
+    as "waited for an account" cannot drift apart again."""
+    from lib import error_classify
+
+    assert error_classify.account_wait_message("claude") == WAITING
+    for sentence in (
+            error_classify.account_wait_message("claude"),
+            error_classify.account_wait_message("codex", "gpt-6-sol"),
+            error_classify.account_wait_message("claude", None),
+            error_classify.account_wait_message("claude", "claude-fable-5-2[1m]"),
+            "Waiting for an opencode account with available usage"):
+        assert error_classify.is_account_wait_message(sentence), sentence
+    for other in ("", None, "Waiting for a claude account", WAITING + ".",
+                  "claude spawn failed: " + WAITING,
+                  "Waiting for a claude account that serves fable"):
+        assert not error_classify.is_account_wait_message(other), other
+    # The runtime's park uses the same builder (turn_launcher._pause_for_account).
+    import inspect
+    from lib import turn_launcher
+    source = inspect.getsource(turn_launcher.LauncherMixin._pause_for_account)
+    assert "error_classify.account_wait_message(" in source and "Waiting for" not in source
+
+
 def test_the_park_text_is_lack_of_usage_only_for_a_wake_that_never_started(tmp_path):
     service, plan, request = _old_refusal(tmp_path)
     db.conn().execute("UPDATE queued_turns SET status='failed', started_at=? WHERE queue_id=?",
