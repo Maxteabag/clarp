@@ -511,8 +511,7 @@ def write_frontier(database, checkpoint: Checkpoint, file_hash: str, raw_inputs)
     key = (checkpoint.agent_id, checkpoint.backend_session_id, checkpoint.source_file)
     if load_checkpoint(database, *key) != checkpoint:
         return
-    if raw_inputs[4] or any(row["origin"] not in ("user", "agent", None, "")
-                            for row in raw_inputs[1]):
+    if raw_inputs[4]:
         database.execute(
             """DELETE FROM transcript_import_frontiers
                 WHERE agent_id=? AND backend_session_id=? AND source_file=?""", key)
@@ -1243,10 +1242,6 @@ def _cache_committed_tail(key, revision, checkpoint, raw_inputs, file_hash, *, r
     if raw_inputs[4]:
         _TAIL_STATES.note_refusal(key, revision, reason_token, "oracle_history")
         _tail_log("oracle_history", retention=True)
-        return
-    if any(row["origin"] not in ("user", "agent", None, "") for row in raw_inputs[1]):
-        _TAIL_STATES.note_refusal(key, revision, reason_token, "automation_provenance")
-        _tail_log("automation_provenance", retention=True)
         return
     state = _TailState(checkpoint, raw_inputs, file_hash, hasher)
     if hasher is not None:
