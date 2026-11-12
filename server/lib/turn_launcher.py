@@ -92,9 +92,10 @@ class LauncherMixin:
         if not self._holds_slot(spec):
             return
         # It is the agent's live turn again. A message queued behind it while
-        # it waited may have moved the trace marker (a voice message does);
-        # left there, this turn's own callbacks would read as a replaced
-        # turn's. The queued message sets it again when its turn starts.
+        # it waited may have moved the trace marker (a voice message does),
+        # and what reads the marker as the live turn's trace (the hooks in
+        # the process, the speech queue) would file this turn under that
+        # message. The queued message sets it again when its turn starts.
         agents_db.set_trace_for_session(spec.session, spec.trace_id)
         if _is_call_opening(spec) and (attempt != 1 or state.get("spawn_started") is not None):
             # Only an attempt-1 initiative parked before its spawn flag was ever set (the flag
