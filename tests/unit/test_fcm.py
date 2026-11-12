@@ -588,3 +588,44 @@ def test_the_documented_token_form_is_what_fcm_tokens_look_like():
     assert fcm.valid_token(ANDROID)
     assert not fcm.valid_token("a b") and not fcm.valid_token("x" * 19)
     assert urllib.parse.quote(ANDROID, safe=":_-") == ANDROID
+
+
+class _PushCfg:
+    """Only what apns._deliverable asks a configuration."""
+
+    def __init__(self, apns_on: bool, fcm_on: bool):
+        self._apns_on, self._fcm_on = apns_on, fcm_on
+
+    def apns_enabled(self) -> bool:
+        return self._apns_on
+
+    def fcm_enabled(self) -> bool:
+        return self._fcm_on
+
+    def fcm_service_account_file(self) -> str:
+        return ""
+
+
+def test_iphones_are_sent_before_android_phones_in_one_batch():
+    # An Android send can wait on Google through its retries; it must not
+    # hold up an iPhone's push that happens to sit after it in the table.
+    rows = [
+        {"token": "android-1", "provider": "fcm"},
+        {"token": "iphone-1", "provider": "apns"},
+        {"token": "android-2", "provider": "fcm"},
+        {"token": "iphone-2"},  # a row from before the provider column
+    ]
+    order = [r["token"] for r in apns._deliverable(_PushCfg(True, True), rows)]
+    assert order == ["iphone-1", "iphone-2", "android-1", "android-2"]
+
+
+def test_android_rows_never_change_which_iphones_get_a_push(monkeypatch):
+    rows = [
+        {"token": "android-1", "provider": "fcm"},
+        {"token": "iphone-1", "provider": "apns"},
+    ]
+    monkeypatch.setattr(fcm, "report_auth_problem", lambda *a, **k: None)
+    # No usable service account: the Android row is dropped, the iPhone stays.
+    assert [r["token"] for r in apns._deliverable(_PushCfg(True, False), rows)] == ["iphone-1"]
+    # APNs off, FCM on: the reverse, and nothing raises.
+    assert [r["token"] for r in apns._deliverable(_PushCfg(False, True), rows)] == ["android-1"]
