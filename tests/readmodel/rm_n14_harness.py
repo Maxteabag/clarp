@@ -24,7 +24,9 @@ BACKENDS = ("claude", "codex")
 BASE_MS = 1_791_706_800_000
 # Optimization metadata is checked separately, never allowed to hide a change
 # to product rows or any automation/team/Oracle side-effect table.
-METADATA_TABLES = frozenset({"transcript_import_checkpoints"})
+# The import's own bookkeeping, not products: the checkpoint and the frontier
+# stored beside it (the reference lane imports in full and keeps neither).
+METADATA_TABLES = frozenset({"transcript_import_checkpoints", "transcript_import_frontiers"})
 
 
 def append_bytes(backend: str, ordinal: int, *, size: int = 1024,
@@ -232,7 +234,24 @@ def run_lane(database: pathlib.Path, transcript: pathlib.Path, backend: str,
             original_log = host_log.log
             metrics["tail_events"] = []
 
+            metrics["prefix_changed"] = []
+            metrics["digest_reads"] = []
+            read_digest = inc._read_digest
+
+            def counted_digest(path, previous_size, current_size, *, digest=None):
+                # "all": every imported byte was read again; "added": only the new ones.
+                metrics["digest_reads"].append("all" if digest is None else "added")
+                return read_digest(path, previous_size, current_size, digest=digest)
+
+            stack.enter_context(patch.object(inc, "_read_digest", counted_digest))
+            if faults.get("settings"):
+                settings = inc.settings
+                stack.enter_context(patch.object(
+                    inc, "settings", lambda: {**settings(), **faults["settings"]}))
+
             def capture_log(event, detail=""):
+                if event == "transcriptPrefixChanged":
+                    metrics["prefix_changed"].append(detail)
                 if event in ("transcriptTailDecision", "transcriptTailRetention", "transcriptTailFenceRead"):
                     import re
                     shape = r"code=[a-z0-9_]+ count=[1-9][0-9]*"
