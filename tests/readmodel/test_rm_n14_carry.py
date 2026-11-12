@@ -301,17 +301,35 @@ def test_an_ordinary_new_message_is_imported_by_its_tail(tmp_path, backend, rule
                              else ["latest_user_row", "row_send", "turn_rows"])
 
 
+@pytest.mark.parametrize("words", ["synthetic request 2", "  synthetic request 2 \n"],
+                         ids=["the same words", "with other whitespace around them"])
 @BACKENDS
 def test_a_new_message_with_the_words_of_an_old_turn_typed_in_a_terminal_is_a_full_import(
-        tmp_path, backend):
+        tmp_path, backend, words):
     """The twin. The old turn found no /send row when it was imported and is
-    stored as a transcript row. A full replay links it to the new row."""
+    stored as a transcript row. A full replay links it to the new row. The
+    linker compares stripped words, so the new row's words are stripped too:
+    spaces and a newline around them do not make them new."""
     with World(tmp_path, backend, _history(backend)) as world:
         ordinal = world.started(6)
-        world.send("again", "synthetic request 2", at=FAR)
+        world.send("again", words, at=FAR)
         world.grow(_turn(backend, ordinal))
         assert world.imported() == ("full_carry_inputs_changed", ["send_said_before"])
         world.grow(_turn(backend, ordinal + 1))
+        assert world.imported() == ("tail_applied", [])
+
+
+@pytest.mark.parametrize("words", ["Synthetic Request 2", "synthetic  request 2"],
+                         ids=["another case", "other whitespace inside"])
+@BACKENDS
+def test_words_the_linker_would_not_link_to_an_old_turn_are_new_words(tmp_path, backend, words):
+    """The other side of the same key: nothing but the strip. Another case
+    or another space between the words is another message to the linker, so
+    it is one here."""
+    with World(tmp_path, backend, _history(backend)) as world:
+        ordinal = world.started(6)
+        world.send("nearly", words, at=FAR)
+        world.grow(_turn(backend, ordinal))
         assert world.imported() == ("tail_applied", [])
 
 
