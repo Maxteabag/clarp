@@ -106,7 +106,6 @@ class StrandedParks:
         # reference -> how long checks that could read the status have found
         # it unlisted, without one between that found it listed.
         self._unlisted_ms: dict[str, int] = {}
-        self._logged: set[str] = set()
         self._unavailable_logged = -_UNAVAILABLE_LOG_MS
 
     def tick(self, now: int) -> int:
@@ -132,7 +131,6 @@ class StrandedParks:
         self._unlisted_ms = {
             reference: self._unlisted_ms[reference] + EVERY_MS if reference in self._unlisted_ms else 0
             for reference in absent}
-        self._logged &= set(absent)
         changed = 0
         for alert in _open_alerts():
             if alert["reference_id"] not in absent:
@@ -147,11 +145,6 @@ class StrandedParks:
 
     def _report(self, reference: str, park: dict[str, Any], now: int) -> int:
         minutes = max(0, now - park["parked_at"]) // 60_000 if park["parked_at"] else 0
-        if reference not in self._logged:
-            self._logged.add(reference)
-            log("strandedPark",
-                f"agent={park['agent_id']} session={park['session']} trace={park['trace_id']} "
-                f"parked_min={minutes} unlisted_min={self._unlisted_ms[reference] // 60_000}")
         artifact_id = "stranded-park-" + hashlib.sha256(reference.encode()).hexdigest()[:40]
         summary = ("This turn waits for an account, but the runtime no longer holds it, "
                    "so it will not continue on its own. Stop the agent and send the message again.")
@@ -166,6 +159,12 @@ class StrandedParks:
             if (existing["status"] != "cancelled" or existing["archived_at"] is not None
                     or existing["deleted_at"] is not None):
                 return 0
+        # Logged when the alert is raised or opened again, so once per alert:
+        # a Host that restarts finds the alert and says nothing more.
+        log("strandedPark",
+            f"agent={park['agent_id']} session={park['session']} trace={park['trace_id']} "
+            f"parked_min={minutes} unlisted_min={self._unlisted_ms[reference] // 60_000}")
+        if existing is not None:
             artifacts.update(artifact_id, {"status": "failed", "summary": summary})
             return 1
         diagnostic = (f"The agent has shown the wait for {minutes} minutes and no account "

@@ -57,4 +57,7 @@ def test_connection_recovery_real_dispatch(tmp_path, monkeypatch, mode, expected
             assert any(e.get('action')=='reconnecting' and 'saved' in e['summary'] for e in activities)
     finally:
         clear_for_agent(agent)
-        codex_app_server.recycle_clients()
+        # Until the pools are empty: a client left behind fails the next
+        # test's quiescence gate (as in test_codex_start_guardrails).
+        from tests.unit.test_codex_start_guardrails import _leave_no_client_behind
+        _leave_no_client_behind()

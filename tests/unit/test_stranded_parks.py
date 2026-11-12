@@ -281,6 +281,10 @@ def test_a_host_restart_finds_the_alert_it_already_raised(host):
     again = stranded_parks.StrandedParks(status=runtime.status)
     assert _minutes(again, 6, 10) == 0
     assert len(_alerts(sam)) == 1
+    # And logs nothing more: one line for one alert, however often it starts.
+    once_more = stranded_parks.StrandedParks(status=runtime.status)
+    assert _minutes(once_more, 17, 10) == 0
+    assert [event for event, _ in lines] == ["strandedPark"]
 
 
 def test_a_deleted_agent_is_not_reported(host):
