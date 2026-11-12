@@ -249,9 +249,13 @@ def run_lane(database: pathlib.Path, transcript: pathlib.Path, backend: str,
                 stack.enter_context(patch.object(
                     inc, "settings", lambda: {**settings(), **faults["settings"]}))
 
+            metrics["carry_changed"] = []
+
             def capture_log(event, detail=""):
                 if event == "transcriptPrefixChanged":
                     metrics["prefix_changed"].append(detail)
+                if event == "transcriptCarryInputsChanged":
+                    metrics["carry_changed"].append(detail)
                 if event in ("transcriptTailDecision", "transcriptTailRetention", "transcriptTailFenceRead"):
                     import re
                     shape = r"code=[a-z0-9_]+ count=[1-9][0-9]*"
