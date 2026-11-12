@@ -52,7 +52,7 @@ _jwt_cache: tuple[str, int, tuple] | None = None  # (token, minted_at_epoch, ide
 # `with` block keeps a strong reference), so the map does not grow by one lock
 # per session ever notified. Concurrent senders still share one object.
 _send_locks_guard = threading.Lock()
-_send_locks: "weakref.WeakValueDictionary[str, threading.Lock]" = (
+_send_locks: "weakref.WeakValueDictionary[str, threading.Lock | _AndroidLane]" = (
     weakref.WeakValueDictionary())
 
 
@@ -1099,24 +1099,86 @@ def _deliverable(cfg, rows: list[dict]) -> list[dict]:
     return sorted(live, key=lambda r: r.get("provider") == "fcm")
 
 
-def _send_groups(session: str, rows: list[dict]) -> list[tuple[threading.Lock, list[dict]]]:
-    """The batch's rows with the lock each group is sent under, iPhones first.
+# At most this many notifications of one agent wait behind the Android send in progress; a newer
+# one drops the oldest waiting (logged). With a slow Google each Android send can take about 45 s
+# (3 attempts of up to 10 s each, the back-off, a token exchange), so the queue must stay short.
+ANDROID_MAX_WAITING = 2
+
+
+class _AndroidLane:
+    """One agent's Android sends: one at a time, in order, with a bounded queue."""
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.guard = threading.Lock()
+        self.waiting: collections.deque = collections.deque()
+        self.dropped: set = set()
+
+
+def _android_lane(session: str) -> _AndroidLane:
+    # Kept in the same weak table as the send locks: it lives while a sender holds it.
+    key = f"fcm\x00{(session or '').strip() or '__global__'}"
+    with _send_locks_guard:
+        lane = _send_locks.get(key)
+        if lane is None:
+            lane = _AndroidLane()
+            _send_locks[key] = lane
+        return lane
+
+
+class _AndroidTurn:
+    """``with _AndroidTurn(...) as go``: wait for this agent's Android lane; ``go`` is False when a
+    newer notification pushed this one out of the bounded queue while it waited."""
+
+    def __init__(self, session: str, label: str):
+        self._session, self._label = session, label
+        self._lane = _android_lane(session)
+        self._ticket = object()
+
+    def __enter__(self) -> bool:
+        lane = self._lane
+        with lane.guard:
+            lane.waiting.append(self._ticket)
+            while len(lane.waiting) > ANDROID_MAX_WAITING:
+                lane.dropped.add(lane.waiting.popleft())
+        lane.lock.acquire()
+        with lane.guard:
+            if self._ticket in lane.dropped:
+                lane.dropped.discard(self._ticket)
+                go = False
+            else:
+                lane.waiting.remove(self._ticket)
+                go = True
+        if not go:
+            log("apnsAndroidDropped",
+                f"session={self._session} notification={self._label} reason=queue-full "
+                f"max_waiting={ANDROID_MAX_WAITING}")
+        return go
+
+    def __exit__(self, *exc) -> bool:
+        self._lane.lock.release()
+        return False
+
+
+def _send_groups(session: str, rows: list[dict], label: str = "") -> list[tuple[object, list[dict]]]:
+    """The batch's rows with the gate each group is sent under, iPhones first.
 
     The conversation's send lock keeps two notifications of one agent in order
     on iPhones (an older, slower APNs request must not arrive after and
     collapse over its successor). Android rows are sent after it is released,
-    under a lock of their own: an FCM send can wait on Google through its
-    retries and timeouts (about half a minute at worst), and that wait must
-    never hold the same agent's next iPhone push. Android sends of one
-    conversation still go out in order among themselves.
+    through the agent's Android lane: an FCM send can wait on Google through its
+    retries and deadlines, and that wait must never hold the same agent's next
+    iPhone push. Android sends of one conversation go out in order among
+    themselves, and at most ANDROID_MAX_WAITING wait; the oldest waiting is
+    dropped first. ``with gate as go`` gives False for a dropped one.
     """
     iphones = [r for r in rows if r.get("provider") != "fcm"]
     androids = [r for r in rows if r.get("provider") == "fcm"]
-    groups = []
+    groups: list[tuple[object, list[dict]]] = []
     if iphones:
-        groups.append((_send_lock(session), iphones))
+        groups.append((_send_lock(session), iphones))     # Lock.__enter__ returns True
     if androids:
-        groups.append((_send_lock(f"fcm\x00{session}"), androids))
+        groups.append((_AndroidTurn(session, label), androids))
     return groups
 
 
@@ -1174,10 +1236,13 @@ def send_user_notification(notification: dict) -> dict:
     source_message_id = str(notification.get("source_message_id") or "")
     preview_hash = _preview_fingerprint(body)
     started = time.monotonic()
-    for lock, rows in _send_groups(session, tokens):
+    for gate, rows in _send_groups(session, tokens, notification_id):
         if suppressed:
             break
-        with lock:
+        with gate as go:
+            if not go:
+                failed += len(rows)
+                continue
             try:
                 transport = _transport(cfg)
                 for row in rows:
@@ -1479,8 +1544,11 @@ def send_decision_created(artifact: dict) -> dict:
     notification_id = decision_notification_id(decision_id)
     sent = failed = disabled = 0
     started = time.monotonic()
-    for lock, rows in _send_groups(session, tokens):
-        with lock:
+    for gate, rows in _send_groups(session, tokens, notification_id):
+        with gate as go:
+            if not go:
+                failed += len(rows)
+                continue
             try:
                 transport = _transport(cfg)
                 for row in rows:
