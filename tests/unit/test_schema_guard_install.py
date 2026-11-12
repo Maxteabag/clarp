@@ -400,42 +400,99 @@ def test_a_foreign_service_is_refused_only_on_a_database_that_exists_below_it(tm
 
 # --- an override that is no longer needed ----------------------------------------
 
-def test_a_start_on_a_database_not_above_the_code_removes_a_stale_override(tmp_path, capsys):
-    database = _database_at(tmp_path / "state.sqlite", CODE)
-    marker = tmp_path / schema_guard.ROLLBACK_MARKER
-    schema_guard.allow_rollback(tmp_path, code=CODE - 1, stored=CODE)   # an earlier rollback
+def _an_installation_with_a_stale_override(tmp_path, database_version=CODE):
+    """An installation whose Host once ran on an allowed rollback; the
+    override is still there."""
+    share = tmp_path / "share"
+    release = share / "releases/abc1234-1"
+    release.mkdir(parents=True)
+    (share / "current").symlink_to(release, target_is_directory=True)
+    database = _database_at(share / "state.sqlite", database_version)
+    schema_guard.allow_rollback(share, code=CODE - 1, stored=CODE)
+    return share, release, database
 
-    schema_guard.check_host_start(database, tmp_path, code=CODE, code_root=tmp_path)
 
-    assert not marker.exists()
+def test_the_installations_own_host_removes_a_stale_override_and_says_so(tmp_path, capsys):
+    share, release, database = _an_installation_with_a_stale_override(tmp_path)
+
+    schema_guard.check_host_start(database, share, code=CODE, code_root=release)
+
+    assert not (share / schema_guard.ROLLBACK_MARKER).exists()
     assert "no longer needed" in capsys.readouterr().err
-    schema_guard.check_host_start(database, tmp_path, code=CODE, code_root=tmp_path)   # nothing to remove
+    schema_guard.check_host_start(database, share, code=CODE, code_root=release)   # nothing to remove
 
 
 def test_an_override_in_use_is_kept(tmp_path):
-    database = _database_at(tmp_path / "state.sqlite", CODE + 1)
-    schema_guard.allow_rollback(tmp_path, code=CODE, stored=CODE + 1)
+    share, release, database = _an_installation_with_a_stale_override(tmp_path, CODE + 1)
+    schema_guard.allow_rollback(share, code=CODE, stored=CODE + 1)
 
-    schema_guard.check_host_start(database, tmp_path, code=CODE, code_root=tmp_path)
-    schema_guard.check_host_start(database, tmp_path, code=CODE, code_root=tmp_path)
+    schema_guard.check_host_start(database, share, code=CODE, code_root=release)
+    schema_guard.check_host_start(database, share, code=CODE, code_root=release)
 
-    assert schema_guard.rollback_allowed(tmp_path, code=CODE, stored=CODE + 1)
+    assert schema_guard.rollback_allowed(share, code=CODE, stored=CODE + 1)
 
 
-def test_a_host_that_is_not_the_installations_removes_nothing(tmp_path):
-    """A checkout started in a shell that inherited the installation's paths is
-    not its Host: the installed Host's override is not its to remove."""
-    share = tmp_path / "share"
-    (share / "releases/abc1234-1").mkdir(parents=True)
-    (share / "current").symlink_to(share / "releases/abc1234-1", target_is_directory=True)
-    database = _database_at(share / "state.sqlite", CODE)
-    schema_guard.allow_rollback(share, code=CODE - 1, stored=CODE)
+# Who starts, with the installation's share directory in its environment, and
+# on which database. Only the first is the installation's Host.
+WHO_STARTS = {
+    "the installation's own Host on its database": ("release", "installation", False),
+    "a checkout on the installation's database": ("checkout", "installation", True),
+    "a checkout with the installation's share and a database of its own":
+        ("checkout", "own", True),
+    "another installation's release with this share and its own database":
+        ("stranger", "own", True),
+    "the installation's release on some other database": ("release", "own", True),
+}
 
-    schema_guard.check_host_start(database, share, code=CODE, code_root=tmp_path / "checkout")
-    assert schema_guard.rollback_allowed(share, code=CODE - 1, stored=CODE)
 
-    schema_guard.check_host_start(database, share, code=CODE,
-                                  code_root=share / "releases/abc1234-1")
+@pytest.mark.parametrize("who", list(WHO_STARTS))
+def test_only_the_installations_own_host_on_its_own_database_removes_the_override(tmp_path, who):
+    """The override belongs to the installed Host. A checkout pointed at a
+    scratch database, with the share directory inherited from the shell, is
+    the very environment the refusal advises; it removed the override, and
+    the installed Host on its rollback would have exited 78 at its next
+    restart."""
+    code, serves, kept = WHO_STARTS[who]
+    share, release, database = _an_installation_with_a_stale_override(tmp_path)
+    code_root = {"release": release, "checkout": tmp_path / "checkout",
+                 "stranger": tmp_path / "another/share/releases/def5678-1"}[code]
+    code_root.mkdir(parents=True, exist_ok=True)
+    if serves == "own":
+        database = _database_at(tmp_path / "scratch/state.sqlite", CODE)
+
+    schema_guard.check_host_start(database, share, code=CODE, code_root=code_root)
+
+    assert (share / schema_guard.ROLLBACK_MARKER).exists() is kept
+    assert schema_guard.rollback_allowed(share, code=CODE - 1, stored=CODE) is kept
+
+
+def test_an_installation_reached_through_links_is_still_its_own(tmp_path):
+    """Releases on another disk and a database that is a link, as installed."""
+    share, _release, _database = _an_installation_with_a_stale_override(tmp_path)
+    real = tmp_path / "disk2/releases/abc1234-2"
+    real.mkdir(parents=True)
+    (share / "releases/abc1234-2").symlink_to(real, target_is_directory=True)
+    (tmp_path / "db").symlink_to(share / "state.sqlite")
+
+    schema_guard.check_host_start(tmp_path / "db", share, code=CODE,
+                                  code_root=share / "releases/abc1234-2")
+    assert (share / schema_guard.ROLLBACK_MARKER).exists()     # its code is not under releases
+    # A path that cannot be read is not shown to be the installation's own.
+    real = pathlib.Path.resolve
+
+    def unreadable(self, *args, **kwargs):
+        if self == share / "current":
+            raise PermissionError(13, "Permission denied", str(self))
+        return real(self, *args, **kwargs)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(pathlib.Path, "resolve", unreadable)
+        schema_guard.check_host_start(tmp_path / "db", share, code=CODE,
+                                      code_root=share / "current")
+    assert (share / schema_guard.ROLLBACK_MARKER).exists()
+
+    schema_guard.check_host_start(tmp_path / "db", share, code=CODE,
+                                  code_root=share / "current")
     assert not (share / schema_guard.ROLLBACK_MARKER).exists()
 
 
