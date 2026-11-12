@@ -3360,14 +3360,17 @@ if __name__ == "__main__":
     # own code, and is otherwise the one that upgrades the database it opens.
     from lib import db as _state_db, db_schema as _db_schema, schema_guard as _schema_guard
     from lib.deployment import LAYOUT as _layout
+    _code_root = pathlib.Path(__file__).resolve().parent     # the release, not the link to it
     try:
         _schema_guard.check_host_start(
-            _state_db.DB_PATH, _layout.share, code=_db_schema._SCHEMA_VERSION)
-    except _schema_guard.OlderCode as _refused:
+            _state_db.DB_PATH, _layout.share, code=_db_schema._SCHEMA_VERSION,
+            release=_code_root.name)
+        if not _state_db.run_as_service("host", code_root=_code_root, share=_layout.share):
+            _schema_guard.check_foreign_start(
+                _code_root, _state_db.DB_PATH, _layout.share, code=_db_schema._SCHEMA_VERSION)
+    except (_schema_guard.OlderCode, _schema_guard.NotThisInstallation) as _refused:
         print(f"clarp: {_refused}", file=sys.stderr, flush=True)
-        raise SystemExit(78)        # EX_CONFIG: restarting changes nothing
-    _state_db.run_as_service(
-        "host", code_root=pathlib.Path(__file__).resolve().parent, share=_layout.share)
+        raise SystemExit(_schema_guard.EXIT_REFUSED)    # restarting changes nothing
     # Keep holding the entrypoint's data-root locks but never pass them to children (agent
     # terminals): a no-op unless fds 8/9 are exactly the lock files.
     from lib.data_root_locks import seal_inherited_lock_fds

@@ -35,6 +35,10 @@ ROLLBACK_MARKER = "schema-rollback.json"
 # How the admin CLI hands the same override to a source tree's installer.
 ROLLBACK_ENV = "CLARP_ALLOW_OLDER_SCHEMA"
 
+# What a service exits with when it refuses the database it was given
+# (EX_CONFIG): starting it again changes nothing, and the units do not.
+EXIT_REFUSED = 78
+
 RISK = (
     "Older code does not know the tables and columns the newer release added: "
     "it can fail on them, and rows it writes may be wrong for the newer "
@@ -45,6 +49,11 @@ RISK = (
 
 class OlderCode(RuntimeError):
     """The code is at a lower schema than the database it would run on."""
+
+
+class NotThisInstallation(RuntimeError):
+    """A service that is not one of the installation's releases was started
+    on the installation's database, which is below its schema."""
 
 
 def code_version(root: pathlib.Path | str) -> int | None:
@@ -64,13 +73,19 @@ def code_version(root: pathlib.Path | str) -> int | None:
 
 def stored_version(path: pathlib.Path | str) -> int:
     """The database file's ``user_version``; 0 for a file that is missing or
-    empty. Never writes: not the file, and no ``-wal`` or ``-shm`` beside it.
+    empty. The file and its ``-wal`` are never written.
 
     With no write-ahead log beside the file its header is the whole truth
-    (bytes 60 to 63). With one, the newest header may still be in the log, so
-    the file is read through SQLite, read-only; the side files exist already.
+    (bytes 60 to 63) and nothing at all is touched or created. With one, the
+    newest header may still be in the log, so the file is read through
+    SQLite, read-only. That leaves the file and the ``-wal`` as they are; the
+    ``-shm`` index beside them can change, and is created if it was missing.
+
+    The path is resolved first: SQLite keeps the ``-wal`` beside the real
+    file, not beside a symlink to it, and a version read from the header
+    alone is stale until the next checkpoint.
     """
-    path = pathlib.Path(path)
+    path = pathlib.Path(path).resolve()
     try:
         if path.stat().st_size == 0:
             return 0
@@ -157,10 +172,26 @@ def foreign_to_installation(code_root, database, share) -> bool:
         return True
 
 
-def check_host_start(database, share, *, code: int) -> None:
+def check_foreign_start(code_root, database, share, *, code: int) -> None:
+    """For a service that ``db.run_as_service`` gave no grant (it is not one
+    of this installation's releases): refuse (``NotThisInstallation``) now if
+    the database is below its schema. Nobody will upgrade it for this
+    process, so it could only wait and then fail at its first read; exiting
+    1 there, it was restarted every twelve seconds."""
+    stored = stored_version(database)
+    if 0 < stored < code:
+        raise NotThisInstallation(
+            f"{code_root} is not an installed release of {share}, and that installation's "
+            f"database ({database}) is at schema {stored}, below this code's schema {code}. "
+            "Only its own Host and runtime upgrade it. Install this release there, or give "
+            "this one a database of its own (CLAUDE_PWA_DB).")
+
+
+def check_host_start(database, share, *, code: int, release: str = "") -> None:
     """What the Host asks before it opens the database: refuse (``OlderCode``)
     to serve a database above its own schema, unless a rollback to exactly
-    this code on exactly this database was asked for."""
+    this code on exactly this database was asked for. ``release`` is the
+    name of the release that asks, for the command the refusal names."""
     stored = stored_version(database)
     if stored <= code:
         return
@@ -172,7 +203,8 @@ def check_host_start(database, share, *, code: int) -> None:
     raise OlderCode(older_code_message(
         code=code, stored=stored, what="This Clarp Host", database=database,
         how=(f"Install a release at schema {stored} or newer. To run this older "
-             "release on purpose: clarp-admin rollback --allow-older-schema.")))
+             f"release on purpose: clarp-admin rollback {release or '<this release>'} "
+             "--allow-older-schema.")))
 
 
 def main(argv: list[str]) -> int:
@@ -183,10 +215,14 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--source", required=True)
     parser.add_argument("--database", required=True)
     parser.add_argument("--share")
+    parser.add_argument(
+        "--restored", action="store_true",
+        help="the source is the release an installer puts back after a failed install: "
+             "record that it may run on a database the failed release already upgraded")
     args = parser.parse_args(argv)
     code, stored = code_version(args.source), stored_version(args.database)
-    allow = code is not None and env_override(
-        os.environ.get(ROLLBACK_ENV), code=code, stored=stored)
+    allow = args.restored or (code is not None and env_override(
+        os.environ.get(ROLLBACK_ENV), code=code, stored=stored))
     try:
         check_source(
             args.source, args.database, share=args.share, allow=allow,
