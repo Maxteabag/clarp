@@ -1151,16 +1151,30 @@ DEAD_ROW_GRACE_MS = 120_000
 
 
 def dead_rows(agent_id: str = "", *, prefix: str = "", now_ms: int | None = None,
-              grace_ms: int = DEAD_ROW_GRACE_MS) -> list[dict]:
+              grace_ms: int = DEAD_ROW_GRACE_MS,
+              live_trace: Callable[[str, str], bool] | None = None) -> list[dict]:
     """Queued rows that nothing will run again.
 
-    The newest turn of the row's trace is over (settled or closed) for at
-    least ``grace_ms`` and its launch evidence permits no relaunch:
-    ``pending_for_dispatch`` skips such a row, and ``reconcile_receipts``
-    defers it unless the launch is proven. It stays ``queued`` for good; a
-    wake parked for an account and then failed before its spawn left one
-    (2026-11-10). Read-only: what becomes of the row is its owner's call. The
-    goal scheduler retires its own wakes; a message's payload is kept."""
+    The newest turn of the row's trace is over for at least ``grace_ms`` and
+    its launch evidence permits no relaunch: ``pending_for_dispatch`` skips
+    such a row, and ``reconcile_receipts`` defers it unless the launch is
+    proven. It stays ``queued`` for good; a wake parked for an account and
+    then failed before its spawn left one (2026-11-10).
+
+    A turn is over when it settled or was closed. One that was opened and
+    never closed (a launch abandoned at a phase nobody could prove; turn rows
+    that never end are common) is over only under all of these: its launch is
+    unproven (``unknown``: no spawn record, or one that cannot be attributed
+    because the trace has more than one turn row, which does not prove that
+    it never ran), a later turn of the same agent began at least
+    ``grace_ms`` ago, and ``live_trace(agent_id, trace_id)`` says the runtime
+    no longer holds the agent's slot for it. A later turn alone proves
+    nothing, since a hook inside a running process can mint a new trace; a
+    turn that runs or waits for an account holds its slot until it finishes.
+    Without ``live_trace``, or when it cannot answer, an open turn is live.
+
+    Read-only: what becomes of the row is its owner's call. The goal
+    scheduler retires its own wakes; a message's payload is kept."""
     now = db.now_ms() if now_ms is None else now_ms
     where, args = "status = 'queued'", []
     if agent_id:
@@ -1176,16 +1190,36 @@ def dead_rows(agent_id: str = "", *, prefix: str = "", now_ms: int | None = None
         if not row["agent_id"] or not row["trace_id"]:
             continue
         turn = db.conn().execute(
-            """SELECT ended_at, settled_at FROM turns
+            """SELECT turn_id, ended_at, settled_at FROM turns
                 WHERE agent_id = ? AND trace_id = ? ORDER BY turn_id DESC LIMIT 1""",
             (row["agent_id"], row["trace_id"])).fetchone()
         if turn is None:
             continue  # never opened: it waits for its dispatch
         over_at = max(int(turn["settled_at"] or 0), int(turn["ended_at"] or 0))
+        still_open = not over_at
+        if still_open:
+            if live_trace is None:
+                continue
+            moved_on = db.conn().execute(
+                """SELECT MIN(started_at) FROM turns
+                    WHERE agent_id = ? AND turn_id > ? AND trace_id <> ?""",
+                (row["agent_id"], turn["turn_id"], row["trace_id"])).fetchone()[0]
+            over_at = int(moved_on or 0)
         if not over_at or now - over_at < grace_ms:
             continue  # running, or a retry may still follow
-        if _consumed_or_uncertain(row):
-            dead.append(row)
+        launch = _launch_status(row)
+        if launch in ("retryable", "handoff", "unstarted"):
+            continue  # recovery relaunches it
+        if still_open:
+            if launch != "unknown":
+                continue  # it was spawned: its receipt follows that turn
+            try:
+                if live_trace(str(row["agent_id"]), str(row["trace_id"])):
+                    continue
+            except Exception as exc:  # noqa: BLE001 - cannot tell: it stays live
+                log("queueDeadRowLiveCheckFail", f"queue={row['queue_id']} {exc!r}")
+                continue
+        dead.append(row)
     return dead
 
 

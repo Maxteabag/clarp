@@ -31,9 +31,87 @@ owners and changed native bindings must never launch work. Dependency deadlines
 produce an honest recovery checkpoint rather than an invented job success.
 Bounded retries eventually require attention. Explicit stop must suppress recovery.
 Only work that can still run suppresses a wake: a queued row whose turn is over
-and that nothing may launch again is not live work. The scheduler retires its
-own such wake rows on every pass and records an accepted wake that did not run
-as `wake_undelivered`, so a failed wake is retried and never silent.
+and that nothing may launch again is not live work. A turn is over when it
+settled or was closed. One that was opened and never closed counts as over only
+when no spawn was recorded for it, a later turn of the same agent began at least
+two minutes ago, and the runtime no longer holds the agent's slot for it; a
+turn that runs or waits for an account holds its slot until it finishes. The
+scheduler retires its own dead wake rows on every pass.
+
+A wake the scheduler sent that did not complete is recorded once, as
+`wake_undelivered` (it never started) or `wake_failed` (it started, then
+failed), and the continuation's reason says which, why, and when the next try
+is. Retries follow the backoff, which starts at the dispatch: 2, 4, 8, 16 and
+32 minutes, then hourly.
+
+- With the default recovery limit of 5 and wakes that fail at once, wakes go
+  out at minute 0, 2, 6, 14 and 30 and the goal reaches `attention` at minute
+  62. A try that first waits in the account park (up to 30 minutes) fails that
+  much later, and its backoff has usually passed by then: five such tries go
+  out at 0, 30, 60, 90 and 120 and reach `attention` at about minute 152.
+- A wake that fails only because no account has usage left until its window
+  resets does not count against the limit. It keeps its growing backoff and is
+  tried until usage returns. The exemption is narrow on purpose. The error
+  category `usage_limit` also holds depleted credits, payment (402), a
+  suspended account, a monthly or hard billing limit, a trial quota and a model
+  that refuses this client; no reset clears those. The split is made where the
+  category is defined (`error_classify.usage_limit_resets`: a text that reads
+  as a spent window and as nothing else of the category, or a text of the
+  category that states its own reset, as Muse's "Subscription quota exhausted.
+  Your usage window resets at ..." does, unless it also names credits,
+  payment, suspension, billing, a trial or the free tier), and the provider's
+  own statement overrides it where the Host records one (`backend_usage`:
+  `credits_depleted`). Everything not known to clear at a reset counts, as
+  `billing`. A Codex failure that reads like a limit but whose quota the
+  provider did not confirm exhausted is settled by the Host's own usage record
+  of the backend (`backend_usage.exhausted_backends`): a spent window there
+  makes it lack of usage, which does not count; depleted credits make it
+  `billing`; with no record it counts as an ordinary failure
+  (`unconfirmed_limit`). Codex confirms a limit only when the failed turn was
+  quiet and alone on the app-server, so on a busy host the Host's record is
+  usually what tells. No text decides whether a limit was confirmed: a backend
+  that records its limits writes `provider_limit_event_id` on the failed state
+  when the quota is confirmed, and its absence says it was not. The reason
+  keeps the provider's own words beside the category's, so it says which
+  limit it was.
+- Sign-in, plan and billing failures (`auth`, `account_plan`, `billing`) count,
+  because a person has to act; the `attention` reason says what: sign in, switch
+  account or model, pay or raise the limit.
+- The ceiling under the exemption: a goal none of whose wakes has completed for
+  8 days (`task_goal_recovery.WAKE_COMPLETION_CEILING_MS`) goes to `attention`
+  whatever the reason, and the reason names the last failure. Eight days
+  because a real usage window lasts up to a week and must not reach
+  `attention`, where nothing would resume the goal when usage returns; a wait
+  longer than any window is not a window. The clock
+  (`continuation.uncompleted_since`) starts at the dispatch of the first wake
+  of a streak that failed, for whatever reason, and is cleared only by a wake
+  whose turn settled as completed, by a checkpoint or by a resume. A wake that
+  starts and then fails is one more failure in the streak; a turn that ended
+  with no recorded outcome is not a completion. It is checked when the next
+  try is due, so with the hourly backoff it fires within an hour after the
+  eighth day. Until then a misread failure costs up to 192 hourly tries.
+
+What is still not announced:
+
+- `attention` is a state in the goal. Nothing pushes a notification when a goal
+  reaches it, and the owner cannot checkpoint because nothing wakes it; a
+  person has to resume the goal.
+- A dead queued row of another origin (a user or peer message) no longer holds
+  goal wakes, but still holds heartbeat, janitor and dreaming wakes and is
+  still listed as queued. Only goal wake rows are retired.
+- A never-closed turn of an agent that has not run any turn since is not judged
+  over. The runtime now closes such a turn when it abandons the launch, so
+  this concerns only rows left by an older runtime.
+
+Two limits of the above:
+
+- An abandoned launch is closed and its wake retired only when no process of
+  the agent is live. If the backend raised after its process existed, the turn
+  and the row are left to that process; should it die without settling, the
+  row heals by the open-turn rule once the agent has run a later turn.
+- `capacity_failures` is unknown to a Host older than this change. Rolling the
+  Host back to one sends a goal with many such tries straight to `attention`,
+  because every try counts there; resume the goal after the rollback.
 
 Native cards and detail show completed/working/remaining/blocked/deferred counts,
 current work or concrete wait, next wake, last checkpoint, evidence and revisions.

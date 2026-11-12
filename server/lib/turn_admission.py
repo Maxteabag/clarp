@@ -544,6 +544,7 @@ class AdmissionMixin:
         proof = _preinvoke_failure(error)
         if proof is None or (proof.agent_id, proof.trace_id) != (spec.agent_id, spec.trace_id):
             log("unlaunchedMarkerDeferred", f"agent={spec.agent_id} trace={spec.trace_id} reason=phase_unknown")
+            self._end_unproven_launch(spec, turn_id)
             return
         known = turn_id if type(turn_id) is int and turn_id > 0 else None
         _mark_preinvoke_failure(error, agent_id=spec.agent_id, trace_id=spec.trace_id, turn_id=known)
@@ -565,6 +566,32 @@ class AdmissionMixin:
                 except Exception as scheduling_error:
                     # Preserve the original launch failure even if proof capture fails.
                     BaseException.add_note(error, f"unlaunchedRetryCaptureFailed agent={spec.agent_id} trace={spec.trace_id} type={type(scheduling_error).__name__}")
+
+    def _end_unproven_launch(self, spec: _TurnSpec, turn_id: int) -> None:
+        """A launch abandoned at a phase nobody can prove (the backend raised
+        once it had been invoked) gets no "never started" marker: that would
+        permit a replay. Its turn is over all the same. Left open it read as
+        a running turn for good, and a goal wake's ``queued`` row under it,
+        which recovery never relaunches, held every goal of the agent
+        (review of 258, finding 1). Closing the row is no proof either way,
+        so the launch stays unknown. A goal wake is the scheduler's to send
+        again: its row is retired here, as when its turn fails.
+
+        Not while something of this agent runs, though. The backend can raise
+        after its process exists; that process may be this very launch, so the
+        turn stays open and the row stays, or the wake would be sent a second
+        time beside it. The process's own end, or the Host's pass once the
+        agent has moved on, settles them."""
+        if self._has_live_turn(spec):
+            log("unprovenLaunchLeftOpen",
+                f"agent={spec.agent_id} trace={spec.trace_id} — a process of this agent is live")
+            return
+        try:
+            if type(turn_id) is int and turn_id > 0:
+                turn_lifecycle.close_turn(turn_id)
+        except Exception as close_error:  # noqa: BLE001 - the Host's pass ends it later
+            log_exception("spawnAbandonedCloseFail", close_error, detail=spec.session)
+        self._retire_unstarted_goal_wake(spec)
 
     def _retry_unlaunched_marker(self, spec: _TurnSpec, attempts_left: int, *,
                                  turn_id: int | None = None, frontier: int | None = None,

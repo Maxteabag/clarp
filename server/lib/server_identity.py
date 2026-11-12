@@ -41,7 +41,7 @@ CAPABILITIES_VERSION = 1
 # adds a row to docs/compatibility.md; tests/unit/test_client_contract.py
 # fails when the table and these constants disagree. Clients identify
 # themselves with the X-Clarp-Client header ("ios/2620 contract=1").
-HOST_CONTRACT = 91  # 90 plus avatar_generation_status on agents/personas and non-blocking POST /agents TTS.
+HOST_CONTRACT = 92  # 91 plus avatar_generation_status on agents/personas and non-blocking POST /agents TTS.
 MIN_IOS_CONTRACT = 1
 # F4 delivery state: read paths and committed-transition hints share the
 # advertised feature gate; an unavailable runtime still leaves delivery unknown.
@@ -246,13 +246,23 @@ def hotseat_desk_enabled() -> bool:
 
 # Android push is offered only by a Host that can deliver it: one with a
 # usable FCM service account ([fcm] service_account, docs/push-android.md).
+# Whether it has one is a push-side question (lib.fcm is a feature module and
+# this one is core), so the composition root installs the answer as a probe,
+# the way it installs the live probe above. Without one: not advertised.
 FCM_FEATURES = frozenset({"push_fcm"})
+_fcm_probe: Callable[[], bool] | None = None
+
+
+def set_fcm_probe(probe: Callable[[], bool] | None) -> None:
+    """Install the check for "this Host can deliver Android pushes"."""
+    global _fcm_probe
+    _fcm_probe = probe
 
 
 def fcm_push_enabled() -> bool:
+    probe = _fcm_probe
     try:
-        from . import config
-        return bool(config.load().fcm_enabled())
+        return bool(probe and probe())
     except Exception as e:  # noqa: BLE001 - unknown means not advertised
         from .log import log
         log("fcmFeatureProbeFail", f"{type(e).__name__}: {e}")

@@ -467,7 +467,13 @@ class TurnDispatchService(AdmissionMixin, LauncherMixin, HandoffMixin, ClaimMixi
                     resume=lambda: defer_on(
                         coordinator.lock,
                         lambda: self._resume_after_account_switch(spec, attempt, state)),
-                    work=(spec, attempt))
+                    work=(spec, attempt),
+                    fail=lambda: defer_on(
+                        coordinator.lock,
+                        lambda: self._end_parked_for_its_plan(spec, attempt, state)),
+                    hold=lambda: defer_on(
+                        coordinator.lock,
+                        lambda: self._pause_for_account(spec, unserved=True)))
                 if coordinator.register(account_attempt):
                     return
             on_init, on_result, on_error = self._attempt_callbacks(spec, attempt, state)
@@ -653,14 +659,26 @@ def clear_for_agent(
 
 
 def owns_inflight_trace(agent_id: str, trace_id: str) -> bool:
-    """Whether this server process still owns the exact running turn."""
+    """Whether the process that owns turns still holds the agent's slot for
+    exactly this trace.
+
+    Its callers free or end something on "no" (the goal scheduler retires a
+    wake row, the Oracle reconciler ends a delegation), so only a readable
+    answer may say no. The runtime's status carries ``active`` as a map of
+    agent to trace. A status without that map, or with something other than
+    a trace under the agent, is not an answer: it counts as held."""
     if _RUNTIME_CLIENT is not None:
         try:
-            active = _RUNTIME_CLIENT.status().get("active") or {}
-            return bool(trace_id) and str(active.get(agent_id) or "") == trace_id
+            active = _RUNTIME_CLIENT.status().get("active")
         except Exception:
             return bool(trace_id) and agents_db.is_busy(agent_id) and \
                 agents_db.get_trace(agent_id) == trace_id
+        if not isinstance(active, dict):
+            return True
+        if agent_id not in active:
+            return False
+        holder = active[agent_id]
+        return holder == trace_id if isinstance(holder, str) and holder else True
     return _SLOTS.owns(agent_id, trace_id)
 
 
