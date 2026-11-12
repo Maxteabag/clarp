@@ -50,6 +50,9 @@ _MAX_ATTEMPTS = 3
 _BACKOFF_BASE_SEC = 1.0
 _RETRY_AFTER_CAP_SEC = 10.0
 _TIMEOUT_SEC = 10.0
+# The whole of one attempt (token exchange or send): connect, TLS, writing and every read together.
+# httpx's timeout is per read, so a Google that trickles a byte at a time would never trip it.
+_ATTEMPT_DEADLINE_SEC = 10.0
 
 # An FCM registration token: URL-safe base64 plus ':' (typically ~160 chars).
 _TOKEN_RE = re.compile(r"^[A-Za-z0-9_:\-]{20,4096}$")
@@ -268,6 +271,92 @@ _client = None
 _client_ctor = None
 
 
+class AttemptDeadline(Exception):
+    """One attempt to reach Google ran out of its total time (_ATTEMPT_DEADLINE_SEC)."""
+
+
+_deadline = threading.local()   # per sending thread: the monotonic time its current attempt must end by
+
+
+class _attempt:
+    """``with _attempt(seconds):`` bounds every network operation of the calling thread's request."""
+
+    def __init__(self, seconds: float):
+        self._seconds = seconds
+
+    def __enter__(self):
+        self._outer = getattr(_deadline, "at", None)
+        _deadline.at = time.monotonic() + self._seconds
+        return self
+
+    def __exit__(self, *exc):
+        _deadline.at = self._outer
+        return False
+
+
+def _clamp(timeout):
+    """``timeout`` shortened to what is left of the current attempt; raises when nothing is left."""
+    at = getattr(_deadline, "at", None)
+    if at is None:
+        return timeout
+    left = at - time.monotonic()
+    if left <= 0:
+        import httpcore
+        raise httpcore.ReadTimeout("FCM attempt deadline exceeded")
+    return left if timeout is None else min(timeout, left)
+
+
+def _deadline_backend():
+    """An httpcore network backend whose every connect, TLS handshake, read and write gets only the
+    time left of the calling thread's attempt, so a slow or trickling Google is bounded in total."""
+    import httpcore
+    from httpcore._backends.sync import SyncBackend
+
+    class Stream(httpcore.NetworkStream):
+        def __init__(self, inner):
+            self._inner = inner
+
+        def read(self, max_bytes, timeout=None):
+            return self._inner.read(max_bytes, _clamp(timeout))
+
+        def write(self, buffer, timeout=None):
+            return self._inner.write(buffer, _clamp(timeout))
+
+        def close(self):
+            return self._inner.close()
+
+        def start_tls(self, ssl_context, server_hostname=None, timeout=None):
+            return Stream(self._inner.start_tls(ssl_context, server_hostname, _clamp(timeout)))
+
+        def get_extra_info(self, info):
+            return self._inner.get_extra_info(info)
+
+    class Backend(httpcore.NetworkBackend):
+        def __init__(self):
+            self._inner = SyncBackend()
+
+        def connect_tcp(self, host, port, timeout=None, local_address=None, socket_options=None):
+            return Stream(self._inner.connect_tcp(host, port, _clamp(timeout), local_address, socket_options))
+
+        def connect_unix_socket(self, path, timeout=None, socket_options=None):
+            return Stream(self._inner.connect_unix_socket(path, _clamp(timeout), socket_options))
+
+        def sleep(self, seconds):
+            return self._inner.sleep(seconds)
+
+    return Backend()
+
+
+def _transport():
+    """httpx's own transport (its error mapping and TLS defaults) over the deadline backend."""
+    import httpcore
+    import httpx
+    transport = httpx.HTTPTransport()
+    transport._pool = httpcore.ConnectionPool(          # the one documented knob httpx does not expose
+        ssl_context=httpx.create_ssl_context(), network_backend=_deadline_backend())
+    return transport
+
+
 def http_client():
     """One pooled HTTPS client for Google; rebuilt when httpx.Client changes
     (tests swap in fakes)."""
@@ -275,7 +364,7 @@ def http_client():
     import httpx
     with _client_lock:
         if _client is None or _client_ctor is not httpx.Client:
-            old, _client = _client, httpx.Client(timeout=_TIMEOUT_SEC)
+            old, _client = _client, httpx.Client(timeout=_TIMEOUT_SEC, transport=_transport())
             _client_ctor = httpx.Client
             _close(old)
         return _client
@@ -398,18 +487,27 @@ def message_body(token: str, data: dict[str, str], *, priority: str = "10",
 # --------------------------------------------------------------------------
 # Sending
 # --------------------------------------------------------------------------
-def _error(resp) -> tuple[str, str, str]:
-    """(FCM errorCode, google.rpc status, message) from an error answer."""
+def _error(resp) -> tuple[str, str, str, frozenset]:
+    """(FCM errorCode, google.rpc status, message, invalid fields) from an error answer.
+
+    The FCM v1 error body carries a ``google.firebase.fcm.v1.FcmError`` detail with ``errorCode`` and,
+    for INVALID_ARGUMENT, a ``google.rpc.BadRequest`` detail whose ``fieldViolations[].field`` names
+    the invalid request field as a dotted path from the request body (``message.token``)."""
     try:
         err = (resp.json() or {}).get("error") or {}
     except Exception:  # noqa: BLE001
-        return "", "", str(getattr(resp, "text", "") or "")[:200]
-    code = ""
+        return "", "", str(getattr(resp, "text", "") or "")[:200], frozenset()
+    code, fields = "", set()
     for detail in err.get("details") or []:
-        if isinstance(detail, dict) and detail.get("errorCode"):
+        if not isinstance(detail, dict):
+            continue
+        if detail.get("errorCode") and not code:
             code = str(detail["errorCode"])
-            break
-    return code, str(err.get("status") or ""), str(err.get("message") or "")[:200]
+        if str(detail.get("@type") or "").endswith("google.rpc.BadRequest"):
+            for violation in detail.get("fieldViolations") or []:
+                if isinstance(violation, dict) and violation.get("field"):
+                    fields.add(str(violation["field"]))
+    return code, str(err.get("status") or ""), str(err.get("message") or "")[:200], frozenset(fields)
 
 
 def _retry_after(resp) -> float:
@@ -463,13 +561,15 @@ class Transport:
         while True:
             attempt += 1
             try:
-                bearer = access_token(sa, self._http())
+                with _attempt(_ATTEMPT_DEADLINE_SEC):
+                    bearer = access_token(sa, self._http())
             except FcmAuthError as e:
                 report_auth_problem(f"{sa.client_email}: {e}")
                 return 0, "FcmAuthUnavailable", ""
             try:
-                resp = self._http().post(url, headers={"authorization": f"Bearer {bearer}"},
-                                         json=body)
+                with _attempt(_ATTEMPT_DEADLINE_SEC):
+                    resp = self._http().post(url, headers={"authorization": f"Bearer {bearer}"},
+                                             json=body)
             except Exception as e:  # noqa: BLE001 - network: retry, then let the batch log it
                 if attempt >= _MAX_ATTEMPTS:
                     raise
@@ -484,7 +584,7 @@ class Transport:
                 except Exception:  # noqa: BLE001 - delivered; the id is only for the log
                     name = ""
                 return 200, "", name
-            code, rpc_status, message = _error(resp)
+            code, rpc_status, message, fields = _error(resp)
             if status == 401 and auth_retry:
                 # A revoked or expired access token: mint a new one once.
                 auth_retry = False
@@ -493,10 +593,15 @@ class Transport:
                 continue
             if code == "UNREGISTERED" or (status == 404 and not code):
                 return 410, "Unregistered", ""
-            if status == 400 and "registration token" in message.lower():
-                # "The registration token is not a valid FCM registration token": this token can
-                # never be delivered to, so it is dead like an unregistered one. Any other 400 is
-                # about the message, not the token, and stays a plain failure.
+            if (status == 400 and "INVALID_ARGUMENT" in (code, rpc_status)
+                    and not (fields - {"message.token"})):
+                # firebase.google.com/docs/cloud-messaging/error-codes shows both cases with code 400
+                # and status INVALID_ARGUMENT: an invalid registration token carries only the FcmError
+                # detail (no field named), and an invalid value in a data message carries a
+                # google.rpc.BadRequest naming the field (message.data[0].value). So a 400
+                # INVALID_ARGUMENT that names no field other than message.token disables the token;
+                # one naming another field is about the payload and keeps it. The message text is
+                # not read.
                 return 410, "InvalidRegistration", ""
             if status in (401, 403) and code != "SENDER_ID_MISMATCH":
                 report_auth_problem(f"{sa.client_email}: FCM send HTTP {status} "
