@@ -38,6 +38,7 @@ from .message_import_common import (  # noqa: F401 - facade compatibility
     _client_provenance,
 )
 from .message_import_rows import (  # noqa: F401 - facade compatibility
+    _own_turns_row,
     _park_adopted_occupant,
     _seq_taken,
     _restore_unadopted_parked,
@@ -1191,7 +1192,8 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
                 continue
             if rows:
                 client_msg_id, current_origin, current_sender_agent_id, _ = \
-                    provenance.take(key, rows)
+                    provenance.take(key, rows, _own_turns_row(
+                        database, rows, turn_index.trace_at(turn.get("timestamp"))))
                 unanswered_key = key
                 authored = database.execute("SELECT trace_id FROM messages WHERE message_id=?", (client_msg_id,)).fetchone()
                 current_request_trace = (authored["trace_id"] or "") if authored else ""
