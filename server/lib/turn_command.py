@@ -17,6 +17,7 @@ from . import team_store, turn_queue
 from . import launch_receipts
 from .policies import admission as admission_policy
 from .log import log, log_exception
+from .message_text import DELIVERY_CONTEXT_CLOSE, DELIVERY_CONTEXT_OPEN
 from .prompt_admissions import PromptAdmission
 from .turn_dispatch_state import _JANITOR_SPAWN_LOCKS, _TURN_LOCK
 
@@ -511,16 +512,18 @@ def _with_delivery_context(text: str, *, unheard_audio: bool = False) -> str:
     The canonical user row remains exactly what the user said. This notice is
     injected only into the provider prompt so an agent does not assume that a
     synthesized reply was heard merely because it exists in its transcript.
+    The transcript import takes it off the provider's copy of the turn again
+    (message_text.strip_delivery_context), by these delimiters.
     """
     if not unheard_audio:
         return text
     return (
-        "<clarp-delivery-context>\n"
+        f"{DELIVERY_CONTEXT_OPEN}\n"
         "The user began a new spoken turn before hearing one or more of your "
         "previous synthesized replies. Treat those replies as unheard. Carry "
         "forward anything still important, but answer the user's newest message "
         "naturally instead of blindly repeating the old response.\n"
-        "</clarp-delivery-context>\n\n"
+        f"{DELIVERY_CONTEXT_CLOSE}\n\n"
         + text
     )
 

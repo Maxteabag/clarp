@@ -27,6 +27,10 @@ CALL_OPENING_CLOSE = "</clarp-call-opening>"
 # Clarp's record of a conversation the backend lost, opening its continuation.
 RESTORED_CONTEXT_OPEN = "--- Clarp restored conversation ---"
 RESTORED_CONTEXT_CLOSE = "--- End Clarp restored conversation ---"
+# What a barge-in puts in front of the user's words in the prompt
+# (turn_command._with_delivery_context): the replies they did not hear.
+DELIVERY_CONTEXT_OPEN = "<clarp-delivery-context>"
+DELIVERY_CONTEXT_CLOSE = "</clarp-delivery-context>"
 
 
 def strip_injected_team_context(text: str) -> str:
@@ -57,8 +61,28 @@ def strip_injected_context(text: str) -> str:
     # The restored record is the outermost block and may quote the others
     # (an old reply about Clarp's own team context), so it goes first.
     text = _strip_block(text, RESTORED_CONTEXT_OPEN, RESTORED_CONTEXT_CLOSE)
-    return _strip_block(strip_injected_team_context(text),
+    text = _strip_block(strip_injected_team_context(text),
                         FALLBACK_CONTEXT_OPEN, FALLBACK_CONTEXT_CLOSE)
+    # The delivery notice sits directly in front of the words, inside the
+    # other blocks: last, when they are gone.
+    return strip_delivery_context(text)
+
+
+def strip_delivery_context(text: str) -> str:
+    """Drop the delivery notice a barge-in put in front of a user turn.
+
+    The provider's transcript copies the whole prompt back. Imported with the
+    notice, the copy no longer matched the row that holds the user's own
+    words, and the chat showed those words and then the notice as a second
+    message (issue 284). Only a notice at the very start is the server's: a
+    message that mentions the tag further in is the user's text."""
+    if not text:
+        return text
+    body = text.lstrip()
+    if not body.startswith(DELIVERY_CONTEXT_OPEN):
+        return text
+    _, closed, words = body.partition(DELIVERY_CONTEXT_CLOSE)
+    return words.strip() if closed else text
 
 
 def _strip_block(text: str, opening: str, closing: str) -> str:
