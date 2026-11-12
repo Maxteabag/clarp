@@ -117,9 +117,16 @@ the rows digest to the stored value. Then:
   mtime, complete to its last byte) and a tail from that checkpoint would be
   allowed: nothing is imported (`transcriptTailDecision code=unchanged_file`).
   The second half matters. Every check a tail passes is made first, so an
-  unchanged file is imported in full when its audit is due (`full_audit`)
-  and when a sub-agent child appeared or went while the parent was idle
-  (`full_claude_subagent_children_changed`);
+  unchanged file is imported in full when a sub-agent child appeared or went
+  while the parent was idle (`full_claude_subagent_children_changed`). When
+  its audit is due its bytes are read once and compared with the stored
+  digest (`unchanged_file_audited`): the rows it was imported with are
+  proven unchanged already, so there is nothing to replay. A mismatch is a
+  full import with the `transcriptPrefixChanged` line. Nothing is written,
+  so this is not the audit a grown file gets (that stays a full import and
+  starts the clock again), and each Host start after the hour reads the
+  file once. `audit_unchanged_by_digest = false` makes it a full import
+  (`full_audit`) instead;
 - otherwise the import is a tail, under the checks below.
 
 A rewritten transcript is found by: another inode or device; a size below
@@ -144,8 +151,8 @@ then went idle keeps its old rows across any number of starts while its
 audit is not due. The bound is the audit: an unchanged file is left alone
 only until `audit_seconds` have passed since its last full import (or it has
 had `audit_every` imports); the first import after that, the first time the
-conversation is opened after a Host start for instance, is a full one that
-reads every byte. Within one process a file whose size and mtime do not
+conversation is opened after a Host start for instance, reads every byte
+and compares. Within one process a file whose size and mtime do not
 change is not handed to the importer again, so there the next growth, touch
 or Host start is what brings the audit. A rewrite that keeps the inode, the
 size and the mtime is found the same way, by the audit. Whenever a check

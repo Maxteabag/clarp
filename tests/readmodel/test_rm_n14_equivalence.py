@@ -610,13 +610,18 @@ def test_rewrite_outside_the_samples_is_found_when_all_bytes_are_next_read(
     assert any("synthetic task 8" in text for _id, text in _texts(candidate))
 
 
+@pytest.mark.parametrize("by_digest", [True, False], ids=["bytes compared", "full import"])
 @pytest.mark.parametrize("backend", harness.BACKENDS)
-def test_rewrite_outside_the_samples_and_then_idle_is_found_when_the_audit_is_due(tmp_path, backend):
+def test_rewrite_outside_the_samples_and_then_idle_is_found_when_the_audit_is_due(
+        tmp_path, backend, by_digest):
     """The same rewrite, and then the conversation goes idle. A Host start
     alone does not find it: an unchanged file is not read. It is left alone
-    only until its audit is due, though; the first import after that (here a
-    Host start an hour on; a lane's clock is its tick, in seconds) is a full
-    one, names the file, and the rows are the full replay's again."""
+    only until its audit is due, though (here a Host start an hour on; a
+    lane's clock is its tick, in seconds). Then its bytes are read and
+    compared, or with ``audit_unchanged_by_digest`` off it is imported in
+    full; either way the file is named, the import is a full one, and the
+    rows are the full replay's again."""
+    how = {"settings": {"audit_unchanged_by_digest": by_digest}}
     reference, candidate, transcript, rewrite = _rewritten_outside_the_samples(tmp_path, backend)
     with harness.PersistentLane(reference, transcript, backend, "reference") as full:
         with harness.PersistentLane(candidate, transcript, backend, "candidate") as actual:
@@ -627,12 +632,14 @@ def test_rewrite_outside_the_samples_and_then_idle_is_found_when_the_audit_is_du
             assert actual.tick(1)["apply_mode"] == "tail"
         for tick in (2, 3599):
             with harness.PersistentLane(candidate, transcript, backend, "candidate") as restarted:
-                idle = restarted.tick(tick)
+                idle = restarted.tick(tick, faults=how)
             assert idle["apply_mode"] == "unchanged" and idle["prefix_changed"] == []
             assert not any("synthetic task 8" in text for _id, text in _texts(candidate))
         with harness.PersistentLane(candidate, transcript, backend, "candidate") as restarted:
-            found = restarted.tick(3600)
+            found = restarted.tick(3600, faults=how)
     assert found["apply_mode"] == "full"
+    [decision] = [e["code"] for e in found["tail_events"] if e["event"] == "transcriptTailDecision"]
+    assert decision == ("full_prefix_content_changed" if by_digest else "full_audit")
     [line] = found["prefix_changed"]
     assert f"file={transcript} what=imported_bytes" in line
     assert _texts(candidate) == _texts(reference)
