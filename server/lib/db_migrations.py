@@ -204,6 +204,8 @@ def _migrate(con: sqlite3.Connection, *, upgrade: bool = True) -> None:
             _migrate_to_v122(con)
         if version < 123:
             _migrate_to_v123(con)
+        if version < 124:
+            _migrate_to_v124(con)
 
         con.execute(f"PRAGMA user_version = {db_schema._SCHEMA_VERSION}")
         con.execute("COMMIT")
@@ -980,6 +982,17 @@ def _migrate_to_v123(con: sqlite3.Connection) -> None:
     columns = {row[1] for row in con.execute("PRAGMA table_info(device_tokens)")}
     if "provider" not in columns:
         con.execute("ALTER TABLE device_tokens ADD COLUMN provider TEXT NOT NULL DEFAULT 'apns'")
+
+
+def _migrate_to_v124(con: sqlite3.Connection) -> None:
+    """The import frontier that survives a Host restart (transcript_incremental). A new table
+    only, created if missing, so a rerun is a no-op and older code, which never reads it, is
+    not affected by it: a rollback needs no down-migration. (A 123 release still does not
+    start on a 124 database unless the rollback is asked for: schema_guard.)"""
+    start = db_schema._SCHEMA_SQL.index("CREATE TABLE transcript_import_frontiers")
+    end = db_schema._SCHEMA_SQL.index(");", start) + 2
+    con.execute(db_schema._SCHEMA_SQL[start:end].replace(
+        "CREATE TABLE ", "CREATE TABLE IF NOT EXISTS ", 1))
 
 
 def _migrate_to_v119(con: sqlite3.Connection) -> None:
