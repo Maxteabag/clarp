@@ -3290,6 +3290,32 @@ def test_a_running_maintenance_turn_is_superseded_once_its_run_is_not_the_dispat
     assert service._superseded(run) is True and service._superseded(spec) is True
 
 
+def test_a_check_that_cannot_be_read_supersedes_no_ordinary_turn(tmp_path, monkeypatch):
+    """The marker cannot be read (the database is locked, say). That is not
+    evidence that a newer turn took over: an ordinary turn's outcome is
+    recorded. Only a maintenance turn, whose run must be proven, is dropped."""
+    from dataclasses import replace
+    from lib import janitors
+    service, backends, agent_id = _make_service(tmp_path)
+    service.dispatch(text="first", requested_session="mike", trace_id="tA",
+                     synthesize_audio=False)
+    spec = _td._TurnSpec(
+        backend="claude", text="first", cwd=tmp_path, backend_session_id="", is_new_session=False,
+        session="mike", agent_id=agent_id, trace_id="tA", context=None, synthesize_audio=False)
+    _td._INFLIGHT[agent_id] = "tB"                          # so the marker is what is asked
+
+    def unreadable(*args, **kwargs):
+        raise RuntimeError("database is locked")
+
+    monkeypatch.setattr(agents_db, "get_trace", unreadable)
+    monkeypatch.setattr(janitors, "validate_dispatch", unreadable)
+    assert service._superseded(spec) is False
+    assert service._superseded(replace(spec, janitor_run_id="run-1")) is True
+    _td._INFLIGHT[agent_id] = "tA"                          # the run itself cannot be read
+    assert service._superseded(replace(spec, janitor_run_id="run-1")) is True
+    assert service._superseded(spec) is False
+
+
 def test_restart_rehydrates_an_open_turn_though_its_trace_marker_moved(tmp_path):
     from lib import turn_lifecycle
     service, backends, agent_id = _make_service(tmp_path)

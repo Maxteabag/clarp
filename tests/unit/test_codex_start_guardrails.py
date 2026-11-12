@@ -55,7 +55,40 @@ def pool(tmp_path, monkeypatch):
     yield world
     for rule in world.rules.values():
         rule.get("release", threading.Event()).set()
-    cas.recycle_clients()
+    _leave_no_client_behind()
+
+
+def _leave_no_client_behind(limit=15.0):
+    """Retire what the test left, until the pools are empty. An idle client is
+    retired at once; one a held start has just been released on is idle a
+    moment later. A process recycled as stuck has exited but stays listed as
+    retiring until the next send prunes it (``cas._client``), and no send
+    follows a test: pruned here the same way, once its readers are done. Left
+    in a pool, it fails the next test's Codex quiescence gate, and with it
+    every later test of the worker."""
+    deadline = time.monotonic() + limit
+    while True:
+        cas.recycle_clients()
+        with cas._LOCK:
+            for key, retired in list(cas._RETIRING.items()):
+                readers = (getattr(retired, "reader", None), getattr(retired, "stderr_reader", None))
+                if retired.proc.poll() is not None and not any(
+                        reader is not None and reader.is_alive() for reader in readers):
+                    del cas._RETIRING[key]
+            left = [*cas._CLIENTS.values(), *cas._DRAINING.values(), *cas._RETIRING.values()]
+        if not left or time.monotonic() >= deadline:
+            return
+        time.sleep(0.05)
+
+
+@pytest.fixture
+def synthetic_pools(monkeypatch):
+    """For a test that puts a hand-built client into a pool it patched. The
+    patch is undone after the Codex quiescence gate has looked, so the pools
+    are emptied here first; that client is an object, not a process."""
+    yield
+    for pool in (cas._CLIENTS, cas._DRAINING, cas._RETIRING):
+        pool.clear()
 
 
 def _hold(world, method, match=lambda p: True):
@@ -196,7 +229,7 @@ def test_a_stop_during_a_start_never_waits_on_the_goal_pause(pool):
     assert _wait(lambda: cas._stop_pause_get(thread) is None), "the fence outlived the landed pause"
 
 
-def test_a_retiring_client_is_published_before_it_leaves_the_pool(monkeypatch):
+def test_a_retiring_client_is_published_before_it_leaves_the_pool(monkeypatch, synthetic_pools):
     from tests.unit.test_codex_stuck_and_switch import _client
     client = _client()
     client.process_group = False
@@ -321,7 +354,8 @@ def test_a_rolled_back_stop_leaves_the_follow_up_to_run_once(pool):
 
 
 # Reviewer A's probes on 582dc80b (f88f49de), unchanged but for names.
-def test_old_cleanup_cannot_remove_a_successor_between_identity_check_and_pop(tmp_path, monkeypatch):
+def test_old_cleanup_cannot_remove_a_successor_between_identity_check_and_pop(
+        tmp_path, monkeypatch, synthetic_pools):
     from tests.unit.test_codex_stuck_and_switch import _client
     client = _client()
     agent, other = _gen_agent(tmp_path, 'claim-owner'), _gen_agent(tmp_path, 'claim-other')

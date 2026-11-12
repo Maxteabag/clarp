@@ -85,7 +85,10 @@ def world(tmp_path, monkeypatch):
                             rachel=_agent(tmp_path, "rachel"), mike=_agent(tmp_path, "mike"))
     yield world
     release.set()
-    cas.recycle_clients()
+    # As test_codex_start_guardrails: an idle moment later, and a recycled
+    # process that has exited, or the next test's quiescence gate fails.
+    from tests.unit.test_codex_start_guardrails import _leave_no_client_behind
+    _leave_no_client_behind()
 
 
 def _hold_rachel(world):
