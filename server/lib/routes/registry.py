@@ -408,6 +408,10 @@ def _delete_live_activity(handler, path):
     return handler._handle_live_activity_delete()
 
 
+def _delete_device(handler, path):
+    return handler._handle_unregister_device()
+
+
 def _delete_agent(handler, path):
     return handler._handle_delete_agent(path[len("/agents/"):])
 
@@ -432,6 +436,7 @@ DELETE = (
     Route("DELETE", "schedule", lambda path: path.startswith("/schedules/"), _delete_schedule),
     Route("DELETE", "live-activity", lambda path: path == "/devices/live-activity",
           _delete_live_activity),
+    Route("DELETE", "device", lambda path: path == "/devices", _delete_device),
     Route("DELETE", "agent", lambda path: path.startswith("/agents/"), _delete_agent),
     Route("DELETE", "persona", lambda path: path.startswith("/personas/"), _delete_persona),
 )

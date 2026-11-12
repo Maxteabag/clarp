@@ -139,6 +139,15 @@ def revoke(device_id: str) -> bool:
         (db.now_ms(), device_id.strip()),
     )
     if result.rowcount == 1:
+        # Its push tokens stop at once: a revoked phone gets no further notification previews. The
+        # rows keep their owner (provenance) and come back only if a paired device registers the
+        # token again (apns.register_token passes a revoked owner's token to it).
+        disabled = db.conn().execute(
+            "UPDATE device_tokens SET disabled_at = ? WHERE principal = ? AND disabled_at IS NULL",
+            (db.now_ms(), device_id.strip())).rowcount
+        if disabled:
+            from .log import log
+            log("devicePairingPushTokensDisabled", f"device={device_id.strip()} rows={disabled}")
         # A listen-first opening answered on this device loses its authority.
         try:
             from . import agent_rings
