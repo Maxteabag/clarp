@@ -399,34 +399,47 @@ def _quota_unconfirmed(detail):
     return bool(records) and not detail.get("provider_limit_event_id")
 
 
+def _host_record(plan):
+    """What the Host's own usage record says about the owner's backend:
+    ``usage_limit`` (a window is spent), ``credits_depleted``, or "" when it
+    holds no fresh record that the backend is exhausted."""
+    from . import backend_usage, backends
+
+    try:
+        agent = agents.get_by_agent_id(plan["agent_id"]) or {}
+        known = backend_usage.exhausted_backends().get(backends.normalize(agent.get("backend")))
+        return str((known or {}).get("reason") or "")
+    except Exception as exc:  # noqa: BLE001 - the failure itself still answers
+        log_exception("goalWakeLimitKindFail", exc, detail=plan["plan_id"])
+        return ""
+
+
 def _limit_code(plan, detail):
     """``usage_limit`` only for a failure that clears when a usage window
     resets; ``billing`` for the rest of that error category, which a person
     has to clear (credits, payment, a suspended account, a hard or monthly
     limit, a trial, a model that refuses this client); ``unconfirmed_limit``
-    for a Codex failure whose quota the provider did not confirm exhausted.
+    for a Codex failure whose quota neither the provider nor the Host
+    confirms exhausted.
 
-    Two sources, the stricter wins. The failure's own text, split where the
-    category is defined (error_classify.usage_limit_resets). And the
-    provider's own statement where the Host records one (backend_usage:
-    ``credits_depleted``), which can say "credits" under an error text that
-    reads like an ordinary window."""
-    from . import backend_usage, backends, error_classify
+    Two sources. The provider's own statement where the Host records one
+    (backend_usage), which can say "credits" under an error text that reads
+    like an ordinary window, and which settles a limit Codex did not confirm
+    for this turn: it confirms one only when the failed turn was quiet and
+    alone on the app-server. And the failure's own text, split where the
+    category is defined (error_classify.usage_limit_resets)."""
+    from . import error_classify
 
-    if _quota_unconfirmed(detail):
-        # Not known to be lack of usage: an ordinary failure, which counts.
-        return "unconfirmed_limit"
-    text = " ".join(str(detail.get(key) or "") for key in ("error", "provider_message"))
-    if not error_classify.usage_limit_resets(text):
+    known = _host_record(plan)
+    if known == "credits_depleted":
         return "billing"
-    try:
-        agent = agents.get_by_agent_id(plan["agent_id"]) or {}
-        known = backend_usage.exhausted_backends().get(backends.normalize(agent.get("backend")))
-        if known and known.get("reason") == "credits_depleted":
-            return "billing"
-    except Exception as exc:  # noqa: BLE001 - the text has already answered
-        log_exception("goalWakeLimitKindFail", exc, detail=plan["plan_id"])
-    return "usage_limit"
+    if _quota_unconfirmed(detail):
+        # Not known to be lack of usage from the turn itself. The Host's
+        # record that the window is spent says it is; without one it is an
+        # ordinary failure, which counts.
+        return "usage_limit" if known == "usage_limit" else "unconfirmed_limit"
+    text = " ".join(str(detail.get(key) or "") for key in ("error", "provider_message"))
+    return "usage_limit" if error_classify.usage_limit_resets(text) else "billing"
 
 
 def _last_wake(state):

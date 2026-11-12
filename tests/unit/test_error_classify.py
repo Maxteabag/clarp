@@ -248,6 +248,46 @@ NOT_CLEARED_BY_A_RESET = [
 ]
 
 
+# Muse's wording, as elitebook recorded it 27 times on 2026-11-11 (the request
+# id replaced). "Quota exhausted" alone reads as billing; this text says when
+# its window resets.
+MUSE_WINDOW = (
+    "Muse Code failed: API error 429 [request_id=00000000-0000-0000-0000-000000000000]: "
+    "Subscription quota exhausted. Your usage window resets at 2026-11-16T00:00:00Z. "
+    "(rate_limit_error)")
+STATES_ITS_RESET = [
+    MUSE_WINDOW,
+    "Quota exhausted. Resets at 15:00.",
+    "quota exceeded; your usage window resets in 3 hours",
+    "Monthly limit reached. It will reset on the 1st.",
+    "Quota exhausted. Limits reset at 15:00.",
+    "Quota exhausted. It will reset tomorrow.",
+]
+# A reset is stated, and so is something no reset clears.
+STATES_A_RESET_BUT_NEEDS_A_PERSON = [
+    "Quota exhausted. Your credits reset at midnight.",
+    "Payment required. Your usage window resets at 2026-11-16T00:00:00Z.",
+    "Account suspended: quota exhausted. Your usage window resets at 15:00.",
+    "You have reached your billing hard limit. It resets at the next period.",
+    "Your trial quota is used up. Your usage window resets at 15:00.",
+    "Free tier quota exhausted. Your usage window resets at 00:00 UTC.",
+]
+
+
+def test_a_text_that_states_its_reset_is_a_window():
+    """Whatever else it calls the allowance, unless it also names credits,
+    payment, suspension, billing, a trial or the free tier."""
+    for msg in STATES_ITS_RESET:
+        assert ec.classify_error(msg) == ec.USAGE_LIMIT, msg
+        assert ec.usage_limit_resets(msg) is True, msg
+    for msg in STATES_A_RESET_BUT_NEEDS_A_PERSON:
+        assert ec.classify_error(msg) == ec.USAGE_LIMIT, msg
+        assert ec.usage_limit_resets(msg) is False, msg
+    # A reset in a text that is no usage limit at all is nothing.
+    assert ec.usage_limit_resets("The preview server resets at midnight") is False
+    assert ec.usage_limit_resets("Connection reset by peer") is False
+
+
 def test_only_a_usage_window_clears_at_a_reset():
     for msg in USAGE_WINDOWS:
         assert ec.classify_error(msg) == ec.USAGE_LIMIT, msg
