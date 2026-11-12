@@ -321,8 +321,13 @@ def enqueue_computer_capped(
 ) -> tuple[dict | None, bool]:
     """Atomically check retry/rolling-window caps, enqueue, and claim launch.
 
-    Runs inside a single ``BEGIN IMMEDIATE`` transaction so simultaneous callers
-    cannot overshoot ``max_launches`` or emit duplicate ``queued`` events.
+    SQLite WAL's snapshot check (``SQLITE_BUSY_SNAPSHOT``) already prevents a
+    deferred transaction from committing on a stale read, which is what enforces
+    the ``max_launches`` ceiling if two writers race. ``BEGIN IMMEDIATE``
+    acquires the write lock up front (polled by ``_TrackedConnection``) before
+    any ``SELECT`` pins a read snapshot, so concurrent callers that are still
+    under ``max_launches``—or racing an unrelated Host write—wait their turn and
+    get admitted instead of failing mid-transaction with ``database is locked``.
     Returns ``(job, claimed)``: ``claimed`` is ``True`` only for the single
     caller admitted to spawn the detached worker.
     """
