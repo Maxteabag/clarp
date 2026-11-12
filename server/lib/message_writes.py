@@ -19,7 +19,8 @@ from typing import Any, Callable
 
 from .clock import iso_from_ms as _iso_from_ms, now_ms
 from .db import conn, note_import_holds_lock
-from . import dreaming, heartbeat, origins, team_leader, team_store
+from . import dreaming, heartbeat, message_carry, origins, team_leader, team_store
+from .message_turns import iso_ms
 from .voice_markup import strip_hidden_blocks
 from .message_text import (CALL_OPENING_OPEN, _strip_voice_markup, strip_delivery_context,
                            strip_injected_blocks)
@@ -586,6 +587,7 @@ def store_transcript_turns(*, agent_id: str, backend_session_id: str,
                            out_seqs: list[int] | None = None,
                            checkpoint_status: dict | None = None,
                            recertify_checkpoint: Callable[[], bool] | None = None,
+                           carry_session_rows: bool = False,
                            ) -> list[dict[str, Any]]:
     """Full materialization; only opted native checkpoints may recertify.
 
@@ -623,7 +625,8 @@ def store_transcript_turns(*, agent_id: str, backend_session_id: str,
         if _recertify_full_checkpoint(
                 database, binding, agent_id=agent_id, backend_session_id=backend_session_id,
                 source_file=source_file, turns=turns, capture_at=capture_at, on_stored=on_stored,
-                prepare=recertify_checkpoint, phases=phases, visible_replies=visible_replies):
+                prepare=recertify_checkpoint, phases=phases, visible_replies=visible_replies,
+                session_rows=carry_session_rows):
             if checkpoint_status is not None:
                 checkpoint_status.pop("refused", None)
 
@@ -702,7 +705,7 @@ def _checkpoint_db_binding(database):
 
 def _recertify_full_checkpoint(database, binding, *, agent_id, backend_session_id,
                                source_file, turns, capture_at, on_stored,
-                               prepare, phases, visible_replies):
+                               prepare, phases, visible_replies, session_rows=False):
     """Fresh read-only carry, then exact five-input check in a new writer.
 
     Previous products are already committed. Never run a second row-writing
@@ -717,7 +720,7 @@ def _recertify_full_checkpoint(database, binding, *, agent_id, backend_session_i
     try:
         prelude = _prepare_import_prelude(
             probe, agent_id, backend_session_id, turns,
-            phases=phases, guard_carry=True)
+            phases=phases, guard_carry=True, session_rows=session_rows)
         _store_transcript_turns_txn(
             probe, agent_id=agent_id, backend_session_id=backend_session_id,
             source_file=source_file, turns=turns,
@@ -734,7 +737,7 @@ def _recertify_full_checkpoint(database, binding, *, agent_id, backend_session_i
         if _checkpoint_db_binding(database) != binding:
             return False
         current = _prepare_import_prelude(
-            writer, agent_id, backend_session_id, [], raw_only=True)
+            writer, agent_id, backend_session_id, [], raw_only=True, session_rows=session_rows)
         if current != expected:
             return False
         published = False
@@ -818,6 +821,7 @@ def store_transcript_tail(*, agent_id: str, backend_session_id: str,
                           captured: dict[str, Any] | None = None,
                           on_stored=None,
                           expected_prelude=None,
+                          carry_rules=frozenset(),
                           checkpoint_status: dict | None = None,
                           ) -> list[dict[str, Any]]:
     """Apply a certified tail through the full import's admission protocol.
@@ -826,17 +830,34 @@ def store_transcript_tail(*, agent_id: str, backend_session_id: str,
     database inputs, which are exactly revalidated under BEGIN IMMEDIATE.
     The optional durable checkpoint shares the final row transaction and
     the full import's savepoint failure handling.
+
+    ``expected_prelude`` are the rows the frontier was published with. The
+    tail is refused (``_TailInvalidated``, its ``what`` naming the rows) when
+    a row the turns before ``start_seq`` could read has changed since;
+    ``carry_rules`` name what they cannot read (lib.message_carry).
     """
     visible_replies = _visible_replies(turns)
     phases = _row_phases(turns)
     database = _facade().conn()
     writer = _ImportWriter(database, locked=False)
+
+    def guard(prepared) -> None:
+        if expected_prelude is None:
+            return
+        what = prepared.carry_change(
+            expected_prelude, rules=carry_rules, carry=carry, boundary_seq=start_seq,
+            source_file=source_file, backend_session_id=backend_session_id)
+        if what:
+            refusal = _TailInvalidated("tail_carry_inputs_changed")
+            refusal.what = what
+            raise refusal
+
     try:
         prelude = _prepare_import_prelude(
             writer, agent_id, backend_session_id, turns, phases=phases,
-            guard_carry=expected_prelude is not None)
-        if expected_prelude is not None and not prelude.same_carry_inputs(expected_prelude):
-            raise _TailInvalidated("tail_carry_inputs_changed")
+            guard_carry=expected_prelude is not None,
+            session_rows=message_carry.SESSION_ROWS in carry_rules)
+        guard(prelude)
         out = _store_transcript_turns_txn(
             writer, agent_id=agent_id, backend_session_id=backend_session_id,
             source_file=source_file, turns=turns, start_seq=start_seq, carry=carry,
@@ -858,8 +879,7 @@ def store_transcript_tail(*, agent_id: str, backend_session_id: str,
     writer = _ImportWriter(database, locked=True)
     try:
         prepared = _revalidate_import_prelude(writer, agent_id, backend_session_id, prepared)
-        if expected_prelude is not None and not prepared.same_carry_inputs(expected_prelude):
-            raise _TailInvalidated("tail_carry_inputs_changed")
+        guard(prepared)
         out = _store_transcript_turns_txn(
             writer, agent_id=agent_id, backend_session_id=backend_session_id,
             source_file=source_file, turns=turns, start_seq=start_seq, carry=carry,
@@ -910,26 +930,42 @@ class _ImportPrelude:
     client_rows: list
     carry_rows: list | None = None
     oracle_rows: list | None = None
+    # Whether carry_rows are this session's message rows only (lib.message_carry).
+    session_rows: bool = False
 
     def raw_carry_inputs(self) -> tuple:
         return (self.turn_index._rows, self.client_rows, self.user_provenance,
                 self.carry_rows, self.oracle_rows)
 
-    def same_carry_inputs(self, previous) -> bool:
-        """Exact ordered raw rows; revisions/counts alone cannot certify carry."""
+    def carry_change(self, previous, **context) -> str:
+        """'' when the rows ``previous`` recorded still stand for the turns
+        before the boundary, else what changed (lib.message_carry.changed).
+        Raw rows are compared; revisions/counts alone cannot certify carry."""
         expected = previous.raw_carry_inputs() if isinstance(previous, _ImportPrelude) else previous
-        return (self.carry_rows is not None and expected[3] is not None
-                and self.raw_carry_inputs() == expected)
+        return message_carry.changed(expected, self.raw_carry_inputs(), **context)
 
     def for_pass(self) -> _ImportPrelude:
         return _ImportPrelude(
             self.turn_index, self.phases,
             {key: list(rows) for key, rows in self.client_user_provenance.items()},
-            self.user_provenance, self.client_rows, self.carry_rows, self.oracle_rows)
+            self.user_provenance, self.client_rows, self.carry_rows, self.oracle_rows,
+            self.session_rows)
+
+
+def _carry_message_rows(database, agent_id, backend_session_id, session_rows):
+    """The message rows a frontier is published with: every row of the agent,
+    or with ``session_rows`` this session's (lib.message_carry.SESSION_ROWS)."""
+    if session_rows:
+        return database.execute(
+            "SELECT * FROM messages WHERE agent_id=? AND backend_session_id=? ORDER BY message_id",
+            (agent_id, backend_session_id)).fetchall()
+    return database.execute("SELECT * FROM messages WHERE agent_id=? ORDER BY message_id",
+                            (agent_id,)).fetchall()
 
 
 def _prepare_import_prelude(database, agent_id, backend_session_id, turns,
-                            *, phases=None, guard_carry=False, raw_only=False):
+                            *, phases=None, guard_carry=False, raw_only=False,
+                            session_rows=False):
     from . import message_turns
     if raw_only:
         # A checkpoint callback captures only ordered raw inputs in its final
@@ -938,22 +974,20 @@ def _prepare_import_prelude(database, agent_id, backend_session_id, turns,
             message_turns.TurnIndex.read_rows(database, agent_id),
             _client_provenance_rows(database, agent_id, backend_session_id),
             _latest_user_provenance(database, agent_id, backend_session_id),
-            database.execute("SELECT * FROM messages WHERE agent_id=? ORDER BY message_id",
-                             (agent_id,)).fetchall(),
+            _carry_message_rows(database, agent_id, backend_session_id, session_rows),
             database.execute("SELECT * FROM oracle_delegations WHERE agent_id=? ORDER BY delegation_id",
                              (agent_id,)).fetchall())
     turn_index = message_turns.TurnIndex(database, agent_id)
     phases = _row_phases(turns) if phases is None else phases
     rows = _client_provenance_rows(database, agent_id, backend_session_id)
-    carry_rows = database.execute(
-        "SELECT * FROM messages WHERE agent_id=? ORDER BY message_id", (agent_id,)
-    ).fetchall() if guard_carry else None
+    carry_rows = _carry_message_rows(
+        database, agent_id, backend_session_id, session_rows) if guard_carry else None
     oracle_rows = database.execute(
         "SELECT * FROM oracle_delegations WHERE agent_id=? ORDER BY delegation_id", (agent_id,)
     ).fetchall() if guard_carry else None
     return _ImportPrelude(turn_index, phases, _client_provenance(rows),
                           _latest_user_provenance(database, agent_id, backend_session_id),
-                          rows, carry_rows, oracle_rows)
+                          rows, carry_rows, oracle_rows, session_rows)
 
 
 def _revalidate_import_prelude(database, agent_id, backend_session_id,
@@ -971,14 +1005,14 @@ def _revalidate_import_prelude(database, agent_id, backend_session_id,
     provenance = prelude.client_user_provenance
     if client_rows != prelude.client_rows:
         provenance = _client_provenance(client_rows)
-    carry_rows = database.execute(
-        "SELECT * FROM messages WHERE agent_id=? ORDER BY message_id", (agent_id,)
-    ).fetchall() if prelude.carry_rows is not None else None
+    carry_rows = _carry_message_rows(
+        database, agent_id, backend_session_id, prelude.session_rows
+    ) if prelude.carry_rows is not None else None
     oracle_rows = database.execute(
         "SELECT * FROM oracle_delegations WHERE agent_id=? ORDER BY delegation_id", (agent_id,)
     ).fetchall() if prelude.carry_rows is not None else None
     return _ImportPrelude(turn_index, prelude.phases, provenance, user, client_rows,
-                          carry_rows, oracle_rows)
+                          carry_rows, oracle_rows, prelude.session_rows)
 
 
 def _store_transcript_turns_txn(database, *, agent_id: str,
@@ -1034,12 +1068,21 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
     final_rows = _FinalRows(database, agent_id, backend_session_id)
     # Rows this import already wrote: never moved again (RM-N1).
     placed_ids: set[str] = set()
+    # For the carried-inputs guard (lib.message_carry), recorded with the
+    # carry: the latest time a turn so far carries (None: not known, the
+    # carry this import started from did not record it), and whether a reply
+    # came before any user turn and so read the conversation's latest user row.
+    latest_ms: int | None = 0
+    user_turn_seen = initial_provenance_used = False
     if carry is not None:
         agy.resume(carry)
         unanswered_key = carry["unanswered_key"]
         current_request_trace = carry["current_request_trace"]
         adopted_final_ids = set(carry["adopted_final_ids"])
         newest_trace = carry["newest_trace"]
+        latest_ms = carry.get("prefix_latest_ms")
+        user_turn_seen = True
+        initial_provenance_used = bool(carry.get("initial_provenance_used", True))
 
     def capture() -> None:
         """The carried state as the loop stands now (lib.transcript_incremental)."""
@@ -1056,6 +1099,8 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
             "current_request_trace": current_request_trace,
             "adopted_final_ids": sorted(adopted_final_ids),
             "newest_trace": newest_trace,
+            "prefix_latest_ms": latest_ms,
+            "initial_provenance_used": initial_provenance_used,
         })))
 
     def commit_batch() -> None:
@@ -1091,6 +1136,11 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
         if database.due():
             commit_batch()
         role = turn.get("role")
+        turn_ms = iso_ms(turn.get("timestamp"))
+        if turn_ms is not None and latest_ms is not None:
+            latest_ms = max(latest_ms, turn_ms)
+        if role == "assistant" and not user_turn_seen:
+            initial_provenance_used = True
         reply_trace = ""
         if role == "assistant":
             reply_trace = current_request_trace or turn_index.trace_at(turn.get("timestamp"))
@@ -1131,6 +1181,7 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
             skipped_slot_removed = skipped_slot_removed or removed > 0
             continue
         if role == "user":
+            user_turn_seen = True      # every path below sets whose turn it is
             text = strip_injected_blocks(text)
             words = strip_delivery_context(text)
             if words != text and not provenance.candidates(_norm_text(text)):

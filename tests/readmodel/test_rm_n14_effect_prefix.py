@@ -282,14 +282,17 @@ def test_claude_subagent_prefix_is_a_tail_until_its_child_directory_answers_diff
         harness.assert_product_equal(reference, candidate)
 
 
+@pytest.mark.parametrize("later", [0, 3600], ids=["inside the hour", "audit due"])
 @pytest.mark.parametrize("change", ["a child appears", "the child goes"])
 def test_a_child_that_changed_while_the_parent_was_idle_is_noticed_after_a_host_start(
-        tmp_path, change):
+        tmp_path, change, later):
     """The directory changes, the parent's file does not, and no import runs
     before the Host starts again. The file is unchanged, but it is not left
     alone: the stored answer is asked again, the import is full and the old
     cell gets what the full replay gives it. On the next start the new answer
-    is the recorded one and the file is left alone."""
+    is the recorded one and the file is left alone. The same when the file's
+    audit is due at that start: reading and comparing its bytes is not enough
+    then, the directory is asked first."""
     backend = "claude"
     reference, candidate = _clones(tmp_path, backend)
     transcript = tmp_path / "synthetic.jsonl"
@@ -320,22 +323,22 @@ def test_a_child_that_changed_while_the_parent_was_idle_is_noticed_after_a_host_
             child.with_name("agent-a0.meta.json").unlink()
         expected = [str(child) if change == "a child appears" else ""]
 
-        full.tick(2)
+        full.tick(2 + later)
         assert stored_paths(reference) == expected
         with harness.PersistentLane(candidate, transcript, backend, "candidate") as after:
-            report = after.tick(2)
+            report = after.tick(2 + later)
             assert _decision(report)["code"] == "full_claude_subagent_children_changed"
             assert report["apply_mode"] == "full"
         harness.assert_product_equal(reference, candidate)
         assert stored_paths(candidate) == expected
 
-        full.tick(3)
+        full.tick(3 + later)
         with harness.PersistentLane(candidate, transcript, backend, "candidate") as again:
-            assert _decision(again.tick(3))["code"] == "unchanged_file"
+            assert _decision(again.tick(3 + later))["code"] == "unchanged_file"
             harness.assert_product_equal(reference, candidate)
             _append(transcript, harness.append_bytes(backend, 21))
-            full.tick(4)
-            assert _decision(again.tick(4))["code"] == "tail_applied"
+            full.tick(4 + later)
+            assert _decision(again.tick(4 + later))["code"] == "tail_applied"
             harness.assert_product_equal(reference, candidate)
 
 

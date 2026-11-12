@@ -75,6 +75,7 @@ CORE = frozenset({f"lib.{m}" for m in (
     'live_core',
     'live_projection',
     'log',
+    'message_carry',
     'message_live',
     'message_store',
     'message_text',
