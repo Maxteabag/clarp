@@ -873,10 +873,11 @@ def _goal_mutate(plan_id, *, revision, action, data=None):
                 data = {**data, "dependency_kept": {**awaited, "due_at": state.get("due_at")}}
             elif pending and kind == "timer" and not replaces:
                 raise ValueError(
-                    f"goal is waiting on dependency {named}: a timer would replace that wake. "
-                    "Omit continuation to keep waiting for it; to be woken earlier, send the "
-                    "dependency continuation again with an earlier due_at; to stop waiting "
-                    'for it, add "replace_dependency": true'
+                    f"Nothing was saved: goal is waiting on dependency {named}, and a timer "
+                    "would replace that wake. Send the checkpoint again: omit continuation to "
+                    "keep waiting for it; to be woken earlier, send the dependency "
+                    "continuation again with an earlier due_at; to stop waiting for it "
+                    '(also when it has already ended), add "replace_dependency": true'
                 )
             elif pending and kind == "blocked":
                 # Held as a pause holds it: the resume awaits it again and a

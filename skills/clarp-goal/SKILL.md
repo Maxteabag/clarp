@@ -62,8 +62,12 @@ peer request or another dependency is pending):
   evidence and leaves the wake exactly as it is. This is the routine progress
   checkpoint; write it freely while a job runs.
 - A checkpoint with a timer continuation is refused, and the error names the
-  dependency (and job) it would have replaced. Nothing is saved; send it again
-  without `continuation`.
+  dependency (and job) it would have replaced. Nothing is saved, not the
+  progress, evidence or documents either; send it again without `continuation`.
+  This also happens when the job has already ended but the Host has not
+  recorded that yet because you were busy: the goal still reads `waiting`.
+  Omit `continuation` and its result still arrives as your next wake, or use
+  `"replace_dependency": true` if you have read the result yourself.
 - To be woken before the dependency ends, send the same dependency again (same
   `key`, same `job_handle`) with an earlier `due_at`. That wake tells you the job
   was still running and is no longer awaited: name it again in the checkpoint
@@ -72,10 +76,13 @@ peer request or another dependency is pending):
   timer with `"replace_dependency": true`. The ledger records
   `dependency_replaced` with the key and job that were dropped.
 - A `blocked` continuation holds the dependency: `resume` waits for it again
-  and delivers a result that arrived meanwhile.
+  and delivers a result that arrived meanwhile. While it is held, a checkpoint
+  without `continuation` leaves the goal blocked: nothing wakes you, not even
+  the job's end, until the goal is resumed.
 
 With no dependency pending, a checkpoint without `continuation` schedules a wake
-two minutes later, as before.
+two minutes later, as before. That includes a goal you blocked with a `blocked`
+continuation and no dependency: a bare checkpoint ends the blocker.
 
 Track detached workers (including systemd/nohup and watchers) with
 [clarp-background-jobs](../clarp-background-jobs/SKILL.md), so purpose, status,
@@ -87,12 +94,29 @@ A lost callback times out into owner reconciliation. Scheduling is not delivery:
 inspect continuation state/history for the admission receipt, failures and retry
 state. A running checklist row alone is not a live process.
 
-A wake that was accepted but did not run (its turn failed, for example while no
-account had usage left, or its queued row could never start) is recorded as
-`wake_undelivered` with the reason, and `continuation.reason` reads "Wake not
-delivered: ...". The Host retries after the backoff, up to the goal's recovery
-limit; then `continuation.state` is `attention` and names the last failure, and
-nothing more wakes you until you checkpoint or the goal is resumed.
+The Host records, once per wake, what became of one that did not complete:
+`wake_undelivered` when it never started (it was refused, its backend failed to
+start, or its queued row was retired) and `wake_failed` when its turn started
+and then failed. `continuation.reason` then reads "Wake did not start: ..." or
+"Wake started and failed: ...", with the attempt and the time of the next try.
+The wake is sent again on a growing backoff: 2, 4, 8, 16 and 32 minutes, then
+hourly.
+
+- Failures count against the goal's recovery limit (default 5). Five wakes that
+  fail at once use it up in about an hour; then `continuation.state` is
+  `attention`, names the last failure, and nothing more wakes you until you
+  checkpoint or the goal is resumed. Nothing notifies the user of that state.
+- Failures only a person can clear count too, and the `attention` reason says
+  what to do: sign in again; switch account or model when the plan lacks the
+  model; pay, raise the limit or pick another model or account when credits,
+  billing, a spending limit or a trial are the cause.
+- A wake that fails only because no account has usage left until its window
+  resets does not count. The reason says "no account with usage", quotes the
+  provider's own words when the wake got far enough to hear them, and gives the
+  next try as HH:MM in the Host's local time; the Host keeps trying.
+- Whatever the reason, a goal none of whose wakes has completed for 8 days
+  goes to `attention`, and the reason names the last failure. Only a wake that
+  runs to its end, a checkpoint or a resume ends that count.
 
 ```sh
 clarp-goal checkpoint PLAN_ID REVISION \

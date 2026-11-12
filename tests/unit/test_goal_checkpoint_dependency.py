@@ -140,7 +140,7 @@ def test_a_timer_checkpoint_is_refused_and_names_the_pending_job(owner, continua
 
     message = str(refused.value)
     assert "build-1111" in message and handle in message
-    assert "Omit continuation" in message and "replace_dependency" in message
+    assert "omit continuation" in message and "replace_dependency" in message
     # Nothing was written: the wake stands and so does the last checkpoint.
     assert _stored(plan) == before
     _job_ends(job, "failed")
@@ -243,3 +243,66 @@ def test_without_a_pending_dependency_a_checkpoint_schedules_as_before(owner):
         "ready", "Scheduled continuation", "")
     assert before + 120_000 <= wake["due_at"] <= db.now_ms() + 120_000
     assert "dependency_kept" not in _history(plan, "checkpoint")[-1]["detail"]
+
+
+# --- what the refusal and the skill tell the owner (review of 258, 5 and 6) -------
+
+
+def test_the_refusal_says_that_nothing_was_saved(owner):
+    plan, _job, handle, _due = _waiting_on_job()
+
+    with pytest.raises(ValueError) as refused:
+        _checkpoint(plan, progress="Important progress", evidence={"criterion-1": "proof"},
+                    continuation={"kind": "timer", "due_at": db.now_ms() + HOUR_MS})
+
+    message = str(refused.value)
+    assert message.startswith("Nothing was saved: ")
+    assert "build-1111" in message and handle in message
+    stored = task_plans.get(plan["plan_id"])["goal"]
+    assert stored["checkpoint"]["progress"] == "Build launched"
+    assert stored["criteria"][0]["evidence"] == ""
+
+
+def test_a_timer_is_refused_after_the_job_ended_until_the_scheduler_has_seen_it(owner):
+    """The owner is busy, so the scheduler has not recorded the job's end:
+    the goal still reads as waiting, and a timer is still refused. The error's
+    own way out works, and so does simply omitting the continuation."""
+    plan, job, handle, _due = _waiting_on_job()
+    _job_ends(job)
+    assert _continuation(plan)["state"] == "waiting"   # not seen yet
+
+    with pytest.raises(ValueError, match="replace_dependency"):
+        _checkpoint(plan, progress="Read the result myself",
+                    continuation={"kind": "timer", "due_at": db.now_ms() + HOUR_MS})
+
+    later = db.now_ms() + HOUR_MS
+    wake = _checkpoint(plan, progress="Read the result myself", continuation={
+        "kind": "timer", "due_at": later, "replace_dependency": True})["goal"]["continuation"]
+    assert (wake["state"], wake["dependency_key"], wake["due_at"]) == ("ready", "", later)
+    assert [entry["detail"]["key"] for entry in _history(plan, "dependency_replaced")] == [
+        "build-1111"]
+
+
+def test_a_bare_checkpoint_under_a_blocker_that_holds_a_dependency_stays_blocked(owner):
+    plan, job, handle, _due = _waiting_on_job()
+    _checkpoint(plan, continuation={"kind": "blocked", "reason": "Needs Peter"})
+
+    wake = _checkpoint(plan, progress="Still waiting for Peter")["goal"]["continuation"]
+
+    assert (wake["state"], wake["due_at"], wake["dependency_key"]) == (
+        "blocked", None, "build-1111")
+    _job_ends(job)
+    assert _tick(offset_ms=6 * HOUR_MS) == []      # no wake until the goal is resumed
+
+
+def test_a_bare_checkpoint_under_a_blocker_without_a_dependency_ends_the_blocker(owner):
+    plan = _goal()
+    _checkpoint(plan, continuation={"kind": "blocked", "reason": "Needs Peter"})
+    assert _continuation(plan)["state"] == "blocked"
+    before = db.now_ms()
+
+    wake = _checkpoint(plan, progress="Peter answered in chat")["goal"]["continuation"]
+
+    assert (wake["state"], wake["reason"]) == ("ready", "Scheduled continuation")
+    assert before + 120_000 <= wake["due_at"] <= db.now_ms() + 120_000
+    assert len(_tick(offset_ms=3 * 60_000)) == 1

@@ -67,3 +67,11 @@ def test_a_bad_android_registration_is_refused_and_ios_is_unchanged(running_serv
     # An iPhone's body, as it has always been sent: APNs, owned, answered as before.
     assert _post(base, android["token"], {"token": "a1" * 32, "session": "koko"}) == (200, {"ok": True})
     assert _rows()["a1" * 32]["provider"] == "apns"
+
+
+def test_build_server_installs_the_push_fcm_probe(running_server):
+    """The running server answers push_fcm from the push side; without [fcm] it is not offered."""
+    from lib import server_identity
+    assert server_identity._fcm_probe is not None
+    assert server_identity.fcm_push_enabled() is False
+    assert "push_fcm" not in server_identity.get_server_info()["capabilities"]["features"]

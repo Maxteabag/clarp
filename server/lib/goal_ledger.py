@@ -41,7 +41,8 @@ ACTOR_KINDS = ("owner", "user", "delegate", "system", "peer", "legacy", "unattri
 SUBGOAL_STATUSES = ("proposed", "active", "blocked", "done", "retired", "unknown")
 # History kinds the Host writes itself while recovering a goal.
 SYSTEM_KINDS = frozenset({"wake_claim", "dispatch_queued", "dispatch_admitted",
-                          "dispatch_retry", "execution_observed", "wake_undelivered"})
+                          "dispatch_retry", "execution_observed", "wake_undelivered",
+                          "wake_failed"})
 # Goal fields whose before/after is recorded with each change.
 TRACKED_FIELDS = ("outcome", "limits", "criteria", "checkpoint", "native_session_id",
                   "superseded_by")

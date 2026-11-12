@@ -41,7 +41,8 @@ a service account pushes to Android phones only.
 The Host advertises feature **`push_fcm`** (Host contract **88**) in
 `GET /server-info` (`capabilities.features` and `contract.features`) only
 while the service account file exists and reads as a Google service account.
-The app registers its token only with Hosts that advertise it. Whether
+Only the running Host answers it: a script or `clarp-admin` that reads
+`/server-info` data in-process never claims `push_fcm`. The app registers its token only with Hosts that advertise it. Whether
 Google accepts the account is known at the first send, not before.
 
 ## Registration
@@ -78,7 +79,15 @@ token (`onNewToken`):
   Android token, so a rotation never pushes twice. Another phone's token
   is never touched.
 - A token another paired device already registered answers
-  `409 {"ok": false, "error": "device_token_owned_elsewhere"}`.
+  `409 {"ok": false, "error": "device_token_owned_elsewhere"}`. That
+  includes the same phone paired again (a new device id): its token stays
+  with the earlier pairing, as for iPhones, and keeps receiving pushes
+  through that row. Revoking the earlier pairing does not release or stop
+  it; alert rows do not check revocation.
+- A token is registered for one push service for good. Registering a token
+  the Host already holds as an APNs row (an iPhone's, or an unbound legacy
+  row) as Android/FCM, or an FCM token as anything else, answers
+  `400 {"ok": false, "error": "device_token_invalid"}` and changes nothing.
 - A registration made with the administrator token (not a paired device)
   is stored unbound, as for iPhones; it rotates only by `session`. An old
   token FCM has dropped is disabled at the next push (below).
@@ -182,14 +191,24 @@ the same policy as APNs: per-agent mute, quiet agents and an active desktop
 suppress Android pushes exactly as they suppress iPhone pushes, and a push
 never raises into a turn.
 
+A batch sends to the iPhones first, under the conversation's send lock
+(which keeps two notifications of one agent in order on iPhones). The
+Android phones follow after that lock is released, under a lock of their
+own. An FCM send can take about half a minute at worst (three attempts of up
+to 10 s each, the back-off, and up to 10 s for the token exchange), and that
+wait never holds the same agent's next iPhone push. Android sends of one
+conversation stay in order among themselves.
+
 - **Auth.** The Host signs an RS256 JWT with the service account key
   (`iss` the client email, `scope`
   `https://www.googleapis.com/auth/firebase.messaging`, `aud` the token
   endpoint, one hour), exchanges it for an access token and caches that
   until five minutes before it expires. A `401` from FCM mints a new token
   once.
-- **`UNREGISTERED`** (or a bare `404`): the token is disabled. The app
-  re-enables it by registering again.
+- **`UNREGISTERED`** (or a bare `404`), or a `400` whose message is about the
+  registration token ("The registration token is not a valid FCM
+  registration token"): the token is disabled. The app re-enables it by
+  registering again.
 - **`QUOTA_EXCEEDED`, `429`, `5xx`, a network error**: up to three attempts,
   waiting 1 s then 2 s, or the `Retry-After` the server sends (capped at
   10 s). Then the push counts as failed and is logged; the token is kept. A
@@ -200,9 +219,28 @@ never raises into a turn.
   only when the reason changes, and `fcmAuthRecovered` when sends work
   again). The push counts as failed; tokens are kept.
 - **`SENDER_ID_MISMATCH`** (the token belongs to another Firebase project)
-  and `INVALID_ARGUMENT` are logged as `fcmSendReject` and count as failed.
+  and any other `INVALID_ARGUMENT` (about the message, not the token) are
+  logged as `fcmSendReject` and count as failed; the token is kept.
 
 Each send is logged like an APNs one (`apnsSendResult … via=fcm`).
+
+## Rolling back to a Host before contract 88
+
+Schema step 123 is additive, so an older release runs on the upgraded
+database. But older code knows nothing of providers: it lists every live
+row, Android rows included, as an APNs target. Its first push sends the FCM
+token to Apple (or to the Audio Central relay). Apple answers
+`BadDeviceToken` and the older code disables the row. Through the relay,
+the token may instead be refused at binding and stay live, counted as a
+failed push each time. The token string goes to Apple or the relay in either
+case; nothing reaches the phone.
+
+Nothing in an older release can be changed to prevent this. After rolling
+forward again, each Android phone gets push back when it registers again:
+the app does so on its next launch against a Host that advertises
+`push_fcm`, which re-enables its row. To avoid sending FCM tokens to Apple
+during a rollback, disable the Android rows first (set `disabled_at` on the
+rows with `provider = 'fcm'`); the phones re-enable them the same way.
 
 ## Phase 2: relay with Play Integrity grants
 

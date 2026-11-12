@@ -144,8 +144,11 @@ def load_service_account(path: str) -> ServiceAccount:
 def configured(cfg) -> bool:
     """True when the Host has a usable service account file (feature
     ``push_fcm``). Whether Google accepts it is only known at the first send."""
+    path_of = getattr(cfg, "fcm_service_account_file", None)
+    if not callable(path_of):
+        return False          # a config without the [fcm] section's accessor
     try:
-        load_service_account(cfg.fcm_service_account_file())
+        load_service_account(path_of())
         return True
     except ServiceAccountError:
         return False
@@ -490,6 +493,11 @@ class Transport:
                 continue
             if code == "UNREGISTERED" or (status == 404 and not code):
                 return 410, "Unregistered", ""
+            if status == 400 and "registration token" in message.lower():
+                # "The registration token is not a valid FCM registration token": this token can
+                # never be delivered to, so it is dead like an unregistered one. Any other 400 is
+                # about the message, not the token, and stays a plain failure.
+                return 410, "InvalidRegistration", ""
             if status in (401, 403) and code != "SENDER_ID_MISMATCH":
                 report_auth_problem(f"{sa.client_email}: FCM send HTTP {status} "
                                     f"{code or rpc_status}: {message}")
