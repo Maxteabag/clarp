@@ -691,6 +691,20 @@ def test_live_reads_keep_a_minimum_interval_and_say_when_the_next_is_allowed(des
     assert len(bodies[4]["accounts"]) == 4
 
 
+def test_a_live_read_whose_list_part_failed_is_not_reported_as_refreshed(desk):
+    base, token, fake, _turns, _ctx = desk
+    fake.stop("koko")
+    fake.set(list_fails=True)
+
+    status, body = _call(base, token, "GET", "/hotseat/desk?refresh=1")
+
+    assert status == 200 and body["error"] is None
+    assert body["sources"] == {"tui": "ok", "list": "failed", "work": "ok"}
+    assert (body["partial"], body["refreshed"]) == (True, False)
+    assert body["stopped_work"] == [], "stopped work was not read, which is why this is not a complete read"
+    assert len(body["accounts"]) == 4 and body["observed_at"] == body["live_read_at"]
+
+
 def test_only_a_full_device_reaches_the_desk(desk):
     base, token, _fake, _turns, _ctx = desk
     from lib import device_pairing
