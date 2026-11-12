@@ -593,12 +593,15 @@ class Transport:
                 continue
             if code == "UNREGISTERED" or (status == 404 and not code):
                 return 410, "Unregistered", ""
-            if status == 400 and "INVALID_ARGUMENT" in (code, rpc_status) and "message.token" in fields:
-                # Google's docs (FCM v1 ErrorCode, "manage tokens"): INVALID_ARGUMENT is an invalid
-                # registration only when the payload is otherwise valid, and its google.rpc.BadRequest
-                # names the invalid field. Only a violation of message.token is a dead token. A 400
-                # about the payload, or one naming no field ("Request contains an invalid
-                # argument."), keeps the token and counts as a failed push.
+            if (status == 400 and "INVALID_ARGUMENT" in (code, rpc_status)
+                    and not (fields - {"message.token"})):
+                # firebase.google.com/docs/cloud-messaging/error-codes shows both cases with code 400
+                # and status INVALID_ARGUMENT: an invalid registration token carries only the FcmError
+                # detail (no field named), and an invalid value in a data message carries a
+                # google.rpc.BadRequest naming the field (message.data[0].value). So a 400
+                # INVALID_ARGUMENT that names no field other than message.token disables the token;
+                # one naming another field is about the payload and keeps it. The message text is
+                # not read.
                 return 410, "InvalidRegistration", ""
             if status in (401, 403) and code != "SENDER_ID_MISMATCH":
                 report_auth_problem(f"{sa.client_email}: FCM send HTTP {status} "

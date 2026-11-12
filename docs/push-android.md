@@ -117,6 +117,9 @@ Pushes to a token stop through the Host, never by editing its database
   the administrator token, or from before device binding) cannot be
   attributed and keep their pushes; remove them with `clarp-admin push
   disable`.
+- A paired full-scope device is trusted: one that knows a revoked phone's
+  token can register it under its own pairing, and pushes to that token
+  resume.
 
 ## The message
 
@@ -223,10 +226,13 @@ total deadline of 10 s, covering connect, TLS, writing and every read, so a
 Google that answers a byte at a time is cut off like a silent one. One
 Android send therefore takes at most about 45 s (three attempts, the 1 s and
 2 s back-off, a token exchange), and that wait never holds the same agent's
-next iPhone push. Android sends of one agent go out one at a time, in order;
-at most two more wait behind the one in progress. A newer notification
-drops the oldest waiting one, logged as `apnsAndroidDropped … reason=queue-full`
-and counted as failed; its iPhone push has already gone.
+next iPhone push. Android sends of one agent go out one at a time, first in,
+first out. While Google answers, nothing is dropped. Only when the send in
+progress has been running longer than 5 s is the queue behind it held to two:
+the oldest ordinary alert is dropped first, a decision only when no ordinary
+alert is left to drop, and the agent's newest waiting decision never. A drop
+is logged as `apnsAndroidDropped … reason=google-slow` and counted as failed;
+its iPhone push has already gone.
 
 - **Auth.** The Host signs an RS256 JWT with the service account key
   (`iss` the client email, `scope`
@@ -236,14 +242,14 @@ and counted as failed; its iPhone push has already gone.
   once.
 - **`UNREGISTERED`** (or a bare `404`): the token is disabled. The app
   re-enables it by registering again.
-- **`400 INVALID_ARGUMENT` naming the token**: Google's docs (FCM v1
-  `ErrorCode`, "Manage FCM registration tokens") make `INVALID_ARGUMENT` an
-  invalid registration only when the payload is otherwise valid, and its
-  `google.rpc.BadRequest` detail names the invalid field. When a
-  `fieldViolations[].field` is `message.token`, the token is disabled. A `400`
-  naming any other field (the payload), or naming none ("Request contains an
-  invalid argument."), keeps the token and counts as a failed push; the
-  message text is never read for this.
+- **`400 INVALID_ARGUMENT`**: Google's error-code page
+  (firebase.google.com/docs/cloud-messaging/error-codes) shows an invalid
+  registration token as a `400 INVALID_ARGUMENT` with only the `FcmError`
+  detail, and an invalid value in a data message as a `400 INVALID_ARGUMENT`
+  whose `google.rpc.BadRequest` names the field (`message.data[0].value`). So
+  a `400 INVALID_ARGUMENT` that names no field other than `message.token`
+  disables the token, and one naming another field (the payload) keeps it and
+  counts as a failed push. The message text is never read for this.
 - **`QUOTA_EXCEEDED`, `429`, `5xx`, a network error**: up to three attempts,
   waiting 1 s then 2 s, or the `Retry-After` the server sends (capped at
   10 s). Then the push counts as failed and is logged; the token is kept. A

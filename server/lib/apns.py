@@ -1099,20 +1099,60 @@ def _deliverable(cfg, rows: list[dict]) -> list[dict]:
     return sorted(live, key=lambda r: r.get("provider") == "fcm")
 
 
-# At most this many notifications of one agent wait behind the Android send in progress; a newer
-# one drops the oldest waiting (logged). With a slow Google each Android send can take about 45 s
-# (3 attempts of up to 10 s each, the back-off, a token exchange), so the queue must stay short.
+# One agent's Android sends go out one at a time, first in, first out. While Google answers, nothing
+# is dropped. Only when the send in progress has been running longer than ANDROID_SLOW_SEC (a slow or
+# silent Google: each send may take about 45 s) is the queue held to ANDROID_MAX_WAITING, dropping the
+# oldest ordinary alert first; a decision goes only when no ordinary alert is left to drop, and the
+# agent's newest waiting decision is never dropped.
 ANDROID_MAX_WAITING = 2
+ANDROID_SLOW_SEC = 5.0
+
+
+class _AndroidTicket:
+    __slots__ = ("label", "decision", "event", "go")
+
+    def __init__(self, label: str, decision: bool):
+        self.label, self.decision = label, decision
+        self.event = threading.Event()
+        self.go = False
 
 
 class _AndroidLane:
-    """One agent's Android sends: one at a time, in order, with a bounded queue."""
+    """One agent's Android sends: one at a time, in arrival order, bounded only while Google is slow."""
 
     def __init__(self):
-        self.lock = threading.Lock()
         self.guard = threading.Lock()
-        self.waiting: collections.deque = collections.deque()
-        self.dropped: set = set()
+        self.queue: collections.deque = collections.deque()   # waiting tickets, oldest first
+        self.busy = False
+        self.started = 0.0                                     # monotonic start of the send in progress
+
+    def prune(self, session: str, now: float, *, slow: bool = False) -> None:
+        """Under ``guard``: while the send in progress is slow, drop down to ANDROID_MAX_WAITING."""
+        if not (slow or (self.busy and now - self.started > ANDROID_SLOW_SEC)):
+            return
+        while len(self.queue) > ANDROID_MAX_WAITING:
+            victim = next((t for t in self.queue if not t.decision), None)
+            if victim is None:
+                decisions = [t for t in self.queue if t.decision]
+                if len(decisions) < 2:
+                    return                         # only the newest decision is left: never dropped
+                victim = decisions[0]
+            self.queue.remove(victim)
+            victim.go = False
+            victim.event.set()
+            log("apnsAndroidDropped",
+                f"session={session} notification={victim.label} decision={int(victim.decision)} "
+                f"reason=google-slow waiting={len(self.queue)} max_waiting={ANDROID_MAX_WAITING}")
+
+    def grant_next(self, now: float) -> None:
+        """Under ``guard``: hand the lane to the oldest waiting ticket, if any."""
+        if self.queue:
+            ticket = self.queue.popleft()
+            self.busy, self.started = True, now
+            ticket.go = True
+            ticket.event.set()
+        else:
+            self.busy = False
 
 
 def _android_lane(session: str) -> _AndroidLane:
@@ -1127,40 +1167,42 @@ def _android_lane(session: str) -> _AndroidLane:
 
 
 class _AndroidTurn:
-    """``with _AndroidTurn(...) as go``: wait for this agent's Android lane; ``go`` is False when a
-    newer notification pushed this one out of the bounded queue while it waited."""
+    """``with _AndroidTurn(...) as go``: wait for this agent's Android lane, in arrival order; ``go``
+    is False when the notification was dropped while Google was slow (see ANDROID_SLOW_SEC)."""
 
-    def __init__(self, session: str, label: str):
-        self._session, self._label = session, label
+    def __init__(self, session: str, label: str, decision: bool = False):
+        self._session = session
         self._lane = _android_lane(session)
-        self._ticket = object()
+        self._ticket = _AndroidTicket(label, decision)
+        self._granted = False
 
     def __enter__(self) -> bool:
-        lane = self._lane
+        lane, ticket = self._lane, self._ticket
         with lane.guard:
-            lane.waiting.append(self._ticket)
-            while len(lane.waiting) > ANDROID_MAX_WAITING:
-                lane.dropped.add(lane.waiting.popleft())
-        lane.lock.acquire()
-        with lane.guard:
-            if self._ticket in lane.dropped:
-                lane.dropped.discard(self._ticket)
-                go = False
+            now = time.monotonic()
+            if not lane.busy and not lane.queue:
+                lane.busy, lane.started = True, now
+                ticket.go = True
+                ticket.event.set()
             else:
-                lane.waiting.remove(self._ticket)
-                go = True
-        if not go:
-            log("apnsAndroidDropped",
-                f"session={self._session} notification={self._label} reason=queue-full "
-                f"max_waiting={ANDROID_MAX_WAITING}")
-        return go
+                lane.queue.append(ticket)
+                lane.prune(self._session, now)
+        ticket.event.wait()
+        self._granted = ticket.go
+        return ticket.go
 
     def __exit__(self, *exc) -> bool:
-        self._lane.lock.release()
+        if self._granted:
+            lane = self._lane
+            with lane.guard:
+                now = time.monotonic()
+                lane.prune(self._session, now, slow=now - lane.started > ANDROID_SLOW_SEC)
+                lane.grant_next(now)
         return False
 
 
-def _send_groups(session: str, rows: list[dict], label: str = "") -> list[tuple[object, list[dict]]]:
+def _send_groups(session: str, rows: list[dict], label: str = "",
+                 decision: bool = False) -> list[tuple[object, list[dict]]]:
     """The batch's rows with the gate each group is sent under, iPhones first.
 
     The conversation's send lock keeps two notifications of one agent in order
@@ -1168,9 +1210,9 @@ def _send_groups(session: str, rows: list[dict], label: str = "") -> list[tuple[
     collapse over its successor). Android rows are sent after it is released,
     through the agent's Android lane: an FCM send can wait on Google through its
     retries and deadlines, and that wait must never hold the same agent's next
-    iPhone push. Android sends of one conversation go out in order among
-    themselves, and at most ANDROID_MAX_WAITING wait; the oldest waiting is
-    dropped first. ``with gate as go`` gives False for a dropped one.
+    iPhone push. Android sends of one conversation go out in arrival order; only
+    while Google is slow is that queue bounded (see ANDROID_SLOW_SEC).
+    ``with gate as go`` gives False for a dropped one.
     """
     iphones = [r for r in rows if r.get("provider") != "fcm"]
     androids = [r for r in rows if r.get("provider") == "fcm"]
@@ -1178,7 +1220,7 @@ def _send_groups(session: str, rows: list[dict], label: str = "") -> list[tuple[
     if iphones:
         groups.append((_send_lock(session), iphones))     # Lock.__enter__ returns True
     if androids:
-        groups.append((_AndroidTurn(session, label), androids))
+        groups.append((_AndroidTurn(session, label, decision), androids))
     return groups
 
 
@@ -1544,7 +1586,7 @@ def send_decision_created(artifact: dict) -> dict:
     notification_id = decision_notification_id(decision_id)
     sent = failed = disabled = 0
     started = time.monotonic()
-    for gate, rows in _send_groups(session, tokens, notification_id):
+    for gate, rows in _send_groups(session, tokens, notification_id, decision=True):
         with gate as go:
             if not go:
                 failed += len(rows)
