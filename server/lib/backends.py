@@ -273,6 +273,13 @@ def known_models(backend: str) -> list[str]:
     return by_id(backend).known_models()
 
 
+def unknown_model_detail(backend: str, model: str) -> str:
+    """What a refusal of ``model`` adds: the ids the backend offers, or ""
+    when it has no list."""
+    known = known_models(backend)
+    return f"{backend} has no model '{model}'; it offers " + ", ".join(known) if known else ""
+
+
 
 
 

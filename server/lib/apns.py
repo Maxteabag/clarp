@@ -995,7 +995,12 @@ def _deliverable(cfg, rows: list[dict]) -> list[dict]:
             fcm.load_service_account(cfg.fcm_service_account_file())
         except fcm.ServiceAccountError as e:
             fcm.report_auth_problem(f"{len(fcm_rows)} Android device(s) registered, but {e}")
-    return [r for r in rows if (fcm_on if r.get("provider") == "fcm" else apns_on)]
+    live = [r for r in rows if (fcm_on if r.get("provider") == "fcm" else apns_on)]
+    # iPhones first. The batch loops send one row after another, and an
+    # Android send that Google is slow to answer can take its retries and
+    # timeouts (tens of seconds at worst). It must never sit in front of an
+    # iPhone's push. The sort is stable, so each group keeps its order.
+    return sorted(live, key=lambda r: r.get("provider") == "fcm")
 
 
 def _route(row: dict, context: dict | None = None) -> dict:
