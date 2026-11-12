@@ -1,3 +1,5 @@
+import json
+
 import pytest
 from pathlib import Path
 from types import SimpleNamespace
@@ -3187,6 +3189,152 @@ def test_superseded_turn_outcome_leaves_the_newer_owner_alone(tmp_path):
 
     assert _td.runtime_status()["active"][agent_id] == "tB"
     assert agents_db.latest_state(agent_id)["kind"] != AgentState.DONE
+
+
+
+# The agent's trace marker is not who owns the agent. POST /transcribe writes
+# it for a voice message that is only queued behind the running turn, and the
+# speech worker writes it back to an earlier turn's. The running turn then read
+# itself as superseded: its session start was refused and its outcome was
+# dropped, so the turn ended without its DONE and without its usage. One Host
+# logged supersededTurnReleased 34 times in three days (to 12 November 2026).
+# A turn is superseded when another turn has taken its slot.
+
+def _states(agent_id):
+    from lib import db
+    rows = db.conn().execute(
+        "SELECT kind, detail FROM state_log WHERE agent_id = ? ORDER BY state_id",
+        (agent_id,)).fetchall()
+    return [(row["kind"], json.loads(row["detail"] or "{}").get("trace_id")) for row in rows]
+
+
+@pytest.mark.parametrize("outcome", ["result", "error"])
+def test_a_turn_with_a_voice_message_queued_behind_it_records_its_own_outcome(tmp_path, outcome):
+    service, backends, agent_id = _make_service(tmp_path)
+    service.dispatch(text="first", requested_session="mike", trace_id="tA",
+                     synthesize_audio=False)
+    agents_db.set_trace(agent_id, "voice-1")                # POST /transcribe
+    service.dispatch(text="second", requested_session="mike", trace_id="voice-1",
+                     client_msg_id="u-voice", synthesize_audio=False, queue_if_busy=True)
+
+    call = backends.spawned[0][1]
+    if outcome == "result":
+        call["on_result"]({"duration_ms": 5})
+        ended = (AgentState.DONE, "tA")
+    else:
+        call["on_error"]("Turn interrupted")
+        ended = (AgentState.INTERRUPTED, None)
+
+    # Its own end, then the queued message's start.
+    assert _states(agent_id)[-2:] == [ended, (AgentState.THINKING, "voice-1")]
+
+    assert [kw["text"] for _, kw in backends.spawned] == ["first", "second"]
+    assert _td.runtime_status()["active"][agent_id] == "voice-1"
+
+
+def test_a_turn_whose_trace_marker_moved_still_binds_its_session(tmp_path):
+    service, backends, agent_id = _make_service(tmp_path)
+    service.dispatch(text="first", requested_session="mike", trace_id="tA",
+                     synthesize_audio=False)
+    call = backends.spawned[0][1]
+    agents_db.set_trace(agent_id, "the-turn-before")        # the speech worker
+
+    assert call["on_session_init"](call["backend_session_id"] or "native-1") is True
+
+
+def test_a_replaced_turns_late_session_start_is_refused_and_binds_nothing(tmp_path):
+    """What the check is for: a newer turn took the slot. The old process's
+    late callbacks must not bind its session to the agent, stop the newer
+    turn, or record an outcome."""
+    service, backends, agent_id = _make_service(tmp_path)
+    service.dispatch(text="first", requested_session="mike", trace_id="tA",
+                     synthesize_audio=False)
+    service.dispatch(text="second", requested_session="mike", trace_id="tB",
+                     synthesize_audio=False, origin="agent")       # an agent's message preempts
+    assert [kw["trace_id"] for _, kw in backends.spawned] == ["tA", "tB"]
+    old = backends.spawned[0][1]
+    bound, stopped, states = (agents_db.live_backend_session(agent_id),
+                              list(backends.interrupted), _states(agent_id))
+
+    assert old["on_session_init"]("the-replaced-turns-session") is False
+    old["on_error"]("Turn interrupted")
+
+    assert agents_db.live_backend_session(agent_id) == bound
+    assert backends.interrupted == stopped and _states(agent_id) == states
+    assert _td.runtime_status()["active"][agent_id] == "tB"
+
+
+def test_a_running_maintenance_turn_is_superseded_once_its_run_is_not_the_dispatched_one(
+        tmp_path, monkeypatch):
+    """Holding the slot does not make a maintenance turn the live one when its
+    run was cancelled or replaced; an ordinary turn in the same place is."""
+    from dataclasses import replace
+    from lib import janitors
+    service, backends, agent_id = _make_service(tmp_path)
+    service.dispatch(text="first", requested_session="mike", trace_id="tA",
+                     synthesize_audio=False)
+    agents_db.set_trace(agent_id, "voice-1")                # the marker moved
+    spec = _td._TurnSpec(
+        backend="claude", text="first", cwd=tmp_path, backend_session_id="", is_new_session=False,
+        session="mike", agent_id=agent_id, trace_id="tA", context=None, synthesize_audio=False)
+    run = replace(spec, janitor_run_id="run-1")
+    valid = [True]
+    monkeypatch.setattr(janitors, "validate_dispatch", lambda *a: valid[0])
+
+    assert service._superseded(spec) is False and service._superseded(run) is False
+    valid[0] = False
+    assert service._superseded(run) is True and service._superseded(spec) is False
+    # Another turn in the slot: superseded, whatever the run says.
+    valid[0] = True
+    _td._INFLIGHT[agent_id] = "tB"
+    assert service._superseded(run) is True and service._superseded(spec) is True
+
+
+def test_a_check_that_cannot_be_read_supersedes_no_ordinary_turn(tmp_path, monkeypatch):
+    """The marker cannot be read (the database is locked, say). That is not
+    evidence that a newer turn took over: an ordinary turn's outcome is
+    recorded. Only a maintenance turn, whose run must be proven, is dropped."""
+    from dataclasses import replace
+    from lib import janitors
+    service, backends, agent_id = _make_service(tmp_path)
+    service.dispatch(text="first", requested_session="mike", trace_id="tA",
+                     synthesize_audio=False)
+    spec = _td._TurnSpec(
+        backend="claude", text="first", cwd=tmp_path, backend_session_id="", is_new_session=False,
+        session="mike", agent_id=agent_id, trace_id="tA", context=None, synthesize_audio=False)
+    _td._INFLIGHT[agent_id] = "tB"                          # so the marker is what is asked
+
+    def unreadable(*args, **kwargs):
+        raise RuntimeError("database is locked")
+
+    monkeypatch.setattr(agents_db, "get_trace", unreadable)
+    monkeypatch.setattr(janitors, "validate_dispatch", unreadable)
+    assert service._superseded(spec) is False
+    assert service._superseded(replace(spec, janitor_run_id="run-1")) is True
+    _td._INFLIGHT[agent_id] = "tA"                          # the run itself cannot be read
+    assert service._superseded(replace(spec, janitor_run_id="run-1")) is True
+    assert service._superseded(spec) is False
+
+
+def test_restart_rehydrates_an_open_turn_though_its_trace_marker_moved(tmp_path):
+    from lib import turn_lifecycle
+    service, backends, agent_id = _make_service(tmp_path)
+    turn_lifecycle.open_turn(agent_id=agent_id, source="pwa", trace_id="alive")
+    agents_db.set_trace_for_session("mike", "voice-1")      # queued behind it
+    _td.reset_for_tests()
+    service.recover_queued()
+    assert _td._INFLIGHT[agent_id] == "alive"
+
+
+def test_restart_adopts_no_open_turn_whose_process_is_gone(tmp_path):
+    from lib import turn_lifecycle
+    service, backends, agent_id = _make_service(tmp_path)
+    turn_lifecycle.open_turn(agent_id=agent_id, source="pwa", trace_id="gone")
+    agents_db.set_trace_for_session("mike", "gone")
+    _td.reset_for_tests()
+    backends.live = False
+    service.recover_queued()
+    assert agent_id not in _td._INFLIGHT
 
 
 # --- self-heal: a slot without a process whose turn settled is released -----

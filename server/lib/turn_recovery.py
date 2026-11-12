@@ -56,8 +56,11 @@ class RecoveryMixin:
             log_exception("callOpenBootResolveFail", exc)
 
         def live(agent_id: str, trace_id: str) -> bool:
+            # The open turns row is the authority for which turn it is; the
+            # agent's trace marker is not asked (see _holds_slot): it has
+            # moved on when a voice message is queued behind the turn.
             agent = agents_db.get_by_agent_id(agent_id)
-            if not agent or agents_db.get_trace(agent_id) != trace_id:
+            if not agent:
                 return False
             try:
                 return bool(self.backends.active_handles(
@@ -403,15 +406,26 @@ class RecoveryMixin:
         clobber the new turn's THINKING and leave the pill looking idle while
         the agent is actually working. The agent's current trace is the newest
         /send's; a stale turn carries an older one. Same-trace retries are NOT
-        superseded (they share spec.trace_id), so they still record normally."""
+        superseded (they share spec.trace_id), so they still record normally.
+
+        A turn that still holds the agent's slot has not been taken over,
+        whatever the trace marker says. The marker also moves without a newer
+        turn: POST /transcribe writes it for a voice message that is only
+        queued behind this turn, and the speech worker writes it back to an
+        earlier turn's. Read as "superseded", the running turn had its session
+        start refused and its outcome dropped: no DONE, no usage, only
+        supersededTurnReleased (34 times in three days on one Host, to
+        2026-11-12). A newer turn takes the slot before it writes the marker."""
         try:
-            if spec.janitor_run_id:
-                from . import janitors
-                with (_TURN_LOCK if locked else _NO_LOCK):
-                    if _INFLIGHT.get(spec.agent_id) != spec.trace_id:
+            with (_TURN_LOCK if locked else _NO_LOCK):
+                holds = _INFLIGHT.get(spec.agent_id) == spec.trace_id
+                if spec.janitor_run_id:
+                    from . import janitors
+                    if not holds or not janitors.validate_dispatch(
+                            spec.session, spec.janitor_run_id, spec.trace_id):
                         return True
-                    if not janitors.validate_dispatch(spec.session, spec.janitor_run_id, spec.trace_id):
-                        return True
+            if holds:
+                return False
             current = agents_db.get_trace(spec.agent_id)
         except Exception:
             return bool(spec.janitor_run_id)

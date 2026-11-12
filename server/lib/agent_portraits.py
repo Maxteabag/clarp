@@ -22,9 +22,46 @@ class PortraitError(ValueError):
         self.status = status
 
 
+LEGACY_PREFIX = "portrait_legacy_"
+
+
 def list_for_session(session: str, *, portrait_dir: pathlib.Path) -> dict[str, Any]:
-    agent = _ensure_current_primary(session, portrait_dir)
-    return _collection(agent)
+    """What GET /agent-portraits answers. It reads and writes nothing.
+
+    The portraits are shown as the next change will record them
+    (``_ensure_current_primary``): the agent's avatar is the primary, also
+    when no row holds it yet, alternates whose file is gone are left out, and
+    with the avatar as a fourth picture the oldest alternate is left out too.
+    An avatar without a row gets the id that change will give its row, so a
+    client can select what it was shown.
+
+    It used to make that change itself: opening the portrait viewer recorded
+    the avatar, copied it into the media directory and could retire a
+    portrait the user kept, from any client, a limited paired device
+    included (every GET is open to those)."""
+    del portrait_dir                       # only a change writes there
+    agent = _agent(db.conn(), session)
+    rows = [row for row in _rows(agent["agent_id"])
+            if row["is_primary"] or pathlib.Path(str(row["storage_path"] or "")).is_file()]
+    current = _current_avatar(agent)
+    if current is not None:
+        _raw, digest, mime = current
+        primary = next((row for row in rows if row["sha256"] == digest), None)
+        if primary is None:
+            alternates = [row for row in rows if not row["is_primary"]]
+            if len(rows) >= MAX_PORTRAITS and alternates:
+                rows.remove(min(alternates, key=lambda row: (row["created_at"], row["portrait_id"])))
+            primary = {
+                "portrait_id": _legacy_id(agent["agent_id"], digest),
+                "agent_id": agent["agent_id"], "media_asset_id": None,
+                "storage_path": str(agent["avatar_path"]), "sha256": digest,
+                "mime_type": mime, "created_by": "legacy_avatar",
+                "created_at": int(agent.get("created_at") or 0)}
+            rows.append(primary)
+        for row in rows:
+            row["is_primary"] = 1 if row is primary else 0
+    rows.sort(key=lambda row: (-int(row["is_primary"]), row["created_at"], row["portrait_id"]))
+    return _collection(agent, rows)
 
 
 def add_media_asset(*, session: str, asset_id: str,
@@ -170,47 +207,82 @@ def replace_alternates_with_media_assets(
 
 
 def get_content(portrait_id: str) -> dict[str, Any] | None:
+    portrait_id = (portrait_id or "").strip()
     row = db.conn().execute(
         """SELECT * FROM agent_portraits
              WHERE portrait_id=? AND deleted_at IS NULL""",
-        ((portrait_id or "").strip(),),
+        (portrait_id,),
     ).fetchone()
-    return dict(row) if row else None
+    if row:
+        return dict(row)
+    # An avatar a listing showed that no change has recorded yet: the avatar
+    # file itself, while it is still that picture.
+    if not portrait_id.startswith(LEGACY_PREFIX):
+        return None
+    agent_id = portrait_id[len(LEGACY_PREFIX):].rpartition("_")[0]
+    agent = db.conn().execute(
+        "SELECT agent_id,session,avatar_path,created_at FROM agents "
+        "WHERE agent_id=? AND deleted_at IS NULL", (agent_id,)).fetchone()
+    current = _current_avatar(dict(agent)) if agent else None
+    if current is None or _legacy_id(agent_id, current[1]) != portrait_id:
+        return None
+    return {"portrait_id": portrait_id, "agent_id": agent_id,
+            "storage_path": str(agent["avatar_path"]), "sha256": current[1],
+            "mime_type": current[2]}
+
+
+def _legacy_id(agent_id: str, digest: str) -> str:
+    """The id of the portrait that is the agent's avatar as it is now, before
+    and after a change records it."""
+    return f"{LEGACY_PREFIX}{agent_id}_{digest[:24]}"
+
+
+def _agent(con, session: str) -> dict[str, Any]:
+    row = con.execute(
+        """SELECT agent_id,session,avatar_path,created_at FROM agents
+             WHERE session=? AND deleted_at IS NULL""",
+        ((session or "").strip(),),
+    ).fetchone()
+    if not row:
+        raise PortraitError("unknown session", status=404)
+    return dict(row)
+
+
+def _current_avatar(agent: dict[str, Any]) -> tuple[bytes, str, str] | None:
+    """The agent's avatar file as (bytes, sha256, mime type), when it is an
+    image a portrait can hold. Reads the file and nothing else."""
+    raw_path = str(agent.get("avatar_path") or "")
+    path = pathlib.Path(raw_path)
+    if not raw_path or not path.is_file():
+        return None
+    if path.stat().st_size > MAX_PORTRAIT_BYTES:
+        return None
+    with path.open("rb") as handle:
+        raw = handle.read(MAX_PORTRAIT_BYTES + 1)
+    if len(raw) > MAX_PORTRAIT_BYTES:
+        return None
+    mime = _image_mime(raw)
+    if mime is None:
+        return None
+    return raw, hashlib.sha256(raw).hexdigest(), mime
 
 
 def _ensure_current_primary(
     session: str, portrait_dir: pathlib.Path
 ) -> dict[str, Any]:
+    """Record the agent's avatar as its primary portrait. Called by every
+    change to the portraits, never by a read (``list_for_session`` shows the
+    same without writing)."""
     con = db.conn()
     con.execute("BEGIN IMMEDIATE")
     try:
-        row = con.execute(
-            """SELECT agent_id,session,avatar_path,created_at FROM agents
-                 WHERE session=? AND deleted_at IS NULL""",
-            ((session or "").strip(),),
-        ).fetchone()
-        if not row:
-            raise PortraitError("unknown session", status=404)
-        agent = dict(row)
+        agent = _agent(con, session)
         _prune_unavailable_alternates(con, agent["agent_id"])
-        raw_path = str(agent.get("avatar_path") or "")
-        path = pathlib.Path(raw_path)
-        if not raw_path or not path.is_file():
+        current = _current_avatar(agent)
+        if current is None:
             con.execute("COMMIT")
             return agent
-        if path.stat().st_size > MAX_PORTRAIT_BYTES:
-            con.execute("COMMIT")
-            return agent
-        with path.open("rb") as handle:
-            raw = handle.read(MAX_PORTRAIT_BYTES + 1)
-        if len(raw) > MAX_PORTRAIT_BYTES:
-            con.execute("COMMIT")
-            return agent
-        mime = _image_mime(raw)
-        if mime is None:
-            con.execute("COMMIT")
-            return agent
-        digest = hashlib.sha256(raw).hexdigest()
+        raw, digest, mime = current
         immutable_path = _write_immutable(
             raw, digest=digest, mime=mime, portrait_dir=portrait_dir)
         row = con.execute(
@@ -239,12 +311,16 @@ def _ensure_current_primary(
                 else:
                     raise PortraitError(
                         "portrait primary reconciliation conflict", status=409)
-            portrait_id = _new_id()
+            # The id a listing has already shown for this avatar. A retired
+            # row of the same picture comes back under it.
+            portrait_id = _legacy_id(agent["agent_id"], digest)
             con.execute(
                 """INSERT INTO agent_portraits (
                        portrait_id,agent_id,media_asset_id,storage_path,sha256,
                        mime_type,created_by,created_at,is_primary,deleted_at
-                   ) VALUES (?,?,NULL,?,?,?,?,?,0,NULL)""",
+                   ) VALUES (?,?,NULL,?,?,?,?,?,0,NULL)
+                   ON CONFLICT(portrait_id) DO UPDATE SET
+                       storage_path=excluded.storage_path, deleted_at=NULL""",
                 (portrait_id, agent["agent_id"], str(immutable_path), digest,
                  mime,
                  "legacy_avatar", int(agent.get("created_at") or db.now_ms())),
@@ -266,13 +342,19 @@ def _ensure_current_primary(
         raise
 
 
-def _collection(agent: dict[str, Any]) -> dict[str, Any]:
-    rows = [dict(row) for row in db.conn().execute(
+def _rows(agent_id: str) -> list[dict[str, Any]]:
+    return [dict(row) for row in db.conn().execute(
         """SELECT * FROM agent_portraits
              WHERE agent_id=? AND deleted_at IS NULL
              ORDER BY is_primary DESC, created_at, portrait_id""",
-        (agent["agent_id"],),
+        (agent_id,),
     ).fetchall()]
+
+
+def _collection(agent: dict[str, Any],
+                rows: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    if rows is None:
+        rows = _rows(agent["agent_id"])
     portraits = [_public(row) for row in rows]
     primary = next((row["portrait_id"] for row in rows if row["is_primary"]), None)
     return {
