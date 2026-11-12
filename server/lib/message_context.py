@@ -19,6 +19,7 @@ from .message_text import (
     TEAM_CONTEXT_OPEN,
     _strip_block,
     _strip_voice_markup,
+    strip_delivery_context,
     strip_injected_context,
     strip_injected_team_context,
 )
@@ -46,6 +47,10 @@ def _automation_kind(*, role: str, origin: str | None,
 def _display_text_for_message(*, role: str, origin: str | None,
                               text: str | None) -> str:
     raw = strip_hidden_blocks(str(text or ""))
+    if role == "user":
+        # A row stored with a barge-in's delivery notice before the import
+        # took it off, whose transcript is gone, so no import puts it right.
+        raw = strip_delivery_context(raw)
     kind = _automation_kind(role=role, origin=origin, text=raw)
     if not kind:
         return raw
